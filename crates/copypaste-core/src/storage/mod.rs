@@ -33,7 +33,7 @@
 //! * **One live row per distinct content.** [`Store::insert_or_bump`] promotes
 //!   the existing row rather than writing a second one, across all of history
 //!   and not only a recent window (manifest 01 I-23).
-//! * **Errors never contain a filesystem path** (CLAUDE.md rule 4 — the path
+//! * **Errors never contain a filesystem path** (AGENTS.md rule 4 — the path
 //!   discloses the local username). Nothing in [`StoreError`] formats a path,
 //!   and the underlying `rusqlite` errors do not carry one either.
 //!

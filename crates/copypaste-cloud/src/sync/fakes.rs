@@ -120,9 +120,7 @@ pub(super) fn driver(rest: FakeRest, auth: FakeAuth) -> CloudSync<FakeRest, Fake
     .without_retry_delays()
 }
 
-// ---------------------------------------------------------------------------
 // The fake store
-// ---------------------------------------------------------------------------
 
 /// A store with the ordering the real one is required to have: newer
 /// `created_at` wins, an exact tie keeps local. That tie rule is what makes
@@ -286,9 +284,7 @@ impl CloudSource for FakeSource {
     }
 }
 
-// ---------------------------------------------------------------------------
 // The fake transport
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub(super) enum Reply {

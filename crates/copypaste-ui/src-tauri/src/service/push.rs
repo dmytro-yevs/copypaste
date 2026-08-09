@@ -75,7 +75,7 @@ pub struct ChangePayload {
     /// every other one.
     ///
     /// Forwarded rather than dropped because it is the only history change the
-    /// user did not ask for, and a deletion nobody is told about is CLAUDE.md
+    /// user did not ask for, and a deletion nobody is told about is AGENTS.md
     /// rule 4's worst outcome arriving quietly. A count, never ids: the rows
     /// are gone and the event carries no content either way.
     pub swept: u32,

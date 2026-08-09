@@ -6,7 +6,7 @@
 //! path: `capture.rs` in the daemon records what happened when v1 had two
 //! ("the IPC one forgot the dedup probe"), and dedup, secret detection,
 //! eviction and the size cap are all decisions this file must not re-make
-//! (CLAUDE.md rule 1).
+//! (AGENTS.md rule 1).
 //!
 //! # The backend is the one ingest path
 //!

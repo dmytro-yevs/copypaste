@@ -36,7 +36,7 @@ pub(super) const FLAG_MARKERS: [&str; 2] =
 ///
 /// `None` is a flag that is present but could not be read. Every unreadable or
 /// malformed case answers "forbidden": a marker we cannot decide is one whose
-/// writer went out of its way to say something, and CLAUDE.md rule 4 fails
+/// writer went out of its way to say something, and AGENTS.md rule 4 fails
 /// closed on exactly this shape of question.
 pub(super) fn flag_forbids_capture(payload: Option<&[u8]>) -> bool {
     let Some(payload) = payload else {

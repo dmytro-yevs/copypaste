@@ -18,7 +18,7 @@ const MSG_IMPORT_FAILED: &str = "That file couldn't be imported.";
 /// The withheld count comes back with the items and is not recomputed here: a
 /// user who is not told believes they exported everything, and a second
 /// accounting is how the two platforms would come to disagree about what a short
-/// export means (CLAUDE.md rule 1).
+/// export means (AGENTS.md rule 1).
 pub(super) fn export(inner: &Inner, limit: u32, include_sensitive: bool) -> Result<ExportData> {
     copypaste_core::export(
         &inner.state.store,

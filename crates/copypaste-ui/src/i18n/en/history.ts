@@ -132,7 +132,7 @@ export const history = {
      * that pretends otherwise costs the user an evening.
      *
      * No path is named in any of them, and none may be: the location of the
-     * database discloses the local username (CLAUDE.md rule 4).
+     * database discloses the local username (AGENTS.md rule 4).
      */
     keyUnusable: {
       title: "This clipboard history can't be unlocked",

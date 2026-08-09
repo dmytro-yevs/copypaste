@@ -11,7 +11,7 @@
 //! reported, never killed.
 //!
 //! **No path reaches a user.** The binary's location is never interpolated into
-//! a message; every failure here is a fixed sentence (CLAUDE.md rule 4).
+//! a message; every failure here is a fixed sentence (AGENTS.md rule 4).
 //!
 //! # Android
 //!
@@ -257,7 +257,7 @@ impl Supervisor {
     /// Wait for the daemon to answer, or for it to die trying.
     ///
     /// `backon` rather than a sleep loop: the workspace already carries one
-    /// retry implementation and v1 grew six (CLAUDE.md rule 1).
+    /// retry implementation and v1 grew six (AGENTS.md rule 1).
     async fn await_ready<B: ServiceBackend>(&self, backend: &B) -> Result<()> {
         let policy = ExponentialBuilder::new()
             .with_min_delay(Duration::from_millis(50))

@@ -76,7 +76,7 @@ describe("the settings navigation", () => {
   it("reaches the shortcut, service, sync and storage screens", () => {
     withClient(<SettingsView />);
     // "Service" is the daemon's own configuration. Before it existed the app
-    // could not change a single one of those values (CLAUDE.md rule 6).
+    // could not change a single one of those values (AGENTS.md rule 6).
     for (const label of ["Shortcut", "Service", "Sync", "Storage"]) {
       expect(screen.getByRole("tab", { name: label })).toBeTruthy();
     }

@@ -51,9 +51,7 @@ stamp="$(date +%s)$RANDOM"
 CANARY_SHELL="CopyPasteShellCanary${stamp}"
 CANARY_TILE="CopyPasteTileCanary${stamp}"
 
-# ---------------------------------------------------------------------------
 # Helpers that need the device
-# ---------------------------------------------------------------------------
 
 clip_call() {   # <tag> <code> <callingPackage>
     adb shell "service call clipboard $2 s16 $3 s16 null i32 0 i32 0" 2>&1 \
@@ -112,9 +110,7 @@ clipboard_holds() {   # <alphanumeric text>
     parcel_holds "$OUT/parcel-now.txt" "$1"
 }
 
-# ---------------------------------------------------------------------------
 group "Preflight"
-# ---------------------------------------------------------------------------
 command -v adb >/dev/null 2>&1 || { echo "  FATAL adb is not on PATH"; exit 1; }
 adb wait-for-device
 devices="$(adb devices | grep -cE '\sdevice$')"
@@ -147,9 +143,7 @@ DB_REL="$(grep -E 'copypaste-v2\.db$' "$OUT/files.txt" | head -n 1)"
     && ok "the history database exists" \
     || bad "the history database exists" "nothing named copypaste-v2.db under the app's data directory"
 
-# ---------------------------------------------------------------------------
 group "1. Rung 2 — the shell uid reads the clipboard with no focus"
-# ---------------------------------------------------------------------------
 # What this settles: android-clipboard-access.md §4 is derived from AOSP source
 # and marked never observed. Shizuku's whole contribution is making our binder
 # calls arrive as uid 2000 with callingPackage="com.android.shell"; adb shell
@@ -237,9 +231,7 @@ note "the Shizuku transport itself" \
 note "the Android 12+ access toast and OEM battery managers" \
      "spike items 6 and 7 need a phone — a toast is not in any dumpsys this image answers, and no emulator reproduces a vendor task killer"
 
-# ---------------------------------------------------------------------------
 group "2. The Quick Settings tile"
-# ---------------------------------------------------------------------------
 # android-spike.md records this as unproven because `cmd statusbar add-tile`
 # and `click-tile` printed nothing. They print nothing and work: add-tile is
 # visible in sysui_qs_tiles, and click-tile reaches the tile once SystemUI has
@@ -354,9 +346,7 @@ else
     bad "no other app can start the tile's clipboard reader" "$reader_start"
 fi
 
-# ---------------------------------------------------------------------------
 group "3. The background capture service"
-# ---------------------------------------------------------------------------
 # The service exists to keep the process alive while rung 2 is armed. With
 # Shizuku absent nothing may arm, and the failure this guards against is a
 # service that runs anyway: an ongoing "Capturing from every app." notification
@@ -445,9 +435,7 @@ sh_ run-as "$PKG" rm -f shared_prefs/capture-service.xml >/dev/null 2>&1
 note "the foreground service surviving an OEM battery manager" \
      "spike item 6 needs a real phone left idle for an hour; the design is weakest here and an emulator cannot reproduce it"
 
-# ---------------------------------------------------------------------------
 group "4. FLAG_SECURE (INV-35)"
-# ---------------------------------------------------------------------------
 # tao's set_content_protection is compiled for macOS and Windows only, so on
 # Android nothing sets this but ScreenProtectionPlugin. Asserted on the window,
 # because that is where the platform enforces it. screencap and screenrecord

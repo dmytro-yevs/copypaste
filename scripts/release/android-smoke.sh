@@ -35,9 +35,7 @@ fi
 
 mkdir -p "$OUT"
 
-# ---------------------------------------------------------------------------
 group "Preflight"
-# ---------------------------------------------------------------------------
 command -v adb >/dev/null 2>&1 || { echo "  FATAL adb is not on PATH"; exit 1; }
 adb wait-for-device
 devices="$(adb devices | grep -cE '\sdevice$')"
@@ -59,9 +57,7 @@ else
     summary; exit 1
 fi
 
-# ---------------------------------------------------------------------------
 group "Install"
-# ---------------------------------------------------------------------------
 adb uninstall "$PKG" >/dev/null 2>&1 || true
 # -g grants the runtime permissions the app declares, so POST_NOTIFICATIONS
 # does not put a system dialog in front of the WebView we are about to inspect.
@@ -81,9 +77,7 @@ else
     summary; exit 1
 fi
 
-# ---------------------------------------------------------------------------
 group "1. It launches at all"
-# ---------------------------------------------------------------------------
 adb logcat -c || true
 launched_at="$SECONDS"
 start_out="$(sh_ am start -W -n "$MAIN")"
@@ -198,9 +192,7 @@ else
         "nothing matching @webview_devtools_remote_$pid_now is open; the UI harness in e2e-android/ cannot attach to this build"
 fi
 
-# ---------------------------------------------------------------------------
 group "4. The database opens"
-# ---------------------------------------------------------------------------
 app_files > "$OUT/files-launch1.txt"
 DB_REL="$(grep -E 'copypaste-v2\.db$' "$OUT/files-launch1.txt" | head -n 1)"
 if [[ -n "$DB_REL" ]]; then
@@ -228,9 +220,7 @@ else
     salt1=""
 fi
 
-# ---------------------------------------------------------------------------
 group "2. The keystore round-trips (second launch)"
-# ---------------------------------------------------------------------------
 prefs="$(grep -E 'shared_prefs/' "$OUT/files-launch1.txt" | tr '\n' ' ')"
 prefs_hash_1=""
 if [[ -n "$prefs" ]]; then
@@ -309,9 +299,7 @@ if [[ -n "$prefs_hash_1" ]]; then
                "the shared_prefs blob changed between launches, which is what minting a second secret looks like"
 fi
 
-# ---------------------------------------------------------------------------
 group "3. A doorway captures"
-# ---------------------------------------------------------------------------
 CANARY_SEND="CopyPasteCanarySend$(date +%s)$RANDOM"
 CANARY_PROC="CopyPasteCanaryProc$(date +%s)$RANDOM"
 
@@ -377,9 +365,7 @@ fi
 leaks="$(sh_ run-as "$PKG" grep -rl "$CANARY_SEND" . 2>/dev/null)"
 probe "the canary anywhere else under the app's data directory" "${leaks:-nowhere}"
 
-# ---------------------------------------------------------------------------
 group "Rung 2 reports unavailable rather than claiming to work (ADR-0005)"
-# ---------------------------------------------------------------------------
 shizuku="$(sh_ pm list packages | grep -i shizuku)"
 [[ -z "$shizuku" ]] \
     && ok "Shizuku is absent, as it must be on a stock emulator" \
@@ -400,9 +386,7 @@ grep -q 'Capturing from every app' <<<"$notifs" \
     && bad "no notification claims background capture" "the ongoing capture notification is posted with rung 2 unavailable" \
     || ok "no notification claims background capture"
 
-# ---------------------------------------------------------------------------
 group "Probes for the next round"
-# ---------------------------------------------------------------------------
 tile_add="$(sh_ cmd statusbar add-tile "$PKG/.CaptureTileService")"
 tile_click="$(sh_ cmd statusbar click-tile "$PKG/.CaptureTileService")"
 probe "the Quick Settings tile" "add: ${tile_add:-<no output>} / click: ${tile_click:-<no output>}"

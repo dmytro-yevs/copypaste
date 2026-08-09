@@ -13,7 +13,7 @@
 //!   there is one.
 //! * **It does not frame bytes by hand.** Framing is
 //!   [`tokio_util::codec::LinesCodec`], the same codec the daemon and the CLI
-//!   use (CLAUDE.md rule 1).
+//!   use (AGENTS.md rule 1).
 //! * **It never puts a path in an error.** Failures become
 //!   [`BackendError`], which scrubs on the way in.
 //!

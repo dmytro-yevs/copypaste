@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
 # Run `smoke.sh` against a real PostgREST on a throwaway PostgreSQL cluster,
 # with no Docker and no Supabase CLI.
 #
@@ -23,7 +22,6 @@
 #
 # Needs: PostgreSQL server binaries (initdb, pg_ctl, psql), a `postgrest`
 # binary, curl, jq, python3.
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

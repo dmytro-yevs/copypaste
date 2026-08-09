@@ -42,9 +42,7 @@ env:
   MSRV: "1.96"
 
 jobs:
-  # ---------------------------------------------------------------------------
   # Cheap gates. No compilation, so they fail in seconds rather than minutes.
-  # ---------------------------------------------------------------------------
 
   fmt:
     name: rustfmt
@@ -107,7 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      # A gate. CLAUDE.md rule 8 carried no number for months and bound
+      # A gate. AGENTS.md rule 8 carried no number for months and bound
       # nothing: the rule cited an eighty-line header as its own worst case
       # while the tree grew a file with 152 comment lines above four of code.
       # scripts/comment-budget.txt holds the pre-existing debt and can only
@@ -130,7 +128,7 @@ jobs:
 
       # A gate, not an annotation. `scripts/check-file-size.sh`'s header records
       # v1's argument against a hard check — that it forces artificial splits —
-      # and CLAUDE.md rule 5 already answers it: a file that is one indivisible
+      # and AGENTS.md rule 5 already answers it: a file that is one indivisible
       # responsibility is exempt, provided its module header names what was
       # considered for extraction and why doing it would make the code worse.
       # EXEMPT is where that claim is registered, in the same commit as the
@@ -146,7 +144,7 @@ jobs:
           printf '%s\n' "$out"
 
           {
-            echo '## File-size budget (CLAUDE.md rule 5)'
+            echo '## File-size budget (AGENTS.md rule 5)'
             echo
             echo '```'
             printf '%s\n' "$out"
@@ -160,7 +158,7 @@ jobs:
               echo "::notice file=crates/${file}::${lines} source lines, exempt (rule 5)"
               continue
             fi
-            echo "::error file=crates/${file}::${lines} source lines, over the 500-line budget (CLAUDE.md rule 5). Split it, or claim the indivisible-responsibility exemption in the module header and add it to EXEMPT in .github/workflows/ci.yml."
+            echo "::error file=crates/${file}::${lines} source lines, over the 500-line budget (AGENTS.md rule 5). Split it, or claim the indivisible-responsibility exemption in the module header and add it to EXEMPT in .github/workflows/ci.yml."
             fail=1
           done < <(printf '%s\n' "$out" | awk '/^[^ ]+\.rs[[:space:]]+[0-9]+$/ { print $1, $2 }')
 
@@ -223,10 +221,8 @@ jobs:
       # file.
       - run: npm run check
 
-  # ---------------------------------------------------------------------------
   # The Rust gate. Clippy and the test suite share one runner so SQLCipher and
   # the dependency graph are compiled once, not twice.
-  # ---------------------------------------------------------------------------
 
   rust:
     name: test + clippy (linux)
@@ -295,11 +291,9 @@ jobs:
         if: success() || failure()
         run: ./scripts/check-macos-types.sh --self-test
 
-  # ---------------------------------------------------------------------------
   # The Rust layer end to end, on Linux against the fake clipboard source.
   # Neither platform's shell, engine or pasteboard is involved; the layer that
   # owns each of those is in docs/rewrite/testing-policy.md.
-  # ---------------------------------------------------------------------------
 
   demo:
     name: demo.sh + demo-p2p.sh
@@ -349,10 +343,8 @@ jobs:
         timeout-minutes: 10
         run: ./scripts/demo-p2p.sh
 
-  # ---------------------------------------------------------------------------
   # Frontend, in jsdom. Layout, scrolling and virtualisation are the browser
   # layer's (browser-webkitgtk.yml); every rect here is 0x0.
-  # ---------------------------------------------------------------------------
 
   frontend:
     name: npm build + test (jsdom)
@@ -383,7 +375,6 @@ jobs:
 
       - run: npm test
 
-  # ---------------------------------------------------------------------------
   # macOS. The job that changes "never compiled" into "compiles", and then
   # "never executed" into "executed": the last four steps drive the real
   # NSPasteboard and the real Keychain rather than the fakes.
@@ -391,7 +382,6 @@ jobs:
   # It is the macOS layer for those two and for nothing else. The tray, the
   # popover, the hotkey, launch at login and WKWebView are unexercised here and
   # are marked NOT VERIFIED IN CI in docs/rewrite/testing-policy.md.
-  # ---------------------------------------------------------------------------
 
   macos-check:
     name: macOS check + platform (arm64)
@@ -559,10 +549,8 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/copypaste-ci.keychain-db"
           exit 0
 
-  # ---------------------------------------------------------------------------
   # Windows owns the DPAPI and named-pipe assertions, then exercises the
   # installed product. Missing evidence or cleanup fails the job.
-  # ---------------------------------------------------------------------------
 
   windows-check:
     name: Windows workspace + installed product evidence (x64)

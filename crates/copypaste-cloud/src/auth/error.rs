@@ -158,9 +158,7 @@ pub(super) async fn classify(response: Response, grant: GrantKind) -> Result<Str
     Err(AuthError::Rejected { status: code })
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 //
 // Asserted through a real `reqwest` round trip against wiremock: the rule under
 // test is what a status does to the *caller*, which includes whether the request

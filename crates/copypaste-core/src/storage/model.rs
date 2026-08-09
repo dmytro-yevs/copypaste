@@ -100,7 +100,7 @@ impl Ingest {
 /// This is also what a sync session compares and serves. The four merge keys
 /// (`created_at`, `content_hash`, `deleted`, `origin_device_id`) are all here
 /// so that one row type answers both questions; carrying them in a second view
-/// on a second connection is what `crate::sync` was extracted from.
+/// on a second connection would violate the storage/sync ownership boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredItem {
     pub id: String,
@@ -133,7 +133,7 @@ pub struct StoredItem {
 
 /// Storage failures.
 ///
-/// No variant carries a filesystem path (CLAUDE.md rule 4). `rusqlite` and
+/// No variant carries a filesystem path (AGENTS.md rule 4). `rusqlite` and
 /// `r2d2` errors do not embed one either, so these are safe to show a user.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

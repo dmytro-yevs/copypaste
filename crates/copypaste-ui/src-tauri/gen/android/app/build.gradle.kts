@@ -64,7 +64,7 @@ rust {
 dependencies {
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
-    // Rung 2. CLAUDE.md rule 1: the maintained client library, not a
+    // Rung 2. AGENTS.md rule 1: the maintained client library, not a
     // hand-rolled binder proxy — `ShizukuBinderWrapper` and
     // `SystemServiceHelper` are exactly the two pieces we would otherwise be
     // reimplementing against a hidden API. MIT, from RikkaApps.

@@ -10,9 +10,7 @@
 # in this file has been executed on a Mac by its author; see the header of
 # release.yml for what that means.
 #
-# ---------------------------------------------------------------------------
 # Why this signs by hand instead of letting Tauri do it
-# ---------------------------------------------------------------------------
 # The Tauri CLI signs the bundle itself when APPLE_SIGNING_IDENTITY is set, and
 # the obvious thing to do is set it to "-". Two reasons not to:
 #
@@ -29,9 +27,7 @@
 # So: `tauri build --bundles app` with no signing identity in the environment,
 # then sign here, then build the DMG in make-dmg.sh.
 #
-# ---------------------------------------------------------------------------
 # Why there is no hardened runtime and no entitlements file
-# ---------------------------------------------------------------------------
 # The hardened runtime is a *precondition for notarisation*, not a benefit on
 # its own. ADR-0001 rules notarisation out, so `--options runtime` buys nothing
 # — and it costs something specific: a hardened ad-hoc signature can prevent
@@ -43,9 +39,7 @@
 # Mac, the fallback is to re-sign in the cask postflight. Casks/copypaste.rb
 # documents where that goes.
 #
-# ---------------------------------------------------------------------------
 # Why the release artefact is still ad-hoc when the cask re-signs anyway
-# ---------------------------------------------------------------------------
 # The signature that matters for TCC is applied on the user's machine, by
 # packaging/macos/selfsign.sh, with a certificate that only exists there. CI has
 # no certificate and ADR-0001 says it never will. So this build signs ad-hoc —
@@ -90,9 +84,7 @@ DIST="dist"
 APP="${DIST}/${APP_NAME}.app"
 UI_DIR="crates/copypaste-ui"
 
-# ---------------------------------------------------------------------------
 # 1. Version agreement
-# ---------------------------------------------------------------------------
 # tauri.conf.json's "version" is a path to crates/copypaste-ui/package.json,
 # which check.sh holds equal to [workspace.package]. So this script must never
 # rewrite a version; it checks instead. A mismatch is a release-preparation
@@ -107,9 +99,7 @@ if [[ "$WS_VERSION" != "$VERSION" ]]; then
     exit 1
 fi
 
-# ---------------------------------------------------------------------------
 # 2. Build
-# ---------------------------------------------------------------------------
 echo "==> Building the daemon and CLI for $TRIPLE"
 rustup target add "$TRIPLE" >/dev/null 2>&1 || true
 cargo build --release --locked --target "$TRIPLE" -p copypaste-daemon -p copypaste-cli
@@ -142,9 +132,7 @@ if [[ ! -d "$BUILT_APP" ]]; then
     exit 1
 fi
 
-# ---------------------------------------------------------------------------
 # 3. Stage and inject
-# ---------------------------------------------------------------------------
 echo "==> Staging $APP"
 rm -rf "$APP"
 mkdir -p "$DIST"
@@ -167,9 +155,7 @@ PLIST="${APP}/Contents/Info.plist"
 EXEC_PATH="$(macos_bundle_executable_path "$APP")" || exit 1
 EXEC="${EXEC_PATH##*/}"
 
-# ---------------------------------------------------------------------------
 # CFBundleShortVersionString, and the pre-release suffix
-# ---------------------------------------------------------------------------
 # Apple's documented format for CFBundleShortVersionString is one to three
 # period-separated integers. A tag like v2.0.0-alpha.1 is not that, and nobody
 # on this project has yet watched Tauri's macOS bundler decide what to do with
@@ -216,9 +202,7 @@ if [[ "$SHORT_VERSION" != "$VERSION" ]]; then
     fi
 fi
 
-# ---------------------------------------------------------------------------
 # Stage the on-machine signing script
-# ---------------------------------------------------------------------------
 # packaging/macos/selfsign.sh runs on the user's machine, from the cask's
 # postflight, and does the de-quarantine and the re-sign with a per-machine
 # certificate. It travels inside the bundle rather than being pasted into the
@@ -235,9 +219,7 @@ cp "$SELFSIGN_SRC" "${APP}/Contents/Resources/selfsign.sh"
 chmod 755 "${APP}/Contents/Resources/selfsign.sh"
 echo "    staged Contents/Resources/selfsign.sh"
 
-# ---------------------------------------------------------------------------
 # 4. Sign, ad-hoc, inside out
-# ---------------------------------------------------------------------------
 # Inner Mach-O binaries first, then the bundle. NOT `--deep`: Apple deprecated
 # it, and it is the wrong tool anyway — it re-signs nested code with the outer
 # identity and no per-binary identifier, which is how you get identifiers that

@@ -610,7 +610,7 @@ mod tests {
     async fn a_forged_tombstone_cannot_delete_an_item() {
         // The most destructive shape: one write into the account, and the item
         // is gone from every device. Data loss is the worst outcome
-        // (`CLAUDE.md` rule 4), so this one is asserted on its own.
+        // (`AGENTS.md` rule 4), so this one is asserted on its own.
         let source = FakeSource::default();
         let sync = driver(
             FakeRest::seeded(vec![cloud_row("a", 1_000, "keep me")]),

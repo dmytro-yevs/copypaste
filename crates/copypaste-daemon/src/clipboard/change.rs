@@ -172,9 +172,7 @@ impl ChangeTracker {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tests — the invariants that used to be untestable
-// ---------------------------------------------------------------------------
 //
 // This is the state machine the macOS backend runs; testing it here is what
 // makes I-2, I-3, I-4, §3.2 and the whole §3.3 sentinel protocol verifiable on a

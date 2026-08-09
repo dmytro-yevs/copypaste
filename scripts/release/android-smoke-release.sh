@@ -35,9 +35,7 @@ fi
 
 mkdir -p "$OUT"
 
-# ---------------------------------------------------------------------------
 group "Preflight"
-# ---------------------------------------------------------------------------
 command -v adb >/dev/null 2>&1 || { echo "  FATAL adb is not on PATH"; exit 1; }
 adb wait-for-device
 sdk="$(sh_ getprop ro.build.version.sdk)"
@@ -56,9 +54,7 @@ else
     summary; exit 1
 fi
 
-# ---------------------------------------------------------------------------
 group "Install"
-# ---------------------------------------------------------------------------
 adb uninstall "$PKG" >/dev/null 2>&1 || true
 if install_out="$(adb install -r -g "$APK" 2>&1)"; then
     ok "adb install"
@@ -79,9 +75,7 @@ else
     ok "the installed package is not debuggable (R8 ran on it)"
 fi
 
-# ---------------------------------------------------------------------------
 group "1. The shipped build launches"
-# ---------------------------------------------------------------------------
 adb logcat -c || true
 launched_at="$SECONDS"
 start_out="$(sh_ am start -W -n "$MAIN")"
@@ -130,9 +124,7 @@ else
         "R8 stripped or renamed something the app looks up by name — CapturePlugin is resolved by reflection and proguard-rules.pro does not keep it: $(head -n 12 <<<"$stripped")"
 fi
 
-# ---------------------------------------------------------------------------
 group "2. The UI paints"
-# ---------------------------------------------------------------------------
 wake_screen
 
 window="$(sh_ dumpsys window)"
@@ -204,9 +196,7 @@ else
         "CDP answered as $PKG on pid $pid_cdp, and no app we did not build serves one on this device — so this endpoint is the build's own, and anything that can reach adb can read clipboard content out of the DOM"
 fi
 
-# ---------------------------------------------------------------------------
 group "3. Native code is mapped"
-# ---------------------------------------------------------------------------
 # Expected to be unreadable here: /proc/<pid>/maps of another uid's process
 # needs ptrace access, which the shell user does not have without run-as. It is
 # attempted rather than assumed so that a device where it *is* readable gives
@@ -232,9 +222,7 @@ else
          "maps is not readable without run-as and this build is not debuggable — ${maps_err:-$lines lines}. What stands in its place: the process survived setup, which loads the library before super.onCreate, no UnsatisfiedLinkError appears above, and the WebView painted assets that only the Rust side serves"
 fi
 
-# ---------------------------------------------------------------------------
 group "4. The doorways still accept a clip"
-# ---------------------------------------------------------------------------
 CANARY_SEND="CopyPasteReleaseCanary$(date +%s)$RANDOM"
 
 adb logcat -c || true

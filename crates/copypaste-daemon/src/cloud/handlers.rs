@@ -3,7 +3,7 @@
 //! **Three secrets arrive here and none leaves.** Neither the password nor the
 //! passphrase is stored, logged at any level, or reachable from an error
 //! payload — every client-visible string here is a `const`, so nothing can be
-//! interpolated into one, and that is also `CLAUDE.md` rule 4 (no path in a
+//! interpolated into one, and that is also `AGENTS.md` rule 4 (no path in a
 //! user-facing error). None reaches the store, so none reaches the search index.
 //!
 //! One residual: the passphrase copy used for derivation is `Zeroizing`, but

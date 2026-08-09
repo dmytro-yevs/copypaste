@@ -41,7 +41,7 @@ use crate::AppState;
 ///
 /// A fixed absolute path under `/System`, so it is neither user-supplied nor
 /// user-identifying, and it never appears in a message that reaches a client
-/// (CLAUDE.md rule 4).
+/// (AGENTS.md rule 4).
 #[cfg(target_os = "macos")]
 const PLAYER: &str = "/usr/bin/afplay";
 #[cfg(target_os = "macos")]

@@ -293,7 +293,7 @@ pub fn note_version_written(state: &AppState, created_at_ms: i64) {
 /// function is private, so the predicate is spelled twice; the constants are
 /// not, and `the_upload_caps_are_the_cloud_crates_own` pins the pair. Delete
 /// this the moment `copypaste-cloud` exports the predicate itself — one
-/// definition of "too large" is the point (CLAUDE.md rule 1).
+/// definition of "too large" is the point (AGENTS.md rule 1).
 #[must_use]
 pub fn too_large_to_sync(content_type: &str, byte_len: usize) -> bool {
     // `== "text"`, not `content_type::is_text`: the cloud's split is between

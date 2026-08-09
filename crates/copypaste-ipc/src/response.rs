@@ -155,7 +155,7 @@ impl Response {
     /// Build a failure reply.
     ///
     /// `message` must never contain a filesystem path: the daemon socket path
-    /// discloses the local username (CLAUDE.md rule 4). Callers map internal
+    /// discloses the local username (AGENTS.md rule 4). Callers map internal
     /// errors to a plain sentence before they get here.
     pub fn err(id: u64, code: ErrorCode, message: impl Into<String>) -> Self {
         Self {

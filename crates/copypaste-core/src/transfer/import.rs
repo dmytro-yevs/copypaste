@@ -21,7 +21,7 @@ const MAX_IMPORT_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 /// The `Display` text carries no detail for the same reason
 /// [`IngestError`]'s does not: these strings can reach a client, and the
 /// underlying `StoreError` may carry a database path, which discloses the local
-/// username (CLAUDE.md rule 4).
+/// username (AGENTS.md rule 4).
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
     #[error("there is nothing to import")]
@@ -239,7 +239,7 @@ mod tests {
     }
 
     /// An entry that cannot be stored at all is counted, not fatal: losing the
-    /// rest of the file over one blank line is data loss (CLAUDE.md rule 4).
+    /// rest of the file over one blank line is data loss (AGENTS.md rule 4).
     #[test]
     fn a_mixed_batch_reports_every_skip_reason_and_the_rest_still_lands() {
         let mut f = fixture();

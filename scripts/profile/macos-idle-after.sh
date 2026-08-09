@@ -46,10 +46,8 @@ note() { printf '\033[1;36m▶ %s\033[0m\n' "$*" >&2; }
 
 [ "$(uname -s)" = Darwin ] || die "this is the macOS measurement; this host is $(uname -s)"
 
-# ---------------------------------------------------------------------------
 # Preconditions. Each one, if violated, makes the comparison with §2.2 void
 # rather than merely noisy — so each is a refusal, not a warning.
-# ---------------------------------------------------------------------------
 [ "$INTERVAL" = 500 ] || die "§2.2 was taken at poll_interval_ms=500, not $INTERVAL"
 [ "${NO_MDNS:-0}" = 1 ] || die "set NO_MDNS=1: otherwise other daemons' advertisements are counted as this one's idle cost (§2.1)"
 # F-IDLE-2's early return is keyed on `is_configured`, which is false only when
@@ -80,9 +78,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ---------------------------------------------------------------------------
 # The route
-# ---------------------------------------------------------------------------
 AUTH_WAIT=20
 
 case "$ROUTE" in
@@ -104,7 +100,7 @@ mint-fresh)
     [ "${NO_COPYPASTE_INSTALL:-0}" = 1 ] ||
         die "mint-fresh deletes the device-secret item. Set NO_COPYPASTE_INSTALL=1 only after the preflight has reported no history database."
     [ ! -f "$REAL_DATA_DIR/copypaste-v2.db" ] ||
-        die "a v2 history database is present: deleting its device secret would make it permanently unopenable (CLAUDE.md rule 4)"
+        die "a v2 history database is present: deleting its device secret would make it permanently unopenable (AGENTS.md rule 4)"
     note "route mint-fresh: removing the device-secret item so this run mints its own"
     if security delete-generic-password -s "$SERVICE" -a "$ACCOUNT" >/dev/null 2>&1; then
         note "  removed"
@@ -133,9 +129,7 @@ signed)
     ;;
 esac
 
-# ---------------------------------------------------------------------------
 # Build, sign if asked, check it can start, measure
-# ---------------------------------------------------------------------------
 CARGO="cargo"
 cargo +1.96 --version >/dev/null 2>&1 && CARGO="cargo +1.96"
 note "building (release)"
@@ -202,9 +196,7 @@ esac
 note "measuring: ${WINDOW}s at ${INTERVAL}ms, NO_MDNS=1, route $ROUTE"
 NO_MDNS=1 "$HERE/daemon-idle.sh" "$WINDOW" "$INTERVAL" 2>&1 | tee "$LOG"
 
-# ---------------------------------------------------------------------------
 # What was expected, beside what happened
-# ---------------------------------------------------------------------------
 OBS_WAKE="$(awk '/Wakeups:/ { print $NF; exit }' "$LOG" | sed 's|/min||')"
 OBS_CPU="$(awk '/CPU-s\/hour/ { print $(NF - 1); exit }' "$LOG")"
 OBS_THREADS="$(awk '/Threads:/ { print $NF; exit }' "$LOG")"

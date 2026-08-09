@@ -5,7 +5,7 @@ use crate::protocol::ProtocolError;
 /// Session failures.
 ///
 /// No variant carries a path or any item content: these are logged and shown to
-/// users (CLAUDE.md rule 4). Implementations of [`SyncSource`](super::SyncSource)
+/// users (AGENTS.md rule 4). Implementations of [`SyncSource`](super::SyncSource)
 /// must hold to the same rule when they build [`SyncError::Source`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SyncError {

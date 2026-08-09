@@ -15,7 +15,7 @@ use super::validators::{
 };
 
 /// Regex compilation failures. No variant carries a path or any input text
-/// (CLAUDE.md rule 4).
+/// (AGENTS.md rule 4).
 #[derive(Debug, thiserror::Error)]
 pub enum DetectorError {
     /// A single rule's regex failed to compile.

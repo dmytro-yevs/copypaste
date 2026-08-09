@@ -222,7 +222,7 @@ export const devices = {
 
   /**
    * The heavier one, and every line of it is something the user does not get
-   * back (CLAUDE.md rule 4). The three consequences are separate entries
+   * back (AGENTS.md rule 4). The three consequences are separate entries
    * because a screen may show them as a list and a confirmation has to name
    * what is lost rather than say "are you sure".
    */
