@@ -93,7 +93,7 @@ pub async fn pair_scan_invite(
         return Ok(PairingCeremony::unavailable());
     };
     let progress = backend
-        .pair_join(scanned.code.as_str(), &scanned.addr)
+        .pair_join(scanned.code.as_str(), scanned.addr.as_str())
         .await?;
     let presentation = presenter.present_progress(&progress);
     Ok(PairingCeremony::from_progress(progress, presentation))
