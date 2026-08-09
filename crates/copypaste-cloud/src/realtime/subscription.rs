@@ -42,9 +42,10 @@ impl RealtimeSubscription {
     /// Open the socket, join the channel, and start delivering events.
     ///
     /// The first connect and join happen before this returns, so a bad URL, a
-    /// rejected token or a missing subject claim surface here rather than as a
-    /// silent no-op. Everything after that — disconnects, reconnects,
-    /// heartbeats — is handled by the background task.
+    /// rejected token, missing subject claim or unavailable PostgreSQL change
+    /// feed surfaces here rather than as a silent no-op. Everything after that
+    /// — disconnects, reconnects, heartbeats — is handled by the background
+    /// task.
     ///
     /// `access_token` is the current user JWT, and it is the *initial* value of
     /// something the caller must keep current: every session refresh has to
@@ -59,8 +60,8 @@ impl RealtimeSubscription {
     ///
     /// [`RealtimeError::Connect`] if the socket cannot be opened.
     ///
-    /// [`RealtimeError::JoinRefused`] if the channel join is not confirmed
-    /// within [`JOIN_TIMEOUT`](super::JOIN_TIMEOUT).
+    /// [`RealtimeError::JoinRefused`] if the channel join or PostgreSQL change
+    /// subscription is not confirmed within [`JOIN_TIMEOUT`](super::JOIN_TIMEOUT).
     pub async fn connect(config: &CloudConfig, access_token: &str) -> Result<Self, RealtimeError> {
         let user_id = jwt_subject(access_token).ok_or(RealtimeError::MissingUserId)?;
         let base_url = config.url.clone();

@@ -12,10 +12,10 @@
 //!
 //! Deleting the poll loop "because we have Realtime now" reintroduces silent
 //! data loss on every reconnect. What Realtime is allowed to change is the poll
-//! *interval*, and only once the channel has confirmed its join — not merely
-//! once the socket has opened. A socket that is open but whose channel never
-//! joined delivers nothing at all, and backing off on it would halve the sync
-//! rate for no reason.
+//! *interval*, and only once the channel has confirmed its join and PostgreSQL
+//! replication readiness — not merely once the socket has opened. A channel
+//! whose replication subscription is still starting delivers nothing at all,
+//! and backing off on it would halve the sync rate for no reason.
 //!
 //! # Using this from a process that stays up for days
 //!
@@ -30,8 +30,9 @@
 //!    at which the at-most-once property is known to have bitten.
 //! 3. **Report the channel's state to
 //!    [`CloudSync::note_push_channel`](crate::sync::CloudSync::note_push_channel)** —
-//!    on a confirmed join, and again when it drops. The long idle poll ceiling
-//!    is only defensible while this module is carrying the latency.
+//!    once PostgreSQL changes are ready, and again when the channel drops. The
+//!    long idle poll ceiling is only defensible while this module is carrying
+//!    the latency.
 //! 4. **Treat an `Err` as information, not as an end.** The task keeps
 //!    reconnecting on its own schedule; `None` from
 //!    [`RealtimeSubscription::next_event`] is the only terminal signal. A
@@ -99,8 +100,8 @@ pub(crate) const TABLE: &str = crate::rest::TABLE;
 /// Phoenix topic. Supabase namespaces every channel under `realtime:`.
 pub(crate) const TOPIC: &str = "realtime:clipboard_items";
 
-/// How long to wait for the socket and for the `phx_reply` that confirms the
-/// join. Without a bound, a black-holed connection stalls `connect` forever.
+/// How long to wait for the socket, join reply and PostgreSQL readiness event.
+/// Without a bound, a black-holed connection stalls `connect` forever.
 ///
 /// Also bounds the farewell in [`socket`]: a shutdown that cannot get its
 /// `phx_leave` out must not hold the caller either.
