@@ -1,5 +1,5 @@
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use super::cadence::AdaptiveCadence;
@@ -9,6 +9,7 @@ use super::transport::{AuthApi, RestApi};
 use crate::auth::Session;
 use crate::crypto::SyncKey;
 use crate::CloudConfig;
+use zeroize::Zeroizing;
 
 pub struct CloudSync<R: RestApi, A: AuthApi> {
     pub(super) rest: R,
@@ -16,12 +17,25 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     pub(super) key: SyncKey,
     config: CloudConfig,
     // A 401 rotates this for every later request; never hold it across an await.
-    pub(super) session: Mutex<Session>,
+    session: Mutex<SessionState>,
+    pub(super) refresh_lock: tokio::sync::Mutex<()>,
     pub(super) sensitive: SensitiveGuard,
     pub(super) cadence: AdaptiveCadence,
     pub(super) push_channel: AtomicBool,
     // Tests set this to zero; retry duration math is exercised separately.
     delay_scale: f64,
+}
+
+struct SessionState {
+    session: Session,
+    revision: u64,
+    fenced: bool,
+}
+
+pub(super) enum SessionRevision {
+    Current,
+    Superseded,
+    Fenced,
 }
 
 impl<R: RestApi, A: AuthApi> std::fmt::Debug for CloudSync<R, A> {
@@ -47,7 +61,12 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             auth,
             key,
             config,
-            session: Mutex::new(session),
+            session: Mutex::new(SessionState {
+                session,
+                revision: 0,
+                fenced: false,
+            }),
+            refresh_lock: tokio::sync::Mutex::new(()),
             sensitive,
             cadence: AdaptiveCadence::default(),
             push_channel: AtomicBool::new(false),
@@ -68,7 +87,61 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// Borrows the rotated session so callers do not retain another bearer
     /// copy.
     pub fn inspect_session<T>(&self, f: impl FnOnce(&Session) -> T) -> T {
-        f(&self.lock_session())
+        f(&self.lock_session().session)
+    }
+
+    /// Identifies the session generation an auth outcome belongs to.
+    pub fn session_revision(&self) -> u64 {
+        self.lock_session().revision
+    }
+
+    pub(super) fn refresh_snapshot(&self) -> Option<(u64, Zeroizing<String>)> {
+        let state = self.lock_session();
+        (!state.fenced).then(|| {
+            (
+                state.revision,
+                Zeroizing::new(state.session.refresh_token.clone()),
+            )
+        })
+    }
+
+    /// Stops refresh results from being installed, optionally only while the
+    /// named generation is current. Sign-out uses an unconditional fence.
+    pub fn fence_session(&self, expected_revision: Option<u64>) -> bool {
+        let mut state = self.lock_session();
+        if expected_revision.is_some_and(|expected| state.revision != expected) {
+            return false;
+        }
+        state.fenced = true;
+        true
+    }
+
+    pub(super) fn revision_state(&self, expected: u64) -> SessionRevision {
+        let state = self.lock_session();
+        if state.fenced {
+            SessionRevision::Fenced
+        } else if state.revision == expected {
+            SessionRevision::Current
+        } else {
+            SessionRevision::Superseded
+        }
+    }
+
+    pub(super) fn install_refreshed_session(
+        &self,
+        expected_revision: u64,
+        session: Session,
+    ) -> SessionRevision {
+        let mut state = self.lock_session();
+        if state.fenced {
+            return SessionRevision::Fenced;
+        }
+        if state.revision != expected_revision {
+            return SessionRevision::Superseded;
+        }
+        state.session = session;
+        state.revision = state.revision.wrapping_add(1);
+        SessionRevision::Current
     }
 
     /// Pushes first so a new tombstone cannot be briefly shadowed by a stale
@@ -95,7 +168,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     }
 
     // Panics cannot tear these values; poison must not disable sync permanently.
-    pub(super) fn lock_session(&self) -> std::sync::MutexGuard<'_, Session> {
+    fn lock_session(&self) -> MutexGuard<'_, SessionState> {
         self.session.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
