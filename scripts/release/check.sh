@@ -504,19 +504,21 @@ else
         "the guard step was removed; it is deliberate (ADR-0001)"
 fi
 
-# The prerelease flag is built with a command substitution containing a failing
-# test, which is the sort of thing `set -e` punishes. Prove it does not.
 prerelease_probe() {
     set -euo pipefail
     for VERSION in "2.0.0" "2.0.0-alpha.1"; do
-        printf '%s\n' "$VERSION $([[ "$VERSION" == *-* ]] && echo --prerelease)"
+        local prerelease=()
+        if [[ "$VERSION" == *-* ]]; then
+            prerelease+=(--prerelease)
+        fi
+        printf '%s %s\n' "$VERSION" "${prerelease[*]-}"
     done
 }
 if out="$(prerelease_probe 2>&1)" \
    && [[ "$out" == *"2.0.0 "* ]] && [[ "$out" == *"2.0.0-alpha.1 --prerelease"* ]]; then
-    ok "the --prerelease command substitution survives set -e for both version shapes"
+    ok "the --prerelease argument survives set -e for both version shapes"
 else
-    bad "the --prerelease command substitution survives set -e" "$out"
+    bad "the --prerelease argument survives set -e" "$out"
 fi
 
 group "SQLCipher's crypto backend (ADR-0007)"

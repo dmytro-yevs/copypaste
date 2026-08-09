@@ -944,12 +944,16 @@ jobs:
 
           # --verify-tag: refuse to create a release for a tag that does not
           # exist, so a typo in a manual dispatch cannot invent one.
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease+=(--prerelease)
+          fi
           gh release create "v${VERSION}" \
             --repo "${{ github.repository }}" \
             --title "v${VERSION}" \
             --notes-file packaging/release-notes.md \
             --verify-tag \
-            $([[ "$VERSION" == *-* ]] && echo --prerelease) \
+            "${prerelease[@]}" \
             dist/*.dmg dist/*.dmg.sha256 \
             dist/*.tar.gz dist/*.tar.gz.sha256 \
             dist/*.apk dist/*.apk.sha256 \
