@@ -1,6 +1,12 @@
 use copypaste_ipc::{PairingInviteData, PairingProgressData};
 use zeroize::Zeroizing;
 
+#[cfg(any(
+    test,
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows"
+))]
 mod invite;
 
 #[cfg(target_os = "android")]
