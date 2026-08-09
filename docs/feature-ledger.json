@@ -9,7 +9,7 @@
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["loading", "empty", "error", "keyboard", "screen_reader"],
       "failure_states": ["restart", "offline", "timeout"],
-      "performance": {"scenario": "history-first-paint", "p95_ms": 500, "measurement": "artifacts/native/{platform}/history/latency.json"},
+      "performance": {"android": {"status": "uncredited"}, "macos": {"status": "uncredited"}},
       "native": {
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/history/screenshot.png", "ax_log": "artifacts/native/android/history/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/history/screenshot.png", "ax_log": "artifacts/native/macos/history/ax.json"}
@@ -24,7 +24,7 @@
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["permission_required", "disabled", "error", "screen_reader"],
       "failure_states": ["restart", "offline", "permission_denied"],
-      "performance": {"scenario": "capture-to-history", "p95_ms": 750, "measurement": "artifacts/native/{platform}/capture/latency.json"},
+      "performance": {"android": {"status": "uncredited"}, "macos": {"status": "uncredited"}},
       "native": {
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/capture/screenshot.png", "ax_log": "artifacts/native/android/capture/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/capture/screenshot.png", "ax_log": "artifacts/native/macos/capture/ax.json"}
@@ -39,7 +39,7 @@
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["progress", "error", "keyboard", "screen_reader"],
       "failure_states": ["restart", "offline"],
-      "performance": {"scenario": "devices-list", "p95_ms": 750, "measurement": "artifacts/native/{platform}/devices/latency.json"},
+      "performance": {"android": {"status": "uncredited"}, "macos": {"status": "uncredited"}},
       "native": {
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/devices/screenshot.png", "ax_log": "artifacts/native/android/devices/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/devices/screenshot.png", "ax_log": "artifacts/native/macos/devices/ax.json"}
@@ -54,7 +54,7 @@
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["loading", "saved", "error", "keyboard", "screen_reader"],
       "failure_states": ["restart", "offline", "permission_denied"],
-      "performance": {"scenario": "settings-ready", "p95_ms": 500, "measurement": "artifacts/native/{platform}/settings-and-service/latency.json"},
+      "performance": {"android": {"status": "uncredited"}, "macos": {"status": "uncredited"}},
       "native": {
         "android": {"scenario": "./scripts/release/android-storage-transfer.sh", "screenshot": "artifacts/android-storage/transfer-persisted.png", "ax_log": "artifacts/android-storage/transfer-persisted.xml"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/settings-and-service/screenshot.png", "ax_log": "artifacts/native/macos/settings-and-service/ax.json"}
@@ -69,7 +69,10 @@
       "ui_tests": ["npm --prefix crates/copypaste-ui test -- SyncTab"],
       "accessibility_states": ["unconfigured", "signed_out", "connected", "sync_result", "offline_error", "screen_reader"],
       "failure_states": ["restart", "offline", "authentication_rejected"],
-      "performance": {"scenario": "cloud-account-lifecycle", "p95_ms": 60000, "measurement": "artifacts/native/{platform}/cloud/latency.json"},
+      "performance": {
+        "android": {"status": "credited", "scenario": "offline-error", "p95_ms": 60000, "evidence": {"kind": "scenario", "path": "scripts/release/android-cloud-evidence.sh", "executed_by": [".github/workflows/release.yml"]}},
+        "macos": {"status": "credited", "scenario": "offline-error", "p95_ms": 60000, "evidence": {"kind": "scenario", "path": "scripts/release/macos-cloud-evidence.sh", "executed_by": ["scripts/release/smoke-macos-dmg.sh", ".github/workflows/release.yml"]}}
+      },
       "native": {
         "android": {
           "scenario": "./scripts/release/android-cloud-evidence.sh --all",

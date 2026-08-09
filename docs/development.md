@@ -17,6 +17,11 @@ and `npm --prefix crates/copypaste-ui run dev:native` on macOS. Run the scenario
 named by the feature ledger and retain its evidence under `artifacts/native/`;
 the nightly and release workflows upload the same evidence shape.
 
+Performance credit is platform-specific. A credited p95 names either a JSON
+measurement artifact or a scenario with an execution chain ending in a
+workflow; a configured budget or prose report is not evidence. An unmeasured
+platform stays `uncredited` rather than borrowing another platform's number.
+
 Run `npm --prefix crates/copypaste-ui run test:native-parity` to exercise the
 fail-closed receipt gate without native hardware. Release publication requires
 same-commit macOS and physical Android receipts. Windows native-contract

@@ -518,8 +518,17 @@ for name, why in SELF_TESTED.items():
 ledger_check = pathlib.Path("scripts/check-feature-ledger.py").read_text()
 release_check = pathlib.Path("scripts/release/check.sh").read_text()
 rec("--self-test" in ledger_check and "check-feature-ledger.py --self-test" in release_check,
-    "the feature-ledger cloud schema carries a wired self-test",
-    "the schema detector must prove it rejects a missing native cloud state")
+    "the feature-ledger schema carries a wired self-test",
+    "the schema detector must prove its negative performance and cloud fixtures")
+ci_ledger_body = "\n".join(step.get("run") or "" for step in steps(ci_jobs.get("feature-ledger") or {}))
+rec("check-feature-ledger.py --self-test" in ci_ledger_body
+    and "check-feature-ledger.py" in ci_ledger_body,
+    "ci.yml runs the feature-ledger provenance fixtures and guard",
+    "CI must exercise the detector before trusting the ledger")
+release_ledger_body = "\n".join(step.get("run") or "" for step in steps(release_jobs.get("native-parity") or {}))
+rec("check-feature-ledger.py" in release_ledger_body,
+    "release.yml validates performance provenance before native parity",
+    "publication must reject a credited p95 whose producer or wiring went stale")
 
 # --- self-test: prove the runner-image detector fails when it should --------
 if SELF_TEST:
