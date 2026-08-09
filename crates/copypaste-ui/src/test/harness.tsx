@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import type {
   CaptureSnapshot,
   Item,
@@ -63,7 +64,7 @@ export function status(over: Partial<StatusData> = {}): StatusData {
   return {
     device_name: "This device",
     version: "2.0.0-alpha.1",
-    protocol_version: 1,
+    protocol_version: CURRENT_PROTOCOL_VERSION,
     item_count: 3,
     capture_running: true,
     clipboard_backend: "nspasteboard",
