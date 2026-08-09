@@ -1,9 +1,8 @@
 //! The handle a caller holds, and the lifetime of the task behind it.
 
-use std::sync::Arc;
-
-use tokio::sync::{mpsc, watch, Notify};
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use super::channel::{jwt_subject, open_channel, websocket_url};
 use super::event::{RealtimeError, RealtimeEvent};
@@ -27,7 +26,8 @@ const EVENT_QUEUE: usize = 64;
 pub struct RealtimeSubscription {
     events: mpsc::Receiver<Result<RealtimeEvent, RealtimeError>>,
     token: watch::Sender<String>,
-    shutdown: Arc<Notify>,
+    // Cancellation must be sticky because close can precede the task's first wait.
+    shutdown: CancellationToken,
     task: JoinHandle<()>,
 }
 
@@ -71,7 +71,7 @@ impl RealtimeSubscription {
 
         let (tx, events) = mpsc::channel(EVENT_QUEUE);
         let (token_tx, token_rx) = watch::channel(token);
-        let shutdown = Arc::new(Notify::new());
+        let shutdown = CancellationToken::new();
         let task = tokio::spawn(run(
             stream,
             url,
@@ -79,7 +79,7 @@ impl RealtimeSubscription {
             token_rx,
             user_id,
             tx,
-            Arc::clone(&shutdown),
+            shutdown.clone(),
         ));
 
         Ok(Self {
@@ -118,10 +118,53 @@ impl RealtimeSubscription {
     /// Waits for the task to finish so that the `phx_leave` and the close frame
     /// are actually sent before the caller moves on.
     pub async fn close(self) {
-        self.shutdown.notify_waiters();
+        self.shutdown.cancel();
         // The task also observes the dropped receiver, so it cannot deadlock on
         // a full queue while shutting down.
         drop(self.events);
         let _ = self.task.await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::sync::oneshot;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn close_before_the_task_waits_is_not_lost() {
+        let (tx, events) = mpsc::channel(1);
+        let (token, token_rx) = watch::channel(String::from("token"));
+        let shutdown = CancellationToken::new();
+        let observer = shutdown.clone();
+        let (start_tx, start_rx) = oneshot::channel();
+        let task = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move {
+                start_rx.await.unwrap();
+                shutdown.cancelled().await;
+            }
+        });
+        let subscription = RealtimeSubscription {
+            events,
+            token,
+            shutdown,
+            task,
+        };
+
+        let closing = tokio::spawn(subscription.close());
+        while !observer.is_cancelled() {
+            tokio::task::yield_now().await;
+        }
+        start_tx.send(()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), closing)
+            .await
+            .expect("close did not wake a later waiter")
+            .expect("close task panicked");
+        drop((tx, token_rx));
     }
 }
