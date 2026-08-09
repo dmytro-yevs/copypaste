@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/copypaste",
+      "binaries/copypaste-daemon"
+    ],
+    "windows": {
+      "certificateThumbprint": "__WINDOWS_CERTIFICATE_THUMBPRINT__",
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "__WINDOWS_TIMESTAMP_URL__",
+      "tsp": true
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "__TAURI_UPDATER_PUBLIC_KEY__",
+      "endpoints": [
+        "__TAURI_UPDATER_ENDPOINT__"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
