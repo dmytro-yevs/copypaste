@@ -1,6 +1,8 @@
 use copypaste_ipc::{PairingInviteData, PairingProgressData};
 use zeroize::Zeroizing;
 
+mod invite;
+
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -15,7 +17,7 @@ pub enum PairingPresentationState {
 
 pub struct ScannedPairing {
     pub code: Zeroizing<String>,
-    pub addr: String,
+    pub addr: Zeroizing<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,9 +40,15 @@ pub struct PairingPresenter {
 
 impl Default for PairingPresenter {
     fn default() -> Self {
-        Self {
-            native: Box::new(UnavailablePairingUi),
-        }
+        #[cfg(target_os = "windows")]
+        let native = Box::new(windows::WindowsPairingUi::new(
+            invite::encode_native_invite,
+            invite::decode_native_invite,
+        ));
+        #[cfg(not(target_os = "windows"))]
+        let native = Box::new(UnavailablePairingUi);
+
+        Self { native }
     }
 }
 
@@ -62,8 +70,10 @@ impl PairingPresenter {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 struct UnavailablePairingUi;
 
+#[cfg(not(target_os = "windows"))]
 impl NativePairingUi for UnavailablePairingUi {
     fn present_invite(&self, _invite: &PairingInviteData) -> PairingPresentationState {
         PairingPresentationState::Unavailable
@@ -82,7 +92,7 @@ impl NativePairingUi for UnavailablePairingUi {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     use super::*;
     use copypaste_ipc::{PairingRole, PairingState};
