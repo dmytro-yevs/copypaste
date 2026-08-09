@@ -144,7 +144,7 @@ jobs:
           printf '%s\n' "$out"
 
           {
-            echo '## File-size budget (AGENTS.md rule 5)'
+            echo '## File-size budget (CLAUDE.md rule 5)'
             echo
             echo '```'
             printf '%s\n' "$out"
@@ -158,7 +158,7 @@ jobs:
               echo "::notice file=crates/${file}::${lines} source lines, exempt (rule 5)"
               continue
             fi
-            echo "::error file=crates/${file}::${lines} source lines, over the 500-line budget (AGENTS.md rule 5). Split it, or claim the indivisible-responsibility exemption in the module header and add it to EXEMPT in .github/workflows/ci.yml."
+            echo "::error file=crates/${file}::${lines} source lines, over the 500-line budget (CLAUDE.md rule 5). Split it, or claim the indivisible-responsibility exemption in the module header and add it to EXEMPT in .github/workflows/ci.yml."
             fail=1
           done < <(printf '%s\n' "$out" | awk '/^[^ ]+\.rs[[:space:]]+[0-9]+$/ { print $1, $2 }')
 

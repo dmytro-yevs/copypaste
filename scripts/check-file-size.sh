@@ -49,5 +49,5 @@ echo
 if [ "$over" -eq 0 ]; then
     echo "All files within the ${TARGET}-line budget."
 else
-    echo "$over file(s) over the ${TARGET}-line budget (AGENTS.md rule 5)."
+    echo "$over file(s) over the ${TARGET}-line budget (CLAUDE.md rule 5)."
 fi

@@ -91,7 +91,7 @@ fi
 if (( FAILED )); then
     cat >&2 <<'EOF'
 
-AGENTS.md rule 10. Allowed shape:
+CLAUDE.md rule 10. Allowed shape:
 
   <imperative subject, <=72 chars, no period>
 
