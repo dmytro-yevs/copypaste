@@ -468,10 +468,12 @@ if emu:
     debug_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))
                               for step in steps((emu.get("jobs") or {}).get("emulator") or {})
                               if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner"))
+    if "android-emulator-legs.sh" in debug_scripts:
+        debug_scripts += "\n" + pathlib.Path("scripts/release/android-emulator-legs.sh").read_text()
     configured_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))
                                    for step in steps((emu.get("jobs") or {}).get("release-emulator") or {})
                                    if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner"))
-    rec("android-cloud-evidence.sh --unconfigured" in debug_scripts,
+    rec("android-cloud-evidence.sh" in debug_scripts and "--unconfigured" in debug_scripts,
         "android-emulator.yml captures the unconfigured cloud state",
         "the debug emulator leg must retain the build-without-deployment state")
     rec("android-cloud-evidence.sh --configured" in configured_scripts,
