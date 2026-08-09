@@ -32,6 +32,7 @@ export function item(over: Partial<Item> = {}): Item {
     too_large_to_sync: false,
     truncated: false,
     ...over,
+    sensitive_finding: over.sensitive_finding ?? null,
   };
 }
 
