@@ -436,6 +436,9 @@ mod tests {
         assert!(!allowed.contains("pair_create"));
         assert!(!allowed.contains("pair_accept"));
         assert!(!allowed.contains("scan_pairing_qr"));
+        assert!(!allowed.contains("pair_create_invite"));
+        assert!(!allowed.contains("pair_scan_invite"));
+        assert!(!allowed.contains("pair_confirm"));
         assert!(!allowed.contains("export_history"));
     }
 

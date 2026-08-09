@@ -54,11 +54,13 @@ use copypaste_ipc::{
 use tokio::sync::mpsc::Receiver;
 
 pub mod error;
+mod pairing;
 
 #[cfg(test)]
 pub mod testing;
 
 pub use error::{BackendError, UiError};
+pub use pairing::PairingBackend;
 
 /// Shorthand for what every backend method returns.
 pub type Result<T> = std::result::Result<T, BackendError>;
@@ -108,7 +110,7 @@ impl From<copypaste_ipc::ItemPage> for Page {
 /// compile time by [`SelectedBackend`], so there is never a trait object and
 /// never a boxed future to pay for.
 #[allow(async_fn_in_trait)]
-pub trait Backend: Send + Sync + 'static {
+pub trait Backend: PairingBackend + Send + Sync + 'static {
     // ---- history ---------------------------------------------------------
 
     /// Most recent items, newest first; pinned ahead of unpinned.
@@ -210,12 +212,6 @@ pub trait Backend: Send + Sync + 'static {
     async fn shutdown(&self) -> Result<()>;
 
     // ---- peers -----------------------------------------------------------
-    //
-    // No `pair_create`/`pair_accept`. ADR-0015 and manifest 06 §3.3 keep
-    // pairing off every product surface until the wire can derive a SAS from
-    // the handshake and bind both devices' confirmation to it before anything
-    // is persisted. Absent from the trait rather than refused in it: a method
-    // the WebView can name is a method a compromised renderer can call.
 
     /// Known peers and when each was last reachable.
     async fn peers(&self) -> Result<Vec<PeerInfo>>;

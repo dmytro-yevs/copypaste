@@ -29,6 +29,7 @@
 mod backup;
 mod cloud;
 mod open;
+mod pairing;
 mod peers;
 mod retention;
 mod rows;
@@ -491,6 +492,7 @@ impl Backend for EmbeddedBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::PairingBackend;
     use std::sync::{Arc, Mutex};
 
     /// Records what was written, so `copy` can be asserted without a system
@@ -657,19 +659,27 @@ mod tests {
         assert!(!err.ui_error().retryable, "{err:?}");
     }
 
-    /// ADR-0015. Android is a product surface, and this backend is the whole of
-    /// its API: a pairing verb it does not expose is one the WebView cannot
-    /// reach, whatever the screen renders. Minting and redeeming still live in
-    /// `copypaste-p2p`, which is where their behaviour is tested.
     #[tokio::test]
-    async fn the_embedded_backend_exposes_no_pairing_verb() {
-        let source = include_str!("mod.rs");
-        for verb in [concat!("fn pair_", "create"), concat!("fn pair_", "accept")] {
-            assert!(!source.contains(verb), "{verb} is reachable on Android");
-        }
+    async fn the_embedded_backend_owns_a_cancellable_invite() {
+        let (backend, _clip, _dir) = backend();
+        let invite = backend.pair_create_invite().await.unwrap();
+        assert_eq!(invite.expires_in_secs, 120);
+        assert_eq!(
+            backend.pair_progress().await.unwrap().state,
+            copypaste_ipc::PairingState::WaitingForPeer
+        );
+        assert_eq!(
+            backend.pair_cancel().await.unwrap().state,
+            copypaste_ipc::PairingState::Cancelled
+        );
+        assert_ne!(
+            backend.pair_create_invite().await.unwrap().pairing_id,
+            invite.pairing_id
+        );
+    }
 
-        // Revoking is unaffected, and still bars a pairing id this device has
-        // never seen — the case that matters after a device is lost.
+    #[tokio::test]
+    async fn revoking_an_unknown_pairing_bars_later_enrolment() {
         let (backend, _clip, _dir) = backend();
         let token = copypaste_p2p::transport::PairingToken::generate();
         backend.revoke(&token.pairing_id()).await.unwrap();

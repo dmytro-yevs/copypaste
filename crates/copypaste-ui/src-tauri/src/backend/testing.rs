@@ -11,10 +11,11 @@ use std::sync::Mutex;
 
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, PeerInfo, PrivateModeData, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PairingInviteData, PairingProgressData, PeerInfo,
+    PrivateModeData, StatusData, SyncResult,
 };
 
-use super::{Backend, BackendError, Page, Result};
+use super::{Backend, BackendError, Page, PairingBackend, Result};
 
 /// What the fake should do when asked for `status`.
 #[derive(Debug, Clone)]
@@ -271,6 +272,28 @@ impl Backend for FakeBackend {
     }
 
     async fn watch(&self) -> Result<tokio::sync::mpsc::Receiver<EventData>> {
+        Err(refused())
+    }
+}
+
+impl PairingBackend for FakeBackend {
+    async fn pair_create_invite(&self) -> Result<PairingInviteData> {
+        Err(refused())
+    }
+
+    async fn pair_join(&self, _code: &str, _addr: &str) -> Result<PairingProgressData> {
+        Err(refused())
+    }
+
+    async fn pair_progress(&self) -> Result<PairingProgressData> {
+        Err(refused())
+    }
+
+    async fn pair_confirm(&self, _accept: bool) -> Result<PairingProgressData> {
+        Err(refused())
+    }
+
+    async fn pair_cancel(&self) -> Result<PairingProgressData> {
         Err(refused())
     }
 }
