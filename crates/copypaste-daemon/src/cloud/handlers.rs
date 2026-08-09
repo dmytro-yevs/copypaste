@@ -20,7 +20,7 @@ use copypaste_ipc::{ErrorCode, Response, ResponseData};
 use tracing::{info, warn};
 use zeroize::Zeroizing;
 
-use crate::cloud::{poll, ActivateError};
+use crate::cloud::{poll, ActivateError, ActivateRequest};
 use crate::AppState;
 
 const MSG_NOT_CONFIGURED: &str =
@@ -102,9 +102,16 @@ pub async fn sign_in(
     // The hex is taken before the key is moved into the driver, and is
     // zeroized with the rest of this frame.
     let key_hex = Zeroizing::new(hex::encode(key.to_bytes().as_slice()));
-    let switched = match state.cloud.activate(
-        state, attempt, config, email, user_id, key, session, &key_hex,
-    ) {
+    let switched = match state.cloud.activate(ActivateRequest {
+        state,
+        attempt,
+        config,
+        email,
+        user_id,
+        key,
+        session,
+        key_hex: &key_hex,
+    }) {
         Ok(switched) => switched,
         Err(ActivateError::Stale) => {
             return Response::err(id, ErrorCode::AuthFailed, MSG_ACCOUNT_CHANGED);
