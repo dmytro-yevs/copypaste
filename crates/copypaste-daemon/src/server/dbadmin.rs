@@ -225,6 +225,7 @@ mod tests {
 
         assert!(restore_from(&state, &dest, true).ok);
         assert_eq!(contents(&state), ["before the backup"]);
+        assert_eq!(state.store.count().unwrap(), 1);
     }
 
     #[test]
