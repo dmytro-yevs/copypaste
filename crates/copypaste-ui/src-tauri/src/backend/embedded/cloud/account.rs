@@ -202,8 +202,8 @@ impl EmbeddedCloud {
             super::sensitive_guard(&state.detector),
         ));
         let mut account = self.account();
-        if store.state(KEY_CURSOR_USER_ID).ok().flatten().as_deref() != Some(&user_id) {
-            if self
+        if store.state(KEY_CURSOR_USER_ID).ok().flatten().as_deref() != Some(&user_id)
+            && self
                 .upload_cursor
                 .replace_account(
                     store,
@@ -217,9 +217,8 @@ impl EmbeddedCloud {
                     ],
                 )
                 .is_err()
-            {
-                return;
-            }
+        {
+            return;
         }
         if let Some(previous) = account.as_ref() {
             previous.cancel.cancel();

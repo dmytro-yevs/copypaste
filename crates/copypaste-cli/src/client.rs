@@ -646,7 +646,7 @@ mod tests {
                         .to_string(),
                 ),
                 StubAction::Reply(
-                    r#"{"id":{id},"ok":true,"data":{"status":{"version":"2.0.0","protocol_version":1,"item_count":0,"capture_running":true,"clipboard_backend":"fake"}}}"#
+                    r#"{"id":{id},"ok":true,"data":{"status":{"version":"2.0.0","protocol_version":1,"item_count":0,"capture_running":true,"clipboard_backend":"fake","private_mode_epoch":0}}}"#
                         .to_string(),
                 ),
             ],
