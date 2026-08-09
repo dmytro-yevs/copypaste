@@ -669,9 +669,11 @@ Identical policy on **both** read and write paths (`cloud/push/transport.rs:112-
   (`CopyPaste-crh3.97`, `protocol.rs:45-55`).
 - Reject frames that are not exactly 5 elements.
 
-**Connection.** `wss://<project>/realtime/v1/websocket`; the publishable/anon key
-goes in a **request header**, not the URL query string (`CopyPaste-lnjm`,
-`realtime/session.rs:28-33`).
+**Connection.** `wss://<project>/realtime/v1/websocket?apikey=<anon>&vsn=1.0.0`;
+the publishable/anon key goes in both the `apikey` query parameter required by
+the local Supabase gateway and the request header accepted by hosted gateways
+(`CopyPaste-lnjm`). The key is public by design, and errors must not echo the
+connection URL.
 
 **Join payload** (`realtime/join.rs:39-51`):
 

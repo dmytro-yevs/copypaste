@@ -3,7 +3,7 @@
 //!
 //! The three things that decide whether the subscription is *safe* rather than
 //! merely working all live here — the token's subject becomes the per-user
-//! filter, the anon key goes in a header rather than the URL, and the join is
+//! filter, the anon key is supplied to the WebSocket handshake, and the join is
 //! not considered done until the server has confirmed **the subscription we
 //! asked for**.
 //!
@@ -39,16 +39,18 @@ pub(super) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// uses "realtime is live" to slow its poll loop, and a socket whose channel
 /// never joined delivers nothing (manifest 05 §4.8).
 pub(super) async fn open_channel(
-    url: &str,
+    base_url: &str,
     anon_key: &str,
     access_token: &str,
     user_id: &str,
 ) -> Result<WsStream, RealtimeError> {
+    let url = websocket_url(base_url, anon_key);
     let mut request = url
+        .as_str()
         .into_client_request()
         .map_err(|_| RealtimeError::Connect("the configured url is not a websocket url"))?;
-    // The publishable key goes in a header, not the query string: a URL ends up
-    // in proxy logs and in error messages (`CopyPaste-lnjm`).
+    // Hosted gateways accept this header, while the local Kong route copies the
+    // required query parameter through to Realtime (`CopyPaste-lnjm`).
     request.headers_mut().insert(
         "apikey",
         anon_key
@@ -181,11 +183,11 @@ fn confirms_subscription(payload: &Value, user_id: &str) -> Result<(), RealtimeE
     }
 }
 
-/// `https://…` / `http://…` -> the realtime websocket endpoint.
+/// `https://…` / `http://…` -> the authenticated realtime websocket endpoint.
 ///
 /// A non-`http` scheme is passed through untouched so a `ws://` loopback URL
 /// works in a test harness.
-pub(super) fn websocket_url(base: &str) -> String {
+pub(super) fn websocket_url(base: &str, anon_key: &str) -> String {
     let Ok(mut base_url) = Url::parse(base) else {
         return base.to_owned();
     };
@@ -201,9 +203,12 @@ pub(super) fn websocket_url(base: &str) -> String {
     let Ok(mut endpoint) = base_url.join("/realtime/v1/websocket") else {
         return base.to_owned();
     };
-    // `vsn` selects the Phoenix serializer; 1.0.0 is the five-element array
-    // this module parses.
-    endpoint.query_pairs_mut().append_pair("vsn", "1.0.0");
+    // The local Supabase gateway reads `apikey` from the query before proxying
+    // the upgrade. `vsn` selects the five-element Phoenix array serializer.
+    endpoint
+        .query_pairs_mut()
+        .append_pair("apikey", anon_key)
+        .append_pair("vsn", "1.0.0");
     endpoint.into()
 }
 
@@ -246,6 +251,10 @@ pub(super) fn jwt_subject(token: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::accept_hdr_async;
+    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+
     use super::*;
 
     const HEADER: &str = "e30";
@@ -438,27 +447,61 @@ mod tests {
     #[test]
     fn the_websocket_url_is_derived_from_the_rest_url() {
         assert_eq!(
-            websocket_url("https://proj.supabase.co"),
-            "wss://proj.supabase.co/realtime/v1/websocket?vsn=1.0.0"
+            websocket_url("https://proj.supabase.co", "anon.jwt"),
+            "wss://proj.supabase.co/realtime/v1/websocket?apikey=anon.jwt&vsn=1.0.0"
         );
         // A trailing slash must not double up.
         assert_eq!(
-            websocket_url("https://proj.supabase.co/"),
-            "wss://proj.supabase.co/realtime/v1/websocket?vsn=1.0.0"
+            websocket_url("https://proj.supabase.co/", "anon.jwt"),
+            "wss://proj.supabase.co/realtime/v1/websocket?apikey=anon.jwt&vsn=1.0.0"
         );
         assert_eq!(
-            websocket_url("http://127.0.0.1:54321"),
-            "ws://127.0.0.1:54321/realtime/v1/websocket?vsn=1.0.0"
+            websocket_url("http://127.0.0.1:54321", "anon.jwt"),
+            "ws://127.0.0.1:54321/realtime/v1/websocket?apikey=anon.jwt&vsn=1.0.0"
         );
         assert_eq!(
-            websocket_url("ws://127.0.0.1:54321/harness/"),
-            "ws://127.0.0.1:54321/realtime/v1/websocket?vsn=1.0.0"
+            websocket_url("ws://127.0.0.1:54321/harness/", "anon.jwt"),
+            "ws://127.0.0.1:54321/realtime/v1/websocket?apikey=anon.jwt&vsn=1.0.0"
         );
         assert_eq!(
-            websocket_url("https://[2001:db8::1]:8443/nested%20base/?apikey=must-go#fragment"),
-            "wss://[2001:db8::1]:8443/realtime/v1/websocket?vsn=1.0.0"
+            websocket_url(
+                "https://[2001:db8::1]:8443/nested%20base/?apikey=must-go#fragment",
+                "replacement key"
+            ),
+            "wss://[2001:db8::1]:8443/realtime/v1/websocket?apikey=replacement+key&vsn=1.0.0"
         );
-        // The anon key is never in the URL.
-        assert!(!websocket_url("https://proj.supabase.co").contains("apikey"));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::result_large_err)]
+    async fn the_handshake_carries_the_key_in_the_query_and_header() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_hdr_async(stream, |request: &Request, response: Response| {
+                assert_eq!(request.uri().path(), "/realtime/v1/websocket");
+                assert_eq!(request.uri().query(), Some("apikey=anon.jwt&vsn=1.0.0"));
+                assert_eq!(request.headers()["apikey"], "anon.jwt");
+                Ok(response)
+            })
+            .await
+            .unwrap();
+            ws.next().await.unwrap().unwrap();
+            ws.send(Message::Text(reply("ok", &echo(USER))))
+                .await
+                .unwrap();
+        });
+
+        let stream = open_channel(
+            &format!("ws://{address}"),
+            "anon.jwt",
+            &token_for(USER),
+            USER,
+        )
+        .await
+        .unwrap();
+        drop(stream);
+        server.await.unwrap();
     }
 }
