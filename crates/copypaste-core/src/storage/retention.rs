@@ -31,14 +31,12 @@ pub const DEDUP_WINDOW_MS: i64 = 60_000;
 /// agree about where a bucket starts.
 const DEDUP_BUCKET_MS: i64 = DEDUP_WINDOW_MS;
 
-fn live_count(conn: &Connection) -> rusqlite::Result<u64> {
-    let live: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
-        [],
-        |r| r.get(0),
-    )?;
+pub(super) fn live_count(conn: &Connection) -> rusqlite::Result<u64> {
+    let live: i64 = conn.query_row(LIVE_COUNT_SQL, [], |r| r.get(0))?;
     Ok(live.max(0) as u64)
 }
+
+const LIVE_COUNT_SQL: &str = "SELECT live FROM clipboard_live_count";
 
 fn unpinned_bytes(conn: &Connection) -> rusqlite::Result<u64> {
     let total: i64 = conn.query_row(BYTE_CAP_TOTAL_SQL, [], |r| r.get(0))?;
@@ -466,6 +464,73 @@ mod tests {
         assert!(!again.is_bump());
         assert_ne!(again.item().id, first.id);
         assert_eq!(s.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn the_live_count_tracks_every_liveness_change() {
+        let s = store();
+        assert_counter_matches(&s, "empty store");
+
+        let ids: Vec<String> = (0..4)
+            .map(|n| {
+                s.insert(item(&format!("item {n}"), T0 + n * 60_000))
+                    .unwrap()
+                    .id
+            })
+            .collect();
+        assert_counter_matches(&s, "inserts");
+
+        s.insert_or_bump(item("item 0", T0 + 7 * 86_400_000))
+            .unwrap();
+        assert_counter_matches(&s, "dedup bump");
+
+        assert!(s.delete(&ids[1]).unwrap());
+        assert!(!s.delete(&ids[1]).unwrap());
+        assert_counter_matches(&s, "soft delete");
+
+        assert!(s.set_pinned(&ids[0], true).unwrap());
+        assert_eq!(s.evict_over_cap(2).unwrap(), 1);
+        assert_counter_matches(&s, "cap purge");
+
+        s.delete_all().unwrap();
+        assert_eq!(s.count().unwrap(), 1, "the pinned item survives");
+        assert_counter_matches(&s, "bulk delete");
+
+        s.insert(item("after the sweep", T0 + 8 * 86_400_000))
+            .unwrap();
+        assert_counter_matches(&s, "insert after purge");
+    }
+
+    #[test]
+    fn the_history_cap_gate_reads_only_the_counter() {
+        let s = store();
+        s.insert(item("payload", T0)).unwrap();
+        let conn = s.conn().unwrap();
+        let plan = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {LIVE_COUNT_SQL}"))
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            !plan.iter().any(|detail| detail.contains("clipboard_items")),
+            "the cap gate must not read the items table: {plan:?}"
+        );
+    }
+
+    #[track_caller]
+    fn assert_counter_matches(s: &Store, after: &str) {
+        let scanned: i64 = s
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(s.count().unwrap(), scanned as u64, "drift after {after}");
     }
 
     #[test]

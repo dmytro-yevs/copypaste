@@ -99,6 +99,33 @@ CREATE INDEX idx_items_sync_cursor
     ON clipboard_items(MAX(created_at, pin_updated_at), id)
     WHERE deleted = 1 OR is_sensitive = 0;
 
+-- SQLite has no constant-time row count. This singleton is derived state:
+-- triggers maintain it in the item transaction and open repairs any drift.
+CREATE TABLE clipboard_live_count (
+    only_row INTEGER PRIMARY KEY NOT NULL CHECK (only_row = 0),
+    live     INTEGER NOT NULL
+);
+INSERT INTO clipboard_live_count (only_row, live) VALUES (0, 0);
+
+CREATE TRIGGER clipboard_live_count_insert AFTER INSERT ON clipboard_items
+WHEN NEW.deleted = 0
+BEGIN
+    UPDATE clipboard_live_count SET live = live + 1;
+END;
+
+CREATE TRIGGER clipboard_live_count_delete AFTER DELETE ON clipboard_items
+WHEN OLD.deleted = 0
+BEGIN
+    UPDATE clipboard_live_count SET live = live - 1;
+END;
+
+CREATE TRIGGER clipboard_live_count_update AFTER UPDATE OF deleted ON clipboard_items
+WHEN OLD.deleted <> NEW.deleted
+BEGIN
+    UPDATE clipboard_live_count
+       SET live = live + CASE WHEN NEW.deleted = 0 THEN 1 ELSE -1 END;
+END;
+
 -- External-content mode is NOT used: there is no cascade from clipboard_items,
 -- so every delete path must remove the FTS row explicitly, in the same
 -- transaction as the row change. Rows are keyed by `rowid`, mirrored in
@@ -124,9 +151,36 @@ CREATE TABLE sync_device_name (
 );
 "#;
 
+const LIVE_COUNT_DDL: &str = r#"
+CREATE TABLE IF NOT EXISTS clipboard_live_count (
+    only_row INTEGER PRIMARY KEY NOT NULL CHECK (only_row = 0),
+    live     INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO clipboard_live_count (only_row, live) VALUES (0, 0);
+
+CREATE TRIGGER IF NOT EXISTS clipboard_live_count_insert AFTER INSERT ON clipboard_items
+WHEN NEW.deleted = 0
+BEGIN
+    UPDATE clipboard_live_count SET live = live + 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS clipboard_live_count_delete AFTER DELETE ON clipboard_items
+WHEN OLD.deleted = 0
+BEGIN
+    UPDATE clipboard_live_count SET live = live - 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS clipboard_live_count_update AFTER UPDATE OF deleted ON clipboard_items
+WHEN OLD.deleted <> NEW.deleted
+BEGIN
+    UPDATE clipboard_live_count
+       SET live = live + CASE WHEN NEW.deleted = 0 THEN 1 ELSE -1 END;
+END;
+"#;
+
 /// One past the last migration in [`MIGRATIONS`]. `super::schema_verify` reads
 /// it to refuse a file this ladder has not produced.
-pub(super) const SCHEMA_VERSION: i64 = 6;
+pub(super) const SCHEMA_VERSION: i64 = 7;
 
 static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
     Migrations::new(vec![
@@ -136,8 +190,15 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up_with_hook("", repair_early_v2_schema),
         M::up_with_hook("", repair_dedup_index),
         M::up_with_hook("", add_fts_rowid_and_sync_indexes),
+        M::up_with_hook("", add_live_count),
     ])
 });
+
+fn add_live_count(tx: &Transaction<'_>) -> HookResult {
+    tx.execute_batch(LIVE_COUNT_DDL)?;
+    reconcile_live_count(tx)?;
+    Ok(())
+}
 
 fn repair_early_v2_schema(tx: &Transaction<'_>) -> HookResult {
     for (name, statement) in [
@@ -221,6 +282,16 @@ fn add_fts_rowid_and_sync_indexes(tx: &Transaction<'_>) -> HookResult {
     Ok(())
 }
 
+fn reconcile_live_count(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO clipboard_live_count (only_row, live) \
+         VALUES (0, (SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0)) \
+         ON CONFLICT(only_row) DO UPDATE SET live = excluded.live",
+        [],
+    )?;
+    Ok(())
+}
+
 fn has_column(tx: &Transaction<'_>, name: &str) -> Result<bool, rusqlite::Error> {
     tx.query_row(
         "SELECT 1 FROM pragma_table_info('clipboard_items') WHERE name = ?1 LIMIT 1",
@@ -234,6 +305,9 @@ fn has_column(tx: &Transaction<'_>, name: &str) -> Result<bool, rusqlite::Error>
 /// Creates the v2 schema. A database written by a newer schema is refused.
 pub(super) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     MIGRATIONS.to_latest(conn)?;
+    // Derived state is repaired once per open, never scanned on capture.
+    conn.execute_batch(LIVE_COUNT_DDL)?;
+    reconcile_live_count(conn)?;
     Ok(())
 }
 
@@ -244,7 +318,7 @@ mod tests {
     use super::super::connection::run_pragma;
     use super::super::dbfile::open_validated;
     use super::super::schema_verify::verify_schema;
-    use super::super::test_support::KEY;
+    use super::super::test_support::{item, KEY, T0};
     use super::super::{Store, StoreError};
 
     fn rewrite_as_early_v2(path: &std::path::Path, version: i64, columns: &str) {
@@ -359,6 +433,44 @@ mod tests {
             vec!["decoy".to_string()],
             "the delete must take its own index row and only its own"
         );
+    }
+
+    #[test]
+    fn missing_live_count_state_is_repaired_on_open() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        {
+            let store = Store::open(&path, &KEY).unwrap();
+            store.insert(item("first", T0)).unwrap();
+            store.insert(item("second", T0 + 60_000)).unwrap();
+            store
+                .conn()
+                .unwrap()
+                .execute_batch(
+                    "DELETE FROM clipboard_live_count;
+                     DROP TRIGGER clipboard_live_count_insert;",
+                )
+                .unwrap();
+        }
+
+        let store = Store::open(&path, &KEY).unwrap();
+        assert_eq!(store.count().unwrap(), 2);
+        store.insert(item("third", T0 + 120_000)).unwrap();
+        assert_eq!(store.count().unwrap(), 3, "the repaired triggers must run");
+    }
+
+    #[test]
+    fn a_repaired_v2_schema_gets_a_maintained_live_count() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        rewrite_as_early_v2(&path, 1, EARLY_COLUMNS);
+
+        let store = Store::open(&path, &KEY).unwrap();
+        assert_eq!(store.count().unwrap(), 1);
+        let added = store.insert(item("after repair", T0)).unwrap();
+        assert_eq!(store.count().unwrap(), 2);
+        assert!(store.delete(&added.id).unwrap());
+        assert_eq!(store.count().unwrap(), 1);
     }
 
     #[test]
