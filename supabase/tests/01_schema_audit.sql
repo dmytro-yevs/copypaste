@@ -274,6 +274,9 @@ begin
     if f.rolname <> 'copypaste_retention' then
         raise exception 'private.enforce_retention() is owned by % rather than the least-privilege role', f.rolname;
     end if;
+    if has_schema_privilege('copypaste_retention', 'private', 'CREATE') then
+        raise exception 'the retention role can create arbitrary objects in the private schema';
+    end if;
 
     if exists (
         select 1 from information_schema.role_routine_grants
