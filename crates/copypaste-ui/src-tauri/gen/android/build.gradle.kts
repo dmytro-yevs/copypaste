@@ -31,6 +31,9 @@ allprojects {
 
 apply(plugin = "org.owasp.dependencycheck")
 
+val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
+    ?.takeIf { it.isNotBlank() }
+
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     failBuildOnCVSS = 7.0F
     scanProjects.set(listOf(":app"))
@@ -45,7 +48,8 @@ configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     format = ReportGenerator.Format.ALL.toString()
     data.directory = "${System.getProperty("user.home")}/.gradle/dependency-check-data"
     nvd {
-        delay = 16000
+        apiKey = nvdApiKey
+        delay = if (nvdApiKey == null) 16000 else 3500
         maxRetryCount = 20
         validForHours = 24
     }

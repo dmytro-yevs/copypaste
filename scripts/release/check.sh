@@ -401,11 +401,14 @@ fi
 # on the scheduled emulator workflow as well.
 if grep -q 'org.owasp:dependency-check-gradle:12.2.2' crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts \
    && grep -q 'dependencyCheckAggregate' .github/workflows/android-emulator.yml \
+   && grep -q 'apiKey = nvdApiKey' crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts \
+   && grep -Fq 'NVD_API_KEY: ${{ secrets.NVD_API_KEY }}' .github/workflows/android-emulator.yml \
+   && grep -q 'name: android-dependency-check-report' .github/workflows/android-emulator.yml \
    && grep -q 'native-nightly.yml' scripts/release/check-wiring.py; then
-    ok "Android workflow audits the resolved Gradle dependency graph"
+    ok "Android workflow audits and retains the resolved Gradle dependency graph"
 else
-    bad "Android workflow audits the resolved Gradle dependency graph" \
-        "expected OWASP Dependency-Check after the Android build on its schedule"
+    bad "Android workflow audits and retains the resolved Gradle dependency graph" \
+        "expected OWASP Dependency-Check with NVD secret and report wiring"
 fi
 
 CERT_FILE="packaging/android/release-cert.sha256"
