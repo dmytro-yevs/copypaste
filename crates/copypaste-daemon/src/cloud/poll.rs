@@ -110,10 +110,13 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
 
 fn record_failure(state: &AppState, driver: &Arc<Driver>, error: &SyncError) {
     let message = describe(error);
+    let revision = driver.session_revision();
     if is_terminal_auth_error(error) {
-        state.cloud.invalidate_session(&state.meta, driver, message);
+        state
+            .cloud
+            .invalidate_session(&state.meta, driver, revision, message);
     } else {
-        state.cloud.note_driver_failure(driver, message);
+        state.cloud.note_driver_failure(driver, revision, message);
     }
 }
 

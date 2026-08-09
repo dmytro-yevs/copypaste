@@ -9,7 +9,7 @@
 use std::future::Future;
 use std::time::Duration;
 
-use super::driver::CloudSync;
+use super::driver::{CloudSync, SessionRevision};
 use super::outcome::SyncError;
 use super::transport::{AuthApi, AuthFault, RestApi, TransportFault};
 
@@ -56,7 +56,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         let mut waited_on_429 = false;
 
         loop {
-            let token = self.lock_session().access_token.clone();
+            let token = self.inspect_session(|session| session.access_token.clone());
 
             match op(token).await {
                 Ok(value) => return Ok(value),
@@ -95,19 +95,41 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// surfaces as [`SyncError::SessionExpired`] and the sign-in is the
     /// caller's decision to make.
     pub async fn refresh_session(&self) -> Result<(), SyncError> {
-        let refresh_token = self.lock_session().refresh_token.clone();
+        let Some((revision, refresh_token)) = self.refresh_snapshot() else {
+            return Err(SyncError::SessionExpired);
+        };
+        let _refresh = self.refresh_lock.lock().await;
+
+        match self.revision_state(revision) {
+            SessionRevision::Current => {}
+            SessionRevision::Superseded => return Ok(()),
+            SessionRevision::Fenced => return Err(SyncError::SessionExpired),
+        }
 
         match self.auth.refresh(&refresh_token).await {
-            Ok(session) => {
-                // Keep the rotated refresh token: GoTrue rotates on every
-                // refresh and the old one stops working.
-                *self.lock_session() = session;
-                Ok(())
-            }
-            Err(AuthFault::InvalidCredentials) => Err(SyncError::InvalidCredentials),
-            Err(AuthFault::SessionExpired) => Err(SyncError::SessionExpired),
-            Err(AuthFault::RateLimited { .. }) => Err(SyncError::RateLimited),
-            Err(AuthFault::Unavailable(reason)) => Err(SyncError::Transport(reason)),
+            Ok(session) => match self.install_refreshed_session(revision, session) {
+                SessionRevision::Current | SessionRevision::Superseded => Ok(()),
+                SessionRevision::Fenced => Err(SyncError::SessionExpired),
+            },
+            Err(error) => match self.revision_state(revision) {
+                SessionRevision::Superseded => Ok(()),
+                SessionRevision::Fenced => Err(SyncError::SessionExpired),
+                SessionRevision::Current => {
+                    let error = match error {
+                        AuthFault::InvalidCredentials => SyncError::InvalidCredentials,
+                        AuthFault::SessionExpired => SyncError::SessionExpired,
+                        AuthFault::RateLimited { .. } => SyncError::RateLimited,
+                        AuthFault::Unavailable(reason) => SyncError::Transport(reason),
+                    };
+                    if matches!(
+                        error,
+                        SyncError::InvalidCredentials | SyncError::SessionExpired
+                    ) {
+                        self.fence_session(Some(revision));
+                    }
+                    Err(error)
+                }
+            },
         }
     }
 }
@@ -127,9 +149,164 @@ pub(super) fn rate_limit_delay(retry_after: Option<Duration>) -> Duration {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
 
-    use super::super::fakes::{cloud_row, driver, item, FakeAuth, FakeRest, FakeSource, Reply};
+    use tokio::sync::Notify;
+
+    use super::super::fakes::{
+        allow_everything, cloud_row, config, driver, item, key, session, FakeAuth, FakeRest,
+        FakeSource, Reply,
+    };
     use super::*;
+    use crate::auth::Session;
+
+    #[derive(Clone)]
+    struct BlockingAuth {
+        control: Arc<BlockingAuthControl>,
+        reply: Arc<Mutex<Option<Result<Session, AuthFault>>>>,
+    }
+
+    #[derive(Default)]
+    struct BlockingAuthControl {
+        calls: std::sync::atomic::AtomicUsize,
+        entered: Notify,
+        release: Notify,
+    }
+
+    impl BlockingAuth {
+        fn new(reply: Result<Session, AuthFault>) -> Self {
+            Self {
+                control: Arc::new(BlockingAuthControl::default()),
+                reply: Arc::new(Mutex::new(Some(reply))),
+            }
+        }
+    }
+
+    impl Default for BlockingAuth {
+        fn default() -> Self {
+            Self::new(Ok(session_with_refresh("refresh-rotated")))
+        }
+    }
+
+    impl AuthApi for BlockingAuth {
+        async fn refresh(&self, _refresh_token: &str) -> Result<Session, AuthFault> {
+            self.control.calls.fetch_add(1, Ordering::SeqCst);
+            self.control.entered.notify_one();
+            self.control.release.notified().await;
+            self.reply.lock().unwrap().take().unwrap()
+        }
+    }
+
+    fn session_with_refresh(refresh_token: &str) -> Session {
+        Session {
+            access_token: format!("access-{refresh_token}"),
+            refresh_token: refresh_token.into(),
+            user_id: "user-1".into(),
+            expires_at_ms: i64::MAX,
+        }
+    }
+
+    fn blocked_driver(auth: BlockingAuth) -> CloudSync<FakeRest, BlockingAuth> {
+        CloudSync::new(
+            FakeRest::default(),
+            auth,
+            key(),
+            config(),
+            session("token-1"),
+            allow_everything(),
+        )
+    }
+
+    #[tokio::test]
+    async fn simultaneous_refresh_callers_share_one_rotation() {
+        let auth = BlockingAuth::default();
+        let control = Arc::clone(&auth.control);
+        let sync = Arc::new(blocked_driver(auth));
+
+        let first = tokio::spawn({
+            let sync = Arc::clone(&sync);
+            async move { sync.refresh_session().await }
+        });
+        control.entered.notified().await;
+        let second = tokio::spawn({
+            let sync = Arc::clone(&sync);
+            async move { sync.refresh_session().await }
+        });
+        tokio::task::yield_now().await;
+
+        assert_eq!(control.calls.load(Ordering::SeqCst), 1);
+        control.release.notify_waiters();
+        control.release.notify_one();
+        first.await.unwrap().unwrap();
+        second.await.unwrap().unwrap();
+
+        assert_eq!(control.calls.load(Ordering::SeqCst), 1);
+        sync.inspect_session(|current| assert_eq!(current.refresh_token, "refresh-rotated"));
+    }
+
+    #[tokio::test]
+    async fn stale_success_cannot_replace_a_newer_rotation() {
+        let auth = BlockingAuth::default();
+        let control = Arc::clone(&auth.control);
+        let sync = Arc::new(blocked_driver(auth));
+        let stale_revision = sync.session_revision();
+        let refresh = tokio::spawn({
+            let sync = Arc::clone(&sync);
+            async move { sync.refresh_session().await }
+        });
+        control.entered.notified().await;
+
+        assert!(matches!(
+            sync.install_refreshed_session(stale_revision, session_with_refresh("refresh-newer")),
+            SessionRevision::Current
+        ));
+        control.release.notify_one();
+        refresh.await.unwrap().unwrap();
+
+        sync.inspect_session(|current| assert_eq!(current.refresh_token, "refresh-newer"));
+    }
+
+    #[tokio::test]
+    async fn stale_failure_cannot_fence_a_newer_rotation() {
+        let auth = BlockingAuth::new(Err(AuthFault::SessionExpired));
+        let control = Arc::clone(&auth.control);
+        let sync = Arc::new(blocked_driver(auth));
+        let stale_revision = sync.session_revision();
+        let refresh = tokio::spawn({
+            let sync = Arc::clone(&sync);
+            async move { sync.refresh_session().await }
+        });
+        control.entered.notified().await;
+
+        assert!(matches!(
+            sync.install_refreshed_session(stale_revision, session_with_refresh("refresh-newer")),
+            SessionRevision::Current
+        ));
+        control.release.notify_one();
+        refresh.await.unwrap().unwrap();
+
+        assert!(sync.refresh_snapshot().is_some());
+        sync.inspect_session(|current| assert_eq!(current.refresh_token, "refresh-newer"));
+    }
+
+    #[tokio::test]
+    async fn sign_out_fence_discards_an_in_flight_success() {
+        let auth = BlockingAuth::default();
+        let control = Arc::clone(&auth.control);
+        let sync = Arc::new(blocked_driver(auth));
+        let refresh = tokio::spawn({
+            let sync = Arc::clone(&sync);
+            async move { sync.refresh_session().await }
+        });
+        control.entered.notified().await;
+
+        assert!(sync.fence_session(None));
+        control.release.notify_one();
+        assert_eq!(refresh.await.unwrap(), Err(SyncError::SessionExpired));
+        sync.inspect_session(|current| assert_eq!(current.refresh_token, "refresh-1"));
+        assert_eq!(sync.refresh_session().await, Err(SyncError::SessionExpired));
+        assert_eq!(control.calls.load(Ordering::SeqCst), 1);
+    }
 
     #[tokio::test]
     async fn a_401_refreshes_once_and_retries_once() {
