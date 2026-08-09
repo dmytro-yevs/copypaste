@@ -113,6 +113,15 @@ objc2-menu = { package = "objc2", version = "0.6.4" }
 copypaste-core = { path = "../../copypaste-core" }
 
 # ---------------------------------------------------------------------------
+# Windows only
+# ---------------------------------------------------------------------------
+[target.'cfg(target_os = "windows")'.dependencies]
+# Pairing stays in native controls, including their UI Automation behavior.
+winsafe = { version = "0.0.28", features = ["gui", "gdi"] }
+qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
+image.workspace = true
+
+# ---------------------------------------------------------------------------
 # Android only
 # ---------------------------------------------------------------------------
 # Android hosts no background daemon (ADR-0002), so there is no socket to talk
