@@ -76,14 +76,12 @@ const UTI_MARKERS: [&str; 3] = [
 struct Utis {
     text: Retained<NSString>,
     text_probe: Retained<NSArray<NSString>>,
-    file_url: Retained<NSString>,
     markers: Retained<NSArray<NSString>>,
 }
 
 impl Utis {
     fn new() -> Self {
         let text = NSString::from_str(UTI_TEXT);
-        let file_url = NSString::from_str(UTI_FILE_URL);
         let markers: Vec<Retained<NSString>> =
             UTI_MARKERS.iter().map(|s| NSString::from_str(s)).collect();
         // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
@@ -93,7 +91,6 @@ impl Utis {
             text_probe: NSArray::from_vec(vec![text.clone()]),
             markers: NSArray::from_vec(markers),
             text,
-            file_url,
         }
     }
 }
@@ -464,13 +461,12 @@ mod tests {
             .unwrap();
 
         let path = autoreleasepool(|_| unsafe {
-            let bytes = UTIS.with(|utis| {
-                NSPasteboard::generalPasteboard()
-                    .dataForType(&utis.file_url)
-                    .expect("the file URL was not put on the pasteboard")
-                    .bytes()
-                    .to_vec()
-            });
+            let file_url = NSString::from_str(UTI_FILE_URL);
+            let bytes = NSPasteboard::generalPasteboard()
+                .dataForType(&file_url)
+                .expect("the file URL was not put on the pasteboard")
+                .bytes()
+                .to_vec();
             let url = url::Url::parse(&String::from_utf8(bytes).unwrap()).unwrap();
             url.to_file_path().unwrap()
         });
@@ -537,15 +533,12 @@ mod tests {
 
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn non_text_only_changes_are_acknowledged_without_capture() {
+    fn text_wins_when_an_image_is_also_offered() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
 
-        write_types(&[(UTI_PNG, b"not a decoded image")]);
-        assert!(clipboard.poll().is_none());
-        assert!(clipboard.poll().is_none(), "the cursor must still advance");
-
         write_types(&[(UTI_TEXT, b"plain fallback"), (UTI_PNG, b"ignored")]);
+        assert!(offers(UTI_TEXT) && offers(UTI_PNG));
         let capture = clipboard.poll().expect("plain text must win when offered");
         assert_eq!(capture.content, "plain fallback");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::TEXT);
@@ -685,7 +678,7 @@ mod tests {
 
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn image_pre_read_uses_the_image_limit_and_keeps_its_boundary() {
+    fn image_only_changes_are_acknowledged_without_reading_or_rejection() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
         let settings = copypaste_ipc::ConfigData {
@@ -695,16 +688,17 @@ mod tests {
 
         let oversized = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize + 1];
         write_types(&[(UTI_PNG, &oversized)]);
+        assert!(offers(UTI_PNG), "the image-only write never landed");
         assert!(clipboard
             .poll_with_policy(CapturePolicy::new(&settings))
             .is_none());
-
-        let boundary = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize];
-        write_types(&[(UTI_PNG, &boundary)]);
-        let capture = clipboard
-            .poll_with_policy(CapturePolicy::new(&settings))
-            .expect("the encoded-image boundary is accepted");
-        assert_eq!(capture.binary_content.as_deref(), Some(boundary.as_slice()));
+        assert_eq!(clipboard.rejected_too_large_count(), 0);
+        assert!(
+            clipboard
+                .poll_with_policy(CapturePolicy::new(&settings))
+                .is_none(),
+            "the cursor must advance for an image-only change"
+        );
     }
 
     /// An empty pasteboard is a change like any other: nothing to capture, and
