@@ -1,6 +1,9 @@
 use copypaste_ipc::{PairingInviteData, PairingProgressData};
 use zeroize::Zeroizing;
 
+#[cfg(target_os = "windows")]
+mod windows;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
