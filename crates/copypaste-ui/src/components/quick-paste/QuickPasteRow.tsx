@@ -26,6 +26,9 @@ function label(item: Item) {
   if (item.is_sensitive) return t("quickPaste.row.sensitive");
   if (isImage(item)) return t("quickPaste.row.image");
   if (item.content_type.toLowerCase() === "file") return t("quickPaste.row.file");
+  if (item.sensitive_finding) {
+    return item.sensitive_finding.redacted_preview.trim() || t("quickPaste.row.empty");
+  }
   return item.content?.trim() || t("quickPaste.row.empty");
 }
 
@@ -65,6 +68,7 @@ export function QuickPasteRow({
   const TypeIcon = type.Icon;
   const source = clipSourceMetadata(item);
   const SourceIcon = source.Icon;
+  const potentiallySensitive = !item.is_sensitive && item.sensitive_finding !== null;
 
   return (
     <div
@@ -142,6 +146,16 @@ export function QuickPasteRow({
           <TimestampToggle createdAt={item.created_at} />
           {item.pinned && (
             <Pin size={11} aria-label={t("quickPaste.row.pinned")} className="text-brand-2" />
+          )}
+          {potentiallySensitive && (
+            <span
+              role="img"
+              aria-label={t("quickPaste.row.potentialSensitive")}
+              title={t("quickPaste.row.potentialSensitive")}
+              className="flex shrink-0 items-center text-destructive"
+            >
+              <ShieldAlert size={12} aria-hidden="true" />
+            </span>
           )}
         </span>
       </div>
