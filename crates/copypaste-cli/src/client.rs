@@ -796,7 +796,8 @@ mod tests {
     #[test]
     fn status_deserialises_into_typed_status() {
         let line = r#"{"id":1,"ok":true,"data":{"status":{"version":"2.0.0","protocol_version":1,
-            "item_count":3,"capture_running":true,"clipboard_backend":"macos"}}}"#;
+            "item_count":3,"capture_running":true,"clipboard_backend":"macos",
+            "private_mode_epoch":0}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let status = expect_status(into_data(response).unwrap()).unwrap();
         assert_eq!(status.item_count, 3);
