@@ -13,17 +13,6 @@ export interface Child {
   stop(): Promise<void>;
 }
 
-interface Options {
-  /**
-   * Signal the whole process group rather than the one process. Required for
-   * `tauri-driver`, which spawns WebKitWebDriver and the app as children:
-   * signalling only the parent orphans both, and an orphaned WebKitWebDriver
-   * holds the single session slot and keeps the runner's event loop alive.
-   * The spawn must pass `detached: true` for this to have a group to signal.
-   */
-  group?: boolean;
-}
-
 /** setTimeout that does not by itself keep the process alive. */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -32,7 +21,7 @@ export function sleep(ms: number): Promise<void> {
   });
 }
 
-export function track(proc: ResultPromise, options: Options = {}): Child {
+export function track(proc: ResultPromise): Child {
   let done = false;
   const lines: string[] = [];
 
@@ -43,15 +32,6 @@ export function track(proc: ResultPromise, options: Options = {}): Child {
   });
 
   function signal(name: "SIGTERM" | "SIGKILL"): void {
-    const { pid } = proc;
-    if (options.group && pid !== undefined) {
-      try {
-        process.kill(-pid, name);
-        return;
-      } catch {
-        /* the group is already gone */
-      }
-    }
     proc.kill(name);
   }
 
