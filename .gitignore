@@ -100,12 +100,6 @@ graphify-out/
 crates/copypaste-ui/playwright-report/
 crates/copypaste-ui/test-results/
 
-# Compatibility evidence from v0.4.1 — committed on purpose.
-# The generic *.db rule above silently excluded these once already; git add
-# gives no warning for an ignored path, so the test suite referenced fixtures
-# that were never in the repository.
-!compat/golden-v0.4.1/*.db
-
 # UI build artefacts
 /node_modules/
 crates/copypaste-ui/node_modules/
