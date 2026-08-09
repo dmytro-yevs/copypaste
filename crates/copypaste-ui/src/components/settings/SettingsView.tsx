@@ -91,14 +91,10 @@ export function SettingsView() {
   const [searchAnnouncement, setSearchAnnouncement] = useState("");
   const highlightTimer = useRef<number | undefined>(undefined);
   const deferredQuery = useDeferredValue(query);
-  // Android has its own capture setup, but the in-process backend persists
-  // service limits and source exclusions too. Keep the Service tab visible so
-  // those controls do not silently disappear on a phone.
+  // Android has its own capture setup, but Service and Storage expose controls
+  // backed by native commands on every product platform.
   const tabs = android
-    ? TABS.filter(
-        (tab) =>
-          tab.value !== "shortcut" && tab.value !== "storage",
-      )
+    ? TABS.filter((tab) => tab.value !== "shortcut")
     : TABS.filter((tab) => tab.value !== "capture");
   const tabLabels = useMemo(
     () => new Map(tabs.map((tab) => [tab.value, t(tab.label)])),
