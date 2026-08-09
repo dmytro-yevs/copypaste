@@ -1,7 +1,9 @@
 use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt as _;
+use std::path::Path;
 
+use copypaste_fs::Visibility;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_dialog::{DialogExt as _, FilePath};
 use tauri_plugin_fs::{FsExt as _, OpenOptions};
@@ -121,7 +123,15 @@ pub(super) fn write_picked<R: Runtime>(
     bytes: &[u8],
     message: &'static str,
 ) -> Result<()> {
-    copy_to_picked(app, dest, &mut std::io::Cursor::new(bytes), message)
+    match dest {
+        FilePath::Path(path) => copypaste_fs::write_atomically(&path, bytes, Visibility::OwnerOnly)
+            .map_err(|_| BackendError::Internal(message.into())),
+        dest @ FilePath::Url(_) => stream_to_uri(
+            &mut std::io::Cursor::new(bytes),
+            app.fs().open(dest, REPLACE_OR_CREATE.plugin_options()),
+            message,
+        ),
+    }
 }
 
 pub(super) fn copy_to_picked<R: Runtime>(
@@ -130,19 +140,40 @@ pub(super) fn copy_to_picked<R: Runtime>(
     input: &mut impl Read,
     message: &'static str,
 ) -> Result<()> {
-    copy_with(
+    copy_to_destination(
+        dest,
         input,
-        |contract| app.fs().open(dest, contract.plugin_options()),
+        |path, bytes| copypaste_fs::write_atomically(path, bytes, Visibility::OwnerOnly),
+        |dest, contract| app.fs().open(dest, contract.plugin_options()),
         message,
     )
 }
 
-fn copy_with<W: Write>(
+fn copy_to_destination<W: Write>(
+    dest: FilePath,
     input: &mut impl Read,
-    open: impl FnOnce(WriteContract) -> std::io::Result<W>,
+    write_path: impl FnOnce(&Path, &[u8]) -> std::io::Result<()>,
+    open_uri: impl FnOnce(FilePath, WriteContract) -> std::io::Result<W>,
     message: &'static str,
 ) -> Result<()> {
-    let mut output = open(REPLACE_OR_CREATE).map_err(|_| BackendError::Internal(message.into()))?;
+    match dest {
+        FilePath::Path(path) => {
+            let mut bytes = Vec::new();
+            input
+                .read_to_end(&mut bytes)
+                .map_err(|_| BackendError::Internal(message.into()))?;
+            write_path(&path, &bytes).map_err(|_| BackendError::Internal(message.into()))
+        }
+        dest @ FilePath::Url(_) => stream_to_uri(input, open_uri(dest, REPLACE_OR_CREATE), message),
+    }
+}
+
+fn stream_to_uri<W: Write>(
+    input: &mut impl Read,
+    output: std::io::Result<W>,
+    message: &'static str,
+) -> Result<()> {
+    let mut output = output.map_err(|_| BackendError::Internal(message.into()))?;
     std::io::copy(input, &mut output)
         .and_then(|_| output.flush())
         .map_err(|_| BackendError::Internal(message.into()))
@@ -192,10 +223,12 @@ mod tests {
         }
     }
 
-    fn write_path(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-        copy_with(
+    fn write_path(path: &Path, bytes: &[u8]) -> Result<()> {
+        copy_to_destination(
+            FilePath::Path(path.to_owned()),
             &mut io::Cursor::new(bytes),
-            |contract| std::fs::OpenOptions::from(contract.plugin_options()).open(path),
+            |path, bytes| copypaste_fs::write_atomically(path, bytes, Visibility::OwnerOnly),
+            |_, _| -> io::Result<io::Sink> { unreachable!() },
             ERROR,
         )
     }
@@ -222,17 +255,105 @@ mod tests {
     }
 
     #[test]
-    fn an_open_failure_preserves_the_destination_and_maps_the_error() {
+    fn a_content_uri_keeps_streaming_through_the_plugin() {
+        let destination = FakeDestination {
+            bytes: RefCell::default(),
+            requests: RefCell::default(),
+            fail_open: false,
+        };
+        let uri = "content://documents/export.json".parse().unwrap();
+        let mut input = io::Cursor::new(b"replacement");
+
+        copy_to_destination(
+            uri,
+            &mut input,
+            |_, _| unreachable!(),
+            |_, contract| destination.open(contract),
+            ERROR,
+        )
+        .unwrap();
+
+        assert_eq!(&*destination.bytes.borrow(), b"replacement");
+        assert_eq!(&*destination.requests.borrow(), &[REPLACE_OR_CREATE]);
+    }
+
+    #[test]
+    fn a_uri_open_failure_maps_the_error_without_a_path() {
         let destination = FakeDestination {
             bytes: RefCell::new(b"original".to_vec()),
             requests: RefCell::default(),
             fail_open: true,
         };
+        let uri = "content://documents/export.json".parse().unwrap();
         let mut input = io::Cursor::new(b"replacement");
-        let result = copy_with(&mut input, |contract| destination.open(contract), ERROR);
+        let result = copy_to_destination(
+            uri,
+            &mut input,
+            |_, _| unreachable!(),
+            |_, contract| destination.open(contract),
+            ERROR,
+        );
 
         assert_eq!(&*destination.bytes.borrow(), b"original");
         assert_eq!(&*destination.requests.borrow(), &[REPLACE_OR_CREATE]);
+        assert!(matches!(result, Err(BackendError::Internal(message)) if message == ERROR));
+    }
+
+    #[test]
+    fn a_mid_write_failure_preserves_the_old_path_and_hides_the_error_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("export.json");
+        std::fs::write(&path, b"original").unwrap();
+        let mut input = io::Cursor::new(b"replacement");
+
+        let result = copy_to_destination(
+            FilePath::Path(path.clone()),
+            &mut input,
+            |target, bytes| {
+                let mut staging = tempfile::NamedTempFile::new_in(target.parent().unwrap())?;
+                staging.write_all(&bytes[..4])?;
+                Err(io::Error::other(format!(
+                    "write failed beside {}",
+                    target.display()
+                )))
+            },
+            |_, _| -> io::Result<io::Sink> { unreachable!() },
+            ERROR,
+        );
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        assert!(matches!(result, Err(BackendError::Internal(message)) if message == ERROR));
+    }
+
+    #[test]
+    fn a_mid_read_failure_preserves_the_old_path_and_hides_the_error_path() {
+        struct FailingReader(bool);
+
+        impl Read for FailingReader {
+            fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+                if self.0 {
+                    return Err(io::Error::other("read failed at /Users/alice/private"));
+                }
+                self.0 = true;
+                output[..4].copy_from_slice(b"repl");
+                Ok(4)
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("export.json");
+        std::fs::write(&path, b"original").unwrap();
+
+        let result = copy_to_destination(
+            FilePath::Path(path.clone()),
+            &mut FailingReader(false),
+            |_, _| unreachable!(),
+            |_, _| -> io::Result<io::Sink> { unreachable!() },
+            ERROR,
+        );
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
         assert!(matches!(result, Err(BackendError::Internal(message)) if message == ERROR));
     }
 
