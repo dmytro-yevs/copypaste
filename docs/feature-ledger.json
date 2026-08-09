@@ -84,7 +84,7 @@
           "evidence_states": ["unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"]
         }
       },
-      "release_evidence": ["release-android-cloud-evidence", "release-macos-cloud-evidence"]
+      "release_evidence": ["release-android-cloud-evidence", "release-android-hardware-evidence", "release-macos-cloud-evidence", "release-macos-native-evidence"]
     }
   ]
 }
