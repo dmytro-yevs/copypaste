@@ -16,10 +16,39 @@ val auditPins = arrayOf(
     "com.google.guava:guava:33.6.0-jre",
 )
 
+// AGP's host-only UTP configurations pin vulnerable Netty and Protobuf;
+// limiting the force by configuration keeps :app runtime graphs untouched.
+val utpUpgrades = arrayOf(
+    "io.netty:netty-buffer:4.1.137.Final",
+    "io.netty:netty-codec:4.1.137.Final",
+    "io.netty:netty-codec-http:4.1.137.Final",
+    "io.netty:netty-codec-http2:4.1.137.Final",
+    "io.netty:netty-codec-socks:4.1.137.Final",
+    "io.netty:netty-common:4.1.137.Final",
+    "io.netty:netty-handler:4.1.137.Final",
+    "io.netty:netty-handler-proxy:4.1.137.Final",
+    "io.netty:netty-resolver:4.1.137.Final",
+    "io.netty:netty-transport:4.1.137.Final",
+    "io.netty:netty-transport-native-unix-common:4.1.137.Final",
+    "com.google.protobuf:protobuf-java:3.25.5",
+    "com.google.protobuf:protobuf-java-util:3.25.5",
+    "com.google.protobuf:protobuf-kotlin:3.25.5",
+)
+
 gradle.allprojects {
     if (rootProject.name == "buildSrc") {
         configurations.configureEach {
             resolutionStrategy.force(*auditPins)
+        }
+    } else {
+        configurations.configureEach {
+            // UTP is audit-only. Matching its configurations keeps the APK's
+            // compile and runtime dependency graphs unchanged.
+            if (name.removePrefix("_").startsWith("internal-unified-test-platform") ||
+                name.startsWith("unified-test-platform")
+            ) {
+                resolutionStrategy.force(*utpUpgrades)
+            }
         }
     }
 }
