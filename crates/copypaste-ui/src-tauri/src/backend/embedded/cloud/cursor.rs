@@ -28,10 +28,14 @@ impl UploadCursor {
         self.epoch.load(Ordering::Acquire)
     }
 
-    pub(super) fn reset(&self, store: &Store) -> Result<(), StoreError> {
+    pub(super) fn replace_account(
+        &self,
+        store: &Store,
+        entries: &[(&str, &str)],
+    ) -> Result<(), StoreError> {
         self.epoch.fetch_add(1, Ordering::AcqRel);
         let _guard = self.guard();
-        Self::store(store, &UploadFloor::default())
+        store.set_state_all(entries)
     }
 
     pub(super) fn note_version_written(&self, store: &Store, created_at: i64) {

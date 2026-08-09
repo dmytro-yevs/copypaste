@@ -1,11 +1,10 @@
 mod account;
-mod credentials;
 mod cursor;
 mod schedule;
 mod source;
 
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use copypaste_cloud::auth::{AuthError, Session, SupabaseAuth};
 use copypaste_cloud::crypto::derive_sync_key;
@@ -19,11 +18,9 @@ use zeroize::Zeroizing;
 
 use super::open::Inner;
 use super::{BackendError, Result};
-use account::{Account, AccountSlot};
-use credentials::{
-    read_key, read_session, write_session, CREDENTIAL_KEYS, KEY_EMAIL, KEY_LAST_SYNC, KEY_SYNC_KEY,
-    KEY_USER_ID,
-};
+#[cfg(test)]
+use account::{Account, CREDENTIAL_KEYS, KEY_ACCESS, KEY_EMAIL};
+use account::{AccountSlot, ActivateError, MSG_ACCOUNT_CHANGED};
 use cursor::{UploadCursor, UploadFloor};
 use schedule::until_cancelled;
 use source::StoreSource;
@@ -34,7 +31,6 @@ pub(super) const KEY_WATERMARK: &str = "cloud_watermark_ms";
 pub(super) const KEY_WATERMARK_ITEM: &str = "cloud_watermark_item_id";
 pub(super) const KEY_UPLOAD_FLOOR: &str = "cloud_upload_floor_ms";
 pub(super) const KEY_UPLOAD_FLOOR_ITEM: &str = "cloud_upload_floor_item_id";
-
 const MSG_NOT_CONFIGURED: &str = "Cloud sync is not configured in this build.";
 const MSG_SIGNED_OUT: &str = "Sign in before syncing.";
 const MSG_REJECTED: &str = "The email address or password was not accepted.";
@@ -46,6 +42,7 @@ const MSG_STORE: &str = "The sync account could not be stored.";
 pub(super) struct EmbeddedCloud {
     config: Option<CloudConfig>,
     account: AccountSlot,
+    account_revision: AtomicU64,
     last_sync_ms: AtomicI64,
     last_error: Mutex<Option<&'static str>>,
     upload_cursor: UploadCursor,
@@ -59,6 +56,7 @@ impl EmbeddedCloud {
         let cloud = Self {
             config: cloud_config(),
             account: AccountSlot::default(),
+            account_revision: AtomicU64::new(0),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
             upload_cursor: UploadCursor::new(),
@@ -110,6 +108,7 @@ impl EmbeddedCloud {
         if email.is_empty() {
             return Err(BackendError::Invalid("An email address is required."));
         }
+        let attempt = self.begin_sign_in();
         let session = SupabaseAuth::new(config.clone())
             .sign_in(&email, password)
             .await
@@ -122,52 +121,37 @@ impl EmbeddedCloud {
             .map_err(|_| BackendError::internal(MSG_PASSPHRASE))?
             .map_err(|_| BackendError::Invalid(MSG_PASSPHRASE))?;
 
-        self.account.cancel();
-        let previous = inner.state.store.state(KEY_USER_ID).ok().flatten();
-        let switched = previous.as_deref() != Some(&user_id);
-        if switched
-            && inner
-                .state
-                .store
-                .set_state_all(&[(KEY_WATERMARK, "0"), (KEY_WATERMARK_ITEM, "")])
-                .is_err()
-        {
-            self.clear_local(&inner.state.store);
-            return Err(BackendError::internal(MSG_STORE));
-        }
-        if self.upload_cursor.reset(&inner.state.store).is_err() {
-            self.clear_local(&inner.state.store);
-            return Err(BackendError::internal(MSG_STORE));
-        }
         let key_hex = Zeroizing::new(hex::encode(key.to_bytes()));
         let driver = Arc::new(make_driver(inner, config, key, session));
-        self.account.install(Account {
+        self.activate(
+            &inner.state.store,
+            attempt,
             email,
             user_id,
-            driver: Arc::clone(&driver),
-            cancel: CancellationToken::new(),
-        });
-        if switched {
-            self.last_sync_ms.store(0, Ordering::Release);
-            let _ = inner.state.store.clear_state(&[KEY_LAST_SYNC]);
-        }
-        *self.error() = None;
-        if self.persist(&inner.state.store, &key_hex).is_err() {
-            self.clear_local(&inner.state.store);
-            return Err(BackendError::internal(MSG_STORE));
-        }
+            driver,
+            &key_hex,
+        )
+        .map_err(|error| match error {
+            ActivateError::Stale => BackendError::from_code(
+                Some(ErrorCode::AuthFailed),
+                None,
+                Some(MSG_ACCOUNT_CHANGED),
+            ),
+            ActivateError::Store(error) => {
+                tracing::warn!(?error, "embedded cloud account was not persisted");
+                BackendError::internal(MSG_STORE)
+            }
+            ActivateError::AccountMismatch => BackendError::internal(MSG_STORE),
+        })?;
         self.ensure_poller(inner);
         self.wake.notify_one();
         Ok(self.status())
     }
 
     pub(super) async fn sign_out(&self, inner: &Arc<Inner>) {
-        let account = self.account.take();
-        self.clear_local(&inner.state.store);
-        if let (Some(account), Some(config)) = (account, self.config.clone()) {
-            let token = account
-                .driver
-                .inspect_session(|session| session.access_token.clone());
+        let driver = self.take_for_sign_out(&inner.state.store);
+        if let (Some(driver), Some(config)) = (driver, self.config.clone()) {
+            let token = driver.inspect_session(|session| session.access_token.clone());
             if let Err(error) = SupabaseAuth::new(config).sign_out(&token).await {
                 tracing::warn!(?error, "cloud session revocation failed");
             }
@@ -185,9 +169,11 @@ impl EmbeddedCloud {
         if self.shutdown.is_cancelled() {
             return Err(BackendError::NotReady);
         }
-        let (driver, cancel) = self.account.round().ok_or_else(|| {
+        let account = self.round().ok_or_else(|| {
             BackendError::from_code(Some(ErrorCode::AuthFailed), None, Some(MSG_SIGNED_OUT))
         })?;
+        let driver = account.driver;
+        let cancel = account.cancel;
         let source = StoreSource::for_round(inner, &driver, &cancel);
         let started = copypaste_core::now_ms();
         let Some(outcome) = until_cancelled(&cancel, driver.sync(&source)).await else {
@@ -223,135 +209,6 @@ impl EmbeddedCloud {
                 ))
             }
         }
-    }
-
-    fn restore(&self, state: &super::state::BackendState) {
-        let Some(config) = self.config.clone() else {
-            return;
-        };
-        let store = &state.store;
-        let Some(session) = read_session(store) else {
-            return;
-        };
-        let Some(key) = read_key(store) else {
-            return;
-        };
-        let (Ok(Some(email)), Ok(Some(user_id))) =
-            (store.state(KEY_EMAIL), store.state(KEY_USER_ID))
-        else {
-            return;
-        };
-        let guard = sensitive_guard(&state.detector);
-        let driver = CloudSync::new(
-            SupabaseRest::new(config.clone()),
-            SupabaseAuth::new(config.clone()),
-            key,
-            config,
-            session,
-            guard,
-        );
-        self.account.install(Account {
-            email,
-            user_id,
-            driver: Arc::new(driver),
-            cancel: CancellationToken::new(),
-        });
-        if let Ok(ms) = store.state_ms(KEY_LAST_SYNC) {
-            self.last_sync_ms.store(ms, Ordering::Release);
-        }
-    }
-
-    fn persist(
-        &self,
-        store: &copypaste_core::Store,
-        key_hex: &str,
-    ) -> std::result::Result<(), copypaste_core::StoreError> {
-        let account = self.account();
-        let Some(account) = account.as_ref() else {
-            return Ok(());
-        };
-        store.set_state_all(&[
-            (KEY_EMAIL, &account.email),
-            (KEY_USER_ID, &account.user_id),
-            (KEY_SYNC_KEY, key_hex),
-        ])?;
-        write_session(store, &account.driver)
-    }
-
-    fn persist_session(&self, store: &copypaste_core::Store, expected: &Arc<Driver>) {
-        let account = self.account();
-        if let Some(account) = account
-            .as_ref()
-            .filter(|value| Arc::ptr_eq(&value.driver, expected))
-        {
-            if let Err(error) = write_session(store, &account.driver) {
-                tracing::warn!(?error, "rotated cloud session was not persisted");
-            }
-        }
-    }
-
-    fn note_success(&self, store: &copypaste_core::Store, expected: &Arc<Driver>, completed: i64) {
-        let account = self.account();
-        if account
-            .as_ref()
-            .is_some_and(|value| Arc::ptr_eq(&value.driver, expected))
-        {
-            self.last_sync_ms.store(completed, Ordering::Release);
-            *self.error() = None;
-            let _ = store.set_state_ms(KEY_LAST_SYNC, completed);
-        }
-    }
-
-    fn record_failure(
-        &self,
-        store: &copypaste_core::Store,
-        expected: &Arc<Driver>,
-        message: &'static str,
-        terminal: bool,
-    ) {
-        let mut account = self.account();
-        if !account
-            .as_ref()
-            .is_some_and(|value| Arc::ptr_eq(&value.driver, expected))
-        {
-            return;
-        }
-        if terminal {
-            if let Some(expired) = account.take() {
-                expired.cancel.cancel();
-            }
-            let _ = store.clear_state(CREDENTIAL_KEYS);
-            self.last_sync_ms.store(0, Ordering::Release);
-        }
-        *self.error() = Some(message);
-    }
-
-    fn clear_local(&self, store: &copypaste_core::Store) {
-        self.account.take();
-        let _ = store.clear_state(CREDENTIAL_KEYS);
-        self.last_sync_ms.store(0, Ordering::Release);
-        *self.error() = None;
-    }
-
-    fn driver(&self) -> Option<Arc<Driver>> {
-        self.account.driver()
-    }
-
-    fn with_driver<T>(
-        &self,
-        expected: &Arc<Driver>,
-        cancel: &CancellationToken,
-        f: impl FnOnce() -> T,
-    ) -> Option<T> {
-        self.account.with_driver(expected, cancel, f)
-    }
-    fn account(&self) -> MutexGuard<'_, Option<Account>> {
-        self.account.lock()
-    }
-    fn error(&self) -> MutexGuard<'_, Option<&'static str>> {
-        self.last_error
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
     }
 
     pub(super) fn note_version_written(&self, inner: &Inner, created_at: i64) {
@@ -470,7 +327,6 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
 
 #[cfg(test)]
 mod tests {
-    use super::credentials::KEY_ACCESS;
     use super::*;
 
     fn configured() -> EmbeddedCloud {
@@ -480,6 +336,7 @@ mod tests {
                 anon_key: "public-anon".into(),
             }),
             account: AccountSlot::default(),
+            account_revision: AtomicU64::new(0),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
             upload_cursor: UploadCursor::new(),
@@ -568,7 +425,7 @@ mod tests {
             state.store.set_state(key, "secret").unwrap();
         }
         let cloud = configured();
-        cloud.clear_local(&state.store);
+        cloud.take_for_sign_out(&state.store);
         for key in CREDENTIAL_KEYS {
             assert_eq!(state.store.state(key).unwrap(), None);
         }

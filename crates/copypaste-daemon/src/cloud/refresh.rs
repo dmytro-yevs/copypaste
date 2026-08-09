@@ -17,7 +17,8 @@ use copypaste_cloud::sync::SyncError;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
-use super::{poll, Cloud, Driver, CREDENTIAL_KEYS};
+use super::account::CREDENTIAL_KEYS;
+use super::{poll, Cloud, Driver};
 use crate::meta::Meta;
 use crate::AppState;
 
@@ -43,7 +44,7 @@ impl Cloud {
         else {
             return;
         };
-        if let Err(error) = super::write_session(meta, &account.driver) {
+        if let Err(error) = super::account::write_session(meta, &account.driver, &account.user_id) {
             warn!(error = ?error, "could not persist the rotated cloud session");
         }
         *self.lock_error() = None;
@@ -104,6 +105,9 @@ impl Cloud {
         }
         if !expected.fence_session(Some(expected_revision)) {
             return;
+        }
+        if let Some(current) = account.as_ref() {
+            current.cancel.cancel();
         }
         let _expired = account.take();
         if let Err(error) = meta.clear_state(CREDENTIAL_KEYS) {
