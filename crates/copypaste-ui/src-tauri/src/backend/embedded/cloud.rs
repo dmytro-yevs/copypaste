@@ -90,7 +90,7 @@ impl EmbeddedCloud {
         }
         let inner = Arc::downgrade(inner);
         let shutdown = self.shutdown.clone();
-        tokio::spawn(async move { schedule::poll(inner, shutdown).await });
+        tauri::async_runtime::spawn(async move { schedule::poll(inner, shutdown).await });
     }
 
     pub(super) async fn sign_in(
