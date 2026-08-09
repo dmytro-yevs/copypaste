@@ -553,7 +553,7 @@ fn verify_file(root: &Path, relative: &str, expected: &str) -> Result<()> {
 }
 
 pub fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn yes() -> bool {
@@ -563,6 +563,20 @@ fn yes() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_is_lowercase_hex() {
+        let digest = sha256(b"");
+
+        assert_eq!(
+            digest,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(digest.len(), 64);
+        assert!(digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    }
 
     #[test]
     fn pinned_config_exposes_the_global_content_allowlist() {

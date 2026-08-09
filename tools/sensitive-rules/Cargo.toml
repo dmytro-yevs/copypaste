@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 copypaste-fs = { path = "../../crates/copypaste-fs" }
 anyhow.workspace = true
+hex.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true
