@@ -155,6 +155,11 @@ impl Node {
         &self.cursors
     }
 
+    /// Makes a locally written version visible below every peer's cursor.
+    pub fn note_local_version(&self, floor_ms: i64) {
+        self.cursors.note_local(floor_ms);
+    }
+
     pub(crate) fn record_cursor(&self, pairing_id: &str, outcome: &SyncOutcome) {
         if let Some(floor) = outcome.applied_floor {
             self.cursors.note_applied(pairing_id, floor);

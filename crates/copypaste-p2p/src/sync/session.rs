@@ -694,6 +694,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_local_floor_recovers_a_later_peer_item_from_a_slower_clock() {
+        let initiator = TestSource::new(
+            "joiner",
+            vec![item("joiner-pre", 400, "joiner before pairing", "joiner")],
+        );
+        let responder = TestSource::new(
+            "creator",
+            vec![item(
+                "creator-pre",
+                100,
+                "creator before pairing",
+                "creator",
+            )],
+        );
+        let (first_i, first_r) = session(&initiator, &responder).await;
+        assert_eq!(first_i.cursor.since_ms, 100);
+        assert_eq!(first_r.cursor.since_ms, 400);
+
+        let (second_i, second_r) =
+            session_with(&initiator, &responder, first_i.cursor, first_r.cursor).await;
+        responder
+            .apply(item(
+                "creator-live",
+                300,
+                "creator after pairing",
+                "creator",
+            ))
+            .unwrap();
+
+        let responder_cursor = SyncCursor {
+            relay_floor_ms: Some(300),
+            ..second_r.cursor
+        };
+
+        let (third_i, _) =
+            session_with(&initiator, &responder, second_i.cursor, responder_cursor).await;
+
+        assert!(initiator.get("creator-live").is_some());
+        assert_eq!(third_i.stats.received, 1);
+    }
+
+    #[tokio::test]
     async fn a_history_larger_than_one_summary_page_eventually_converges() {
         let history: Vec<_> = (0..=MAX_SUMMARIES_PER_MESSAGE)
             .map(|n| item(&format!("history-{n:05}"), n as i64, "archived", "dev-a"))
