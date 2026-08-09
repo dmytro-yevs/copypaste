@@ -1,0 +1,124 @@
+{
+  "probe": {
+    "probe": {
+      "supported": true,
+      "installed": true,
+      "running": true,
+      "permission": true,
+      "enabled": true,
+      "toastSuppressed": false,
+      "rearmRequested": true
+    },
+    "enabled": true,
+    "listening": true
+  },
+  "arms": [
+    {
+      "probe": {
+        "supported": true,
+        "installed": true,
+        "running": true,
+        "permission": true,
+        "enabled": true,
+        "toastSuppressed": false,
+        "rearmRequested": true
+      },
+      "enabled": true,
+      "listening": true,
+      "outcome": "succeeded",
+      "focused": true,
+      "notificationPermission": true
+    },
+    {
+      "probe": {
+        "supported": true,
+        "installed": true,
+        "running": true,
+        "permission": true,
+        "enabled": true,
+        "toastSuppressed": false,
+        "rearmRequested": true
+      },
+      "enabled": false,
+      "listening": false,
+      "outcome": "empty",
+      "focused": true,
+      "notificationPermission": true
+    },
+    {
+      "probe": {
+        "supported": true,
+        "installed": true,
+        "running": true,
+        "permission": true,
+        "enabled": true,
+        "toastSuppressed": false,
+        "rearmRequested": true
+      },
+      "enabled": false,
+      "listening": false,
+      "outcome": "refused",
+      "focused": true,
+      "notificationPermission": false
+    }
+  ],
+  "reads": [
+    {
+      "outcome": "succeeded",
+      "text": "captured",
+      "atMs": 1700000000001,
+      "focused": true
+    },
+    {
+      "outcome": "empty",
+      "atMs": 1700000000002,
+      "focused": true
+    },
+    {
+      "outcome": "refused",
+      "atMs": 1700000000003,
+      "focused": true
+    }
+  ],
+  "drain": {
+    "clips": [
+      {
+        "text": "in_app",
+        "source": "in_app",
+        "atMs": 1700000000100
+      },
+      {
+        "text": "share",
+        "source": "share",
+        "atMs": 1700000000101
+      },
+      {
+        "text": "process_text",
+        "source": "process_text",
+        "atMs": 1700000000102
+      },
+      {
+        "text": "tile",
+        "source": "tile",
+        "atMs": 1700000000103
+      },
+      {
+        "text": "background",
+        "source": "background",
+        "atMs": 1700000000104,
+        "sourceAppBundleId": "com.example.writer",
+        "sourceAppName": "Writer"
+      }
+    ],
+    "dropped": 2,
+    "probe": {
+      "supported": true,
+      "installed": true,
+      "running": true,
+      "permission": true,
+      "enabled": true,
+      "toastSuppressed": false,
+      "rearmRequested": true
+    }
+  }
+}

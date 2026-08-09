@@ -29,6 +29,10 @@ class IntakeActivity : Activity() {
         else -> null
     }
 
-    private fun sourceOf(intent: Intent?): String =
-        if (intent?.action == Intent.ACTION_PROCESS_TEXT) "process_text" else "share"
+    private fun sourceOf(intent: Intent?): CaptureSource =
+        if (intent?.action == Intent.ACTION_PROCESS_TEXT) {
+            CaptureSource.PROCESS_TEXT
+        } else {
+            CaptureSource.SHARE
+        }
 }

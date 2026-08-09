@@ -100,7 +100,6 @@ crates/copypaste-ui/src-tauri/src/backend/error.rs
 crates/copypaste-ui/src-tauri/src/backend/mod.rs
 crates/copypaste-ui/src-tauri/src/capture/intake.rs
 crates/copypaste-ui/src-tauri/src/capture/messages.rs
-crates/copypaste-ui/src-tauri/src/capture/mod.rs
 crates/copypaste-ui/src-tauri/src/capture/model.rs
 crates/copypaste-ui/src-tauri/src/commands/clipboard.rs
 crates/copypaste-ui/src-tauri/src/commands/config.rs

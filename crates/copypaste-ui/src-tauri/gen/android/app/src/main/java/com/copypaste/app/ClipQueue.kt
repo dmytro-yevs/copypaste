@@ -21,7 +21,7 @@ object ClipQueue {
     /** Beyond this, the oldest go. Matches `MAX_BUFFERED` on the Rust side. */
     private const val CAPACITY = 128
 
-    private val queue = ArrayDeque<Clip>(CAPACITY)
+    private val queue = ArrayDeque<CapturedClip>(CAPACITY)
     private var dropped = 0L
     private var privateMode = false
 
@@ -29,23 +29,17 @@ object ClipQueue {
     @Volatile
     var rustIsUp = false
 
-    data class Clip(
-        val text: String,
-        val source: String,
-        val atMs: Long,
-        val sourceAppBundleId: String?,
-        val sourceAppName: String?,
-    )
-
     @Synchronized
     fun offer(
         text: String,
-        source: String,
+        source: CaptureSource,
         sourceAppBundleId: String? = null,
         sourceAppName: String? = null,
     ) {
         if (privateMode || text.isBlank()) return
-        queue.addLast(Clip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName))
+        queue.addLast(
+            CapturedClip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName),
+        )
         while (queue.size > CAPACITY) {
             queue.removeFirst()
             dropped++
@@ -66,7 +60,7 @@ object ClipQueue {
 
     /** Everything captured since the last call, oldest first. */
     @Synchronized
-    fun drain(): Pair<List<Clip>, Long> {
+    fun drain(): Pair<List<CapturedClip>, Long> {
         val taken = queue.toList()
         val lost = dropped
         queue.clear()
