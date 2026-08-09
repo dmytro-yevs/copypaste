@@ -307,12 +307,17 @@ impl Cloud {
     /// Forget the account on this device. Keeps the deployment configuration
     /// (manifest 04, `CopyPaste-crh3.100`).
     pub fn sign_out(&self, meta: &Meta) -> Option<Arc<Driver>> {
-        let previous = self.lock_account().take();
+        let mut account = self.lock_account();
+        if let Some(current) = account.as_ref() {
+            current.driver.fence_session(None);
+        }
+        let previous = account.take();
         if let Err(e) = meta.clear_state(CREDENTIAL_KEYS) {
             warn!(error = ?e, "could not clear the stored cloud account");
         }
         self.last_sync_ms.store(0, Ordering::Release);
         *self.lock_error() = None;
+        drop(account);
         self.notify_session_changed();
         previous.map(|account| account.driver)
     }
@@ -576,7 +581,9 @@ mod tests {
         );
 
         // Signing out leaves nothing behind to restore from.
+        let stale_driver = state2.cloud.driver().unwrap();
         state2.cloud.sign_out(&state2.meta);
+        state2.cloud.persist_session(&state2.meta, &stale_driver);
         assert!(!state2.cloud.signed_in());
         assert!(!state2.cloud.restore(&state2));
         assert_eq!(state2.meta.state(KEY_REFRESH).unwrap(), None);

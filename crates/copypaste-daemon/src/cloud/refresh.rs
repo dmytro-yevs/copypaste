@@ -57,11 +57,17 @@ impl Cloud {
             .is_some_and(|account| Arc::ptr_eq(&account.driver, expected))
     }
 
-    pub(crate) fn note_driver_failure(&self, expected: &Arc<Driver>, message: &'static str) {
+    pub(crate) fn note_driver_failure(
+        &self,
+        expected: &Arc<Driver>,
+        expected_revision: u64,
+        message: &'static str,
+    ) {
         let account = self.lock_account();
         if account
             .as_ref()
             .is_some_and(|account| Arc::ptr_eq(&account.driver, expected))
+            && expected.session_revision() == expected_revision
         {
             *self.lock_error() = Some(message);
         }
@@ -86,6 +92,7 @@ impl Cloud {
         &self,
         meta: &Meta,
         expected: &Arc<Driver>,
+        expected_revision: u64,
         message: &'static str,
     ) {
         let mut account = self.lock_account();
@@ -93,6 +100,9 @@ impl Cloud {
             .as_ref()
             .is_some_and(|account| Arc::ptr_eq(&account.driver, expected))
         {
+            return;
+        }
+        if !expected.fence_session(Some(expected_revision)) {
             return;
         }
         let _expired = account.take();
@@ -108,12 +118,17 @@ impl Cloud {
 
 trait RefreshDriver: Send + Sync {
     fn next_refresh(&self, now_ms: i64) -> Duration;
+    fn session_revision(&self) -> u64;
     fn refresh(&self) -> Pin<Box<dyn Future<Output = Result<(), SyncError>> + Send + '_>>;
 }
 
 impl RefreshDriver for Driver {
     fn next_refresh(&self, now_ms: i64) -> Duration {
         self.inspect_session(|session| refresh_delay(session, now_ms))
+    }
+
+    fn session_revision(&self) -> u64 {
+        Self::session_revision(self)
     }
 
     fn refresh(&self) -> Pin<Box<dyn Future<Output = Result<(), SyncError>> + Send + '_>> {
@@ -128,8 +143,8 @@ trait RefreshTarget: Send + Sync {
     fn session_updates(&self) -> watch::Receiver<u64>;
     fn is_current(&self, driver: &Arc<Self::Driver>) -> bool;
     fn refreshed(&self, driver: &Arc<Self::Driver>);
-    fn failed(&self, driver: &Arc<Self::Driver>, message: &'static str);
-    fn invalidate(&self, driver: &Arc<Self::Driver>, message: &'static str);
+    fn failed(&self, driver: &Arc<Self::Driver>, revision: u64, message: &'static str);
+    fn invalidate(&self, driver: &Arc<Self::Driver>, revision: u64, message: &'static str);
 }
 
 impl RefreshTarget for AppState {
@@ -151,12 +166,13 @@ impl RefreshTarget for AppState {
         self.cloud.session_refreshed(&self.meta, driver);
     }
 
-    fn failed(&self, driver: &Arc<Self::Driver>, message: &'static str) {
-        self.cloud.note_driver_failure(driver, message);
+    fn failed(&self, driver: &Arc<Self::Driver>, revision: u64, message: &'static str) {
+        self.cloud.note_driver_failure(driver, revision, message);
     }
 
-    fn invalidate(&self, driver: &Arc<Self::Driver>, message: &'static str) {
-        self.cloud.invalidate_session(&self.meta, driver, message);
+    fn invalidate(&self, driver: &Arc<Self::Driver>, revision: u64, message: &'static str) {
+        self.cloud
+            .invalidate_session(&self.meta, driver, revision, message);
     }
 }
 
@@ -217,6 +233,7 @@ async fn maintain<T: RefreshTarget, C: WallClock>(
                 continue 'session;
             }
 
+            let revision = driver.session_revision();
             let result = tokio::select! {
                 biased;
                 _ = shutdown.changed() => break 'session,
@@ -232,14 +249,14 @@ async fn maintain<T: RefreshTarget, C: WallClock>(
                 Err(error) if is_terminal_auth_error(&error) => {
                     let message = poll::describe(&error);
                     warn!(error = %error, "cloud session cannot be refreshed");
-                    target.invalidate(&driver, message);
+                    target.invalidate(&driver, revision, message);
                     continue 'session;
                 }
                 Err(error) => {
                     let message = poll::describe(&error);
                     let delay = retry.next().unwrap_or(RETRY_MAX);
                     warn!(error = %error, retry_secs = delay.as_secs(), "cloud refresh failed");
-                    target.failed(&driver, message);
+                    target.failed(&driver, revision, message);
                     tokio::select! {
                         biased;
                         _ = shutdown.changed() => break 'session,
@@ -282,7 +299,7 @@ fn refresh_delay(session: &Session, now_ms: i64) -> Duration {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
     use super::*;
@@ -297,6 +314,8 @@ mod tests {
         session: Mutex<Session>,
         replies: Mutex<VecDeque<Reply>>,
         attempts: AtomicUsize,
+        revision: AtomicU64,
+        fenced: AtomicBool,
     }
 
     impl FakeDriver {
@@ -305,6 +324,8 @@ mod tests {
                 session: Mutex::new(session),
                 replies: Mutex::new(replies.into_iter().collect()),
                 attempts: AtomicUsize::new(0),
+                revision: AtomicU64::new(0),
+                fenced: AtomicBool::new(false),
             })
         }
 
@@ -326,6 +347,10 @@ mod tests {
             refresh_delay(&self.lock_session(), now_ms)
         }
 
+        fn session_revision(&self) -> u64 {
+            self.revision.load(Ordering::SeqCst)
+        }
+
         fn refresh(&self) -> Pin<Box<dyn Future<Output = Result<(), SyncError>> + Send + '_>> {
             Box::pin(async move {
                 self.attempts.fetch_add(1, Ordering::SeqCst);
@@ -333,6 +358,7 @@ mod tests {
                 match reply {
                     Reply::Ok(session) => {
                         *self.lock_session() = session;
+                        self.revision.fetch_add(1, Ordering::SeqCst);
                         Ok(())
                     }
                     Reply::Err(error) => Err(error),
@@ -412,8 +438,8 @@ mod tests {
                 .send_modify(|revision| *revision = revision.wrapping_add(1));
         }
 
-        fn failed(&self, driver: &Arc<Self::Driver>, message: &'static str) {
-            if self.current(driver) {
+        fn failed(&self, driver: &Arc<Self::Driver>, revision: u64, message: &'static str) {
+            if self.current(driver) && driver.session_revision() == revision {
                 *self
                     .last_error
                     .lock()
@@ -421,11 +447,16 @@ mod tests {
             }
         }
 
-        fn invalidate(&self, driver: &Arc<Self::Driver>, message: &'static str) {
+        fn invalidate(&self, driver: &Arc<Self::Driver>, revision: u64, message: &'static str) {
             let mut current = self.lock_driver();
             if !current
                 .as_ref()
                 .is_some_and(|candidate| Arc::ptr_eq(candidate, driver))
+            {
+                return;
+            }
+            if driver.revision.load(Ordering::SeqCst) != revision
+                || driver.fenced.swap(true, Ordering::SeqCst)
             {
                 return;
             }
@@ -593,6 +624,24 @@ mod tests {
 
         shutdown_tx.send(true).unwrap();
         task.await.unwrap();
+    }
+
+    #[test]
+    fn stale_failure_does_not_invalidate_a_rotated_session() {
+        let driver = FakeDriver::new(session("refresh-1", 0), []);
+        let target = FakeTarget::new(Arc::clone(&driver));
+        let stale_revision = driver.session_revision();
+        *driver.lock_session() = session("refresh-2", 600_000);
+        driver.revision.fetch_add(1, Ordering::SeqCst);
+
+        target.invalidate(
+            &driver,
+            stale_revision,
+            "the session expired; sign in again",
+        );
+
+        assert!(target.current(&driver));
+        assert_eq!(driver.lock_session().refresh_token, "refresh-2");
     }
 
     #[tokio::test(start_paused = true)]
