@@ -489,7 +489,7 @@ jobs:
           COPYPASTE_CLOUD_URL=http://10.0.2.2:47800 \
           COPYPASTE_CLOUD_ANON_KEY=native-evidence \
             npm run tauri -- android build --apk --target x86_64
-          configured="$(find "$outputs" -name '*release*.apk' ! -name '*universal*' -print -quit)"
+          configured="$(find "$outputs" -name '*release*.apk' -print -quit)"
           [[ -n "$configured" ]] || { echo "::error::the configured x86_64 evidence APK was not produced"; exit 1; }
           cp "$configured" "${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
 
