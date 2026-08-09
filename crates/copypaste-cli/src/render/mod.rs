@@ -14,7 +14,10 @@ pub use service::{
 };
 
 use comfy_table::{presets, ContentArrangement, Table};
-use copypaste_ipc::{DiscoveredDevice, Item, PairingData, PeerInfo, SyncResult};
+use copypaste_ipc::{
+    DiscoveredDevice, Item, PairingInviteData, PairingProgressData, PairingState, PeerInfo,
+    SyncResult,
+};
 
 /// Stand-in printed instead of a sensitive item's content.
 ///
@@ -221,7 +224,7 @@ pub fn discovered_table(devices: &[DiscoveredDevice], now_ms: i64, empty: &str) 
     if devices.is_empty() {
         return format!(
             "{empty}\n\nPair with an address instead: copypaste pair create, then \
-             copypaste pair accept CODE --addr HOST:PORT on the other device."
+             copypaste pair join CODE --addr HOST:PORT on the other device."
         );
     }
 
@@ -277,7 +280,7 @@ pub fn sync_table(results: &[SyncResult], empty: &str) -> String {
 /// The code is the one secret this CLI ever prints. It goes to stdout so it can
 /// be read out or piped, and the surrounding text says plainly what it is worth
 /// — a code in a chat log is a paired device.
-pub fn pairing_text(pairing: &PairingData) -> String {
+pub fn pairing_text(pairing: &PairingInviteData) -> String {
     let mut lines = vec![
         format!("{:<12} {}", "code", pairing.code),
         format!("{:<12} {}", "pairing id", pairing.pairing_id),
@@ -292,7 +295,7 @@ pub fn pairing_text(pairing: &PairingData) -> String {
     lines.push(String::new());
     lines.push("On the other device, run:".to_string());
     lines.push(format!(
-        "  copypaste pair accept {} --addr {}",
+        "  copypaste pair join {} --addr {}",
         pairing.code,
         pairing.listen_addr.as_deref().unwrap_or("HOST:PORT")
     ));
@@ -302,6 +305,31 @@ pub fn pairing_text(pairing: &PairingData) -> String {
          with this device."
             .to_string(),
     );
+    lines.join("\n")
+}
+
+pub fn pairing_progress_text(progress: &PairingProgressData) -> String {
+    let state = match progress.state {
+        PairingState::Idle => "idle",
+        PairingState::WaitingForPeer => "waiting_for_peer",
+        PairingState::Handshaking => "handshaking",
+        PairingState::AwaitingConfirmation => "awaiting_confirmation",
+        PairingState::Confirmed => "confirmed",
+        PairingState::Rejected => "rejected",
+        PairingState::Cancelled => "cancelled",
+        PairingState::TimedOut => "timed_out",
+        PairingState::Failed => "failed",
+    };
+    let mut lines = vec![format!("{:<12} {state}", "state")];
+    if let Some(sas) = &progress.sas {
+        lines.push(format!("{:<12} {sas}", "sas"));
+    }
+    if let Some(peer) = &progress.known_device {
+        lines.push(format!(
+            "{:<12} {} ({})",
+            "device", peer.name, peer.pairing_id
+        ));
+    }
     lines.join("\n")
 }
 
@@ -575,26 +603,28 @@ mod tests {
 
     #[test]
     fn a_pairing_shows_the_code_and_says_it_is_a_secret() {
-        let text = pairing_text(&PairingData {
+        let text = pairing_text(&PairingInviteData {
             code: "ABCD-EFGH-JKMN".into(),
             pairing_id: "0123456789abcdef".into(),
             listen_addr: Some("192.168.1.24:47654".into()),
+            expires_in_secs: 120,
         });
         assert!(text.contains("ABCD-EFGH-JKMN"), "{text}");
         assert!(text.contains("secret"), "{text}");
         // The command to run on the other device must be copy-pasteable whole.
         assert!(
-            text.contains("copypaste pair accept ABCD-EFGH-JKMN --addr 192.168.1.24:47654"),
+            text.contains("copypaste pair join ABCD-EFGH-JKMN --addr 192.168.1.24:47654"),
             "{text}"
         );
     }
 
     #[test]
     fn a_pairing_with_no_reachable_address_says_what_to_do() {
-        let text = pairing_text(&PairingData {
+        let text = pairing_text(&PairingInviteData {
             code: "ABCD-EFGH".into(),
             pairing_id: "0123456789abcdef".into(),
             listen_addr: None,
+            expires_in_secs: 120,
         });
         assert!(text.contains("HOST:PORT"), "{text}");
         assert!(text.contains("unknown"), "{text}");

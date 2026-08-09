@@ -14,8 +14,9 @@ use crate::error::CliError;
 use copypaste_ipc::transport;
 use copypaste_ipc::{
     socket_path, BackupData, CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredData,
-    ErrorCode, EventData, ExportData, ImportData, Item, ItemPage, Method, PairingData, PeerInfo,
-    Request, Response, ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    ErrorCode, EventData, ExportData, ImportData, Item, ItemPage, Method, PairingInviteData,
+    PairingProgressData, PeerInfo, Request, Response, ResponseData, StatusData, SyncResult,
+    MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::future::Future;
@@ -296,10 +297,19 @@ pub fn optional_count(data: &Option<ResponseData>) -> Option<u64> {
 }
 
 /// A response that must carry a freshly minted pairing.
-pub fn expect_pairing(data: Option<ResponseData>) -> Result<PairingData, CliError> {
+pub fn expect_pairing(data: Option<ResponseData>) -> Result<PairingInviteData, CliError> {
     match data {
-        Some(ResponseData::Pairing(pairing)) => Ok(pairing),
+        Some(ResponseData::PairingInvite(pairing)) => Ok(pairing),
         _ => Err(shape_error("a pairing")),
+    }
+}
+
+pub fn expect_pairing_progress(
+    data: Option<ResponseData>,
+) -> Result<PairingProgressData, CliError> {
+    match data {
+        Some(ResponseData::PairingProgress(progress)) => Ok(progress),
+        _ => Err(shape_error("pairing progress")),
     }
 }
 
@@ -861,8 +871,9 @@ mod tests {
 
     #[test]
     fn a_pairing_payload_reads_back_as_a_pairing() {
-        let line = r#"{"id":1,"ok":true,"data":{"pairing":{"code":"ABCD-EFGH",
-            "pairing_id":"0123456789abcdef","listen_addr":"192.168.1.24:47654"}}}"#;
+        let line = r#"{"id":1,"ok":true,"data":{"pairing_invite":{"code":"ABCD-EFGH",
+            "pairing_id":"0123456789abcdef","listen_addr":"192.168.1.24:47654",
+            "expires_in_secs":120}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let pairing = expect_pairing(into_data(response).unwrap()).unwrap();
         assert_eq!(pairing.code, "ABCD-EFGH");
