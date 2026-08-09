@@ -319,6 +319,32 @@ pub struct PrivateModeData {
     pub private_mode_epoch: u64,
 }
 
+/// One validated match in text that remains eligible for history and sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct SensitiveSpan {
+    /// UTF-8 byte offset into the detector's NFKC-normalised input.
+    pub start: u32,
+    /// Exclusive UTF-8 byte offset into the detector's NFKC-normalised input.
+    pub end: u32,
+}
+
+/// A detected but non-destructive match that a client may surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct SensitiveFinding {
+    /// Stable detector rule id, such as `email` or `iban`.
+    pub label: String,
+    /// Validated matches in normalised UTF-8 byte order.
+    pub spans: Vec<SensitiveSpan>,
+    /// True when more matches existed than the wire contract permits.
+    pub spans_truncated: bool,
+    /// A bounded NFKC-normalised preview with every validated match replaced.
+    pub redacted_preview: String,
+}
+
 /// An item as seen by clients. Content is plaintext here: it is decrypted by
 /// the daemon on the way out, and the socket is `0600`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -329,9 +355,16 @@ pub struct Item {
     /// Milliseconds since the Unix epoch.
     pub created_at: i64,
     pub pinned: bool,
-    /// True when the detector matched. Sensitive items are excluded from the
-    /// search index at write time, at read time, and by a purge pass.
+    /// True when the high-confidence whole-item gate matched or capture came
+    /// from a password manager. Such items are excluded from the search index
+    /// at write time, at read time, and by a purge pass.
     pub is_sensitive: bool,
+
+    /// Low-confidence detector metadata. Absent for unmatched, binary, and
+    /// whole-item sensitive rows; the latter remain hidden rather than partly
+    /// represented by a redacted preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitive_finding: Option<SensitiveFinding>,
 
     /// Which device first captured this item.
     ///

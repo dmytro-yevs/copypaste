@@ -40,7 +40,8 @@ pub use limits::{
 pub use payload::{
     BackupData, CloudStatusData, CloudSyncData, DiagnosticCounters, DiscoveredData,
     DiscoveredDevice, ExportData, ExportItem, ImagePreview, ImportData, Item, ItemPage,
-    PairingData, PeerInfo, PrivateModeData, StatusData, SyncResult,
+    PairingData, PeerInfo, PrivateModeData, SensitiveFinding, SensitiveSpan, StatusData,
+    SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 

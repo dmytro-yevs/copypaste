@@ -113,6 +113,7 @@ impl Backend for FakeBackend {
             // it with the one rule the intake tests need: anything containing
             // this marker is treated as a secret.
             is_sensitive: content.contains("AKIA"),
+            sensitive_finding: None,
             origin_device_id: "fake-device".into(),
             origin_device_name: None,
             source_app_bundle_id: None,

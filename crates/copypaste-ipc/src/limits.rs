@@ -143,6 +143,7 @@ mod tests {
             created_at: 1_767_225_600_000,
             pinned: false,
             is_sensitive: false,
+            sensitive_finding: None,
             origin_device_id: "3c6e0b8a-9c15-424f-b8b8-1a2b3c4d5e6f".into(),
             origin_device_name: Some("a device with a fairly long display name".into()),
             source_app_bundle_id: None,

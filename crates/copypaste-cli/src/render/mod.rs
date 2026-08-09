@@ -317,6 +317,7 @@ mod tests {
             created_at: 1_000_000,
             pinned: false,
             is_sensitive: false,
+            sensitive_finding: None,
             origin_device_id: "9e1d0000-0000-4000-8000-00000000000a".into(),
             origin_device_name: Some("This Mac".into()),
             source_app_bundle_id: None,

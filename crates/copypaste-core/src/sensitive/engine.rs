@@ -123,7 +123,11 @@ impl Detector {
     /// followed by confidence and stable rule id.
     pub fn scan_all(&self, text: &str) -> Vec<SpannedFinding> {
         let normalised = normalise(text);
-        self.scan_normalised(&normalised, ScanMode::AllSpans)
+        self.scan_all_normalised(&normalised)
+    }
+
+    pub(super) fn scan_all_normalised(&self, text: &str) -> Vec<SpannedFinding> {
+        self.scan_normalised(text, ScanMode::AllSpans)
     }
 
     /// Highest-confidence match, or None. Ties prefer the longer match, then
@@ -206,7 +210,7 @@ impl Detector {
     }
 }
 
-fn compare_rank(a: &SpannedFinding, b: &SpannedFinding) -> std::cmp::Ordering {
+pub(super) fn compare_rank(a: &SpannedFinding, b: &SpannedFinding) -> std::cmp::Ordering {
     a.confidence
         .total_cmp(&b.confidence)
         .then_with(|| (a.end - a.start).cmp(&(b.end - b.start)))

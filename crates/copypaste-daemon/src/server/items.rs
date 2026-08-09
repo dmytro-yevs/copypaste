@@ -360,7 +360,7 @@ fn to_wire_and_plaintext(
         warn!(error = ?e, "could not resolve an item's origin device");
         state.meta.here()
     });
-    to_wire_with(row, &origin, &state.keyring.item_key())
+    to_wire_with(row, &origin, &state.keyring.item_key(), &state.detector)
 }
 
 /// [`to_wire`] with the origin and the item key already resolved.
@@ -374,6 +374,7 @@ fn to_wire_with(
     row: StoredItem,
     origin: &crate::meta::Origin,
     key: &copypaste_core::ItemKey,
+    detector: &copypaste_core::Detector,
 ) -> Result<(Item, Vec<u8>), copypaste_core::CryptoError> {
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (CLAUDE.md rule 4,
@@ -387,20 +388,26 @@ fn to_wire_with(
     // measures: `LocalItem::content` is the opened payload, and the seal that
     // follows is a fixed overhead the cap does not count.
     let too_large_to_sync = crate::cloud::too_large_to_sync(&row.content_type, plaintext.len());
+    let content = if copypaste_ipc::content_type::is_binary(&row.content_type) {
+        format!(
+            "[{}]",
+            copypaste_ipc::content_type::label(&row.content_type)
+        )
+    } else {
+        String::from_utf8_lossy(&plaintext).into_owned()
+    };
+    let sensitive_finding = (!row.is_sensitive
+        && copypaste_ipc::content_type::is_text(&row.content_type))
+    .then(|| detector.inert_finding_metadata(&content))
+    .flatten();
     let item = Item {
         id: row.id,
-        content: if copypaste_ipc::content_type::is_binary(&row.content_type) {
-            format!(
-                "[{}]",
-                copypaste_ipc::content_type::label(&row.content_type)
-            )
-        } else {
-            String::from_utf8_lossy(&plaintext).into_owned()
-        },
+        content,
         content_type: row.content_type,
         created_at: row.created_at,
         pinned: row.pinned,
         is_sensitive: row.is_sensitive,
+        sensitive_finding,
         origin_device_id: origin.device_id.clone(),
         origin_device_name: origin.device_name.clone(),
         source_app_bundle_id: row.app_bundle_id,
@@ -444,7 +451,7 @@ fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
     for row in rows {
         let row_id = row.id.clone();
         let origin = origins.get(&row_id).unwrap_or(&here);
-        match to_wire_with(row, origin, &key) {
+        match to_wire_with(row, origin, &key, &state.detector) {
             Ok((item, _)) => page.items.push(item),
             Err(e) => {
                 warn!(id = %row_id, error = ?e, "skipping an item that failed to decrypt");
@@ -633,6 +640,11 @@ mod tests {
         };
         assert_eq!(whole.items.len(), PAGE);
         assert!(whole.items.iter().all(|item| item.truncated));
+        assert!(whole.items.iter().all(|item| {
+            item.sensitive_finding.as_ref().is_none_or(|finding| {
+                finding.spans.len() <= copypaste_core::sensitive::MAX_SURFACED_SENSITIVE_SPANS
+            })
+        }));
         for item in &mut whole.items {
             item.content = item.content.repeat(BODY / LIST_PREVIEW_BYTES);
             item.truncated = false;
@@ -641,8 +653,11 @@ mod tests {
             .unwrap()
             .len();
 
+        let item_bound = LIST_PREVIEW_BYTES * 2
+            + copypaste_core::sensitive::MAX_SURFACED_SENSITIVE_SPANS * 48
+            + 768;
         assert!(
-            bounded <= PAGE * (LIST_PREVIEW_BYTES + 512),
+            bounded <= PAGE * item_bound,
             "a bounded page of {PAGE} items serialised to {bounded} bytes"
         );
         assert!(
@@ -826,6 +841,7 @@ mod tests {
             other => panic!("expected an item, got {other:?}"),
         };
         assert!(added.is_sensitive, "the detector must flag an AWS key id");
+        assert!(added.sensitive_finding.is_none());
 
         // Data loss is the worse outcome: flagged, but still stored and still
         // listed.
@@ -859,6 +875,35 @@ mod tests {
             ),
             other => panic!("expected a page, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn inert_findings_are_redacted_for_display_but_remain_searchable() {
+        let (state, _dir) = test_state("inert-sensitive-finding");
+        let text = "mail alice@example.com about the release";
+        let added = match add(&state, 1, text).data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("expected an item, got {other:?}"),
+        };
+
+        assert!(!added.is_sensitive);
+        let finding = added.sensitive_finding.as_ref().unwrap();
+        assert_eq!(finding.label, "email");
+        assert_eq!(finding.spans.len(), 1);
+        assert!(!finding.redacted_preview.contains("alice@example.com"));
+
+        match search(&state, 2, "alice", 20).data {
+            Some(ResponseData::Page(page)) => {
+                assert!(page.items.iter().any(|item| item.id == added.id));
+            }
+            other => panic!("expected a page, got {other:?}"),
+        }
+        assert!(state
+            .store
+            .summaries(20)
+            .unwrap()
+            .iter()
+            .any(|version| version.id == added.id));
     }
 
     /// B-1 / `CopyPaste-8ebg.57`, at the wire: a capture landing above the
