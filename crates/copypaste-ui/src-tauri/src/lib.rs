@@ -486,11 +486,24 @@ mod tests {
         let release: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.windows.release.conf.json"))
                 .expect("the Windows release config is valid JSON");
+        let signed: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.signed.conf.template.json"))
+                .expect("the signed Windows release template is valid JSON");
+        let hooks = include_str!("../windows/hooks.nsh");
 
         assert_eq!(config["bundle"]["targets"], serde_json::json!(["nsis"]));
+        assert_eq!(config["bundle"]["windows"]["allowDowngrades"], false);
         assert_eq!(
             config["bundle"]["windows"]["nsis"]["installMode"],
             "currentUser"
+        );
+        assert_eq!(
+            config["bundle"]["windows"]["nsis"]["installerHooks"],
+            "windows/hooks.nsh"
+        );
+        assert_eq!(
+            config["bundle"]["windows"]["nsis"]["installerIcon"],
+            "icons/icon.ico"
         );
 
         let main = &config["app"]["windows"][0];
@@ -507,5 +520,27 @@ mod tests {
             release["bundle"]["externalBin"],
             serde_json::json!(["binaries/copypaste", "binaries/copypaste-daemon"])
         );
+        assert_eq!(signed["bundle"]["createUpdaterArtifacts"], true);
+        assert_eq!(
+            signed["bundle"]["externalBin"],
+            serde_json::json!(["binaries/copypaste", "binaries/copypaste-daemon"])
+        );
+        assert_eq!(signed["bundle"]["windows"]["digestAlgorithm"], "sha256");
+        assert_eq!(signed["bundle"]["windows"]["tsp"], true);
+        assert_eq!(
+            signed["plugins"]["updater"]["pubkey"],
+            "__TAURI_UPDATER_PUBLIC_KEY__"
+        );
+        assert_eq!(
+            signed["plugins"]["updater"]["endpoints"],
+            serde_json::json!(["__TAURI_UPDATER_ENDPOINT__"])
+        );
+        assert_eq!(
+            signed["plugins"]["updater"]["windows"]["installMode"],
+            "passive"
+        );
+        assert!(hooks.matches("copypaste.exe\" shutdown").count() >= 2);
+        assert!(hooks.contains("$UpdateMode <> 1"));
+        assert!(hooks.contains("StartupApproved\\Run"));
     }
 }

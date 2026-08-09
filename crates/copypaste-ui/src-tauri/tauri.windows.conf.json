@@ -23,12 +23,20 @@
     ]
   },
   "bundle": {
+    "publisher": "CopyPaste",
+    "homepage": "https://github.com/dmytro-yevs/copypaste",
+    "copyright": "Copyright © 2026 CopyPaste contributors",
     "targets": [
       "nsis"
     ],
     "windows": {
+      "allowDowngrades": false,
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "windows/hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "startMenuFolder": "CopyPaste"
       }
     }
   }

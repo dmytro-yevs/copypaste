@@ -11,6 +11,7 @@
 | [ADR-0005](adr/0005-android-capture-in-rust-kotlin-reports.md) | Kotlin reports facts; Rust decides what they mean. The capture ladder's state machine and every sentence it shows compile and are tested on a host with no Android SDK. |
 | [ADR-0006](adr/0006-android-release-signing.md) | What the released APK is signed with, and why an unsigned one is not an option the way an ad-hoc `.app` is. |
 | [ADR-0007](adr/0007-sqlcipher-crypto-backend-per-platform.md) | Which crypto provider SQLCipher is compiled against on each platform, and what the build must guarantee about the linkage. |
+| [ADR-0019](adr/0019-windows-distribution-and-update-signing.md) | Windows ships through current-user NSIS with separate Authenticode and updater signatures. |
 | [android-clipboard-access](rewrite/android-clipboard-access.md) | What Android lets a clipboard manager read, and what we ask the user for. A four-rung ladder with rung 0 (no permission) as the default and Shizuku as the one upgrade we build; v1's `READ_LOGS` approach is not ported. |
 | [target-architecture](rewrite/target-architecture.md) | Which maintained crate does each job, and the short list of custom code that stays. |
 | [design/README](../design/README.md) | The visual system: shadcn/ui on Tailwind v4, zinc base in OKLCH, one token source in `design/tokens/`, and a contrast gate that measures composited pairs rather than asserting AA. |
