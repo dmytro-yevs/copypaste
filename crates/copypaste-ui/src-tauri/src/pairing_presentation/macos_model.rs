@@ -159,7 +159,7 @@ mod tests {
             "QrCode::new",
             "NSSecureTextField",
             "setAccessibilityProtectedContent(true)",
-            "NSWindowSharingType::None",
+            "NSWindowSharingType::NSWindowSharingNone",
             "Security code: {spoken}",
         ] {
             assert!(
