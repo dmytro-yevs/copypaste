@@ -47,16 +47,6 @@ jobs:
             crates/copypaste-ui/package-lock.json
             e2e/package-lock.json
 
-      - name: Confirm the hosted Edge driver matches Edge
-        shell: pwsh
-        run: |
-          $driver = Join-Path $env:EDGEWEBDRIVER "msedgedriver.exe"
-          if (-not (Test-Path -LiteralPath $driver -PathType Leaf)) {
-            throw "the hosted runner exposes no Edge WebDriver"
-          }
-          & $driver --version
-          if ($LASTEXITCODE -ne 0) { throw "Edge WebDriver did not start" }
-
       - name: Install tauri-driver
         run: cargo install tauri-driver --version 2.0.6 --locked
 
@@ -78,6 +68,46 @@ jobs:
       - name: Audit harness dependencies
         working-directory: e2e
         run: npm audit
+
+      - name: Install the WebView2-matched Edge driver
+        shell: pwsh
+        run: |
+          $product = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+          $keys = @(
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$product"
+            "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$product"
+          )
+          $versions = @($keys | ForEach-Object {
+            (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
+          } | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Sort-Object -Unique)
+          if ($versions.Count -ne 1) {
+            throw "expected one installed WebView2 Runtime version, found $($versions.Count)"
+          }
+          $runtimeVersion = $versions[0]
+          if ($runtimeVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+            throw "the WebView2 Runtime reported an invalid version"
+          }
+
+          $driverDirectory = Join-Path $env:RUNNER_TEMP "webview2-edgedriver"
+          $archive = Join-Path $env:RUNNER_TEMP "webview2-edgedriver.zip"
+          $uri = "https://msedgedriver.microsoft.com/$runtimeVersion/edgedriver_win64.zip"
+          Invoke-WebRequest -Uri $uri -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $driverDirectory -Force
+
+          $driver = Join-Path $driverDirectory "msedgedriver.exe"
+          $reported = (& $driver --version | Out-String)
+          $versionMatch = [regex]::Match($reported, 'Microsoft Edge WebDriver (\d+\.\d+\.\d+\.\d+)')
+          if ($LASTEXITCODE -ne 0 -or -not $versionMatch.Success) {
+            throw "the downloaded Edge WebDriver did not report a valid version"
+          }
+          $driverVersion = $versionMatch.Groups[1].Value
+          $runtimeMajor = ([version]$runtimeVersion).Major
+          $driverMajor = ([version]$driverVersion).Major
+          if ($driverMajor -ne $runtimeMajor -or $driverVersion -ne $runtimeVersion) {
+            throw "Edge WebDriver does not exactly match the WebView2 Runtime"
+          }
+          Write-Host "WebView2 Runtime and Edge WebDriver: $runtimeVersion"
+          "EDGEWEBDRIVER=$driverDirectory" >> $env:GITHUB_ENV
 
       - name: Run Windows native desktop E2E
         working-directory: e2e
