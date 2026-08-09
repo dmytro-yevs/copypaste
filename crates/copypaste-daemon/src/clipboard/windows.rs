@@ -28,7 +28,7 @@ use read::{Reading, Representation};
 /// is ordinary on a machine running a second clipboard tool. Retried inside the
 /// crate, and a change we still could not open is left unacknowledged so the
 /// next tick sees it again — dropping it would lose a copy the user made, which
-/// is the outcome CLAUDE.md rule 4 ranks worst.
+/// is the outcome AGENTS.md rule 4 ranks worst.
 const OPEN_ATTEMPTS: usize = 10;
 
 /// The largest sequence-number delta a write of ours may claim as its own.
@@ -183,7 +183,7 @@ impl WindowsClipboard {
     fn write(&mut self, set: impl FnOnce() -> clipboard_win::SysResult<()>) -> anyhow::Result<()> {
         let before = self.sequence_number();
         let clipboard = Clipboard::new_attempts(OPEN_ATTEMPTS)
-            // I-9 / CLAUDE.md rule 4: no paths, no content, no user name.
+            // I-9 / AGENTS.md rule 4: no paths, no content, no user name.
             .map_err(|_| anyhow::anyhow!("the clipboard could not be opened"))?;
         let written = set();
         drop(clipboard);
@@ -377,9 +377,7 @@ impl ClipboardSource for WindowsClipboard {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tests — the half of manifest 01 that only Windows can answer
-// ---------------------------------------------------------------------------
 //
 // `change` and `windows_optout` are testable anywhere. What is not is whether
 // the sequence number moves at all, how far one write of ours moves it, and

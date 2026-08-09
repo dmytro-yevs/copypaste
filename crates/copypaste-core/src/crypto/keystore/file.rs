@@ -22,7 +22,7 @@ use super::{CryptoError, DeviceSecret, Lookup, KEY_LEN, SECRET_FILE_NAME};
 /// default: security review F-11. Resolving through `directories::ProjectDirs`
 /// meant `--data-dir` moved the database and left the secret behind.
 ///
-/// Never surfaced in an error (`CLAUDE.md` rule 4) — the path contains the
+/// Never surfaced in an error (`AGENTS.md` rule 4) — the path contains the
 /// local username.
 fn secret_path(data_dir: &Path) -> PathBuf {
     data_dir.join(SECRET_FILE_NAME)

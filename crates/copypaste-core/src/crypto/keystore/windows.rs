@@ -42,7 +42,7 @@ const MAX_SEALED_LEN: usize = 4096;
 /// The blob sits in the data directory it opens, not in a user-scoped store:
 /// security review F-11, and what makes `--data-dir` a separate install rather
 /// than two databases sharing one secret. Never surfaced in an error
-/// (`CLAUDE.md` rule 4) — the path contains the local username.
+/// (`AGENTS.md` rule 4) — the path contains the local username.
 fn blob_path(data_dir: &Path) -> PathBuf {
     data_dir.join(SECRET_BLOB_NAME)
 }

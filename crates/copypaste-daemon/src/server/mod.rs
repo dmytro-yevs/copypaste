@@ -22,7 +22,7 @@
 //! * [`halted`] — the socket when there is no history to serve at all.
 //!
 //! **Errors never carry a filesystem path.** The socket path discloses the
-//! local username (CLAUDE.md rule 4), and a `StoreError` from SQLite routinely
+//! local username (AGENTS.md rule 4), and a `StoreError` from SQLite routinely
 //! embeds the database path. Every failure is mapped to one of the fixed
 //! sentences in [`messages`]; the underlying error goes to the local log and
 //! never onto the wire. Gathering them in one file is what lets a single test

@@ -39,7 +39,7 @@ pub async fn copy_text<R: Runtime>(app: AppHandle<R>, text: String) -> Result<()
     }
     app.clipboard()
         // The platform error is dropped rather than rendered: it is written by
-        // the OS, and this string is shown to a user (CLAUDE.md rule 4).
+        // the OS, and this string is shown to a user (AGENTS.md rule 4).
         .write_text(text)
         .map_err(|e| {
             tracing::warn!(error = %e, "a clipboard write failed");

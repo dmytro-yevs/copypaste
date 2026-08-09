@@ -102,7 +102,7 @@ impl Backend for EmbeddedBackend {
                 .map_err(|_| BackendError::internal("history could not be searched"))?;
             // Read-time enforcement of "sensitive items are never searchable".
             // The store already keeps them out of the index at write time; this
-            // is the second of the three layers CLAUDE.md rule 4 demands, and
+            // is the second of the three layers AGENTS.md rule 4 demands, and
             // it is what protects a database written before the rule existed.
             // Both backends carrying it is the point of a layered rule, not a
             // duplicated decision.
@@ -119,7 +119,7 @@ impl Backend for EmbeddedBackend {
     /// `copypaste_core::ingest` is the daemon's ingest path, moved down into
     /// the core rather than re-typed here: dedup, the write-time secret rule,
     /// the id-before-seal ordering and eviction are one implementation with
-    /// two callers, not two that will drift (CLAUDE.md rule 1, ADR-0003).
+    /// two callers, not two that will drift (AGENTS.md rule 1, ADR-0003).
     async fn add(&self, content: &str) -> Result<Item> {
         let content = content.to_string();
         self.blocking(move |inner| {
@@ -925,7 +925,7 @@ mod tests {
         assert_eq!(backend.list(50, None).await.unwrap().items.len(), 1);
     }
 
-    /// CLAUDE.md rule 4, the write-time layer: a detected secret is stored but
+    /// AGENTS.md rule 4, the write-time layer: a detected secret is stored but
     /// never indexed, on this platform as on the other.
     #[tokio::test]
     async fn a_captured_secret_is_stored_and_stays_out_of_the_index() {

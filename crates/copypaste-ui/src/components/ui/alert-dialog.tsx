@@ -9,7 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
  * `Dialog` on purpose: it is `role="alertdialog"`, it focuses the *cancel*
  * action by default, and it does not close on a backdrop click — a misclick
  * must not be able to dismiss a prompt whose other button erases history
- * (CLAUDE.md rule 4: data loss is the worst outcome).
+ * (AGENTS.md rule 4: data loss is the worst outcome).
  */
 function AlertDialog(props: ComponentProps<typeof AlertDialogPrimitive.Root>) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;

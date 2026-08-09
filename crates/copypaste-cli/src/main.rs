@@ -65,7 +65,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Delete { id } => Method::Delete { id: id.clone() },
         Command::Clear { yes } => {
             // Destroying history needs an explicit decision, and a piped stdin
-            // is not one (CLAUDE.md rule 4: data loss is the worst outcome).
+            // is not one (AGENTS.md rule 4: data loss is the worst outcome).
             if !yes && !confirm_clear()? {
                 out("cancelled; nothing was deleted");
                 return Ok(());
@@ -96,7 +96,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         },
         Command::Revoke { pairing_id, yes } => {
             // Irreversible, and the key on the other device is gone with it:
-            // both halves have to be paired again by hand (CLAUDE.md rule 4).
+            // both halves have to be paired again by hand (AGENTS.md rule 4).
             if !yes && !confirm_revoke(pairing_id)? {
                 out("cancelled; that device is still paired");
                 return Ok(());
@@ -131,7 +131,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         },
         Command::Restore { src, yes } => {
             // Restoring replaces every item on this device. A piped stdin is
-            // not a decision (CLAUDE.md rule 4: data loss is the worst
+            // not a decision (AGENTS.md rule 4: data loss is the worst
             // outcome).
             if !yes && !confirm_restore()? {
                 out("cancelled; nothing was changed");
@@ -209,7 +209,7 @@ fn read_export(path: Option<&Path>) -> Result<ExportData, CliError> {
         Some(path) => std::fs::read_to_string(path).map_err(|e| {
             // The user supplied the path, so naming *what went wrong* is
             // useful; the path itself is scrubbed on the way out by
-            // `CliError::user_message` (CLAUDE.md rule 4).
+            // `CliError::user_message` (AGENTS.md rule 4).
             CliError::local(format!("could not read the import file: {e}"))
         })?,
         None => {

@@ -40,7 +40,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     ///   and `auth.rs` already implement exactly that, once, behind
     ///   `transient_backoff()`. A transient fault reaching this function has
     ///   already spent that budget; retrying it again would be a second
-    ///   scheduler for one condition — the shape of duplication `CLAUDE.md`
+    ///   scheduler for one condition — the shape of duplication `AGENTS.md`
     ///   rule 1 exists to prevent — and would turn four attempts into sixteen.
     ///   The outer retry is the poll cadence.
     /// * **anything else** — give up. Retrying a 400 does not make it a 200.

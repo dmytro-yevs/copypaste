@@ -44,9 +44,7 @@ check() {
     fi
 }
 
-# ---------------------------------------------------------------------------
 group "Shell syntax"
-# ---------------------------------------------------------------------------
 for f in scripts/release/*.sh; do
     check "bash -n $f" bash -n "$f"
 done
@@ -71,9 +69,7 @@ else
     printf '  skip  shellcheck (not installed)\n'
 fi
 
-# ---------------------------------------------------------------------------
 group "Ruby syntax"
-# ---------------------------------------------------------------------------
 if command -v ruby >/dev/null 2>&1; then
     check "ruby -c Casks/copypaste.rb"                    ruby -c Casks/copypaste.rb
     check "ruby -c packaging/homebrew/copypaste-cli.rb"   ruby -c packaging/homebrew/copypaste-cli.rb
@@ -81,9 +77,7 @@ else
     printf '  skip  ruby (not installed)\n'
 fi
 
-# ---------------------------------------------------------------------------
 group "Install-time tooling uses the application data directory"
-# ---------------------------------------------------------------------------
 for f in Casks/copypaste.rb packaging/macos/selfsign.sh; do
     if grep -qE 'Application Support/CopyPaste([/"]|$)' "$f"; then
         bad "$f names only the application data directory" \
@@ -99,9 +93,7 @@ else
         "zap removes no CopyPaste data at all"
 fi
 
-# ---------------------------------------------------------------------------
 group "Seeded values fail closed"
-# ---------------------------------------------------------------------------
 # An unreleased checkout must not be able to install anything: version 0.0.0 has
 # no release, and an all-zero checksum cannot match a real file.
 ZERO="0000000000000000000000000000000000000000000000000000000000000000"
@@ -114,9 +106,7 @@ for f in Casks/copypaste.rb packaging/homebrew/copypaste-cli.rb; do
     fi
 done
 
-# ---------------------------------------------------------------------------
 group "Generators round-trip"
-# ---------------------------------------------------------------------------
 SHA_A="1111111111111111111111111111111111111111111111111111111111111111"
 SHA_B="2222222222222222222222222222222222222222222222222222222222222222"
 VERSION_A="2.0.0-alpha.1"
@@ -184,9 +174,7 @@ else
     bad "formula URL interpolates to $EXPECTED_TGZ"
 fi
 
-# ---------------------------------------------------------------------------
 group "Generators reject bad input"
-# ---------------------------------------------------------------------------
 reject() {
     local desc="$1"; shift
     if "$@" >/dev/null 2>&1; then
@@ -202,9 +190,7 @@ reject "gen-cask.sh rejects uppercase sha256"   ./scripts/release/gen-cask.sh   
 reject "gen-cask.sh rejects a missing argument" ./scripts/release/gen-cask.sh    "2.0.0"
 reject "gen-cask.sh rejects an unknown flag"    ./scripts/release/gen-cask.sh    "2.0.0" "$SHA_A" --nope
 
-# ---------------------------------------------------------------------------
 group "Tap layout"
-# ---------------------------------------------------------------------------
 # `brew tap` looks for Casks/ and Formula/ at the repository root.
 for p in "Casks/copypaste.rb" "Formula/copypaste-cli.rb"; do
     if [[ -f "$TAPDIR/$p" ]]; then
@@ -221,9 +207,7 @@ check "setup-tap.sh --dry-run is idempotent beside an existing tap" \
 reject "setup-tap.sh needs a user"   ./scripts/release/setup-tap.sh --dry-run
 reject "setup-tap.sh rejects a bad tap name" ./scripts/release/setup-tap.sh --github-user dmytro-yevs --tap-name "Bad Name" --dry-run
 
-# ---------------------------------------------------------------------------
 group "One version, three files"
-# ---------------------------------------------------------------------------
 # The macOS bundler falls back to the Cargo package version when tauri.conf.json
 # has no "version"; the Android one does not — it writes no tauri.properties at
 # all and the APK ships versionName "1.0". So tauri.conf.json points its
@@ -255,9 +239,7 @@ else
         "expected Tauri 14.0, Homebrew :sonoma, docs naming Sonoma, and macos-14 CI/release jobs; Tauri=${MACOS_MIN:-<unset>}"
 fi
 
-# ---------------------------------------------------------------------------
 group "Android scaffold is checked in, not regenerated"
-# ---------------------------------------------------------------------------
 # gen/android is tracked source (see its README). Two files under it are
 # git-ignored on purpose because tauri-build writes them during the Rust build
 # with absolute paths into the cargo registry; committing those would pin one
@@ -333,9 +315,7 @@ else
     ok "release.yml does not run 'tauri android init'"
 fi
 
-# ---------------------------------------------------------------------------
 group "Workflow wiring"
-# ---------------------------------------------------------------------------
 # Structural checks across all four workflows. Everything here is a mistake that
 # only a real run would otherwise report, one round trip at a time: an artifact
 # name that does not match its producer, an output nothing declares, a job that
@@ -354,9 +334,7 @@ else
 fi
 rm -f "$WIRING"
 
-# ---------------------------------------------------------------------------
 group "Both platforms reach one release page"
-# ---------------------------------------------------------------------------
 check "publish depends on macos, Android artifact smoke and packaging" python3 - <<'PY'
 import sys, yaml
 jobs = yaml.safe_load(open(".github/workflows/release.yml"))["jobs"]
@@ -514,9 +492,7 @@ else
     bad "the --prerelease command substitution survives set -e" "$out"
 fi
 
-# ---------------------------------------------------------------------------
 group "SQLCipher's crypto backend (ADR-0007)"
-# ---------------------------------------------------------------------------
 # Every invariant here is invisible in a green build. Vendoring OpenSSL on macOS
 # succeeds — it just spends what ADR-0007 declined to spend — and a macOS binary
 # linked against the runner's Homebrew libcrypto builds, signs, and mounts.
@@ -643,9 +619,7 @@ else
         "nothing else in this pipeline would notice a bundle linked against the runner's Homebrew"
 fi
 
-# ---------------------------------------------------------------------------
 group "The bits that need real hardware"
-# ---------------------------------------------------------------------------
 cat <<'EOS'
   note  Not checked here, and not checkable here:
           - codesign, spctl, PlistBuddy, hdiutil, xattr, security

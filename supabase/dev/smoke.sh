@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
 # End-to-end smoke test against a running local stack.
 #
 #   supabase start          # needs Docker
@@ -32,7 +31,6 @@
 #      the client (manifest 05 §5.3).
 #
 # Needs: curl, jq.
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 for tool in curl jq; do

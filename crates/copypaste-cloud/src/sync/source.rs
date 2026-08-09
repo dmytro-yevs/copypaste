@@ -8,9 +8,7 @@ use std::sync::Arc;
 
 use super::outcome::SyncError;
 
-// ---------------------------------------------------------------------------
 // The local side
-// ---------------------------------------------------------------------------
 
 /// One version of one item, in the plain.
 ///
@@ -247,9 +245,7 @@ pub trait CloudSource: Send + Sync {
     }
 }
 
-// ---------------------------------------------------------------------------
 // The sensitive-content gate
-// ---------------------------------------------------------------------------
 
 /// The last check before an item leaves the machine.
 ///
@@ -265,7 +261,7 @@ pub trait CloudSource: Send + Sync {
 /// `copypaste-core`'s `sensitive::Detector`, with the full ruleset, the
 /// confidence model and the false-positive defences of manifest 07.
 /// Re-implementing even a "quick check" here would be a second regex engine,
-/// which is one of the duplications `CLAUDE.md` rule 1 was written about. The
+/// which is one of the duplications `AGENTS.md` rule 1 was written about. The
 /// daemon wires the real detector in `cloud::sensitive_guard`.
 #[derive(Clone)]
 pub struct SensitiveGuard(Arc<dyn Fn(&LocalItem) -> bool + Send + Sync>);

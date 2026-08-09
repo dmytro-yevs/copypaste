@@ -56,9 +56,7 @@ fn store_device_secret(secret: &[u8; KEY_LEN]) -> Result<(), SecurityFrameworkEr
     set_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT, secret)
 }
 
-// ---------------------------------------------------------------------------
 // Tests — against the real Keychain
-// ---------------------------------------------------------------------------
 //
 // Every assertion names *which backend answered*: a test satisfied by a value
 // coming back is satisfied by the `0600` file this backend exists to replace,

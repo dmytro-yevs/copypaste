@@ -85,7 +85,7 @@ pub enum Method {
     /// 1 no longer names the same boundary by the time page 2 is asked for: the
     /// second page repeats a row or skips one, and a row the user never saw is
     /// indistinguishable from one that was never captured
-    /// (`CopyPaste-8ebg.57`, CLAUDE.md rule 4).
+    /// (`CopyPaste-8ebg.57`, AGENTS.md rule 4).
     ///
     /// `cursor` is [`ItemPage::next_cursor`] from the previous page, and
     /// `None`/absent asks for the first. It is opaque — a position in the list

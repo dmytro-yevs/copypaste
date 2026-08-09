@@ -35,9 +35,7 @@ name: Android emulator
 # notification claiming background capture — and prints the rest of
 # docs/rewrite/android-spike.md as NOT ASSERTED.
 #
-# ---------------------------------------------------------------------------
 # Cost, and when this runs
-# ---------------------------------------------------------------------------
 # Measured on run 1: 6.5 minutes to build the APK against a warm rust-cache,
 # 3.5 to boot the AVD and drive it. A cold cache adds the OpenSSL and SQLCipher
 # compile for the ABI, which is the bulk of a first run.
@@ -201,7 +199,6 @@ jobs:
           set -euo pipefail
           ./scripts/release/android-link-abis.sh
 
-  # ---------------------------------------------------------------------------
   # A debug APK, x86_64 only.
   #
   # Debug rather than release because every filesystem assertion in the smoke
@@ -213,7 +210,6 @@ jobs:
   #
   # x86_64 only because that is the emulator's ABI. It also cuts the Rust and
   # OpenSSL work to a quarter of the release job's.
-  # ---------------------------------------------------------------------------
   apk:
     name: Build the debug APK (x86_64)
     runs-on: ubuntu-24.04
@@ -363,14 +359,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ---------------------------------------------------------------------------
   # Boot an AVD and run it.
   #
   # reactivecircus/android-emulator-runner rather than avdmanager and a pile of
-  # YAML (CLAUDE.md rule 1): it creates the AVD, waits for boot properly, and
+  # YAML (AGENTS.md rule 1): it creates the AVD, waits for boot properly, and
   # kills the emulator on the way out. All this job adds is KVM, which GitHub's
   # Linux runners expose but do not make world-writable.
-  # ---------------------------------------------------------------------------
   emulator:
     name: Launch, capture, and read back (API ${{ matrix.api-level }})
     needs: apk
@@ -446,14 +440,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # ---------------------------------------------------------------------------
   # The same build people install: release build type, so R8 runs.
   #
   # It has to be signed to install at all — Android refuses an unsigned APK and
   # there is no ad-hoc equivalent. Its generated key is limited to this
   # never-published emulator fixture; ADR-0006 requires the release workflow to
   # fail closed rather than use such a key for a published artifact.
-  # ---------------------------------------------------------------------------
   release-apk:
     name: Build the release APK (x86_64, minified)
     runs-on: ubuntu-24.04
@@ -604,9 +596,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ---------------------------------------------------------------------------
   # The narrower question, on the artefact that ships.
-  # ---------------------------------------------------------------------------
   release-emulator:
     name: Launch the shipped build
     needs: release-apk

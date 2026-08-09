@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
     let detector = Arc::new(Detector::new().context("build the sensitive-content detector")?);
 
     // The third enforcement layer for "sensitive items must never reach the
-    // search index" (CLAUDE.md rule 4). `is_sensitive` is decided once at
+    // search index" (AGENTS.md rule 4). `is_sensitive` is decided once at
     // capture, so a row taken before a detector rule existed keeps its
     // plaintext searchable; this is the only thing that ever revisits it. It
     // touches the index and never the history. Not fatal: a history that

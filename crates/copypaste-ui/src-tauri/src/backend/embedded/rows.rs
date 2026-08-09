@@ -22,7 +22,7 @@ impl Inner {
     ///
     /// Two library calls and a struct literal. The item id is the AAD, so a row
     /// decrypted under another row's identity fails authentication rather than
-    /// falling back to a plaintext read (CLAUDE.md rule 4, "fail closed").
+    /// falling back to a plaintext read (AGENTS.md rule 4, "fail closed").
     pub(super) fn to_wire(&self, row: StoredItem) -> Result<Item> {
         let device_id = origin_or(&row.origin_device_id, &self.state.device_id).to_string();
         let names = self
@@ -82,7 +82,7 @@ impl Inner {
     /// what was dropped.
     ///
     /// One unreadable row must not blank a whole page: the other items are
-    /// still the user's data (CLAUDE.md rule 4). But dropping it silently makes
+    /// still the user's data (AGENTS.md rule 4). But dropping it silently makes
     /// a short page indistinguishable from a small history, which is parity
     /// finding 17 / `CopyPaste-00zz`. The count is what lets the UI say "3
     /// items could not be read" instead of showing three fewer rows.

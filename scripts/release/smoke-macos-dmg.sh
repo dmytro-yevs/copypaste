@@ -12,9 +12,7 @@
 # download is quarantined, run the postflight script from inside the bundle,
 # then start what was installed.
 #
-# ---------------------------------------------------------------------------
 # ENFORCED vs REPORTED
-# ---------------------------------------------------------------------------
 # A leg is ENFORCED when a failure means the artefact is broken for everyone:
 # the image does not mount, the signature does not verify, the postflight the
 # cask runs fails, the daemon inside the bundle cannot start, or a copy made
@@ -119,9 +117,7 @@ wait_for_daemon() {
     return 1
 }
 
-# ---------------------------------------------------------------------------
 group "Mount (ENFORCED)"
-# ---------------------------------------------------------------------------
 if hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT" >/dev/null; then
     ok "the image mounts"
 else
@@ -147,9 +143,7 @@ else
     bad "the drag-to-install symlink is there"
 fi
 
-# ---------------------------------------------------------------------------
 group "Signature (ENFORCED except Gatekeeper)"
-# ---------------------------------------------------------------------------
 if verify="$(codesign --verify --strict --verbose=2 "$MNT/CopyPaste.app" 2>&1)"; then
     ok "the bundle in the image verifies"
 else
@@ -169,9 +163,7 @@ done
 assess="$(spctl --assess --type execute --verbose=4 "$MNT/CopyPaste.app" 2>&1)"
 note "Gatekeeper says: $(printf '%s' "$assess" | tr '\n' ' ')"
 
-# ---------------------------------------------------------------------------
 group "Install, quarantine, postflight (ENFORCED)"
-# ---------------------------------------------------------------------------
 rm -rf "$APP"
 cp -R "$MNT/CopyPaste.app" "$APP"
 if APP_EXECUTABLE="$(macos_bundle_executable_path "$APP")"; then
@@ -212,9 +204,7 @@ fi
 signature="$(codesign --display --verbose=4 "$APP" 2>&1 | grep -iE 'Signature|Authority|TeamIdentifier' | tr '\n' ' ')"
 note "the installed bundle is signed: $signature"
 
-# ---------------------------------------------------------------------------
 group "The daemon inside the bundle (ENFORCED)"
-# ---------------------------------------------------------------------------
 # Run directly rather than through the app: this needs no window server, so a
 # failure here is the product rather than the runner. It is also the first time
 # the Keychain device-secret path runs in the configuration that ships.
@@ -260,9 +250,7 @@ fi
 "$CLI" shutdown >/dev/null 2>&1
 wait "$DAEMON_PID" 2>/dev/null
 
-# ---------------------------------------------------------------------------
 group "The app itself (REPORTED — needs a window server)"
-# ---------------------------------------------------------------------------
 # `open` rather than exec: it goes through LaunchServices, which is what a user
 # does and what Gatekeeper sees. The app is a menu-bar item with no dock icon,
 # so "it is still running after ten seconds and started its service" is the
@@ -308,9 +296,7 @@ else
     note "open(1) refused to launch the app" "$(cat "$LOGS/open.err")"
 fi
 
-# ---------------------------------------------------------------------------
 group "A re-signed binary and the Keychain (REPORTED)"
-# ---------------------------------------------------------------------------
 # An ad-hoc signature's designated requirement is its cdhash — which changes on
 # every build, so a Keychain ACL can stop matching and macOS can raise a prompt.
 # This check re-signs the daemon and reads again to catch that failure.
@@ -342,7 +328,6 @@ else
     bad "the installed app produced cloud account lifecycle evidence"
 fi
 
-# ---------------------------------------------------------------------------
 printf '\n%s\n' "-----------------------------------------------"
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
 if [[ "${#NOTES[@]}" -gt 0 ]]; then

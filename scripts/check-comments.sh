@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforce the CLAUDE.md rule 8 budgets.
+# Enforce the AGENTS.md rule 8 budgets.
 #
 # Three numbers, checked per file:
 #
@@ -174,7 +174,7 @@ print(f"baseline: {len(baseline)} file(s) recorded, {over_baseline} still over")
 
 if new:
     print()
-    print(f"{len(new)} file(s) over budget and not in the baseline (CLAUDE.md rule 8).")
+    print(f"{len(new)} file(s) over budget and not in the baseline (AGENTS.md rule 8).")
     print("Cut the comment to its reason. Do not add it to the baseline.")
     sys.exit(1)
 

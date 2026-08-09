@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Report source files over the CLAUDE.md rule 5 budget.
+# Report source files over the AGENTS.md rule 5 budget.
 #
 # Counts source lines only: everything before the `#[cfg(test)]` module.
 # A file may be 500 lines of code and 900 of tests and still be within budget.
@@ -49,5 +49,5 @@ echo
 if [ "$over" -eq 0 ]; then
     echo "All files within the ${TARGET}-line budget."
 else
-    echo "$over file(s) over the ${TARGET}-line budget (CLAUDE.md rule 5)."
+    echo "$over file(s) over the ${TARGET}-line budget (AGENTS.md rule 5)."
 fi

@@ -709,7 +709,7 @@ mod tests {
         assert_eq!(model.snapshot().dropped_clips, 5);
     }
 
-    /// CLAUDE.md rule 4: nothing shown to a user names a path. These strings
+    /// AGENTS.md rule 4: nothing shown to a user names a path. These strings
     /// are shown verbatim, so they are checked the same way `BackendError`'s
     /// are.
     #[test]

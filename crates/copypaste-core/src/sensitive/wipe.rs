@@ -9,7 +9,7 @@
 //! A row is deleted only if it was classified **at capture** (`is_sensitive =
 //! 1`) **and** its plaintext scans as [`Severity::HighConfidence`] **now**. The
 //! second gate reads the row rather than a stamped flag on purpose:
-//! `CLAUDE.md` rule 4 puts
+//! `AGENTS.md` rule 4 puts
 //! data loss above everything, and a persisted "may be deleted" bit written by a
 //! ruleset that has since changed is a decision nobody can review before it
 //! fires. Reading the plaintext also means an item whose confidence has dropped
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(raw_row_count(&f.store, &id), 1);
     }
 
-    /// `CLAUDE.md` rule 4: detection may flag, but only the high-confidence band
+    /// `AGENTS.md` rule 4: detection may flag, but only the high-confidence band
     /// may delete. An email address is flagged and must still be there.
     #[test]
     fn a_flagged_item_below_the_floor_is_never_wiped() {

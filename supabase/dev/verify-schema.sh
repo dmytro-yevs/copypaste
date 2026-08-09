@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
 # Apply the migrations to a throwaway PostgreSQL cluster and run the assertions
 # against it.
 #
@@ -14,7 +13,6 @@
 # Needs a PostgreSQL server installation (initdb, pg_ctl, psql). It touches no
 # system cluster: everything lives in a temporary directory that is removed on
 # exit, and the server listens on a unix socket inside it rather than on a port.
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -2,7 +2,7 @@
  * Nothing here may be re-authored in TypeScript. `report` arrives redacted by
  * `copypaste_ipc::redact::scrub_paths` — the one redactor — and building,
  * extending or reformatting it on this side would put a second one here
- * (CLAUDE.md rule 1, and rule 4's no-paths obligation).
+ * (AGENTS.md rule 1, and rule 4's no-paths obligation).
  */
 import { call } from "@/lib/ipcCall";
 import type { ServiceState } from "@/lib/ipc";

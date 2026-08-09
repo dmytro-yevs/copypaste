@@ -112,7 +112,7 @@ jobs:
       # cargo-deny, where an exception carries a written justification next to
       # it in deny.toml. Making them fatal here too would mean maintaining the
       # same ignore list in a second place with no reasons attached — which is
-      # the duplication CLAUDE.md rule 1 is about, applied to configuration.
+      # the duplication AGENTS.md rule 1 is about, applied to configuration.
       #
       # Division of labour: cargo-deny owns policy (licences, bans, sources,
       # and advisories-with-exceptions); cargo-audit owns the vulnerability

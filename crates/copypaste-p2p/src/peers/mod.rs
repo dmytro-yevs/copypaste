@@ -41,7 +41,7 @@ pub const PAIRING_CODE_TTL: Duration = Duration::from_secs(300);
 /// **A refusal, never an eviction.** Making room by dropping the oldest pairing
 /// would cut off a device the user still owns, and nothing on this end can put
 /// it back — the other half's key is gone and the two devices have to be paired
-/// again by hand. That is the data-loss-shaped outcome `CLAUDE.md` rule 4 rules
+/// again by hand. That is the data-loss-shaped outcome `AGENTS.md` rule 4 rules
 /// out, so a new pairing at the cap fails with
 /// [`PeerStoreError::TooManyPairings`] and the user unpairs something. An
 /// *existing* pairing is never refused: a rename, a new address and the

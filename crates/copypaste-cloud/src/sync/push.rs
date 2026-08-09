@@ -104,7 +104,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             if let Some(limit) = over_size_limit(&item) {
                 // Withheld, never deleted: the local copy is the durable one,
                 // and refusing to upload an item is not a reason to lose it
-                // (`CLAUDE.md` rule 4).
+                // (`AGENTS.md` rule 4).
                 stats.skipped_too_large += 1;
                 tracing::warn!(
                     item_id = %item.item_id,

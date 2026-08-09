@@ -22,7 +22,7 @@
 //! * **Constant-time comparison** of secrets via `subtle` (I-13).
 //! * **No panics on caller-supplied data.** Every failure is a typed `Result`
 //!   (I-14).
-//! * **Errors never contain a filesystem path** (`CLAUDE.md` rule 4), enforced
+//! * **Errors never contain a filesystem path** (`AGENTS.md` rule 4), enforced
 //!   structurally: [`CryptoError`]'s payloads are `&'static str`.
 //! * **Keystore naming is frozen** at `com.copypaste.daemon` /
 //!   `device-secret-key` (I-10).
@@ -40,7 +40,7 @@ pub(crate) use stream::{
 
 /// Every failure this module can produce.
 ///
-/// Payloads are `&'static str` on purpose: `CLAUDE.md` rule 4 forbids showing
+/// Payloads are `&'static str` on purpose: `AGENTS.md` rule 4 forbids showing
 /// users a filesystem path, and a `String` payload is an invitation to
 /// `format!` one in. A closed set of literals cannot leak.
 #[derive(Debug, thiserror::Error)]
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn error_messages_contain_no_paths() {
-        // CLAUDE.md rule 4: the type makes this structural, but pin the
+        // AGENTS.md rule 4: the type makes this structural, but pin the
         // rendered strings anyway.
         let errors = [
             CryptoError::AuthFailed,
