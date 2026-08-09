@@ -57,10 +57,9 @@ test("the raw transport error is not rendered anywhere", async () => {
 });
 
 /**
- * `XDG_DATA_HOME` is the knob the harness turns; the daemon resolves a project
- * directory underneath it, and only the daemon knows where. Found rather than
- * recomputed, so a second copy of `directories`' rules cannot disagree with the
- * first.
+ * The harness relocates the complete data directory, and only the daemon knows
+ * which files it creates there. Found rather than recomputed, so the test does
+ * not grow a second copy of the storage layout.
  */
 function dataDirOf(home: string): string {
   for (const entry of readdirSync(home, { recursive: true }) as string[]) {
@@ -69,6 +68,33 @@ function dataDirOf(home: string): string {
     }
   }
   throw new Error("the daemon did not create a database under its data home");
+}
+
+async function writeUnusableSecret(dataDir: string): Promise<void> {
+  if (process.platform !== "win32") {
+    writeFileSync(path.join(dataDir, "device_secret.key"), Buffer.alloc(7));
+    return;
+  }
+
+  await execa(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Add-Type -AssemblyName System.Security; " +
+        "$entropy = [Text.Encoding]::UTF8.GetBytes('copypaste/v2/device-secret/dpapi-entropy'); " +
+        "$sealed = [Security.Cryptography.ProtectedData]::Protect([byte[]]::new(7), $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser); " +
+        "[IO.File]::WriteAllBytes($env:COPYPASTE_E2E_SECRET_PATH, $sealed)",
+    ],
+    {
+      env: {
+        ...process.env,
+        COPYPASTE_E2E_SECRET_PATH: path.join(dataDir, "device_secret.dpapi"),
+      },
+      timeout: 20_000,
+    },
+  );
 }
 
 /**
@@ -93,7 +119,7 @@ describe("a startup failure no retry can clear", () => {
       // Present and unusable: `read_secret` rejects a wrong-length entry as
       // `KeystoreEntryUnusable`, which is the condition that no retry, restart
       // or reinstall changes.
-      writeFileSync(path.join(dataDir, "device_secret.key"), Buffer.alloc(7));
+      await writeUnusableSecret(dataDir);
 
       halted = track(
         execa(daemonBinary(), ["--foreground", "--port", String(daemon.peerPort)], {

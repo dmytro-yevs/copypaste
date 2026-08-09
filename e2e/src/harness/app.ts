@@ -1,6 +1,7 @@
 import { execa } from "execa";
 import { remote } from "webdriverio";
 
+import { snapshotAndClearClipboard } from "./clipboard.js";
 import {
   DEV_SERVER_URL,
   NATIVE_DRIVER,
@@ -38,8 +39,24 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   requireDisplay();
   await requireDevServer();
 
-  const daemon = await startDaemon();
-  if (options.seed?.length) await daemon.addMany(options.seed);
+  const clipboard = await snapshotAndClearClipboard();
+  let daemon: Daemon;
+  try {
+    daemon = await startDaemon();
+  } catch (error) {
+    await clipboard.restore();
+    throw error;
+  }
+  try {
+    if (options.seed?.length) await daemon.addMany(options.seed);
+  } catch (error) {
+    try {
+      await daemon.stop();
+    } finally {
+      await clipboard.restore();
+    }
+    throw error;
+  }
 
   const driverPort = await freePort();
   const nativePort = await freePort();
@@ -66,7 +83,16 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
     ),
   );
 
-  await waitForDriver(driverPort, driver);
+  try {
+    await waitForDriver(driverPort, driver);
+  } catch (error) {
+    try {
+      await shutdown(driver, daemon);
+    } finally {
+      await clipboard.restore();
+    }
+    throw error;
+  }
 
   let browser: Browser;
   try {
@@ -86,7 +112,11 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       },
     });
   } catch (cause) {
-    await shutdown(driver, daemon);
+    try {
+      await shutdown(driver, daemon);
+    } finally {
+      await clipboard.restore();
+    }
     throw new Error(
       `could not open a WebDriver session against the app:\n${driver.log()}`,
       { cause },
@@ -104,7 +134,11 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
         browser.deleteSession().catch(() => undefined),
         sleep(10_000),
       ]);
-      await shutdown(driver, daemon);
+      try {
+        await shutdown(driver, daemon);
+      } finally {
+        await clipboard.restore();
+      }
     },
   };
 
