@@ -84,11 +84,15 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Status => Method::Status,
         Command::Shutdown => Method::Shutdown,
         Command::Pair { action } => match action {
-            PairAction::Create { name } => Method::PairCreate { name: name.clone() },
-            PairAction::Accept { code, addr } => Method::PairAccept {
+            PairAction::Create => Method::PairCreateInvite,
+            PairAction::Join { code, addr } => Method::PairJoin {
                 code: code.clone(),
                 addr: addr.clone(),
             },
+            PairAction::Progress => Method::PairProgress,
+            PairAction::Confirm => Method::PairConfirm { accept: true },
+            PairAction::Reject => Method::PairConfirm { accept: false },
+            PairAction::Cancel => Method::PairCancel,
         },
         Command::Peers => Method::Peers,
         Command::Unpair { pairing_id } => Method::Unpair {
@@ -609,29 +613,24 @@ mod tests {
     }
 
     #[test]
-    fn pair_create_defaults_its_name_and_accepts_one() {
+    fn pair_create_has_no_unused_peer_name() {
         match parse(&["copypaste", "pair", "create"]).command {
             Command::Pair {
-                action: PairAction::Create { name },
-            } => assert_eq!(name, "unnamed device"),
+                action: PairAction::Create,
+            } => {}
             other => panic!("{other:?}"),
         }
-        match parse(&["copypaste", "pair", "create", "--name", "phone"]).command {
-            Command::Pair {
-                action: PairAction::Create { name },
-            } => assert_eq!(name, "phone"),
-            other => panic!("{other:?}"),
-        }
+        assert!(Cli::try_parse_from(["copypaste", "pair", "create", "--name", "phone"]).is_err());
     }
 
     #[test]
-    fn pair_accept_requires_both_a_code_and_an_address() {
-        assert!(Cli::try_parse_from(["copypaste", "pair", "accept"]).is_err());
-        assert!(Cli::try_parse_from(["copypaste", "pair", "accept", "CODE"]).is_err());
+    fn pair_join_requires_both_a_code_and_an_address() {
+        assert!(Cli::try_parse_from(["copypaste", "pair", "join"]).is_err());
+        assert!(Cli::try_parse_from(["copypaste", "pair", "join", "CODE"]).is_err());
         match parse(&[
             "copypaste",
             "pair",
-            "accept",
+            "join",
             "ABCD-EFGH",
             "--addr",
             "127.0.0.1:47654",
@@ -639,12 +638,30 @@ mod tests {
         .command
         {
             Command::Pair {
-                action: PairAction::Accept { code, addr },
+                action: PairAction::Join { code, addr },
             } => {
                 assert_eq!(code, "ABCD-EFGH");
                 assert_eq!(addr, "127.0.0.1:47654");
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn pairing_decisions_are_explicit_subcommands() {
+        for (verb, expected) in [
+            ("progress", PairAction::Progress),
+            ("confirm", PairAction::Confirm),
+            ("reject", PairAction::Reject),
+            ("cancel", PairAction::Cancel),
+        ] {
+            let Command::Pair { action } = parse(&["copypaste", "pair", verb]).command else {
+                panic!("pair action did not parse");
+            };
+            assert_eq!(
+                std::mem::discriminant(&action),
+                std::mem::discriminant(&expected)
+            );
         }
     }
 
@@ -701,7 +718,7 @@ mod tests {
             ),
             (
                 vec!["copypaste", "pair", "create"],
-                r#""method":"pair_create""#,
+                r#""method":"pair_create_invite""#,
             ),
         ] {
             let method = method_for(&parse(&args).command).expect("a method");
@@ -724,8 +741,8 @@ mod tests {
                 pairing_id: pairing_id.clone(),
             },
             Command::Pair {
-                action: PairAction::Create { name },
-            } => Method::PairCreate { name: name.clone() },
+                action: PairAction::Create,
+            } => Method::PairCreateInvite,
             _ => return None,
         })
     }

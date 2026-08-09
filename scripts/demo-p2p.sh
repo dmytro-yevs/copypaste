@@ -103,8 +103,8 @@ a add "AKIAIOSFODNN7EXAMPLE"
 has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the secret was not stored on A"
 ok "stored on A, flagged by the detector"
 
-step "Pair: A mints a code, B accepts it at an explicit address"
-PAIR_OUT=$(a pair create --name device-b)
+step "Pair: A mints a code, both devices confirm the same SAS"
+PAIR_OUT=$(a pair create)
 CODE=$(printf '%s\n' "$PAIR_OUT" | awk '/^code /{print $2}')
 PAIRING_ID=$(printf '%s\n' "$PAIR_OUT" | awk '/^pairing id /{print $3}')
 [[ -n "$CODE" ]] || fail "no pairing code was printed"
@@ -112,15 +112,26 @@ PAIRING_ID=$(printf '%s\n' "$PAIR_OUT" | awk '/^pairing id /{print $3}')
 [[ "$CODE" != "$PAIRING_ID" ]] || fail "the code and the pairing id must not be the same value"
 ok "code minted (not echoed here — it is a secret)"
 
-b pair accept "$CODE" --addr "127.0.0.1:$A_PORT" || fail "pairing failed"
-ok "B paired with A over 127.0.0.1:$A_PORT"
+JOIN_OUT=$(b pair join "$CODE" --addr "127.0.0.1:$A_PORT") || fail "pairing failed"
+A_PROGRESS=$(a pair progress) || fail "A did not enter the pairing ceremony"
+B_SAS=$(printf '%s\n' "$JOIN_OUT" | awk '/^sas /{print $2}')
+A_SAS=$(printf '%s\n' "$A_PROGRESS" | awk '/^sas /{print $2}')
+[[ -n "$A_SAS" && "$A_SAS" == "$B_SAS" ]] || fail "the devices did not derive the same SAS"
+a pair confirm >/dev/null || fail "A could not confirm the pairing"
+b pair confirm >/dev/null || fail "B could not confirm the pairing"
+ok "both devices confirmed the handshake-bound SAS"
 
 step "Both devices list the pairing"
+for _ in $(seq 1 50); do
+    a peers | grep -q "$PAIRING_ID" && b peers | grep -q "$PAIRING_ID" && break
+    sleep 0.1
+done
 a peers | grep -q "$PAIRING_ID" || fail "A does not list the pairing"
 b peers | grep -q "$PAIRING_ID" || fail "B does not list the pairing"
 ok "pairing id $PAIRING_ID on both sides"
 
-step "Pairing itself ran one session, so the first three items are already across"
+step "The first sync carries the pre-pairing items"
+b sync >/dev/null || fail "the first sync failed"
 for item in "alpha one" "alpha two" "bravo one"; do
     has_item "$item" a || fail "A is missing '$item'"
     has_item "$item" b || fail "B is missing '$item'"
@@ -173,7 +184,7 @@ ok "idempotent: 0 sent, 0 received"
 step "A wrong pairing code cannot pair"
 BEFORE=$(b peers | grep -c "$PAIRING_ID" || true)
 WRONG="AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH-JJJJ-KKKK-MMMM-NNNN-PPPP"
-if b pair accept "$WRONG" --addr "127.0.0.1:$A_PORT" 2>/dev/null; then
+if b pair join "$WRONG" --addr "127.0.0.1:$A_PORT" 2>/dev/null; then
     fail "a wrong code was accepted"
 fi
 AFTER=$(b peers | grep -c "$PAIRING_ID" || true)
@@ -181,7 +192,7 @@ AFTER=$(b peers | grep -c "$PAIRING_ID" || true)
 ok "handshake refused, and nothing was persisted"
 
 step "A malformed code is refused before any connection is made"
-if b pair accept "not-a-code" --addr "127.0.0.1:$A_PORT" 2>/dev/null; then
+if b pair join "not-a-code" --addr "127.0.0.1:$A_PORT" 2>/dev/null; then
     fail "a malformed code was accepted"
 fi
 ok "refused"

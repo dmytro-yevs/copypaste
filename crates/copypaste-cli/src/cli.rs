@@ -325,23 +325,28 @@ pub(crate) enum PairAction {
     /// The code is a secret — anyone who has it can pair with this device — and
     /// it is shown exactly once. It is never written to a log or stored in
     /// readable form.
-    Create {
-        /// What to call the other device until it says its own name.
-        #[arg(long, short = 'n', default_value = "unnamed device")]
-        name: String,
-    },
+    Create,
 
-    /// Consume a code from another device and complete the pairing.
-    ///
-    /// The pairing is only kept if a sync session with that device succeeds, so
-    /// a wrong code or an unreachable address leaves nothing behind.
-    Accept {
+    /// Join the ceremony started on another device.
+    Join {
         /// The code shown by `copypaste pair create` on the other device.
         code: String,
         /// Where that device is listening, as `host:port`.
         #[arg(long, value_name = "HOST:PORT")]
         addr: String,
     },
+
+    /// Show the current ceremony state and handshake-bound security code.
+    Progress,
+
+    /// Confirm that the security code matches the other device.
+    Confirm,
+
+    /// Reject the current ceremony because the security code does not match.
+    Reject,
+
+    /// Cancel the current ceremony or unused invitation.
+    Cancel,
 }
 
 /// Turn the `config set` flags into a patch. Absent flags are absent fields, so

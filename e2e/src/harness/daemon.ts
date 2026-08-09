@@ -1,10 +1,7 @@
 import {
   mkdtempSync,
   mkdirSync,
-  readFileSync,
-  readdirSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { execa } from "execa";
@@ -38,8 +35,6 @@ export interface Daemon {
   kill(): Promise<void>;
   /** Start it again on the same data directory and the same peer port. */
   restart(): Promise<void>;
-  /** Move an unredeemed code past its deadline, preserving the native store format. */
-  expirePairing(pairingId: string): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -142,18 +137,6 @@ export async function startDaemon(): Promise<Daemon> {
     }
   }
 
-  function findPeerStore(directory: string): string | null {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const candidate = path.join(directory, entry.name);
-      if (entry.isFile() && entry.name === "peers.json") return candidate;
-      if (entry.isDirectory()) {
-        const found = findPeerStore(candidate);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-
   return {
     env: isolation,
     dataHome,
@@ -189,20 +172,6 @@ export async function startDaemon(): Promise<Daemon> {
     },
     async restart() {
       await child.stop();
-      child = await spawn();
-    },
-    async expirePairing(pairingId) {
-      await child.stop();
-      const storePath = findPeerStore(dataHome);
-      if (!storePath) throw new Error("the daemon did not create a peer store");
-      const store = JSON.parse(readFileSync(storePath, "utf8")) as {
-        pending?: Record<string, number>;
-      };
-      if (store.pending?.[pairingId] === undefined) {
-        throw new Error("the requested pairing is not pending");
-      }
-      store.pending[pairingId] = 1;
-      writeFileSync(storePath, JSON.stringify(store));
       child = await spawn();
     },
     async stop() {

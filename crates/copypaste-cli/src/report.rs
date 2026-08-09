@@ -76,19 +76,20 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
         },
         Command::Shutdown => out("the daemon is stopping"),
         Command::Pair { action } => match action {
-            PairAction::Create { .. } => {
+            PairAction::Create => {
                 let pairing = client::expect_pairing(data)?;
                 // The only place a code is ever rendered. Straight to stdout,
                 // never through the logger, and the daemon does not keep a copy
                 // that could be asked for again.
                 out(&render::pairing_text(&pairing));
             }
-            PairAction::Accept { .. } => {
-                let peers = client::expect_peers(data)?;
-                match peers.first() {
-                    Some(peer) => out(&format!("paired with {} ({})", peer.name, peer.pairing_id)),
-                    None => out("paired"),
-                }
+            PairAction::Join { .. }
+            | PairAction::Progress
+            | PairAction::Confirm
+            | PairAction::Reject
+            | PairAction::Cancel => {
+                let progress = client::expect_pairing_progress(data)?;
+                out(&render::pairing_progress_text(&progress));
             }
         },
         Command::Peers => {
