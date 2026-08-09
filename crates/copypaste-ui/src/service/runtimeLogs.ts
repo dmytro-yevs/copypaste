@@ -25,5 +25,5 @@ export interface RuntimeLogQuery {
 }
 
 export function getRuntimeLogEvents(query: RuntimeLogQuery): Promise<RuntimeLogPage> {
-  return call<RuntimeLogPage>("runtime_log_events", { ...query });
+  return call<RuntimeLogPage>("runtime_log_events", { query });
 }
