@@ -6,7 +6,12 @@ React — over a shared Rust core. On desktop the app talks to a local daemon; o
 Android it links the core in-process
 ([ADR-0003](docs/adr/0003-one-command-surface-two-backends.md)).
 
-**2.0.0-alpha.1, on `main`, unaudited.** CopyPaste is under active development.
+**Early v2 prerelease, on `main`, unaudited.** The
+[releases page](https://github.com/dmytro-yevs/copypaste/releases) lists v2
+prereleases newest first; GitHub's `releases/latest` redirect selects the
+legacy stable line. See the
+[Android installation notes](packaging/release-notes.md#android) for the current
+release asset. CopyPaste is under active development.
 Dependencies are the default; hand-rolled infrastructure needs a written reason.
 
 ## Status
