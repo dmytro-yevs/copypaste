@@ -176,12 +176,7 @@ async function shutdown(driver: Child, daemon: Daemon): Promise<void> {
  */
 async function assertReallyRunning(browser: Browser, driver: Child): Promise<void> {
   const capabilities = browser.capabilities as { browserName?: string };
-  if (capabilities.browserName !== "wry") {
-    throw new Error(
-      `expected the Tauri WebView ("wry"), got "${capabilities.browserName}". ` +
-        `The session is not the app under test.`,
-    );
-  }
+  assertTauriBrowserName(capabilities, process.platform);
 
   // An app stuck in a render loop never yields its main thread, so `execute`
   // does not return at all — the probe hangs instead of failing. Without this
@@ -204,6 +199,19 @@ async function assertReallyRunning(browser: Browser, driver: Child): Promise<voi
       ),
     ),
   ]);
+}
+
+export function assertTauriBrowserName(
+  capabilities: { browserName?: string },
+  platform: NodeJS.Platform,
+): void {
+  const expected = platform === "win32" ? "webview2" : "wry";
+  if (capabilities.browserName !== expected) {
+    throw new Error(
+      `expected the Tauri WebView ("${expected}"), got "${capabilities.browserName}". ` +
+        `The session is not the app under test.`,
+    );
+  }
 }
 
 async function probeUntilMounted(browser: Browser, driver: Child): Promise<void> {
