@@ -9,7 +9,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const uiPackagePath = join(repo, "crates/copypaste-ui/package.json");
 const requireFromUi = createRequire(pathToFileURL(uiPackagePath));
-const { applyEdits, modify, parse } = requireFromUi("jsonc-parser");
+
+function jsoncParser() {
+  return requireFromUi("jsonc-parser");
+}
 
 function semver() {
   return requireFromUi("semver");
@@ -102,6 +105,7 @@ export function resolveIdentity() {
 }
 
 function updateAndroidConfig(source, product) {
+  const { applyEdits, modify } = jsoncParser();
   let updated = source;
   const fields = [
     [["identifier"], product.releaseApplicationId],
@@ -156,7 +160,7 @@ export function resolveMetadata(versionOverride) {
   if (tauri.version !== "../package.json") {
     throw new Error(`tauri.conf.json must resolve version through ../package.json`);
   }
-  const android = parse(readFileSync(androidPath, "utf8"));
+  const android = jsoncParser().parse(readFileSync(androidPath, "utf8"));
   if (android?.identifier !== product.releaseApplicationId
       || android?.bundle?.android?.versionCode !== versionCodeFor(product.versionName)
       || android?.bundle?.android?.debugApplicationIdSuffix !== product.debugApplicationIdSuffix) {
