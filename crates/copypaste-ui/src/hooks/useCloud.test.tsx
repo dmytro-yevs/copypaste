@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -8,13 +9,15 @@ import {
   useCloudSignIn,
   useCloudSignOut,
   useCloudStatus,
+  useCloudSyncNow,
 } from "@/hooks/useCloud";
-import type { CloudStatusData } from "@/lib/ipc";
+import type { CloudStatusData, CloudSyncData } from "@/lib/ipc";
 import { testClient } from "@/test/harness";
 
 const getCloudStatus = vi.fn();
 const cloudSignIn = vi.fn();
 const cloudSignOut = vi.fn();
+const syncCloudNow = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -23,6 +26,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     getCloudStatus: () => getCloudStatus(),
     cloudSignIn: (credentials: unknown) => cloudSignIn(credentials),
     cloudSignOut: () => cloudSignOut(),
+    syncCloudNow: () => syncCloudNow(),
   };
 });
 
@@ -47,6 +51,21 @@ function cloudStatus(overrides: Partial<CloudStatusData> = {}): CloudStatusData 
   };
 }
 
+function cloudSync(overrides: Partial<CloudSyncData> = {}): CloudSyncData {
+  return {
+    uploaded: 2,
+    tombstoned: 0,
+    downloaded: 3,
+    applied: 3,
+    skipped_sensitive: 0,
+    skipped_undecryptable: 0,
+    skipped_forged: 0,
+    skipped_future: 0,
+    skipped_too_large: 0,
+    ...overrides,
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -65,6 +84,49 @@ beforeEach(() => {
   getCloudStatus.mockReset();
   cloudSignIn.mockReset();
   cloudSignOut.mockReset();
+  syncCloudNow.mockReset();
+  vi.mocked(toast.success).mockReset();
+  vi.mocked(toast.warning).mockReset();
+});
+
+describe("cloud sync completion toast", () => {
+  it("keeps a skipped-row warning available for accessibility scans", async () => {
+    syncCloudNow.mockResolvedValue(cloudSync({
+      skipped_sensitive: 1,
+      skipped_undecryptable: 2,
+    }));
+    const client = testClient();
+    const { result } = renderHook(() => useCloudSyncNow(), {
+      wrapper: wrapper(client),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync();
+    });
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      "Cloud sync finished: 2 uploaded, 3 downloaded, 3 skipped",
+      { duration: 12_000 },
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("keeps zero-skip completion on the normal success toast", async () => {
+    syncCloudNow.mockResolvedValue(cloudSync());
+    const client = testClient();
+    const { result } = renderHook(() => useCloudSyncNow(), {
+      wrapper: wrapper(client),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync();
+    });
+
+    expect(toast.success).toHaveBeenCalledWith(
+      "Cloud sync finished: 2 uploaded, 3 downloaded",
+    );
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
 });
 
 describe("cloud status cache mutation ordering", () => {

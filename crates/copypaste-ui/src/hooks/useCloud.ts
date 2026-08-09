@@ -15,6 +15,7 @@ import {
 } from "@/lib/ipc";
 
 export const CLOUD_STATUS_KEY = ["cloud-status"] as const;
+const SKIPPED_SYNC_TOAST_DURATION_MS = 12_000;
 
 export function useCloudStatus() {
   return useQuery<CloudStatusData>({
@@ -71,16 +72,23 @@ export function useCloudSyncNow() {
     mutationFn: syncCloudNow,
     onSuccess: (result) => {
       const skipped = withheld(result);
-      const key = skipped === 0
-        ? "settings.sync.cloud.toast.synced"
-        : "settings.sync.cloud.toast.syncedWithSkips";
-      toast[skipped === 0 ? "success" : "warning"](
-        t(key, {
-          uploaded: result.uploaded,
-          downloaded: result.downloaded,
-          skipped,
-        }),
-      );
+      if (skipped === 0) {
+        toast.success(
+          t("settings.sync.cloud.toast.synced", {
+            uploaded: result.uploaded,
+            downloaded: result.downloaded,
+          }),
+        );
+      } else {
+        toast.warning(
+          t("settings.sync.cloud.toast.syncedWithSkips", {
+            uploaded: result.uploaded,
+            downloaded: result.downloaded,
+            skipped,
+          }),
+          { duration: SKIPPED_SYNC_TOAST_DURATION_MS },
+        );
+      }
       void qc.invalidateQueries({ queryKey: CLOUD_STATUS_KEY });
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
     },
