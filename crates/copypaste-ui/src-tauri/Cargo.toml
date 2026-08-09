@@ -48,7 +48,7 @@ tokio.workspace = true
 # The one retry implementation in the workspace (CLAUDE.md rule 1). Used for
 # the bounded wait after starting the background service.
 backon.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 futures-util = { workspace = true, features = ["sink"] }
 serde.workspace = true
 serde_json.workspace = true
