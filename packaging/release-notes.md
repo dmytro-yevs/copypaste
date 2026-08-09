@@ -16,8 +16,42 @@ brew install --cask copypaste     # the app
 brew install copypaste-cli        # the CLI and daemon
 ```
 
-**Android:** download the `.apk` attached below and open it. Android will ask
-you to allow installing from this source.
+### Android
+
+On the [releases page](https://github.com/dmytro-yevs/copypaste/releases), open
+the newest v2 prerelease rather than GitHub's legacy **Latest** release. Download
+its `CopyPaste-…-android.apk` asset as `CopyPaste-android.apk` in the directory
+where you run `adb`, then install or update it with:
+
+```sh
+adb install -r ./CopyPaste-android.apk
+```
+
+This is not an upgrade from v0.4. The v0.4 app is
+`com.copypaste.android`; v2 is `com.copypaste.app`, starts with new history and
+pairings, and can remain installed beside v0.4.
+
+Only v2 alpha.1 or a local/debug APK installed as `com.copypaste.app` with an
+incompatible key needs a one-time uninstall. If installation reports
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, inspect every Android user, including a
+work profile, before removing anything:
+
+```sh
+adb shell pm list users
+adb shell pm list packages --user 0 com.copypaste.app
+adb shell pm list packages --user 10 com.copypaste.app  # repeat for each listed ID
+```
+
+**Uninstalling erases that v2 install's history, pairings and settings for all
+users and profiles.** Do not uninstall `com.copypaste.android`; remove only the
+incompatibly signed v2 package, then rerun the install command above:
+
+```sh
+adb uninstall com.copypaste.app
+```
+
+Future debug builds use `com.copypaste.app.debug`, so they do not replace the
+release app.
 
 The current publish workflow does not attach a Windows installer.
 
