@@ -34,7 +34,7 @@ pub enum RestoreError {
 /// Open `path` with `db_key` and prove the key works before returning.
 ///
 /// Fails closed: a key that does not open the file is [`StoreError::InvalidKey`],
-/// never a fallback to an unkeyed read (CLAUDE.md rule 4).
+/// never a fallback to an unkeyed read (AGENTS.md rule 4).
 ///
 /// **No migration is run.** That is the point of the "validating" half — a
 /// candidate file is inspected as it stands, and a file this build has never

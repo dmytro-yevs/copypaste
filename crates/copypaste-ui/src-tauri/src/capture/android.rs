@@ -82,9 +82,7 @@ pub struct AndroidCapture {
     model: Mutex<CaptureModel>,
 }
 
-// ---------------------------------------------------------------------------
 // the wire to Kotlin
-// ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -3,7 +3,7 @@
 //! Here rather than in the daemon because Android has no daemon: the app links
 //! this crate in its own process and calls the same two functions the IPC
 //! handlers call. A second export that forgot a skip count, or a second import
-//! that trusted the file's `is_sensitive`, is the drift CLAUDE.md rule 1 exists
+//! that trusted the file's `is_sensitive`, is the drift AGENTS.md rule 1 exists
 //! to stop — and the second of those is a security regression, not a cosmetic
 //! one.
 //!

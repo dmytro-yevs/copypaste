@@ -3,8 +3,8 @@
 //! Two questions, one answer source: where should a peer dial this device, and
 //! is that address on the wire in fact ours? `getifaddrs(3)` behind a
 //! maintained crate rather than a `SIOCGIFCONF` walk or the "connect a UDP
-//! socket and read its local end" trick; it covers macOS and Android, which is
-//! the whole of CLAUDE.md rule 7.
+//! socket and read its local end" trick; the crate-backed enumeration works on
+//! all three shipped platforms (AGENTS.md rule 7).
 
 use std::net::IpAddr;
 use std::sync::Mutex;

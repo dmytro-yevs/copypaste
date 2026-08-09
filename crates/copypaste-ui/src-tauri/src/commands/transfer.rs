@@ -5,7 +5,7 @@
 //!
 //! Every one of these needs a file, and a file needs a path. The path is
 //! obtained here, from the platform's own panel, and used here; the WebView is
-//! given counts and an opaque one-use token, never a path. That is CLAUDE.md
+//! given counts and an opaque one-use token, never a path. That is AGENTS.md
 //! rule 4 held structurally rather than by remembering: there is no path field
 //! for React to pass or render, so no authored string and no error can end up
 //! carrying the user's home directory.

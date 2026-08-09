@@ -70,7 +70,7 @@ const VALUE_STOPWORDS: &[&str] = &[
 ///   auto-wiped it (one of the two FPs v1's 5 % budget absorbed, §7.7). A value
 ///   containing `(`, `)`, `'`, `"`, `` ` ``, `<`, `>`, or opening with
 ///   `$`/`${`/`{{` is code or a template reference, and biasing toward "not a
-///   secret" is what CLAUDE.md rule 4 and manifest I1 require. Neither the
+///   secret" is what AGENTS.md rule 4 and manifest I1 require. Neither the
 ///   code-shape nor the stopword rejection is in §5.3; both are v2 additions,
 ///   so where they contradict §5.3 the manifest wins.
 /// * **Stopwords** (§5.6).

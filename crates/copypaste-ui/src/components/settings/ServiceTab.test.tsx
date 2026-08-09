@@ -349,7 +349,7 @@ describe("the sensitive-content sweep", () => {
   });
 
   /** Turning it on is turning on an unrecoverable delete. The control has to
-   *  say that where the user is looking (CLAUDE.md rule 4). */
+   *  say that where the user is looking (AGENTS.md rule 4). */
   it("states what turning it on costs, at the control", async () => {
     getConfig.mockResolvedValue(applied({ sensitive_ttl_secs: 30 }));
     withUser(<ServiceTab />);

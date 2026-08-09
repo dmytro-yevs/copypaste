@@ -20,9 +20,7 @@
 #     C. The include points at the files in this repository — never a copy,
 #     which would pass while the tree rotted.
 #
-# ---------------------------------------------------------------------------
 # The drift cost, stated
-# ---------------------------------------------------------------------------
 # The generated crate mirrors the surface those two files reach for outside
 # themselves: `crypto::{CryptoError, KEY_LEN}`, `crypto::keys::random_secret`,
 # and the slice of `AppState` that `notify.rs` reads. If `keystore/mod.rs`
@@ -76,9 +74,7 @@ if cargo +1.96 --version >/dev/null 2>&1; then
     TOOLCHAIN="--toolchain 1.96"
 fi
 
-# ---------------------------------------------------------------------------
 group "Preflight"
-# ---------------------------------------------------------------------------
 if ! command -v cargo >/dev/null 2>&1; then
     bad "cargo is on PATH"
     exit 1
@@ -97,9 +93,7 @@ else
     exit 1
 fi
 
-# ---------------------------------------------------------------------------
 group "The harness pins what the workspace builds"
-# ---------------------------------------------------------------------------
 # Read the requirement out of [workspace.dependencies] rather than Cargo.lock:
 # the lock holds two objc2 majors, because Tauri brings its own.
 workspace_req() {
@@ -128,10 +122,8 @@ pin_matches objc2-foundation "$PIN_OBJC2_FOUNDATION"
 pin_matches objc2-app-kit    "$PIN_OBJC2_APP_KIT"
 pin_matches security-framework "$PIN_SECURITY_FRAMEWORK"
 
-# ---------------------------------------------------------------------------
 # Generate the crate. Quoted heredocs, with @REPO@ substituted afterwards, so
 # nothing in the Rust below is interpreted by the shell.
-# ---------------------------------------------------------------------------
 write_harness() {
     local dir="$1"
     rm -rf "$dir"
@@ -298,9 +290,7 @@ run_harness() {
         $CARGO clippy --target "$TARGET" --all-targets -- -D warnings 2>&1 )
 }
 
-# ---------------------------------------------------------------------------
 group "copypaste-ipc, checked directly (no stub)"
-# ---------------------------------------------------------------------------
 # Pure Rust all the way down, so the real crate compiles for Darwin as it is.
 # This verifies the shared IPC crate for Darwin.
 if out="$($CARGO check -p copypaste-ipc --all-targets --target "$TARGET" --locked 2>&1)"; then
@@ -309,9 +299,7 @@ else
     bad "copypaste-ipc compiles for $TARGET" "$out"
 fi
 
-# ---------------------------------------------------------------------------
 group "clipboard/macos.rs, keystore/macos.rs and notify.rs"
-# ---------------------------------------------------------------------------
 write_harness "$HARNESS"
 if out="$(run_harness "$HARNESS")"; then
     ok "the macOS-only files compile for $TARGET, tests included, clippy-clean"
@@ -319,7 +307,6 @@ else
     bad "the macOS-only files compile for $TARGET, tests included, clippy-clean" "$out"
 fi
 
-# ---------------------------------------------------------------------------
 if [[ "${1:-}" == "--self-test" ]]; then
     group "self-test: the check can still fail"
 
@@ -361,7 +348,6 @@ if [[ "${1:-}" == "--self-test" ]]; then
     rm -rf "$WORK/selftest-stub" "$WORK/selftest-clipboard"
 fi
 
-# ---------------------------------------------------------------------------
 printf '\n%s\n' "-----------------------------------------------"
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1

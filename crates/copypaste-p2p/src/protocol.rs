@@ -222,7 +222,7 @@ pub enum SyncMessage {
 
 /// Wire-level failures.
 ///
-/// No variant carries a filesystem path or any item content (CLAUDE.md rule 4,
+/// No variant carries a filesystem path or any item content (AGENTS.md rule 4,
 /// and the log-hygiene rule in manifest 05 §4.7): these strings are shown to
 /// users and written to logs.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

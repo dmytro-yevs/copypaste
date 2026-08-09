@@ -270,7 +270,7 @@ impl ClipboardSource for MacOsClipboard {
             if !ok {
                 // §3.3 step 5.
                 self.tracker.sentinel.clear();
-                // I-9 / CLAUDE.md rule 4: no paths, no content.
+                // I-9 / AGENTS.md rule 4: no paths, no content.
                 return Err(anyhow::anyhow!("the pasteboard rejected the write"));
             }
 
@@ -355,9 +355,7 @@ impl ClipboardSource for MacOsClipboard {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tests — the half of manifest 01 that only a Mac can answer
-// ---------------------------------------------------------------------------
 //
 // `super::change` made the state machine testable anywhere. What stayed
 // untestable is this file: whether `changeCount` moves at all without a window

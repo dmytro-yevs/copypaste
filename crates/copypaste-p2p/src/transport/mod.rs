@@ -7,7 +7,7 @@
 //! * **No secret in `Debug`, `Display` or any log line.** [`PairingToken`]'s
 //!   `Debug` prints its `pairing_id` and nothing else; [`Session`]'s prints the
 //!   peer address. Tests pin both.
-//! * **No filesystem path in any error** (`CLAUDE.md` rule 4). Structurally
+//! * **No filesystem path in any error** (`AGENTS.md` rule 4). Structurally
 //!   enforced: no variant of [`TransportError`] has a payload that can hold
 //!   one, and this module never opens a file.
 //! * **Constant-time comparison of secrets** via `subtle` (port manifest 02,

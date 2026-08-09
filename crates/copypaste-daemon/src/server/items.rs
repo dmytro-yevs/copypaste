@@ -377,7 +377,7 @@ fn to_wire_with(
     detector: &copypaste_core::Detector,
 ) -> Result<(Item, Vec<u8>), copypaste_core::CryptoError> {
     // The item id is the AAD: a row decrypted under another row's identity must
-    // fail authentication, not fall back to a plaintext read (CLAUDE.md rule 4,
+    // fail authentication, not fall back to a plaintext read (AGENTS.md rule 4,
     // "fail closed on crypto").
     let plaintext = if copypaste_ipc::content_type::is_binary(&row.content_type) {
         copypaste_core::open_binary(&row.content_ciphertext, key, &row.id)?
@@ -722,7 +722,7 @@ mod tests {
     ///
     /// The store keeps it out of the FTS index at write time; this covers the
     /// server's read-time layer, which is what protects a database written
-    /// before the rule existed (CLAUDE.md rule 4 — "enforced at write time, at
+    /// before the rule existed (AGENTS.md rule 4 — "enforced at write time, at
     /// read time, and by a purge migration").
     /// Reading must never have the side effect of copying: `get` returns the
     /// content, and the clipboard is untouched by it.

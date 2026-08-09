@@ -19,7 +19,7 @@ use copypaste_ipc::{DiscoveredDevice, Item, PairingData, PeerInfo, SyncResult};
 /// Stand-in printed instead of a sensitive item's content.
 ///
 /// The list view must never render the plaintext of an item the detector
-/// flagged (CLAUDE.md rule 4 / port manifest 07 I9). Spelled the same way the
+/// flagged (AGENTS.md rule 4 / port manifest 07 I9). Spelled the same way the
 /// core redactor spells it so the two read as one convention.
 pub const REDACTED: &str = "***REDACTED***";
 

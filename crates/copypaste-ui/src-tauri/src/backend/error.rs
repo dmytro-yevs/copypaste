@@ -3,7 +3,7 @@
 //! # Rule 1 — no filesystem path reaches a user
 //!
 //! The daemon socket lives under the user's home directory, so its path spells
-//! out the local username (CLAUDE.md rule 4, manifest 06). Everything that
+//! out the local username (AGENTS.md rule 4, manifest 06). Everything that
 //! arrives from outside this crate is passed through
 //! [`copypaste_ipc::redact::scrub_paths`] — the module every client shares,
 //! never a second copy of it — on the way in, at

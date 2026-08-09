@@ -7,7 +7,7 @@
 //!
 //! Every string here is shown verbatim — `CaptureSnapshot::headline` is not a
 //! code the view translates — so each is a complete sentence, names no
-//! filesystem path (CLAUDE.md rule 4), and points at nothing that does not
+//! filesystem path (AGENTS.md rule 4), and points at nothing that does not
 //! work. v1's did the last of those wrong: it told users to "enable
 //! AccessibilityService instead", which is not a clipboard exemption and which
 //! v1 had not implemented.
@@ -104,7 +104,7 @@ pub(super) fn detail(platform: Rung, health: CaptureHealth) -> Option<&'static s
 mod tests {
     use super::*;
 
-    /// CLAUDE.md rule 4: nothing shown to a user names a path. These strings
+    /// AGENTS.md rule 4: nothing shown to a user names a path. These strings
     /// are shown verbatim, so they are checked the same way `BackendError`'s
     /// are.
     #[test]

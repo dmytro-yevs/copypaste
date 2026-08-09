@@ -2,7 +2,7 @@
 //!
 //! Every variant's `Display` is a fixed sentence with no interpolation. These
 //! reach a peer's log and a user's screen, so none of them may carry a
-//! filesystem path (CLAUDE.md rule 4) and none may describe *how* a pairing
+//! filesystem path (AGENTS.md rule 4) and none may describe *how* a pairing
 //! code was wrong — the input is a secret, and saying which part failed is a
 //! hint about what a valid one looks like.
 

@@ -5,7 +5,7 @@
 //! twenty-six places across four crates — with two different opinions about
 //! what counts as text already in the tree (`server::transfer::is_text` accepts
 //! a `text/` prefix, `copypaste_cloud::sync::push::over_size_limit` does not).
-//! That is the shape CLAUDE.md rule 1 is about, and it is the first thing that
+//! That is the shape AGENTS.md rule 1 is about, and it is the first thing that
 //! would break under image, file and rich-text capture, where the question
 //! "is this text?" stops having an obvious answer.
 //!

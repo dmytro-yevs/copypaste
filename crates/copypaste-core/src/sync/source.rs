@@ -54,7 +54,7 @@ const RETENTION_DEBOUNCE: Duration = Duration::from_millis(250);
 /// a burst coalesces onto a trailing run scheduled on the reactor, which is
 /// what makes the bound hold when a session ends by error or disconnect and not
 /// only when it ends by agreement. Sweeping later can only delete less, later,
-/// which is the safe direction under CLAUDE.md rule 4 — skipping the trailing
+/// which is the safe direction under AGENTS.md rule 4 — skipping the trailing
 /// run is not, so with no reactor to carry it the sweep happens inline instead.
 #[derive(Default)]
 struct RetentionGate {

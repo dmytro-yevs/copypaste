@@ -93,7 +93,7 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 ///
 /// Best-effort, and deliberately never fatal to a tick: the sweep deletes user
 /// data, so a failure must leave the data alone and retry, not stop capture
-/// (CLAUDE.md rule 4). `0` disables it, and that is the default until a user
+/// (AGENTS.md rule 4). `0` disables it, and that is the default until a user
 /// asks for it — `copypaste_ipc::ConfigData::sensitive_ttl_secs` records why,
 /// and what would justify turning it back on out of the box.
 fn sweep_sensitive_items(state: &AppState) {

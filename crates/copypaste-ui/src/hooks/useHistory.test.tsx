@@ -215,7 +215,7 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
    * *between* the two fetches — the ordinary case for a clipboard manager — and
    * the second page must neither repeat a row the user has already seen nor
    * skip one they have not. A skipped row is data loss from the user's side
-   * even though it is still on disk (CLAUDE.md rule 4).
+   * even though it is still on disk (AGENTS.md rule 4).
    *
    * The service is modelled as a real keyset walk over a list that grows at the
    * top: the cursor names a position, so rows prepended after it was issued are

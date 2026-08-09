@@ -6,7 +6,7 @@
 //! those rows again: their plaintext stays in `clipboard_fts` — the one table
 //! not under the item AEAD — for as long as the item lives. Two detector fixes
 //! landed on 2026-07-30 (security review F-1, F-2), so this is a live gap, not a
-//! hypothetical one. `CLAUDE.md` rule 4 has promised this pass since before it
+//! hypothetical one. `AGENTS.md` rule 4 has promised this pass since before it
 //! existed, and so do `copypaste-ipc`'s and the daemon's item payloads.
 //!
 //! # It removes from the index, and only from the index
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(s.search("shopping", 10).unwrap().len(), 1);
     }
 
-    /// `CLAUDE.md` rule 4. The re-derived verdict may take an index entry and
+    /// `AGENTS.md` rule 4. The re-derived verdict may take an index entry and
     /// may take nothing else — the item is still there, still readable, still
     /// listed.
     #[test]

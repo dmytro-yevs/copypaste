@@ -6,7 +6,7 @@
  * pairing code, which is the long-term Noise pre-shared key: after an unpair it
  * still enrols the pairing, and after a revoke the pairing id is refused for
  * ever (`PeerStore::revoke`, `CopyPaste-gbo`). So this dialog names the code
- * first, and it does not merely ask "are you sure": CLAUDE.md rule 4 makes an
+ * first, and it does not merely ask "are you sure": AGENTS.md rule 4 makes an
  * unrecoverable action one that has to say what is lost.
  *
  * It carries more weight than the unpair confirmation deliberately — an

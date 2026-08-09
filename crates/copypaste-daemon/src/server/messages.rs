@@ -2,7 +2,7 @@
 //! that turn an internal failure into one of them.
 //!
 //! **Errors never carry a filesystem path.** The socket path discloses the
-//! local username (CLAUDE.md rule 4), and a `StoreError` from SQLite routinely
+//! local username (AGENTS.md rule 4), and a `StoreError` from SQLite routinely
 //! embeds the database path. Every failure is therefore mapped to one of the
 //! fixed sentences below; the underlying error goes to the local log and never
 //! onto the wire.
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn error_messages_never_disclose_a_path() {
-        // CLAUDE.md rule 4. The socket path contains the local username, and
+        // AGENTS.md rule 4. The socket path contains the local username, and
         // the database path is right next to it; the cheapest way to keep both
         // off the wire is to keep every separator out of every message.
         for message in ALL_MESSAGES {

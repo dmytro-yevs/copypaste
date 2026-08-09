@@ -1,5 +1,5 @@
 /**
- * INV-35 has a UI or it has nothing (CLAUDE.md rule 6): a protection nobody can
+ * INV-35 has a UI or it has nothing (AGENTS.md rule 6): a protection nobody can
  * turn off for a support call gets turned off by uninstalling the app, and one
  * nobody can find protects only the people who went looking.
  *

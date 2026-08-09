@@ -1,6 +1,6 @@
 /**
  * `sensitive_ttl_secs` ships at `0` because a silent irreversible delete is
- * CLAUDE.md rule 4's worst outcome — v1 shipped 30 seconds beside a tab that
+ * AGENTS.md rule 4's worst outcome — v1 shipped 30 seconds beside a tab that
  * showed the sweep had run, v2 carried the number without the interface. This
  * is that interface, and the note names where the deletions are reported.
  */

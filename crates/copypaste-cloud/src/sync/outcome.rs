@@ -5,9 +5,7 @@
 //! — a caller matches on one or reads the other, and neither is useful without
 //! knowing what the other can say.
 
-// ---------------------------------------------------------------------------
 // Results
-// ---------------------------------------------------------------------------
 
 /// What one push, pull or sync did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -57,15 +55,13 @@ impl SyncStats {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 /// Sync failures.
 ///
 /// Every payload is a `&'static str`, so no variant can carry a filesystem
 /// path, an access token, a refresh token, a passphrase or row content. That is
-/// `CLAUDE.md` rule 4 enforced by the type rather than by review. Implementors
+/// `AGENTS.md` rule 4 enforced by the type rather than by review. Implementors
 /// of [`CloudSource`](super::CloudSource) must hold to the same rule when they
 /// build [`SyncError::Source`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

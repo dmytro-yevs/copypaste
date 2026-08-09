@@ -54,7 +54,7 @@ struct Connection {
 impl Connection {
     async fn open(path: &Path, deadline: Instant) -> Result<Self, CliError> {
         // The path is never surfaced to the user: it discloses the local
-        // username (CLAUDE.md rule 4). Every failure here collapses to one
+        // username (AGENTS.md rule 4). Every failure here collapses to one
         // pathless variant.
         let stream = before(deadline, transport::connect(path))
             .await?

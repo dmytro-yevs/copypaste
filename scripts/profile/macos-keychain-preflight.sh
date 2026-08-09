@@ -50,7 +50,7 @@ security show-keychain-info "$HOME/Library/Keychains/login.keychain-db" 2>&1 |
 
 head_ "Is there a real install on this Mac?"
 # The question that decides whether the device-secret item may be touched at
-# all. Deleting it leaves an installed history unopenable, and CLAUDE.md rule 4
+# all. Deleting it leaves an installed history unopenable, and AGENTS.md rule 4
 # puts data loss above every other outcome.
 if [ -f "$REAL_DATA_DIR/copypaste-v2.db" ]; then
     say "YES — a v2 history database is in the application-support directory."
@@ -104,10 +104,8 @@ else
     say "none — selfsign.sh has not run on this machine"
 fi
 
-# ---------------------------------------------------------------------------
 # Does the daemon start? Bounded, and told apart from the three things that
 # look the same from outside: halted, exited, still waiting on a prompt.
-# ---------------------------------------------------------------------------
 probe_start() {
     local dir pid i
     dir="$(mktemp -d)"

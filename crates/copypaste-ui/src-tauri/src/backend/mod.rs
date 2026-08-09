@@ -15,7 +15,7 @@
 //!
 //! * every operation is declared once, here, in terms of [`copypaste_ipc`]
 //!   types — the single model of the contract that the daemon and the CLI also
-//!   use, so there is no second set of DTOs (CLAUDE.md rule 1);
+//!   use, so there is no second set of DTOs (AGENTS.md rule 1);
 //! * `crate::commands` is written against the trait and contains **no `cfg`
 //!   at all**, so the `#[tauri::command]` signatures are literally the same
 //!   text on both platforms;
@@ -38,7 +38,7 @@
 //! properties hold by construction:
 //!
 //! * **No filesystem path ever reaches one.** The socket path discloses the
-//!   local username (CLAUDE.md rule 4). Anything that originates outside this
+//!   local username (AGENTS.md rule 4). Anything that originates outside this
 //!   crate goes through [`copypaste_ipc::redact::scrub_paths`] — the shared
 //!   module, not a second copy of it.
 //! * **No error carries content.** A failure to decrypt or store an item names
@@ -104,7 +104,7 @@ impl From<copypaste_ipc::ItemPage> for Page {
 ///
 /// The method set is the CLI's verb set, which is deliberate: the CLI is the
 /// scripting and test surface for the same daemon, so any operation it can
-/// reach and the app cannot is a feature with no UI (CLAUDE.md rule 6).
+/// reach and the app cannot is a feature with no UI (AGENTS.md rule 6).
 ///
 /// `async fn` in a trait rather than `#[async_trait]`: the backend is chosen at
 /// compile time by [`SelectedBackend`], so there is never a trait object and
@@ -311,9 +311,7 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
     async fn watch(&self) -> Result<Receiver<EventData>>;
 }
 
-// ---------------------------------------------------------------------------
 // selection
-// ---------------------------------------------------------------------------
 
 // The predicate names the feature as well as the target so the Android path is
 // type-checkable on a Linux host (`--features embedded-backend`). Without that

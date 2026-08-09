@@ -154,9 +154,7 @@ fn log_unparseable(text: &str) {
     tracing::warn!(len = text.len(), "realtime frame could not be parsed");
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 //
 // Frames are strings; nothing here opens a socket.
 

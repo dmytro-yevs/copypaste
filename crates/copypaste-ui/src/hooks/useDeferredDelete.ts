@@ -1,5 +1,5 @@
 /**
- * Delete with an undo window (§3.1.8; CLAUDE.md rule 4 — data loss is the worst
+ * Delete with an undo window (§3.1.8; AGENTS.md rule 4 — data loss is the worst
  * outcome). The row goes at once, the IPC fires 5000ms later, a second delete
  * commits the first immediately, and anything pending is committed on unmount
  * so nothing is silently left undeleted (F11).

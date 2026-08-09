@@ -27,7 +27,7 @@ pub struct AppState {
     /// peer listener runs, and the device secret is not `Clone` on purpose.
     pub keyring: Arc<Keyring>,
     /// `Arc` because the cloud upload gate holds one too. A second `Detector`
-    /// would be a second ruleset (CLAUDE.md rule 1) free to disagree with the
+    /// would be a second ruleset (AGENTS.md rule 1) free to disagree with the
     /// one capture uses.
     pub detector: Arc<Detector>,
     /// `std::sync::Mutex`, not `tokio`'s: the guard is never held across an

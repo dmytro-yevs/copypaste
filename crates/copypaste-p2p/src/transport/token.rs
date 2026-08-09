@@ -122,7 +122,7 @@ impl PairingToken {
     ///
     /// `BLAKE2s(domain || token)`, truncated to 128 bits — BLAKE2s because the
     /// Noise suite already provides it, so no second hash implementation enters
-    /// the tree (`CLAUDE.md` rule 1). One-way on purpose: recovering the token
+    /// the tree (`AGENTS.md` rule 1). One-way on purpose: recovering the token
     /// would mean preimaging a 256-bit random input, so the id is safe to log.
     /// It identifies a pairing; it does not stand in for it.
     #[must_use]

@@ -88,7 +88,7 @@ hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o "$OUT" -ov
 echo "==> Checksum"
 # Bare `shasum -a 256 <file>` embeds the full path, which then appears in the
 # published .sha256 and discloses the runner layout. cd into the directory so
-# the recorded name is just the filename. (CLAUDE.md rule 4: no paths in
+# the recorded name is just the filename. (AGENTS.md rule 4: no paths in
 # anything a user sees.)
 ( cd "$DIST" && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256" )
 cat "${OUT}.sha256"

@@ -267,7 +267,7 @@ impl ClipboardSource for FakeClipboard {
             if let Err(err) = std::fs::write(&watched.path, text.as_bytes()) {
                 // §3.3 step 5: a failed write must not leave a stale sentinel.
                 self.tracker.sentinel.clear();
-                // I-9 / CLAUDE.md rule 4: the message carries no path.
+                // I-9 / AGENTS.md rule 4: the message carries no path.
                 return Err(anyhow::anyhow!(
                     "could not write the fake clipboard file: {}",
                     err.kind()
@@ -306,9 +306,7 @@ impl ClipboardSource for FakeClipboard {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 //
 // These are the acceptance tests of manifest §5 that the port makes reachable.
 

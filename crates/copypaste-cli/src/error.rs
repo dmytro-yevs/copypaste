@@ -1,6 +1,6 @@
 //! CLI error type, exit-code mapping, and the user-facing message rules.
 //!
-//! Two rules from CLAUDE.md are enforced here rather than at each call site:
+//! Two rules from AGENTS.md are enforced here rather than at each call site:
 //!
 //! * **Errors shown to users must never contain paths** (rule 4). The daemon
 //!   socket lives under the user's home directory, so printing it discloses the
@@ -73,7 +73,7 @@ impl CliError {
         match self {
             CliError::DaemonUnreachable => {
                 // Deliberately no path: naming the socket would disclose the
-                // local username (CLAUDE.md rule 4).
+                // local username (AGENTS.md rule 4).
                 "cannot reach the CopyPaste daemon. Start it with `copypaste-daemon`, \
                  then run this command again."
                     .to_string()

@@ -15,7 +15,7 @@
 //! reported and the defaults are used, rather than refusing to start.
 //!
 //! **No error names the file.** [`ConfigError`] carries a field name and a
-//! bound, never a path (CLAUDE.md rule 4).
+//! bound, never a path (AGENTS.md rule 4).
 
 use serde::{Deserialize, Serialize};
 
@@ -75,7 +75,7 @@ pub enum Liveness {
 /// * `relay_url`, `sync_on_wifi_only`, `max_bandwidth_kbps`, `collect_public_ip`
 ///   — no relay and no STUN in v2.
 /// * `sqlite_cache_mb`, `config_version` — implementation detail, dead, and
-///   unnecessary without backward compatibility (CLAUDE.md rule 3).
+///   unnecessary without backward compatibility (AGENTS.md rule 3).
 ///
 /// `sound_on_copy` and `notify_on_copy` were absent for the same reason and are
 /// now present: parity finding 18 is built.
@@ -86,7 +86,7 @@ pub enum Liveness {
 /// index — so a threshold would have nothing to govern there. The only place a
 /// confidence number decides anything is the auto-wipe floor, and putting a
 /// slider on that lets a user set it to zero and have the TTL sweep delete
-/// everything the detector flags. Data loss is the worst outcome (CLAUDE.md
+/// everything the detector flags. Data loss is the worst outcome (AGENTS.md
 /// rule 4), and this one would be silent and irreversible.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
@@ -121,7 +121,7 @@ pub struct ConfigData {
     ///
     /// `0` is an explicit **disabled** sentinel, not "delete immediately" — the
     /// distinction is the whole of `CopyPaste-8ebg.1`, and getting it backwards
-    /// destroys user data that is not recoverable (CLAUDE.md rule 4). **Live.**
+    /// destroys user data that is not recoverable (AGENTS.md rule 4). **Live.**
     ///
     /// Only findings above the detector's auto-wipe floor are ever deleted, and
     /// `copypaste_core::sensitive::sweep_sensitive` re-scans the plaintext at
@@ -140,7 +140,7 @@ pub struct ConfigData {
     /// default beside a Settings tab that showed the value; v2's Settings has no
     /// control for it, the sweep raises no notice, and a deleted item simply
     /// stops being in the list. That is a silent, irreversible delete a user can
-    /// neither discover nor switch off from the product surface — CLAUDE.md
+    /// neither discover nor switch off from the product surface — AGENTS.md
     /// rule 4's worst outcome arrived at through rule 6's gap.
     ///
     /// The asymmetry decides it: a user who wants the wipe turns it on once,
@@ -703,7 +703,7 @@ mod tests {
     ///
     /// A default of 30 hard-deletes anything the detector reads as a
     /// high-confidence secret half a minute after it is copied, with no
-    /// Settings control to find it and no notice when it fires. CLAUDE.md rule
+    /// Settings control to find it and no notice when it fires. AGENTS.md rule
     /// 4 puts unrecoverable data loss above everything; this is the line that
     /// keeps the shipped value honest, and the field's doc records what would
     /// justify changing it back.
@@ -775,7 +775,7 @@ mod tests {
         .is_err());
     }
 
-    /// CLAUDE.md rule 4: a settings error is shown to a user, and the config
+    /// AGENTS.md rule 4: a settings error is shown to a user, and the config
     /// file lives under the user's home directory.
     #[test]
     fn no_error_message_looks_like_a_path() {

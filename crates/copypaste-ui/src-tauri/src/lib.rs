@@ -74,7 +74,7 @@ pub fn run() {
     // The dialog plugin is registered for `commands::transfer`, which drives it
     // from Rust. It is deliberately not granted to the WebView in
     // `capabilities/`: a picked path is used on this side and never handed
-    // across (CLAUDE.md rule 4). The notification plugin is Rust-only for the
+    // across (AGENTS.md rule 4). The notification plugin is Rust-only for the
     // same reason — `shell::notify` posts, and a JS grant would let the page
     // post anything it liked in the app's name.
     let builder = tauri::Builder::default()

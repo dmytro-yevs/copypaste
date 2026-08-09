@@ -6,7 +6,7 @@
  * Noise pre-shared key — still enrols the pairing afterwards; `revoke` bars the
  * pairing id for ever. A screen that offered one button for both, or two
  * buttons with the same confirmation, would be a screen where an irreversible
- * action is one click and reads like a reversible one (CLAUDE.md rule 4).
+ * action is one click and reads like a reversible one (AGENTS.md rule 4).
  *
  * So these tests are about what the confirmations *say* and what weight they
  * carry, not about the mutation firing.

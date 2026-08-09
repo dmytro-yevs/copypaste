@@ -214,7 +214,7 @@ pub(super) fn websocket_url(base: &str) -> String {
 /// that the channel filter can be built. Reading one claim is a base64url
 /// decode and a JSON lookup; pulling a full JWT crate in would add a second
 /// signature-verification stack to the tree for a value we deliberately do not
-/// verify (`CLAUDE.md` rule 1, exemption 3).
+/// verify (`AGENTS.md` rule 1, exemption 3).
 ///
 /// Returns `None` unless the token has exactly three non-empty base64url
 /// segments and an object payload carrying a non-empty string `sub`. The caller
@@ -239,9 +239,7 @@ pub(super) fn jwt_subject(token: &str) -> Option<String> {
     Some(sub.to_owned())
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 //
 // The join frame, the reply rule, the URL and the subject claim are all pure
 // functions of a string. Nothing here opens a socket.

@@ -14,7 +14,7 @@
 //!   message one's payload, so message one is already an AEAD ciphertext and a
 //!   responder holding the wrong token cannot decrypt it. No downgrade, no
 //!   "unauthenticated but encrypted" mode, and no code path here that could
-//!   offer one (port manifest 02, I-15; `CLAUDE.md` rule 4).
+//!   offer one (port manifest 02, I-15; `AGENTS.md` rule 4).
 //! * **Forward secrecy.** The `ee` DH in message two means a token disclosed
 //!   later does not decrypt traffic captured earlier.
 //!

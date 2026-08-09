@@ -29,10 +29,8 @@ note() { NOTES+=("$1 — $2"); printf '  ----  NOT ASSERTED  %s\n              %
 probe(){ PROBES+=("$1 -> $2"); printf '  ....  probe  %s -> %s\n' "$1" "$2"; }
 group(){ printf '\n== %s\n' "$1"; }
 
-# ---------------------------------------------------------------------------
 # Detection logic. Everything here is pure: a file in, a verdict out, so
 # --self-test can prove each one actually fails when it should.
-# ---------------------------------------------------------------------------
 
 # `Process … has died` is deliberately not here: force-stop, which this script
 # does on purpose between launches, prints it.
@@ -302,9 +300,7 @@ apk_wry_jni_counts() {   # <apk>
     printf '%s %s' "$call" "$others"
 }
 
-# ---------------------------------------------------------------------------
 # adb helpers
-# ---------------------------------------------------------------------------
 
 sh_() { adb shell "$@" 2>&1 | tr -d '\r'; }
 
@@ -338,7 +334,7 @@ no_pid()  { [[ -z "$(app_pid)" ]]; }
 #
 # curl missing is not a pass: the caller is handed a name it can never match,
 # so an environment that cannot prove the endpoint dead fails the way an open
-# one does (CLAUDE.md rule 4, fail closed).
+# one does (AGENTS.md rule 4, fail closed).
 devtools_cdp_package() {   # <pid>
     local port="${CDP_PROBE_PORT:-19229}" json
     command -v curl >/dev/null 2>&1 || { printf 'UNPROVEN(no curl)'; return 0; }
@@ -524,9 +520,7 @@ db_fingerprint() {
     cat "$out"
 }
 
-# ---------------------------------------------------------------------------
 # --self-test: prove the detectors above fail when they should
-# ---------------------------------------------------------------------------
 
 self_test() {
     local t
@@ -830,9 +824,7 @@ self_test() {
     [[ $FAIL -eq 0 ]]
 }
 
-# ---------------------------------------------------------------------------
 # The summary, printed on every exit path
-# ---------------------------------------------------------------------------
 
 summary() {
     local verdict="FAILED"

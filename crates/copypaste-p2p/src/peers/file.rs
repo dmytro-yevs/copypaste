@@ -7,7 +7,7 @@
 //! * Replaced through [`copypaste_fs::write_atomically`] at
 //!   [`Visibility::OwnerOnly`], so a crash mid-write leaves the previous file
 //!   intact and the keys never exist at a mode wider than `0600`. Losing a
-//!   pairing means re-pairing every device by hand, and `CLAUDE.md` rule 4 ranks
+//!   pairing means re-pairing every device by hand, and `AGENTS.md` rule 4 ranks
 //!   data loss as the worst outcome.
 //! * An existing file whose mode is wider than `0600` is reported at `warn`.
 //!

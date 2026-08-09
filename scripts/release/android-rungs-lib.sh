@@ -13,14 +13,12 @@ set -uo pipefail
 # shellcheck source=scripts/release/android-smoke-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
 
-# ---------------------------------------------------------------------------
 # `service call` replies
 #
 # The rung 2 test calls IClipboard as the shell uid, which is the one identity
 # on an emulator that holds READ_CLIPBOARD_IN_BACKGROUND. `service call` prints
 # the reply parcel as hex plus a printable column, and that column is the whole
 # of what can be read back.
-# ---------------------------------------------------------------------------
 
 # The printable column, concatenated. One quoted group per row.
 parcel_text() {   # <reply file>
@@ -59,9 +57,7 @@ parcel_holds() {   # <reply file> <alphanumeric needle>
     grep -qF "$2" <<<"$text" || grep -qF "$2" <<<"${text//./}"
 }
 
-# ---------------------------------------------------------------------------
 # Window flags
-# ---------------------------------------------------------------------------
 
 # The `fl=` line of the named window, or nothing if the dump has no such window.
 #
@@ -103,9 +99,7 @@ other_unprotected_window() {   # <dump> <package>
     ' "$1"
 }
 
-# ---------------------------------------------------------------------------
 # Quick Settings and the capture service
-# ---------------------------------------------------------------------------
 
 # SystemUI records a third-party tile in sysui_qs_tiles as `custom(<component>)`.
 tile_present() {   # <sysui_qs_tiles value> <component>
@@ -122,7 +116,6 @@ service_is_running() {   # <dumpsys activity services dump> <class name>
     ' "$1" | grep -q running
 }
 
-# ---------------------------------------------------------------------------
 # Driving another app
 #
 # There is no shell command that puts text on the clipboard: `cmd clipboard`
@@ -130,7 +123,6 @@ service_is_running() {   # <dumpsys activity services dump> <class name>
 # API 36. Another app's text field, selected and copied, does work — and
 # getPrimaryClipSource then names that app, so the clip is genuinely foreign
 # and the tile's read is the product's read rather than a self-test.
-# ---------------------------------------------------------------------------
 
 # uiautomator refuses while the screen is animating, which is ordinary right
 # after a launch or a tap. A single dump that fails downgrades an assertion to
@@ -179,9 +171,7 @@ for match in re.finditer(r"<node[^>]*>", xml):
 PY
 }
 
-# ---------------------------------------------------------------------------
 # --self-test
-# ---------------------------------------------------------------------------
 
 rungs_self_test() {
     local t

@@ -1,6 +1,6 @@
 /**
  * Three of the four actions here are irreversible in some direction, so each
- * one that is asks first and says what it costs (CLAUDE.md rule 4):
+ * one that is asks first and says what it costs (AGENTS.md rule 4):
  *
  * * Export is not destructive but it *leaks* — every clip as readable text —
  *   and the opt-in for flagged items sits inside the dialog, the second ask.

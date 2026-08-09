@@ -47,7 +47,7 @@
 //!   something that falls out of `serde_json::to_string` in a log line.
 //! * Emails are masked in logs by `redact_email`.
 //! * No error variant carries free text, so no path and no token can reach a
-//!   user-facing message (`CLAUDE.md` rule 4). `reqwest`'s own errors have their
+//!   user-facing message (`AGENTS.md` rule 4). `reqwest`'s own errors have their
 //!   URL stripped before we keep them.
 //!
 //! # Retry

@@ -58,7 +58,7 @@
 //!
 //! # Dependencies
 //!
-//! Per `CLAUDE.md` rule 1 nothing here is hand-rolled: `argon2` for the
+//! Per `AGENTS.md` rule 1 nothing here is hand-rolled: `argon2` for the
 //! passphrase KDF, `hkdf` + `sha2` for the salt, `chacha20poly1305` for the
 //! AEAD, `rand` for nonces, `zeroize` for erasure, `base64` for the wire
 //! encoding. The code in this module is glue and policy.

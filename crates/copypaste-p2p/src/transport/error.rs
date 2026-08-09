@@ -5,7 +5,7 @@ use super::session::MAX_MESSAGE_BYTES;
 /// Every failure this module can produce.
 ///
 /// No variant carries a `String`, a `PathBuf` or a foreign error's `Display`
-/// output: `CLAUDE.md` rule 4 forbids showing a user a filesystem path, and a
+/// output: `AGENTS.md` rule 4 forbids showing a user a filesystem path, and a
 /// closed set of literals cannot leak one by accident. A cause worth keeping is
 /// attached as a `#[source]`, which the daemon can log but which never appears
 /// in this error's own `Display`.
@@ -44,7 +44,7 @@ pub enum TransportError {
 
     /// A logical message exceeded [`MAX_MESSAGE_BYTES`], on send or on
     /// reassembly. Returned rather than truncating: silent truncation of
-    /// clipboard content is data loss, which `CLAUDE.md` rule 4 ranks as the
+    /// clipboard content is data loss, which `AGENTS.md` rule 4 ranks as the
     /// worst outcome.
     #[error("message exceeds the {MAX_MESSAGE_BYTES}-byte limit")]
     TooLarge,
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn error_messages_contain_no_paths() {
-        // `CLAUDE.md` rule 4: no payload can hold a path, but the literals
+        // `AGENTS.md` rule 4: no payload can hold a path, but the literals
         // themselves must stay clean too.
         let errors: Vec<TransportError> = vec![
             TransportError::Handshake,

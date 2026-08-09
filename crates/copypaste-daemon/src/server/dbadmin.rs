@@ -318,7 +318,7 @@ mod tests {
     }
 
     /// A backup taken on another device is encrypted under another key. It must
-    /// fail authentication, never be half-read (CLAUDE.md rule 4).
+    /// fail authentication, never be half-read (AGENTS.md rule 4).
     #[test]
     fn a_backup_from_another_device_is_refused_and_history_survives() {
         let (theirs, their_dir) = test_state("beta");

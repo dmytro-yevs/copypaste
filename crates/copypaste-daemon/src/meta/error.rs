@@ -2,7 +2,7 @@
 //!
 //! No variant renders a path: `rusqlite`'s messages come from `sqlite3_errmsg`,
 //! which does not embed the filename, and every cause is a `#[source]` rather
-//! than interpolated text so it cannot reach a user (CLAUDE.md rule 4).
+//! than interpolated text so it cannot reach a user (AGENTS.md rule 4).
 
 use copypaste_core::StoreError;
 
@@ -15,7 +15,7 @@ pub enum MetaError {
     Store(#[source] StoreError),
 
     /// Fail closed: a key that does not open the file is an error, never a
-    /// fallback to an unkeyed read (CLAUDE.md rule 4).
+    /// fallback to an unkeyed read (AGENTS.md rule 4).
     #[error("the history database could not be opened with this device's key")]
     InvalidKey,
 }

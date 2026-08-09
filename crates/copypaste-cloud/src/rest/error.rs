@@ -131,9 +131,7 @@ fn truncate_body(body: &str) -> String {
     format!("{}…", &body[..end])
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 //
 // The status rules are asserted through a real `reqwest` round trip against
 // wiremock, because the thing under test is what a status *does* to the retry

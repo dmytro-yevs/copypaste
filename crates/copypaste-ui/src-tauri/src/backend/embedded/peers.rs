@@ -5,7 +5,7 @@
 //! [`copypaste_core::StoreSource`] — the same node the daemon runs and the same
 //! source it runs it over. Nothing in this file decides anything about pairing,
 //! sessions or the merge; if it did, this platform would have its own answer to
-//! a question the other platform has already answered (ADR-0003, CLAUDE.md
+//! a question the other platform has already answered (ADR-0003, AGENTS.md
 //! rule 1).
 //!
 //! # The listener comes up once, lazily

@@ -2,7 +2,7 @@
 
 /// Every failure this module can produce.
 ///
-/// No variant can render a filesystem path (`CLAUDE.md` rule 4). The
+/// No variant can render a filesystem path (`AGENTS.md` rule 4). The
 /// `io::Error` is a `#[source]`, available to a log sink but never to this
 /// type's own `Display`.
 #[derive(Debug, thiserror::Error)]

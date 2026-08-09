@@ -89,7 +89,7 @@ impl Store {
     /// **Only `clipboard_fts` is touched.** No history row is deleted,
     /// tombstoned or reflagged, so the worst outcome of a wrong verdict here is
     /// an item the user cannot find by searching — never one they cannot find at
-    /// all (CLAUDE.md rule 4). Flipping `is_sensitive` instead would arm
+    /// all (AGENTS.md rule 4). Flipping `is_sensitive` instead would arm
     /// [`crate::sensitive::sweep_sensitive`], which hard-deletes.
     pub fn purge_from_index(&self, rowids: &[i64]) -> Result<u64, StoreError> {
         if rowids.is_empty() {

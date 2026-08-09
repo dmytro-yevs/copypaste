@@ -7,7 +7,7 @@
  * quiet `aria-live="polite"` line rather than a banner with a retry.
  *
  * No "delete the unreadable ones" action: data loss is the worst outcome
- * (CLAUDE.md rule 4), and a row that will not decrypt today may be a keychain
+ * (AGENTS.md rule 4), and a row that will not decrypt today may be a keychain
  * problem that is fixable tomorrow.
  */
 import { FileWarning } from "lucide-react";

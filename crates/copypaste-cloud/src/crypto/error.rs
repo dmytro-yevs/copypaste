@@ -5,7 +5,7 @@ use super::key::MIN_PASSPHRASE_CHARS;
 
 /// Every failure this module can produce.
 ///
-/// Payloads are `&'static str` on purpose. `CLAUDE.md` rule 4 forbids showing
+/// Payloads are `&'static str` on purpose. `AGENTS.md` rule 4 forbids showing
 /// users a filesystem path, and the sync path additionally must never render a
 /// token or a passphrase. A closed set of literals cannot leak one even by
 /// accident — there is no `String` to `format!` into.
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn error_messages_contain_no_paths_and_no_secrets() {
-        // CLAUDE.md rule 4, plus the sync rule that a token or a passphrase
+        // AGENTS.md rule 4, plus the sync rule that a token or a passphrase
         // must never be rendered. The type makes this structural — every
         // payload is a `&'static str` — but pin the rendered strings too.
         let errors = [

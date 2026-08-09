@@ -4,9 +4,7 @@ name: Release
 # .app in a DMG, the CLI and daemon in a tarball, the Homebrew cask and formula
 # that point at both, and an Android APK a user can download and install.
 #
-# ---------------------------------------------------------------------------
 # NOTHING IN THIS FILE HOLDS A SIGNING CREDENTIAL
-# ---------------------------------------------------------------------------
 # That is the entire premise of ADR-0001, not an accident of the current setup.
 # There is no APPLE_CERTIFICATE, no APPLE_ID, no APPLE_TEAM_ID, no notarisation
 # step and no keychain import. Signing is ad-hoc (`codesign --sign -`), which
@@ -25,19 +23,15 @@ name: Release
 # secrets are required: a release without its durable key fails closed before it
 # can upload a non-upgradable artefact. ADR-0006 records that decision.
 #
-# ---------------------------------------------------------------------------
 # UNVERIFIED
-# ---------------------------------------------------------------------------
 # This project is developed on Linux. Every macOS-specific step below —
 # codesign, hdiutil, PlistBuddy, the Tauri macOS bundler, and whether the
 # resulting bundle actually launches — was written from documentation and from
 # v1's scripts on archive/v0.4.1-pre-rewrite. None of it has been executed on a
 # Mac. Treat the first run as an experiment and read the log.
 #
-# ---------------------------------------------------------------------------
 # Why this is not cargo-dist
-# ---------------------------------------------------------------------------
-# CLAUDE.md rule 1 makes a maintained tool the default, so cargo-dist (now
+# AGENTS.md rule 1 makes a maintained tool the default, so cargo-dist (now
 # "dist") was evaluated first. It does not package macOS .app bundles or DMGs.
 # axodotdev/cargo-dist#24, "macos .dmg/.app installer support?", has been open
 # since October 2022 and the maintainers' position on it is that it is "more
@@ -95,10 +89,8 @@ jobs:
       - name: Exercise the disposable Supabase stack
         run: bash supabase/tests/real-supabase.sh
 
-  # ---------------------------------------------------------------------------
   # Resolve the version once, so the tag, the workspace manifest, the DMG
   # filename, the cask and the formula cannot disagree with each other.
-  # ---------------------------------------------------------------------------
   version:
     name: Resolve version
     runs-on: ubuntu-latest
@@ -193,11 +185,9 @@ jobs:
         working-directory: e2e
         run: npm test -- tests/devices.e2e.test.ts
 
-  # ---------------------------------------------------------------------------
   # Build on macOS. arm64 only: the release ships a single aarch64 slice, not a
   # universal binary, matching `depends_on arch: :arm64` in the cask. Homebrew
   # is winding down Intel support and this project has no Intel user to serve.
-  # ---------------------------------------------------------------------------
   macos:
     name: Build macOS (arm64)
     needs: version
@@ -317,7 +307,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # ---------------------------------------------------------------------------
   # Build the Android APK.
   #
   # UNVERIFIED, in the same sense as the macOS job and then some: no Android
@@ -330,7 +319,6 @@ jobs:
   # signed with a per-run key cannot upgrade an existing install. All four
   # release-key secrets are therefore required; their absence fails this job
   # before any Android artifact is uploaded or published.
-  # ---------------------------------------------------------------------------
   android:
     name: Build Android (universal APK)
     needs: version
@@ -642,13 +630,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ---------------------------------------------------------------------------
   # Test the signed universal artifact, not a separately assembled emulator
   # APK. This job downloads exactly what `publish` will later download, checks
   # its sidecar digest, and installs/runs it through the release smoke harness.
   # It runs only when a release can be published; a non-publishing dispatch may
   # still build artifacts without spending an emulator runner.
-  # ---------------------------------------------------------------------------
   android-smoke:
     name: Smoke-test published Android APK
     needs: [version, android]
@@ -826,11 +812,9 @@ jobs:
           --evidence ${{ github.workspace }}/artifacts/native-parity/macos/native-evidence.json
           --evidence ${{ github.workspace }}/artifacts/native-parity/android/release-android-hardware/native-evidence.json
 
-  # ---------------------------------------------------------------------------
   # Generate the cask and the formula from the artefacts that were actually
   # built, so the checksums come from the files being published rather than
   # from a re-download.
-  # ---------------------------------------------------------------------------
   packaging:
     name: Generate cask and formula
     needs: [version, macos]
@@ -873,9 +857,7 @@ jobs:
           path: tap/
           if-no-files-found: error
 
-  # ---------------------------------------------------------------------------
   # Publish.
-  # ---------------------------------------------------------------------------
   publish:
     name: Publish release
     # android is a hard dependency, not a nice-to-have: ADR-0006 says one

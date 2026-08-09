@@ -26,7 +26,7 @@ pub use merge::{
 pub use source::StoreSource;
 
 /// Fixed, pathless sentences: these reach a peer's log and a user's screen
-/// (CLAUDE.md rule 4).
+/// (AGENTS.md rule 4).
 pub const MSG_STORE: &str = "the history database could not be read";
 pub const MSG_ENCRYPT: &str = "the incoming item could not be encrypted";
 

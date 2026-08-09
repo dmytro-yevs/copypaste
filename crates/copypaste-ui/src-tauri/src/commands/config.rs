@@ -3,7 +3,7 @@
 //! Everything Settings showed before this existed — theme, accent, preview
 //! lines — is the app's own preference and never leaves the WebView. These two
 //! commands are the other half: the values that govern what the service *does*,
-//! which had no route into the app at all (CLAUDE.md rule 6).
+//! which had no route into the app at all (AGENTS.md rule 6).
 //!
 //! # A patch, not a record
 //!
