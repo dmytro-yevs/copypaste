@@ -949,10 +949,10 @@ error response.
 
 ---
 
-## 7. Legacy / deprecated verbs — what they MUST return
+## 7. Legacy / deprecated verbs (reference only)
 
-These are kept alive purely so an old client gets a diagnosable answer instead of
-`"unknown method"`. The rewrite MUST keep them.
+v0.4.x kept these alive so old clients received a diagnosable answer instead of
+`"unknown method"`. v2 has no obligation to preserve these verbs or responses.
 
 | Verb | Status | Required behaviour |
 |---|---|---|

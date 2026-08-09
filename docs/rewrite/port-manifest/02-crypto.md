@@ -3,14 +3,10 @@
 > Harvested from `copypaste` v0.4.1 (`crates/copypaste-core/src/crypto/**`, plus
 > `copypaste-daemon/src/keychain/**`, `copypaste-p2p/src/pake.rs`, and
 > `copypaste-core/src/relay.rs`).
-> This is an **implementation-independent specification**. It exists so a
-> from-scratch, library-first rewrite can (a) keep every security property the
-> current code earned through bug fixes, and (b) still decrypt data written by
-> v0.4.x installs.
->
-> **Rule for the rewrite:** every byte string in section 3 is a frozen external
-> contract. Changing any of them is a hard fork of existing user data and MUST
-> be accompanied by an explicit, tested migration.
+> Legacy byte layouts, key versions, decoders, migrations and compatibility
+> tests in this file are non-binding historical reference. Only the security
+> properties mapped as binding by [README.md](README.md) apply to v2; v2 never
+> opens old data.
 
 ## 1. Purpose & scope
 
@@ -813,16 +809,14 @@ be consulted; the rewrite should re-express them against its own API.
 | `build_item_aad_v2_golden_bytes` | `build_item_aad_v2("item-abc", 4, 2) == b"item-abc\|4\|2"` and `build_item_aad("item-abc", 3) == b"item-abc\|3"` | `crypto/encrypt.rs:385-395`, `tests/key_version_tests.rs:302-332` |
 | `build_cloud_aad_format` | `== b"item-abc\|5"` | `crypto/sync_key/tests.rs:211-214` |
 | `cloud_aad_schema_version_is_5`, `aad_schema_version_v4_constant_is_4`, `hkdf_version_is_2`, `min_passphrase_len_is_twelve`, `argon2_params_are_expected_values` | pin the integers | `sync_key/tests.rs:205-223,296-298`, `encrypt.rs:373-375`, `keys.rs:470-472` |
-| **NEW — required** | pin the chunk AAD prefix as exactly the 16 bytes `b"CHUNK_FORMAT_V1\0"` and the full 41-byte AAD for a fixed `(file_id, index, total, is_final)` | *no such test exists today — add it* |
-| **NEW — required** | pin the 34-byte chunk wire header layout against a hand-written expected byte vector | *no such test exists today — add it* |
+| **Historical fixture gap (reference only)** | Pinning the exact `CHUNK_FORMAT_V1\0` prefix and AAD would have protected the v1 format. v2 does not preserve that byte contract. | *no such test existed* |
+| **Historical fixture gap (reference only)** | Pinning the 34-byte chunk header would have protected the v1 wire layout. v2 does not preserve that layout. | *no such test existed* |
 
-### 5.2 Decrypt-data-written-by-the-old-version (the critical class)
+### 5.2 Historical chunk decoding (reference only)
 
-The current suite tests these by **re-encrypting with the old scheme inside the
-test**, not from a checked-in binary fixture. The rewrite should do both: keep
-the reproduce-then-decrypt tests **and** check in real byte fixtures captured
-from a v0.4.1 build, because the rewrite may not contain the old encrypt path at
-all.
+v0.4.x tested these by **re-encrypting with the old scheme inside the test**,
+not from checked-in binary fixtures. They record the old security history but
+do not require v2 to carry an old encrypt or decrypt path.
 
 | Test | What it proves | Old location |
 |---|---|---|
@@ -834,7 +828,7 @@ all.
 | `v3_and_v4_aad_are_incompatible` | a v3-AAD ciphertext cannot be read with a v4 AAD even when the shared fields match | `crypto/encrypt.rs:361-370`, `tests/key_version_tests.rs:333-356` |
 | `decrypt_without_aad_fails` | v0.2 empty-AAD rows stay rejected (the accepted one-way break) | `tests/aead_tamper.rs:321+` |
 | `from_bytes_decrypts_blob_encrypted_by_derive_sync_key` | a cloud blob survives the `spawn_blocking` key-snapshot round-trip | `crypto/sync_key/tests.rs:233-254` |
-| **NEW — required** | checked-in v0.4.1 fixtures: (a) a `key_version = 1` text row (`item_id`, nonce, ciphertext, and the seed) that must decrypt; (b) a `key_version = 2` text row; (c) a real chunked image blob + its `blob_ref` JSON + key; (d) a cloud blob + passphrase + `account_id`; (e) a real `CPPAIR2` string and a real `CPPAIR1` string that must both decode | *does not exist — this is the single biggest gap* |
+| **Historical fixture gap (reference only)** | Proposed v0.4.1 fixtures covered text rows, chunked and cloud blobs, and `CPPAIR1`/`CPPAIR2` strings. v2 has no obligation to create or read them. | These fixtures were never checked in. |
 
 ### 5.3 AEAD tamper detection (`tests/aead_tamper.rs`)
 
@@ -1147,7 +1141,5 @@ still not be plaintext-at-rest.
    silently dropped on deserialisation. (**CopyPaste-5lm**.)
 3. **`HKDF_VERSION` doc-comment vs reality (§6.1).** It documents a per-pair
    rotation architecture that was never wired up.
-4. **No checked-in old-version byte fixtures** anywhere in the suite (§5.2). Every
-   "can we still read old data" test reproduces the old format in-process, which
-   will be impossible once the rewrite drops the old encrypt paths. Capture the
-   fixtures from a v0.4.1 build **before** starting the rewrite.
+4. **No checked-in old-version byte fixtures** existed in the v1 suite (§5.2).
+   This is historical evidence, not a v2 fixture requirement.

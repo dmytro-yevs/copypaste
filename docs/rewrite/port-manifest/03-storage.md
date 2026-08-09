@@ -8,13 +8,15 @@
 > `crates/copypaste-core/tests/{migration,dedup,fts5_search,encryption_at_rest,corruption,key_version_tests,pool_stress,concurrent_writers}.rs`.
 > All `file:line` citations are repo-relative and refer to the **old** tree at
 > v0.4.1 — they are provenance, not instructions to copy.
+> Legacy formats, probes, migrations and compatibility tests in this file are
+> non-binding historical reference. Only the behaviour mapped as binding by
+> [README.md](README.md) applies to v2.
 >
 > Related ADRs: ADR-003 (SQLCipher at rest), ADR-004 (WAL), ADR-015 (FTS
 > sensitive exclusion), ADR-017 (file-size budget — `schema/versions.rs` is
 > `// size-exempt` under it).
 >
-> **Read §2 and §4 before writing a single line of the new storage layer.**
-> Everything else is detail; those two are the contract with existing user data.
+> **Read [README.md](README.md) before using this manifest as a requirement.**
 
 ---
 
@@ -39,13 +41,9 @@ Out of scope for this manifest (covered elsewhere): the AEAD content
 encryption itself (see `02-crypto.md`), the LWW merge algorithm (sync crate),
 the IPC verbs (see `04-ipc-protocol.md`).
 
-**The rewrite MUST be able to open, migrate, and keep serving an existing
-user database written by v0.4.1 (schema v15) and by every shipped predecessor
-(v1..v14).** That constraint dominates every design decision below.
-
-> **Reversed in v2 by CLAUDE.md rule 3 — see the amendment under I1.** v2 opens
-> none of those files. Read the rest of this manifest with that inverted: the
-> ladder, the plaintext auto-migration and the rekey procedure are provenance.
+v0.4.x had to open every shipped predecessor. The ladder, plaintext
+auto-migration and rekey procedure below record that history; v2 does not port
+them.
 
 ### File layout on disk
 
@@ -64,25 +62,11 @@ so a crashed previous attempt cannot poison the next one.
 
 ## 2. Invariants (MUST hold)
 
-**I1 — Openability.** A database file at any `user_version` in `1..=15` MUST
-open and be migrated forward to the current version in a single atomic
-transaction. Never require the user to "start fresh".
-
-> **Amended in v2, 2026-07-30: inverted.** CLAUDE.md rule 3 drops backward
-> compatibility, so v2 does the opposite — a v0.4.x file MUST NOT be opened,
-> migrated or modified. What survives is the *reason* I1 was written: the user
-> must not silently lose a history. v2 discharges that by leaving the file
-> exactly as it is and saying so.
->
-> `copypaste-core/src/storage/legacy.rs` identifies one **positively**, without
-> consulting the key: an unkeyed read showing `user_version` in `1..=15` plus a
-> `clipboard_items` carrying `item_id`, `lamport_ts` and `wall_time` (the
-> pre-encryption case, §3.4), or — because SQLCipher pages carry no header to
-> read — v0.4.x's filename `clipboard.db` on a page-shaped file, which v2 can
-> treat as evidence precisely because it writes `copypaste-v2.db` instead. The
-> verdict is never "the key failed, therefore v1": that would report a damaged
-> v2 file as an old history. `StoreError::LegacyDatabase` is its own variant,
-> distinct from `InvalidKey`, and names no path (rule 4).
+**I1 — Historical openability (reference only).** v0.4.x migrated database
+files at `user_version` 1 through 15 in one atomic transaction. v2 writes a
+distinct database, never opens or migrates those files, and leaves any old
+history untouched. If an old history is encountered, it must be explained
+without a path rather than misreported as a damaged v2 database.
 
 **I2 — No silent downgrade.** If `PRAGMA user_version > SCHEMA_VERSION`, the
 open MUST fail with a typed downgrade error and MUST NOT touch the file.
@@ -1018,11 +1002,11 @@ These are the tests that encode the earned knowledge. Names are the old ones so
 they can be cross-referenced; the rewrite should reproduce the **behaviour**,
 not the implementation.
 
-### 5.1 MANDATORY — migration & openability
+### 5.1 Historical migration and openability (reference only)
 
 | # | Test | Assertion | Old location |
 |---|---|---|---|
-| M1 | **open a v1 DB and migrate to current** | Stage a **plaintext** SQLite file with `schema_v1.sql` + `PRAGMA user_version = 1`, close it, then `Database::open(path, key)`. Must (a) auto-encrypt to SQLCipher in place, (b) migrate 1→15, (c) `PRAGMA user_version == 15`, (d) all v1 rows intact | `tests/migration.rs::pragma_user_version_advances_atomically`, `::stage_v1_plaintext` |
+| M1 | **Historical v1 migration (reference only)** | v0.4.x staged a plaintext v1 database, auto-encrypted it, migrated 1→15 and preserved its rows. v2 does not open that database. | `tests/migration.rs::pragma_user_version_advances_atomically`, `::stage_v1_plaintext` |
 | M2 | v0 (empty file, `user_version = 0`) migrates to current | baseline tables created, then all later steps, in one atomic batch | `tests/migration.rs::migrate_v0_to_v1_adds_baseline_tables` |
 | M3 | Fresh DB lands directly at current version | not via per-step replay | `tests/migration.rs::fresh_db_creates_at_current_user_version`, `schema/tests.rs::fresh_db_reaches_current_schema_version` |
 | M4 | **Row bytes survive migration unchanged** | `content`, `content_nonce`, `lamport_ts`, `wall_time` byte-identical after v1→15 — proves migrations are pure ALTER/CREATE and never rewrite rows | `tests/migration.rs::existing_rows_preserved_through_migration` |
@@ -1157,15 +1141,9 @@ not the implementation.
 
 ### 5.10 New tests the rewrite should add
 
-* **A golden v0.4.1 database fixture** checked into the repo (small, fixed key
-  `[0u8; 32]`, a handful of text + image + pinned + sensitive + tombstone rows)
-  that every CI run opens and migrates. The old suite only ever *constructs* a
-  legacy shape by hand, so it can never catch a divergence between the
-  hand-built shape and what v0.4.1 actually wrote.
-* **One fixture per shipped `user_version` 1..15**, each opened and migrated to
-  current, with row counts and column values asserted. The old suite covers
-  v1, v2, v3, v11, v12 and "v12-by-hand"; v4–v10 and v13–v15 upgrade paths are
-  only covered indirectly.
+* **Historical fixture gaps (reference only).** v0.4.x had neither a golden
+  database nor one fixture per shipped `user_version` 1..15. v2 has no
+  obligation to create, open or migrate those fixtures.
 * **Round-trip property test**: for every column, `insert → select` returns the
   exact value written (catches positional-projection drift, see §6.3).
 * **Keyset pagination property test** (Q11 above).

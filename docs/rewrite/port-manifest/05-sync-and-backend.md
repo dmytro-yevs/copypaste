@@ -2,7 +2,9 @@
 
 > **Port manifest, implementation-independent.** Harvested from the pre-rewrite
 > tree (P2P `copypaste-sync` + `sync_orch`, Supabase `cloud/` + `copypaste-supabase`,
-> and the custom `copypaste-relay`). Everything here is a *contract*, not an API.
+> and the custom `copypaste-relay`). Legacy wire formats, relay compatibility
+> and migration paths are non-binding reference. Only convergence and behaviour
+> mapped as binding by [README.md](README.md) apply to v2.
 > Old `file:line` citations are provenance, not a porting instruction. Paths are
 > relative to the repo root; where a section is already scoped to one crate the
 > citations are shortened (e.g. `merge.rs:28` inside §3 means
