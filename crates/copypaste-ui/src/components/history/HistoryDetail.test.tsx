@@ -17,6 +17,14 @@ import { useUi } from "@/store/ui";
 
 const LONG = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
 const SECRET = "AKIAIOSFODNN7EXAMPLE";
+const POTENTIAL_ORIGINAL = "Email alice@example.com about the release";
+const REDACTED_PREVIEW = "Email ***REDACTED*** about the release";
+const FINDING = {
+  label: "email",
+  spans: [{ start: 6, end: 23 }],
+  spans_truncated: false,
+  redacted_preview: REDACTED_PREVIEW,
+};
 
 const listItems = vi.fn();
 const searchItems = vi.fn();
@@ -180,6 +188,66 @@ describe("a sensitive item in the detail view", () => {
 
     const confirm = await screen.findByRole("alertdialog");
     expect(confirm.textContent).toContain("Reveal sensitive content?");
+    expect(revealItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("a potential-sensitive item in the detail view", () => {
+  beforeEach(() => {
+    listItems.mockResolvedValue(
+      page([
+        item({
+          id: "potential",
+          content: POTENTIAL_ORIGINAL,
+          sensitive_finding: FINDING,
+        }),
+      ]),
+    );
+  });
+
+  it("starts with the backend-redacted preview and no plaintext in the DOM", async () => {
+    const { user } = withUser(<HistoryView />);
+    const dialog = await open(user);
+
+    expect(within(dialog).getByText(REDACTED_PREVIEW)).toBeTruthy();
+    expect(
+      within(dialog).getByRole("status", {
+        name: "Potentially sensitive content",
+      }),
+    ).toBeTruthy();
+    expect(dialog.textContent).not.toContain(POTENTIAL_ORIGINAL);
+    expect(dialog.innerHTML).not.toContain(POTENTIAL_ORIGINAL);
+    expect(revealItem).not.toHaveBeenCalled();
+  });
+
+  it("shows and hides the original locally from the keyboard", async () => {
+    const { user } = withUser(<HistoryView />);
+    const dialog = await open(user);
+    const show = within(dialog).getByRole("button", {
+      name: "Show original content",
+    });
+
+    show.focus();
+    await user.keyboard("{Enter}");
+    expect(within(dialog).getByText(POTENTIAL_ORIGINAL)).toBeTruthy();
+    expect(revealItem).not.toHaveBeenCalled();
+
+    const hide = within(dialog).getByRole("button", {
+      name: "Hide original content",
+    });
+    hide.focus();
+    await user.keyboard(" ");
+    expect(within(dialog).queryByText(POTENTIAL_ORIGINAL)).toBeNull();
+    expect(within(dialog).getByText(REDACTED_PREVIEW)).toBeTruthy();
+  });
+
+  it("copies by id only after a direct copy action", async () => {
+    const { user } = withUser(<HistoryView />);
+    const dialog = await open(user);
+
+    expect(copyItem).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: /^copy$/i }));
+    await waitFor(() => expect(copyItem).toHaveBeenCalledWith("potential"));
     expect(revealItem).not.toHaveBeenCalled();
   });
 });

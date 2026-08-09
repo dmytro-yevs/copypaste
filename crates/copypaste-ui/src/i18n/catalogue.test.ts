@@ -54,6 +54,16 @@ describe("the catalogue", () => {
   });
 });
 
+describe("the potential-sensitive history copy", () => {
+  it("describes uncertainty and exposes explicit local disclosure actions", () => {
+    expect(en.history.row.potentialSensitiveWarning).toBe(
+      "Potentially sensitive content",
+    );
+    expect(en.history.row.showOriginal).toBe("Show original content");
+    expect(en.history.row.hideOriginal).toBe("Hide original content");
+  });
+});
+
 describe("no user-facing string can carry a filesystem path (INV-12)", () => {
   const SHAPES: ReadonlyArray<readonly [string, RegExp]> = [
     ["an absolute unix path", /\/(?:Users|home|private|var|tmp|etc|opt|usr|Applications|Library)\//],
