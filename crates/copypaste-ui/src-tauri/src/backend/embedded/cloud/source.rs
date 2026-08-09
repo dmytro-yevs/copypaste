@@ -4,13 +4,13 @@ use copypaste_cloud::sync::{Applied, CloudSource, LocalItem, SyncError};
 use copypaste_core::RemoteVersion;
 
 use super::cursor::UploadFloor;
-use super::{KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM};
+use super::{Driver, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM};
 use crate::backend::embedded::open::Inner;
 
 const UPLOAD_SCAN_LIMIT: i64 = 500;
 
 struct Round {
-    driver: Weak<super::Driver>,
+    driver: Weak<Driver>,
     cancel: tokio_util::sync::CancellationToken,
 }
 
