@@ -625,13 +625,12 @@ Never "daemon" (bdac.34/36). American spelling ("initializing") in newer strings
 
 ### 3.3 Pairing — QR modal and SAS modal
 
-> **Current product decision (ADR-0015).** The v2 backend currently persists a
-> pairing before it can bind either device's decision to a SAS and has no safe
-> abort state machine. Until that API exists, Pair/Add-device controls are not
-> rendered on any platform. The Devices view still manages known devices. The
-> QR/SAS requirements below are the re-entry contract and must all be met before
-> the controls return; a blurred QR, local-only SAS, or clipboard copy of the
-> long-lived credential is not an acceptable partial implementation.
+> **Current product decision (ADR-0015).** The v2 ceremony now binds both
+> devices' decisions before persistence and supports rejection and cancellation.
+> Pair/Add-device controls use only the native-safe command family. The WebView
+> receives typed progress and confirmed-device metadata; invite codes, QR
+> payloads, SAS values and ceremony peer addresses stay in the native layer.
+> The QR/SAS requirements below apply to that protected native surface.
 
 #### 3.3.1 QR pairing modal
 
@@ -1348,9 +1347,9 @@ to offline immediately (not after TTL).
 
 ### Pairing
 
-**AT-28 — SAS digits are shown and are inert.** Six digits rendered; the region
-has an accessible label `Security code: <digits>`; text selection and copy are
-not possible; the raw QR payload string appears nowhere in the DOM.
+**AT-28 — SAS digits are shown natively and are inert.** The protected native
+surface renders six digits with an accessible label and no copy action. Neither
+the SAS nor the raw QR payload string appears anywhere in the WebView DOM.
 
 **AT-29 — Watchdog hides the decision buttons.**
 *Given* 60 s elapse with no terminal state, *then* the timeout message is shown

@@ -45,7 +45,7 @@ time and each gets a fresh daemon and a fresh database.
 | `history-render` · `scroll-anchor` · `history-controls` | virtualisation, the row-height rule (INV-5), scroll anchoring (INV-1/6), keyboard navigation, toolbar layout |
 | `sensitive` · `error-strings` | a flagged item's plaintext is absent from `outerHTML`, and no user-facing string carries a filesystem path (INV-10/12) |
 | `bulk-actions` | per-row actions are **absent** in selection mode rather than hidden, and a bulk delete reaches the database |
-| `devices` | the ADR-0015 boundary in a real engine: pairing-unavailable copy and Pair/Add/code/QR controls absent; a CLI-established peer is listed, syncs, exposes the revoke confirmation and unpairs |
+| `devices` | the ADR-0015 boundary in a real engine: native-safe controls are reachable while code/QR/SAS plaintext stays absent; a CLI-established peer is listed, syncs, exposes the revoke confirmation and unpairs |
 | `push` | a `copypaste://changed` event crosses the host's Tauri bridge, the list updates inside the poll interval, and a dead daemon degrades to polling |
 | `service-lifecycle` | the offline screen offers to *start* the service, and pressing the button starts the sibling `target/debug` daemon |
 | `settings` | every tab lays out, a daemon preference reaches the service, an app preference reaches layout and survives a reload, and Settings still works with the service down |
@@ -75,10 +75,9 @@ field that did not survive.
 
 ## Surfaces this suite does not reach
 
-- **An in-product pairing ceremony.** ADR-0015 requires Pair and Add-device
-  controls to remain absent until the protocol supplies a bound SAS ceremony.
-  `devices` establishes a known-peer fixture through the CLI; that setup is not
-  browser coverage for code mint/reveal, QR (INV-13), camera fallback or SAS.
+- **Native pairing presentation.** `devices` reaches the WebView controls and
+  typed ceremony state, but WebDriver cannot drive the native QR, camera or SAS
+  surfaces. It establishes its known-peer fixture through the CLI.
 - **Export, import, backup, restore from the screen.** Same shape:
   `commands/transfer.rs` ships all four and `StorageTab` surfaces them, while
   `export-import` goes through `copypaste export`. The Windows file asserts the

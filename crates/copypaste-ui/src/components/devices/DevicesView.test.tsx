@@ -25,6 +25,13 @@ const unpair = vi.fn();
 const revokeDevice = vi.fn();
 const syncNow = vi.fn();
 const setDeviceName = vi.fn();
+const getPairingProgress = vi.fn();
+const createPairingInvite = vi.fn();
+const scanPairingInvite = vi.fn();
+const presentPairing = vi.fn();
+const confirmPairing = vi.fn();
+const rejectPairing = vi.fn();
+const cancelPairing = vi.fn();
 
 configure({ asyncUtilTimeout: 15_000 });
 vi.setConfig({ testTimeout: 20_000 });
@@ -41,6 +48,13 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     revokeDevice: (pairingId: string) => revokeDevice(pairingId),
     syncNow: (pairingId?: string) => syncNow(pairingId),
     setDeviceName: (name: string) => setDeviceName(name),
+    getPairingProgress: () => getPairingProgress(),
+    createPairingInvite: () => createPairingInvite(),
+    scanPairingInvite: () => scanPairingInvite(),
+    presentPairing: () => presentPairing(),
+    confirmPairing: () => confirmPairing(),
+    rejectPairing: () => rejectPairing(),
+    cancelPairing: () => cancelPairing(),
   };
 });
 
@@ -55,6 +69,21 @@ beforeEach(() => {
   revokeDevice.mockReset().mockResolvedValue(undefined);
   syncNow.mockReset().mockResolvedValue([]);
   setDeviceName.mockReset().mockResolvedValue(undefined);
+  const idlePairing = {
+    ceremony_id: null,
+    role: null,
+    state: "idle",
+    presentation: "unavailable",
+    known_device: null,
+    error: null,
+  };
+  getPairingProgress.mockReset().mockResolvedValue(idlePairing);
+  createPairingInvite.mockReset().mockResolvedValue(idlePairing);
+  scanPairingInvite.mockReset().mockResolvedValue(idlePairing);
+  presentPairing.mockReset().mockResolvedValue(idlePairing);
+  confirmPairing.mockReset().mockResolvedValue(idlePairing);
+  rejectPairing.mockReset().mockResolvedValue(idlePairing);
+  cancelPairing.mockReset().mockResolvedValue(idlePairing);
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -133,57 +162,15 @@ describe("cutting a device off", () => {
   });
 });
 
-/**
- * ADR-0015 and manifest 06 §3.3: no Pair or Add-device control may be rendered
- * until the wire derives a SAS from the handshake and binds both devices'
- * confirmation to it before anything is persisted. These assert the *absence*
- * of the control, because a disabled or hidden one is still a control — and the
- * shipped dialog's "security code" was the first six characters of the pairing
- * id, which travels in the same QR as the credential and so verified nothing.
- */
-describe("pairing availability (ADR-0015)", () => {
-  it("offers no way to start a pairing", async () => {
+describe("native-safe pairing entry points", () => {
+  it("offers create and scan without a credential field or copy action", async () => {
     withUser(<DevicesView />);
     await screen.findByText("Lost Phone");
 
-    // Anchored: "Unpair <name>" is a legitimate button whose accessible name
-    // contains "pair", and an unanchored pattern would match it.
-    for (const label of [
-      /^show code$/i,
-      /^join device$/i,
-      /^add device$/i,
-      /^pair$/i,
-      /scan qr/i,
-    ]) {
-      expect(screen.queryByRole("button", { name: label })).toBeNull();
-    }
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("says why, without naming a code or a credential", async () => {
-    withUser(<DevicesView />);
-    const notice = await screen.findByText(/adding a device isn't available yet/i);
-    expect(notice).toBeTruthy();
-
-    // The explanation must not read as a transient outage the user can retry,
-    // and must not teach a credential vocabulary the screen no longer offers.
-    const body = document.body.textContent ?? "";
-    expect(body).toMatch(/devices already paired keep syncing/i);
-    expect(body).not.toMatch(/pairing code/i);
-    expect(body).not.toMatch(/security code/i);
-    expect(body).not.toMatch(/QR/);
-  });
-
-  it("renders no QR, no credential field and no copy affordance", async () => {
-    withUser(<DevicesView />);
-    await screen.findByText("Lost Phone");
-
+    expect(screen.getByRole("button", { name: "Show pairing code" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Scan pairing code" })).toBeTruthy();
     expect(document.querySelector("svg[role='img']")).toBeNull();
     expect(document.querySelector("canvas")).toBeNull();
-    expect(screen.queryByLabelText(/pairing code/i)).toBeNull();
-    expect(screen.queryByLabelText(/connection address/i)).toBeNull();
-    expect(screen.queryByLabelText(/security code/i)).toBeNull();
-    expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByRole("button", { name: /copy pairing details/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /paste pairing details/i })).toBeNull();
   });

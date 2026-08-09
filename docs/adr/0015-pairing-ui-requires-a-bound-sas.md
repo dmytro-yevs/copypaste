@@ -1,17 +1,16 @@
 # 0015 — Pairing UI requires a bound SAS ceremony
 
-**Status:** Accepted — 2026-08-01
+**Status:** Accepted — 2026-08-01; re-entry conditions met — 2026-08-09
 
 The current v2 `PairCreate` / `PairAccept` protocol uses a long-lived pairing
 credential and persists the pairing as part of accepting it. It has no daemon
 pairing state machine, no peer-visible SAS confirmation, and no abort operation
 that can cancel a pending ceremony without also unpairing a confirmed device.
 
-Therefore the desktop and Android UI must not expose Pair or Add-device
-controls. A blurred QR or a locally generated six-digit code would only look
-like a confirmation ceremony; it could not bind both peers' decision to the
-stored pairing. Copying the long-lived credential to the system clipboard is
-also prohibited.
+Therefore a product UI may expose Pair or Add-device controls only through a
+ceremony that binds both peers' decisions before persistence. A locally
+generated six-digit code remains prohibited, as does copying the long-lived
+credential to the system clipboard.
 
 The Devices screen continues to list, sync, unpair and revoke established
 devices. Pairing may return only with a protocol/API that supplies all of:
@@ -22,26 +21,15 @@ devices. Pairing may return only with a protocol/API that supplies all of:
 - a QR rendered only after explicit reveal, with no credential text or
   clipboard copy path.
 
-This is a product-security boundary, not a temporary UI styling limitation.
+The native-safe pairing commands now meet those conditions. The WebView sees
+only typed ceremony states, presentation availability, sanitized errors, and
+confirmed device metadata. Invite data, QR payloads, SAS values, ceremony peer
+addresses and key material remain in the native presentation layer.
 
 ## Consequences
 
-A Pair/Join dialog reached the app regardless, and was removed rather than
-kept: it copied the 52-character credential and a `copypaste://pair?code=…`
-URI to the system clipboard, and the "security code" it asked both users to
-compare was the first six characters of the pairing id — which is derived from
-the credential and travels in the same QR, so it verified nothing while looking
-exactly like a ceremony that does. Comparing it would have taught the gesture
-without ever buying the property.
-
-The controls are absent, not disabled, and `pair_create`/`pair_accept` are
-absent from the `Backend` trait, the Tauri command list and the dev web bridge
-— a verb the WebView can name is a verb a compromised renderer can call. The
-`copypaste://pair` deep link no longer opens anything. `PairCreate`/`PairAccept`
-stay on the daemon's IPC surface for the CLI, which is the scripting surface and
-not a product one (`CLAUDE.md` rule 6).
-
-Re-entry needs all four bullets above, and the SAS in the first one has to come
-from the Noise transcript — `snow` exposes it as `HandshakeState::get_handshake_hash`,
-which must be captured before `into_transport_mode`, since `TransportState` does
-not carry it. Nothing short of that is a partial step towards this decision.
+The old WebView Pair/Join dialog remains prohibited: it copied a long-lived
+credential and displayed a value derived from the pairing id as if it were a
+bound SAS. Product controls call only the native-safe command family. Native
+presentation owns QR generation/scanning and SAS comparison; the WebView owns
+progress, cancellation, retry, and the confirmed-device refresh.

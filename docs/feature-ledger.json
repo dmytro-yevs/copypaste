@@ -37,8 +37,8 @@
       "contracts": ["set_device_name", "peers", "unpair", "revoke", "sync_now", "discovered", "rescan", "pair_create_invite", "pair_scan_invite", "pair_progress", "pair_present", "pair_confirm", "pair_reject", "pair_cancel"],
       "backend_tests": ["cargo test -p copypaste-p2p"],
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
-      "accessibility_states": ["progress", "error", "keyboard", "screen_reader"],
-      "failure_states": ["restart", "offline"],
+      "accessibility_states": ["progress", "confirmed", "error", "keyboard", "screen_reader"],
+      "failure_states": ["restart", "offline", "timeout", "code_mismatch"],
       "performance": {"android": {"status": "uncredited"}, "macos": {"status": "uncredited"}},
       "native": {
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/devices/screenshot.png", "ax_log": "artifacts/native/android/devices/ax.json"},

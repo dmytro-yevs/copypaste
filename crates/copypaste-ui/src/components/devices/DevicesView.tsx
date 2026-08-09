@@ -1,31 +1,11 @@
 /**
- * Rules carried from manifest §3.2:
- *
- *  - **`online: false` means "not seen", never "unreachable"** — a device on a
- *    network without multicast is reachable by address and still reads as
- *    offline, so the dot is a hint and the row never renders as an error
- *    (5917.11 / SCRD-3: the two-state version lied).
- *  - **Peer-reported names are unverified** (INV-15) and are labelled as such.
- *  - Unpairing is one-sided and needs a confirm that says so (§3.2.6).
- *  - **Unpair and revoke are two actions, not one with a flag.** Unpairing is
- *    recoverable — the pairing code still enrols the pairing — and revoking is
- *    not, so they carry different weight and `RevokeDialog` owns the heavier
- *    half.
- *  - Every load state is *visible*: a spinner, not a classless empty element
- *    (CopyPaste-8ebg.29, bdac.2).
- *
- * **There is no "revoked" row.** A revoked pairing leaves the list in exactly
- * the state an unpaired one does, so rendering the two differently would mean
- * inventing a distinction the wire cannot make.
- *
- * **No Pair or Add-device control** (ADR-0015, manifest 06 §3.3). The wire
- * persists a pairing as it accepts it and can bind neither device's decision to
- * a handshake-derived SAS, so any control here could only stage a ceremony it
- * cannot complete. The screen says pairing is unavailable instead; established
- * devices are still listed, synced, unpaired and revoked.
+ * `online: false` means "not seen", never "unreachable" (5917.11 / SCRD-3).
+ * Peer-reported names stay labelled unverified (INV-15). Unpair is recoverable;
+ * revoke is permanent, so each keeps its own confirmation. A revoked peer
+ * leaves no row because the wire exposes no distinct revoked-list state.
  */
 import { useState } from "react";
-import { Laptop, Link2, LoaderCircle, RefreshCw, ShieldAlert, TriangleAlert } from "lucide-react";
+import { Laptop, Link2, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 
 import {
   AlertDialog,
@@ -42,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/EmptyState";
 import { StateNotice } from "@/components/StateNotice";
 import { PeerRow } from "@/components/devices/PeerRow";
+import { PairingPanel } from "@/components/devices/PairingPanel";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
 import { DeviceNameField } from "@/components/devices/DeviceNameField";
 import {
@@ -219,6 +200,8 @@ export function DevicesView() {
             </div>
           </section>
 
+          <PairingPanel disabled={full} />
+
           <section aria-labelledby="paired-devices-heading" className="flex flex-col gap-s-2">
             <div className="flex flex-wrap items-baseline justify-between gap-s-2">
               <h2 id="paired-devices-heading" className="text-sm font-semibold">
@@ -230,14 +213,6 @@ export function DevicesView() {
                 </span>
               )}
             </div>
-
-            {errorKind === null && (
-              <StateNotice
-                icon={ShieldAlert}
-                title={t("devices.pairing.unavailable.title")}
-                body={t("devices.pairing.unavailable.body")}
-              />
-            )}
 
             {peers.isPending ? (
               <EmptyState
