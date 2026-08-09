@@ -216,19 +216,23 @@ pub(super) fn websocket_url(base: &str) -> String {
 /// signature-verification stack to the tree for a value we deliberately do not
 /// verify (`CLAUDE.md` rule 1, exemption 3).
 ///
-/// Returns `None` for anything that is not a three-part token with a decodable
-/// JSON payload carrying a non-empty string `sub` — which the caller turns into
-/// a hard error rather than an omitted filter.
+/// Returns `None` unless the token has exactly three non-empty base64url
+/// segments and an object payload carrying a non-empty string `sub`. The caller
+/// turns that into a hard error rather than an omitted filter.
 pub(super) fn jwt_subject(token: &str) -> Option<String> {
     let mut parts = token.split('.');
-    let _header = parts.next()?;
+    let header = parts.next()?;
     let payload = parts.next()?;
-    // A JWT has three parts. Two is not a token we should be reading, and the
-    // signature is not checked here — see the doc comment.
-    parts.next()?;
+    let signature = parts.next()?;
+    if header.is_empty() || payload.is_empty() || signature.is_empty() || parts.next().is_some() {
+        return None;
+    }
+
+    B64URL.decode(header).ok()?;
     let decoded = B64URL.decode(payload).ok()?;
+    B64URL.decode(signature).ok()?;
     let claims: Value = serde_json::from_slice(&decoded).ok()?;
-    let sub = claims.get("sub")?.as_str()?;
+    let sub = claims.as_object()?.get("sub")?.as_str()?;
     if sub.is_empty() {
         return None;
     }
@@ -246,12 +250,16 @@ pub(super) fn jwt_subject(token: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// A JWT-shaped token whose payload decodes to `{"sub": id}`. Not signed —
-    /// nothing here verifies signatures, and pretending otherwise in a test
-    /// would suggest that it does.
+    const HEADER: &str = "e30";
+    const SIGNATURE: &str = "c2lnbmF0dXJl";
+
+    fn token_with_payload(payload: &str) -> String {
+        let payload = B64URL.encode(payload);
+        format!("{HEADER}.{payload}.{SIGNATURE}")
+    }
+
     fn token_for(id: &str) -> String {
-        let payload = B64URL.encode(format!(r#"{{"sub":"{id}","role":"authenticated"}}"#));
-        format!("header.{payload}.signature")
+        token_with_payload(&json!({ "sub": id, "role": "authenticated" }).to_string())
     }
 
     const USER: &str = "6b1e2f80-0000-4000-8000-000000000001";
@@ -379,20 +387,54 @@ mod tests {
     }
 
     #[test]
-    fn a_token_without_a_subject_is_a_hard_error() {
+    fn a_valid_unicode_subject_is_preserved() {
+        let subject = "用户-🙂-café";
+
+        assert_eq!(jwt_subject(&token_for(subject)).as_deref(), Some(subject));
+    }
+
+    #[test]
+    fn a_jwt_requires_exactly_three_nonempty_base64url_segments() {
+        let payload = B64URL.encode(json!({ "sub": USER }).to_string());
+        let valid = format!("{HEADER}.{payload}.{SIGNATURE}");
+
+        assert_eq!(jwt_subject(&valid).as_deref(), Some(USER));
+        for token in [
+            "".to_owned(),
+            HEADER.to_owned(),
+            format!("{HEADER}.{payload}"),
+            format!("{valid}.extra"),
+            format!("{valid}.extra.more"),
+            format!(".{payload}.{SIGNATURE}"),
+            format!("{HEADER}..{SIGNATURE}"),
+            format!("{HEADER}.{payload}."),
+            format!("*.{payload}.{SIGNATURE}"),
+            format!("{HEADER}.*.{SIGNATURE}"),
+            format!("{HEADER}.{payload}.*"),
+        ] {
+            assert_eq!(jwt_subject(&token), None, "accepted {token:?}");
+        }
+    }
+
+    #[test]
+    fn a_jwt_payload_must_be_an_object_with_a_nonempty_string_subject() {
         // CopyPaste-nr2y: the filter is never silently omitted.
-        assert_eq!(jwt_subject(&token_for(USER)).as_deref(), Some(USER));
-
-        // Present but empty is still no user id.
-        let empty_sub = B64URL.encode(r#"{"sub":""}"#);
-        assert_eq!(jwt_subject(&format!("h.{empty_sub}.s")), None);
-
-        assert_eq!(jwt_subject("not.a"), None);
-        assert_eq!(jwt_subject(""), None);
-        assert_eq!(jwt_subject("a.b.c"), None);
-
-        let no_sub = B64URL.encode(r#"{"role":"authenticated"}"#);
-        assert_eq!(jwt_subject(&format!("h.{no_sub}.s")), None);
+        for payload in [
+            "not json".to_owned(),
+            "null".to_owned(),
+            json!(USER).to_string(),
+            json!([{"sub": USER}]).to_string(),
+            json!({"role": "authenticated"}).to_string(),
+            json!({"sub": ""}).to_string(),
+            json!({"sub": null}).to_string(),
+            json!({"sub": 42}).to_string(),
+            json!({"sub": false}).to_string(),
+            json!({"sub": [USER]}).to_string(),
+            json!({"sub": {"id": USER}}).to_string(),
+        ] {
+            let token = token_with_payload(&payload);
+            assert_eq!(jwt_subject(&token), None, "accepted payload {payload}");
+        }
     }
 
     #[test]
