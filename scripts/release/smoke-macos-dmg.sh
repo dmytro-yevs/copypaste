@@ -52,6 +52,7 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT" || exit 2
+source scripts/release/macos-bundle-lib.sh
 
 [[ "$(uname -s)" == "Darwin" ]] || { echo "ERROR: must run on macOS" >&2; exit 2; }
 
@@ -71,6 +72,8 @@ DMG="dist/CopyPaste-v${VERSION}-macos-${ARCH}.dmg"
 APP="/Applications/CopyPaste.app"
 MNT="$(mktemp -d)/CopyPaste"
 LOGS="$(mktemp -d)"
+APP_EXECUTABLE=""
+CLI=""
 PASS=0
 FAIL=0
 NOTES=()
@@ -88,8 +91,12 @@ note() {
 group() { printf '\n== %s\n' "$1"; }
 
 cleanup() {
-    "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1
-    pkill -f "$APP/Contents/MacOS/CopyPaste" >/dev/null 2>&1
+    if [[ -n "$CLI" && -x "$CLI" ]]; then
+        "$CLI" shutdown >/dev/null 2>&1
+    fi
+    if [[ -n "$APP_EXECUTABLE" ]]; then
+        pkill -f "$APP_EXECUTABLE" >/dev/null 2>&1
+    fi
     pkill -f "$APP/Contents/MacOS/copypaste-daemon" >/dev/null 2>&1
     rm -rf "$APP"
     hdiutil detach "$MNT" -quiet >/dev/null 2>&1
@@ -128,6 +135,12 @@ else
     bad "CopyPaste.app is in the image" "$(ls -1 "$MNT")"
     exit 1
 fi
+if macos_bundle_executable_path "$MNT/CopyPaste.app" >/dev/null; then
+    ok "bundle metadata names one executable that can run"
+else
+    bad "bundle metadata names one executable that can run"
+    exit 1
+fi
 if [[ -L "$MNT/Applications" ]]; then
     ok "the drag-to-install symlink is there"
 else
@@ -161,6 +174,12 @@ group "Install, quarantine, postflight (ENFORCED)"
 # ---------------------------------------------------------------------------
 rm -rf "$APP"
 cp -R "$MNT/CopyPaste.app" "$APP"
+if APP_EXECUTABLE="$(macos_bundle_executable_path "$APP")"; then
+    ok "the installed executable matches bundle metadata"
+else
+    bad "the installed executable matches bundle metadata"
+    exit 1
+fi
 # What Homebrew applies to everything it downloads, and the reason the cask has
 # a postflight at all.
 xattr -w com.apple.quarantine "0083;00000000;Safari;" "$APP"
@@ -265,7 +284,7 @@ if open -a "$APP" 2>"$LOGS/open.err"; then
     else
         note "no WKWebView content process appeared" "the window may have no WebView in it"
     fi
-    if pgrep -f "$APP/Contents/MacOS/CopyPaste" >/dev/null 2>&1; then
+    if pgrep -f "$APP_EXECUTABLE" >/dev/null 2>&1; then
         ok "the app is still running ten seconds after launch"
     else
         note "the app exited within ten seconds of launching" "$(cat "$LOGS/open.err")"
@@ -284,7 +303,7 @@ if open -a "$APP" 2>"$LOGS/open.err"; then
         note "a crash report was written" \
              "$(basename "$(find "$CRASH_DIR" -maxdepth 1 -iname '*copypaste*' -print -quit)")"
     fi
-    pkill -f "$APP/Contents/MacOS/CopyPaste" >/dev/null 2>&1
+    pkill -f "$APP_EXECUTABLE" >/dev/null 2>&1
 else
     note "open(1) refused to launch the app" "$(cat "$LOGS/open.err")"
 fi

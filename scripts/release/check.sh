@@ -489,6 +489,9 @@ else
         "no 'env -u APPLE_SIGNING_IDENTITY' before the tauri build"
 fi
 
+check "macOS bundle executable lookup self-test" \
+    ./scripts/release/macos-bundle-self-test.sh
+
 if grep -q 'an Apple signing credential is present in the environment' .github/workflows/release.yml; then
     ok "release.yml still fails the build if a signing identity appears"
 else
