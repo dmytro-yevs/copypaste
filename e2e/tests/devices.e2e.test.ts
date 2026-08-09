@@ -40,6 +40,13 @@ interface PeerInfo {
   last_seen_ms: number;
 }
 
+interface SyncResult {
+  pairing_id: string;
+  sent: number;
+  received: number;
+  error: string | null;
+}
+
 let app: App;
 let other: Daemon;
 let paired: PeerInfo;
@@ -109,6 +116,50 @@ async function completePairing(
   expect(inviterDone.known_device).not.toBeNull();
   if (!joinerDone.known_device) throw new Error("pairing did not persist on the joiner");
   return joinerDone.known_device;
+}
+
+async function syncUntilPresent(
+  fromApp: string,
+  fromOther: string,
+): Promise<void> {
+  const observations: string[] = [];
+  const attempts: Array<[string, Daemon]> = [
+    ["app", app.daemon],
+    ["other", other],
+    ["app", app.daemon],
+    ["other", other],
+  ];
+  for (const [label, daemon] of attempts) {
+    const results = await daemon.json<SyncResult[]>([
+      "sync",
+      "--peer",
+      paired.pairing_id,
+    ]);
+    const result = results.find(
+      (candidate) => candidate.pairing_id === paired.pairing_id,
+    );
+    const [here, there] = await Promise.all([
+      app.daemon.items(),
+      other.items(),
+    ]);
+    const appReceived = here.some((item) => item.content === fromOther);
+    const otherReceived = there.some((item) => item.content === fromApp);
+    observations.push(
+      result
+        ? `${label}: sent=${result.sent}, received=${result.received}, ` +
+            `error=${result.error ?? "none"}, app=${appReceived}, ` +
+            `other=${otherReceived}`
+        : `${label}: requested peer omitted, app=${appReceived}, ` +
+            `other=${otherReceived}`,
+    );
+    if (appReceived && otherReceived) {
+      return;
+    }
+  }
+
+  throw new Error(
+    `two-way native sync did not converge: ${observations.join("; ")}`,
+  );
 }
 
 beforeAll(async () => {
@@ -274,26 +325,14 @@ describe("a known device", () => {
   });
 
   test("moves clipboard history both ways", async () => {
-    const fromApp = `from-app-${Date.now()}`;
-    const fromOther = `from-other-${Date.now()}`;
+    // Numeric uniqueness can form a Luhn-valid card and make the fixture
+    // correctly ineligible for sync (Browser CI 31331955801).
+    const fromApp = "two-way sync item from the app";
+    const fromOther = "two-way sync item from the other device";
     await app.daemon.add(fromApp);
     await other.add(fromOther);
 
-    await app.daemon.json<unknown>(["sync", "--peer", paired.pairing_id]);
-    await other.json<unknown>(["sync", "--peer", paired.pairing_id]);
-    await app.browser.waitUntil(
-      async () => {
-        const [here, there] = await Promise.all([
-          app.daemon.items(),
-          other.items(),
-        ]);
-        return (
-          here.some((item) => item.content === fromOther) &&
-          there.some((item) => item.content === fromApp)
-        );
-      },
-      { timeout: 45_000, timeoutMsg: "two-way native sync did not converge" },
-    );
+    await syncUntilPresent(fromApp, fromOther);
   });
 
   test("shows a failure and recovers after reconnect", async () => {
