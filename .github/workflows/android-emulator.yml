@@ -304,8 +304,13 @@ jobs:
       - name: Audit resolved Android dependencies
         working-directory: crates/copypaste-ui/src-tauri/gen/android
         timeout-minutes: 60
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           set -euo pipefail
+          if [[ -z "${NVD_API_KEY:-}" ]]; then
+            echo "::warning::NVD_API_KEY is unavailable; using NVD's slower anonymous rate limit."
+          fi
           ./gradlew --no-daemon \
             --init-script "${GITHUB_WORKSPACE}/scripts/ci/android-dependency-check.init.gradle.kts" \
             dependencyCheckAggregate
@@ -316,6 +321,15 @@ jobs:
         with:
           path: ~/.gradle/dependency-check-data
           key: dependency-check-12-${{ runner.os }}-${{ steps.dc-day.outputs.day }}
+
+      - name: Keep the Android dependency audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-dependency-check-report
+          path: crates/copypaste-ui/src-tauri/gen/android/**/dependency-check-report.*
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Locate it and check what it claims
         run: |

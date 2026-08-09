@@ -345,6 +345,25 @@ rec(emu is not None, "android-emulator.yml exists",
     "it is the only thing in this repository that runs a line of Kotlin")
 if emu:
     ejobs = emu.get("jobs") or {}
+    apk_steps = steps(ejobs.get("apk") or {})
+    dependency_audit = next(
+        (step for step in apk_steps if "dependencyCheckAggregate" in (step.get("run") or "")),
+        {},
+    )
+    audit_report = next(
+        (step for step in apk_steps
+         if (step.get("with") or {}).get("name") == "android-dependency-check-report"),
+        {},
+    )
+    rec((dependency_audit.get("env") or {}).get("NVD_API_KEY") == "${{ secrets.NVD_API_KEY }}",
+        "Android dependency audit reads the NVD API key secret",
+        "forks may leave the secret empty, but repository runs must pass it to Gradle")
+    rec(audit_report.get("if") == "always()",
+        "Android dependency audit report uploads after a failed gate",
+        "the CVE report is evidence for the failure and must not be skipped with later steps")
+    rec((audit_report.get("with") or {}).get("if-no-files-found") == "ignore",
+        "Android dependency report tolerates failures before report generation",
+        "always() must not hide the original audit failure when no report exists")
     triggers = emu.get(True) or emu.get("on") or {}
     # Reversed deliberately. It used to assert the opposite — ten minutes of
     # runner time was judged too much per merge — but this is Android's only
