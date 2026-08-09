@@ -58,9 +58,9 @@ export const NATIVE_DRIVER = nativeDriver();
 
 /**
  * A Unix socket path must fit in `sockaddr_un.sun_path` (~108 bytes) or the
- * daemon dies with "path must be shorter than SUN_LEN". The daemon derives its
- * socket from `XDG_DATA_HOME`, and the usual per-run scratch directories are
- * already long enough to blow the limit, so run roots live directly under /tmp.
+ * daemon dies with "path must be shorter than SUN_LEN". The harness keeps the
+ * data directory and socket together, and the usual per-run scratch directories
+ * are already long enough to blow the limit, so run roots live directly under /tmp.
  */
 export const RUN_ROOT =
   process.platform === "win32" ? path.join(os.tmpdir(), "cp-e2e") : "/tmp/cp-e2e";

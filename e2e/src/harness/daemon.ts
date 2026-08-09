@@ -54,13 +54,10 @@ interface CliItem {
 export async function startDaemon(): Promise<Daemon> {
   mkdirSync(RUN_ROOT, { recursive: true });
   const dataHome = mkdtempSync(path.join(RUN_ROOT, "run-"));
-  const isolation: Record<string, string> =
-    process.platform === "win32"
-      ? {
-          APPDATA: dataHome,
-          COPYPASTE_SOCKET: path.join(dataHome, "daemon.sock"),
-        }
-      : { XDG_DATA_HOME: dataHome };
+  const isolation: Record<string, string> = {
+    COPYPASTE_DATA_DIR: dataHome,
+    COPYPASTE_SOCKET: path.join(dataHome, "daemon.sock"),
+  };
   const env = { ...process.env, ...isolation } as Record<string, string>;
 
   // Peer listener port: the default is fixed, so two runs on one host collide.
