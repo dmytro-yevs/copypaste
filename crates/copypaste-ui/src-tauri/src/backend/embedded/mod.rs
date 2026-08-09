@@ -918,6 +918,7 @@ mod tests {
         let (backend, _clip, _dir) = backend();
         let item = backend.add("AKIAIOSFODNN7EXAMPLE").await.unwrap();
         assert!(item.is_sensitive, "the detector did not flag a known key");
+        assert!(item.sensitive_finding.is_none());
         assert!(
             backend
                 .search("AKIAIOSFODNN7EXAMPLE", 20)
@@ -930,6 +931,28 @@ mod tests {
         // …and it is still the user's data: reachable by id, which is how the
         // reveal gesture gets to it.
         assert!(backend.get(&item.id).await.unwrap().is_sensitive);
+    }
+
+    #[tokio::test]
+    async fn inert_findings_match_the_daemon_contract_and_stay_searchable() {
+        let (backend, _clip, _dir) = backend();
+        let item = backend
+            .add("mail alice@example.com about the release")
+            .await
+            .unwrap();
+
+        assert!(!item.is_sensitive);
+        let finding = item.sensitive_finding.as_ref().unwrap();
+        assert_eq!(finding.label, "email");
+        assert_eq!(finding.spans.len(), 1);
+        assert!(!finding.redacted_preview.contains("alice@example.com"));
+        assert!(backend
+            .search("alice", 20)
+            .await
+            .unwrap()
+            .items
+            .iter()
+            .any(|found| found.id == item.id));
     }
 
     #[tokio::test]

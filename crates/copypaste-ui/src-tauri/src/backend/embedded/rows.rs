@@ -48,20 +48,26 @@ impl Inner {
         // until a session with that device has told us one.
         let device_id = origin_or(&row.origin_device_id, &self.state.device_id).to_string();
         let origin_device_name = names.get(&device_id).cloned();
+        let content = if copypaste_ipc::content_type::is_binary(&row.content_type) {
+            format!(
+                "[{}]",
+                copypaste_ipc::content_type::label(&row.content_type)
+            )
+        } else {
+            String::from_utf8_lossy(&plaintext).into_owned()
+        };
+        let sensitive_finding = (!row.is_sensitive
+            && copypaste_ipc::content_type::is_text(&row.content_type))
+        .then(|| self.state.detector.inert_finding_metadata(&content))
+        .flatten();
         Ok(Item {
             id: row.id,
-            content: if copypaste_ipc::content_type::is_binary(&row.content_type) {
-                format!(
-                    "[{}]",
-                    copypaste_ipc::content_type::label(&row.content_type)
-                )
-            } else {
-                String::from_utf8_lossy(&plaintext).into_owned()
-            },
+            content,
             content_type: row.content_type,
             created_at: row.created_at,
             pinned: row.pinned,
             is_sensitive: row.is_sensitive,
+            sensitive_finding,
             origin_device_id: device_id,
             origin_device_name,
             source_app_bundle_id: row.app_bundle_id,

@@ -43,7 +43,9 @@
 
 #[cfg(any(target_os = "android", target_os = "macos", test))]
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use copypaste_ipc::{DiscoveredDevice, ImagePreview, Item, PeerInfo, StatusData, SyncResult};
+use copypaste_ipc::{
+    DiscoveredDevice, ImagePreview, Item, PeerInfo, SensitiveFinding, StatusData, SyncResult,
+};
 use serde::Serialize;
 
 use crate::backend::UiError;
@@ -64,6 +66,9 @@ pub struct UiItem {
     created_at: i64,
     pinned: bool,
     is_sensitive: bool,
+    /// Inert detector metadata. A high-confidence item never carries even a
+    /// redacted preview across this boundary.
+    sensitive_finding: Option<SensitiveFinding>,
     /// Which device captured this. Not secret, and the whole point of it is to
     /// be shown: an item that arrived from the Mac and one captured on this
     /// phone are different things to a user, and the android access doc's §5
@@ -186,10 +191,10 @@ impl From<Item> for UiItem {
         // The whole point of the file, in one branch. `item.content` is moved
         // into the `Some` or dropped on the spot; there is no path that keeps
         // it and no way to opt out.
-        let content = if item.is_sensitive {
-            None
+        let (content, sensitive_finding) = if item.is_sensitive {
+            (None, None)
         } else {
-            Some(item.content)
+            (Some(item.content), item.sensitive_finding)
         };
         Self {
             id: item.id,
@@ -198,6 +203,7 @@ impl From<Item> for UiItem {
             created_at: item.created_at,
             pinned: item.pinned,
             is_sensitive: item.is_sensitive,
+            sensitive_finding,
             origin_device_id: item.origin_device_id,
             origin_device_name: item.origin_device_name,
             source_app_bundle_id: item.source_app_bundle_id,
@@ -341,6 +347,7 @@ mod tests {
             created_at: 1_700_000_000_000,
             pinned: false,
             is_sensitive,
+            sensitive_finding: None,
             origin_device_id: "device-1".into(),
             origin_device_name: Some("Mac".into()),
             source_app_bundle_id: Some("com.apple.Safari".into()),
@@ -358,18 +365,42 @@ mod tests {
         assert!(json.contains("hello"), "{json}");
     }
 
+    #[test]
+    fn inert_finding_metadata_crosses_with_a_redacted_preview() {
+        let mut wire = wire("mail alice@example.com", false);
+        wire.sensitive_finding = Some(SensitiveFinding {
+            label: "email".into(),
+            spans: vec![copypaste_ipc::SensitiveSpan { start: 5, end: 22 }],
+            spans_truncated: false,
+            redacted_preview: "mail ***REDACTED***".into(),
+        });
+
+        let json = serde_json::to_string(&UiItem::from(wire)).unwrap();
+        assert!(json.contains(r#""label":"email""#), "{json}");
+        assert!(json.contains("mail ***REDACTED***"), "{json}");
+    }
+
     /// The load-bearing test: a sensitive item's plaintext must not appear in
     /// the JSON that reaches the WebView, in any form — not the value, not a
     /// mask of it, not a truncated preview.
     #[test]
     fn sensitive_plaintext_never_reaches_the_serialised_form() {
         let secret = "AKIAIOSFODNN7EXAMPLE";
-        let item = UiItem::from(wire(secret, true));
+        let mut wire = wire(secret, true);
+        wire.sensitive_finding = Some(SensitiveFinding {
+            label: "untrusted".into(),
+            spans: Vec::new(),
+            spans_truncated: false,
+            redacted_preview: "surrounding plaintext".into(),
+        });
+        let item = UiItem::from(wire);
 
         assert!(!item.has_content());
         let json = serde_json::to_string(&item).unwrap();
         assert!(!json.contains(secret), "sensitive plaintext leaked: {json}");
         assert!(!json.contains("AKIA"), "a prefix leaked: {json}");
+        assert!(!json.contains("surrounding plaintext"), "{json}");
+        assert!(!json.contains("untrusted"), "{json}");
         assert!(json.contains("\"content\":null"), "{json}");
         // The flag itself must survive: the view needs to know to render a
         // placeholder rather than an empty row.

@@ -2,7 +2,8 @@ use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, DiagnosticCounters,
     DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind, ExportData, ExportItem,
     ImagePreview, ImportData, Item, ItemPage, Method, PairingData, PeerInfo, PrivateModeData,
-    Request, Response, ResponseData, StatusData, SyncResult, PROTOCOL_VERSION,
+    Request, Response, ResponseData, SensitiveFinding, SensitiveSpan, StatusData, SyncResult,
+    PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -14,6 +15,7 @@ fn item() -> Item {
         created_at: 1,
         pinned: false,
         is_sensitive: false,
+        sensitive_finding: None,
         origin_device_id: "device-1".into(),
         origin_device_name: Some("Laptop".into()),
         source_app_bundle_id: None,
@@ -342,6 +344,28 @@ fn an_item_with_no_truncated_flag_reads_as_a_whole_body() {
     });
     let item: Item = serde_json::from_value(wire).unwrap();
     assert!(!item.truncated);
+    assert!(item.sensitive_finding.is_none());
+}
+
+#[test]
+fn an_inert_sensitive_finding_round_trips_as_additive_metadata() {
+    let mut item = item();
+    item.sensitive_finding = Some(SensitiveFinding {
+        label: "email".into(),
+        spans: vec![SensitiveSpan { start: 5, end: 22 }],
+        spans_truncated: false,
+        redacted_preview: "mail ***REDACTED***".into(),
+    });
+
+    let wire = serde_json::to_value(&item).unwrap();
+    assert_eq!(wire["sensitive_finding"]["label"], "email");
+    assert_eq!(wire["sensitive_finding"]["spans"][0]["start"], 5);
+    assert_eq!(
+        wire["sensitive_finding"]["redacted_preview"],
+        "mail ***REDACTED***"
+    );
+    let back: Item = serde_json::from_value(wire).unwrap();
+    assert_eq!(back.sensitive_finding, item.sensitive_finding);
 }
 
 #[test]

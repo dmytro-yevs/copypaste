@@ -4,7 +4,8 @@ use std::path::Path;
 
 use copypaste_ipc::{
     CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, DiagnosticCounters,
-    DiscoveredDevice, ErrorCode, ImportData, Liveness, PeerInfo, PrivateModeData, StatusData,
+    DiscoveredDevice, ErrorCode, ImportData, Liveness, PeerInfo, PrivateModeData, SensitiveFinding,
+    SensitiveSpan, StatusData,
 };
 use ts_rs::{Config, ExportError, TS};
 
@@ -38,6 +39,8 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<UiImagePreview>(&config, &mut output);
     declaration::<UiSourceAppIcon>(&config, &mut output);
     declaration::<UiInstalledSourceApp>(&config, &mut output);
+    declaration::<SensitiveSpan>(&config, &mut output);
+    declaration::<SensitiveFinding>(&config, &mut output);
     declaration::<UiItem>(&config, &mut output);
     declaration::<UiPage>(&config, &mut output);
     declaration::<Liveness>(&config, &mut output);
