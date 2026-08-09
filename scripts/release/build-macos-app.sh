@@ -78,6 +78,7 @@ esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
+source scripts/release/macos-bundle-lib.sh
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "ERROR: must run on macOS (this host is $(uname -s))" >&2
@@ -163,12 +164,8 @@ done
 # it, postflight fails, brew rolls back, and the error names a file it has
 # already removed.
 PLIST="${APP}/Contents/Info.plist"
-EXEC="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$PLIST" 2>/dev/null || true)"
-[[ -n "$EXEC" ]] || { echo "ERROR: CFBundleExecutable unset in $PLIST" >&2; exit 1; }
-[[ -f "${BIN_DIR}/${EXEC}" ]] || {
-    echo "ERROR: CFBundleExecutable '$EXEC' is not present at ${BIN_DIR}/${EXEC}" >&2
-    exit 1
-}
+EXEC_PATH="$(macos_bundle_executable_path "$APP")" || exit 1
+EXEC="${EXEC_PATH##*/}"
 
 # ---------------------------------------------------------------------------
 # CFBundleShortVersionString, and the pre-release suffix
