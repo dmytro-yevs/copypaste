@@ -96,7 +96,10 @@ on run argv
                             end try
                         else if actionMode is "set" then
                             try
-                                set value of elementRef to inputValue
+                                set focused of elementRef to true
+                                keystroke "a" using command down
+                                key code 51
+                                keystroke inputValue
                                 return "ok"
                             end try
                         end if
@@ -162,6 +165,8 @@ mac_ui_self_test() {
             ready) printf 'ok\n' ;;
             surface) printf 'AXMenuBar\tCopyPaste\nAXMenuBarItem\tCopyPaste\n' ;;
             dump) printf 'AXButton\tSign in\t\t\t\nAXStaticText\tConnected\t\t\t\n' ;;
+            press) [[ "$4" == "Sign in" ]] && printf 'ok\n' ;;
+            set) [[ "$4" == "Email" && "$5" == "native@example.test" ]] && printf 'ok\n' ;;
             *) return 1 ;;
         esac
     }
@@ -169,6 +174,8 @@ mac_ui_self_test() {
     mac_ax ready >/dev/null
     mac_ax surface > "$1/surface.txt"
     mac_ax dump > "$fixture"
+    mac_ax press "Sign in" >/dev/null
+    mac_ax set "Email" "native@example.test" >/dev/null
     unset -f osascript
     mac_ax_contains "$1/surface.txt" "AXMenuBar" \
         && ok "the full native surface retains menu bar evidence" \
@@ -179,6 +186,10 @@ mac_ui_self_test() {
     mac_ax_contains "$fixture" "Sign in" \
         && ok "an accessible action is found for the launched PID" \
         || bad "an accessible action is found for the launched PID"
+    grep -Fq 'set focused of elementRef to true' "${BASH_SOURCE[0]}" \
+        && grep -Fq 'keystroke inputValue' "${BASH_SOURCE[0]}" \
+        && ok "field input dispatches keyboard events" \
+        || bad "field input dispatches keyboard events"
     mac_ax_contains "$fixture" "Signed out" \
         && bad "an absent accessibility state is not found" \
         || ok "an absent accessibility state is not found"
