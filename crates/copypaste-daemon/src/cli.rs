@@ -66,15 +66,20 @@ pub struct Args {
 /// Both halves are required: a URL with no key cannot authenticate and a key
 /// with no URL has nothing to talk to, so a half-configuration is reported as
 /// unconfigured rather than failing at the first request.
-pub fn cloud_config(args: &Args) -> Option<copypaste_cloud::CloudConfig> {
+pub fn cloud_config(
+    args: &Args,
+) -> Result<Option<copypaste_cloud::CloudConfig>, copypaste_cloud::CloudConfigError> {
     fn resolve(flag: Option<&String>, var: &str) -> Option<String> {
         flag.cloned()
             .or_else(|| std::env::var(var).ok())
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
     }
-    Some(copypaste_cloud::CloudConfig {
-        url: resolve(args.cloud_url.as_ref(), "COPYPASTE_CLOUD_URL")?,
-        anon_key: resolve(args.cloud_anon_key.as_ref(), "COPYPASTE_CLOUD_ANON_KEY")?,
-    })
+    let Some(url) = resolve(args.cloud_url.as_ref(), "COPYPASTE_CLOUD_URL") else {
+        return Ok(None);
+    };
+    let Some(anon_key) = resolve(args.cloud_anon_key.as_ref(), "COPYPASTE_CLOUD_ANON_KEY") else {
+        return Ok(None);
+    };
+    copypaste_cloud::CloudConfig::new(url, anon_key).map(Some)
 }

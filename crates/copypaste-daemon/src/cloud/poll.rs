@@ -184,10 +184,7 @@ mod tests {
 
         // A URL that resolves nowhere: the round must fail at the transport
         // rather than hang.
-        let config = CloudConfig {
-            url: "http://127.0.0.1:1".into(),
-            anon_key: "anon".into(),
-        };
+        let config = CloudConfig::new_loopback("http://127.0.0.1:1", "anon").unwrap();
         let (state, _dir) = crate::testutil::test_state_with_cloud(
             "alpha",
             crate::cloud::Cloud::new(Some(config.clone())),
@@ -247,10 +244,7 @@ mod tests {
         use copypaste_cloud::crypto::derive_sync_key;
         use copypaste_cloud::CloudConfig;
 
-        let config = CloudConfig {
-            url: "https://example.supabase.co".into(),
-            anon_key: "anon".into(),
-        };
+        let config = CloudConfig::new("https://example.supabase.co", "anon").unwrap();
         let (state, _dir) =
             test_state_with_cloud("alpha", crate::cloud::Cloud::new(Some(config.clone())));
         let key = derive_sync_key("correct horse battery staple", "user-1").unwrap();

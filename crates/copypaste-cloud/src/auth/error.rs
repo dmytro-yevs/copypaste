@@ -316,11 +316,9 @@ mod tests {
     #[tokio::test]
     async fn a_network_failure_message_carries_no_url_or_path() {
         // Port 1 on loopback refuses immediately.
-        let auth = SupabaseAuth::new(CloudConfig {
-            url: "http://127.0.0.1:1".into(),
-            anon_key: ANON.into(),
-        })
-        .with_retry_policy(fast_retry());
+        let auth =
+            SupabaseAuth::new(CloudConfig::new_loopback("http://127.0.0.1:1", ANON).unwrap())
+                .with_retry_policy(fast_retry());
         let err = auth.sign_in("a@b.co", "x").await.unwrap_err();
         assert!(matches!(err, AuthError::Network(_)), "{err:?}");
         let rendered = format!("{err}");

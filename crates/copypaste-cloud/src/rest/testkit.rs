@@ -39,11 +39,8 @@ pub(super) fn fast_retry() -> ExponentialBuilder {
 }
 
 pub(super) fn client(stub: &Stub) -> SupabaseRest {
-    SupabaseRest::new(CloudConfig {
-        url: stub.base_url.clone(),
-        anon_key: ANON.to_string(),
-    })
-    .with_retry_policy(fast_retry())
+    SupabaseRest::new(CloudConfig::new_loopback(&stub.base_url, ANON).unwrap())
+        .with_retry_policy(fast_retry())
 }
 
 /// A signed row, because an unsigned one is not a row this client will send.
