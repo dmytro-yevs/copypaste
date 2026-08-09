@@ -77,7 +77,8 @@ require_exclusive_adb() {
 
 boot() {
     local avd="$1" log="$2" waited=0
-    # shellcheck disable=SC2086 -- EMULATOR_OPTS is an argument vector override.
+    # EMULATOR_OPTS is an argument vector override, so splitting is intentional.
+    # shellcheck disable=SC2086
     "$EMULATOR_BIN" -avd "$avd" $EMULATOR_OPTS >"$log" 2>&1 &
     EMU_PID=$!
     adb wait-for-device
