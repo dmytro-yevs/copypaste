@@ -651,9 +651,10 @@ mod tests {
             },
         );
         let current = state.cloud.driver().unwrap();
+        let current_revision = current.session_revision();
         state
             .cloud
-            .note_driver_failure(&current, "the current account failed");
+            .note_driver_failure(&current, current_revision, "the current account failed");
 
         state
             .cloud
