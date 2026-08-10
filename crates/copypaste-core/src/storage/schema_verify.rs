@@ -1,318 +1,83 @@
-//! Proving that a database file *is* the schema this build writes.
-//!
-//! Separate from [`super::schema`] because the question is the opposite one: a
-//! candidate — a backup a user is about to restore over their history — is
-//! inspected as it stands and refused if it does not match, rather than being
-//! upgraded into matching.
+//! Proving that a database file is exactly the schema this build writes.
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 
 use super::model::StoreError;
-use super::schema::SCHEMA_VERSION;
 
-struct Column {
-    name: &'static str,
-    declared_type: &'static str,
-    not_null: bool,
-    primary_key: bool,
-}
+const CURRENT_TABLES: &[&str] = &[
+    "clipboard_items",
+    "clipboard_fts",
+    "clipboard_live_count",
+    "sync_device_state",
+    "sync_device_name",
+];
 
-struct Table {
-    name: &'static str,
-    columns: &'static [Column],
-    virtual_fts5: bool,
-}
-
-struct ActualColumn {
+#[derive(Debug, PartialEq)]
+struct SchemaObject {
+    kind: String,
     name: String,
-    declared_type: String,
-    not_null: bool,
-    primary_key: bool,
+    table: String,
+    sql: String,
 }
-
-const CLIPBOARD_ITEMS_COLUMNS: &[Column] = &[
-    Column {
-        name: "id",
-        declared_type: "TEXT",
-        not_null: true,
-        primary_key: true,
-    },
-    Column {
-        name: "content_ciphertext",
-        declared_type: "BLOB",
-        not_null: false,
-        primary_key: false,
-    },
-    Column {
-        name: "nonce",
-        declared_type: "BLOB",
-        not_null: false,
-        primary_key: false,
-    },
-    Column {
-        name: "content_type",
-        declared_type: "TEXT",
-        not_null: true,
-        primary_key: false,
-    },
-    Column {
-        name: "content_hash",
-        declared_type: "TEXT",
-        not_null: true,
-        primary_key: false,
-    },
-    Column {
-        name: "is_sensitive",
-        declared_type: "INTEGER",
-        not_null: true,
-        primary_key: false,
-    },
-    Column {
-        name: "pinned",
-        declared_type: "INTEGER",
-        not_null: true,
-        primary_key: false,
-    },
-    Column {
-        name: "pin_order",
-        declared_type: "REAL",
-        not_null: false,
-        primary_key: false,
-    },
-    Column {
-        name: "pin_updated_at",
-        declared_type: "INTEGER",
-        not_null: true,
-        primary_key: false,
-    },
-    Column {
-        name: "created_at",
-        declared_type: "INTEGER",
-        not_null: true,
-        primary_key: false,
-    },
-    Column {
-        name: "deleted",
-        declared_type: "INTEGER",
-        not_null: true,
-        primary_key: false,
-    },
-    Column {
-        name: "origin_device_id",
-        declared_type: "TEXT",
-        not_null: true,
-        primary_key: false,
-    },
-    Column {
-        name: "app_bundle_id",
-        declared_type: "TEXT",
-        not_null: false,
-        primary_key: false,
-    },
-    Column {
-        name: "app_name",
-        declared_type: "TEXT",
-        not_null: false,
-        primary_key: false,
-    },
-    Column {
-        name: "payload_metadata",
-        declared_type: "TEXT",
-        not_null: false,
-        primary_key: false,
-    },
-    Column {
-        name: "fts_rowid",
-        declared_type: "INTEGER",
-        not_null: false,
-        primary_key: false,
-    },
-];
-
-const CLIPBOARD_FTS_COLUMNS: &[Column] = &[
-    Column {
-        name: "id",
-        declared_type: "",
-        not_null: false,
-        primary_key: false,
-    },
-    Column {
-        name: "content_text",
-        declared_type: "",
-        not_null: false,
-        primary_key: false,
-    },
-];
-
-const CLIPBOARD_LIVE_COUNT_COLUMNS: &[Column] = &[
-    Column {
-        name: "only_row",
-        declared_type: "INTEGER",
-        not_null: true,
-        primary_key: true,
-    },
-    Column {
-        name: "live",
-        declared_type: "INTEGER",
-        not_null: true,
-        primary_key: false,
-    },
-];
-
-const SYNC_DEVICE_STATE_COLUMNS: &[Column] = &[
-    Column {
-        name: "key",
-        declared_type: "TEXT",
-        not_null: true,
-        primary_key: true,
-    },
-    Column {
-        name: "value",
-        declared_type: "TEXT",
-        not_null: true,
-        primary_key: false,
-    },
-];
-
-const SYNC_DEVICE_NAME_COLUMNS: &[Column] = &[
-    Column {
-        name: "device_id",
-        declared_type: "TEXT",
-        not_null: true,
-        primary_key: true,
-    },
-    Column {
-        name: "name",
-        declared_type: "TEXT",
-        not_null: true,
-        primary_key: false,
-    },
-];
-
-const TABLES: &[Table] = &[
-    Table {
-        name: "clipboard_items",
-        columns: CLIPBOARD_ITEMS_COLUMNS,
-        virtual_fts5: false,
-    },
-    Table {
-        name: "clipboard_fts",
-        columns: CLIPBOARD_FTS_COLUMNS,
-        virtual_fts5: true,
-    },
-    Table {
-        name: "clipboard_live_count",
-        columns: CLIPBOARD_LIVE_COUNT_COLUMNS,
-        virtual_fts5: false,
-    },
-    Table {
-        name: "sync_device_state",
-        columns: SYNC_DEVICE_STATE_COLUMNS,
-        virtual_fts5: false,
-    },
-    Table {
-        name: "sync_device_name",
-        columns: SYNC_DEVICE_NAME_COLUMNS,
-        virtual_fts5: false,
-    },
-];
 
 pub(super) fn verify_schema(conn: &Connection) -> Result<(), StoreError> {
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version != SCHEMA_VERSION {
-        return Err(StoreError::InvalidSchema);
-    }
+    let expected = Connection::open_in_memory()?;
+    expected.execute_batch(super::schema::SCHEMA)?;
 
-    for table in TABLES {
-        verify_table(conn, table)?;
+    if schema_objects(conn)? != schema_objects(&expected)? {
+        return Err(StoreError::InvalidSchema);
     }
     Ok(())
 }
 
 pub(super) fn is_current_table(name: &str) -> bool {
-    TABLES.iter().any(|table| table.name == name)
+    CURRENT_TABLES.contains(&name)
 }
 
-fn verify_table(conn: &Connection, expected: &Table) -> Result<(), StoreError> {
-    let sql: Option<String> = conn
-        .query_row(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
-            [expected.name],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(sql) = sql else {
-        return Err(StoreError::InvalidSchema);
-    };
-    if expected.virtual_fts5 {
-        let definition = sql.trim_start().to_ascii_lowercase();
-        if !definition.starts_with("create virtual table") || !definition.contains("using fts5") {
-            return Err(StoreError::InvalidSchema);
-        }
-    }
-
-    let pragma = format!("PRAGMA table_info({})", quote_identifier(expected.name));
-    let mut statement = conn.prepare(&pragma)?;
-    let actual = statement
+fn schema_objects(conn: &Connection) -> rusqlite::Result<Vec<SchemaObject>> {
+    let mut statement = conn.prepare(
+        "SELECT type, name, tbl_name, sql FROM sqlite_schema \
+         WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' \
+         ORDER BY type, name",
+    )?;
+    let objects = statement
         .query_map([], |row| {
-            Ok(ActualColumn {
+            Ok(SchemaObject {
+                kind: row.get(0)?,
                 name: row.get(1)?,
-                declared_type: row.get(2)?,
-                not_null: row.get::<_, i64>(3)? != 0,
-                primary_key: row.get::<_, i64>(5)? != 0,
+                table: row.get(2)?,
+                sql: row.get(3)?,
             })
         })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-
-    if actual.len() != expected.columns.len()
-        || expected.columns.iter().any(|expected_column| {
-            actual
-                .iter()
-                .find(|actual| actual.name == expected_column.name)
-                .is_none_or(|actual| {
-                    actual.declared_type != expected_column.declared_type
-                        || actual.not_null != expected_column.not_null
-                        || actual.primary_key != expected_column.primary_key
-                })
-        })
-    {
-        return Err(StoreError::InvalidSchema);
-    }
-    Ok(())
-}
-
-fn quote_identifier(identifier: &str) -> String {
-    format!("\"{}\"", identifier.replace('"', "\"\""))
+        .collect();
+    objects
 }
 
 #[cfg(test)]
 mod tests {
-    use tempfile::TempDir;
-
     use super::super::test_support::KEY;
     use super::super::{Store, StoreError};
     use super::verify_schema;
 
     #[test]
     fn the_current_schema_passes_validation() {
-        let dir = TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("copypaste-v2.db");
         let store = Store::open(&path, &KEY).unwrap();
-        let conn = store.conn().unwrap();
 
-        verify_schema(&conn).unwrap();
+        verify_schema(&store.conn().unwrap()).unwrap();
     }
 
     #[test]
-    fn schema_validation_rejects_a_column_with_the_wrong_type() {
-        let dir = TempDir::new().unwrap();
+    fn validation_rejects_equivalent_but_noncanonical_ddl() {
+        let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("copypaste-v2.db");
         let store = Store::open(&path, &KEY).unwrap();
         let conn = store.conn().unwrap();
         conn.execute_batch(
             "DROP TABLE sync_device_name;
              CREATE TABLE sync_device_name (
-                 device_id BLOB PRIMARY KEY NOT NULL,
+                 device_id TEXT NOT NULL PRIMARY KEY,
                  name TEXT NOT NULL
              );",
         )
@@ -325,12 +90,12 @@ mod tests {
     }
 
     #[test]
-    fn schema_validation_rejects_a_missing_live_count_table() {
-        let dir = TempDir::new().unwrap();
+    fn validation_rejects_a_missing_trigger() {
+        let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("copypaste-v2.db");
         let store = Store::open(&path, &KEY).unwrap();
         let conn = store.conn().unwrap();
-        conn.execute_batch("DROP TABLE clipboard_live_count")
+        conn.execute_batch("DROP TRIGGER clipboard_live_count_insert")
             .unwrap();
 
         assert!(matches!(

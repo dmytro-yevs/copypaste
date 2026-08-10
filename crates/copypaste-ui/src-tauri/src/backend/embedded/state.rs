@@ -125,7 +125,6 @@ fn store_open_error(error: StoreError) -> BackendError {
         StoreError::File(_)
         | StoreError::Sqlite(_)
         | StoreError::Pool(_)
-        | StoreError::Migration(_)
         | StoreError::InvalidKey
         | StoreError::IntegrityCheckFailed
         | StoreError::InvalidSchema

@@ -12,7 +12,7 @@ version pins and the RustSec reasoning attached.
 
 | Concern | v1 (hand-rolled) | v2 |
 |---|---|---|
-| DB migrations | `user_version` ladder + three layers of race guards | `rusqlite_migration` |
+| DB schema | `user_version` ladder + three layers of race guards | one transactional fresh schema; exact validation on every existing file |
 | Row mapping | positional column lists, hand-synced in three places | `rusqlite`'s `row.get("name")`, by name |
 | Connection pool | *(already correct)* | `r2d2` + `r2d2_sqlite` |
 | SQLCipher | *(inherent)* | `rusqlite` `bundled-sqlcipher` |

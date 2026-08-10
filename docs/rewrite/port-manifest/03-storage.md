@@ -68,10 +68,11 @@ distinct database, never opens or migrates those files, and leaves any old
 history untouched. If an old history is encountered, it must be explained
 without a path rather than misreported as a damaged v2 database.
 
-**I2 — No silent downgrade.** If `PRAGMA user_version > SCHEMA_VERSION`, the
-open MUST fail with a typed downgrade error and MUST NOT touch the file.
-(`schema/mod.rs`: `SchemaError::Downgrade`; the pre-fix code fell through to
-`Ok(())` and silently masked the mismatch — "CRITICAL edge-case #2".)
+**I2 — No silent downgrade.** v2 accepts only the exact schema its build writes.
+Any other layout fails with a typed, path-redacted incompatibility error and is
+not upgraded, repaired, deleted or overwritten. The v1 version comparison below
+is historical (`schema/mod.rs`: `SchemaError::Downgrade`; the pre-fix code fell
+through to `Ok(())` and silently masked the mismatch — "CRITICAL edge-case #2").
 
 **I3 — Migration atomicity.** All migration steps for a single open run inside
 one `BEGIN … COMMIT`, with `PRAGMA user_version = N` set as the last statement
@@ -121,9 +122,9 @@ item.
 deliberately does **not** filter `deleted = 0`; every UI/list/search/count
 query does.
 
-**I14 — Pool refuses an unmigrated file.** Opening the read pool on a file with
-`user_version = 0` MUST fail with a descriptive `SchemaNotInitialized` error,
-not a later "no such table".
+**I14 — Pool refuses an incompatible file.** The exact schema check runs before
+the read pool is built, so an empty, earlier-development or altered file fails
+with the path-redacted incompatibility error, not a later "no such table".
 
 **I15 — `key_version` ∈ {1, 2} on write.** Anything else is rejected at write
 time (`UnsupportedKeyVersion`); a stored value that does not fit `u8` is
@@ -1155,6 +1156,13 @@ not the implementation.
 Each item below was verified against the source before being recorded.
 
 ### 6.1 The hand-rolled `user_version` migration runner — replace with `rusqlite_migration`
+
+> **Amended in v2, 2026-08-10:** this recommendation described a rewrite that
+> still intended to open earlier files. Rule 3 removes that requirement and the
+> migration crate with it. v2 reserves a missing `copypaste-v2.db`, creates the
+> whole schema in one transaction, and compares every existing schema object to
+> that canonical DDL before applying connection pragmas. No `user_version`
+> consumer, old-layout probe, repair hook or migration step remains.
 
 **Verified.** Neither `rusqlite_migration` nor any migration crate appears in
 `Cargo.toml` or `Cargo.lock`. The runner is bespoke:

@@ -1,19 +1,10 @@
-//! The one v2 schema, created in one transaction. `rusqlite_migration` owns
-//! the version marker and refuses a database written by a newer build.
+//! The one v2 schema, created in one transaction on a newly reserved file.
 
-use std::sync::LazyLock;
-
-use rusqlite::{Connection, OptionalExtension, Transaction};
-use rusqlite_migration::{HookResult, Migrations, M};
+use rusqlite::Connection;
 
 use super::model::StoreError;
 
-/// Schema v1 — the whole schema, created in one step on a fresh database.
-///
-/// No `IF NOT EXISTS` guards and no `pragma_table_info` probes: the version
-/// marker is `rusqlite_migration`'s business now, and every statement here runs
-/// exactly once, inside its transaction.
-const SCHEMA_V1: &str = r#"
+pub(super) const SCHEMA: &str = r#"
 CREATE TABLE clipboard_items (
     id                 TEXT    PRIMARY KEY NOT NULL,
     -- NULL only on a tombstone: soft delete wipes the payload.
@@ -99,8 +90,8 @@ CREATE INDEX idx_items_sync_cursor
     ON clipboard_items(MAX(created_at, pin_updated_at), id)
     WHERE deleted = 1 OR is_sensitive = 0;
 
--- SQLite has no constant-time row count. This singleton is derived state:
--- triggers maintain it in the item transaction and open repairs any drift.
+-- SQLite has no constant-time row count. This singleton is derived state;
+-- triggers maintain it in the item transaction.
 CREATE TABLE clipboard_live_count (
     only_row INTEGER PRIMARY KEY NOT NULL CHECK (only_row = 0),
     live     INTEGER NOT NULL
@@ -151,341 +142,95 @@ CREATE TABLE sync_device_name (
 );
 "#;
 
-const LIVE_COUNT_DDL: &str = r#"
-CREATE TABLE IF NOT EXISTS clipboard_live_count (
-    only_row INTEGER PRIMARY KEY NOT NULL CHECK (only_row = 0),
-    live     INTEGER NOT NULL
-);
-INSERT OR IGNORE INTO clipboard_live_count (only_row, live) VALUES (0, 0);
-
-CREATE TRIGGER IF NOT EXISTS clipboard_live_count_insert AFTER INSERT ON clipboard_items
-WHEN NEW.deleted = 0
-BEGIN
-    UPDATE clipboard_live_count SET live = live + 1;
-END;
-
-CREATE TRIGGER IF NOT EXISTS clipboard_live_count_delete AFTER DELETE ON clipboard_items
-WHEN OLD.deleted = 0
-BEGIN
-    UPDATE clipboard_live_count SET live = live - 1;
-END;
-
-CREATE TRIGGER IF NOT EXISTS clipboard_live_count_update AFTER UPDATE OF deleted ON clipboard_items
-WHEN OLD.deleted <> NEW.deleted
-BEGIN
-    UPDATE clipboard_live_count
-       SET live = live + CASE WHEN NEW.deleted = 0 THEN 1 ELSE -1 END;
-END;
-"#;
-
-/// One past the last migration in [`MIGRATIONS`]. `super::schema_verify` reads
-/// it to refuse a file this ladder has not produced.
-pub(super) const SCHEMA_VERSION: i64 = 7;
-
-static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
-    Migrations::new(vec![
-        M::up(SCHEMA_V1),
-        M::up_with_hook("", repair_early_v2_schema),
-        M::up_with_hook("", repair_early_v2_schema),
-        M::up_with_hook("", repair_early_v2_schema),
-        M::up_with_hook("", repair_dedup_index),
-        M::up_with_hook("", add_fts_rowid_and_sync_indexes),
-        M::up_with_hook("", add_live_count),
-    ])
-});
-
-fn add_live_count(tx: &Transaction<'_>) -> HookResult {
-    tx.execute_batch(LIVE_COUNT_DDL)?;
-    reconcile_live_count(tx)?;
-    Ok(())
-}
-
-fn repair_early_v2_schema(tx: &Transaction<'_>) -> HookResult {
-    for (name, statement) in [
-        (
-            "origin_device_id",
-            "ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';",
-        ),
-        (
-            "app_bundle_id",
-            "ALTER TABLE clipboard_items ADD COLUMN app_bundle_id TEXT;",
-        ),
-        (
-            "app_name",
-            "ALTER TABLE clipboard_items ADD COLUMN app_name TEXT;",
-        ),
-        (
-            "payload_metadata",
-            "ALTER TABLE clipboard_items ADD COLUMN payload_metadata TEXT;",
-        ),
-        (
-            "pin_updated_at",
-            "ALTER TABLE clipboard_items ADD COLUMN pin_updated_at INTEGER NOT NULL DEFAULT 0;",
-        ),
-    ] {
-        if !has_column(tx, name)? {
-            tx.execute_batch(statement)?;
-        }
-    }
-    tx.execute_batch(
-        "CREATE TABLE IF NOT EXISTS sync_device_state (
-             key TEXT PRIMARY KEY NOT NULL,
-             value TEXT NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS sync_device_name (
-             device_id TEXT PRIMARY KEY NOT NULL,
-             name TEXT NOT NULL
-         );",
-    )?;
-    Ok(())
-}
-
-fn repair_dedup_index(tx: &Transaction<'_>) -> HookResult {
-    tx.execute_batch(
-        "DROP INDEX IF EXISTS idx_items_dedup;
-         CREATE UNIQUE INDEX idx_items_dedup
-             ON clipboard_items(content_hash, created_at / 60000, origin_device_id)
-             WHERE deleted = 0 AND content_hash <> '';",
-    )?;
-    Ok(())
-}
-
-/// Idempotent like the repair hooks above, because [`SCHEMA_V1`] already
-/// carries all of this on a fresh database and only a v2 history written
-/// before it needs the work done.
-///
-/// The backfill goes through a keyed temporary table rather than a correlated
-/// subquery: `clipboard_fts.id` is UNINDEXED, so the direct form is one full
-/// scan of the plaintext index per item row.
-fn add_fts_rowid_and_sync_indexes(tx: &Transaction<'_>) -> HookResult {
-    if !has_column(tx, "fts_rowid")? {
-        tx.execute_batch("ALTER TABLE clipboard_items ADD COLUMN fts_rowid INTEGER;")?;
-        tx.execute_batch(
-            "CREATE TEMP TABLE fts_rowid_map (id TEXT PRIMARY KEY, rowid_value INTEGER);
-             INSERT OR REPLACE INTO fts_rowid_map (id, rowid_value)
-                 SELECT id, rowid FROM clipboard_fts;
-             UPDATE clipboard_items SET fts_rowid =
-                 (SELECT rowid_value FROM fts_rowid_map m WHERE m.id = clipboard_items.id)
-               WHERE id IN (SELECT id FROM fts_rowid_map);
-             DROP TABLE fts_rowid_map;",
-        )?;
-    }
-    tx.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_items_syncable
-             ON clipboard_items(created_at, id, content_hash, deleted, origin_device_id,
-                                pinned, pin_order, pin_updated_at, is_sensitive)
-             WHERE deleted = 1 OR is_sensitive = 0;
-         CREATE INDEX IF NOT EXISTS idx_items_sync_cursor
-             ON clipboard_items(MAX(created_at, pin_updated_at), id)
-             WHERE deleted = 1 OR is_sensitive = 0;",
-    )?;
-    Ok(())
-}
-
-fn reconcile_live_count(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute(
-        "INSERT INTO clipboard_live_count (only_row, live) \
-         VALUES (0, (SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0)) \
-         ON CONFLICT(only_row) DO UPDATE SET live = excluded.live",
-        [],
-    )?;
-    Ok(())
-}
-
-fn has_column(tx: &Transaction<'_>, name: &str) -> Result<bool, rusqlite::Error> {
-    tx.query_row(
-        "SELECT 1 FROM pragma_table_info('clipboard_items') WHERE name = ?1 LIMIT 1",
-        [name],
-        |_| Ok(()),
-    )
-    .optional()
-    .map(|found| found.is_some())
-}
-
-/// Creates the v2 schema. A database written by a newer schema is refused.
-pub(super) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
-    MIGRATIONS.to_latest(conn)?;
-    // Derived state is repaired once per open, never scanned on capture.
-    conn.execute_batch(LIVE_COUNT_DDL)?;
-    reconcile_live_count(conn)?;
-    Ok(())
+pub(super) fn create(conn: &mut Connection) -> Result<(), StoreError> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(SCHEMA)?;
+    tx.commit()?;
+    super::schema_verify::verify_schema(conn)
 }
 
 #[cfg(test)]
 mod tests {
-    use tempfile::TempDir;
-
-    use super::super::connection::run_pragma;
-    use super::super::dbfile::open_validated;
-    use super::super::schema_verify::verify_schema;
-    use super::super::test_support::{item, KEY, T0};
+    use super::super::test_support::{KEY, OTHER_KEY};
     use super::super::{Store, StoreError};
 
-    fn rewrite_as_early_v2(path: &std::path::Path, version: i64, columns: &str) {
-        let store = Store::open(path, &KEY).unwrap();
-        let conn = store.conn().unwrap();
-        conn.execute_batch(&format!(
-            "DROP TABLE sync_device_name;
-             DROP TABLE sync_device_state;
-             DROP TABLE clipboard_fts;
-             DROP TABLE clipboard_items;
-             CREATE TABLE clipboard_items ({columns});
-             CREATE VIRTUAL TABLE clipboard_fts USING fts5(id UNINDEXED, content_text);
-             INSERT INTO clipboard_items (id, content_type, content_hash, created_at)
-             VALUES ('historic-item', 'text/plain', 'historic-hash', 1);
-             PRAGMA user_version = {version};"
-        ))
-        .unwrap();
-    }
-
-    const EARLY_COLUMNS: &str = "
-        id TEXT PRIMARY KEY NOT NULL,
-        content_ciphertext BLOB,
-        nonce BLOB,
-        content_type TEXT NOT NULL,
-        content_hash TEXT NOT NULL DEFAULT '',
-        is_sensitive INTEGER NOT NULL DEFAULT 0,
-        pinned INTEGER NOT NULL DEFAULT 0,
-        pin_order REAL,
-        created_at INTEGER NOT NULL,
-        deleted INTEGER NOT NULL DEFAULT 0";
-
-    const PRE_PIN_COLUMNS: &str = "
-        id TEXT PRIMARY KEY NOT NULL,
-        content_ciphertext BLOB,
-        nonce BLOB,
-        content_type TEXT NOT NULL,
-        content_hash TEXT NOT NULL DEFAULT '',
-        is_sensitive INTEGER NOT NULL DEFAULT 0,
-        pinned INTEGER NOT NULL DEFAULT 0,
-        pin_order REAL,
-        created_at INTEGER NOT NULL,
-        deleted INTEGER NOT NULL DEFAULT 0,
-        origin_device_id TEXT NOT NULL DEFAULT '',
-        app_bundle_id TEXT,
-        payload_metadata TEXT";
-
     #[test]
-    fn repairs_a_v2_history_from_before_the_schema_ladder_was_complete() {
-        let dir = TempDir::new().unwrap();
+    fn fresh_open_creates_the_canonical_schema_and_reopens_it() {
+        let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("copypaste-v2.db");
-        rewrite_as_early_v2(&path, 1, EARLY_COLUMNS);
 
         let store = Store::open(&path, &KEY).unwrap();
-        let conn = store.conn().unwrap();
-        verify_schema(&conn).unwrap();
-        drop(conn);
-        assert_eq!(
-            store.list_from(None, 10).unwrap().items[0].id,
-            "historic-item"
-        );
+        super::super::schema_verify::verify_schema(&store.conn().unwrap()).unwrap();
+        drop(store);
+        Store::open(&path, &KEY).unwrap();
     }
 
     #[test]
-    fn repairs_a_v2_history_that_already_has_the_old_second_migration() {
-        let dir = TempDir::new().unwrap();
+    fn an_incompatible_database_is_refused_without_repairing_it() {
+        let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("copypaste-v2.db");
-        rewrite_as_early_v2(&path, 2, PRE_PIN_COLUMNS);
-
         let store = Store::open(&path, &KEY).unwrap();
-        let conn = store.conn().unwrap();
-        verify_schema(&conn).unwrap();
-        drop(conn);
-        assert_eq!(
-            store.list_from(None, 10).unwrap().items[0].id,
-            "historic-item"
-        );
-    }
-
-    /// The `fts_rowid` back-pointer is the only key a delete now uses, so a
-    /// history written before the column existed has to be mapped onto it. An
-    /// unmapped row would leave the plaintext of a deleted item in the index.
-    #[test]
-    fn index_rows_written_before_the_back_pointer_are_mapped_onto_it() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("copypaste-v2.db");
-        rewrite_as_early_v2(&path, 1, EARLY_COLUMNS);
-        // Planted on a connection that does not migrate, so these rows carry
-        // FTS5's own rowids and no back-pointer — the state an upgrade finds.
-        open_validated(&path, &KEY)
+        store
+            .conn()
             .unwrap()
-            .execute_batch(
-                "INSERT INTO clipboard_fts (id, content_text) \
-                 VALUES ('decoy', 'unrelated text');
-                 INSERT INTO clipboard_fts (id, content_text) \
-                 VALUES ('historic-item', 'historic plaintext');",
+            .execute_batch("DROP INDEX idx_items_sync_cursor")
+            .unwrap();
+        drop(store);
+
+        let error = Store::open(&path, &KEY).unwrap_err();
+        assert!(matches!(error, StoreError::InvalidSchema));
+        assert!(!error.to_string().contains(&*path.to_string_lossy()));
+
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        super::super::connection::apply_key(&conn, &KEY).unwrap();
+        super::super::connection::validate_key(&conn).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'idx_items_sync_cursor'",
+                [],
+                |row| row.get(0),
             )
             .unwrap();
+        assert_eq!(count, 0, "open must not repair an incompatible schema");
+    }
 
-        let store = Store::open(&path, &KEY).unwrap();
-        assert!(store.delete("historic-item").unwrap());
+    #[test]
+    fn wrong_key_still_fails_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        drop(Store::open(&path, &KEY).unwrap());
 
-        let conn = store.conn().unwrap();
-        let left: Vec<String> = conn
-            .prepare("SELECT id FROM clipboard_fts")
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
+        assert!(matches!(
+            Store::open(&path, &OTHER_KEY),
+            Err(StoreError::InvalidKey)
+        ));
+    }
+
+    #[test]
+    fn source_has_one_schema_and_no_compatibility_ladder() {
+        let production = include_str!("schema.rs")
+            .split("#[cfg(test)]")
+            .next()
             .unwrap();
-        assert_eq!(
-            left,
-            vec!["decoy".to_string()],
-            "the delete must take its own index row and only its own"
-        );
-    }
-
-    #[test]
-    fn missing_live_count_state_is_repaired_on_open() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("copypaste-v2.db");
-        {
-            let store = Store::open(&path, &KEY).unwrap();
-            store.insert(item("first", T0)).unwrap();
-            store.insert(item("second", T0 + 60_000)).unwrap();
-            store
-                .conn()
-                .unwrap()
-                .execute_batch(
-                    "DELETE FROM clipboard_live_count;
-                     DROP TRIGGER clipboard_live_count_insert;",
-                )
-                .unwrap();
+        for forbidden in [
+            concat!("rusqlite", "_migration"),
+            concat!("Migration", "s"),
+            concat!("M::", "up"),
+            concat!("up_with_", "hook"),
+            concat!("repair", "_early_v2_schema"),
+            concat!("pragma_", "table_info"),
+            concat!("user_", "version"),
+            "ALTER TABLE",
+        ] {
+            assert!(!production.contains(forbidden), "forbidden: {forbidden}");
         }
+        assert_eq!(production.matches("pub(super) const SCHEMA").count(), 1);
+        assert_eq!(production.matches("tx.execute_batch(SCHEMA)").count(), 1);
 
-        let store = Store::open(&path, &KEY).unwrap();
-        assert_eq!(store.count().unwrap(), 2);
-        store.insert(item("third", T0 + 120_000)).unwrap();
-        assert_eq!(store.count().unwrap(), 3, "the repaired triggers must run");
-    }
-
-    #[test]
-    fn a_repaired_v2_schema_gets_a_maintained_live_count() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("copypaste-v2.db");
-        rewrite_as_early_v2(&path, 1, EARLY_COLUMNS);
-
-        let store = Store::open(&path, &KEY).unwrap();
-        assert_eq!(store.count().unwrap(), 1);
-        let added = store.insert(item("after repair", T0)).unwrap();
-        assert_eq!(store.count().unwrap(), 2);
-        assert!(store.delete(&added.id).unwrap());
-        assert_eq!(store.count().unwrap(), 1);
-    }
-
-    #[test]
-    fn a_future_schema_version_is_refused() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("copypaste-v2.db");
-        {
-            let s = Store::open(&path, &KEY).unwrap();
-            let conn = s.conn().unwrap();
-            run_pragma(&conn, "PRAGMA user_version = 999").unwrap();
-        }
-        let err = Store::open(&path, &KEY).unwrap_err();
-        assert!(
-            matches!(err, StoreError::Migration(_)),
-            "expected a migration error, got {err:?}"
+        let manifests = concat!(
+            include_str!("../../Cargo.toml"),
+            include_str!("../../../../Cargo.toml")
         );
+        assert!(!manifests.contains(concat!("rusqlite", "_migration")));
     }
 }

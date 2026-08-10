@@ -14,7 +14,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use zeroize::Zeroizing;
 
 use super::connection::{apply_connection_pragmas, apply_key, validate_key};
@@ -32,19 +32,19 @@ pub enum RestoreError {
     Failed(#[source] StoreError),
 }
 
-/// Open `path` with `db_key` and prove the key works before returning.
+/// Open `path` with `db_key` and prove the key and schema before returning.
 ///
 /// Fails closed: a key that does not open the file is [`StoreError::InvalidKey`],
 /// never a fallback to an unkeyed read (AGENTS.md rule 4).
 ///
-/// **No migration is run.** That is the point of the "validating" half — a
-/// candidate file is inspected as it stands, and a file this build has never
-/// seen is refused rather than upgraded in place.
-///
 pub fn open_validated(path: &Path, db_key: &[u8; 32]) -> Result<Connection, StoreError> {
-    let conn = Connection::open(path)?;
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
     apply_key(&conn, db_key)?;
     validate_key(&conn)?;
+    verify_schema(&conn)?;
     apply_connection_pragmas(&conn)?;
     Ok(conn)
 }
