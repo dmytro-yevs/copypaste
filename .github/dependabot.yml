@@ -8,8 +8,3 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 0
-    ignore:
-      # RUSTSEC-2024-0429 is pinned by Tauri's unshipped Linux GTK stack.
-      # Dependabot cannot scope an ignore to one advisory, so remove this entry
-      # when that stack resolves glib 0.20 or later. See ADR-0021.
-      - dependency-name: "glib"
