@@ -30,7 +30,23 @@ def downloads(job):
     }
 
 
-def contract_errors(release, nightly):
+def installs_requirements_before(job, marker):
+    installed = False
+    for step in steps(job):
+        command = "\n".join((
+            str(step.get("run") or ""),
+            str((step.get("with") or {}).get("script") or ""),
+        ))
+        marker_at = command.find(marker)
+        install_at = command.find("pip install --requirement requirements-ci.txt")
+        if marker_at >= 0:
+            return installed or (install_at >= 0 and install_at < marker_at)
+        if install_at >= 0:
+            installed = True
+    return False
+
+
+def contract_errors(release, nightly, ci):
     errors = []
     jobs = release.get("jobs") or {}
     gate = jobs.get("native-parity") or {}
@@ -77,20 +93,35 @@ def contract_errors(release, nightly):
         "WINDOWS_TIMESTAMP_URL",
         "TAURI_UPDATER_PUBLIC_KEY",
         "TAURI_UPDATER_ENDPOINT",
-        "TAURI_SIGNING_PRIVATE_KEY",
-        "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
     }
+    private_signing_env = {"TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"}
     certificate_step = next(
         (step for step in steps(windows) if step.get("name") == "Import Windows release certificate"),
         {},
     )
     certificate_env = certificate_step.get("env") or {}
+    signed_build = next(
+        (step for step in steps(windows) if step.get("name") == "Build signed Windows release package"),
+        {},
+    )
+    unsigned_build = next(
+        (step for step in steps(windows) if step.get("name") == "Build unsigned Windows release package"),
+        {},
+    )
     if (
         not signing_env <= set(windows_env)
         or not {"WINDOWS_SIGNING_CERTIFICATE_BASE64", "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"} <= set(certificate_env)
         or "releases/download/v${{ needs.version.outputs.version }}" not in str(windows_env.get("WINDOWS_RELEASE_BASE_URL") or "")
     ):
         errors.append("signed Windows publication must declare every certificate, updater, timestamp, and release URL input")
+    if (
+        private_signing_env & set(windows_env)
+        or not private_signing_env <= set(signed_build.get("env") or {})
+        or private_signing_env & set(unsigned_build.get("env") or {})
+        or signed_build.get("if") != "needs.version.outputs.publish == 'true'"
+        or unsigned_build.get("if") != "needs.version.outputs.publish != 'true'"
+    ):
+        errors.append("Tauri private signing inputs must be scoped only to the signed Windows build step")
     windows_uploads = {
         (step.get("with") or {}).get("name"): (step.get("with") or {})
         for step in steps(windows)
@@ -122,6 +153,21 @@ def contract_errors(release, nightly):
     ):
         errors.append("requested nightly Windows evidence must exercise and gate an installed package")
 
+    ci_jobs = ci.get("jobs") or {}
+    requirements_producers = (
+        (jobs.get("macos") or {}, "smoke-macos-dmg.sh", "release macOS evidence"),
+        (jobs.get("android-smoke") or {}, "android-release-emulator-legs.sh", "release Android API 36 evidence"),
+        (jobs.get("android-smoke-api33") or {}, "android-smoke-release.sh", "release Android API 33 evidence"),
+        (jobs.get("android-hardware") or {}, "android-smoke-release.sh", "release Android hardware evidence"),
+        (windows, "windows-native-evidence.ps1", "release Windows evidence"),
+        (nightly_windows, "windows-native-evidence.ps1", "nightly Windows evidence"),
+        (ci_jobs.get("windows-check") or {}, "windows-native-evidence.ps1", "CI Windows evidence"),
+        (ci_jobs.get("release-pipeline") or {}, "scripts/release/check.sh", "CI release self-tests"),
+    )
+    for job, marker, label in requirements_producers:
+        if not installs_requirements_before(job, marker):
+            errors.append(f"{label} must install requirements-ci.txt before its producer")
+
     hardware_uploads = [
         step
         for step in steps(jobs.get("android-hardware") or {})
@@ -132,7 +178,7 @@ def contract_errors(release, nightly):
     return errors
 
 
-def self_test(release, nightly):
+def self_test(release, nightly, ci):
     failures = 0
 
     def remove_download(value):
@@ -154,7 +200,7 @@ def self_test(release, nightly):
         nonlocal failures
         fixture = copy.deepcopy(release)
         mutation(fixture)
-        held = any(expected in error for error in contract_errors(fixture, nightly))
+        held = any(expected in error for error in contract_errors(fixture, nightly, ci))
         print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
         failures += 0 if held else 1
 
@@ -174,16 +220,43 @@ def self_test(release, nightly):
         "dist/latest.json",
     )
     rejected(
-        "missing Windows signing dependency fails",
-        lambda value: value["jobs"]["windows"]["env"].pop("TAURI_SIGNING_PRIVATE_KEY"),
-        "every certificate, updater, timestamp, and release URL input",
+        "job-wide Tauri private signing input fails",
+        lambda value: value["jobs"]["windows"]["env"].update({"TAURI_SIGNING_PRIVATE_KEY": "leaked"}),
+        "scoped only to the signed Windows build step",
+    )
+    rejected(
+        "unsigned build Tauri private signing input fails",
+        lambda value: next(step for step in value["jobs"]["windows"]["steps"] if step.get("name") == "Build unsigned Windows release package").setdefault("env", {}).update({"TAURI_SIGNING_PRIVATE_KEY_PASSWORD": "leaked"}),
+        "scoped only to the signed Windows build step",
+    )
+    rejected(
+        "missing signed-step Tauri private signing input fails",
+        lambda value: next(step for step in value["jobs"]["windows"]["steps"] if step.get("name") == "Build signed Windows release package")["env"].pop("TAURI_SIGNING_PRIVATE_KEY_PASSWORD"),
+        "scoped only to the signed Windows build step",
+    )
+    rejected(
+        "missing requirements install fails",
+        lambda value: value["jobs"]["windows"]["steps"].__setitem__(
+            slice(None),
+            [step for step in value["jobs"]["windows"]["steps"] if "pip install --requirement requirements-ci.txt" not in str(step.get("run") or "")],
+        ),
+        "release Windows evidence must install requirements-ci.txt",
+    )
+    rejected(
+        "missing Android producer requirements install fails",
+        lambda value: value["jobs"]["android-smoke-api33"]["steps"].__setitem__(
+            slice(None),
+            [step for step in value["jobs"]["android-smoke-api33"]["steps"] if "pip install --requirement requirements-ci.txt" not in str(step.get("run") or "")],
+        ),
+        "release Android API 33 evidence must install requirements-ci.txt",
     )
     return failures
 
 
 release = load("release.yml")
 nightly = load("native-nightly.yml")
-errors = contract_errors(release, nightly)
+ci = load("ci.yml")
+errors = contract_errors(release, nightly, ci)
 for error in errors:
     print(f"FAIL|{error}|")
 if not errors:
@@ -196,5 +269,5 @@ for script in ("macos-native-evidence.sh", "android-smoke-release.sh", "windows-
         print(f"FAIL|{errors[-1]}|")
 
 if "--self-test" in sys.argv:
-    errors.extend("self-test failure" for _ in range(self_test(release, nightly)))
+    errors.extend("self-test failure" for _ in range(self_test(release, nightly, ci)))
 sys.exit(1 if errors else 0)

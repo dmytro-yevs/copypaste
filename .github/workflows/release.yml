@@ -258,6 +258,9 @@ jobs:
             target/aarch64-apple-darwin/release/copypaste \
             target/aarch64-apple-darwin/release/copypaste-daemon
 
+      - name: Install native evidence Python dependencies
+        run: python3 -m pip install --requirement requirements-ci.txt
+
       - name: Install the DMG and run it
         # The first thing in this pipeline that opens what it built. It mounts
         # the image, copies the app to /Applications, quarantines it the way a
@@ -677,6 +680,9 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
+      - name: Install native evidence Python dependencies
+        run: python3 -m pip install --requirement requirements-ci.txt
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android
@@ -769,6 +775,9 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
+      - name: Install native evidence Python dependencies
+        run: python3 -m pip install --requirement requirements-ci.txt
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android
@@ -820,6 +829,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install native evidence Python dependencies
+        run: python3 -m pip install --requirement requirements-ci.txt
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -873,8 +885,6 @@ jobs:
       TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
       TAURI_UPDATER_ENDPOINT: ${{ secrets.TAURI_UPDATER_ENDPOINT }}
       WINDOWS_RELEASE_BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -888,6 +898,9 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - name: Install native evidence Python dependencies
+        shell: pwsh
+        run: python -m pip install --requirement requirements-ci.txt
       - name: Exercise Windows packaging failures
         shell: pwsh
         run: |
@@ -911,15 +924,21 @@ jobs:
           if (-not $certificate.HasPrivateKey) { throw "Windows release certificate has no private key" }
           "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Remove-Item -LiteralPath $pfx -Force
-      - name: Build canonical Windows release package
+      - name: Build signed Windows release package
+        if: needs.version.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          ./scripts/release/build-windows.ps1 -OutputDirectory artifacts/windows-x86_64
+      - name: Build unsigned Windows release package
+        if: needs.version.outputs.publish != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          if ('${{ needs.version.outputs.publish }}' -eq 'true') {
-            ./scripts/release/build-windows.ps1 -OutputDirectory artifacts/windows-x86_64
-          } else {
-            ./scripts/release/build-windows.ps1 -Unsigned -OutputDirectory artifacts/windows-x86_64
-          }
+          ./scripts/release/build-windows.ps1 -Unsigned -OutputDirectory artifacts/windows-x86_64
       - name: Install, launch with packaged sidecar, and uninstall
         shell: pwsh
         run: |

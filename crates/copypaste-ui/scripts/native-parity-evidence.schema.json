@@ -62,6 +62,8 @@
           "named-pipe and clipboard passed",
           "update feed contract matched signing mode",
           "in-place update passed",
+          "feature-specific UI states captured",
+          "screenshot protection restored",
           "uninstall passed"
         ]
       }
@@ -80,7 +82,8 @@
               "accessibility",
               "measurement",
               "test-log",
-              "diagnostic-log"
+              "diagnostic-log",
+              "feature-evidence"
             ]
           },
           "path": {
@@ -161,8 +164,8 @@
           },
           "assertions": {
             "type": "array",
-            "minItems": 7,
-            "maxItems": 7,
+            "minItems": 9,
+            "maxItems": 9,
             "allOf": [
               { "contains": { "const": "installer integrity passed" } },
               { "contains": { "const": "installed app launched" } },
@@ -170,6 +173,8 @@
               { "contains": { "const": "named-pipe and clipboard passed" } },
               { "contains": { "const": "update feed contract matched signing mode" } },
               { "contains": { "const": "in-place update passed" } },
+              { "contains": { "const": "feature-specific UI states captured" } },
+              { "contains": { "const": "screenshot protection restored" } },
               { "contains": { "const": "uninstall passed" } }
             ]
           }

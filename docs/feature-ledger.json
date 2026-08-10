@@ -13,7 +13,7 @@
       "native": {
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/history/screenshot.png", "ax_log": "artifacts/native/android/history/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/history/screenshot.png", "ax_log": "artifacts/native/macos/history/ax.json"},
-        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/screenshot.png", "ax_log": "artifacts/release-windows-native/accessibility.json"}
+        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/history/screenshot.png", "ax_log": "artifacts/release-windows-native/history/accessibility.json", "evidence_states": ["populated"]}
       },
       "release_evidence": ["release-android-smoke-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence", "release-windows-native-evidence"]
     },
@@ -29,7 +29,7 @@
       "native": {
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/capture/screenshot.png", "ax_log": "artifacts/native/android/capture/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/capture/screenshot.png", "ax_log": "artifacts/native/macos/capture/ax.json"},
-        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/screenshot.png", "ax_log": "artifacts/release-windows-native/accessibility.json"}
+        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/capture/screenshot.png", "ax_log": "artifacts/release-windows-native/capture/accessibility.json", "evidence_states": ["service-capture-status"]}
       },
       "release_evidence": ["release-android-smoke-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence", "release-windows-native-evidence"]
     },
@@ -45,7 +45,7 @@
       "native": {
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/devices/screenshot.png", "ax_log": "artifacts/native/android/devices/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/devices/screenshot.png", "ax_log": "artifacts/native/macos/devices/ax.json"},
-        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/screenshot.png", "ax_log": "artifacts/release-windows-native/accessibility.json"}
+        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/devices/screenshot.png", "ax_log": "artifacts/release-windows-native/devices/accessibility.json", "evidence_states": ["ready-to-pair"]}
       },
       "release_evidence": ["release-android-smoke-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence", "release-windows-native-evidence"]
     },
@@ -61,7 +61,7 @@
       "native": {
         "android": {"scenario": "./scripts/release/android-storage-transfer.sh", "screenshot": "artifacts/android-storage/transfer-persisted.png", "ax_log": "artifacts/android-storage/transfer-persisted.xml"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/settings-and-service/screenshot.png", "ax_log": "artifacts/native/macos/settings-and-service/ax.json"},
-        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/screenshot.png", "ax_log": "artifacts/release-windows-native/accessibility.json"}
+        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/settings-and-service/screenshot.png", "ax_log": "artifacts/release-windows-native/settings-and-service/accessibility.json", "evidence_states": ["appearance"]}
       },
       "release_evidence": ["release-android-storage-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence", "release-windows-native-evidence"]
     },
@@ -91,7 +91,7 @@
           "ax_log": "artifacts/native/macos/cloud/signed-in/ax.txt",
           "evidence_states": ["unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"]
         },
-        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/screenshot.png", "ax_log": "artifacts/release-windows-native/accessibility.json"}
+        "windows": {"scenario": "./scripts/release/windows-native-evidence.ps1", "screenshot": "artifacts/release-windows-native/cloud-account/screenshot.png", "ax_log": "artifacts/release-windows-native/cloud-account/accessibility.json", "evidence_states": ["not-configured"]}
       },
       "release_evidence": ["release-android-cloud-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-cloud-evidence", "release-macos-native-evidence", "release-windows-native-evidence"]
     }

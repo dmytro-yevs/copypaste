@@ -11,6 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "windows-native-ui-evidence.ps1")
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -69,37 +70,20 @@ function Assert-PackageIntegrity([string]$Directory, [string]$InstallerPath, [st
     }
 }
 
-function Write-UiEvidence([Diagnostics.Process]$App, [string]$Directory) {
-    Add-Type -AssemblyName System.Drawing
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName UIAutomationClient
-    Add-Type -AssemblyName UIAutomationTypes
-    $App.Refresh()
-    Assert-True ($App.MainWindowHandle -ne 0) "installed app exposes no native window"
-
-    $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $bitmap = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try {
-        $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size)
-        $bitmap.Save((Join-Path $Directory "screenshot.png"), [Drawing.Imaging.ImageFormat]::Png)
-    } finally {
-        $graphics.Dispose()
-        $bitmap.Dispose()
+function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, [string]$DaemonError) {
+    $parts = @()
+    if ($App) {
+        $App.Refresh()
+        $parts += if ($App.HasExited) { "app exited with code $($App.ExitCode)" } else { "app is running" }
+        try { $parts += Get-UiaSummary $App } catch { $parts += "UIA: $($_.Exception.Message)" }
     }
-
-    $nodes = [Windows.Automation.AutomationElement]::RootElement.FindAll(
-        [Windows.Automation.TreeScope]::Descendants,
-        [Windows.Automation.Condition]::TrueCondition
-    ) | Where-Object { $_.Current.ProcessId -eq $App.Id } | ForEach-Object {
-        [ordered]@{
-            name = $_.Current.Name
-            control_type = $_.Current.ControlType.ProgrammaticName
-            automation_id = $_.Current.AutomationId
-        }
+    if (Test-Path -LiteralPath $DaemonError -PathType Leaf) {
+        $parts += "daemon stderr: $((Get-Content -Raw -LiteralPath $DaemonError).Trim())"
     }
-    Assert-True (@($nodes).Count -gt 0) "installed app exposes no Windows accessibility nodes"
-    @($nodes) | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $Directory "accessibility.json") -Encoding utf8
+    $runtime = Get-ChildItem -LiteralPath (Join-Path $DataRoot "logs") -Filter "*.log" -ErrorAction SilentlyContinue |
+        ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
+    if ($runtime) { $parts += "app runtime log: $($runtime -join "`n")" }
+    return $parts
 }
 
 function Invoke-SelfTest {
@@ -112,6 +96,7 @@ function Invoke-SelfTest {
         $rejected = $false
         try { Assert-InstalledLayout $root } catch { $rejected = $_.Exception.Message -match "copypaste-daemon.exe" }
         Assert-True $rejected "a package without the installed sidecar did not fail"
+        Test-WindowsUiEvidenceHelpers
         Write-Output "PASS: a broken installed sidecar package fails closed"
     } finally {
         Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
@@ -163,22 +148,21 @@ try {
     $daemonOut = Join-Path $runRoot "daemon.stdout.log"
     $daemonErr = Join-Path $runRoot "daemon.stderr.log"
     $daemon = Start-Process -FilePath $daemonExe -ArgumentList "--foreground", "--data-dir", $dataRoot, "--port", "48654", "--device-name", "Windows-CI" -WindowStyle Hidden -RedirectStandardOutput $daemonOut -RedirectStandardError $daemonErr -PassThru
-    Start-Sleep -Seconds 3
-    if ($daemon.HasExited) {
-        $detail = Get-Content -Raw -LiteralPath $daemonErr -ErrorAction SilentlyContinue
-        throw "daemon exited before IPC evidence: $detail"
-    }
-
-    $status = Invoke-Json $cli @("status")
+    $status = Wait-Observed "explicit daemon IPC readiness" {
+        if ($daemon.HasExited) { throw "daemon exited with code $($daemon.ExitCode)" }
+        Invoke-Json $cli @("status")
+    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr }
     Assert-True ($status.data.status.clipboard_backend -eq "windows-system-clipboard") "fake clipboard backend"
     Invoke-Json $cli @("add", "named-pipe evidence") | Out-Null
     $search = Invoke-Json $cli @("search", "named-pipe evidence")
     Assert-True ($search.data.page.items.Count -eq 1) "named-pipe add/search did not round-trip"
 
     Set-Clipboard -Value "native clipboard evidence"
-    Start-Sleep -Seconds 2
-    $captured = Invoke-Json $cli @("search", "native clipboard evidence")
-    Assert-True ($captured.data.page.items.Count -ge 1) "native clipboard item was not captured"
+    $captured = Wait-Observed "native clipboard capture" {
+        $reply = Invoke-Json $cli @("search", "native clipboard evidence")
+        if ($reply.data.page.items.Count -ge 1) { return $reply }
+        return $null
+    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr }
 
     $transfer = Join-Path $runRoot "transfer.json"
     Invoke-Json $cli @("export", "--output", $transfer) | Out-Null
@@ -195,27 +179,46 @@ try {
     Remove-Item Env:COPYPASTE_DAEMON_BIN -ErrorAction SilentlyContinue
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $app = Start-Process -FilePath $ui -PassThru
-    Start-Sleep -Seconds 5
-    Assert-True (-not $app.HasExited) "installed Tauri app did not stay running"
-    $sidecars = @(Get-Process -Name "copypaste-daemon" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $daemonExe })
-    if ($sidecars.Count -ne 1) {
-        $appLog = Get-ChildItem -LiteralPath (Join-Path $dataRoot "logs") -Filter "*.log" -ErrorAction SilentlyContinue |
-            ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
-        throw "installed UI launched $($sidecars.Count) installed sidecars; app runtime log:`n$($appLog -join "`n")"
-    }
-    Invoke-Json $cli @("status") | Out-Null
+    Wait-Observed "installed app, native window, and installed sidecar readiness" {
+        $root = Get-AppAutomationRoot $app
+        if ($null -eq $root) { return $null }
+        $sidecars = @(Get-Process -Name "copypaste-daemon" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $daemonExe })
+        if ($sidecars.Count -ne 1) { return $null }
+        Invoke-Json $cli @("status") | Out-Null
+        return $root
+    } { Get-InstalledDiagnostics $app $dataRoot $daemonErr } 30000 | Out-Null
     $preserved = Invoke-Json $cli @("search", "named-pipe evidence")
     Assert-True ($preserved.data.page.items.Count -eq 1) "in-place update lost clipboard history"
     $timer.Stop()
-    if ($evidencePath) { Write-UiEvidence $app $evidencePath }
+    if ($evidencePath) {
+        $featureStates = @()
+        Invoke-UiaNamedControl $app "Settings" "Theme"
+        Invoke-UiaNamedControl $app "List" "Allow screenshots"
+        Set-UiaScreenshots $app $true
+        Invoke-UiaNamedControl $app "History" "Clipboard history"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history"
+        Invoke-UiaNamedControl $app "Devices" "Ready to pair"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "ready-to-pair" "Ready to pair"
+        Invoke-UiaNamedControl $app "Settings" "Theme"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Theme"
+        Invoke-UiaNamedControl $app "Service" "Background capture"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "service-capture-status" "Background capture"
+        Invoke-UiaNamedControl $app "Sync" "Not configured"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "not-configured" "Not configured"
+        Write-WindowsFeatureManifest $evidencePath $featureStates
+        Invoke-UiaNamedControl $app "List" "Allow screenshots"
+        Set-UiaScreenshots $app $false
+    }
 
     Stop-Process -Id $app.Id -Force
     Assert-True ($app.WaitForExit(10000)) "installed Tauri app did not exit"
     $app = $null
     Invoke-Json $cli @("shutdown") | Out-Null
-    Start-Sleep -Seconds 1
-    $installedProcesses = @(Get-Process -Name "copypaste-ui", "copypaste", "copypaste-daemon" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$installDir*" })
-    Assert-True ($installedProcesses.Count -eq 0) "an installed process survived shutdown"
+    Wait-Observed "installed process shutdown" {
+        $installedProcesses = @(Get-Process -Name "copypaste-ui", "copypaste", "copypaste-daemon" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$installDir*" })
+        if ($installedProcesses.Count -eq 0) { return $true }
+        return $null
+    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr } | Out-Null
 
     $uninstaller = Join-Path $installDir "uninstall.exe"
     $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
@@ -232,6 +235,8 @@ try {
             "named-pipe and clipboard passed"
             "update feed contract matched signing mode: $ExpectedSignature"
             "in-place update passed"
+            "feature-specific UI states captured"
+            "screenshot protection restored"
             "uninstall passed"
         ) | Set-Content -LiteralPath $logPath -Encoding utf8
         $measurement = @{ platform = "windows"; scenario = "installed-sidecar-ready"; p95_ms = 30000; samples_ms = @($timer.ElapsedMilliseconds) }
@@ -253,11 +258,22 @@ try {
             --assertion "named-pipe and clipboard passed" `
             --assertion "update feed contract matched signing mode" `
             --assertion "in-place update passed" `
+            --assertion "feature-specific UI states captured" `
+            --assertion "screenshot protection restored" `
             --assertion "uninstall passed" `
-            --artifact screenshot=screenshot.png `
-            --artifact accessibility=accessibility.json `
+            --artifact screenshot=history/screenshot.png `
+            --artifact accessibility=history/accessibility.json `
+            --artifact screenshot=capture/screenshot.png `
+            --artifact accessibility=capture/accessibility.json `
+            --artifact screenshot=devices/screenshot.png `
+            --artifact accessibility=devices/accessibility.json `
+            --artifact screenshot=settings-and-service/screenshot.png `
+            --artifact accessibility=settings-and-service/accessibility.json `
+            --artifact screenshot=cloud-account/screenshot.png `
+            --artifact accessibility=cloud-account/accessibility.json `
             --artifact test-log=installed-product.log `
-            --artifact measurement=latency.json
+            --artifact measurement=latency.json `
+            --artifact feature-evidence=feature-states.json
         if ($LASTEXITCODE -ne 0) { throw "native evidence writer failed" }
     }
 
