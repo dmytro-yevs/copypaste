@@ -5,6 +5,7 @@
 //! [`super::aead`].
 
 use std::path::Path;
+#[cfg(feature = "dev-ephemeral-key")]
 use std::sync::OnceLock;
 #[cfg(any(target_os = "macos", test))]
 use std::{
@@ -33,11 +34,8 @@ const INFO_DB_KEY: &[u8] = b"copypaste/v2/sqlcipher-db-key";
 /// HKDF `info` for the per-item content AEAD key.
 const INFO_ITEM_KEY: &[u8] = b"copypaste/v2/item-content-key";
 
-/// Dev/test bypass. When set to any value, no keystore is touched at all and a
-/// fresh random secret is minted for the process lifetime. Read exactly once
-/// (see [`ephemeral_requested`]) so that mutating the environment of a running
-/// process cannot flip an already-keyed daemon into ephemeral mode
-/// (port manifest 02, I-23).
+/// Development bypass, compiled out unless `dev-ephemeral-key` is enabled.
+#[cfg(feature = "dev-ephemeral-key")]
 const ENV_EPHEMERAL: &str = "COPYPASTE_EPHEMERAL_KEY";
 
 /// Upper bound on a macOS Keychain load during startup (port manifest 02,
@@ -73,6 +71,7 @@ impl Keyring {
     /// ignore it; the argument is still theirs to receive, because the guard
     /// that refuses to mint over an existing history needs it everywhere.
     ///
+    /// With the development-only `dev-ephemeral-key` feature,
     /// `COPYPASTE_EPHEMERAL_KEY` short-circuits every backend and mints a
     /// throwaway secret; data written under it is unrecoverable after exit.
     ///
@@ -83,6 +82,7 @@ impl Keyring {
     /// one and returns `Ok`. [`CryptoError::KeystoreEntryUnusable`] when a
     /// secret is there and cannot be read, which no retry will fix.
     pub fn load_or_create(data_dir: &Path) -> Result<Self, CryptoError> {
+        #[cfg(feature = "dev-ephemeral-key")]
         if ephemeral_requested() {
             tracing::warn!(
                 "{ENV_EPHEMERAL} is set: using a throwaway device secret. \
@@ -218,14 +218,22 @@ pub(super) fn random_secret() -> [u8; KEY_LEN] {
     secret
 }
 
-/// Read the dev bypass exactly once per process.
+/// Read the development bypass exactly once per process (I-23).
+#[cfg(feature = "dev-ephemeral-key")]
 fn ephemeral_requested() -> bool {
     static EPHEMERAL: OnceLock<bool> = OnceLock::new();
     *EPHEMERAL.get_or_init(|| std::env::var_os(ENV_EPHEMERAL).is_some())
 }
 
+/// Shipped builds do not consult the process environment for key selection.
+#[cfg(all(not(feature = "dev-ephemeral-key"), test))]
+const fn ephemeral_requested() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
     use std::sync::mpsc;
 
     use super::super::test_support::{key_a, ITEM, SECRET_A, SECRET_B};
@@ -241,6 +249,86 @@ mod tests {
     /// 300 tests in flight that budget is genuinely marginal — those tests were
     /// timing out and reporting it as the wrong outcome.
     const AMPLE_TIMEOUT: Duration = Duration::from_secs(10);
+
+    const FEATURE_CHILD_MODE: &str = "COPYPASTE_EPHEMERAL_KEY_FEATURE_TEST_CHILD";
+
+    fn run_feature_child(test: &str, mode: &str, ephemeral_env: bool) {
+        let (_, module) = module_path!().split_once("::").unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", &format!("{module}::{test}"), "--nocapture"])
+            .env(FEATURE_CHILD_MODE, mode);
+        if ephemeral_env {
+            command.env("COPYPASTE_EPHEMERAL_KEY", "1");
+        } else {
+            command.env_remove("COPYPASTE_EPHEMERAL_KEY");
+        }
+        assert!(command.status().unwrap().success());
+    }
+
+    #[cfg(not(feature = "dev-ephemeral-key"))]
+    #[test]
+    fn release_feature_set_ignores_ephemeral_environment() {
+        if std::env::var_os(FEATURE_CHILD_MODE).is_none() {
+            run_feature_child(
+                "release_feature_set_ignores_ephemeral_environment",
+                "release",
+                true,
+            );
+            return;
+        }
+
+        assert!(std::env::var_os("COPYPASTE_EPHEMERAL_KEY").is_some());
+        assert!(!ephemeral_requested());
+
+        #[cfg(not(any(target_os = "macos", target_os = "android")))]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let first = Keyring::load_or_create(dir.path()).unwrap();
+            #[cfg(target_os = "windows")]
+            assert!(dir.path().join("device_secret.dpapi").exists());
+            #[cfg(not(target_os = "windows"))]
+            assert!(dir.path().join("device_secret.key").exists());
+            let reopened = Keyring::load_or_create(dir.path()).unwrap();
+            assert_eq!(first.db_key(), reopened.db_key());
+        }
+    }
+
+    #[cfg(feature = "dev-ephemeral-key")]
+    #[test]
+    fn development_feature_short_circuits_and_caches_its_choice() {
+        let Some(mode) = std::env::var_os(FEATURE_CHILD_MODE) else {
+            run_feature_child(
+                "development_feature_short_circuits_and_caches_its_choice",
+                "enabled",
+                true,
+            );
+            run_feature_child(
+                "development_feature_short_circuits_and_caches_its_choice",
+                "disabled",
+                false,
+            );
+            return;
+        };
+
+        if mode == "enabled" {
+            assert!(ephemeral_requested());
+            std::env::remove_var(ENV_EPHEMERAL);
+            assert!(ephemeral_requested());
+
+            let dir = tempfile::tempdir().unwrap();
+            let database = copypaste_ipc::database_path();
+            std::fs::write(dir.path().join(database.file_name().unwrap()), b"existing").unwrap();
+            Keyring::load_or_create(dir.path()).expect("the bypass must precede the backend");
+            assert!(!dir.path().join("device_secret.key").exists());
+            assert!(!dir.path().join("device_secret.dpapi").exists());
+        } else {
+            assert_eq!(mode, "disabled");
+            assert!(!ephemeral_requested());
+            std::env::set_var(ENV_EPHEMERAL, "1");
+            assert!(!ephemeral_requested());
+        }
+    }
 
     #[test]
     fn bounded_load_returns_a_successful_secret() {

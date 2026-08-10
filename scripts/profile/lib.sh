@@ -39,7 +39,12 @@ die()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 build_release() {
     note "building (release)"
-    $CARGO build --release -p copypaste-daemon -p copypaste-cli >&2
+    if [ -n "${COPYPASTE_EPHEMERAL_KEY+x}" ]; then
+        $CARGO build --release -p copypaste-daemon -p copypaste-cli \
+            --features copypaste-daemon/dev-ephemeral-key >&2
+    else
+        $CARGO build --release -p copypaste-daemon -p copypaste-cli >&2
+    fi
 }
 
 # A number is not a number if six other builds were running while it was taken.
