@@ -9,6 +9,7 @@ import {
   assertTauriBridge,
   assertTauriBrowserName,
 } from "../src/harness/app.js";
+import { startDaemon } from "../src/harness/daemon.js";
 import { track } from "../src/harness/process.js";
 
 describe("Tauri WebDriver capabilities", () => {
@@ -84,4 +85,46 @@ describe("child-process diagnostics", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+});
+
+describe("daemon bulk-delete harness", () => {
+  it("never overlaps real CLI delete processes", async () => {
+    let activeDeletes = 0;
+    let maxActiveDeletes = 0;
+    let settledDeletes = 0;
+    const daemon = await startDaemon((args, phase) => {
+      if (args[0] !== "delete") return;
+      if (phase === "started") {
+        activeDeletes += 1;
+        maxActiveDeletes = Math.max(maxActiveDeletes, activeDeletes);
+      } else {
+        activeDeletes -= 1;
+        settledDeletes += 1;
+      }
+    });
+
+    try {
+      const contents = Array.from(
+        { length: 12 },
+        (_, index) => `serial bulk-delete item ${index}`,
+      );
+      await daemon.addMany(contents);
+      const items = (await daemon.items()).filter((item) =>
+        item.content.startsWith("serial bulk-delete item "),
+      );
+      expect(items).toHaveLength(contents.length);
+
+      await daemon.removeMany(items.map((item) => item.id));
+
+      expect({ activeDeletes, maxActiveDeletes, settledDeletes }).toEqual({
+        activeDeletes: 0,
+        maxActiveDeletes: 1,
+        settledDeletes: items.length,
+      });
+      const remainingIds = new Set((await daemon.items()).map((item) => item.id));
+      expect(items.some((item) => remainingIds.has(item.id))).toBe(false);
+    } finally {
+      await daemon.stop();
+    }
+  }, 120_000);
 });

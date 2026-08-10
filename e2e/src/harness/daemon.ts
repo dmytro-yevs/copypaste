@@ -51,7 +51,14 @@ interface CliItem {
   pinned: boolean;
 }
 
-export async function startDaemon(): Promise<Daemon> {
+type CliActivityObserver = (
+  args: readonly string[],
+  phase: "started" | "settled",
+) => void;
+
+export async function startDaemon(
+  onCliActivity?: CliActivityObserver,
+): Promise<Daemon> {
   mkdirSync(RUN_ROOT, { recursive: true });
   const dataHome = mkdtempSync(path.join(RUN_ROOT, "run-"));
   const logDirectory = path.join(RUN_ROOT, "logs");
@@ -70,16 +77,21 @@ export async function startDaemon(): Promise<Daemon> {
   const peerPort = await freePort();
 
   const cli = async (args: readonly string[]): Promise<CliResult> => {
-    const result = await execa(cliBinary(), [...args], {
-      env,
-      reject: false,
-      timeout: 20_000,
-    });
-    return {
-      exitCode: result.exitCode ?? -1,
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
-    };
+    onCliActivity?.(args, "started");
+    try {
+      const result = await execa(cliBinary(), [...args], {
+        env,
+        reject: false,
+        timeout: 20_000,
+      });
+      return {
+        exitCode: result.exitCode ?? -1,
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+      };
+    } finally {
+      onCliActivity?.(args, "settled");
+    }
   };
 
   let child: Child = await spawn();
