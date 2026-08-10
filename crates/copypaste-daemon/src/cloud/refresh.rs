@@ -13,11 +13,11 @@ use std::time::Duration;
 use backon::{BackoffBuilder, ExponentialBuilder};
 use copypaste_clock::{SystemWallClock, WallClock};
 use copypaste_cloud::auth::{Session, REFRESH_MARGIN_MS};
+use copypaste_cloud::credentials::CredentialStore;
 use copypaste_cloud::sync::SyncError;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
-use super::account::CREDENTIAL_KEYS;
 use super::{poll, Cloud, Driver};
 use crate::meta::Meta;
 use crate::AppState;
@@ -36,7 +36,7 @@ pub(crate) fn is_terminal_auth_error(error: &SyncError) -> bool {
 }
 
 impl Cloud {
-    fn session_refreshed(&self, meta: &Meta, expected: &Arc<Driver>) {
+    fn session_refreshed(&self, store: &copypaste_core::Store, expected: &Arc<Driver>) {
         let account_guard = self.lock_account();
         let Some(account) = account_guard
             .as_ref()
@@ -44,7 +44,8 @@ impl Cloud {
         else {
             return;
         };
-        if let Err(error) = super::account::write_session(meta, &account.driver, &account.user_id) {
+        if let Err(error) = super::account::write_session(store, &account.driver, &account.user_id)
+        {
             warn!(error = ?error, "could not persist the rotated cloud session");
         }
         *self.lock_error() = None;
@@ -91,7 +92,7 @@ impl Cloud {
 
     pub(crate) fn invalidate_session(
         &self,
-        meta: &Meta,
+        store: &copypaste_core::Store,
         expected: &Arc<Driver>,
         expected_revision: u64,
         message: &'static str,
@@ -110,7 +111,7 @@ impl Cloud {
             current.cancel.cancel();
         }
         let _expired = account.take();
-        if let Err(error) = meta.clear_state(CREDENTIAL_KEYS) {
+        if let Err(error) = store.clear_cloud_credentials() {
             warn!(error = ?error, "could not clear the expired cloud account");
         }
         self.last_sync_ms.store(0, Ordering::Release);
@@ -167,7 +168,7 @@ impl RefreshTarget for AppState {
     }
 
     fn refreshed(&self, driver: &Arc<Self::Driver>) {
-        self.cloud.session_refreshed(&self.meta, driver);
+        self.cloud.session_refreshed(&self.store, driver);
     }
 
     fn failed(&self, driver: &Arc<Self::Driver>, revision: u64, message: &'static str) {
@@ -176,7 +177,7 @@ impl RefreshTarget for AppState {
 
     fn invalidate(&self, driver: &Arc<Self::Driver>, revision: u64, message: &'static str) {
         self.cloud
-            .invalidate_session(&self.meta, driver, revision, message);
+            .invalidate_session(&self.store, driver, revision, message);
     }
 }
 

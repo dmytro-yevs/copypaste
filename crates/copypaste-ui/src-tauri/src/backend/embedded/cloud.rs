@@ -7,6 +7,9 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use copypaste_cloud::auth::{AuthError, Session, SupabaseAuth};
+use copypaste_cloud::credentials::CloudStateKey;
+#[cfg(test)]
+use copypaste_cloud::credentials::SIGN_OUT_KEYS;
 use copypaste_cloud::crypto::derive_sync_key;
 use copypaste_cloud::rest::SupabaseRest;
 use copypaste_cloud::sync::{CloudSync, SensitiveGuard, SyncError};
@@ -19,7 +22,7 @@ use zeroize::Zeroizing;
 use super::open::Inner;
 use super::{BackendError, Result};
 #[cfg(test)]
-use account::{Account, CREDENTIAL_KEYS, KEY_ACCESS, KEY_EMAIL};
+use account::Account;
 use account::{AccountSlot, ActivateError, MSG_ACCOUNT_CHANGED};
 use cursor::{UploadCursor, UploadFloor};
 use schedule::until_cancelled;
@@ -27,10 +30,10 @@ use source::StoreSource;
 
 type Driver = CloudSync<SupabaseRest, SupabaseAuth>;
 
-pub(super) const KEY_WATERMARK: &str = "cloud_watermark_ms";
-pub(super) const KEY_WATERMARK_ITEM: &str = "cloud_watermark_item_id";
-pub(super) const KEY_UPLOAD_FLOOR: &str = "cloud_upload_floor_ms";
-pub(super) const KEY_UPLOAD_FLOOR_ITEM: &str = "cloud_upload_floor_item_id";
+pub(super) const KEY_WATERMARK: &str = CloudStateKey::WatermarkMs.as_str();
+pub(super) const KEY_WATERMARK_ITEM: &str = CloudStateKey::WatermarkItemId.as_str();
+pub(super) const KEY_UPLOAD_FLOOR: &str = CloudStateKey::UploadFloorMs.as_str();
+pub(super) const KEY_UPLOAD_FLOOR_ITEM: &str = CloudStateKey::UploadFloorItemId.as_str();
 const MSG_NOT_CONFIGURED: &str = "Cloud sync is not configured in this build.";
 const MSG_SIGNED_OUT: &str = "Sign in before syncing.";
 const MSG_REJECTED: &str = "The email address or password was not accepted.";
@@ -122,7 +125,7 @@ impl EmbeddedCloud {
             .map_err(|_| BackendError::internal(MSG_PASSPHRASE))?
             .map_err(|_| BackendError::Invalid(MSG_PASSPHRASE))?;
 
-        let key_hex = Zeroizing::new(hex::encode(key.to_bytes()));
+        let key_bytes = key.to_bytes();
         let driver = Arc::new(make_driver(inner, config, key, session));
         self.activate(
             &inner.state.store,
@@ -130,7 +133,7 @@ impl EmbeddedCloud {
             email,
             user_id,
             driver,
-            &key_hex,
+            &key_bytes,
         )
         .map_err(|error| match error {
             ActivateError::Stale => BackendError::from_code(
@@ -424,7 +427,7 @@ mod tests {
             driver,
             cancel: CancellationToken::new(),
         });
-        cloud.persist(&state.store, &hex::encode([9; 32])).unwrap();
+        cloud.persist(&state.store, &[9; 32]).unwrap();
 
         let restarted = configured();
         restarted.restore(&state);
@@ -439,7 +442,10 @@ mod tests {
         let state = super::super::state::BackendState::open(dir.path()).unwrap();
         state
             .store
-            .set_state_all(&[(KEY_EMAIL, "a@example.com"), (KEY_ACCESS, "access")])
+            .set_state_all(&[
+                (CloudStateKey::Email.as_str(), "a@example.com"),
+                (CloudStateKey::AccessToken.as_str(), "access"),
+            ])
             .unwrap();
         let cloud = configured();
         cloud.restore(&state);
@@ -451,13 +457,13 @@ mod tests {
     fn local_sign_out_clears_every_credential() {
         let dir = tempfile::TempDir::new().unwrap();
         let state = super::super::state::BackendState::open(dir.path()).unwrap();
-        for key in CREDENTIAL_KEYS {
-            state.store.set_state(key, "secret").unwrap();
+        for key in SIGN_OUT_KEYS {
+            state.store.set_state(key.as_str(), "secret").unwrap();
         }
         let cloud = configured();
         cloud.take_for_sign_out(&state.store);
-        for key in CREDENTIAL_KEYS {
-            assert_eq!(state.store.state(key).unwrap(), None);
+        for key in SIGN_OUT_KEYS {
+            assert_eq!(state.store.state(key.as_str()).unwrap(), None);
         }
     }
 
@@ -473,7 +479,10 @@ mod tests {
             driver: Arc::clone(&driver),
             cancel: CancellationToken::new(),
         });
-        state.store.set_state(KEY_ACCESS, "secret").unwrap();
+        state
+            .store
+            .set_state(CloudStateKey::AccessToken.as_str(), "secret")
+            .unwrap();
 
         cloud.record_failure(
             &state.store,
@@ -486,7 +495,13 @@ mod tests {
         let status = cloud.status();
         assert!(!status.signed_in);
         assert_eq!(status.last_error.as_deref(), Some(MSG_REJECTED));
-        assert_eq!(state.store.state(KEY_ACCESS).unwrap(), None);
+        assert_eq!(
+            state
+                .store
+                .state(CloudStateKey::AccessToken.as_str())
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -531,7 +546,10 @@ mod tests {
             driver: Arc::clone(&driver),
             cancel: CancellationToken::new(),
         });
-        state.store.set_state(KEY_ACCESS, "secret").unwrap();
+        state
+            .store
+            .set_state(CloudStateKey::AccessToken.as_str(), "secret")
+            .unwrap();
 
         cloud.record_failure(
             &state.store,
@@ -543,7 +561,11 @@ mod tests {
 
         assert!(cloud.status().signed_in);
         assert_eq!(
-            state.store.state(KEY_ACCESS).unwrap().as_deref(),
+            state
+                .store
+                .state(CloudStateKey::AccessToken.as_str())
+                .unwrap()
+                .as_deref(),
             Some("secret")
         );
     }

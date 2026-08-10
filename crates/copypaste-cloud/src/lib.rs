@@ -36,6 +36,7 @@
 #![forbid(unsafe_code)]
 
 pub mod auth;
+pub mod credentials;
 pub mod crypto;
 pub mod realtime;
 pub mod rest;

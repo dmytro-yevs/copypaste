@@ -80,7 +80,7 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
 
     // The refresh token rotates on any 401 recovery inside that call, so it is
     // written back whether the round succeeded or not.
-    state.cloud.persist_session(&state.meta, &driver);
+    state.cloud.persist_session(&state.store, &driver);
 
     match &outcome {
         Ok(stats) => {
@@ -119,7 +119,7 @@ fn record_failure(state: &AppState, driver: &Arc<Driver>, error: &SyncError) {
     if is_terminal_auth_error(error) {
         state
             .cloud
-            .invalidate_session(&state.meta, driver, revision, message);
+            .invalidate_session(&state.store, driver, revision, message);
     } else {
         state.cloud.note_driver_failure(driver, revision, message);
     }
@@ -248,7 +248,7 @@ mod tests {
         let (state, _dir) =
             test_state_with_cloud("alpha", crate::cloud::Cloud::new(Some(config.clone())));
         let key = derive_sync_key("correct horse battery staple", "user-1").unwrap();
-        let key_hex = hex::encode(key.to_bytes().as_slice());
+        let key_bytes = key.to_bytes();
         state.cloud.install(
             &state,
             config,
@@ -262,7 +262,7 @@ mod tests {
                 expires_at_ms: i64::MAX,
             },
         );
-        state.cloud.persist(&state.meta, &key_hex).unwrap();
+        state.cloud.persist(&state.store, &key_bytes).unwrap();
         let driver = state.cloud.driver().unwrap();
         let updates = state.cloud.session_updates();
 

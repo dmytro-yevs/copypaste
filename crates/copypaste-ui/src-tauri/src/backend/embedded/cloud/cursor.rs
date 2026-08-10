@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
+use copypaste_cloud::credentials::CredentialError;
 use copypaste_core::{Store, StoreError};
 
 use super::{KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM};
@@ -30,12 +31,11 @@ impl UploadCursor {
 
     pub(super) fn replace_account(
         &self,
-        store: &Store,
-        entries: &[(&str, &str)],
-    ) -> Result<(), StoreError> {
+        replace: impl FnOnce() -> Result<(), CredentialError>,
+    ) -> Result<(), CredentialError> {
         self.epoch.fetch_add(1, Ordering::AcqRel);
         let _guard = self.guard();
-        store.set_state_all(entries)
+        replace()
     }
 
     pub(super) fn note_version_written(&self, store: &Store, created_at: i64) {

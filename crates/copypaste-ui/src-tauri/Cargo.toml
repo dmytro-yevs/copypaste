@@ -70,7 +70,6 @@ tower-http = { workspace = true, optional = true }
 copypaste-core = { path = "../../copypaste-core", optional = true }
 copypaste-p2p = { path = "../../copypaste-p2p", optional = true }
 copypaste-cloud = { path = "../../copypaste-cloud", optional = true }
-hex = { workspace = true, optional = true }
 zeroize.workspace = true
 # `src/android_context.rs` only: the one JNI entry point in this crate, which
 # hands the app context to `ndk-context` so the core's Android Keystore backend
@@ -137,7 +136,6 @@ image.workspace = true
 copypaste-core = { path = "../../copypaste-core" }
 copypaste-p2p = { path = "../../copypaste-p2p" }
 copypaste-cloud = { path = "../../copypaste-cloud" }
-hex.workspace = true
 zeroize.workspace = true
 jni = "0.21"
 ndk-context = "0.1"
@@ -146,7 +144,7 @@ ndk-context = "0.1"
 # Compile the in-process backend on a host that is not Android. Exists so this
 # code is type-checked somewhere: without it the whole Android path would be
 # dead text on every machine the project is actually built on.
-embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:copypaste-cloud", "dep:hex", "dep:jni", "dep:ndk-context"]
+embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:copypaste-cloud", "dep:jni", "dep:ndk-context"]
 # Only the separate Android evidence APK may admit loopback plaintext.
 cloud-evidence = ["copypaste-cloud/test-endpoints"]
 typescript = ["dep:ts-rs", "copypaste-ipc/typescript"]

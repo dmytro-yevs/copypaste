@@ -104,19 +104,13 @@ mod tests {
     #[test]
     fn a_value_round_trips_and_overwrites() {
         let s = store();
-        assert_eq!(s.state("cloud_email").unwrap(), None);
+        assert_eq!(s.state("example_state").unwrap(), None);
 
-        s.set_state("cloud_email", "a@example.com").unwrap();
-        assert_eq!(
-            s.state("cloud_email").unwrap().as_deref(),
-            Some("a@example.com")
-        );
+        s.set_state("example_state", "first").unwrap();
+        assert_eq!(s.state("example_state").unwrap().as_deref(), Some("first"));
 
-        s.set_state("cloud_email", "b@example.com").unwrap();
-        assert_eq!(
-            s.state("cloud_email").unwrap().as_deref(),
-            Some("b@example.com")
-        );
+        s.set_state("example_state", "second").unwrap();
+        assert_eq!(s.state("example_state").unwrap().as_deref(), Some("second"));
     }
 
     #[test]
