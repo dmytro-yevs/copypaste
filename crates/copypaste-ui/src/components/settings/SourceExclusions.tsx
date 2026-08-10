@@ -1,5 +1,5 @@
-import { Search, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronDown, Search, Trash2 } from "lucide-react";
+import { useId, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { clipSourceMetadata } from "@/components/history/clipMetadata";
@@ -16,16 +16,24 @@ const APP_ID = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/;
 interface SourceExclusionsProps {
   ids: readonly string[];
   disabled?: boolean;
+  collapsible?: boolean;
   onChange: (ids: string[]) => void;
 }
 
 /** The service is the source of truth. This component only proposes ids that
  * already appeared in history, and never invents an application name or icon. */
-export function SourceExclusions({ ids, disabled = false, onChange }: SourceExclusionsProps) {
+export function SourceExclusions({
+  ids,
+  disabled = false,
+  collapsible = false,
+  onChange,
+}: SourceExclusionsProps) {
   const { t } = useTranslation();
   const history = useHistory("");
   const [query, setQuery] = useState("");
   const [validation, setValidation] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(!collapsible);
+  const controlsId = useId();
   const android = isAndroidPlatform();
   const installedApps = useQuery({
     queryKey: ["installed-source-apps"],
@@ -72,24 +80,56 @@ export function SourceExclusions({ ids, disabled = false, onChange }: SourceExcl
     onChange([...ids, next]);
   };
 
+  const heading = (
+    <div className="flex flex-col gap-s-1">
+      <h2 className="text-sm font-semibold">
+        {collapsible ? (
+          <Button
+            type="button"
+            variant="ghost"
+            aria-expanded={expanded}
+            aria-controls={controlsId}
+            className="w-full justify-between px-0 text-left whitespace-normal"
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {t("settings.service.exclusions.title")}
+            <ChevronDown aria-hidden="true" className={expanded ? "rotate-180" : undefined} />
+          </Button>
+        ) : (
+          t("settings.service.exclusions.title")
+        )}
+      </h2>
+      <p className="text-xs text-muted-foreground">
+        {t(
+          android
+            ? "settings.service.exclusions.androidLimitation"
+            : "settings.service.exclusions.description",
+        )}
+      </p>
+    </div>
+  );
+
+  if (!expanded) {
+    return (
+      <section
+        data-settings-search-target={`section:${t("settings.service.exclusions.title")}`}
+        className="flex flex-col gap-s-2 rounded-lg border border-divider bg-card p-s-3"
+      >
+        {heading}
+      </section>
+    );
+  }
+
   return (
     <section
       data-settings-search-target={`section:${t("settings.service.exclusions.title")}`}
       className="flex flex-col gap-s-2 rounded-lg border border-divider bg-card p-s-3"
     >
-      <div className="flex flex-col gap-s-1">
-        <h2 className="text-sm font-semibold">{t("settings.service.exclusions.title")}</h2>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            android
-              ? "settings.service.exclusions.androidLimitation"
-              : "settings.service.exclusions.description",
-          )}
-        </p>
-      </div>
+      {heading}
 
       {android ? (
         <AndroidExclusionPicker
+          id={collapsible ? controlsId : undefined}
           apps={visibleInstalledApps}
           selectedIds={ids}
           query={query}
@@ -203,6 +243,7 @@ export function SourceExclusions({ ids, disabled = false, onChange }: SourceExcl
 }
 
 interface AndroidExclusionPickerProps {
+  id?: string;
   apps: readonly InstalledSourceApp[];
   selectedIds: readonly string[];
   query: string;
@@ -214,12 +255,12 @@ interface AndroidExclusionPickerProps {
 }
 
 function AndroidExclusionPicker({
-  apps, selectedIds, query, disabled, loading, failed, onQueryChange, onAdd,
+  id, apps, selectedIds, query, disabled, loading, failed, onQueryChange, onAdd,
 }: AndroidExclusionPickerProps) {
   const { t } = useTranslation();
   const searchLabel = t("settings.service.exclusions.searchInstalled");
   return (
-    <div className="flex flex-col gap-s-2">
+    <div id={id} className="flex flex-col gap-s-2">
       <label htmlFor="android-exclusion-search" className="sr-only">
         {searchLabel}
       </label>
