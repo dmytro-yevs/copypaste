@@ -20,14 +20,11 @@ pub struct UpdateRuntime {
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum UpdateStatus {
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
     Unsupported,
     Unconfigured,
     Ready,
     UpToDate,
-    Available {
-        version: String,
-    },
+    Available { version: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -125,7 +122,10 @@ pub async fn check_for_update(
     }
 
     #[cfg(not(target_os = "windows"))]
-    Ok(UpdateStatus::Unsupported)
+    {
+        let _ = app;
+        Ok(UpdateStatus::Unsupported)
+    }
 }
 
 #[tauri::command]
@@ -179,7 +179,7 @@ pub async fn install_update(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (expected_version, progress);
+        let _ = (app, expected_version, progress);
         Ok(UpdateStatus::Unsupported)
     }
 }
@@ -231,6 +231,19 @@ fn plugin_error(error: PluginError, fallback: &'static str) -> UiError {
 #[cfg(all(test, target_os = "windows"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsigned_windows_plugin_config_starts_unconfigured() {
+        let windows: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.conf.json")).unwrap();
+        let updater = windows
+            .pointer("/plugins/updater")
+            .expect("the unsigned Windows config supplies the updater object");
+
+        serde_json::from_value::<tauri_plugin_updater::Config>(updater.clone())
+            .expect("the updater plugin accepts the unsigned Windows config");
+        assert!(!configured(Some(updater)));
+    }
 
     #[test]
     fn unsigned_and_partial_updater_configs_fail_closed() {
