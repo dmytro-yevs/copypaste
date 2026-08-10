@@ -27,6 +27,7 @@
 //! definition of the same thing.
 
 use std::collections::VecDeque;
+use std::future::Future;
 
 use copypaste_ipc::EventKind;
 use serde::Serialize;
@@ -216,7 +217,7 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
         let _ = private_mode_tx.send(enabled);
     });
 
-    tauri::async_runtime::spawn(async move {
+    spawn_intake_task(async move {
         let mut buffer = Buffer::default();
         let initial = loop {
             let backend = app.state::<SelectedBackend>();
@@ -261,6 +262,10 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
     });
 }
 
+fn spawn_intake_task(task: impl Future<Output = ()> + Send + 'static) {
+    tauri::async_runtime::spawn(task);
+}
+
 fn synchronize_private_mode<R: Runtime>(app: &AppHandle<R>, gate: &mut PrivateGate) {
     if gate.applied == Some(gate.desired) {
         return;
@@ -296,21 +301,29 @@ fn synchronize_private_mode<R: Runtime>(app: &AppHandle<R>, gate: &mut PrivateGa
 }
 
 async fn tick<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer, private_mode: bool) {
-    let taken = {
+    let taken = take_platform_batch(private_mode, || {
         let capture = app.state::<SelectedCapture>();
-        match capture.drain() {
-            Ok(clips) => clips,
-            Err(error) => {
-                tracing::debug!(%error, "the platform had nothing to hand over");
-                Vec::new()
-            }
+        capture.drain()
+    });
+    let taken = match taken {
+        Ok(clips) => clips,
+        Err(error) => {
+            tracing::debug!(%error, "the platform had nothing to hand over");
+            Vec::new()
         }
     };
-    if private_mode {
-        return;
-    }
     push_captured(app, buffer, taken);
     drain_buffer(app, buffer).await;
+}
+
+fn take_platform_batch(
+    private_mode: bool,
+    drain: impl FnOnce() -> Result<Vec<Clip>>,
+) -> Result<Vec<Clip>> {
+    if private_mode {
+        return Ok(Vec::new());
+    }
+    drain()
 }
 
 fn push_captured<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer, taken: Vec<Clip>) {
@@ -473,6 +486,47 @@ mod tests {
         assert_eq!(buffer.pop().unwrap().text, "first");
         assert_eq!(buffer.pop().unwrap().text, "second");
         assert_eq!(buffer.pop().unwrap().text, "third");
+    }
+
+    #[test]
+    fn platform_queue_keeps_ownership_until_the_privacy_gate_opens() {
+        let called = std::cell::Cell::new(false);
+
+        let taken = take_platform_batch(true, || {
+            called.set(true);
+            Ok(vec![clip("must remain on Android")])
+        })
+        .unwrap();
+
+        assert!(taken.is_empty());
+        assert!(!called.get());
+    }
+
+    #[test]
+    fn public_gate_takes_one_platform_batch_exactly_once() {
+        let calls = std::cell::Cell::new(0);
+
+        let taken = take_platform_batch(false, || {
+            calls.set(calls.get() + 1);
+            Ok(vec![clip("one Android batch")])
+        })
+        .unwrap();
+
+        assert_eq!(calls.get(), 1);
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].text, "one Android batch");
+    }
+
+    #[test]
+    fn intake_starts_without_a_caller_tokio_runtime() {
+        let (sent, received) = std::sync::mpsc::sync_channel(1);
+        spawn_intake_task(async move {
+            sent.send(()).unwrap();
+        });
+
+        received
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the Tauri executor did not start the intake task");
     }
 
     #[test]
