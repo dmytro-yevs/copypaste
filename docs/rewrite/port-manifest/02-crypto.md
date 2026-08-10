@@ -248,11 +248,13 @@ runs on a dedicated OS thread with a hard timeout; on timeout the daemon reports
 `Locked` and abandons the thread rather than hanging on an unanswered GUI prompt
 (`keyload.rs:104-168`).
 
-**I-23 — The dev/test bypass must short-circuit before any Security-framework
-call**, and in production it must be read **once** and cached
-(`OnceLock`) so an attacker who can mutate the running process's environment
-mid-session cannot flip it into ephemeral-key mode after the real key is in use
-(**CopyPaste-qvtg.5**, `keychain/mod.rs:55-59`).
+**I-23 — Runtime environment alone must never select a production key
+backend.** The `COPYPASTE_EPHEMERAL_KEY` bypass exists only under the explicit
+`dev-ephemeral-key` compile-time feature, which no shipped macOS, Android or
+Windows build enables. In that development build it must short-circuit before
+any platform-keystore call and cache the environment decision in a `OnceLock`,
+so a mid-process environment mutation cannot change key mode
+(**CopyPaste-qvtg.5**).
 
 **I-24 — Full fingerprints stay out of info-level logs.** Log only the first 23
 chars at `info`; the full 64-char value goes to `debug` only. The fingerprint is
@@ -700,7 +702,7 @@ Backend selection and env overrides:
 | env var | effect |
 |---|---|
 | `COPYPASTE_KEY_BACKEND` = `file` \| `keychain` | forces the backend (`keychain/signing.rs:30,54-59`) |
-| `COPYPASTE_EPHEMERAL_KEY` (any value) | dev/test bypass: every keychain entry point short-circuits **before** any Security-framework call (`keychain/mod.rs:55-68`) |
+| `COPYPASTE_EPHEMERAL_KEY` (any value) | only when compiled with `dev-ephemeral-key`: short-circuits every platform backend before a keystore call; ignored without that feature |
 | `COPYPASTE_KEY_FILE_PATH` | test override for the device-key file path (`file_store.rs:75-82`) |
 
 Default backend without an override: `Keychain` only when this process's code
@@ -929,6 +931,13 @@ string is literally `"keychain_locked"` — the UI consumes it);
 
 Keep the pattern of extracting a **pure classifier** so the decision logic is
 testable without an interactive Keychain.
+
+`release_feature_set_ignores_ephemeral_environment` runs in the release profile
+without default features, sets `COPYPASTE_EPHEMERAL_KEY` in a child process,
+and proves the selected backend still persists and reopens the device secret.
+`development_feature_short_circuits_and_caches_its_choice` separately enables
+`dev-ephemeral-key`, proves the bypass precedes the existing-history guard, and
+proves both initial environment decisions survive later mutation.
 
 ### 5.10 What an interactive Keychain now covers
 

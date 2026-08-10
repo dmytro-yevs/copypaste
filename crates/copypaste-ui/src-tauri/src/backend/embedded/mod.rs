@@ -511,9 +511,6 @@ mod tests {
     /// second fixture that could drift from this one.
     pub(super) fn backend() -> (EmbeddedBackend, Arc<FakeClipboard>, tempfile::TempDir) {
         let dir = tempfile::TempDir::new().unwrap();
-        // Keeps the test off the real keystore and off the developer's own
-        // history file.
-        std::env::set_var("COPYPASTE_EPHEMERAL_KEY", "1");
         let clipboard = Arc::new(FakeClipboard::default());
         let backend = EmbeddedBackend::open(dir.path(), Box::new(Arc::clone(&clipboard)))
             .expect("the embedded backend should open under a temp dir");

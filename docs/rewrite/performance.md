@@ -200,9 +200,11 @@ tick. Both remove threads or timers from exactly this measurement, so 281.7/min
 and 17 threads are a **pre-wave** figure. Re-taking it needs an interactive
 approval: the daemon reads the device secret from the login Keychain, and a
 freshly built binary blocks on the access prompt, so `daemon-idle.sh` cannot
-complete unattended — except that `COPYPASTE_EPHEMERAL_KEY` short-circuits the
-keystore before any Security-framework call, and a daemon profiled on a
-throwaway `--data-dir` never needed the real secret.
+complete unattended — except that the profiling wrapper builds the daemon with
+`dev-ephemeral-key`, after which `COPYPASTE_EPHEMERAL_KEY` short-circuits the
+keystore before any Security-framework call. Shipped builds do not contain
+that runtime path, and a daemon profiled on a throwaway `--data-dir` never
+needed the real secret.
 [macos-idle-measurement.md](macos-idle-measurement.md) has the diagnosis, that
 route and three alternatives, and what the re-taken figures would falsify;
 `scripts/profile/macos-keychain-preflight.sh` decides which route this Mac

@@ -35,7 +35,8 @@ ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31m✗ %s\033[0m\n' "$*"; exit 1; }
 
 step "Building"
-$CARGO build --release -p copypaste-daemon -p copypaste-cli 2>&1 | tail -3
+$CARGO build --release -p copypaste-daemon -p copypaste-cli \
+    --features copypaste-daemon/dev-ephemeral-key 2>&1 | tail -3
 
 DAEMON="$ROOT/target/release/copypaste-daemon"
 CLI="$ROOT/target/release/copypaste"

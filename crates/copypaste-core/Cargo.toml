@@ -112,6 +112,9 @@ keyring-core = "1"
 android-native-keyring-store = "1"
 
 [features]
+# Compile the throwaway device-secret path used by demos and profiling. No
+# shipped target enables it; without this feature the environment is not read.
+dev-ephemeral-key = []
 # Compile `crypto/keystore/android.rs` on a host that is not Android. It
 # selects nothing — the file backend is still what a Linux build uses — and
 # exists so that code is type-checked somewhere rather than being dead text on

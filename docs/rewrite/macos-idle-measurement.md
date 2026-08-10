@@ -4,8 +4,8 @@
 [performance.md](performance.md) §2.2 are pre-wave and stay pre-wave until this
 runs
 **Was blocking:** `scripts/profile/daemon-idle.sh` could not start a freshly
-built daemon on a Mac holding a device-secret Keychain item. It can now: the
-bypass this needs is already in the shipping code and was missed.
+built daemon on a Mac holding a device-secret Keychain item. The profiling
+wrapper now builds an explicit development-only bypass.
 
 ## What blocks, exactly
 
@@ -38,10 +38,9 @@ Five links. Each is in the tree.
    the join handle rather than cancelling, because Security-framework exposes no
    cancellation.
 
-Manifest 02 §5 says "I-22 has no equivalent" and lists the v1 environment
-overrides as gone. **Both statements are stale**; `load_with_timeout` and
-`COPYPASTE_EPHEMERAL_KEY` are both in `crypto/keys.rs`. Read the code before the
-manifest here.
+`load_with_timeout` remains the production I-22 path. The environment bypass is
+compiled only by `dev-ephemeral-key`; the profiling wrapper enables it before
+starting the throwaway daemon.
 
 CI does not hit any of this because it changes the default keychain
 (`ci.yml`, "A throwaway keychain to test against"), and it must:
@@ -57,12 +56,12 @@ Mac without changing anything: it separates *ready*, *halted*, *exited* and
 
 ## The route: `COPYPASTE_EPHEMERAL_KEY`
 
-`Keyring::load_or_create` short-circuits on `COPYPASTE_EPHEMERAL_KEY` **before
-any Security-framework call**, minting a throwaway secret for the process
-lifetime. It is read exactly once into a `OnceLock` so a mutated environment
-cannot flip an already-keyed daemon (port manifest 02, I-23). No prompt, no
-Keychain write, no default-keychain change, no code change, and it runs
-unattended.
+With `dev-ephemeral-key` compiled, `Keyring::load_or_create` short-circuits on
+`COPYPASTE_EPHEMERAL_KEY` **before any Security-framework call**, minting a
+throwaway secret for the process lifetime. It is read exactly once into a
+`OnceLock` so a mutated environment cannot flip an already-keyed daemon (port
+manifest 02, I-23). Shipped builds compile this branch and the environment read
+out entirely.
 
 It is the right trade **for this measurement specifically**: the daemon is
 started on a `mktemp -d` data directory whose history is discarded at the end of

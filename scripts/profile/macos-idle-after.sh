@@ -11,10 +11,10 @@
 #   NO_MDNS=1 scripts/profile/macos-idle-after.sh
 #
 # KEYCHAIN_ROUTE:
-#   ephemeral   (default) COPYPASTE_EPHEMERAL_KEY — Keyring::load_or_create
-#               short-circuits before any Security-framework call. Nothing is
-#               read, written or prompted for. The daemon runs on a throwaway
-#               --data-dir that never needed the real device secret.
+#   ephemeral   (default) builds the daemon with `dev-ephemeral-key`, then
+#               COPYPASTE_EPHEMERAL_KEY short-circuits before any
+#               Security-framework call. Nothing is read, written or prompted
+#               for; shipped builds do not contain this path.
 #   own-user    touch nothing and use the real Keychain. Correct in a throwaway
 #               macOS user account, or when the preflight reported `ready`.
 #   mint-fresh  delete the device-secret item so this run mints its own.
@@ -133,7 +133,12 @@ esac
 CARGO="cargo"
 cargo +1.96 --version >/dev/null 2>&1 && CARGO="cargo +1.96"
 note "building (release)"
-$CARGO build --release -p copypaste-daemon -p copypaste-cli || die "the build failed"
+if [ "$ROUTE" = ephemeral ]; then
+    $CARGO build --release -p copypaste-daemon -p copypaste-cli \
+        --features copypaste-daemon/dev-ephemeral-key || die "the build failed"
+else
+    $CARGO build --release -p copypaste-daemon -p copypaste-cli || die "the build failed"
+fi
 
 if [ "$ROUTE" = signed ]; then
     # Unlock the signing keychain the way selfsign.sh does, so codesign does not

@@ -296,6 +296,10 @@ jobs:
         if: success() || failure()
         run: cargo +1.96 test -p copypaste-ui --features embedded-backend backend::embedded --locked
 
+      - name: Development-only ephemeral key path
+        if: success() || failure()
+        run: cargo +1.96 test -p copypaste-core --features dev-ephemeral-key development_feature_short_circuits_and_caches_its_choice --locked
+
       - name: macOS-only code, type-checked here
         # The same argument as the step above, for the other platform. Nothing
         # on this runner compiles `#[cfg(target_os = "macos")]` code, and the
@@ -344,6 +348,9 @@ jobs:
       # reported as a build failure instead of as a demo failure.
       - name: Build release binaries
         run: cargo build --release --locked -p copypaste-daemon -p copypaste-cli
+
+      - name: Release feature set ignores the ephemeral environment
+        run: cargo test --release --locked -p copypaste-core --no-default-features release_feature_set_ignores_ephemeral_environment
 
       - name: scripts/demo.sh
         # On Linux the clipboard source is the fake backend; the daemon reports

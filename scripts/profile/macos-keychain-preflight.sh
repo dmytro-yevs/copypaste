@@ -89,7 +89,7 @@ if [ -x "$DAEMON" ]; then
     say "   'Always Allow' granted to the previous build no longer applies."
 else
     say "not built: $DAEMON"
-    say "-> cargo build --release -p copypaste-daemon -p copypaste-cli"
+    say "-> cargo build --release -p copypaste-daemon -p copypaste-cli --features copypaste-daemon/dev-ephemeral-key"
 fi
 
 head_ "A stable local signing identity"
@@ -178,20 +178,23 @@ else
             say "(removed the item the probe minted)"
     fi
 
-    head_ "Does it start under COPYPASTE_EPHEMERAL_KEY? (touches no keystore)"
-    # Keyring::load_or_create short-circuits on this before any
-    # Security-framework call, so the answer here should not depend on anything
-    # above. If it does, the block is not the Keychain.
-    export COPYPASTE_EPHEMERAL_KEY=1
-    probe_start
-    BYPASS_VERDICT="$PROBE_VERDICT"
-    unset COPYPASTE_EPHEMERAL_KEY
-    if [ "$BYPASS_VERDICT" = ready ]; then
-        say "ready — the bypass works and the measurement can run unattended."
+    head_ "Does the development-only ephemeral path start?"
+    if strings "$DAEMON" | grep -qF 'COPYPASTE_EPHEMERAL_KEY'; then
+        export COPYPASTE_EPHEMERAL_KEY=1
+        probe_start
+        BYPASS_VERDICT="$PROBE_VERDICT"
+        unset COPYPASTE_EPHEMERAL_KEY
+        if [ "$BYPASS_VERDICT" = ready ]; then
+            say "ready — the profiling build can run unattended."
+        else
+            say "$BYPASS_VERDICT — the bypass did NOT help, so the Keychain is not"
+            say "what is stopping the daemon. Its last lines:"
+            printf '%s\n' "$PROBE_LOG" | sed 's/^/    /'
+        fi
     else
-        say "$BYPASS_VERDICT — the bypass did NOT help, so the Keychain is not"
-        say "what is stopping the daemon. Its last lines:"
-        printf '%s\n' "$PROBE_LOG" | sed 's/^/    /'
+        BYPASS_VERDICT=not-compiled
+        say "not compiled — this is a shipped/default feature set."
+        say "-> macos-idle-after.sh builds its own development-only binary."
     fi
 fi
 
