@@ -1,6 +1,7 @@
 package com.copypaste.app
 
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -28,6 +29,16 @@ class ClipQueueTest {
         ClipQueue.setPrivateMode(true)
         ClipQueue.setPrivateMode(false)
 
+        assertTrue(ClipQueue.drain().first.isEmpty())
+    }
+
+    @Test
+    fun oneEligibleCaptureIsDrainedExactlyOnce() {
+        ClipQueue.offer("tile capture", CaptureSource.TILE)
+
+        val first = ClipQueue.drain().first
+
+        assertEquals(listOf("tile capture"), first.map(CapturedClip::text))
         assertTrue(ClipQueue.drain().first.isEmpty())
     }
 

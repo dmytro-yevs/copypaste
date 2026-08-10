@@ -220,7 +220,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     fun disarm(invoke: Invoke) {
         ShizukuClipboard.disarm()
         CaptureService.stop(activity)
-        invoke.resolve(JSObject())
+        invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
     }
 
     /**
@@ -262,7 +262,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun setPrivateMode(invoke: Invoke) {
         ClipQueue.setPrivateMode(invoke.getArgs().optBoolean("enabled", false))
-        invoke.resolve(JSObject())
+        invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
     }
 
     @Command
