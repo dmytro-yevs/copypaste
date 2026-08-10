@@ -24,6 +24,11 @@ pub use super::messages::{LOST_BODY, LOST_TITLE, TOAST_EXPLANATION};
 
 /// Which mechanism is capturing *right now*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(rename = "CaptureRung", export_to = "ipc.ts")
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Rung {
     /// macOS: the background service reads the pasteboard. No ladder applies.
@@ -43,6 +48,8 @@ pub enum Rung {
 /// ADR-0005 for what has to change for the android doc's §5 rule 5 to be met
 /// in full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum CaptureSource {
     /// Copied inside CopyPaste.
@@ -60,6 +67,8 @@ pub enum CaptureSource {
 
 /// Why background capture is not set up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum NotGrantedReason {
     /// Android 10 and below cannot pair wireless debugging on the device
@@ -74,6 +83,8 @@ pub enum NotGrantedReason {
 
 /// Granted, and still not proven.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum NotWorkingReason {
     /// Everything is in place but nothing has been read yet. Not a fault.
@@ -88,6 +99,8 @@ pub enum NotWorkingReason {
 
 /// v1's four states, carried forward per the android doc §5 rule 2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum CaptureHealth {
     NotGranted {
@@ -108,6 +121,11 @@ pub enum CaptureHealth {
 /// screen and the status chip cannot disagree about the next step — the android
 /// doc's §5 rule 4 is only cheap if there is exactly one answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(rename = "CaptureNextStep", export_to = "ipc.ts")
+)]
 #[serde(rename_all = "snake_case")]
 pub enum NextStep {
     /// Nothing to do.
@@ -124,6 +142,8 @@ pub enum NextStep {
 
 /// What Kotlin found when it looked.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShizukuProbe {
     /// `Build.VERSION.SDK_INT >= 30`: wireless debugging can be paired from the
@@ -443,6 +463,8 @@ impl CaptureModel {
 /// diagnostics screen, which is why [`CaptureSnapshot::headline`] is a finished
 /// sentence rather than a code the view has to translate.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureSnapshot {
     pub rung: Rung,
