@@ -330,8 +330,9 @@ for wf in ("release.yml", "android-emulator.yml"):
             # the ones that matter.
             if not body or len(body.strip().splitlines()) < 2:
                 continue
-            rec(body.lstrip().startswith("set -euo pipefail"),
-                "{}: {} step {} opens with set -euo pipefail".format(wf, jn, i),
+            prefix = '$ErrorActionPreference = "Stop"' if s.get("shell") == "pwsh" else "set -euo pipefail"
+            rec(body.lstrip().startswith(prefix),
+                "{}: {} step {} opens with {}".format(wf, jn, i, prefix),
                 "opens with: {}".format(body.lstrip().splitlines()[0][:60]))
 
 # --- the emulator smoke test ------------------------------------------------

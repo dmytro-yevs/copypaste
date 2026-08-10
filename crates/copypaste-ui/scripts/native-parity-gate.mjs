@@ -31,10 +31,18 @@ const PLATFORM_REQUIREMENTS = {
   },
   windows: {
     environment: "hosted-runner",
-    scenario: "windows-native-contracts",
-    budgetMs: 900000,
-    assertions: new Set(["named-pipe contract passed", "DPAPI round-trip passed"]),
-    artifacts: new Set(["test-log", "measurement"]),
+    scenario: "windows-installed-release",
+    budgetMs: 30000,
+    assertions: new Set([
+      "installer integrity passed",
+      "installed app launched",
+      "installed sidecar launched",
+      "named-pipe and clipboard passed",
+      "update feed contract matched signing mode",
+      "in-place update passed",
+      "uninstall passed",
+    ]),
+    artifacts: new Set(["screenshot", "accessibility", "test-log", "measurement"]),
   },
 };
 

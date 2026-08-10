@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import copy
 import pathlib
 import sys
 
@@ -6,14 +7,6 @@ import yaml
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-FAIL = 0
-
-
-def record(held, description, detail):
-    global FAIL
-    print(f"{'PASS' if held else 'FAIL'}|{description}|{detail if not held else ''}")
-    if not held:
-        FAIL += 1
 
 
 def load(name):
@@ -25,81 +18,183 @@ def steps(job):
     return job.get("steps") or []
 
 
-release = load("release.yml")
-jobs = release.get("jobs") or {}
-gate = jobs.get("native-parity") or {}
-publish = jobs.get("publish") or {}
-gate_needs = set(gate.get("needs") or [])
-publish_needs = set(publish.get("needs") or [])
-record(
-    {"macos", "android-hardware"} <= gate_needs,
-    "native parity waits for macOS and physical Android evidence",
-    f"native-parity needs {sorted(gate_needs)}",
-)
-record(
-    "native-parity" in publish_needs,
-    "publication waits for the native parity gate",
-    f"publish needs {sorted(publish_needs)}",
-)
+def commands(job):
+    return "\n".join(str(step.get("run") or "") for step in steps(job))
 
-downloads = {
-    (step.get("with") or {}).get("name")
-    for step in steps(gate)
-    if str(step.get("uses") or "").startswith("actions/download-artifact")
-}
-record(
-    {"release-macos-native-evidence", "release-android-hardware-evidence"} <= downloads,
-    "native parity downloads both release evidence artifacts",
-    f"downloads {sorted(str(item) for item in downloads)}",
-)
 
-gate_commands = "\n".join(str(step.get("run") or "") for step in steps(gate))
-record(
-    "--require macos,android" in gate_commands
-    and "--run-id ${{ github.run_id }}" in gate_commands
-    and "artifacts/native-parity/macos/native-evidence.json" in gate_commands
-    and "artifacts/native-parity/android/release-android-hardware/native-evidence.json"
-    in gate_commands
-    and gate_commands.count("native-evidence.json") == 2,
-    "release gate requires exactly the two native receipts",
-    "expected the platform set, workflow run ID, and exact macOS and Android receipt paths",
-)
+def downloads(job):
+    return {
+        (step.get("with") or {}).get("name")
+        for step in steps(job)
+        if str(step.get("uses") or "").startswith("actions/download-artifact")
+    }
 
-hardware_uploads = [
-    step for step in steps(jobs.get("android-hardware") or {})
-    if str(step.get("uses") or "").startswith("actions/upload-artifact")
-]
-record(
-    len(hardware_uploads) == 1
-    and (hardware_uploads[0].get("with") or {}).get("if-no-files-found") == "error",
-    "physical Android evidence upload fails closed",
-    "the hardware artifact may be absent without failing",
-)
 
-nightly = load("native-nightly.yml")
-triggers = nightly.get(True) or nightly.get("on") or {}
-windows_input = ((triggers.get("workflow_dispatch") or {}).get("inputs") or {}).get("windows_evidence") or {}
-windows = (nightly.get("jobs") or {}).get("windows") or {}
-windows_commands = "\n".join(str(step.get("run") or "") for step in steps(windows))
-record(
-    windows_input.get("type") == "boolean" and windows_input.get("default") is False,
-    "Windows evidence is opt-in on manual dispatch",
-    f"windows_evidence input is {windows_input!r}",
-)
-record(
-    "inputs.windows_evidence" in str(windows.get("if") or "")
-    and "--require windows" in windows_commands
-    and "--run-id ${{ github.run_id }}" in windows_commands,
-    "requested Windows evidence runs its own receipt gate",
-    "the Windows job is not conditional or does not validate its run-bound receipt",
-)
+def contract_errors(release, nightly):
+    errors = []
+    jobs = release.get("jobs") or {}
+    gate = jobs.get("native-parity") or {}
+    windows = jobs.get("windows") or {}
+    publish = jobs.get("publish") or {}
 
-for script in ("macos-native-evidence.sh", "android-smoke-release.sh"):
-    body = (ROOT / "scripts" / "release" / script).read_text(encoding="utf-8")
-    record(
-        "write-native-evidence.py" in body,
-        f"{script} writes a native evidence receipt",
-        "the producer cannot feed the gate",
+    if not {"macos", "android-hardware", "windows"} <= set(gate.get("needs") or []):
+        errors.append("native parity must wait for all three shipped platforms")
+    if not {"native-parity", "windows"} <= set(publish.get("needs") or []):
+        errors.append("publication must wait for Windows and native parity")
+    required_receipts = {
+        "release-macos-native-evidence",
+        "release-android-hardware-evidence",
+        "release-windows-native-evidence",
+    }
+    if not required_receipts <= downloads(gate):
+        errors.append("native parity must download all three release receipts")
+
+    gate_commands = commands(gate)
+    receipt_paths = (
+        "artifacts/native-parity/macos/native-evidence.json",
+        "artifacts/native-parity/android/release-android-hardware/native-evidence.json",
+        "artifacts/native-parity/windows/native-evidence.json",
     )
+    if (
+        "--require macos,android,windows" not in gate_commands
+        or "--run-id ${{ github.run_id }}" not in gate_commands
+        or any(path not in gate_commands for path in receipt_paths)
+        or gate_commands.count("native-evidence.json") != 3
+    ):
+        errors.append("release gate must validate exactly three run-bound native receipts")
 
-sys.exit(1 if FAIL else 0)
+    windows_commands = commands(windows)
+    if (
+        "build-windows.ps1" not in windows_commands
+        or "-Unsigned" not in windows_commands
+        or "ExpectedSignature $signature" not in windows_commands
+        or "windows-native-evidence.ps1" not in windows_commands
+        or "-PackageDirectory artifacts/windows-x86_64" not in windows_commands
+    ):
+        errors.append("Windows release must distinguish signed and unsigned installed evidence")
+    windows_env = windows.get("env") or {}
+    signing_env = {
+        "WINDOWS_TIMESTAMP_URL",
+        "TAURI_UPDATER_PUBLIC_KEY",
+        "TAURI_UPDATER_ENDPOINT",
+        "TAURI_SIGNING_PRIVATE_KEY",
+        "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+    }
+    certificate_step = next(
+        (step for step in steps(windows) if step.get("name") == "Import Windows release certificate"),
+        {},
+    )
+    certificate_env = certificate_step.get("env") or {}
+    if (
+        not signing_env <= set(windows_env)
+        or not {"WINDOWS_SIGNING_CERTIFICATE_BASE64", "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"} <= set(certificate_env)
+        or "releases/download/v${{ needs.version.outputs.version }}" not in str(windows_env.get("WINDOWS_RELEASE_BASE_URL") or "")
+    ):
+        errors.append("signed Windows publication must declare every certificate, updater, timestamp, and release URL input")
+    windows_uploads = {
+        (step.get("with") or {}).get("name"): (step.get("with") or {})
+        for step in steps(windows)
+        if str(step.get("uses") or "").startswith("actions/upload-artifact")
+    }
+    for name in ("windows-x86_64", "release-windows-native-evidence"):
+        if (windows_uploads.get(name) or {}).get("if-no-files-found") != "error":
+            errors.append(f"{name} upload must fail closed")
+
+    publish_commands = commands(publish)
+    if "windows-x86_64" not in downloads(publish):
+        errors.append("publication must download the Windows release artifact")
+    for asset in ("dist/*.exe", "dist/*.exe.sig", "dist/latest.json", "dist/SHA256SUMS"):
+        if asset not in publish_commands:
+            errors.append(f"publication is missing Windows asset {asset}")
+
+    nightly_jobs = nightly.get("jobs") or {}
+    nightly_windows = nightly_jobs.get("windows") or {}
+    nightly_commands = commands(nightly_windows)
+    triggers = nightly.get(True) or nightly.get("on") or {}
+    windows_input = ((triggers.get("workflow_dispatch") or {}).get("inputs") or {}).get("windows_evidence") or {}
+    if windows_input.get("type") != "boolean" or windows_input.get("default") is not False:
+        errors.append("nightly Windows evidence must remain an explicit manual option")
+    if (
+        "inputs.windows_evidence" not in str(nightly_windows.get("if") or "")
+        or "build-windows.ps1 -Unsigned" not in nightly_commands
+        or "windows-native-evidence.ps1" not in nightly_commands
+        or "--require windows" not in nightly_commands
+    ):
+        errors.append("requested nightly Windows evidence must exercise and gate an installed package")
+
+    hardware_uploads = [
+        step
+        for step in steps(jobs.get("android-hardware") or {})
+        if str(step.get("uses") or "").startswith("actions/upload-artifact")
+    ]
+    if len(hardware_uploads) != 1 or (hardware_uploads[0].get("with") or {}).get("if-no-files-found") != "error":
+        errors.append("physical Android evidence upload must fail closed")
+    return errors
+
+
+def self_test(release, nightly):
+    failures = 0
+
+    def remove_download(value):
+        job_steps = value["jobs"]["native-parity"]["steps"]
+        job_steps[:] = [
+            step
+            for step in job_steps
+            if (step.get("with") or {}).get("name") != "release-windows-native-evidence"
+        ]
+
+    def remove_asset(value):
+        release_step = next(
+            step for step in value["jobs"]["publish"]["steps"]
+            if step.get("name") == "Create GitHub Release"
+        )
+        release_step["run"] = release_step["run"].replace("dist/latest.json", "")
+
+    def rejected(label, mutation, expected):
+        nonlocal failures
+        fixture = copy.deepcopy(release)
+        mutation(fixture)
+        held = any(expected in error for error in contract_errors(fixture, nightly))
+        print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
+        failures += 0 if held else 1
+
+    rejected(
+        "missing Windows platform dependency fails",
+        lambda value: value["jobs"]["native-parity"]["needs"].remove("windows"),
+        "all three shipped platforms",
+    )
+    rejected(
+        "missing Windows evidence download fails",
+        remove_download,
+        "all three release receipts",
+    )
+    rejected(
+        "missing Windows publish asset fails",
+        remove_asset,
+        "dist/latest.json",
+    )
+    rejected(
+        "missing Windows signing dependency fails",
+        lambda value: value["jobs"]["windows"]["env"].pop("TAURI_SIGNING_PRIVATE_KEY"),
+        "every certificate, updater, timestamp, and release URL input",
+    )
+    return failures
+
+
+release = load("release.yml")
+nightly = load("native-nightly.yml")
+errors = contract_errors(release, nightly)
+for error in errors:
+    print(f"FAIL|{error}|")
+if not errors:
+    print("PASS|all shipped-platform release wiring is fail closed|")
+
+for script in ("macos-native-evidence.sh", "android-smoke-release.sh", "windows-native-evidence.ps1"):
+    body = (ROOT / "scripts" / "release" / script).read_text(encoding="utf-8")
+    if "write-native-evidence.py" not in body:
+        errors.append(f"{script} does not write a native evidence receipt")
+        print(f"FAIL|{errors[-1]}|")
+
+if "--self-test" in sys.argv:
+    errors.extend("self-test failure" for _ in range(self_test(release, nightly)))
+sys.exit(1 if errors else 0)

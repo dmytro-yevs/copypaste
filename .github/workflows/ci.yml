@@ -667,21 +667,25 @@ jobs:
           }
           Write-Output "no CopyPaste entry in the Credential Manager, as designed"
 
-      - name: Build the complete current-user installer
+      - name: Exercise Windows package failure fixtures
         shell: pwsh
         run: |
-          cargo +1.96 build --release -p copypaste-cli -p copypaste-daemon --locked
-          $bin = "crates/copypaste-ui/src-tauri/binaries"
-          New-Item -ItemType Directory -Force -Path $bin | Out-Null
-          Copy-Item target/release/copypaste.exe "$bin/copypaste-x86_64-pc-windows-msvc.exe"
-          Copy-Item target/release/copypaste-daemon.exe "$bin/copypaste-daemon-x86_64-pc-windows-msvc.exe"
-          Push-Location crates/copypaste-ui
-          npm exec tauri build -- --bundles nsis --config src-tauri/tauri.windows.release.conf.json
-          Pop-Location
+          ./scripts/release/test-package-windows.ps1
+          ./scripts/release/windows-native-evidence.ps1 -SelfTest
+
+      - name: Build the complete current-user installer
+        shell: pwsh
+        run: ./scripts/release/build-windows.ps1 -Unsigned -OutputDirectory artifacts/windows-ci-package
 
       - name: Installer, sidecar, pipe, clipboard and transfer evidence
         shell: pwsh
         run: |
-          $installer = @(Get-ChildItem target/release/bundle/nsis/*-setup.exe)
+          $installer = @(Get-ChildItem artifacts/windows-ci-package/*-setup.exe)
           if ($installer.Count -ne 1) { throw "expected one NSIS installer, found $($installer.Count)" }
-          ./scripts/release/windows-native-evidence.ps1 -Installer $installer[0].FullName
+          ./scripts/release/windows-native-evidence.ps1 `
+            -Installer $installer[0].FullName `
+            -PackageDirectory artifacts/windows-ci-package `
+            -EvidenceDirectory artifacts/windows-ci-native `
+            -ExpectedSignature NotSigned `
+            -Commit '${{ github.sha }}' `
+            -RunId '${{ github.run_id }}'
