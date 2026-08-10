@@ -30,7 +30,6 @@ rand.workspace = true
 zeroize.workspace = true
 subtle.workspace = true
 rusqlite.workspace = true
-rusqlite_migration.workspace = true
 r2d2.workspace = true
 r2d2_sqlite.workspace = true
 serde.workspace = true

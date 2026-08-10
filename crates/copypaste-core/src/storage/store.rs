@@ -1,6 +1,8 @@
-//! The [`Store`] handle: what it takes to get a keyed, migrated, pooled
+//! The [`Store`] handle: what it takes to get a keyed, schema-validated, pooled
 //! connection, and nothing about what is then done with it.
 
+use std::fs::OpenOptions;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -13,7 +15,7 @@ use super::connection::{
     apply_connection_pragmas, apply_key, build_pool, run_pragma, validate_key,
 };
 use super::model::StoreError;
-use super::schema::migrate;
+use super::schema::create;
 
 /// The clipboard store.
 ///
@@ -34,28 +36,41 @@ impl std::fmt::Debug for Store {
 }
 
 impl Store {
-    /// Opens the database at `path`, creating it if absent, and migrates it to
-    /// the current schema. The parent directory must already exist.
+    /// Opens the database at `path`, creating the canonical schema only when
+    /// the file did not exist. The parent directory must already exist.
     ///
     /// `db_key` is the raw 32-byte SQLCipher key. A key that does not open an
     /// existing file yields [`StoreError::InvalidKey`]; there is no fallback
     /// read and no unkeyed plaintext probe.
     pub fn open(path: &Path, db_key: &[u8; 32]) -> Result<Self, StoreError> {
         let db_key = Zeroizing::new(*db_key);
-        // Probe on a private connection first so a wrong key surfaces as
-        // InvalidKey instead of an opaque pool-construction failure, and so the
-        // migration runs once rather than once per pooled connection.
-        let mut conn = Connection::open(path)?;
-        apply_key(&conn, &db_key)?;
-        validate_key(&conn)?;
-        apply_connection_pragmas(&conn)?;
-        migrate(&mut conn)?;
+        let fresh = match OpenOptions::new().write(true).create_new(true).open(path) {
+            Ok(file) => {
+                drop(file);
+                true
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => false,
+            Err(error) => return Err(error.into()),
+        };
+        let flags =
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = if fresh {
+            let mut conn = Connection::open_with_flags(path, flags)?;
+            apply_key(&conn, &db_key)?;
+            validate_key(&conn)?;
+            apply_connection_pragmas(&conn)?;
+            create(&mut conn)?;
+            conn
+        } else {
+            super::dbfile::open_validated(path, &db_key)?
+        };
         // A restart onto a populated history would otherwise plan every query
         // from default guesses until the pool first retires a connection.
         let _ = run_pragma(&conn, "PRAGMA optimize");
         drop(conn);
 
-        let pool = build_pool(SqliteConnectionManager::file(path), db_key, false)?;
+        let manager = SqliteConnectionManager::file(path).with_flags(flags);
+        let pool = build_pool(manager, db_key, false)?;
         Ok(Self {
             pool,
             path: Some(Arc::new(path.to_owned())),
@@ -80,7 +95,7 @@ impl Store {
         );
         let pool = build_pool(manager, db_key, true)?;
         let mut conn = pool.get()?;
-        migrate(&mut conn)?;
+        create(&mut conn)?;
         drop(conn);
         Ok(Self { pool, path: None })
     }
@@ -111,7 +126,7 @@ mod tests {
             stored.id
         };
 
-        // Re-opening with the right key is a no-op migration and keeps the data.
+        // Re-opening with the right key validates the schema and keeps the data.
         let s = Store::open(&path, &KEY).unwrap();
         assert_eq!(
             s.get(&id).unwrap().unwrap().content_ciphertext,
