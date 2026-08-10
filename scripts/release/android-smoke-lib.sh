@@ -16,6 +16,8 @@ set -uo pipefail
 
 # shellcheck source=scripts/release/android-screencap-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/android-screencap-lib.sh"
+# shellcheck source=scripts/release/android-log-report-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-log-report-lib.sh"
 
 metadata_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/android-metadata.mjs"
 APP_NAMESPACE="$(node "$metadata_tool" --field releaseApplicationId)"
@@ -36,36 +38,6 @@ group(){ printf '\n== %s\n' "$1"; }
 
 # Detection logic. Everything here is pure: a file in, a verdict out, so
 # --self-test can prove each one actually fails when it should.
-
-# `Process … has died` is deliberately not here: force-stop, which this script
-# does on purpose between launches, prints it.
-CRASH_PATTERNS='FATAL EXCEPTION|UnsatisfiedLinkError|Fatal signal|beginning of crash|did not include required runtime symbols'
-
-# The crash blocks in a logcat dump that belong to *this* app.
-#
-# A crash elsewhere on the emulator is not ours, so the block has to name us —
-# and libc truncates the process to 15 characters ("m.copypaste.app"), which is
-# why the token matched is `copypaste` rather than the package.
-# What a stripped or renamed symbol looks like from outside the app. The Tauri
-# plugin is resolved by reflection from a package and a class name, so R8
-# removing or renaming it surfaces here and nowhere else — and only on the
-# release build type, which is the one people install.
-R8_PATTERNS="ClassNotFoundException|NoSuchMethodException|NoSuchMethodError|NoSuchFieldException|Didn't find class|UnsatisfiedLinkError"
-
-crash_report() { log_blocks "$1" "$CRASH_PATTERNS"; }
-r8_report()    { log_blocks "$1" "$R8_PATTERNS"; }
-
-log_blocks() {
-    awk -v pat="$2" '
-        $0 ~ pat && left == 0 { left = 14; block = $0 "\n"; hit = (tolower($0) ~ /copypaste/); next }
-        left > 0 {
-            block = block $0 "\n"
-            if (tolower($0) ~ /copypaste/) hit = 1
-            if (--left == 0 && hit) printf "%s", block
-        }
-        END { if (left > 0 && hit) printf "%s", block }
-    ' "$1"
-}
 
 # Our own keystore and history failures, and nothing else's.
 #
@@ -535,32 +507,7 @@ self_test() {
     SELF_TEST_TMP="$(mktemp -d)"
     t="$SELF_TEST_TMP"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
-    group "self-test: crash detection"
-
-    printf 'I ActivityManager: Start proc 1234:com.copypaste.app/u0a123\nI copypaste: hello\n' > "$t/clean.log"
-    [[ -z "$(crash_report "$t/clean.log")" ]] \
-        && ok "an ordinary log naming the app is not a crash" \
-        || bad "an ordinary log naming the app is not a crash" "$(crash_report "$t/clean.log")"
-
-    printf 'E AndroidRuntime: FATAL EXCEPTION: main\nE AndroidRuntime: Process: com.copypaste.app, PID: 4242\nE AndroidRuntime: java.lang.RuntimeException\n' > "$t/ours.log"
-    [[ -n "$(crash_report "$t/ours.log")" ]] \
-        && ok "a FATAL EXCEPTION naming our process is reported" \
-        || bad "a FATAL EXCEPTION naming our process is reported"
-
-    printf 'E AndroidRuntime: FATAL EXCEPTION: main\nE AndroidRuntime: Process: com.android.settings, PID: 99\n' > "$t/theirs.log"
-    [[ -z "$(crash_report "$t/theirs.log")" ]] \
-        && ok "another package's crash is not ours" \
-        || bad "another package's crash is not ours" "$(crash_report "$t/theirs.log")"
-
-    printf 'F libc: Fatal signal 11 (SIGSEGV) in tid 4242 (m.copypaste.app)\n' > "$t/libc.log"
-    [[ -n "$(crash_report "$t/libc.log")" ]] \
-        && ok "libc's truncated process name still matches" \
-        || bad "libc's truncated process name still matches"
-
-    printf 'E AndroidRuntime: java.lang.UnsatisfiedLinkError: couldnt find "libcopypaste_ui_lib.so"\n' > "$t/link.log"
-    [[ -n "$(crash_report "$t/link.log")" ]] \
-        && ok "a missing libcopypaste_ui_lib.so is reported" \
-        || bad "a missing libcopypaste_ui_lib.so is reported"
+    android_log_report_self_test "$t"
 
     group "self-test: native code in /proc/<pid>/maps"
 
@@ -602,23 +549,6 @@ self_test() {
         && ok "own_map_paths reports every path naming us, executable or not" \
         || bad "own_map_paths reports every path naming us, executable or not" \
                "$(own_map_paths "$t/maps-dexonly" "$pkg")"
-
-    group "self-test: a stripped symbol"
-
-    printf 'E AndroidRuntime: java.lang.ClassNotFoundException: Didn'"'"'t find class "com.copypaste.app.CapturePlugin" on path: DexPathList\n' > "$t/r8.log"
-    [[ -n "$(r8_report "$t/r8.log")" ]] \
-        && ok "a missing CapturePlugin class is reported as R8's work" \
-        || bad "a missing CapturePlugin class is reported as R8's work"
-
-    printf 'W ClassNotFoundException: com.google.android.gms.SomeOptionalThing\n' > "$t/r8-theirs.log"
-    [[ -z "$(r8_report "$t/r8-theirs.log")" ]] \
-        && ok "another package's missing class is not our stripped symbol" \
-        || bad "another package's missing class is not our stripped symbol" "$(r8_report "$t/r8-theirs.log")"
-
-    printf 'I copypaste: everything resolved\n' > "$t/r8-clean.log"
-    [[ -z "$(r8_report "$t/r8-clean.log")" ]] \
-        && ok "an ordinary log holds no stripped symbol" \
-        || bad "an ordinary log holds no stripped symbol"
 
     group "self-test: the WebView devtools socket"
 

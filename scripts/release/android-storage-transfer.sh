@@ -155,6 +155,7 @@ sh_ am force-stop "$PKG" >/dev/null
 wait_for 20 no_pid || bad "force-stop ends the importing process" "pid $(app_pid) is still running"
 sh_ am start -W -n "$MAIN" >/dev/null
 wait_for 60 has_pid || bad "the app relaunches after import"
+transfer_pid="$(app_pid)"
 tap_selector "History" "$OUT/transfer-history-nav.xml" || bad "History is reachable after restart"
 if wait_selector "$CANARY" "$OUT/transfer-persisted.xml" 45; then
     ok "the imported history survives a process restart"
@@ -200,7 +201,7 @@ tap_selector "History" "$OUT/history-nav.xml" || bad "History remains reachable 
 wait_selector "$CANARY" "$OUT/history-after-failure.xml" 20 && ok "a rejected import leaves persisted history intact" || bad "a rejected import leaves persisted history intact"
 
 dump_logcat storage-transfer
-crashes="$(crash_report "$OUT/storage-transfer.log")"
+crashes="$(crash_report "$OUT/storage-transfer.log" "$transfer_pid")"
 [[ -z "$crashes" ]] && ok "no app crash occurred during storage transfer" || bad "no app crash occurred during storage transfer" "$(head -n 20 <<<"$crashes")"
 
 printf '\n## Android storage transfer: %s\n\n%d assertions passed, %d failed.\n' "$([[ $FAIL -eq 0 ]] && echo passed || echo FAILED)" "$PASS" "$FAIL" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"

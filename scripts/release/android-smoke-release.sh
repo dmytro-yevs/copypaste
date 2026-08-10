@@ -107,7 +107,7 @@ else
         "pid was $pid1, is now '${pid_now:-gone}'"
 fi
 
-crashes="$(crash_report "$OUT/release-launch.log")"
+crashes="$(crash_report "$OUT/release-launch.log" "$pid1")"
 if [[ -z "$crashes" ]]; then
     ok "no crash block naming this app in logcat"
 else
@@ -116,7 +116,7 @@ fi
 
 # Named separately from the crash check, because the reader needs the
 # hypothesis handed to them: on this build type, these three are R8.
-stripped="$(r8_report "$OUT/release-launch.log")"
+stripped="$(r8_report "$OUT/release-launch.log" "$pid1")"
 if [[ -z "$stripped" ]]; then
     ok "no ClassNotFoundException, NoSuchMethodException or UnsatisfiedLinkError"
 else
@@ -239,12 +239,12 @@ grep -q 'Error' <<<"$proc_out" \
 sleep 10
 dump_logcat release-capture
 
-crashes2="$(crash_report "$OUT/release-capture.log")"
+crashes2="$(crash_report "$OUT/release-capture.log" "$pid1")"
 [[ -z "$crashes2" ]] \
     && ok "no crash block while capturing" \
     || bad "no crash block while capturing" "$(head -n 20 <<<"$crashes2")"
 
-stripped2="$(r8_report "$OUT/release-capture.log")"
+stripped2="$(r8_report "$OUT/release-capture.log" "$pid1")"
 [[ -z "$stripped2" ]] \
     && ok "no stripped symbol while capturing" \
     || bad "no stripped symbol while capturing" "$(head -n 12 <<<"$stripped2")"
