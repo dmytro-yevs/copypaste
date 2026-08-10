@@ -73,6 +73,9 @@ data class ReadResult(
 )
 
 @Serializable
+class EmptyResult
+
+@Serializable
 data class CapturedClip(
     val text: String,
     val source: CaptureSource,

@@ -920,11 +920,17 @@ mod tests {
     /// dedup probe inside `copypaste_core::ingest` says so, and that is the
     /// point of calling it rather than re-deriving it.
     #[tokio::test]
-    async fn the_same_clip_captured_twice_does_not_double() {
-        let (backend, _clip, _dir) = backend();
-        backend.add("same").await.unwrap();
-        backend.add("same").await.unwrap();
+    async fn a_replayed_android_capture_is_one_encrypted_row() {
+        let (backend, _clip, dir) = backend();
+        let plaintext = "same Android tile capture";
+        backend.add_captured(plaintext, None, None).await.unwrap();
+        backend.add_captured(plaintext, None, None).await.unwrap();
         assert_eq!(backend.list(50, None).await.unwrap().items.len(), 1);
+        drop(backend);
+        let database = std::fs::read(dir.path().join("copypaste-v2.db")).unwrap();
+        assert!(!database
+            .windows(plaintext.len())
+            .any(|bytes| bytes == plaintext.as_bytes()));
     }
 
     /// AGENTS.md rule 4, the write-time layer: a detected secret is stored but

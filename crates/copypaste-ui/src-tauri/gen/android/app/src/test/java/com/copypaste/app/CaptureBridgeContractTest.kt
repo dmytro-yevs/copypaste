@@ -14,6 +14,7 @@ class CaptureBridgeContractTest {
         val arms: List<ArmResult>,
         val reads: List<ReadResult>,
         val drain: DrainResult,
+        val empty: EmptyResult,
     )
 
     @Test
@@ -35,6 +36,7 @@ class CaptureBridgeContractTest {
         assertOptionality(ProbeResult.serializer())
         assertOptionality(ArmResult.serializer())
         assertOptionality(ReadResult.serializer(), setOf("text"))
+        assertOptionality(EmptyResult.serializer())
         assertOptionality(
             CapturedClip.serializer(),
             setOf("sourceAppBundleId", "sourceAppName"),
@@ -103,6 +105,7 @@ class CaptureBridgeContractTest {
                 dropped = 2,
                 probe,
             ),
+            EmptyResult(),
         )
     }
 }

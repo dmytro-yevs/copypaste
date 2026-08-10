@@ -3,6 +3,10 @@ use serde::Deserialize;
 use super::model::{Clip, ReadOutcome, ShizukuProbe};
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AndroidEmptyResult {}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AndroidProbeResult {
     pub probe: ShizukuProbe,
@@ -51,6 +55,7 @@ mod tests {
         arms: Vec<AndroidArmResult>,
         reads: Vec<AndroidReadResult>,
         drain: AndroidDrainResult,
+        empty: AndroidEmptyResult,
     }
 
     #[test]
@@ -123,6 +128,7 @@ mod tests {
             ]
         );
         assert_eq!(fixture.drain.dropped, 2);
+        let _ = fixture.empty;
         assert!(fixture.drain.probe.running);
         assert_eq!(
             fixture

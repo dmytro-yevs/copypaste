@@ -18,7 +18,7 @@ use tauri::{Manager, Wry};
 use crate::backend::{BackendError, Result};
 
 use super::contract::{
-    AndroidArmResult, AndroidDrainResult, AndroidProbeResult, AndroidReadResult,
+    AndroidArmResult, AndroidDrainResult, AndroidEmptyResult, AndroidProbeResult, AndroidReadResult,
 };
 use super::model::{
     CaptureModel, CaptureSnapshot, CaptureSource, Clip, ReadOutcome, LOST_BODY, LOST_TITLE,
@@ -191,7 +191,7 @@ impl CaptureControl for AndroidCapture {
     }
 
     fn disarm(&self) -> Result<CaptureSnapshot> {
-        self.call::<_, ()>("disarm", (), MSG_BRIDGE)?;
+        self.call::<_, AndroidEmptyResult>("disarm", (), MSG_BRIDGE)?;
         Ok(self.with(|model| {
             model.record_loss();
             model.snapshot()
@@ -232,14 +232,19 @@ impl CaptureControl for AndroidCapture {
     }
 
     fn set_private_mode(&self, enabled: bool) -> Result<()> {
-        self.call("setPrivateMode", PrivateModeArgs { enabled }, MSG_BRIDGE)
+        self.call::<_, AndroidEmptyResult>(
+            "setPrivateMode",
+            PrivateModeArgs { enabled },
+            MSG_BRIDGE,
+        )
+        .map(|_| ())
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<CaptureSnapshot> {
         if enabled {
             return self.arm();
         }
-        self.call::<_, ()>("disarm", (), MSG_BRIDGE)?;
+        self.call::<_, AndroidEmptyResult>("disarm", (), MSG_BRIDGE)?;
         Ok(self.with(|model| {
             model.set_enabled(false);
             model.snapshot()
