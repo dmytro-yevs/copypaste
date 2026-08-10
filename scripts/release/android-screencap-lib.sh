@@ -89,7 +89,10 @@ capture_android_png() { # <png> <package>
         [[ ! -s "$pull_log" ]] || sed 's/^/adb pull: /' "$pull_log" >> "$log"
         [[ ! -s "$validation" ]] || sed 's/^/PNG decoder: /' "$validation" >> "$log"
         [[ ! -s "$cleanup_log" ]] || sed 's/^/fallback cleanup: /' "$cleanup_log" >> "$log"
-        if [[ "$fallback_status" -eq 0 && "$pull_status" == 0 && "$bytes" -gt 0 ]]; then
+        if [[ "$cleanup_status" -ne 0 ]]; then
+            printf 'capture_failure=fallback cleanup failed; pulled output preserved; not retried\n' >> "$log"
+            [[ ! -s "$candidate" ]] || mv "$candidate" "${png}.failed"
+        elif [[ "$fallback_status" -eq 0 && "$pull_status" == 0 && "$bytes" -gt 0 ]]; then
             if [[ "$valid" == yes ]]; then
                 mv "$candidate" "$png"
             else
@@ -167,6 +170,10 @@ PY
         fi
         if [[ "${1:-} ${2:-} ${3:-}" == "shell rm -f" ]]; then
             cleanups=$((cleanups + 1))
+            if [[ "$mode" == fallback_cleanup_failure ]]; then
+                printf 'rm: cannot remove remote screenshot: Permission denied\n' >&2
+                return 1
+            fi
             [[ "$4" == "$remote_file" ]]
             return
         fi
@@ -213,6 +220,23 @@ PY
     else
         bad "a failed fallback pull fails closed and cleans up" \
             "exec=$calls fallback=$fallback_calls pull=$pulls cleanup=$cleanups; $(< "$temp/fallback-failed-screencap.log")"
+    fi
+
+    calls=0 fallback_calls=0 pulls=0 cleanups=0
+    mode=fallback_cleanup_failure
+    if capture_android_png "$temp/fallback-cleanup-failed.png" "$PKG"; then
+        bad "failed fallback cleanup prevents screenshot publication"
+    elif [[ "$calls" -eq 3 && "$fallback_calls" -eq 1 && "$pulls" -eq 1 \
+            && "$cleanups" -eq 1 && ! -e "$temp/fallback-cleanup-failed.png" \
+            && -s "$temp/fallback-cleanup-failed.png.failed" \
+            && -z "$(python3 "$ANDROID_PNG_VALIDATOR" "$temp/fallback-cleanup-failed.png.failed" 2>&1)" \
+            && "$(< "$temp/fallback-cleanup-failed-screencap.log")" == *"cleanup_status=1"* \
+            && "$(< "$temp/fallback-cleanup-failed-screencap.log")" == *"Permission denied"* \
+            && "$(< "$temp/fallback-cleanup-failed-screencap.log")" == *"cleanup failed; pulled output preserved; not retried"* ]]; then
+        ok "failed fallback cleanup preserves evidence and fails closed"
+    else
+        bad "failed fallback cleanup preserves evidence and fails closed" \
+            "exec=$calls fallback=$fallback_calls pull=$pulls cleanup=$cleanups; $(< "$temp/fallback-cleanup-failed-screencap.log")"
     fi
 
     calls=0 fallback_calls=0 pulls=0 cleanups=0
