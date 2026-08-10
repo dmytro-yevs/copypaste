@@ -1,73 +1,27 @@
+import type {
+  CapturedPayload as GeneratedCapturedPayload,
+  CaptureHealth as GeneratedCaptureHealth,
+  CaptureNextStep as GeneratedCaptureNextStep,
+  CaptureRung as GeneratedCaptureRung,
+  CaptureSnapshot as GeneratedCaptureSnapshot,
+  CaptureSource as GeneratedCaptureSource,
+  NotGrantedReason as GeneratedNotGrantedReason,
+  NotWorkingReason as GeneratedNotWorkingReason,
+  ShizukuProbe as GeneratedShizukuProbe,
+} from "@/generated/ipc";
+import type { ReadonlyDeep } from "type-fest";
 import type { Item } from "./ipc";
 import { call } from "./ipcCall";
 
-/** The mechanism capturing right now — never the one that was asked for. */
-export type CaptureRung = "desktop" | "in_app" | "shizuku";
-
-export type NotGrantedReason =
-  | "unsupported"
-  | "not_installed"
-  | "not_running"
-  | "no_permission";
-
-export type NotWorkingReason = "awaiting_first_copy" | "read_refused" | "not_armed";
-
-/** `working` is reachable only through a read that happened without focus —
- *  a permission being present is not evidence (CopyPaste-qzhu). Nothing in this
- *  file may construct one. */
-export type CaptureHealth =
-  | { readonly state: "not_granted"; readonly reason: NotGrantedReason }
-  | { readonly state: "disabled" }
-  | { readonly state: "granted_not_working"; readonly reason: NotWorkingReason }
-  | { readonly state: "working" };
-
-export type CaptureNextStep =
-  | "none"
-  | "install_shizuku"
-  | "start_shizuku"
-  | "grant_permission"
-  | "arm";
-
-export type CaptureSource = "in_app" | "share" | "process_text" | "tile" | "background";
-
-export interface ShizukuProbe {
-  /** Wireless debugging can be paired on the phone itself from Android 11. */
-  readonly supported: boolean;
-  readonly installed: boolean;
-  /** False after every reboot until the user starts it again. */
-  readonly running: boolean;
-  readonly permission: boolean;
-  readonly toastSuppressed: boolean;
-  readonly rearmRequested: boolean;
-}
-
-/** `headline` and `detail` are finished sentences authored and tested in
- *  `capture::messages` (ADR-0005). Render them verbatim: deriving replacements
- *  from `health` here is what let the setup screen, the status strip and the
- *  loss notification disagree about the state of the device. */
-export interface CaptureSnapshot {
-  readonly rung: CaptureRung;
-  readonly health: CaptureHealth;
-  readonly shizuku: ShizukuProbe;
-  readonly nextStep: CaptureNextStep;
-  readonly headline: string;
-  readonly detail: string | null;
-  readonly lastReadOkAt: number | null;
-  readonly lastCaptureAt: number | null;
-  /** Copies that were taken from the platform and never stored. */
-  readonly droppedClips: number;
-  readonly toastSuppressed: boolean;
-  readonly toastAcknowledged: boolean;
-  /** The app was opened from the "background capture stopped" notification. */
-  readonly rearmRequested: boolean;
-}
-
-/** Carries no clipboard content: the list re-reads through `list`. */
-export interface CapturedPayload {
-  readonly id: string;
-  readonly source: CaptureSource;
-  readonly isSensitive: boolean;
-}
+export type CapturedPayload = ReadonlyDeep<GeneratedCapturedPayload>;
+export type CaptureHealth = ReadonlyDeep<GeneratedCaptureHealth>;
+export type CaptureNextStep = GeneratedCaptureNextStep;
+export type CaptureRung = GeneratedCaptureRung;
+export type CaptureSnapshot = ReadonlyDeep<GeneratedCaptureSnapshot>;
+export type CaptureSource = GeneratedCaptureSource;
+export type NotGrantedReason = GeneratedNotGrantedReason;
+export type NotWorkingReason = GeneratedNotWorkingReason;
+export type ShizukuProbe = ReadonlyDeep<GeneratedShizukuProbe>;
 
 export function captureState(): Promise<CaptureSnapshot> {
   return call<CaptureSnapshot>("capture_state");

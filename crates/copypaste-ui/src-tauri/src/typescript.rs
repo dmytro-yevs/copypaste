@@ -10,6 +10,11 @@ use copypaste_ipc::{
 use ts_rs::{Config, ExportError, TS};
 
 use crate::backend::UiError;
+use crate::capture::intake::CapturedPayload;
+use crate::capture::model::{
+    CaptureHealth, CaptureSnapshot, CaptureSource, NextStep, NotGrantedReason, NotWorkingReason,
+    Rung, ShizukuProbe,
+};
 use crate::commands::pairing::{PairedDevice, PairingCeremony};
 use crate::commands::transfer::{ExportReport, ImportPreview};
 use crate::model::{
@@ -32,6 +37,15 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<CloudSyncData>(&config, &mut output);
     declaration::<ConfigData>(&config, &mut output);
     declaration::<ConfigPatch>(&config, &mut output);
+    declaration::<Rung>(&config, &mut output);
+    declaration::<CaptureSource>(&config, &mut output);
+    declaration::<NotGrantedReason>(&config, &mut output);
+    declaration::<NotWorkingReason>(&config, &mut output);
+    declaration::<CaptureHealth>(&config, &mut output);
+    declaration::<NextStep>(&config, &mut output);
+    declaration::<ShizukuProbe>(&config, &mut output);
+    declaration::<CaptureSnapshot>(&config, &mut output);
+    declaration::<CapturedPayload>(&config, &mut output);
     declaration::<DiagnosticCounters>(&config, &mut output);
     declaration::<DiscoveredDevice>(&config, &mut output);
     declaration::<ErrorCode>(&config, &mut output);
@@ -83,4 +97,90 @@ fn strip_jsdoc(source: &str) -> String {
     }
     output.push_str(rest);
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn capture_bindings_match_the_runtime_serialization_contract() {
+        let out_dir = tempfile::tempdir().unwrap();
+        export(out_dir.path()).unwrap();
+        let generated = std::fs::read_to_string(out_dir.path().join("ipc.ts")).unwrap();
+
+        assert!(generated.contains(
+            "export type CaptureHealth = { \"state\": \"not_granted\", reason: NotGrantedReason, } | { \"state\": \"disabled\" } | { \"state\": \"granted_not_working\", reason: NotWorkingReason, } | { \"state\": \"working\" };"
+        ));
+        assert!(generated.contains(
+            "export type CaptureSnapshot = { rung: CaptureRung, health: CaptureHealth, shizuku: ShizukuProbe, nextStep: CaptureNextStep, headline: string, detail: string | null, lastReadOkAt: number | null, lastCaptureAt: number | null, droppedClips: number, toastSuppressed: boolean, toastAcknowledged: boolean, rearmRequested: boolean, };"
+        ));
+        assert!(generated.contains(
+            "export type CapturedPayload = { id: string, source: CaptureSource, isSensitive: boolean, };"
+        ));
+        assert!(!generated.contains("export type Clip ="));
+        assert!(!generated.contains("export type ReadOutcome ="));
+
+        let snapshot = CaptureSnapshot {
+            rung: Rung::Shizuku,
+            health: CaptureHealth::NotGranted {
+                reason: NotGrantedReason::NoPermission,
+            },
+            shizuku: ShizukuProbe {
+                supported: true,
+                installed: true,
+                running: true,
+                permission: false,
+                enabled: true,
+                toast_suppressed: false,
+                rearm_requested: true,
+            },
+            next_step: NextStep::GrantPermission,
+            headline: "Background capture isn't set up.",
+            detail: Some("Grant permission."),
+            last_read_ok_at: None,
+            last_capture_at: Some(1_700_000_000_000),
+            dropped_clips: 2,
+            toast_suppressed: false,
+            toast_acknowledged: false,
+            rearm_requested: true,
+        };
+        assert_eq!(
+            serde_json::to_value(snapshot).unwrap(),
+            json!({
+                "rung": "shizuku",
+                "health": { "state": "not_granted", "reason": "no_permission" },
+                "shizuku": {
+                    "supported": true,
+                    "installed": true,
+                    "running": true,
+                    "permission": false,
+                    "enabled": true,
+                    "toastSuppressed": false,
+                    "rearmRequested": true
+                },
+                "nextStep": "grant_permission",
+                "headline": "Background capture isn't set up.",
+                "detail": "Grant permission.",
+                "lastReadOkAt": null,
+                "lastCaptureAt": 1_700_000_000_000_i64,
+                "droppedClips": 2,
+                "toastSuppressed": false,
+                "toastAcknowledged": false,
+                "rearmRequested": true
+            })
+        );
+
+        assert_eq!(
+            serde_json::to_value(CapturedPayload {
+                id: "item-1".into(),
+                source: CaptureSource::ProcessText,
+                is_sensitive: true,
+            })
+            .unwrap(),
+            json!({ "id": "item-1", "source": "process_text", "isSensitive": true })
+        );
+    }
 }

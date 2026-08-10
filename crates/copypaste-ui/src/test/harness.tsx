@@ -97,6 +97,7 @@ export function probe(over: Partial<ShizukuProbe> = {}): ShizukuProbe {
     installed: true,
     running: true,
     permission: true,
+    enabled: true,
     toastSuppressed: false,
     rearmRequested: false,
     ...over,
