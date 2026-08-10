@@ -34,6 +34,25 @@ def fail(message):
     return 1
 
 
+def shipped_commands(source):
+    block = source.split("tauri::generate_handler![", 1)[1].split("]", 1)[0]
+    return set(re.findall(r"^\s*(?:[a-z_]+::)+([a-z_]+),", block, re.MULTILINE))
+
+
+def contract_errors(shipped, classified):
+    errors = []
+    duplicates = sorted({name for name in classified if classified.count(name) > 1})
+    missing = sorted(shipped - set(classified))
+    unknown = sorted(set(classified) - shipped)
+    if duplicates:
+        errors.append("contracts classified more than once: " + ", ".join(duplicates))
+    if missing:
+        errors.append("unclassified Tauri commands: " + ", ".join(missing))
+    if unknown:
+        errors.append("ledger contracts not shipped: " + ", ".join(unknown))
+    return errors
+
+
 def cloud_errors(feature):
     errors = []
     for platform in ("android", "macos"):
@@ -320,6 +339,14 @@ def self_test():
     probe = copy.deepcopy(product)
     del probe["performance"]["windows"]
     checks.append(("missing Windows performance record fails", any("android, macos, and windows" in error for error in platform_errors(probe, root))))
+    handler = """tauri::generate_handler![
+        commands::history::copy_item,
+        updater::update_status,
+    ]"""
+    shipped = shipped_commands(handler)
+    checks.append(("sibling-module Tauri commands are extracted", shipped == {"copy_item", "update_status"}))
+    checks.append(("an omitted sibling-module command fails", any("update_status" in error for error in contract_errors(shipped, ["copy_item"]))))
+    checks.append(("a misclassified sibling-module command fails", bool(contract_errors(shipped, ["copy_item", "update_state"]))))
     for description, held in checks:
         print(f"{'PASS' if held else 'FAIL'}|self-test: {description}|")
     return 0 if all(held for _, held in checks) else 1
@@ -338,9 +365,7 @@ def main():
     if document.get("schema_version") != 1:
         return fail("unsupported schema_version")
 
-    source = HANDLER.read_text(encoding="utf-8")
-    block = source.split("tauri::generate_handler![", 1)[1].split("]", 1)[0]
-    shipped = set(re.findall(r"^\s*(?:[a-z_]+::)+([a-z_]+),", block, re.MULTILINE))
+    shipped = shipped_commands(HANDLER.read_text(encoding="utf-8"))
     classified = []
     errors = []
     required = {"backend_tests", "ui_tests", "accessibility_states", "failure_states", "performance", "native", "release_evidence"}
@@ -360,15 +385,7 @@ def main():
             if feature_id == "cloud-account":
                 errors.extend(cloud_errors(feature))
 
-    duplicates = sorted({name for name in classified if classified.count(name) > 1})
-    missing = sorted(shipped - set(classified))
-    unknown = sorted(set(classified) - shipped)
-    if duplicates:
-        errors.append("contracts classified more than once: " + ", ".join(duplicates))
-    if missing:
-        errors.append("unclassified Tauri commands: " + ", ".join(missing))
-    if unknown:
-        errors.append("ledger contracts not shipped: " + ", ".join(unknown))
+    errors.extend(contract_errors(shipped, classified))
     if errors:
         return fail("\nfeature-ledger: ".join(errors))
     print(f"feature-ledger: {len(document['features'])} features, {len(shipped)} Tauri commands classified")
