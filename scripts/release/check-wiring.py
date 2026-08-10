@@ -526,12 +526,17 @@ rec(bool(re.search(r"^\s*npm run tauri -- android build --apk --target x86_64\s*
 ui_cargo = pathlib.Path("crates/copypaste-ui/src-tauri/Cargo.toml").read_text()
 embedded_cloud = pathlib.Path("crates/copypaste-ui/src-tauri/src/backend/embedded/cloud.rs").read_text()
 android_cloud = pathlib.Path("scripts/release/android-cloud-evidence.sh").read_text()
+android_ui_evidence = pathlib.Path("scripts/release/android-ui-evidence-lib.sh").read_text()
 rec('cloud-evidence = ["copypaste-cloud/test-endpoints"]' in ui_cargo
     and 'cfg(feature = "cloud-evidence")' in embedded_cloud
     and "CloudConfig::new_loopback" in embedded_cloud,
     "the UI cloud evidence feature selects the guarded loopback constructor")
 rec('adb reverse "tcp:$STUB_PORT" "tcp:$STUB_PORT"' in android_cloud,
     "Android cloud evidence reverses the host stub onto device loopback")
+rec("capture_android_png" in android_ui_evidence
+    and "adb exec-out screencap" not in android_ui_evidence,
+    "Android UI evidence reuses the fail-closed PNG capture helper",
+    "storage and cloud evidence must reject zero-byte and malformed screenshots")
 
 if emu:
     debug_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))

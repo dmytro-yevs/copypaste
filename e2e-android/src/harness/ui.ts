@@ -2,6 +2,7 @@ import { sleep } from "./adb.js";
 import type { AndroidApp } from "./app.js";
 
 export const NAV = 'nav[aria-label="Primary"]';
+export const NAVIGATION_READY = '[data-navigation-ready="true"]';
 export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
 export const ROW = `${HISTORY_LIST} [role="listitem"]`;
 export const SEARCH = '[aria-label="Search clipboard history"]';
@@ -65,6 +66,11 @@ export async function waitForRows(
 /** Switch screens the way a user does — see `tapWhere` for why the tap is
  *  dispatched at a point this harness computes rather than by `click()`. */
 export async function gotoView(app: AndroidApp, label: string): Promise<void> {
+  await waitFor(
+    async () => (await count(app, NAVIGATION_READY)) === 1,
+    "Android navigation never settled after capture health loaded",
+    60_000,
+  );
   await tapButton(app, label, { within: NAV });
   await waitFor(
     async () =>
@@ -175,6 +181,12 @@ async function tapWhere(
         const candidates = nth < 0 ? matches : matches.slice(nth, nth + 1);
         for (const node of candidates) {
           const target = node as HTMLElement;
+          if (
+            target.matches(":disabled") ||
+            target.getAttribute("aria-disabled") === "true"
+          ) {
+            continue;
+          }
           const rect = target.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) continue;
           const x = rect.x + rect.width / 2;
