@@ -42,12 +42,16 @@ open_cloud() {
 }
 
 capture_state() { # <state>
-    local dir="$OUT/$1"
+    local dir="$OUT/$1" png
     mkdir -p "$dir"
-    dump_hierarchy "$dir/ax.xml" || true
-    capture_png "$dir/screenshot.png"
-    [[ -s "$dir/ax.xml" ]] || bad "$1 accessibility evidence exists"
-    [[ -s "$dir/screenshot.png" ]] || bad "$1 screenshot evidence exists"
+    png="$dir/screenshot.png"
+    if ! dump_hierarchy "$dir/ax.xml" || [[ ! -s "$dir/ax.xml" ]]; then
+        bad "$1 accessibility evidence exists"
+    fi
+    if ! capture_png "$png"; then
+        bad "$1 screenshot evidence is a complete PNG" \
+            "$(tail -n 12 "${png%.png}-screencap.log" | tr '\n' ' ')"
+    fi
 }
 
 expect_label() { # <selector> <artifact>

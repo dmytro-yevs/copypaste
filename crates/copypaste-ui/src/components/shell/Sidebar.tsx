@@ -22,7 +22,7 @@ const ITEMS = [
   icon: LucideIcon;
 }>;
 
-export function Sidebar() {
+export function Sidebar({ navigationReady = true }: { navigationReady?: boolean }) {
   const { t } = useTranslation();
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
@@ -51,6 +51,7 @@ export function Sidebar() {
             <li key={id} className={android ? "flex-1" : undefined}>
               <button
                 type="button"
+                disabled={android && !navigationReady}
                 onClick={() => setView(id)}
                 aria-current={active ? "page" : undefined}
                 title={label}

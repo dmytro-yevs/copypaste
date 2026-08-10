@@ -3,7 +3,7 @@
  * main pane get sibling boundaries, so a crash in a screen cannot take
  * navigation with it (CopyPaste-8ebg.12).
  */
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 import { BannerBar } from "@/components/shell/Banners";
@@ -59,7 +59,7 @@ export default function App() {
   const pushLive = usePush();
   useCaptureSync();
   const capture = useCaptureState();
-  const welcomed = useRef(false);
+  const [androidStartupSettled, setAndroidStartupSettled] = useState(false);
 
   useEffect(() => {
     const global = window as typeof window & { __copypasteRequestedView?: string };
@@ -115,28 +115,36 @@ export default function App() {
   const statusKind = status.error ? classifyError(status.error) : null;
   const screen = SCREENS[view];
   const android = isAndroidPlatform();
+  const navigationReady = !android || androidStartupSettled;
 
   useEffect(() => {
     if (
-      android &&
-      !welcomed.current &&
-      capture.data !== undefined &&
-      capture.data.health.state !== "working"
+      !android ||
+      androidStartupSettled ||
+      (capture.data === undefined && !capture.isError)
     ) {
-      welcomed.current = true;
+      return;
+    }
+    if (
+      capture.data !== undefined &&
+      capture.data.health.state !== "working" &&
+      useUi.getState().view === "history"
+    ) {
       setView("capture");
     }
-  }, [android, capture.data, setView]);
+    setAndroidStartupSettled(true);
+  }, [android, androidStartupSettled, capture.data, capture.isError, setView]);
 
   return (
     <div
+      data-navigation-ready={navigationReady}
       className={cn(
         "app-surface flex h-full min-h-0 text-foreground",
         android ? "flex-col-reverse" : "app-surface--desktop flex-row",
       )}
     >
       <Boundary label={t("shell.boundary.navigation")}>
-        <Sidebar />
+        <Sidebar navigationReady={navigationReady} />
       </Boundary>
 
       <main data-content-pane className="flex min-h-0 min-w-0 flex-1 flex-col">

@@ -37,7 +37,14 @@ open_storage() {
 }
 
 capture_screen() { # <name>
-    capture_png "$OUT/$1.png"
+    local name="$1" ax="$OUT/$1.xml" png="$OUT/$1.png"
+    if ! dump_hierarchy "$ax" || [[ ! -s "$ax" ]]; then
+        bad "$name accessibility evidence exists"
+    fi
+    if ! capture_png "$png"; then
+        bad "$name screenshot evidence is a complete PNG" \
+            "$(tail -n 12 "${png%.png}-screencap.log" | tr '\n' ' ')"
+    fi
 }
 
 self_test_transfer() {
