@@ -1,3 +1,5 @@
+import { appendFileSync } from "node:fs";
+
 import type { ResultPromise } from "execa";
 
 /**
@@ -9,6 +11,7 @@ import type { ResultPromise } from "execa";
 export interface Child {
   readonly proc: ResultPromise;
   exited(): boolean;
+  diagnostics(): string;
   log(): string;
   stop(): Promise<void>;
 }
@@ -21,23 +24,49 @@ export function sleep(ms: number): Promise<void> {
   });
 }
 
-export function track(proc: ResultPromise): Child {
+export function track(proc: ResultPromise, logPath?: string): Child {
   let done = false;
+  let exitCode: number | "none" = "none";
+  let exitSignal = "none";
   const lines: string[] = [];
 
-  proc.stdout?.on("data", (chunk: Buffer) => lines.push(chunk.toString()));
-  proc.stderr?.on("data", (chunk: Buffer) => lines.push(chunk.toString()));
-  void proc.catch(() => undefined).finally(() => {
-    done = true;
-  });
+  const record = (chunk: Buffer): void => {
+    const text = chunk.toString();
+    lines.push(text);
+    if (logPath) appendFileSync(logPath, text);
+  };
+
+  proc.stdout?.on("data", record);
+  proc.stderr?.on("data", record);
+  void proc
+    .then(
+      (result) => {
+        exitCode = result.exitCode ?? "none";
+        exitSignal = result.signal ?? "none";
+      },
+      () => undefined,
+    )
+    .finally(() => {
+      done = true;
+      if (logPath) appendFileSync(logPath, `\n[harness] ${diagnostics()}\n`);
+    });
 
   function signal(name: "SIGTERM" | "SIGKILL"): void {
     proc.kill(name);
   }
 
+  function diagnostics(): string {
+    const state = done ? "exited" : "running";
+    return (
+      `pid=${proc.pid ?? "unknown"} state=${state} ` +
+      `exitCode=${exitCode} signal=${exitSignal}`
+    );
+  }
+
   return {
     proc,
     exited: () => done,
+    diagnostics,
     log: () => lines.join(""),
     async stop() {
       if (done) return;
