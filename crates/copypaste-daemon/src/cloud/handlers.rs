@@ -99,9 +99,6 @@ pub async fn sign_in(
         }
     };
 
-    // The hex is taken before the key is moved into the driver, and is
-    // zeroized with the rest of this frame.
-    let key_hex = Zeroizing::new(hex::encode(key.to_bytes().as_slice()));
     let switched = match state.cloud.activate(ActivateRequest {
         state,
         attempt,
@@ -110,7 +107,6 @@ pub async fn sign_in(
         user_id,
         key,
         session,
-        key_hex: &key_hex,
     }) {
         Ok(switched) => switched,
         Err(ActivateError::Stale) => {
@@ -158,7 +154,7 @@ fn sign_in_failure(id: u64, error: AuthError) -> Response {
 /// session is good hygiene, but a network failure must not leave credentials on
 /// a device the user has just asked to forget them.
 pub async fn sign_out(state: &Arc<AppState>, id: u64) -> Response {
-    let driver = state.cloud.sign_out(&state.meta);
+    let driver = state.cloud.sign_out(&state.store);
     if let (Some(driver), Some(config)) = (driver, state.cloud.config().cloned()) {
         let token = driver.inspect_session(|session| session.access_token.clone());
         if let Err(e) = SupabaseAuth::new(config).sign_out(&token).await {

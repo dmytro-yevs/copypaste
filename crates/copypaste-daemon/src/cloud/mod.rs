@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use copypaste_cloud::auth::SupabaseAuth;
+use copypaste_cloud::credentials::CloudStateKey;
 use copypaste_cloud::rest::SupabaseRest;
 use copypaste_cloud::sync::{CloudSync, SensitiveGuard};
 use copypaste_cloud::CloudConfig;
@@ -37,25 +38,31 @@ use crate::meta::Meta;
 use crate::AppState;
 
 use account::Account;
-pub(crate) use account::{ActivateError, ActivateRequest, KEY_LAST_SYNC, MSG_ACCOUNT_CHANGED};
-#[cfg(test)]
-pub(crate) use account::{KEY_CURSOR_USER_ID, KEY_REFRESH, KEY_SYNC_KEY};
+pub(crate) use account::{ActivateError, ActivateRequest, MSG_ACCOUNT_CHANGED};
 pub use poll::run;
+
+pub(crate) const KEY_LAST_SYNC: &str = CloudStateKey::LastSyncMs.as_str();
+#[cfg(test)]
+pub(crate) const KEY_CURSOR_USER_ID: &str = CloudStateKey::CursorUserId.as_str();
+#[cfg(test)]
+pub(crate) const KEY_REFRESH: &str = CloudStateKey::RefreshToken.as_str();
+#[cfg(test)]
+pub(crate) const KEY_SYNC_KEY: &str = CloudStateKey::SyncKey.as_str();
 
 /// The production instantiation of the driver.
 pub type Driver = CloudSync<SupabaseRest, SupabaseAuth>;
 
 /// The download cursor: everything this device has reconciled with the account.
-pub(crate) const KEY_WATERMARK: &str = "cloud_watermark_ms";
+pub(crate) const KEY_WATERMARK: &str = CloudStateKey::WatermarkMs.as_str();
 /// The tie-break half of that cursor: the last `item_id` the millisecond above
 /// covers. Written in the same transaction, never on its own.
-pub(crate) const KEY_WATERMARK_ITEM: &str = "cloud_watermark_item_id";
+pub(crate) const KEY_WATERMARK_ITEM: &str = CloudStateKey::WatermarkItemId.as_str();
 /// The upload floor: everything created before this has been offered for upload.
-pub(crate) const KEY_UPLOAD_FLOOR: &str = "cloud_upload_floor_ms";
+pub(crate) const KEY_UPLOAD_FLOOR: &str = CloudStateKey::UploadFloorMs.as_str();
 /// The tie-break half of the upload floor. Together the two keys let a capped
 /// upload scan resume after `(created_at, item_id)` instead of re-reading a
 /// full boundary page forever.
-pub(crate) const KEY_UPLOAD_FLOOR_ITEM: &str = "cloud_upload_floor_item_id";
+pub(crate) const KEY_UPLOAD_FLOOR_ITEM: &str = CloudStateKey::UploadFloorItemId.as_str();
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct UploadFloor {
@@ -393,10 +400,8 @@ mod tests {
             derive_sync_key("correct horse battery staple", "user-1").unwrap(),
             session(),
         );
-        state
-            .cloud
-            .persist(&state.meta, &hex::encode(key.to_bytes().as_slice()))
-            .unwrap();
+        let key_bytes = key.to_bytes();
+        state.cloud.persist(&state.store, &key_bytes).unwrap();
         assert!(state.cloud.signed_in());
 
         // A second daemon over the same database picks the account back up.
@@ -410,8 +415,8 @@ mod tests {
 
         // Signing out leaves nothing behind to restore from.
         let stale_driver = state2.cloud.driver().unwrap();
-        state2.cloud.sign_out(&state2.meta);
-        state2.cloud.persist_session(&state2.meta, &stale_driver);
+        state2.cloud.sign_out(&state2.store);
+        state2.cloud.persist_session(&state2.store, &stale_driver);
         assert!(!state2.cloud.signed_in());
         assert!(!state2.cloud.restore(&state2));
         assert_eq!(state2.meta.state(KEY_REFRESH).unwrap(), None);
@@ -433,10 +438,8 @@ mod tests {
             derive_sync_key("correct horse battery staple", "user-1").unwrap(),
             session(),
         );
-        state
-            .cloud
-            .persist(&state.meta, &hex::encode(key.to_bytes().as_slice()))
-            .unwrap();
+        let key_bytes = key.to_bytes();
+        state.cloud.persist(&state.store, &key_bytes).unwrap();
 
         let at = 1_700_000_000_000;
         let driver = state.cloud.driver().unwrap();
@@ -448,7 +451,7 @@ mod tests {
 
         // And it is the *account's* number, not the device's: signing out has
         // to take it with the rest of the account.
-        restarted.cloud.sign_out(&restarted.meta);
+        restarted.cloud.sign_out(&restarted.store);
         assert_eq!(restarted.meta.state(KEY_LAST_SYNC).unwrap(), None);
         assert_eq!(restarted.cloud.status().last_sync_ms, None);
     }

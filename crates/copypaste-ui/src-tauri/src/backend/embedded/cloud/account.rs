@@ -1,34 +1,14 @@
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use copypaste_cloud::auth::Session;
-use copypaste_cloud::SyncKey;
-use copypaste_core::{Store, StoreError};
+use copypaste_cloud::credentials::{
+    AccountChange, CloudStateKey, CredentialError, CredentialStore, StoredCredentials,
+};
+use copypaste_core::Store;
 use tokio_util::sync::CancellationToken;
 
 use super::{Driver, EmbeddedCloud};
 
-pub(super) const KEY_EMAIL: &str = "cloud_email";
-pub(super) const KEY_USER_ID: &str = "cloud_user_id";
-pub(super) const KEY_ACCESS: &str = "cloud_access_token";
-pub(super) const KEY_REFRESH: &str = "cloud_refresh_token";
-pub(super) const KEY_EXPIRES: &str = "cloud_expires_at_ms";
-pub(super) const KEY_SYNC_KEY: &str = "cloud_sync_key";
-const KEY_SESSION_USER_ID: &str = "cloud_session_user_id";
-const KEY_SYNC_KEY_USER_ID: &str = "cloud_sync_key_user_id";
-pub(super) const KEY_CURSOR_USER_ID: &str = "cloud_cursor_user_id";
-pub(super) const KEY_LAST_SYNC: &str = "cloud_last_sync_ms";
-pub(super) const CREDENTIAL_KEYS: &[&str] = &[
-    KEY_EMAIL,
-    KEY_USER_ID,
-    KEY_ACCESS,
-    KEY_REFRESH,
-    KEY_EXPIRES,
-    KEY_SYNC_KEY,
-    KEY_SESSION_USER_ID,
-    KEY_SYNC_KEY_USER_ID,
-    KEY_LAST_SYNC,
-];
 pub(super) const MSG_ACCOUNT_CHANGED: &str = "The sync account changed during this operation.";
 
 pub(super) struct Account {
@@ -99,13 +79,19 @@ pub(super) struct SignInAttempt(u64);
 #[derive(Debug)]
 pub(super) enum ActivateError {
     Stale,
-    Store(StoreError),
+    Store(CredentialError),
     AccountMismatch,
 }
 
-impl From<StoreError> for ActivateError {
-    fn from(error: StoreError) -> Self {
+impl From<CredentialError> for ActivateError {
+    fn from(error: CredentialError) -> Self {
         Self::Store(error)
+    }
+}
+
+impl From<copypaste_core::StoreError> for ActivateError {
+    fn from(error: copypaste_core::StoreError) -> Self {
+        Self::Store(error.into())
     }
 }
 
@@ -126,7 +112,7 @@ impl EmbeddedCloud {
         email: String,
         user_id: String,
         driver: Arc<Driver>,
-        key_hex: &str,
+        key: &[u8; 32],
     ) -> std::result::Result<bool, ActivateError> {
         if !driver.inspect_session(|session| session.user_id == user_id) {
             return Err(ActivateError::AccountMismatch);
@@ -135,32 +121,23 @@ impl EmbeddedCloud {
         if self.account_revision.load(Ordering::Acquire) != attempt.0 {
             return Err(ActivateError::Stale);
         }
-        let switched = store.state(KEY_CURSOR_USER_ID)?.as_deref() != Some(&user_id);
-        let expires = driver.inspect_session(|session| session.expires_at_ms.to_string());
-        let (access, refresh) = driver.inspect_session(|session| {
-            (session.access_token.clone(), session.refresh_token.clone())
-        });
-        let mut entries = vec![
-            (KEY_EMAIL, email.as_str()),
-            (KEY_USER_ID, user_id.as_str()),
-            (KEY_ACCESS, access.as_str()),
-            (KEY_REFRESH, refresh.as_str()),
-            (KEY_EXPIRES, expires.as_str()),
-            (KEY_SYNC_KEY, key_hex),
-            (KEY_SESSION_USER_ID, user_id.as_str()),
-            (KEY_SYNC_KEY_USER_ID, user_id.as_str()),
-            (KEY_CURSOR_USER_ID, user_id.as_str()),
-            (super::KEY_UPLOAD_FLOOR, "0"),
-            (super::KEY_UPLOAD_FLOOR_ITEM, ""),
-        ];
-        if switched {
-            entries.extend([
-                (super::KEY_WATERMARK, "0"),
-                (super::KEY_WATERMARK_ITEM, ""),
-                (KEY_LAST_SYNC, ""),
-            ]);
-        }
-        self.upload_cursor.replace_account(store, &entries)?;
+        let switched = store
+            .state(CloudStateKey::CursorUserId.as_str())?
+            .as_deref()
+            != Some(&user_id);
+        let session = driver.inspect_session(Clone::clone);
+        self.upload_cursor.replace_account(|| {
+            store.replace_cloud_credentials(
+                &email,
+                &session,
+                key,
+                if switched {
+                    AccountChange::SwitchedAccount
+                } else {
+                    AccountChange::SameAccount
+                },
+            )
+        })?;
         if let Some(previous) = account.as_ref() {
             previous.cancel.cancel();
         }
@@ -182,17 +159,19 @@ impl EmbeddedCloud {
             return;
         };
         let store = &state.store;
-        let (Ok(Some(email)), Ok(Some(user_id))) =
-            (store.state(KEY_EMAIL), store.state(KEY_USER_ID))
-        else {
-            return;
+        let StoredCredentials {
+            email,
+            session,
+            sync_key: key,
+        } = match store.cloud_credentials() {
+            Ok(Some(stored)) => stored,
+            Ok(None) => return,
+            Err(error) => {
+                tracing::warn!(?error, "embedded cloud account could not be restored");
+                return;
+            }
         };
-        let Some(session) = read_session(store, &user_id) else {
-            return;
-        };
-        let Some(key) = read_key(store, &user_id) else {
-            return;
-        };
+        let user_id = session.user_id.clone();
         let driver = Arc::new(copypaste_cloud::sync::CloudSync::new(
             copypaste_cloud::rest::SupabaseRest::new(config.clone()),
             copypaste_cloud::auth::SupabaseAuth::new(config.clone()),
@@ -202,20 +181,15 @@ impl EmbeddedCloud {
             super::sensitive_guard(&state.detector),
         ));
         let mut account = self.account();
-        if store.state(KEY_CURSOR_USER_ID).ok().flatten().as_deref() != Some(&user_id)
+        if store
+            .state(CloudStateKey::CursorUserId.as_str())
+            .ok()
+            .flatten()
+            .as_deref()
+            != Some(&user_id)
             && self
                 .upload_cursor
-                .replace_account(
-                    store,
-                    &[
-                        (KEY_CURSOR_USER_ID, &user_id),
-                        (super::KEY_WATERMARK, "0"),
-                        (super::KEY_WATERMARK_ITEM, ""),
-                        (super::KEY_UPLOAD_FLOOR, "0"),
-                        (super::KEY_UPLOAD_FLOOR_ITEM, ""),
-                        (KEY_LAST_SYNC, ""),
-                    ],
-                )
+                .replace_account(|| store.bind_cloud_cursor(&user_id))
                 .is_err()
         {
             return;
@@ -229,7 +203,7 @@ impl EmbeddedCloud {
             driver,
             cancel: CancellationToken::new(),
         });
-        if let Ok(ms) = store.state_ms(KEY_LAST_SYNC) {
+        if let Ok(ms) = store.state_ms(CloudStateKey::LastSyncMs.as_str()) {
             self.last_sync_ms.store(ms, Ordering::Release);
         }
     }
@@ -260,7 +234,7 @@ impl EmbeddedCloud {
         if let Some(previous) = previous.as_ref() {
             previous.cancel.cancel();
         }
-        let _ = store.clear_state(CREDENTIAL_KEYS);
+        let _ = store.clear_cloud_credentials();
         self.last_sync_ms.store(0, Ordering::Release);
         *self.error() = None;
         previous.map(|account| account.driver)
@@ -287,7 +261,7 @@ impl EmbeddedCloud {
             self.last_sync_ms.store(completed, Ordering::Release);
             *self.error() = None;
             let completed = completed.to_string();
-            let _ = store.set_state_all(&[(KEY_LAST_SYNC, &completed)]);
+            let _ = store.set_state_all(&[(CloudStateKey::LastSyncMs.as_str(), &completed)]);
         }
     }
 
@@ -317,7 +291,7 @@ impl EmbeddedCloud {
                 current.cancel.cancel();
             }
             let _expired = account.take();
-            let _ = store.clear_state(CREDENTIAL_KEYS);
+            let _ = store.clear_cloud_credentials();
             self.last_sync_ms.store(0, Ordering::Release);
         }
         *self.error() = Some(message);
@@ -340,72 +314,40 @@ impl EmbeddedCloud {
     }
 
     #[cfg(test)]
-    pub(super) fn persist(&self, store: &Store, key_hex: &str) -> Result<(), StoreError> {
+    pub(super) fn persist(&self, store: &Store, key: &[u8; 32]) -> Result<(), CredentialError> {
         let account = self.account();
         let Some(account) = account.as_ref() else {
             return Ok(());
         };
-        persist_account(store, account, key_hex)
+        persist_account(store, account, key)
     }
 }
 
 #[cfg(test)]
-fn persist_account(store: &Store, account: &Account, key_hex: &str) -> Result<(), StoreError> {
+fn persist_account(
+    store: &Store,
+    account: &Account,
+    key: &[u8; 32],
+) -> Result<(), CredentialError> {
     account.driver.inspect_session(|session| {
         if session.user_id != account.user_id {
-            return Ok(());
+            return Err(CredentialError::AccountMismatch);
         }
-        let expires = session.expires_at_ms.to_string();
-        store.set_state_all(&[
-            (KEY_EMAIL, &account.email),
-            (KEY_USER_ID, &account.user_id),
-            (KEY_ACCESS, &session.access_token),
-            (KEY_REFRESH, &session.refresh_token),
-            (KEY_EXPIRES, &expires),
-            (KEY_SYNC_KEY, key_hex),
-            (KEY_SESSION_USER_ID, &account.user_id),
-            (KEY_SYNC_KEY_USER_ID, &account.user_id),
-        ])
+        store.replace_cloud_credentials(&account.email, session, key, AccountChange::SameAccount)
     })
 }
 
-fn write_session(store: &Store, driver: &Driver, expected_user_id: &str) -> Result<(), StoreError> {
+fn write_session(
+    store: &Store,
+    driver: &Driver,
+    expected_user_id: &str,
+) -> Result<(), CredentialError> {
     driver.inspect_session(|session| {
         if session.user_id != expected_user_id {
-            return Ok(());
+            return Err(CredentialError::AccountMismatch);
         }
-        let expires = session.expires_at_ms.to_string();
-        store.set_state_all(&[
-            (KEY_ACCESS, &session.access_token),
-            (KEY_REFRESH, &session.refresh_token),
-            (KEY_EXPIRES, &expires),
-            (KEY_SESSION_USER_ID, expected_user_id),
-        ])
+        store.update_cloud_session(session)
     })
-}
-
-fn read_session(store: &Store, expected_user_id: &str) -> Option<Session> {
-    let owner = store.state(KEY_SESSION_USER_ID).ok()??;
-    if owner != expected_user_id {
-        return None;
-    }
-    Some(Session {
-        access_token: store.state(KEY_ACCESS).ok()??,
-        refresh_token: store.state(KEY_REFRESH).ok()??,
-        user_id: owner,
-        expires_at_ms: store.state_ms(KEY_EXPIRES).ok()?,
-    })
-}
-
-fn read_key(store: &Store, expected_user_id: &str) -> Option<SyncKey> {
-    if store.state(KEY_SYNC_KEY_USER_ID).ok()?? != expected_user_id {
-        return None;
-    }
-    let bytes: [u8; 32] = hex::decode(store.state(KEY_SYNC_KEY).ok()??)
-        .ok()?
-        .try_into()
-        .ok()?;
-    Some(SyncKey::from_bytes(bytes))
 }
 
 #[cfg(test)]
@@ -413,8 +355,10 @@ mod tests {
     use std::sync::{Arc, Barrier, Mutex};
 
     use copypaste_cloud::auth::{Session, SupabaseAuth};
+    use copypaste_cloud::credentials::SIGN_OUT_KEYS;
     use copypaste_cloud::rest::SupabaseRest;
     use copypaste_cloud::sync::CloudSync;
+    use copypaste_cloud::SyncKey;
     use tokio::sync::Notify;
 
     use super::*;
@@ -479,7 +423,7 @@ mod tests {
                     "delayed@example.com".into(),
                     "delayed-user".into(),
                     driver(&worker_cloud, &worker_state, "delayed-user"),
-                    &hex::encode([7; 32]),
+                    &[7; 32],
                 )
             });
 
@@ -490,8 +434,8 @@ mod tests {
         });
 
         assert!(cloud.account().is_none());
-        for key in CREDENTIAL_KEYS {
-            assert_eq!(state.store.state(key).unwrap(), None);
+        for key in SIGN_OUT_KEYS {
+            assert_eq!(state.store.state(key.as_str()).unwrap(), None);
         }
     }
 }
