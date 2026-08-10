@@ -277,6 +277,51 @@ group "Android scaffold is checked in, not regenerated"
 # with absolute paths into the cargo registry; committing those would pin one
 # machine's home directory into the build.
 GEN="crates/copypaste-ui/src-tauri/gen/android"
+
+android_local_config_guard() {
+    local repo="$1"
+    local tracked absolute
+    tracked="$(git -C "$repo" ls-files | grep -E '(^|/)local\.properties$' || true)"
+    absolute="$(git -C "$repo" grep -n -I -E \
+        '^[[:space:]]*(sdk|ndk)\.dir[[:space:]]*[=:][[:space:]]*(/|[[:alpha:]]:[\\/]|[[:alpha:]]\\:[\\/]|\\\\)' \
+        -- . || true)"
+
+    [[ -z "$tracked" ]] || printf 'tracked local.properties:\n%s\n' "$tracked"
+    [[ -z "$absolute" ]] || printf 'tracked absolute Android paths:\n%s\n' "$absolute"
+    [[ -z "$tracked" && -z "$absolute" ]]
+}
+
+check "local Android paths stay out of the repository" android_local_config_guard "$REPO_ROOT"
+for f in android/local.properties "$GEN/local.properties"; do
+    if git check-ignore -q "$f"; then
+        ok "$f is ignored"
+    else
+        bad "$f is ignored" "local.properties contains host-specific SDK and NDK paths"
+    fi
+done
+
+LOCAL_CONFIG_FIXTURE="$(mktemp -d)"
+git -C "$LOCAL_CONFIG_FIXTURE" init -q
+printf 'fixture\n' > "$LOCAL_CONFIG_FIXTURE/README"
+git -C "$LOCAL_CONFIG_FIXTURE" add README
+check "Android path guard accepts portable tracked files" android_local_config_guard "$LOCAL_CONFIG_FIXTURE"
+printf 'sdk.dir=/opt/android-sdk\n' > "$LOCAL_CONFIG_FIXTURE/local.properties"
+check "Android path guard ignores untracked local.properties" android_local_config_guard "$LOCAL_CONFIG_FIXTURE"
+git -C "$LOCAL_CONFIG_FIXTURE" add -f local.properties
+reject "Android path guard rejects tracked local.properties" android_local_config_guard "$LOCAL_CONFIG_FIXTURE"
+git -C "$LOCAL_CONFIG_FIXTURE" rm --cached -q local.properties
+rm -f "$LOCAL_CONFIG_FIXTURE/local.properties"
+printf 'sdk.dir=/opt/android-sdk\n' > "$LOCAL_CONFIG_FIXTURE/build.properties"
+git -C "$LOCAL_CONFIG_FIXTURE" add build.properties
+reject "Android path guard rejects absolute sdk.dir" android_local_config_guard "$LOCAL_CONFIG_FIXTURE"
+printf 'ndk.dir=C\\:\\\\Android\\\\ndk\n' > "$LOCAL_CONFIG_FIXTURE/build.properties"
+git -C "$LOCAL_CONFIG_FIXTURE" add build.properties
+reject "Android path guard rejects absolute Windows ndk.dir" android_local_config_guard "$LOCAL_CONFIG_FIXTURE"
+printf 'ndk.dir=vendor/android-ndk\n' > "$LOCAL_CONFIG_FIXTURE/build.properties"
+git -C "$LOCAL_CONFIG_FIXTURE" add build.properties
+check "Android path guard accepts relative SDK metadata" android_local_config_guard "$LOCAL_CONFIG_FIXTURE"
+rm -rf "$LOCAL_CONFIG_FIXTURE"
+
 for f in settings.gradle build.gradle.kts gradlew app/build.gradle.kts \
          app/src/main/AndroidManifest.xml \
          app/src/main/res/xml/backup_rules.xml \
