@@ -17,8 +17,15 @@ CLOUD_RELEASE = {
     "release-android-hardware-evidence",
     "release-macos-cloud-evidence",
     "release-macos-native-evidence",
+    "release-windows-native-evidence",
 }
-PERFORMANCE_PLATFORMS = {"android", "macos"}
+SHIPPED_PLATFORMS = {"android", "macos", "windows"}
+PERFORMANCE_PLATFORMS = SHIPPED_PLATFORMS
+REQUIRED_RELEASE = {
+    "release-android-hardware-evidence",
+    "release-macos-native-evidence",
+    "release-windows-native-evidence",
+}
 SCENARIO_SUFFIXES = {".py", ".ps1", ".sh"}
 
 
@@ -151,7 +158,7 @@ def performance_errors(feature, root=ROOT):
     feature_id = feature.get("id", "<missing id>")
     performance = feature.get("performance")
     if not isinstance(performance, dict) or set(performance) != PERFORMANCE_PLATFORMS:
-        return [f"{feature_id}: performance must distinguish android and macos"]
+        return [f"{feature_id}: performance must distinguish android, macos, and windows"]
     errors = []
     for platform in sorted(PERFORMANCE_PLATFORMS):
         credit = performance[platform]
@@ -182,6 +189,22 @@ def performance_errors(feature, root=ROOT):
             continue
         validator = artifact_errors if kind == "artifact" else scenario_errors
         errors.extend(f"{label}: {message}" for message in validator(root, platform, credit, evidence))
+    return errors
+
+
+def platform_errors(feature, root=ROOT):
+    feature_id = feature.get("id", "<missing id>")
+    errors = []
+    release_evidence = set(feature.get("release_evidence", []))
+    missing_release = sorted(REQUIRED_RELEASE - release_evidence)
+    if missing_release:
+        errors.append(f"{feature_id}: release evidence missing {', '.join(missing_release)}")
+    for platform in sorted(SHIPPED_PLATFORMS):
+        scenario = feature.get("native", {}).get(platform, {})
+        for field in ("scenario", "screenshot", "ax_log"):
+            if not scenario.get(field):
+                errors.append(f"{feature_id}: {platform} missing {field}")
+    errors.extend(performance_errors(feature, root))
     return errors
 
 
@@ -259,6 +282,25 @@ def self_test():
     checks.append(("complete native cloud evidence passes", not cloud_errors(cloud)))
     cloud["native"]["android"]["evidence_states"].remove("offline-error")
     checks.append(("a missing native cloud state fails", bool(cloud_errors(cloud))))
+    product = {
+        "id": "fixture",
+        "native": {
+            platform: {"scenario": "run", "screenshot": "shot", "ax_log": "ax"}
+            for platform in SHIPPED_PLATFORMS
+        },
+        "performance": {platform: {"status": "uncredited"} for platform in SHIPPED_PLATFORMS},
+        "release_evidence": list(REQUIRED_RELEASE),
+    }
+    checks.append(("all three shipped platform records pass", not platform_errors(product, root)))
+    probe = copy.deepcopy(product)
+    del probe["native"]["windows"]
+    checks.append(("a missing Windows platform fails", any("windows missing" in error for error in platform_errors(probe, root))))
+    probe = copy.deepcopy(product)
+    probe["release_evidence"].remove("release-windows-native-evidence")
+    checks.append(("missing Windows release evidence fails", any("release-windows-native-evidence" in error for error in platform_errors(probe, root))))
+    probe = copy.deepcopy(product)
+    del probe["performance"]["windows"]
+    checks.append(("missing Windows performance record fails", any("android, macos, and windows" in error for error in platform_errors(probe, root))))
     for description, held in checks:
         print(f"{'PASS' if held else 'FAIL'}|self-test: {description}|")
     return 0 if all(held for _, held in checks) else 1
@@ -292,20 +334,12 @@ def main():
             errors.append(f"{feature_id}: status must be product or removed")
         classified.extend(feature.get("contracts", []))
         if feature.get("status") == "product":
-            release_evidence = feature.get("release_evidence", [])
-            if "release-android-hardware-evidence" not in release_evidence:
-                errors.append(f"{feature_id}: release evidence missing physical Android smoke")
-            for platform in ("android", "macos"):
-                scenario = feature.get("native", {}).get(platform, {})
-                for field in ("scenario", "screenshot", "ax_log"):
-                    if not scenario.get(field):
-                        errors.append(f"{feature_id}: {platform} missing {field}")
+            errors.extend(platform_errors(feature))
             for state in ("restart", "offline"):
                 if state not in feature.get("failure_states", []):
                     errors.append(f"{feature_id}: failure_states missing {state}")
             if feature_id == "cloud-account":
                 errors.extend(cloud_errors(feature))
-            errors.extend(performance_errors(feature))
 
     duplicates = sorted({name for name in classified if classified.count(name) > 1})
     missing = sorted(shipped - set(classified))

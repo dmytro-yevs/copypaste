@@ -19,7 +19,7 @@ the assertion.
 | Browser (WebKitGTK, Linux) | `browser-webkitgtk.yml` | shared React behaviour in a real engine: rendering, composition, navigation, responsive layout, forms, dialogs, menus, loading/empty/error states, keyboard navigation, focus, the accessibility tree, overflow and scrolling, console errors, behaviour against a real daemon | Tauri commands as shipped, WKWebView, Android WebView, NSPasteboard, Keychain, Keystore, intents, tray or menu bar, global shortcuts, launch at login, native notifications, native window focus or dismissal, platform permissions, packaging, signing, installation |
 | Android | `android-emulator.yml` on x86_64, including `e2e-android/` over CDP; `release.yml` on a physical arm64 device | Android platform behavior at each API level that ran; the debug WebView document; the signed release APK and arm64 path at release | macOS; OEM background policy; a Play-updated WebView |
 | macOS | `ci.yml` → `macOS check + platform (arm64)`; `release.yml` → `smoke-macos-dmg.sh` on a tag | macOS | Android |
-| Windows | `windows-native-e2e.yml` over WebView2; `ci.yml` workspace and installed-product evidence; user-requested `native-nightly.yml` contracts | the shipped WebView and Tauri bridge, native clipboard capture, named-pipe IPC, DPAPI, app launch, shell-setting registration | tray interaction, OS hotkey delivery, autostart after sign-in, notifications, signing |
+| Windows | `windows-native-e2e.yml` over WebView2; `ci.yml`, `native-nightly.yml`, and `release.yml` installed-product evidence | the shipped WebView and Tauri bridge, native clipboard capture, named-pipe IPC, DPAPI, package integrity, install, installed-sidecar launch, in-place update, update-feed contract and uninstall | tray interaction, OS hotkey delivery, autostart after sign-in, notifications |
 
 The browser layer does execute Tauri commands through `wry` on Linux. That is
 useful and it is not verification: the shipped bridges are WKWebView and the
@@ -48,14 +48,14 @@ WebDriver; the whole shared suite runs against a real named-pipe daemon, and a
 Windows-only file exercises native clipboard and shell-setting state.
 
 `native-nightly.yml` runs Android API 34/36 and macOS 14/15 matrices each night.
-Its optional Windows evidence job runs only when a workflow dispatch explicitly
-requests it; the receipt covers native contracts, not an unbuilt Windows UI.
+Its optional Windows job runs only when a workflow dispatch requests it; the
+receipt installs and exercises the maintained unsigned release package.
 `release.yml` runs on a tag. Everything it alone proves — installing the DMG,
 launching the bundle, the cask — is therefore post-hoc, and is marked below.
 
 Publication also waits for the native-parity gate. It verifies checksummed,
-same-commit receipts from the macOS smoke and the physical Android smoke, and
-fails when either platform or its measured evidence is absent. The macOS
+same-commit receipts from macOS smoke, physical Android smoke, and the installed
+signed Windows package, and fails when any platform or measured evidence is absent. The macOS
 receipt producer has not been validated from this Windows recovery environment;
 until a macOS run succeeds, WKWebView remains **NOT VERIFIED IN CI** as recorded
 below.
@@ -220,6 +220,6 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | `brew install --cask` as a user runs it | macOS | **NOT VERIFIED IN CI** — `check.sh` round-trips the generators only |
 | Published universal APK: build, R8, release signing, install, launch, no stripped symbol | Android | Partial — the exact signed artifact is checksum-verified and smoke-tested on API 33 and API 36 before publication, tag-only |
 | The signed release APK installed on a physical device | Android | Partial — publication depends on a tag-only hardware gate that installs and smoke-tests the exact artifact on one physical `arm64-v8a` device |
-| Windows current-user install, sidecars, launch and uninstall | Windows | Verified — `ci.yml` installs the NSIS output into a throwaway directory and requires complete cleanup; signing is unverified |
+| Windows current-user install, sidecars, launch, update and uninstall | Windows | Verified unsigned in `ci.yml`; `release.yml` requires Authenticode and Tauri updater signatures, validates `latest.json`, installs the exact published NSIS artifact, launches its installed sidecar, verifies an in-place reinstall preserves history, and requires complete uninstall |
 | Notarisation and Gatekeeper acceptance | macOS | **NOT VERIFIED IN CI** — ADR-0001 decided against notarisation; recorded so it is not mistaken for coverage |
 | CLI verbs and `--json` | Rust | Verified |

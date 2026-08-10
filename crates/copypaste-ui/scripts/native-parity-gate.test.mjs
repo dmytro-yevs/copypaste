@@ -31,8 +31,16 @@ const RECEIPT_VALUES = {
   },
   windows: {
     environment: "hosted-runner",
-    scenario: { name: "windows-native-contracts", elapsed_ms: 10, budget_ms: 900000 },
-    assertions: ["named-pipe contract passed", "DPAPI round-trip passed"],
+    scenario: { name: "windows-installed-release", elapsed_ms: 10, budget_ms: 30000 },
+    assertions: [
+      "installer integrity passed",
+      "installed app launched",
+      "installed sidecar launched",
+      "named-pipe and clipboard passed",
+      "update feed contract matched signing mode",
+      "in-place update passed",
+      "uninstall passed",
+    ],
   },
 };
 
@@ -40,7 +48,7 @@ async function fixture(root, platform, overrides = {}) {
   const directory = path.join(root, platform);
   const artifacts = [];
   const kinds = platform === "windows"
-    ? ["test-log", "measurement"]
+    ? ["screenshot", "accessibility", "test-log", "measurement"]
     : ["screenshot", "accessibility", "measurement"];
   await mkdir(directory, { recursive: true });
 
@@ -82,7 +90,7 @@ async function withRoot(run) {
   }
 }
 
-test("accepts exact macOS, Android, and requested Windows evidence", () => withRoot(async (root) => {
+test("accepts exact macOS, Android, and Windows release evidence", () => withRoot(async (root) => {
   const evidence = await Promise.all([
     fixture(root, "macos"),
     fixture(root, "android"),
@@ -107,6 +115,19 @@ test("fails closed when a required platform is absent", () => withRoot(async (ro
       runId: RUN_ID,
     }),
     /missing required evidence for android/,
+  );
+}));
+
+test("fails closed when Windows release evidence is absent", () => withRoot(async (root) => {
+  const evidence = [await fixture(root, "macos"), await fixture(root, "android")];
+  await assert.rejects(
+    validateEvidence({
+      commit: COMMIT,
+      evidence,
+      required: new Set(["macos", "android", "windows"]),
+      runId: RUN_ID,
+    }),
+    /missing required evidence for windows/,
   );
 }));
 
@@ -328,6 +349,8 @@ test("rejects artifact kinds that do not belong to the platform contract", () =>
 test("the shared receipt writer emits gate-valid evidence", () => withRoot(async (root) => {
   const output = path.join(root, "windows");
   await mkdir(output, { recursive: true });
+  await writeFile(path.join(output, "screenshot.png"), "screenshot\n");
+  await writeFile(path.join(output, "accessibility.json"), "{}\n");
   await writeFile(path.join(output, "native-tests.log"), "native tests passed\n");
   await writeFile(path.join(output, "latency.json"), '{"elapsed_ms":10}\n');
   const writer = fileURLToPath(new URL("../../../scripts/release/write-native-evidence.py", import.meta.url));
@@ -341,11 +364,18 @@ test("the shared receipt writer emits gate-valid evidence", () => withRoot(async
     "--architecture", "fixture-arch",
     "--commit", COMMIT,
     "--run-id", RUN_ID,
-    "--scenario", "windows-native-contracts",
+    "--scenario", "windows-installed-release",
     "--elapsed-ms", "10",
-    "--budget-ms", "900000",
-    "--assertion", "named-pipe contract passed",
-    "--assertion", "DPAPI round-trip passed",
+    "--budget-ms", "30000",
+    "--assertion", "installer integrity passed",
+    "--assertion", "installed app launched",
+    "--assertion", "installed sidecar launched",
+    "--assertion", "named-pipe and clipboard passed",
+    "--assertion", "update feed contract matched signing mode",
+    "--assertion", "in-place update passed",
+    "--assertion", "uninstall passed",
+    "--artifact", "screenshot=screenshot.png",
+    "--artifact", "accessibility=accessibility.json",
     "--artifact", "test-log=native-tests.log",
     "--artifact", "measurement=latency.json",
   ]);

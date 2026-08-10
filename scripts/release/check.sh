@@ -356,7 +356,8 @@ group "Workflow wiring"
 WIRING="$(mktemp)"
 if python3 scripts/release/check-wiring.py > "$WIRING" \
    && python3 scripts/release/check-wiring.py --self-test >> "$WIRING" \
-   && python3 scripts/release/check-native-parity-wiring.py >> "$WIRING"
+   && python3 scripts/release/check-native-parity-wiring.py >> "$WIRING" \
+   && python3 scripts/release/check-native-parity-wiring.py --self-test >> "$WIRING"
 then
     while IFS='|' read -r verdict desc detail; do
         [[ -n "${verdict:-}" ]] || continue
@@ -367,14 +368,14 @@ else
 fi
 rm -f "$WIRING"
 
-group "Both platforms reach one release page"
-check "publish depends on macos, Android artifact smoke and packaging" python3 - <<'PY'
+group "All shipped platforms reach one release page"
+check "publish depends on macOS, Android, Windows and packaging" python3 - <<'PY'
 import sys, yaml
 jobs = yaml.safe_load(open(".github/workflows/release.yml"))["jobs"]
-missing = [j for j in ("version", "macos", "android", "android-smoke", "packaging") if j not in jobs]
+missing = [j for j in ("version", "macos", "android", "android-smoke", "windows", "packaging") if j not in jobs]
 assert not missing, f"release.yml has no {missing} job"
 needs = set(jobs["publish"]["needs"])
-for j in ("macos", "android", "android-smoke", "packaging"):
+for j in ("macos", "android", "android-smoke", "windows", "packaging"):
     assert j in needs, f"publish does not depend on {j}"
 
 smoke = jobs["android-smoke"]
@@ -393,7 +394,7 @@ if "android-release-emulator-legs.sh" in script:
 assert "android-smoke-release.sh" in script, \
     "android-smoke does not run the release smoke harness"
 PY
-for pattern in 'dist/\*\.dmg' 'dist/\*\.apk' 'dist/\*\.tar\.gz'; do
+for pattern in 'dist/\*\.dmg' 'dist/\*\.apk' 'dist/\*\.tar\.gz' 'dist/\*\.exe' 'dist/\*\.exe\.sig' 'dist/latest\.json' 'dist/SHA256SUMS'; do
     if grep -qE "$pattern" .github/workflows/release.yml; then
         ok "the release attaches ${pattern//\\/}"
     else

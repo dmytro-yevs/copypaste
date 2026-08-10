@@ -5,9 +5,19 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
+function Assert-Fails([scriptblock]$Action, [string]$Message) {
+    try {
+        & $Action
+    } catch {
+        return
+    }
+    throw $Message
+}
+
 $root = Join-Path ([IO.Path]::GetTempPath()) "copypaste-package-test-$([guid]::NewGuid())"
 $input = Join-Path $root "input"
 $output = Join-Path $root "output"
+$unsignedOutput = Join-Path $root "unsigned"
 [IO.Directory]::CreateDirectory($input) | Out-Null
 $installer = Join-Path $input "setup.exe"
 $signature = Join-Path $input "setup.exe.sig"
@@ -33,6 +43,22 @@ try {
     $checksums = Get-Content -LiteralPath (Join-Path $output "SHA256SUMS")
     Assert-True ($checksums.Count -eq 3) "signed release must checksum all three artifacts"
     Assert-True (-not ($checksums -match [regex]::Escape($root))) "checksums disclose a local path"
+
+    $unsigned = & (Join-Path $PSScriptRoot "package-windows.ps1") `
+        -Installer $installer `
+        -OutputDirectory $unsignedOutput `
+        -Version "2.0.0-alpha.4" | ConvertFrom-Json
+    Assert-True (Test-Path -LiteralPath $unsigned.artifact) "unsigned artifact is missing"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $unsignedOutput "latest.json"))) "unsigned package must not publish update metadata"
+    Assert-True (@(Get-Content -LiteralPath (Join-Path $unsignedOutput "SHA256SUMS")).Count -eq 1) "unsigned release must checksum only its installer"
+
+    Assert-Fails {
+        & (Join-Path $PSScriptRoot "package-windows.ps1") `
+            -Installer $installer `
+            -UpdaterSignature $signature `
+            -OutputDirectory (Join-Path $root "broken") `
+            -Version "2.0.0-alpha.4"
+    } "an updater signature without its release URL must fail"
 } finally {
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
 }
