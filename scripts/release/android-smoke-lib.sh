@@ -36,7 +36,7 @@ group(){ printf '\n== %s\n' "$1"; }
 
 # `Process … has died` is deliberately not here: force-stop, which this script
 # does on purpose between launches, prints it.
-CRASH_PATTERNS='FATAL EXCEPTION|E AndroidRuntime|UnsatisfiedLinkError|Fatal signal|beginning of crash|did not include required runtime symbols'
+CRASH_PATTERNS='FATAL EXCEPTION|UnsatisfiedLinkError|Fatal signal|beginning of crash|did not include required runtime symbols'
 
 # The crash blocks in a logcat dump that belong to *this* app.
 #

@@ -147,6 +147,8 @@ ndk-context = "0.1"
 # code is type-checked somewhere: without it the whole Android path would be
 # dead text on every machine the project is actually built on.
 embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:copypaste-cloud", "dep:hex", "dep:jni", "dep:ndk-context"]
+# Only the separate Android evidence APK may admit loopback plaintext.
+cloud-evidence = ["copypaste-cloud/test-endpoints"]
 typescript = ["dep:ts-rs", "copypaste-ipc/typescript"]
 # Never enabled by Tauri or Android builds. This exists solely for the local
 # browser preview, which cannot speak the daemon's private Unix socket.

@@ -563,9 +563,19 @@ jobs:
           find "$outputs" -type f -name '*.apk' -delete
           # No --debug: this is the build type R8 runs on, which is the whole
           # reason this job exists.
-          COPYPASTE_CLOUD_URL=http://10.0.2.2:47800 \
+          COPYPASTE_CLOUD_URL=http://127.0.0.1:47800 \
           COPYPASTE_CLOUD_ANON_KEY=native-evidence \
-            npm run tauri -- android build --apk --target x86_64
+            npm run tauri -- android build --apk --target x86_64 --features cloud-evidence
+          cloud_apk="$(find "$outputs" -name '*release*.apk' -print -quit)"
+          cloud_mapping="$(find src-tauri/gen/android/app/build/outputs/mapping -name 'mapping.txt' -print -quit)"
+          [[ -n "$cloud_apk" && -n "$cloud_mapping" ]] \
+            || { echo "::error::the configured cloud evidence build is incomplete"; exit 1; }
+          cp "$cloud_apk" "${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
+          cp "$cloud_mapping" "${RUNNER_TEMP}/copypaste-cloud-evidence-mapping.txt"
+
+          find "$outputs" -type f -name '*.apk' -delete
+          cargo clean --manifest-path src-tauri/Cargo.toml -p copypaste-ui --release
+          npm run tauri -- android build --apk --target x86_64
 
       - name: Prove R8 ran, then sign it so it can be installed
         run: |
@@ -583,6 +593,10 @@ jobs:
           echo "Built: $unsigned"
           previous_unsigned="${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
           [[ -f "$previous_unsigned" ]] || { echo "::error::the upgrade fixture APK is missing"; exit 1; }
+          cloud_unsigned="${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
+          cloud_mapping="${RUNNER_TEMP}/copypaste-cloud-evidence-mapping.txt"
+          [[ -f "$cloud_unsigned" && -f "$cloud_mapping" ]] \
+            || { echo "::error::the cloud evidence APK or mapping is missing"; exit 1; }
 
           # R8 writes a mapping file and only when it runs. Asserted, because a
           # release APK that was somehow not minified would make this whole leg
@@ -618,18 +632,29 @@ jobs:
             --ks "$keystore" --ks-pass "pass:${pass}" \
             --ks-key-alias emulator-test --key-pass "pass:${pass}" \
             --out "$out" "${out}.aligned"
+          mkdir -p cloud-dist
+          cloud_out="cloud-dist/copypaste-cloud-evidence-x86_64-release.apk"
+          "${tools}/zipalign" -p -f 4 "$cloud_unsigned" "${cloud_out}.aligned"
+          "${tools}/apksigner" sign \
+            --ks "$keystore" --ks-pass "pass:${pass}" \
+            --ks-key-alias emulator-test --key-pass "pass:${pass}" \
+            --out "$cloud_out" "${cloud_out}.aligned"
           previous_out="dist/copypaste-emulator-x86_64-previous.apk"
           "${tools}/zipalign" -p -f 4 "$previous_unsigned" "${previous_out}.aligned"
           "${tools}/apksigner" sign \
             --ks "$keystore" --ks-pass "pass:${pass}" \
             --ks-key-alias emulator-test --key-pass "pass:${pass}" \
             --out "$previous_out" "${previous_out}.aligned"
-          rm -f "${out}.aligned" "${previous_out}.aligned" "$keystore"
+          rm -f "${out}.aligned" "${cloud_out}.aligned" "${previous_out}.aligned" "$keystore"
           "${tools}/apksigner" verify "$out"
+          "${tools}/apksigner" verify "$cloud_out"
           "${tools}/apksigner" verify "$previous_out"
 
           bash scripts/release/android-artifact-check.sh \
             --apk "$out" --build-type release \
+            --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner"
+          bash scripts/release/android-artifact-check.sh \
+            --apk "$cloud_out" --build-type release \
             --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner"
           previous="$(node scripts/release/android-metadata.mjs --previous-fixture)"
           COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 bash scripts/release/android-artifact-check.sh \
@@ -640,7 +665,8 @@ jobs:
           # is unreadable without it, and that is exactly the log this leg
           # produces when it fails.
           cp "$mapping" dist/r8-mapping.txt
-          ls -l dist/
+          cp "$cloud_mapping" cloud-dist/r8-mapping.txt
+          ls -l dist/ cloud-dist/
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -649,6 +675,15 @@ jobs:
             dist/copypaste-emulator-x86_64-release.apk
             dist/copypaste-emulator-x86_64-previous.apk
             dist/r8-mapping.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-release-cloud-evidence-apk
+          path: |
+            cloud-dist/copypaste-cloud-evidence-x86_64-release.apk
+            cloud-dist/r8-mapping.txt
           if-no-files-found: error
           retention-days: 7
 
@@ -673,6 +708,11 @@ jobs:
         with:
           name: android-release-apk
           path: dist
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-release-cloud-evidence-apk
+          path: cloud-dist
 
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
@@ -703,6 +743,7 @@ jobs:
           SMOKE_OUT: artifacts/android-smoke-release
           STORAGE_OUT: artifacts/android-storage-release
           CLOUD_MODE: configured
+          CLOUD_EVIDENCE_APK: cloud-dist/copypaste-cloud-evidence-x86_64-release.apk
           CLOUD_OUT: artifacts/android-cloud-configured
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -714,5 +755,54 @@ jobs:
             artifacts/android-storage-release
             artifacts/android-cloud-configured
             dist/r8-mapping.txt
+            cloud-dist/r8-mapping.txt
           if-no-files-found: warn
+          retention-days: 14
+
+  release-api33-smoke:
+    name: Launch the shipped build (API 33)
+    needs: release-apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-release-apk
+          path: dist
+
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          [[ -e /dev/kvm ]] || { echo "::error::/dev/kvm is absent — this runner cannot accelerate the emulator"; exit 1; }
+
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: "33"
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: ./scripts/release/android-smoke-release.sh
+        env:
+          APK: dist/copypaste-emulator-x86_64-release.apk
+          SMOKE_OUT: artifacts/android-release-api33-smoke
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: android-release-smoke-evidence-api33
+          path: artifacts/android-release-api33-smoke
+          if-no-files-found: error
           retention-days: 14

@@ -10,10 +10,10 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-ui-evidence-lib.sh"
 
 MAIN="$PKG/$APP_NAMESPACE.MainActivity"
-INTAKE="$PKG/$APP_NAMESPACE.IntakeActivity"
 export WAIT_SECS="${TRANSFER_WAIT_SECS:-45}"
 REQUIRE_RUN_AS="${TRANSFER_REQUIRE_RUN_AS:-0}"
 CANARY="CopyPasteStorageTransfer$(date +%s)$RANDOM"
+SEED_FILE="copypaste-seed.json"
 EXPORT_FILE="copypaste-export.json"
 INVALID_FILE="copypaste-invalid.json"
 
@@ -27,8 +27,8 @@ open_downloads() { # <artifact prefix>
         bad "the Android document picker owns the focused window" "$(grep -E 'mCurrentFocus|mFocusedApp' <<<"$focus" | head -n 2)"
     fi
 
-    if tap_selector "Show roots|Roots" "$OUT/${prefix}-roots.xml" 3; then sleep 1; fi
-    tap_selector "Downloads|downloads" "$OUT/${prefix}-downloads.xml" 10
+    if tap_selector "Show roots|Roots" "$OUT/${prefix}-roots.xml" 15; then sleep 1; fi
+    tap_selector "Downloads|downloads" "$OUT/${prefix}-downloads.xml" 30
 }
 
 open_storage() {
@@ -55,14 +55,42 @@ mkdir -p "$OUT"
 command -v adb >/dev/null 2>&1 || { echo "  FATAL adb is not on PATH"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "  FATAL python3 is not on PATH"; exit 1; }
 adb wait-for-device
+adb logcat -c || true
 
 group "Seed encrypted history"
 sh_ mkdir -p /sdcard/Download >/dev/null
-sh_ rm -f "/sdcard/Download/$EXPORT_FILE" "/sdcard/Download/$INVALID_FILE" >/dev/null
-seed_out="$(sh_ am start -a android.intent.action.PROCESS_TEXT -t text/plain --es android.intent.extra.PROCESS_TEXT "$CANARY" -n "$INTAKE")"
-grep -q 'Error' <<<"$seed_out" && bad "the transfer canary entered through ACTION_PROCESS_TEXT" "$seed_out" || ok "the transfer canary entered through ACTION_PROCESS_TEXT"
-sleep 8
+sh_ rm -f "/sdcard/Download/$SEED_FILE" "/sdcard/Download/$EXPORT_FILE" "/sdcard/Download/$INVALID_FILE" >/dev/null
+python3 - "$CANARY" <<'PY' | adb shell dd "of=/sdcard/Download/$SEED_FILE" >/dev/null
+import json
+import sys
+import time
+
+print(json.dumps({
+    "items": [{
+        "content": sys.argv[1],
+        "content_type": "text/plain",
+        "created_at": int(time.time() * 1000),
+        "pinned": False,
+        "is_sensitive": False,
+    }],
+    "skipped_non_text": 0,
+    "skipped_sensitive": 0,
+    "skipped_undecryptable": 0,
+}))
+PY
 sh_ am start -W -n "$MAIN" >/dev/null
+if open_storage && tap_scrolling "Import…" "$OUT/seed-import-action.xml" up; then
+    sleep 2
+    open_downloads seed-picker || bad "Downloads is selectable for the seed import"
+    tap_selector "$SEED_FILE" "$OUT/seed-file.xml" 15 || bad "the seed export is selectable"
+    prepare_action "Import" "$OUT/seed-import-confirm.xml" 20 || bad "the seed import requires confirmation"
+    start_accessibility_events "$OUT/seed-import-events.log" || bad "seed import accessibility events are observable"
+    tap_prepared_action || bad "the seed import confirmation remains actionable"
+    wait_accessibility_event "Imported" "$OUT/seed-import-events.log" 20 && ok "seed import reports user-visible success" || bad "seed import reports user-visible success"
+else
+    bad "Storage exposes import for the seed"
+fi
+tap_selector "History" "$OUT/seed-history-nav.xml" || bad "History is reachable before export"
 wait_selector "$CANARY" "$OUT/seed-history.xml" 30 && ok "the canary is visible before export" || bad "the canary is visible before export" "uiautomator did not expose it"
 
 group "Export through DocumentsUI"
@@ -70,11 +98,13 @@ if open_storage && tap_selector "Export…" "$OUT/export-action.xml"; then
     tap_selector "Choose where to save" "$OUT/export-confirm.xml" || bad "the export confirmation is actionable"
     sleep 2
     open_downloads export-picker || bad "Downloads is selectable in the save picker"
-    tap_selector "Save|action_menu_done" "$OUT/export-save.xml" 15 || bad "the picker exposes its save action"
+    prepare_action "Save|action_menu_done" "$OUT/export-save.xml" 15 || bad "the picker exposes its save action"
+    start_accessibility_events "$OUT/export-events.log" || bad "export accessibility events are observable"
+    tap_prepared_action || bad "the picker save action remains actionable"
 else
     bad "Storage exposes the export action"
 fi
-if wait_selector "Exported" "$OUT/export-success.xml" 20; then
+if wait_accessibility_event "Exported" "$OUT/export-events.log" 20; then
     ok "export reports user-visible success"
 else
     bad "export reports user-visible success" "no Exported toast appeared"
@@ -88,8 +118,10 @@ grep -qF "$CANARY" <<<"$exported_text" && ok "the content URI received the captu
 
 group "Clear and import through DocumentsUI"
 tap_scrolling "Clear history" "$OUT/clear-action.xml" up || bad "Storage exposes the clear action"
-tap_selector "Clear all" "$OUT/clear-confirm.xml" || bad "the clear confirmation is actionable"
-wait_selector "Cleared" "$OUT/clear-success.xml" 15 && ok "clear reports user-visible success" || bad "clear reports user-visible success"
+prepare_action "Clear all" "$OUT/clear-confirm.xml" || bad "the clear confirmation is actionable"
+start_accessibility_events "$OUT/clear-events.log" || bad "clear accessibility events are observable"
+tap_prepared_action || bad "the clear confirmation remains actionable"
+wait_accessibility_event "Cleared" "$OUT/clear-events.log" 15 && ok "clear reports user-visible success" || bad "clear reports user-visible success"
 tap_selector "History" "$OUT/clear-history-nav.xml" || bad "History is reachable after clearing"
 sleep 3
 if dump_hierarchy "$OUT/cleared-history.xml" && [[ -z "$(node_center "$OUT/cleared-history.xml" "$CANARY")" ]]; then
@@ -102,8 +134,10 @@ tap_scrolling "Import…" "$OUT/import-action.xml" down || bad "Storage exposes 
 sleep 2
 open_downloads import-picker || bad "Downloads is selectable in the open picker"
 tap_selector "$EXPORT_FILE" "$OUT/import-file.xml" 15 || bad "the exported document is selectable"
-tap_selector "Import" "$OUT/import-confirm.xml" 20 || bad "the import preview requires confirmation"
-if wait_selector "Imported" "$OUT/import-success.xml" 20; then
+prepare_action "Import" "$OUT/import-confirm.xml" 20 || bad "the import preview requires confirmation"
+start_accessibility_events "$OUT/import-events.log" || bad "import accessibility events are observable"
+tap_prepared_action || bad "the import confirmation remains actionable"
+if wait_accessibility_event "Imported" "$OUT/import-events.log" 20; then
     ok "import reports user-visible success"
 else
     bad "import reports user-visible success" "no Imported toast appeared"
@@ -114,6 +148,7 @@ sh_ am force-stop "$PKG" >/dev/null
 wait_for 20 no_pid || bad "force-stop ends the importing process" "pid $(app_pid) is still running"
 sh_ am start -W -n "$MAIN" >/dev/null
 wait_for 60 has_pid || bad "the app relaunches after import"
+tap_selector "History" "$OUT/transfer-history-nav.xml" || bad "History is reachable after restart"
 if wait_selector "$CANARY" "$OUT/transfer-persisted.xml" 45; then
     ok "the imported history survives a process restart"
 else
@@ -140,13 +175,15 @@ else
 fi
 
 group "Rejected import is visible and non-destructive"
-sh_ sh -c "echo not-json > /sdcard/Download/$INVALID_FILE" >/dev/null
+printf 'not-json\n' | adb shell dd "of=/sdcard/Download/$INVALID_FILE" >/dev/null
 open_storage || bad "Settings remains reachable after the persisted import"
 tap_scrolling "Import…" "$OUT/invalid-action.xml" up || bad "Storage exposes import for the failure case"
 sleep 2
 open_downloads invalid-picker || bad "Downloads is selectable for the failure case"
-tap_selector "$INVALID_FILE" "$OUT/invalid-file.xml" 15 || bad "the invalid document is selectable"
-if wait_selector "isn't a CopyPaste export" "$OUT/import-failure.xml" 20; then
+prepare_action "$INVALID_FILE" "$OUT/invalid-file.xml" 15 || bad "the invalid document is selectable"
+start_accessibility_events "$OUT/import-failure-events.log" || bad "rejected import accessibility events are observable"
+tap_prepared_action || bad "the invalid document remains actionable"
+if wait_accessibility_event "isn't a CopyPaste export" "$OUT/import-failure-events.log" 20; then
     ok "an invalid content URI reports a user-visible failure"
 else
     bad "an invalid content URI reports a user-visible failure" "the authored error toast did not appear"

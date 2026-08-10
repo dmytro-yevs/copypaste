@@ -14,7 +14,7 @@
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/history/screenshot.png", "ax_log": "artifacts/native/android/history/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/history/screenshot.png", "ax_log": "artifacts/native/macos/history/ax.json"}
       },
-      "release_evidence": ["release-android-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
+      "release_evidence": ["release-android-smoke-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
     },
     {
       "id": "capture",
@@ -29,7 +29,7 @@
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/capture/screenshot.png", "ax_log": "artifacts/native/android/capture/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/capture/screenshot.png", "ax_log": "artifacts/native/macos/capture/ax.json"}
       },
-      "release_evidence": ["release-android-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
+      "release_evidence": ["release-android-smoke-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
     },
     {
       "id": "devices",
@@ -44,7 +44,7 @@
         "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/devices/screenshot.png", "ax_log": "artifacts/native/android/devices/ax.json"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/devices/screenshot.png", "ax_log": "artifacts/native/macos/devices/ax.json"}
       },
-      "release_evidence": ["release-android-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
+      "release_evidence": ["release-android-smoke-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
     },
     {
       "id": "settings-and-service",
@@ -59,7 +59,7 @@
         "android": {"scenario": "./scripts/release/android-storage-transfer.sh", "screenshot": "artifacts/android-storage/transfer-persisted.png", "ax_log": "artifacts/android-storage/transfer-persisted.xml"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/settings-and-service/screenshot.png", "ax_log": "artifacts/native/macos/settings-and-service/ax.json"}
       },
-      "release_evidence": ["release-android-storage-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
+      "release_evidence": ["release-android-storage-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
     },
     {
       "id": "cloud-account",
@@ -87,7 +87,7 @@
           "evidence_states": ["unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"]
         }
       },
-      "release_evidence": ["release-android-cloud-evidence", "release-android-hardware-evidence", "release-macos-cloud-evidence", "release-macos-native-evidence"]
+      "release_evidence": ["release-android-cloud-evidence", "release-android-api33-smoke-evidence", "release-android-hardware-evidence", "release-macos-cloud-evidence", "release-macos-native-evidence"]
     }
   ]
 }

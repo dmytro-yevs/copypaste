@@ -190,7 +190,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | No filesystem path in any Android accessible string (INV-12) | Android | Verified — the harness sweeps text and naming attributes |
 | Android UI beyond mount, navigation, typing and the two disclosure sweeps | Android | **NOT VERIFIED IN CI** — CDP sees no pixels, TalkBack or native surface |
 | The release APK cannot enable WebView debugging | Android | Verified — release smoke rejects wry's debugger call and fails closed if its neighbouring JNI markers are absent |
-| Android native accessibility surface | Android | Partial — the pre-publication release job fails when the native tree cannot be observed, exposes fewer than three named nodes, has no actions, or exposes unnamed actions |
+| Android native accessibility surface | Android | Partial — the API 33 and API 36 release jobs fail when the native tree cannot be observed, exposes fewer than three named nodes, has no actions, or exposes unnamed actions |
 | VoiceOver and TalkBack surfaces | macOS, Android | Partial — the macOS release job fails when the native accessibility surface cannot be observed, has no menu bar, or exposes no named elements; gestures and speech output remain **NOT VERIFIED IN CI** |
 
 ### Native shell
@@ -218,7 +218,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | macOS build, codesign, DMG, no linkage outside the bundle | macOS | Partial — ENFORCED, tag-only |
 | Cask postflight, quarantine removal, re-seal | macOS | Partial — ENFORCED, tag-only; Gatekeeper's verdict is a note |
 | `brew install --cask` as a user runs it | macOS | **NOT VERIFIED IN CI** — `check.sh` round-trips the generators only |
-| Published universal APK: build, R8, release signing, install, launch, no stripped symbol | Android | Partial — the exact signed artifact is checksum-verified and smoke-tested before publication, tag-only |
+| Published universal APK: build, R8, release signing, install, launch, no stripped symbol | Android | Partial — the exact signed artifact is checksum-verified and smoke-tested on API 33 and API 36 before publication, tag-only |
 | The signed release APK installed on a physical device | Android | Partial — publication depends on a tag-only hardware gate that installs and smoke-tests the exact artifact on one physical `arm64-v8a` device |
 | Windows current-user install, sidecars, launch and uninstall | Windows | Verified — `ci.yml` installs the NSIS output into a throwaway directory and requires complete cleanup; signing is unverified |
 | Notarisation and Gatekeeper acceptance | macOS | **NOT VERIFIED IN CI** — ADR-0001 decided against notarisation; recorded so it is not mistaken for coverage |

@@ -12,6 +12,7 @@ HANDLER = ROOT / "crates/copypaste-ui/src-tauri/src/lib.rs"
 FORBIDDEN = re.compile(r"\b(?:todo|tbd|waiv(?:e|ed|er)|placeholder)\b", re.I)
 CLOUD_STATES = {"unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"}
 CLOUD_RELEASE = {
+    "release-android-api33-smoke-evidence",
     "release-android-cloud-evidence",
     "release-android-hardware-evidence",
     "release-macos-cloud-evidence",

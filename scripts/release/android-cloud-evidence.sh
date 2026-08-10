@@ -22,6 +22,7 @@ now_ms() { python3 -c 'import time; print(time.time_ns() // 1000000)'; }
 
 cleanup() {
     [[ -n "$STUB_PID" ]] && kill "$STUB_PID" 2>/dev/null || true
+    adb reverse --remove "tcp:$STUB_PORT" >/dev/null 2>&1 || true
 }
 
 install_and_open() { # <apk>
@@ -59,6 +60,7 @@ fill_field() { # <label> <value> <artifact>
     tap_selector "$1" "$3" || return 1
     sh_ input keyevent KEYCODE_MOVE_END >/dev/null
     sh_ input text "$2" >/dev/null
+    sh_ input keyevent KEYCODE_BACK >/dev/null
 }
 
 start_stub() {
@@ -99,6 +101,8 @@ configured_scenario() {
     local started elapsed
     group "Cloud UI: configured account lifecycle"
     start_stub || { bad "the cloud evidence backend starts"; return; }
+    adb reverse "tcp:$STUB_PORT" "tcp:$STUB_PORT" >/dev/null \
+        || { bad "the cloud evidence endpoint is reversed to loopback"; return; }
     install_and_open "$APK_CONFIGURED" || return
     open_cloud || { bad "the configured cloud row is reachable"; return; }
 
