@@ -14,6 +14,9 @@
 #   probe          an observation kept for the next round, not a gate
 set -uo pipefail
 
+# shellcheck source=scripts/release/android-screencap-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-screencap-lib.sh"
+
 metadata_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/android-metadata.mjs"
 APP_NAMESPACE="$(node "$metadata_tool" --field releaseApplicationId)"
 PKG="${PKG:-$APP_NAMESPACE}"
@@ -457,7 +460,10 @@ assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
         sleep 2
     done
 
-    adb exec-out screencap -p > "$png" 2>/dev/null || true
+    if ! capture_android_png "$png" "$PKG"; then
+        bad "a native PNG screenshot was captured" \
+            "$(tail -n 12 "${png%.png}-screencap.log" | tr '\n' ' ')"
+    fi
     [[ -s "$png" ]] && shot="$(stat -c %s "$png")"
     if [[ -s "$dump" ]]; then
         nodes="$(grep -o 'class="[^"]*"' "$dump" | sort | uniq -c | sort -rn | head -n 6 | tr '\n' ' ')"
@@ -669,6 +675,8 @@ self_test() {
         || bad "a library that is not wry's reports no neighbours either" "$(wry_jni_counts "$t/lib-elsewhere.so")"
 
     group "self-test: the WebView painted"
+
+    android_screencap_self_test "$t"
 
     # Shaped after the two runs' hierarchy dumps: run 1 exposed the DOM as
     # named children of the WebView node, run 2 exposed the same chrome with

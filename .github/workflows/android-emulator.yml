@@ -401,6 +401,9 @@ jobs:
           name: android-debug-apk
           path: dist
 
+      - name: Install release evidence dependencies
+        run: python3 -m pip install --requirement requirements-ci.txt
+
       # avdmanager is a Java program. The runner image ships a JDK and sets
       # JAVA_HOME, but which one is a property of the image; pinning it here
       # costs seconds and removes a way for this job to break without us.
@@ -704,6 +707,9 @@ jobs:
 
       - run: npm ci --prefix crates/copypaste-ui --ignore-scripts
 
+      - name: Install release evidence dependencies
+        run: python3 -m pip install --requirement requirements-ci.txt
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android-release-apk
@@ -771,6 +777,9 @@ jobs:
         with:
           name: android-release-apk
           path: dist
+
+      - name: Install release evidence dependencies
+        run: python3 -m pip install --requirement requirements-ci.txt
 
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
