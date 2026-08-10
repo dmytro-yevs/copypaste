@@ -112,7 +112,7 @@ else
         "pid was $pid1, is now '${pid_now:-gone}'"
 fi
 
-crashes="$(crash_report "$OUT/launch1.log")"
+crashes="$(crash_report "$OUT/launch1.log" "$pid1")"
 if [[ -z "$crashes" ]]; then
     ok "no crash block naming this app in logcat"
 else
@@ -261,7 +261,7 @@ else
         "a re-minted device secret cannot open the existing database, and that is fatal to setup"
 fi
 
-crashes2="$(crash_report "$OUT/launch2.log")"
+crashes2="$(crash_report "$OUT/launch2.log" "$pid2")"
 [[ -z "$crashes2" ]] \
     && ok "no crash block on the second launch" \
     || bad "no crash block on the second launch" "$(head -n 20 <<<"$crashes2")"
@@ -328,7 +328,7 @@ for _ in $(seq 1 $((CAPTURE_WAIT_SECS / 5))); do
 done
 dump_logcat capture
 
-crashes3="$(crash_report "$OUT/capture.log")"
+crashes3="$(crash_report "$OUT/capture.log" "$pid2")"
 [[ -z "$crashes3" ]] \
     && ok "no crash block while capturing" \
     || bad "no crash block while capturing" "$(head -n 20 <<<"$crashes3")"
