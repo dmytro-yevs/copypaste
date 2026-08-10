@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import Ajv from "ajv";
+import { verifyWindowsFeatureEvidence } from "./windows-feature-evidence.mjs";
 
 const PLATFORM_REQUIREMENTS = {
   macos: {
@@ -40,9 +41,11 @@ const PLATFORM_REQUIREMENTS = {
       "named-pipe and clipboard passed",
       "update feed contract matched signing mode",
       "in-place update passed",
+      "feature-specific UI states captured",
+      "screenshot protection restored",
       "uninstall passed",
     ]),
-    artifacts: new Set(["screenshot", "accessibility", "test-log", "measurement"]),
+    artifacts: new Set(["screenshot", "accessibility", "test-log", "measurement", "feature-evidence"]),
   },
 };
 
@@ -123,6 +126,9 @@ async function verifyArtifacts(receiptPath, receipt, label) {
     ...(requirement.optionalArtifacts ?? []),
   ]);
   const kinds = new Set();
+  const repeatableKinds = receipt.platform === "windows"
+    ? new Set(["screenshot", "accessibility"])
+    : new Set();
   const declaredPaths = new Set();
   const resolvedPaths = new Set();
   const fileIdentities = new Set();
@@ -132,7 +138,9 @@ async function verifyArtifacts(receiptPath, receipt, label) {
     if (!allowedKinds.has(artifact.kind)) {
       throw new Error(`${artifactLabel} uses an invalid ${receipt.platform} artifact kind`);
     }
-    if (kinds.has(artifact.kind)) throw new Error(`${label} duplicates ${artifact.kind} evidence`);
+    if (kinds.has(artifact.kind) && !repeatableKinds.has(artifact.kind)) {
+      throw new Error(`${label} duplicates ${artifact.kind} evidence`);
+    }
     kinds.add(artifact.kind);
 
     const candidate = path.join(receiptRoot, ...artifact.path.split("/"));
@@ -220,6 +228,9 @@ export async function validateEvidence({ commit, evidence, required, runId }) {
     if (receipt.source.commit !== observedCommit) throw new Error(`${label} belongs to another commit`);
     if (receipt.source.run_id !== runId) throw new Error(`${label} belongs to another workflow run`);
     await verifyArtifacts(receiptPath, receipt, label);
+    if (receipt.platform === "windows") {
+      await verifyWindowsFeatureEvidence(receiptPath, receipt, label);
+    }
     receipts.set(receipt.platform, receipt);
   }
 

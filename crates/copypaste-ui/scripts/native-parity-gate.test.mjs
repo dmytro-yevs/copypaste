@@ -13,6 +13,14 @@ import { validateEvidence } from "./native-parity-gate.mjs";
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "123456789";
 const run = promisify(execFile);
+const WINDOWS_STATES = new Map([
+  ["history", { state: "populated", name: "Clipboard history", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jPwPAfAAUAAf+mXJtdAAAAAElFTkSuQmCC" }],
+  ["capture", { state: "service-capture-status", name: "Background capture", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY2BoYPgPAAKEAYDVwPBdAAAAAElFTkSuQmCC" }],
+  ["devices", { state: "ready-to-pair", name: "Ready to pair", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY2Bg+P8fAAMCAf/Jsq3uAAAAAElFTkSuQmCC" }],
+  ["settings-and-service", { state: "appearance", name: "Theme", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j/n+E/AAf9Av6JUWP0AAAAAElFTkSuQmCC" }],
+  ["cloud-account", { state: "not-configured", name: "Not configured", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY2hgaPgPAAQEAgCs4Z27AAAAAElFTkSuQmCC" }],
+]);
+const PNG = Buffer.from(WINDOWS_STATES.get("history").png, "base64");
 
 const RECEIPT_VALUES = {
   macos: {
@@ -39,6 +47,8 @@ const RECEIPT_VALUES = {
       "named-pipe and clipboard passed",
       "update feed contract matched signing mode",
       "in-place update passed",
+      "feature-specific UI states captured",
+      "screenshot protection restored",
       "uninstall passed",
     ],
   },
@@ -48,9 +58,65 @@ async function fixture(root, platform, overrides = {}) {
   const directory = path.join(root, platform);
   const artifacts = [];
   const kinds = platform === "windows"
-    ? ["screenshot", "accessibility", "test-log", "measurement"]
+    ? ["test-log", "measurement"]
     : ["screenshot", "accessibility", "measurement"];
   await mkdir(directory, { recursive: true });
+
+  if (platform === "windows") {
+    const states = [];
+    for (const [feature, expected] of WINDOWS_STATES) {
+      const featureDirectory = path.join(directory, feature);
+      await mkdir(featureDirectory, { recursive: true });
+      const screenshotPath = `${feature}/screenshot.png`;
+      const accessibilityPath = `${feature}/accessibility.json`;
+      const screenshot = Buffer.from(expected.png, "base64");
+      const accessibility = `${JSON.stringify({
+        schema_version: 1,
+        feature,
+        state: expected.state,
+        expected_name: expected.name,
+        window: {
+          handle: 1,
+          foreground: true,
+          visible: true,
+          minimized: false,
+          capture_allowed: true,
+          display_affinity: 0,
+          capture_bounds: { kind: "client", x: 0, y: 0, width: 1, height: 1 },
+        },
+        nodes: [{ name: expected.name, enabled: true, offscreen: false, bounds: { x: 0, y: 0, width: 1, height: 1 } }],
+      }, null, 2)}\n`;
+      await writeFile(path.join(directory, screenshotPath), screenshot);
+      await writeFile(path.join(directory, accessibilityPath), accessibility);
+      states.push({
+        feature,
+        state: expected.state,
+        expected_name: expected.name,
+        screenshot: {
+          path: screenshotPath,
+          sha256: createHash("sha256").update(screenshot).digest("hex"),
+          bytes: screenshot.length,
+        },
+        accessibility: {
+          path: accessibilityPath,
+          sha256: createHash("sha256").update(accessibility).digest("hex"),
+          bytes: Buffer.byteLength(accessibility),
+        },
+      });
+      artifacts.push(
+        { kind: "screenshot", ...states.at(-1).screenshot },
+        { kind: "accessibility", ...states.at(-1).accessibility },
+      );
+    }
+    const manifest = `${JSON.stringify({ schema_version: 1, states }, null, 2)}\n`;
+    await writeFile(path.join(directory, "feature-states.json"), manifest);
+    artifacts.push({
+      kind: "feature-evidence",
+      path: "feature-states.json",
+      sha256: createHash("sha256").update(manifest).digest("hex"),
+      bytes: Buffer.byteLength(manifest),
+    });
+  }
 
   for (const kind of kinds) {
     const name = `${kind}.txt`;
@@ -128,6 +194,153 @@ test("fails closed when Windows release evidence is absent", () => withRoot(asyn
       runId: RUN_ID,
     }),
     /missing required evidence for windows/,
+  );
+}));
+
+test("rejects a missing Windows feature state", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.states.pop();
+  const contents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, contents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(contents).digest("hex");
+  index.bytes = Buffer.byteLength(contents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /exactly five Windows feature states/,
+  );
+}));
+
+test("rejects an offscreen Windows state marker", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const state = manifest.states[0];
+  const accessibilityPath = path.join(path.dirname(receiptPath), state.accessibility.path);
+  const accessibility = JSON.parse(await readFile(accessibilityPath, "utf8"));
+  accessibility.nodes[0].offscreen = true;
+  const accessibilityContents = `${JSON.stringify(accessibility, null, 2)}\n`;
+  await writeFile(accessibilityPath, accessibilityContents);
+  state.accessibility.sha256 = createHash("sha256").update(accessibilityContents).digest("hex");
+  state.accessibility.bytes = Buffer.byteLength(accessibilityContents);
+  const manifestContents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, manifestContents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  Object.assign(receipt.artifacts.find((artifact) => artifact.path === state.accessibility.path), state.accessibility);
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(manifestContents).digest("hex");
+  index.bytes = Buffer.byteLength(manifestContents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /does not prove its expected UI state/,
+  );
+}));
+
+test("rejects reused screenshot identity across Windows states", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const source = manifest.states[0].screenshot;
+  const target = manifest.states[1].screenshot;
+  const bytes = await readFile(path.join(path.dirname(receiptPath), source.path));
+  await writeFile(path.join(path.dirname(receiptPath), target.path), bytes);
+  target.sha256 = source.sha256;
+  target.bytes = source.bytes;
+  const manifestContents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, manifestContents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  Object.assign(receipt.artifacts.find((artifact) => artifact.path === target.path), target);
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(manifestContents).digest("hex");
+  index.bytes = Buffer.byteLength(manifestContents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /reuses a screenshot identity/,
+  );
+}));
+
+test("rejects a Windows capture without foreground HWND proof", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const state = manifest.states[0];
+  const accessibilityPath = path.join(path.dirname(receiptPath), state.accessibility.path);
+  const accessibility = JSON.parse(await readFile(accessibilityPath, "utf8"));
+  accessibility.window.foreground = false;
+  const accessibilityContents = `${JSON.stringify(accessibility, null, 2)}\n`;
+  await writeFile(accessibilityPath, accessibilityContents);
+  state.accessibility.sha256 = createHash("sha256").update(accessibilityContents).digest("hex");
+  state.accessibility.bytes = Buffer.byteLength(accessibilityContents);
+  const manifestContents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, manifestContents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  Object.assign(receipt.artifacts.find((artifact) => artifact.path === state.accessibility.path), state.accessibility);
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(manifestContents).digest("hex");
+  index.bytes = Buffer.byteLength(manifestContents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility describes the wrong state/,
+  );
+}));
+
+test("rejects Windows capture bounds not derived from the client", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const state = manifest.states[0];
+  const accessibilityPath = path.join(path.dirname(receiptPath), state.accessibility.path);
+  const accessibility = JSON.parse(await readFile(accessibilityPath, "utf8"));
+  accessibility.window.capture_bounds.kind = "outer";
+  const accessibilityContents = `${JSON.stringify(accessibility, null, 2)}\n`;
+  await writeFile(accessibilityPath, accessibilityContents);
+  state.accessibility.sha256 = createHash("sha256").update(accessibilityContents).digest("hex");
+  state.accessibility.bytes = Buffer.byteLength(accessibilityContents);
+  const manifestContents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, manifestContents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  Object.assign(receipt.artifacts.find((artifact) => artifact.path === state.accessibility.path), state.accessibility);
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(manifestContents).digest("hex");
+  index.bytes = Buffer.byteLength(manifestContents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility describes the wrong state/,
+  );
+}));
+
+test("rejects Windows accessibility evidence mapped to another feature", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifest = JSON.parse(await readFile(path.join(path.dirname(receiptPath), "feature-states.json"), "utf8"));
+  const state = manifest.states[0];
+  const accessibilityPath = path.join(path.dirname(receiptPath), state.accessibility.path);
+  const accessibility = JSON.parse(await readFile(accessibilityPath, "utf8"));
+  accessibility.feature = "devices";
+  const contents = `${JSON.stringify(accessibility, null, 2)}\n`;
+  await writeFile(accessibilityPath, contents);
+  state.accessibility.sha256 = createHash("sha256").update(contents).digest("hex");
+  state.accessibility.bytes = Buffer.byteLength(contents);
+  const manifestContents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(path.join(path.dirname(receiptPath), "feature-states.json"), manifestContents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const declared = receipt.artifacts.find((artifact) => artifact.path === state.accessibility.path);
+  declared.sha256 = state.accessibility.sha256;
+  declared.bytes = state.accessibility.bytes;
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(manifestContents).digest("hex");
+  index.bytes = Buffer.byteLength(manifestContents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility describes the wrong state/,
   );
 }));
 
@@ -347,17 +560,14 @@ test("rejects artifact kinds that do not belong to the platform contract", () =>
 }));
 
 test("the shared receipt writer emits gate-valid evidence", () => withRoot(async (root) => {
-  const output = path.join(root, "windows");
-  await mkdir(output, { recursive: true });
-  await writeFile(path.join(output, "screenshot.png"), "screenshot\n");
-  await writeFile(path.join(output, "accessibility.json"), "{}\n");
-  await writeFile(path.join(output, "native-tests.log"), "native tests passed\n");
-  await writeFile(path.join(output, "latency.json"), '{"elapsed_ms":10}\n');
+  const receiptPath = await fixture(root, "windows");
+  const seeded = JSON.parse(await readFile(receiptPath, "utf8"));
+  await rm(receiptPath);
   const writer = fileURLToPath(new URL("../../../scripts/release/write-native-evidence.py", import.meta.url));
   const python = process.platform === "win32" ? "python" : "python3";
-  await run(python, [
+  const args = [
     writer,
-    "--output", path.join(output, "native-evidence.json"),
+    "--output", receiptPath,
     "--platform", "windows",
     "--environment", "hosted-runner",
     "--os-version", "fixture-os",
@@ -373,13 +583,13 @@ test("the shared receipt writer emits gate-valid evidence", () => withRoot(async
     "--assertion", "named-pipe and clipboard passed",
     "--assertion", "update feed contract matched signing mode",
     "--assertion", "in-place update passed",
+    "--assertion", "feature-specific UI states captured",
+    "--assertion", "screenshot protection restored",
     "--assertion", "uninstall passed",
-    "--artifact", "screenshot=screenshot.png",
-    "--artifact", "accessibility=accessibility.json",
-    "--artifact", "test-log=native-tests.log",
-    "--artifact", "measurement=latency.json",
-  ]);
-  const evidence = [path.join(output, "native-evidence.json")];
+  ];
+  for (const artifact of seeded.artifacts) args.push("--artifact", `${artifact.kind}=${artifact.path}`);
+  await run(python, args);
+  const evidence = [receiptPath];
   const receipts = await validateEvidence({
     commit: COMMIT,
     evidence,
