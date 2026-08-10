@@ -446,6 +446,12 @@ if emu:
         rec(all("--target x86_64" in l for l in build), "{}: builds for the AVD's ABI".format(apk_job),
             "an APK with no x86_64 native library installs and then dies on load: {}".format(build))
 
+    for emulator_job in ("emulator", "release-emulator", "release-api33-smoke"):
+        body = "\n".join(s.get("run") or "" for s in steps(ejobs.get(emulator_job) or {}))
+        rec("pip install --requirement requirements-ci.txt" in body,
+            "{} installs the PNG decoder".format(emulator_job),
+            "the screenshot gate imports Pillow before the emulator runner starts")
+
 release = docs.get("release.yml") or {}
 release_jobs = release.get("jobs") or {}
 hardware = release_jobs.get("android-hardware") or {}

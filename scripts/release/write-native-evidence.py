@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import hashlib
 import json
 import os
 import pathlib
+import subprocess
+import sys
 import tempfile
+
+from png_evidence import validate_png
 
 
 KINDS = {"screenshot", "accessibility", "measurement", "test-log", "diagnostic-log"}
@@ -51,6 +56,8 @@ def artifact_record(root, value):
         raise ValueError("artifact escapes its evidence directory") from None
     if not file.is_file() or file.stat().st_size == 0:
         raise ValueError("artifact must be a non-empty regular file")
+    if kind == "screenshot":
+        validate_png(file)
     return {
         "kind": kind,
         "path": relative_path.as_posix(),
@@ -105,5 +112,48 @@ def main():
         raise SystemExit("write-native-evidence: receipt could not be written") from None
 
 
+def self_test():
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        good = root / "good.png"
+        good.write_bytes(base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
+        chunk_corrupt = bytearray(good.read_bytes())
+        chunk_corrupt[chunk_corrupt.index(b"IDAT") + 4] ^= 0xFF
+        fixtures = {
+            "empty.png": b"",
+            "signature-truncated.png": good.read_bytes()[:24],
+            "chunk-corrupt.png": bytes(chunk_corrupt),
+            "good.png": good.read_bytes(),
+        }
+        common = [
+            sys.executable, __file__, "--platform", "android",
+            "--environment", "emulator", "--os-version", "API 33",
+            "--architecture", "x86_64", "--commit", "a" * 40,
+            "--run-id", "self-test", "--scenario", "release-webview-ready",
+            "--elapsed-ms", "1", "--budget-ms", "2", "--assertion", "passed",
+        ]
+        for name, content in fixtures.items():
+            screenshot = root / name
+            screenshot.write_bytes(content)
+            receipt = root / f"{name}.json"
+            result = subprocess.run(
+                common + ["--output", os.fspath(receipt), "--artifact", f"screenshot={name}"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if name == "good.png":
+                if result.returncode != 0 or not receipt.is_file():
+                    raise SystemExit(f"valid PNG self-test failed: {result.stderr.strip()}")
+            elif result.returncode == 0 or receipt.exists():
+                raise SystemExit(f"{name} produced a native evidence receipt")
+    print("native evidence writer self-test passed")
+
+
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--self-test"]:
+        self_test()
+    else:
+        main()
