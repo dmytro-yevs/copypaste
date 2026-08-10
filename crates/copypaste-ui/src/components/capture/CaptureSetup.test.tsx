@@ -11,12 +11,15 @@ import { screen, waitFor } from "@testing-library/react";
 
 import { CaptureSetup } from "@/components/capture/CaptureSetup";
 import type { CaptureSnapshot } from "@/lib/ipc";
+import * as platform from "@/lib/platform";
 import { captureSnapshot, probe, withUser } from "@/test/harness";
 
 const captureState = vi.fn();
 const captureArm = vi.fn();
 const captureRefresh = vi.fn();
 const captureSetEnabled = vi.fn();
+const getConfig = vi.fn();
+const listInstalledSourceApps = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -26,6 +29,14 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     captureArm: () => captureArm(),
     captureRefresh: () => captureRefresh(),
     captureSetEnabled: (enabled: boolean) => captureSetEnabled(enabled),
+    getConfig: () => getConfig(),
+    listInstalledSourceApps: () => listInstalledSourceApps(),
+    listItems: () => Promise.resolve({
+      items: [],
+      total: 0,
+      skipped_undecryptable: 0,
+      next_cursor: null,
+    }),
   };
 });
 
@@ -57,6 +68,13 @@ beforeEach(() => {
   captureArm.mockReset().mockResolvedValue(captureSnapshot());
   captureRefresh.mockReset().mockResolvedValue(captureSnapshot());
   captureSetEnabled.mockReset().mockResolvedValue(captureSnapshot());
+  getConfig.mockReset().mockResolvedValue({
+    config: { excluded_app_bundle_ids: [] },
+    restart_required: [],
+  });
+  listInstalledSourceApps.mockReset().mockResolvedValue([
+    { package_id: "com.example.notes", label: "Notes" },
+  ]);
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -202,5 +220,29 @@ describe("in every state", () => {
   ])("never renders a filesystem path (%s)", async (_name, snapshot) => {
     const { container } = await show(snapshot);
     expect(container.innerHTML).not.toMatch(/\/Users\/|\/home\/|\.sock/);
+  });
+
+  it("keeps the offscreen Android exclusion input out of the accessibility tree", async () => {
+    vi.spyOn(platform, "isAndroidPlatform").mockReturnValue(true);
+    const { user } = await show(captureSnapshot({ rung: "in_app" }));
+    const disclosure = await screen.findByRole("button", {
+      name: "Exclude apps from capture",
+    });
+    const controlsId = disclosure.getAttribute("aria-controls");
+
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    expect(controlsId).toBeTruthy();
+    expect(document.getElementById(controlsId!)).toBeNull();
+    expect(document.getElementById("android-exclusion-search")).toBeNull();
+
+    await user.click(disclosure);
+
+    const search = await screen.findByRole("textbox", { name: "Search installed apps" });
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById(controlsId!)).not.toBeNull();
+    expect(search.id).toBe("android-exclusion-search");
+    expect(search.getAttribute("placeholder")).toBe("Search installed apps");
+    expect(search.className).toContain("min-h-[var(--tap-min)]");
+    expect(document.getElementById(controlsId!)?.contains(search)).toBe(true);
   });
 });

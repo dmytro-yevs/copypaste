@@ -116,6 +116,7 @@ function SourceExclusionsPanel() {
     <SourceExclusions
       ids={data.excluded_app_bundle_ids}
       disabled={save.isPending}
+      collapsible
       onChange={(excluded_app_bundle_ids) => save.mutate({ excluded_app_bundle_ids })}
     />
   );
