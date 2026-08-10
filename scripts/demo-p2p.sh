@@ -71,7 +71,8 @@ has_item() {
 }
 
 step "Building"
-$CARGO build --release -p copypaste-daemon -p copypaste-cli 2>&1 | tail -3
+$CARGO build --release -p copypaste-daemon -p copypaste-cli \
+    --features copypaste-daemon/dev-ephemeral-key 2>&1 | tail -3
 
 DAEMON="$ROOT/target/release/copypaste-daemon"
 CLI="$ROOT/target/release/copypaste"
