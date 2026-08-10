@@ -54,6 +54,12 @@ interface CliItem {
 export async function startDaemon(): Promise<Daemon> {
   mkdirSync(RUN_ROOT, { recursive: true });
   const dataHome = mkdtempSync(path.join(RUN_ROOT, "run-"));
+  const logDirectory = path.join(RUN_ROOT, "logs");
+  mkdirSync(logDirectory, { recursive: true });
+  const daemonLog = path.join(
+    logDirectory,
+    `${path.basename(dataHome)}-daemon.log`,
+  );
   const isolation: Record<string, string> = {
     COPYPASTE_DATA_DIR: dataHome,
     COPYPASTE_SOCKET: path.join(dataHome, "daemon.sock"),
@@ -86,6 +92,7 @@ export async function startDaemon(): Promise<Daemon> {
         stdio: ["ignore", "pipe", "pipe"],
         reject: false,
       }),
+      daemonLog,
     );
 
     const deadline = Date.now() + 30_000;
@@ -130,7 +137,11 @@ export async function startDaemon(): Promise<Daemon> {
   async function removeOne(id: string): Promise<void> {
     const result = await cli(["delete", id]);
     if (result.exitCode !== 0) {
-      throw new Error(`\`copypaste delete\` failed: ${result.stderr || result.stdout}`);
+      throw new Error(
+        `\`copypaste delete\` failed: ${result.stderr || result.stdout}\n` +
+          `daemon ${child.diagnostics()}\n` +
+          `daemon log (${daemonLog}):\n${child.log() || "<no output captured>"}`,
+      );
     }
   }
 
@@ -157,12 +168,9 @@ export async function startDaemon(): Promise<Daemon> {
       await removeOne(id);
     },
     async removeMany(ids) {
-      // Each call is a process spawn against a debug binary; sequentially this
-      // takes longer than the UI's poll interval, which makes "the list
-      // shrank" impossible to observe as one event.
-      for (let i = 0; i < ids.length; i += 8) {
-        await Promise.all(ids.slice(i, i + 8).map(removeOne));
-      }
+      // DMY-45: concurrent debug CLI processes exercised transport concurrency
+      // the product bulk path avoids by serialising the same SQLite writes.
+      for (const id of ids) await removeOne(id);
     },
     async kill() {
       await child.stop();
