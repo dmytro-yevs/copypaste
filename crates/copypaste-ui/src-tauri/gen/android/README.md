@@ -21,6 +21,7 @@ it runs before Gradle, gated on `TAURI_ANDROID_PROJECT_PATH`:
 
 | Ignored file | Written by | Why it cannot be committed |
 |---|---|---|
+| `local.properties` | Android Studio | host-local SDK and NDK paths |
 | `tauri.settings.gradle` | `tauri-build` | absolute paths into the cargo registry |
 | `app/tauri.build.gradle.kts` | `tauri-build` | the plugin list, from `DEP_*_ANDROID_LIBRARY_PATH` |
 | `app/proguard-tauri.pro` | `tauri` | derived from the identifier |

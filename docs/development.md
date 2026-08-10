@@ -19,6 +19,13 @@ the scenario named by the feature ledger and retain its evidence under
 `artifacts/native/`; the nightly and release workflows upload the same evidence
 shape.
 
+For Android, set `ANDROID_HOME` to the SDK and `NDK_HOME` to its installed NDK
+before running the command. The pinned Tauri toolchain also accepts
+`ANDROID_SDK_ROOT` as an SDK fallback; CI exports `ANDROID_NDK_HOME` alongside
+`NDK_HOME` for downstream Android tools. Android Studio may write
+`crates/copypaste-ui/src-tauri/gen/android/local.properties`, which is ignored
+and must remain untracked.
+
 Performance credit is platform-specific. A credited p95 names either a JSON
 measurement artifact or a scenario with an execution chain ending in a
 workflow; a configured budget or prose report is not evidence. An unmeasured
