@@ -58,6 +58,7 @@ pub mod shell;
 pub mod source_app_icon;
 #[cfg(feature = "typescript")]
 pub mod typescript;
+mod updater;
 
 use backend::SelectedBackend;
 use service::Supervisor;
@@ -94,6 +95,9 @@ pub fn run() {
         .plugin(shell::hotkey::plugin())
         .plugin(shell::autostart::plugin());
 
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
     // The Kotlin half of the capture ladder. Its setup registers the Android
     // plugin and publishes the `SelectedCapture` the commands are written
     // against; on the desktop the equivalent is managed below.
@@ -119,6 +123,7 @@ pub fn run() {
             app.manage(make_backend(app)?);
             app.manage(source_app_icon::SourceAppIconCache::default());
             app.manage(commands::transfer::PendingImportState::default());
+            app.manage(updater::UpdateRuntime::default());
             #[cfg(not(target_os = "android"))]
             app.manage(pairing_presentation::PairingPresenter::default());
             app.manage(Supervisor::default());
@@ -245,6 +250,9 @@ pub fn run() {
             commands::transfer::cancel_import_history,
             commands::transfer::backup_database,
             commands::transfer::restore_database,
+            updater::update_status,
+            updater::check_for_update,
+            updater::install_update,
             // peers
             commands::peers::peers,
             commands::peers::unpair,
@@ -439,13 +447,19 @@ mod tests {
                 }
             }
         }
+        for command in command_names(include_str!("updater.rs")) {
+            assert!(
+                annotated.insert(command.clone()),
+                "duplicate command: {command}"
+            );
+        }
         let registered_entries = registered_command_names();
         let registered = registered_entries.iter().cloned().collect::<BTreeSet<_>>();
 
         assert_eq!(registered_entries.len(), registered.len());
         assert_eq!(annotated, registered);
         assert_eq!(registered, product_command_names());
-        assert_eq!(registered.len(), 69);
+        assert_eq!(registered.len(), 72);
     }
 
     #[test]
@@ -553,5 +567,39 @@ mod tests {
         assert!(hooks.matches("copypaste.exe\" shutdown").count() >= 2);
         assert!(hooks.contains("$UpdateMode <> 1"));
         assert!(hooks.contains("StartupApproved\\Run"));
+    }
+
+    #[test]
+    fn signed_windows_updater_has_a_registered_runtime_consumer() {
+        let cargo = include_str!("../Cargo.toml");
+        let capabilities = include_str!("../capabilities/default.json");
+        let signed_config = include_str!("../tauri.windows.signed.conf.template.json");
+        let updater = include_str!("updater.rs");
+        let compact_updater = updater.split_whitespace().collect::<String>();
+
+        assert!(cargo.contains("tauri-plugin-updater = \"=2.10.1\""));
+        assert!(
+            production_source().contains(".plugin(tauri_plugin_updater::Builder::new().build())")
+        );
+        assert!(signed_config.contains("\"updater\""));
+        assert!(updater.contains("app.config().plugins.0.get(\"updater\")"));
+        assert!(updater.contains("UpdaterExt"));
+        assert!(compact_updater.contains(".check().await"));
+        assert!(updater.contains(".download_and_install("));
+        assert!(updater.contains(".on_before_exit("));
+        assert!(!updater.contains("UpdateStatus::Restarting"));
+        assert!(!capabilities.contains("updater:"));
+        for bypass in [
+            "reqwest::",
+            "minisign::",
+            "semver::",
+            "std::process",
+            "Command::new",
+        ] {
+            assert!(
+                !updater.contains(bypass),
+                "updater boundary bypasses the plugin with {bypass}"
+            );
+        }
     }
 }

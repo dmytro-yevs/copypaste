@@ -22,6 +22,7 @@ use crate::model::{
 };
 use crate::pairing_presentation::PairingPresentationState;
 use crate::service::ServiceState;
+use crate::updater::{UpdateProgress, UpdateStatus};
 
 /// Export every Rust-owned DTO into one checked-in frontend module.
 pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
@@ -71,6 +72,8 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<StatusData>(&config, &mut output);
     declaration::<UiSyncResult>(&config, &mut output);
     declaration::<UiError>(&config, &mut output);
+    declaration::<UpdateStatus>(&config, &mut output);
+    declaration::<UpdateProgress>(&config, &mut output);
 
     std::fs::create_dir_all(out_dir.as_ref())?;
     std::fs::write(out_dir.as_ref().join("ipc.ts"), output)?;

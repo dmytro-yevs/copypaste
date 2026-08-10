@@ -201,6 +201,10 @@ try {
         $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "ready-to-pair" "Ready to pair"
         Invoke-UiaNamedControl $app "Settings" "Theme"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Theme"
+        $updateText = if ($ExpectedSignature -eq "Valid") { "Check for updates" } else { "Updates aren't configured in this build." }
+        $updateState = if ($ExpectedSignature -eq "Valid") { "updater-configured" } else { "updater-unconfigured" }
+        Invoke-UiaNamedControl $app "About" $updateText
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" $updateState $updateText $updateState
         Invoke-UiaNamedControl $app "Service" "Background capture"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "service-capture-status" "Background capture"
         Invoke-UiaNamedControl $app "Sync" "Not configured"

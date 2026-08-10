@@ -15,7 +15,7 @@ export interface SettingsSearchItem {
   title: string;
   description?: string;
   keywords?: readonly string[];
-  platforms?: readonly ("desktop" | "android")[];
+  platforms?: readonly ("desktop" | "android" | "windows")[];
 }
 
 /** Every settings row is listed here so search does not depend on hidden tabs
@@ -81,6 +81,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { tab: "diagnostics", title: "settings.diagnostics.report.title", keywords: ["copy", "export", "logs", "support"] },
 
   { tab: "about", title: "settings.about.app.title", description: "settings.about.app.description" },
+  { tab: "about", title: "settings.about.updates.title", description: "settings.about.updates.description", keywords: ["update", "upgrade", "version"], platforms: ["windows"] },
   { tab: "about", title: "settings.about.service.title" },
   { tab: "about", title: "settings.about.capture.title", description: "settings.about.capture.description" },
   { tab: "about", title: "settings.about.backend.title", description: "settings.about.backend.description" },
