@@ -502,6 +502,30 @@ rec("release-android-cloud-evidence" in release_uploads,
     "release.yml uploads dedicated Android cloud evidence",
     repr(release_uploads))
 
+release_android_workflow = text["release.yml"]
+emulator_android_workflow = text["android-emulator.yml"]
+for name, body in (("release.yml", release_android_workflow),
+                   ("android-emulator.yml", emulator_android_workflow)):
+    rec("COPYPASTE_CLOUD_URL=http://127.0.0.1:47800" in body
+        and "--features cloud-evidence" in body and "10.0.2.2:47800" not in body,
+        f"{name} confines plaintext cloud evidence to its loopback feature",
+        "configured evidence must use 127.0.0.1 and cloud-evidence, never emulator plaintext routing")
+rec(bool(re.search(r"^\s*npm run tauri -- android build --apk\s*$", release_android_workflow, re.M)),
+    "release.yml builds the published APK without cloud evidence configuration")
+rec(bool(re.search(r"^\s*npm run tauri -- android build --apk --target x86_64\s*$",
+                   emulator_android_workflow, re.M)),
+    "android-emulator.yml rebuilds the shipped APK without cloud evidence configuration")
+
+ui_cargo = pathlib.Path("crates/copypaste-ui/src-tauri/Cargo.toml").read_text()
+embedded_cloud = pathlib.Path("crates/copypaste-ui/src-tauri/src/backend/embedded/cloud.rs").read_text()
+android_cloud = pathlib.Path("scripts/release/android-cloud-evidence.sh").read_text()
+rec('cloud-evidence = ["copypaste-cloud/test-endpoints"]' in ui_cargo
+    and 'cfg(feature = "cloud-evidence")' in embedded_cloud
+    and "CloudConfig::new_loopback" in embedded_cloud,
+    "the UI cloud evidence feature selects the guarded loopback constructor")
+rec('adb reverse "tcp:$STUB_PORT" "tcp:$STUB_PORT"' in android_cloud,
+    "Android cloud evidence reverses the host stub onto device loopback")
+
 if emu:
     debug_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))
                               for step in steps((emu.get("jobs") or {}).get("emulator") or {})

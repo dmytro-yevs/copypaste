@@ -217,13 +217,18 @@ function AndroidExclusionPicker({
   apps, selectedIds, query, disabled, loading, failed, onQueryChange, onAdd,
 }: AndroidExclusionPickerProps) {
   const { t } = useTranslation();
+  const searchLabel = t("settings.service.exclusions.searchInstalled");
   return (
     <div className="flex flex-col gap-s-2">
+      <label htmlFor="android-exclusion-search" className="sr-only">
+        {searchLabel}
+      </label>
       <Input
-        aria-label={t("settings.service.exclusions.searchInstalled")}
+        id="android-exclusion-search"
+        aria-label={searchLabel}
         value={query}
         disabled={disabled}
-        placeholder={t("settings.service.exclusions.searchInstalled")}
+        placeholder={searchLabel}
         onChange={(event) => onQueryChange(event.target.value)}
       />
       <div className="flex max-h-56 flex-col overflow-y-auto rounded-md border border-divider">

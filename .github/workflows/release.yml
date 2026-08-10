@@ -501,9 +501,9 @@ jobs:
           cp "$published" "${RUNNER_TEMP}/copypaste-release-unsigned.apk"
           find "$outputs" -type f -name '*.apk' -delete
 
-          COPYPASTE_CLOUD_URL=http://10.0.2.2:47800 \
+          COPYPASTE_CLOUD_URL=http://127.0.0.1:47800 \
           COPYPASTE_CLOUD_ANON_KEY=native-evidence \
-            npm run tauri -- android build --apk --target x86_64
+            npm run tauri -- android build --apk --target x86_64 --features cloud-evidence
           configured="$(find "$outputs" -name '*release*.apk' -print -quit)"
           [[ -n "$configured" ]] || { echo "::error::the configured x86_64 evidence APK was not produced"; exit 1; }
           cp "$configured" "${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
@@ -766,6 +766,55 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  android-smoke-api33:
+    name: Smoke-test published Android APK (API 33)
+    needs: [version, android]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android
+          path: dist
+
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          [[ -e /dev/kvm ]] || { echo "::error::/dev/kvm is absent — this runner cannot accelerate the emulator"; exit 1; }
+
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: "33"
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: ./scripts/release/android-smoke-release.sh
+        env:
+          APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
+          SMOKE_OUT: artifacts/release-android-smoke-api33
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-android-api33-smoke-evidence
+          path: artifacts/release-android-smoke-api33
+          if-no-files-found: error
+          retention-days: 14
+
   # The emulator never executes the aarch64 native library and cannot stand in
   # for a phone. Publishing therefore waits for this labelled runner, with one
   # exclusively attached physical arm64 Android device, to run the signed APK.
@@ -903,7 +952,7 @@ jobs:
     # android is a hard dependency, not a nice-to-have: ADR-0006 says one
     # release page serves both platforms, and a page that silently serves one is
     # worse than a failed run.
-    needs: [version, supabase-gate, pairing-e2e, macos, android, android-smoke, android-hardware, native-parity, packaging]
+    needs: [version, supabase-gate, pairing-e2e, macos, android, android-smoke, android-smoke-api33, android-hardware, native-parity, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
