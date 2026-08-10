@@ -204,6 +204,14 @@ def platform_errors(feature, root=ROOT):
         for field in ("scenario", "screenshot", "ax_log"):
             if not scenario.get(field):
                 errors.append(f"{feature_id}: {platform} missing {field}")
+        if platform == "windows":
+            states = scenario.get("evidence_states")
+            if not isinstance(states, list) or not states or not all(isinstance(state, str) and state for state in states):
+                errors.append(f"{feature_id}: windows missing evidence_states")
+            for field in ("screenshot", "ax_log"):
+                value = scenario.get(field, "")
+                if f"/{feature_id}/" not in value:
+                    errors.append(f"{feature_id}: windows {field} must be feature-specific")
     errors.extend(performance_errors(feature, root))
     return errors
 
@@ -285,7 +293,12 @@ def self_test():
     product = {
         "id": "fixture",
         "native": {
-            platform: {"scenario": "run", "screenshot": "shot", "ax_log": "ax"}
+            platform: {
+                "scenario": "run",
+                "screenshot": "artifacts/fixture/shot",
+                "ax_log": "artifacts/fixture/ax",
+                **({"evidence_states": ["ready"]} if platform == "windows" else {}),
+            }
             for platform in SHIPPED_PLATFORMS
         },
         "performance": {platform: {"status": "uncredited"} for platform in SHIPPED_PLATFORMS},
@@ -295,6 +308,12 @@ def self_test():
     probe = copy.deepcopy(product)
     del probe["native"]["windows"]
     checks.append(("a missing Windows platform fails", any("windows missing" in error for error in platform_errors(probe, root))))
+    probe = copy.deepcopy(product)
+    del probe["native"]["windows"]["evidence_states"]
+    checks.append(("missing Windows feature state fails", any("windows missing evidence_states" in error for error in platform_errors(probe, root))))
+    probe = copy.deepcopy(product)
+    probe["native"]["windows"]["screenshot"] = "artifacts/generic/shot"
+    checks.append(("generic Windows evidence path fails", any("screenshot must be feature-specific" in error for error in platform_errors(probe, root))))
     probe = copy.deepcopy(product)
     probe["release_evidence"].remove("release-windows-native-evidence")
     checks.append(("missing Windows release evidence fails", any("release-windows-native-evidence" in error for error in platform_errors(probe, root))))

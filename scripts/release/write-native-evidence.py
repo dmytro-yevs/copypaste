@@ -12,7 +12,7 @@ import tempfile
 from png_evidence import validate_png
 
 
-KINDS = {"screenshot", "accessibility", "measurement", "test-log", "diagnostic-log"}
+KINDS = {"screenshot", "accessibility", "measurement", "test-log", "diagnostic-log", "feature-evidence"}
 
 
 def parser():
