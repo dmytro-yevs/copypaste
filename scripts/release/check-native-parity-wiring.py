@@ -161,6 +161,8 @@ def contract_errors(release, nightly, ci):
         (jobs.get("android-hardware") or {}, "android-smoke-release.sh", "release Android hardware evidence"),
         (windows, "windows-native-evidence.ps1", "release Windows evidence"),
         (nightly_windows, "windows-native-evidence.ps1", "nightly Windows evidence"),
+        (ci_jobs.get("frontend") or {}, "npm test", "CI frontend tests"),
+        (ci_jobs.get("windows-check") or {}, "npm test", "CI Windows frontend tests"),
         (ci_jobs.get("windows-check") or {}, "windows-native-evidence.ps1", "CI Windows evidence"),
         (ci_jobs.get("release-pipeline") or {}, "scripts/release/check.sh", "CI release self-tests"),
     )
@@ -180,6 +182,19 @@ def contract_errors(release, nightly, ci):
 
 def self_test(release, nightly, ci):
     failures = 0
+
+    def move_install_after_test(value, job_name):
+        job_steps = value["jobs"][job_name]["steps"]
+        install = next(
+            step for step in job_steps
+            if "pip install --requirement requirements-ci.txt" in str(step.get("run") or "")
+        )
+        job_steps.remove(install)
+        test_index = next(
+            index for index, step in enumerate(job_steps)
+            if "npm test" in str(step.get("run") or "")
+        )
+        job_steps.insert(test_index + 1, install)
 
     def remove_download(value):
         job_steps = value["jobs"]["native-parity"]["steps"]
@@ -201,6 +216,14 @@ def self_test(release, nightly, ci):
         fixture = copy.deepcopy(release)
         mutation(fixture)
         held = any(expected in error for error in contract_errors(fixture, nightly, ci))
+        print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
+        failures += 0 if held else 1
+
+    def rejected_ci(label, job_name, expected):
+        nonlocal failures
+        fixture = copy.deepcopy(ci)
+        move_install_after_test(fixture, job_name)
+        held = any(expected in error for error in contract_errors(release, nightly, fixture))
         print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
         failures += 0 if held else 1
 
@@ -249,6 +272,16 @@ def self_test(release, nightly, ci):
             [step for step in value["jobs"]["android-smoke-api33"]["steps"] if "pip install --requirement requirements-ci.txt" not in str(step.get("run") or "")],
         ),
         "release Android API 33 evidence must install requirements-ci.txt",
+    )
+    rejected_ci(
+        "frontend test before requirements install fails",
+        "frontend",
+        "CI frontend tests must install requirements-ci.txt",
+    )
+    rejected_ci(
+        "Windows frontend test before requirements install fails",
+        "windows-check",
+        "CI Windows frontend tests must install requirements-ci.txt",
     )
     return failures
 
