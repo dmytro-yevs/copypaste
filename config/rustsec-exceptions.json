@@ -1,0 +1,25 @@
+{
+  "exceptions": [
+    {
+      "advisory": "RUSTSEC-2024-0429",
+      "aliases": ["GHSA-wrw7-89jp-8q8g"],
+      "package": "glib",
+      "version": "0.18.5",
+      "kind": "unsound",
+      "owner": "@dmytro-yevs",
+      "expires": "2026-11-10",
+      "affected_targets": ["x86_64-unknown-linux-gnu"],
+      "unaffected_targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-linux-android",
+        "armv7-linux-androideabi",
+        "i686-linux-android",
+        "x86_64-linux-android",
+        "aarch64-pc-windows-msvc",
+        "x86_64-pc-windows-msvc"
+      ],
+      "decision": "docs/adr/0021-accept-the-glib-advisory-as-unshipped.md"
+    }
+  ]
+}

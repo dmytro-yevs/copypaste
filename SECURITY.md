@@ -223,8 +223,8 @@ build and revoke it on every update. See
 `cargo deny check` and `cargo audit`, both run in CI by
 `.github/workflows/supply-chain.yml` on every push and weekly on a schedule.
 
-`glib 0.18.5` (RUSTSEC-2024-0429) is accepted only in Tauri's Linux desktop
-webview subtree, which is not shipped. Dependabot ignores that crate because
-the tree cannot resolve the non-vulnerable `0.20.0`; every other dependency
-continues to alert. [ADR-0021](docs/adr/0021-accept-the-glib-advisory-as-unshipped.md)
-records the exposure, the wider cost of the ignore, and its removal condition.
+`glib 0.18.5` (RUSTSEC-2024-0429) is accepted only in Tauri's unshipped Linux
+desktop subtree through 2026-11-10. Dependabot remains enabled for `glib`;
+`scripts/check_rustsec_policy.py` fails on a changed, stale or expired
+exception. [ADR-0021](docs/adr/0021-accept-the-glib-advisory-as-unshipped.md)
+records the reachability and upstream constraint.
