@@ -1,27 +1,21 @@
 name: Release
 
-# Builds and publishes a release for both platforms from one page: the macOS
+# Builds and publishes a release for all shipped platforms from one page: the macOS
 # .app in a DMG, the CLI and daemon in a tarball, the Homebrew cask and formula
-# that point at both, and an Android APK a user can download and install.
+# that point at both, an Android APK, and a signed Windows NSIS installer with
+# the update-feed metadata consumed by the future updater UI.
 #
-# NOTHING IN THIS FILE HOLDS A SIGNING CREDENTIAL
-# That is the entire premise of ADR-0001, not an accident of the current setup.
-# There is no APPLE_CERTIFICATE, no APPLE_ID, no APPLE_TEAM_ID, no notarisation
-# step and no keychain import. Signing is ad-hoc (`codesign --sign -`), which
-# needs no identity and no secret. If a future change adds one, ADR-0001 has to
-# change first — a Developer ID would make most of this workflow, and the
-# cask's postflight, unnecessary.
+# macOS remains ad-hoc signed under ADR-0001: no Apple identity or notarisation
+# credential is present. Windows publication is different: it fails closed
+# unless the code-signing certificate and Tauri updater key are available.
 #
 # The one optional secret that is not a signing credential is
 # HOMEBREW_TAP_TOKEN: contents:write on the tap repository so the workflow can
 # publish the updated cask. Without it the workflow still succeeds and attaches
 # the cask and formula to the release for a maintainer to copy across by hand.
 #
-# ANDROID_* is a different matter and is not covered by the paragraph above.
-# Android will not install an unsigned APK at all, so there is no ad-hoc
-# equivalent and no way to defer signing to the device. All four release-signing
-# secrets are required: a release without its durable key fails closed before it
-# can upload a non-upgradable artefact. ADR-0006 records that decision.
+# Android also requires its durable release key. A missing signing secret on
+# either platform stops publication before a non-upgradable artefact is uploaded.
 #
 # UNVERIFIED
 # This project is developed on Linux. Every macOS-specific step below —
@@ -867,9 +861,95 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  windows:
+    name: Build and exercise Windows installer
+    needs: [version]
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: "1.96"
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+      WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+      TAURI_UPDATER_ENDPOINT: ${{ secrets.TAURI_UPDATER_ENDPOINT }}
+      WINDOWS_RELEASE_BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-release
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - name: Exercise Windows packaging failures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          ./scripts/release/test-package-windows.ps1
+          ./scripts/release/windows-native-evidence.ps1 -SelfTest
+      - name: Import Windows release certificate
+        if: needs.version.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not $env:WINDOWS_SIGNING_CERTIFICATE_BASE64) { throw "WINDOWS_SIGNING_CERTIFICATE_BASE64 is required" }
+          if (-not $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD) { throw "WINDOWS_SIGNING_CERTIFICATE_PASSWORD is required" }
+          $pfx = Join-Path $env:RUNNER_TEMP "copypaste-release.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64))
+          $password = ConvertTo-SecureString $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $certificate.HasPrivateKey) { throw "Windows release certificate has no private key" }
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Remove-Item -LiteralPath $pfx -Force
+      - name: Build canonical Windows release package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ('${{ needs.version.outputs.publish }}' -eq 'true') {
+            ./scripts/release/build-windows.ps1 -OutputDirectory artifacts/windows-x86_64
+          } else {
+            ./scripts/release/build-windows.ps1 -Unsigned -OutputDirectory artifacts/windows-x86_64
+          }
+      - name: Install, launch with packaged sidecar, and uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = '${{ needs.version.outputs.version }}'
+          $installer = "artifacts/windows-x86_64/CopyPaste-v$version-windows-x86_64-setup.exe"
+          $signature = if ('${{ needs.version.outputs.publish }}' -eq 'true') { 'Valid' } else { 'NotSigned' }
+          ./scripts/release/windows-native-evidence.ps1 `
+            -Installer $installer `
+            -PackageDirectory artifacts/windows-x86_64 `
+            -EvidenceDirectory artifacts/release-windows-native `
+            -ExpectedSignature $signature `
+            -Commit '${{ github.sha }}' `
+            -RunId '${{ github.run_id }}'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x86_64
+          path: artifacts/windows-x86_64
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-windows-native-evidence
+          path: artifacts/release-windows-native
+          if-no-files-found: error
+          retention-days: 30
+
   native-parity:
     name: Gate publication on native evidence
-    needs: [version, macos, android-hardware]
+    needs: [version, macos, android-hardware, windows]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     steps:
@@ -884,6 +964,10 @@ jobs:
         with:
           name: release-android-hardware-evidence
           path: artifacts/native-parity/android
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-windows-native-evidence
+          path: artifacts/native-parity/windows
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
@@ -895,11 +979,12 @@ jobs:
         working-directory: crates/copypaste-ui
         run: >-
           npm run check:native-parity --
-          --require macos,android
+          --require macos,android,windows
           --commit ${{ github.sha }}
           --run-id ${{ github.run_id }}
           --evidence ${{ github.workspace }}/artifacts/native-parity/macos/native-evidence.json
           --evidence ${{ github.workspace }}/artifacts/native-parity/android/release-android-hardware/native-evidence.json
+          --evidence ${{ github.workspace }}/artifacts/native-parity/windows/native-evidence.json
 
   # Generate the cask and the formula from the artefacts that were actually
   # built, so the checksums come from the files being published rather than
@@ -949,10 +1034,10 @@ jobs:
   # Publish.
   publish:
     name: Publish release
-    # android is a hard dependency, not a nice-to-have: ADR-0006 says one
-    # release page serves both platforms, and a page that silently serves one is
+    # Android and Windows are hard dependencies: one release page serves all
+    # shipped platforms, and a page that silently serves only some of them is
     # worse than a failed run.
-    needs: [version, supabase-gate, pairing-e2e, macos, android, android-smoke, android-smoke-api33, android-hardware, native-parity, packaging]
+    needs: [version, supabase-gate, pairing-e2e, macos, android, android-smoke, android-smoke-api33, android-hardware, windows, native-parity, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -970,6 +1055,11 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android
+          path: dist
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-x86_64
           path: dist
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -1006,6 +1096,7 @@ jobs:
             dist/*.dmg dist/*.dmg.sha256 \
             dist/*.tar.gz dist/*.tar.gz.sha256 \
             dist/*.apk dist/*.apk.sha256 \
+            dist/*.exe dist/*.exe.sig dist/latest.json dist/SHA256SUMS \
             tap/Casks/copypaste.rb \
             tap/Formula/copypaste-cli.rb
 

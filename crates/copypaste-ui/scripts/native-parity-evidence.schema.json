@@ -40,7 +40,7 @@
       "required": ["name", "elapsed_ms", "budget_ms"],
       "properties": {
         "name": {
-          "enum": ["native-launch", "release-webview-ready", "windows-native-contracts"]
+          "enum": ["native-launch", "release-webview-ready", "windows-installed-release"]
         },
         "elapsed_ms": { "type": "integer", "minimum": 0 },
         "budget_ms": { "type": "integer", "minimum": 1 }
@@ -57,8 +57,12 @@
           "signed release app launched",
           "WebView accessibility content painted",
           "release smoke assertions passed",
-          "named-pipe contract passed",
-          "DPAPI round-trip passed"
+          "installer integrity passed",
+          "installed sidecar launched",
+          "named-pipe and clipboard passed",
+          "update feed contract matched signing mode",
+          "in-place update passed",
+          "uninstall passed"
         ]
       }
     },
@@ -151,17 +155,22 @@
           "scenario": {
             "type": "object",
             "properties": {
-              "name": { "const": "windows-native-contracts" },
-              "budget_ms": { "const": 900000 }
+              "name": { "const": "windows-installed-release" },
+              "budget_ms": { "const": 30000 }
             }
           },
           "assertions": {
             "type": "array",
-            "minItems": 2,
-            "maxItems": 2,
+            "minItems": 7,
+            "maxItems": 7,
             "allOf": [
-              { "contains": { "const": "named-pipe contract passed" } },
-              { "contains": { "const": "DPAPI round-trip passed" } }
+              { "contains": { "const": "installer integrity passed" } },
+              { "contains": { "const": "installed app launched" } },
+              { "contains": { "const": "installed sidecar launched" } },
+              { "contains": { "const": "named-pipe and clipboard passed" } },
+              { "contains": { "const": "update feed contract matched signing mode" } },
+              { "contains": { "const": "in-place update passed" } },
+              { "contains": { "const": "uninstall passed" } }
             ]
           }
         }
