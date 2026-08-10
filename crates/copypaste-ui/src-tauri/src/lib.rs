@@ -60,6 +60,8 @@ pub mod source_app_icon;
 pub mod typescript;
 mod updater;
 
+pub use updater::{UpdateProgress, UpdateStatus};
+
 use backend::SelectedBackend;
 use service::Supervisor;
 use tauri::{AppHandle, Manager as _, Runtime};

@@ -22,6 +22,15 @@
       }
     ]
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "publisher": "CopyPaste",
     "homepage": "https://github.com/dmytro-yevs/copypaste",
