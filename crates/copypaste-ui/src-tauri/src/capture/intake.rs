@@ -67,6 +67,8 @@ const PRIVATE_MODE_EVENT: &str = "private-mode-changed";
 const MAX_BUFFERED: usize = 128;
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "camelCase")]
 pub struct CapturedPayload {
     pub id: String,

@@ -10,6 +10,24 @@ export type ConfigData = { private_mode: boolean, poll_interval_ms: number, hist
 
 export type ConfigPatch = { private_mode?: boolean | null, poll_interval_ms?: number | null, history_limit?: number | null, storage_quota_bytes?: number | null, retention_days?: number | null, dedup_window_secs?: number | null, max_text_size_bytes?: number | null, max_image_size_bytes?: number | null, max_file_size_bytes?: number | null, max_decoded_image_mb?: number | null, sensitive_ttl_secs?: number | null, excluded_app_bundle_ids?: Array<string> | null, lan_visibility?: boolean | null, sync_enabled?: boolean | null, notify_on_copy?: boolean | null, sound_on_copy?: boolean | null, };
 
+export type CaptureRung = "desktop" | "in_app" | "shizuku";
+
+export type CaptureSource = "in_app" | "share" | "process_text" | "tile" | "background";
+
+export type NotGrantedReason = "unsupported" | "not_installed" | "not_running" | "no_permission";
+
+export type NotWorkingReason = "awaiting_first_copy" | "read_refused" | "not_armed";
+
+export type CaptureHealth = { "state": "not_granted", reason: NotGrantedReason, } | { "state": "disabled" } | { "state": "granted_not_working", reason: NotWorkingReason, } | { "state": "working" };
+
+export type CaptureNextStep = "none" | "install_shizuku" | "start_shizuku" | "grant_permission" | "arm";
+
+export type ShizukuProbe = { supported: boolean, installed: boolean, running: boolean, permission: boolean, enabled: boolean, toastSuppressed: boolean, rearmRequested: boolean, };
+
+export type CaptureSnapshot = { rung: CaptureRung, health: CaptureHealth, shizuku: ShizukuProbe, nextStep: CaptureNextStep, headline: string, detail: string | null, lastReadOkAt: number | null, lastCaptureAt: number | null, droppedClips: number, toastSuppressed: boolean, toastAcknowledged: boolean, rearmRequested: boolean, };
+
+export type CapturedPayload = { id: string, source: CaptureSource, isSensitive: boolean, };
+
 export type DiagnosticCounters = { rejected_too_large: number, lost_intermediates: number, sensitive_swept: number, index_purged: number, uptime_secs: number, };
 
 export type DiscoveredDevice = { discovery_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, };

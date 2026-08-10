@@ -275,7 +275,9 @@ jobs:
         run: cargo +1.96 test --workspace --locked
 
       - name: generated TypeScript bindings are current
-        run: ./crates/copypaste-ui/scripts/generate-ipc-bindings.sh --check
+        run: |
+          ./crates/copypaste-ui/scripts/generate-ipc-bindings.sh --self-test
+          ./crates/copypaste-ui/scripts/generate-ipc-bindings.sh --check
 
       - name: cargo clippy --all-targets
         # Runs even when the tests fail, so one run reports both. Clippy is a
