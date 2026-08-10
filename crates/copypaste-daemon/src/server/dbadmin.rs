@@ -263,14 +263,15 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_with_a_different_schema_version_is_refused() {
+    fn a_backup_with_an_incompatible_schema_is_refused() {
         let (state, dir) = test_state("alpha");
         add(&state, "still here");
-        let backup = dir.path().join("wrong-version.backup");
+        let backup = dir.path().join("wrong-schema.backup");
         assert!(backup_to(&state, &backup).ok);
 
         let conn = open_validated(&backup, &state.keyring.db_key()).unwrap();
-        conn.pragma_update(None, "user_version", 2).unwrap();
+        conn.execute_batch("DROP INDEX idx_items_sync_cursor")
+            .unwrap();
         drop(conn);
 
         let response = restore_from(&state, &backup, true);

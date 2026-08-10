@@ -146,9 +146,6 @@ pub enum StoreError {
     #[error("connection pool error: {0}")]
     Pool(#[from] r2d2::Error),
 
-    #[error("schema migration failed: {0}")]
-    Migration(#[from] rusqlite_migration::Error),
-
     /// The supplied key does not open this database, or the file is not a
     /// database at all. Fail closed: never fall back to an unkeyed read.
     #[error("database could not be opened with the supplied key")]
@@ -160,7 +157,7 @@ pub enum StoreError {
     #[error("the database failed its integrity check")]
     IntegrityCheckFailed,
 
-    #[error("the database schema does not match this version")]
+    #[error("the database schema is incompatible with this CopyPaste version")]
     InvalidSchema,
 
     #[error("item not found")]

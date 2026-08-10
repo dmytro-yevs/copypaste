@@ -37,8 +37,8 @@
 //!   discloses the local username). Nothing in [`StoreError`] formats a path,
 //!   and the underlying `rusqlite` errors do not carry one either.
 //!
-//! The schema starts clean at version 1 and `rusqlite_migration` owns its
-//! evolution.
+//! The schema is created only for a newly reserved file. Every existing file
+//! must match it exactly before connection pragmas or application queries run.
 
 mod connection;
 mod dbfile;
