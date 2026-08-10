@@ -101,22 +101,11 @@ jobs:
         with:
           tool: cargo-audit
 
-      # Plain `cargo audit`, which clones or updates the advisory DB into the
-      # cached path. v1 learned the hard way that `--no-fetch` fails on a cold
-      # cache with "advisory-db/crates: No such file or directory", because
-      # nothing has populated it yet.
-      #
-      # Deliberately NOT `--deny warnings`.
-      #
-      # Informational advisories (unmaintained, unsound) are already a gate via
-      # cargo-deny, where an exception carries a written justification next to
-      # it in deny.toml. Making them fatal here too would mean maintaining the
-      # same ignore list in a second place with no reasons attached — which is
-      # the duplication AGENTS.md rule 1 is about, applied to configuration.
-      #
-      # Division of labour: cargo-deny owns policy (licences, bans, sources,
-      # and advisories-with-exceptions); cargo-audit owns the vulnerability
-      # feed, where a non-zero exit means a real CVE with no recorded decision
-      # behind it. Yanked crates are printed but not fatal.
-      - name: cargo audit
-        run: cargo audit
+      - name: RustSec policy self-tests
+        working-directory: scripts
+        run: python3 -m unittest test_check_rustsec_policy.py
+
+      # cargo-deny owns unmaintained warnings. This wrapper adds fail-closed
+      # vulnerability, unsoundness and notice handling with expiring decisions.
+      - name: cargo audit policy
+        run: python3 scripts/check_rustsec_policy.py

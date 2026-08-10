@@ -49,13 +49,9 @@ ignore = [
     # exactly one commit. Re-add with a fresh justification if a dependency
     # bump reintroduces any of them.
     #
-    # NOTE: RUSTSEC-2024-0429 (glib 0.18.5 VariantStrIter unsound, Linux/webkit2gtk
-    # only) was removed from this list 2026-06-30: cargo-deny v2 does not raise
-    # `unsound` informational advisories (only `unmaintained`/`vulnerability`), so
-    # the ignore matched no advisory and failed the `advisories` check with
-    # `advisory-not-detected`. The glib path is still Linux-webkit2gtk-only and
-    # unreachable on the shipped macOS/Android targets; re-add here only if a
-    # future cargo-deny/advisory-db actually raises it (see bd CopyPaste-8p37).
+    # RUSTSEC-2024-0429 is absent here because cargo-deny v2 does not raise
+    # `unsound` advisories. scripts/check_rustsec_policy.py gates it separately
+    # with the owner and expiry in config/rustsec-exceptions.json (ADR-0021).
 ]
 
 [licenses]
