@@ -8,9 +8,9 @@
  * (`preferences.json`) and the service-shaped ones to the in-process core
  * (ADR-0003). Neither path exists on the other layer.
  *
- * Android also shows a different set of tabs — no Shortcut and no Storage,
- * plus Background capture — which is why the list is measured from the screen
- * rather than copied from `e2e/tests/settings.e2e.test.ts`.
+ * Android also shows a different set of tabs — no Shortcut, plus Background
+ * capture — which is why the list is measured from the screen rather than
+ * copied from `e2e/tests/settings.e2e.test.ts`.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -142,10 +142,10 @@ async function panel() {
 describe("the tabs", () => {
   test("Android shows its own set, and every one opens onto a pane with a real box", async () => {
     const labels = await tabLabels();
-    // Shortcut and Storage are desktop-only; Background capture is Android's.
+    // Shortcut is desktop-only; Background capture is Android's.
     expect(labels).toContain("Background capture");
+    expect(labels).toContain("Storage");
     expect(labels).not.toContain("Shortcut");
-    expect(labels).not.toContain("Storage");
 
     for (const label of labels) {
       await openTab(label);
