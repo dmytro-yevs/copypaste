@@ -142,6 +142,12 @@ describe("desktop settings", () => {
 });
 
 describe("fail-closed product surfaces", () => {
+  test("names the updater as unconfigured in unsigned builds", async () => {
+    await openTab("About");
+    await waitForText(app.browser, "Updates aren't configured in this build.");
+    expect(await app.browser.$$("button=Check for updates")).toHaveLength(0);
+  });
+
   test("keeps cloud controls absent when no deployment is configured", async () => {
     await openTab("Sync");
     await waitForText(app.browser, "Not configured");

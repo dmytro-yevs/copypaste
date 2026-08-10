@@ -150,7 +150,8 @@ function Save-WindowsFeatureState(
     [string]$EvidenceRoot,
     [string]$Feature,
     [string]$State,
-    [string]$ExpectedName
+    [string]$ExpectedName,
+    [string]$ArtifactDirectory = ""
 ) {
     Wait-UiaName $App $ExpectedName | Out-Null
     $root = Get-AppAutomationRoot $App
@@ -160,10 +161,11 @@ function Save-WindowsFeatureState(
         $_.bounds.width -gt 0 -and $_.bounds.height -gt 0
     })
     Assert-True ($markers.Count -gt 0) "$Feature evidence lacks a visible, enabled '$ExpectedName' marker"
-    $directory = Join-Path $EvidenceRoot $Feature
+    $relativeDirectory = if ($ArtifactDirectory) { Join-Path $Feature $ArtifactDirectory } else { $Feature }
+    $directory = Join-Path $EvidenceRoot $relativeDirectory
     [IO.Directory]::CreateDirectory($directory) | Out-Null
-    $screenshot = Join-Path $Feature "screenshot.png"
-    $accessibility = Join-Path $Feature "accessibility.json"
+    $screenshot = Join-Path $relativeDirectory "screenshot.png"
+    $accessibility = Join-Path $relativeDirectory "accessibility.json"
     $window = Save-WindowImage $App (Join-Path $EvidenceRoot $screenshot)
     [ordered]@{
         schema_version = 1

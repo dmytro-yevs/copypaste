@@ -18,6 +18,8 @@ import { classifyError, friendlyError } from "@/lib/errors";
 import { CURRENT_PROTOCOL_VERSION, hasBridge } from "@/lib/ipc";
 import { usePrefs } from "@/store/prefs";
 import { Row } from "@/components/settings/Row";
+import { UpdateRow } from "@/components/settings/UpdateRow";
+import { isWindows } from "@/lib/platform";
 
 const REAL_BACKENDS = /pasteboard|nspasteboard|system/i;
 
@@ -67,6 +69,8 @@ export function AboutTab() {
             : t("settings.about.app.version", { version: appVersion.data })}
         </span>
       </Row>
+
+      {isWindows() && <UpdateRow />}
 
       <Row title={t("settings.about.service.title")}>
         {status.error ? (

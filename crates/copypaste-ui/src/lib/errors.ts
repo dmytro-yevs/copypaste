@@ -8,7 +8,17 @@ import type { ErrorCode, UiError } from "@/generated/ipc";
 import { t } from "@/i18n";
 
 /** Rust error codes plus boundary conditions owned by the desktop app. */
-export type ErrorKind = ErrorCode | "offline" | "unavailable" | "unknown";
+export type ErrorKind = ErrorCode
+  | "offline"
+  | "unavailable"
+  | "update_busy"
+  | "update_unconfigured"
+  | "update_unsupported"
+  | "update_signature_invalid"
+  | "update_network_failed"
+  | "update_check_failed"
+  | "update_install_failed"
+  | "unknown";
 
 const FRIENDLY = {
   offline: "errors.offline",
@@ -28,6 +38,13 @@ const FRIENDLY = {
   peer_failed: "errors.peer_failed",
   peer_version: "errors.peer_version",
   peer_not_found: "errors.peer_not_found",
+  update_busy: "errors.update_busy",
+  update_unconfigured: "errors.update_unconfigured",
+  update_unsupported: "errors.update_unsupported",
+  update_signature_invalid: "errors.update_signature_invalid",
+  update_network_failed: "errors.update_network_failed",
+  update_check_failed: "errors.update_check_failed",
+  update_install_failed: "errors.update_install_failed",
   internal: "errors.internal",
   unknown: "errors.unknown",
 } as const satisfies Record<ErrorKind, string>;
