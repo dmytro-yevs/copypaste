@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Toaster } from "sonner";
 
 import { isAndroidPlatform } from "@/lib/platform";
@@ -46,6 +46,7 @@ function useContentPaneCenter(enabled: boolean) {
 export function AppToaster() {
   const [theme, setTheme] = useState<ResolvedTheme>(themeOnDocument);
   const android = isAndroidPlatform();
+  const toaster = useRef<HTMLElement>(null);
   useContentPaneCenter(!android);
   const mobileOffset = {
     top: "calc(var(--inset-top) + var(--s-3))",
@@ -62,8 +63,13 @@ export function AppToaster() {
     return () => observer.disconnect();
   }, []);
 
+  useLayoutEffect(() => {
+    if (android) toaster.current?.setAttribute("aria-atomic", "true");
+  }, [android]);
+
   return (
     <Toaster
+      ref={toaster}
       position="bottom-center"
       theme={theme}
       closeButton

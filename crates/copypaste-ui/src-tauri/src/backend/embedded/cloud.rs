@@ -266,7 +266,21 @@ fn cloud_config() -> std::result::Result<Option<CloudConfig>, copypaste_cloud::C
     ) else {
         return Ok(None);
     };
-    CloudConfig::new(url, anon_key).map(Some)
+    validated_cloud_config(url, anon_key).map(Some)
+}
+
+fn validated_cloud_config(
+    url: String,
+    anon_key: String,
+) -> std::result::Result<CloudConfig, copypaste_cloud::CloudConfigError> {
+    #[cfg(feature = "cloud-evidence")]
+    {
+        CloudConfig::new_loopback(url, anon_key)
+    }
+    #[cfg(not(feature = "cloud-evidence"))]
+    {
+        CloudConfig::new(url, anon_key)
+    }
 }
 
 fn make_driver(inner: &Arc<Inner>, config: CloudConfig, key: SyncKey, session: Session) -> Driver {
@@ -334,6 +348,19 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "cloud-evidence"))]
+    #[test]
+    fn production_configuration_rejects_plaintext_loopback() {
+        assert!(validated_cloud_config("http://127.0.0.1:47800".into(), "key".into()).is_err());
+    }
+
+    #[cfg(feature = "cloud-evidence")]
+    #[test]
+    fn evidence_configuration_accepts_only_plaintext_loopback() {
+        assert!(validated_cloud_config("http://127.0.0.1:47800".into(), "key".into()).is_ok());
+        assert!(validated_cloud_config("http://example.com:47800".into(), "key".into()).is_err());
+    }
 
     fn configured() -> EmbeddedCloud {
         EmbeddedCloud {
