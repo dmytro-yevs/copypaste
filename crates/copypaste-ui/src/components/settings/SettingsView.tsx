@@ -33,7 +33,7 @@ import {
   type SettingsSearchTab,
 } from "@/components/settings/settingsSearchIndex";
 import { cn } from "@/lib/cn";
-import { isAndroid } from "@/lib/platform";
+import { isAndroid, isWindows } from "@/lib/platform";
 import { useUi } from "@/store/ui";
 
 const TABS = [
@@ -84,6 +84,7 @@ function TabButton({ tab, desktop }: { tab: SettingsTab; desktop: boolean }) {
 export function SettingsView() {
   const { t } = useTranslation();
   const android = isAndroid();
+  const visiblePlatform = android ? "android" : isWindows() ? "windows" : "desktop";
   const [activeTab, setActiveTab] = useState<SettingsSearchTab>("appearance");
   const requestedTab = useUi((state) => state.settingsTab);
   const setSettingsTab = useUi((state) => state.setSettingsTab);
@@ -106,13 +107,15 @@ export function SettingsView() {
         SETTINGS_SEARCH_ITEMS.filter(
           (item) =>
             tabLabels.has(item.tab) &&
-            (!item.platforms || item.platforms.includes(android ? "android" : "desktop")),
+            (!item.platforms ||
+              item.platforms.includes(visiblePlatform) ||
+              (!android && item.platforms.includes("desktop"))),
         ),
         tabLabels,
         (key) => t(key as never),
         deferredQuery,
       ),
-    [deferredQuery, t, tabLabels],
+    [android, deferredQuery, t, tabLabels, visiblePlatform],
   );
   useEffect(() => {
     if (requestedTab === null) return;

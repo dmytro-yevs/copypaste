@@ -56,6 +56,13 @@ export const errors = {
    *  clipping (post-merge review, finding 4). */
   peer_not_found:
     "That device is no longer paired with this one. Refresh the device list to see what's still paired.",
+  update_busy: "Another update action is already running. Wait for it to finish.",
+  update_unconfigured: "This build has no signed update source. Install a signed CopyPaste release to enable updates.",
+  update_unsupported: "In-app updates aren't available on this platform.",
+  update_signature_invalid: "The update could not be verified. Do not install it; use the official release page or try again later.",
+  update_network_failed: "CopyPaste couldn't reach the update service. Check your connection and try again.",
+  update_check_failed: "CopyPaste couldn't check for updates. Try again in a moment.",
+  update_install_failed: "The verified update couldn't be installed. Close other installers and try again.",
   internal: "The clipboard service returned an error.",
   unknown: "The clipboard service returned an error.",
 } as const;

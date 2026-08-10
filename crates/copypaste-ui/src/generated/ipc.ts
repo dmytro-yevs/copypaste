@@ -78,3 +78,7 @@ export type SyncResult = { pairing_id: string, name: string, sent: number, recei
 
 export type UiError = { code: string, retryable: boolean, };
 
+export type UpdateStatus = { "state": "unsupported" } | { "state": "unconfigured" } | { "state": "ready" } | { "state": "up_to_date" } | { "state": "available", version: string, };
+
+export type UpdateProgress = { "state": "downloading", downloaded: number, total: number | null, } | { "state": "verifying" } | { "state": "installing" };
+

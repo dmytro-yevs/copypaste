@@ -126,6 +126,11 @@ copypaste-core = { path = "../../copypaste-core" }
 winsafe = { version = "0.0.28", features = ["gui", "gdi"] }
 qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
 image.workspace = true
+# Tauri owns feed parsing, version comparison, signature verification,
+# download, installation and restart under ADR-0020. Pin the exact API audited
+# by the updater command boundary; the dependency stays out of mobile builds.
+tauri-plugin-updater = "=2.10.1"
+url.workspace = true
 
 # ---------------------------------------------------------------------------
 # Android only

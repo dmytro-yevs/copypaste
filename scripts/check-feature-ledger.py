@@ -340,7 +340,7 @@ def main():
 
     source = HANDLER.read_text(encoding="utf-8")
     block = source.split("tauri::generate_handler![", 1)[1].split("]", 1)[0]
-    shipped = set(re.findall(r"commands::[a-z_]+::([a-z_]+)", block))
+    shipped = set(re.findall(r"^\s*(?:[a-z_]+::)+([a-z_]+),", block, re.MULTILINE))
     classified = []
     errors = []
     required = {"backend_tests", "ui_tests", "accessibility_states", "failure_states", "performance", "native", "release_evidence"}

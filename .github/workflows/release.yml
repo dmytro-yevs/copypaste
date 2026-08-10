@@ -3,7 +3,7 @@ name: Release
 # Builds and publishes a release for all shipped platforms from one page: the macOS
 # .app in a DMG, the CLI and daemon in a tarball, the Homebrew cask and formula
 # that point at both, an Android APK, and a signed Windows NSIS installer with
-# the update-feed metadata consumed by the future updater UI.
+# the update-feed metadata consumed by the Windows updater runtime.
 #
 # macOS remains ad-hoc signed under ADR-0001: no Apple identity or notarisation
 # credential is present. Windows publication is different: it fails closed
