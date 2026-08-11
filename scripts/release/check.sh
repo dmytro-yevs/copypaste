@@ -515,6 +515,18 @@ else
         "unversioned cargo install makes the browser layer non-reproducible"
 fi
 
+if grep -q 'npm run test:dmy-45:browser-repeat' .github/workflows/browser-webkitgtk.yml \
+   && grep -q 'run: npm test' .github/workflows/browser-webkitgtk.yml \
+   && grep -q 'never overlaps real CLI delete processes' e2e/package.json \
+   && grep -q 'bulk delete confirms first, then really deletes' e2e/package.json \
+   && grep -q 'scroll offset is never left past the end when the list shrinks' e2e/package.json \
+   && grep -q 'INV-6' e2e/package.json; then
+    ok "browser workflow repeats the focused DMY-45 regressions before the full suite"
+else
+    bad "browser workflow repeats the focused DMY-45 regressions before the full suite" \
+        "expected the real CLI-delete serialization, bulk-delete UI and INV-6 filters to run before npm test"
+fi
+
 # ADR-0001's premise, asserted rather than trusted. If a signing credential is
 # ever added to the release workflow, this fails and the ADR has to change
 # first.
