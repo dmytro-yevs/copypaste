@@ -1,0 +1,68 @@
+# Reviewed findings from the full-history scan, pinned by commit fingerprint.
+#
+# Every entry was read at the commit named in its fingerprint and is a v0.4.x-era
+# synthetic fixture, a hex digest, an identifier name, or a vendor documentation
+# placeholder. None is a live credential. A fingerprint pins one rule at one line
+# of one blob, so an entry here can never suppress a secret added later.
+#
+# `.gitleaks.toml` covers content that is still in the tree; this file covers only
+# history. Regenerate after rewriting history, never to silence a new finding.
+#
+# The matched values are deliberately not quoted here: this file is itself scanned.
+
+
+# aws-access-token (1)
+d4946c5ded0075269f9abcff09f3819ab9539819:crates/copypaste-daemon/src/cloud/source.rs:aws-access-token:434
+
+# generic-api-key (36)
+0317f9a9610fbfc0d8243f2a01b4351617e815a0:crates/copypaste-ui/ui/SettingsWindow.slint:generic-api-key:55
+11a2813ec175d1f3cfe7314069623b61c02f0645:docs/rewrite/security-review.md:generic-api-key:93
+3366feb6eb91c4c18f4790189dbe47c92492d206:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:706
+3366feb6eb91c4c18f4790189dbe47c92492d206:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:726
+3366feb6eb91c4c18f4790189dbe47c92492d206:crates/copypaste-android/tests/fixtures/golden_vectors.json:generic-api-key:67
+344c13f2d1ac8d6667dd4d9c266077f3b1c2c4c1:.github/workflows/nightly.yml:generic-api-key:56
+40bcb89acb81728d5562e72b8d1e75a8ee14533a:crates/copypaste-p2p/src/pake.rs:generic-api-key:436
+432d8ec25d697508f0b06e2fc6ab67e0a5a3942f:compat/golden-v0.4.1/manifest.json:generic-api-key:8
+432d8ec25d697508f0b06e2fc6ab67e0a5a3942f:compat/golden-v0.4.1/manifest.json:generic-api-key:9
+63b5d7fd07fde003a9eaed85c5b801c33f35a5df:android/app/src/androidTest/assets/golden_vectors.json:generic-api-key:6
+63b5d7fd07fde003a9eaed85c5b801c33f35a5df:crates/copypaste-android/tests/fixtures/golden_vectors.json:generic-api-key:6
+6c993e31f26dda6b0b79d4e54505d61418116b20:crates/copypaste-daemon/src/ipc.rs:generic-api-key:8829
+7a83a2f728e66c44eb3f378395d9527b41005377:openspec/changes/android-material3-redesign/FULL_DEEP_AUDIT.md:generic-api-key:901
+7c8b51dd58ef5f376e9c2e2a043054344c6b02ea:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:174
+7c8b51dd58ef5f376e9c2e2a043054344c6b02ea:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:175
+7c8b51dd58ef5f376e9c2e2a043054344c6b02ea:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:176
+8e5c5e5f2fac5032a38a9962cc47a5298e89bab1:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:199
+8e5c5e5f2fac5032a38a9962cc47a5298e89bab1:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:200
+8e5c5e5f2fac5032a38a9962cc47a5298e89bab1:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:201
+d835770af4ebd98917424f082430f3a4c023c924:android/app/src/main/java/com/copypaste/android/KeystoreSecretStore.kt:generic-api-key:392
+d835770af4ebd98917424f082430f3a4c023c924:android/app/src/main/java/com/copypaste/android/KeystoreSecretStore.kt:generic-api-key:393
+d835770af4ebd98917424f082430f3a4c023c924:android/app/src/main/java/com/copypaste/android/KeystoreSecretStore.kt:generic-api-key:394
+d835770af4ebd98917424f082430f3a4c023c924:android/app/src/main/java/com/copypaste/android/KeystoreSecretStore.kt:generic-api-key:420
+d835770af4ebd98917424f082430f3a4c023c924:android/app/src/main/java/com/copypaste/android/SyncCursorsStore.kt:generic-api-key:100
+d835770af4ebd98917424f082430f3a4c023c924:android/app/src/main/java/com/copypaste/android/SyncCursorsStore.kt:generic-api-key:80
+deed461ccb713cea8b227de59b44c10e4ce66f8d:FEATURE_GAP_REPORT.md:generic-api-key:1068
+deed461ccb713cea8b227de59b44c10e4ce66f8d:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:1916
+eb9b0f7fd9873793a2b8f6874e8aebeac46694ea:android/app/src/androidTest/assets/golden_vectors.json:generic-api-key:35
+eb9b0f7fd9873793a2b8f6874e8aebeac46694ea:android/app/src/androidTest/assets/golden_vectors.json:generic-api-key:43
+eb9b0f7fd9873793a2b8f6874e8aebeac46694ea:android/app/src/androidTest/assets/golden_vectors.json:generic-api-key:5
+eb9b0f7fd9873793a2b8f6874e8aebeac46694ea:android/app/src/androidTest/assets/golden_vectors.json:generic-api-key:51
+eb9b0f7fd9873793a2b8f6874e8aebeac46694ea:crates/copypaste-android/tests/fixtures/golden_vectors.json:generic-api-key:35
+eb9b0f7fd9873793a2b8f6874e8aebeac46694ea:crates/copypaste-android/tests/fixtures/golden_vectors.json:generic-api-key:43
+eb9b0f7fd9873793a2b8f6874e8aebeac46694ea:crates/copypaste-android/tests/fixtures/golden_vectors.json:generic-api-key:5
+eb9b0f7fd9873793a2b8f6874e8aebeac46694ea:crates/copypaste-android/tests/fixtures/golden_vectors.json:generic-api-key:51
+f9fb87067f44ee981e1e67d39e595355e6344f13:crates/copypaste-daemon/src/ipc/tests.rs:generic-api-key:238
+
+# jwt (2)
+5c63862cf168ae6905c9282cf0afa79b4ff55d81:crates/copypaste-telemetry/tests/pii_scrubber.rs:jwt:113
+65ef13c53dcde9939751426483bddaabc4d12fac:android/app/src/test/java/com/copypaste/android/AppLoggerStorageTest.kt:jwt:80
+
+# private-key (4)
+7d33ab5d38eb8678b1f53976b32cf7659da73ada:crates/copypaste-core/tests/true_positive_corpus.rs:private-key:112
+7d33ab5d38eb8678b1f53976b32cf7659da73ada:crates/copypaste-core/tests/true_positive_corpus.rs:private-key:309
+7d33ab5d38eb8678b1f53976b32cf7659da73ada:crates/copypaste-core/tests/true_positive_corpus.rs:private-key:95
+92d6904446f9c9f0d6cddb945d8b93e8bdb9b99f:crates/copypaste-core/src/sensitive.rs:private-key:1023
+
+# slack-webhook-url (3)
+669c55b3a91dbc0ed40cf76ec189d030087a6a05:crates/copypaste-core/src/sensitive/detector.rs:slack-webhook-url:401
+75ba2a72d5a70cd7097328598ceeafa2a7fbe10d:crates/copypaste-core/src/sensitive/detector.rs:slack-webhook-url:90
+98b879796905137ef25a2d10aaadfa9b55a68184:crates/copypaste-core/src/sensitive/detector.rs:slack-webhook-url:401

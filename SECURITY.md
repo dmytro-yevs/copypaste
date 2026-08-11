@@ -228,3 +228,25 @@ desktop subtree through 2026-11-10. Dependabot remains enabled for `glib`;
 `scripts/check_rustsec_policy.py` fails on a changed, stale or expired
 exception. [ADR-0021](docs/adr/0021-accept-the-glib-advisory-as-unshipped.md)
 records the reachability and upstream constraint.
+
+## Secret scanning
+
+`gitleaks`, run in CI by `.github/workflows/secret-scan.yml` from
+`supply-chain.yml` on every push and pull request and from `release.yml` before
+a release publishes. Push and pull request scan the tree; the weekly cron scans
+every commit, because a secret that was committed and then deleted is still in
+every clone.
+
+With `gitleaks` on `PATH`, the same checks run locally:
+
+```sh
+./scripts/check-secret-scan.sh --self-test   # prove the scan can still fail
+./scripts/check-secret-scan.sh --scan        # tree; add --history for commits
+```
+
+`.gitleaks.toml` extends the upstream default ruleset and allowlists reviewed
+synthetic fixtures by rule id and literal, never by path — a path entry makes
+gitleaks skip the whole file, which would stop it scanning a fixture's
+neighbours. `.gitleaksignore` pins reviewed pre-v2 history findings by commit.
+The scan is not the in-product clipboard detector: `config/gitleaks/` is that
+detector's vendored rule source and must not be pointed at CI.
