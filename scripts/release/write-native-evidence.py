@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import base64
 import hashlib
 import json
 import os
@@ -114,17 +113,28 @@ def main():
 
 def self_test():
     with tempfile.TemporaryDirectory() as directory:
+        from PIL import Image
+
         root = pathlib.Path(directory)
         good = root / "good.png"
-        good.write_bytes(base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-        ))
+        image = Image.new("RGB", (2, 1), "black")
+        image.putpixel((1, 0), (255, 255, 255))
+        image.save(good)
+        black = root / "black.png"
+        Image.new("RGB", (8, 8), "black").save(black)
+        near_black = root / "near-black.png"
+        image = Image.new("RGB", (2, 1), "black")
+        image.putpixel((1, 0), (8, 8, 8))
+        image.save(near_black)
         chunk_corrupt = bytearray(good.read_bytes())
         chunk_corrupt[chunk_corrupt.index(b"IDAT") + 4] ^= 0xFF
         fixtures = {
+            "missing.png": None,
             "empty.png": b"",
             "signature-truncated.png": good.read_bytes()[:24],
             "chunk-corrupt.png": bytes(chunk_corrupt),
+            "black.png": black.read_bytes(),
+            "near-black.png": near_black.read_bytes(),
             "good.png": good.read_bytes(),
         }
         common = [
@@ -136,7 +146,8 @@ def self_test():
         ]
         for name, content in fixtures.items():
             screenshot = root / name
-            screenshot.write_bytes(content)
+            if content is not None:
+                screenshot.write_bytes(content)
             receipt = root / f"{name}.json"
             result = subprocess.run(
                 common + ["--output", os.fspath(receipt), "--artifact", f"screenshot={name}"],
