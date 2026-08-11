@@ -539,8 +539,11 @@ rec("capture_android_png" in android_ui_evidence
     and "adb exec-out screencap" not in android_ui_evidence,
     "Android UI evidence reuses the fail-closed PNG capture helper",
     "storage and cloud evidence must reject zero-byte and malformed screenshots")
-rec("adb -s \"$1\" emu screenrecord screenshot" in android_screencap
-    and "timeout --foreground" in android_screencap
+rec("bounded_adb -s \"$1\" emu screenrecord screenshot" in android_screencap
+    and "run_with_android_screencap_timeout" in android_screencap
+    and "bounded_adb get-serialno" in android_screencap
+    and "append_bounded_adb_diagnostic" in android_screencap
+    and "route=adb-get-serialno" in android_screencap
     and '[[ "$serial" == emulator-* ]]' in android_screencap
     and "Screenshot_*.png" in android_screencap
     and 'for attempt in $(seq 1 "$ANDROID_SCREENCAP_ATTEMPTS")' in android_screencap
@@ -554,7 +557,10 @@ rec("adb exec-out screencap -p" in android_screencap
     "physical Android evidence retains bounded adb capture and fail-closed cleanup")
 rec("Image.alpha_composite" in png_evidence
     and "MIN_VISIBLE_CONTENT_FRACTION = 0.01" in png_evidence
-    and "visible content pixels" in png_evidence
+    and "ImageFilter.BoxBlur(1)" in png_evidence
+    and "locally coherent pixels" in png_evidence
+    and "near-black-checker" in png_evidence
+    and "isolated-noise" in png_evidence
     and "transparent-hidden-rgb" in png_evidence
     and "a decodable black emulator frame is rejected" in android_screencap,
     "native screenshot validation rejects sparse and transparent contentless frames")
