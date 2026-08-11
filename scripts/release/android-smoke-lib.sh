@@ -279,7 +279,7 @@ apk_wry_jni_counts() {   # <apk>
 
 # adb helpers
 
-sh_() { adb shell "$@" 2>&1 | tr -d '\r'; }
+sh_() { adb_ shell "$@" 2>&1 | tr -d '\r'; }
 
 # The app's own process, and not a WebView renderer.
 #
@@ -382,8 +382,8 @@ dump_logcat() { adb logcat -d -b all > "$OUT/$1.log" 2>&1 || true; }
 # uiautomator refuses while the screen is animating ("could not get idle
 # state"), which is ordinary during a launch — the caller retries.
 dump_hierarchy() {   # <local path>
-    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || return 1
-    adb pull /sdcard/ui.xml "$1" >/dev/null 2>&1 || return 1
+    adb_ shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || return 1
+    adb_ pull /sdcard/ui.xml "$1" >/dev/null 2>&1 || return 1
     [[ -s "$1" ]]
 }
 
