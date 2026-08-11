@@ -16,11 +16,6 @@ permissions:
 env:
   CARGO_INCREMENTAL: 0
   CARGO_TERM_COLOR: always
-  # One definition for both the harness that writes here and the step that
-  # uploads it. Node's os.tmpdir() reads TEMP, which on this runner is the
-  # runner account's own directory, not runner.temp — so the two disagreed and
-  # every red run uploaded nothing.
-  COPYPASTE_E2E_RUN_ROOT: ${{ runner.temp }}/cp-e2e
   COPYPASTE_WINDOWS_SHELL_E2E: 1
   MSEDGEDRIVER_TELEMETRY_OPTOUT: 1
   OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
@@ -34,6 +29,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Define the native E2E run root
+        shell: pwsh
+        run: |
+          # Node's os.tmpdir() and runner temp differ on hosted Windows runners.
+          "COPYPASTE_E2E_RUN_ROOT=$env:RUNNER_TEMP\cp-e2e" >> $env:GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
