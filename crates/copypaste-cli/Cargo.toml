@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 copypaste-clock = { path = "../copypaste-clock" }
 copypaste-ipc = { path = "../copypaste-ipc" }
+backon.workspace = true
 tokio.workspace = true
 # Framing is LinesCodec, the same codec the daemon uses — not a hand-rolled
 # byte-scanning read loop (CLAUDE.md rule 1).
