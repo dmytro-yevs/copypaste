@@ -46,9 +46,16 @@ history_unfiltered_holds() { # <artifact>
         && [[ -z "$(node_center_exact "$1" "Clear search")" ]]
 }
 
+# Two authored titles mean "this history is empty", and which one the app shows
+# depends on whether background capture is running. The emulator never grants
+# capture, so pinning the assertion to the never-copied title alone made a
+# correctly cleared history look like one that had not settled. A loading, key
+# or private-mode empty state still fails, which is the point of naming them.
+EMPTY_HISTORY_TITLES="Nothing copied yet|Clipboard capture is paused"
+
 cleared_history_holds() { # <artifact>
     history_unfiltered_holds "$1" \
-        && [[ -n "$(node_center_exact "$1" "Nothing copied yet")" ]] \
+        && [[ -n "$(node_center_exact "$1" "$EMPTY_HISTORY_TITLES")" ]] \
         && [[ -n "$(node_center_exact "$1" "0 items")" ]] \
         && [[ -z "$(node_center_exact "$1" "$CANARY")" ]]
 }
@@ -95,6 +102,8 @@ self_test_transfer() {
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history\" bounds=\"[0,0][200,40]\"/><node content-desc=\"Select multiple items\" clickable=\"true\" bounds=\"[240,0][280,40]\"/><node text=\"0 items\" bounds=\"[280,0][340,40]\"/><node text=\"$CANARY\" bounds=\"[0,50][300,90]\"/></hierarchy>" > "$temp/delayed.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/paused.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Waiting for the key store" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/locked.xml"
     cleared_history_holds "$temp/filtered.xml" \
         && bad "a retained zero-result search cannot prove cleared history" \
         || ok "a retained zero-result search cannot prove cleared history"
@@ -104,24 +113,20 @@ self_test_transfer() {
     cleared_history_holds "$temp/ready.xml" \
         && ok "an unfiltered empty history without the canary is ready" \
         || bad "an unfiltered empty history without the canary is ready"
-    TRANSFER_FIXTURES=("$temp/filtered.xml" "$temp/delayed.xml" "$temp/ready.xml")
-    TRANSFER_FIXTURE_INDEX=0
-    wait_cleared_history "$temp/observed.xml" 3 transfer_fixture_dump \
-        && [[ "$TRANSFER_FIXTURE_INDEX" == 3 ]] \
+    cleared_history_holds "$temp/paused.xml" \
+        && ok "a paused-capture empty history is also cleared" \
+        || bad "a paused-capture empty history is also cleared"
+    cleared_history_holds "$temp/locked.xml" \
+        && bad "an unreadable history is not a cleared one" \
+        || ok "an unreadable history is not a cleared one"
+    ui_fixtures "$temp/filtered.xml" "$temp/delayed.xml" "$temp/paused.xml"
+    wait_cleared_history "$temp/observed.xml" 3 ui_fixture_dump \
+        && [[ "$UI_FIXTURE_INDEX" == 3 ]] \
         && ok "clear readiness waits through retained search and delayed convergence" \
         || bad "clear readiness waits through retained search and delayed convergence"
     rm -rf "$temp"
     printf '\n%d transfer selector tests passed, %d failed\n' "$PASS" "$FAIL"
     [[ $FAIL -eq 0 ]]
-}
-
-TRANSFER_FIXTURES=()
-TRANSFER_FIXTURE_INDEX=0
-transfer_fixture_dump() { # <artifact>
-    local source="${TRANSFER_FIXTURES[$TRANSFER_FIXTURE_INDEX]:-}"
-    [[ -n "$source" ]] || return 1
-    cp "$source" "$1"
-    TRANSFER_FIXTURE_INDEX=$((TRANSFER_FIXTURE_INDEX + 1))
 }
 
 if [[ "${1:-}" == "--self-test" ]]; then
@@ -162,9 +167,10 @@ if open_storage && tap_scrolling "Import…" "$OUT/seed-import-action.xml" up; t
     open_downloads seed-picker || bad "Downloads is selectable for the seed import"
     tap_selector "$SEED_FILE" "$OUT/seed-file.xml" 15 || bad "the seed export is selectable"
     prepare_action "Import" "$OUT/seed-import-confirm.xml" 20 || bad "the seed import requires confirmation"
-    start_accessibility_events "$OUT/seed-import-events.log" || bad "seed import accessibility events are observable"
     tap_prepared_action || bad "the seed import confirmation remains actionable"
-    wait_accessibility_event "Imported" "$OUT/seed-import-events.log" 20 && ok "seed import reports user-visible success" || bad "seed import reports user-visible success"
+    wait_authored_feedback "Imported" "$OUT/seed-import-toast.xml" 20 \
+        && ok "seed import reports user-visible success" \
+        || bad "seed import reports user-visible success" "no Imported toast appeared"
 else
     bad "Storage exposes import for the seed"
 fi
@@ -177,12 +183,11 @@ if open_storage && tap_selector "Export…" "$OUT/export-action.xml"; then
     sleep 2
     open_downloads export-picker || bad "Downloads is selectable in the save picker"
     prepare_action "Save|action_menu_done" "$OUT/export-save.xml" 15 || bad "the picker exposes its save action"
-    start_accessibility_events "$OUT/export-events.log" || bad "export accessibility events are observable"
     tap_prepared_action || bad "the picker save action remains actionable"
 else
     bad "Storage exposes the export action"
 fi
-if wait_accessibility_event "Exported" "$OUT/export-events.log" 20; then
+if wait_authored_feedback "Exported" "$OUT/export-toast.xml" 20; then
     ok "export reports user-visible success"
 else
     bad "export reports user-visible success" "no Exported toast appeared"
@@ -197,9 +202,10 @@ grep -qF "$CANARY" <<<"$exported_text" && ok "the content URI received the captu
 group "Clear and import through DocumentsUI"
 tap_scrolling "Clear history" "$OUT/clear-action.xml" up || bad "Storage exposes the clear action"
 prepare_action "Clear all" "$OUT/clear-confirm.xml" || bad "the clear confirmation is actionable"
-start_accessibility_events "$OUT/clear-events.log" || bad "clear accessibility events are observable"
 tap_prepared_action || bad "the clear confirmation remains actionable"
-wait_accessibility_event "Cleared" "$OUT/clear-events.log" 15 && ok "clear reports user-visible success" || bad "clear reports user-visible success"
+wait_authored_feedback "Cleared" "$OUT/clear-toast.xml" 15 \
+    && ok "clear reports user-visible success" \
+    || bad "clear reports user-visible success" "no Cleared toast appeared"
 open_history "$OUT/clear-history-nav.xml" || bad "History is reachable after clearing"
 if wait_cleared_history "$OUT/cleared-history.xml" 30; then
     ok "cleared unfiltered history settles without the exported canary"
@@ -212,9 +218,8 @@ sleep 2
 open_downloads import-picker || bad "Downloads is selectable in the open picker"
 tap_selector "$EXPORT_FILE" "$OUT/import-file.xml" 15 || bad "the exported document is selectable"
 prepare_action "Import" "$OUT/import-confirm.xml" 20 || bad "the import preview requires confirmation"
-start_accessibility_events "$OUT/import-events.log" || bad "import accessibility events are observable"
 tap_prepared_action || bad "the import confirmation remains actionable"
-if wait_accessibility_event "Imported" "$OUT/import-events.log" 20; then
+if wait_authored_feedback "Imported" "$OUT/import-toast.xml" 20; then
     ok "import reports user-visible success"
 else
     bad "import reports user-visible success" "no Imported toast appeared"
@@ -259,9 +264,8 @@ tap_scrolling "Import…" "$OUT/invalid-action.xml" up || bad "Storage exposes i
 sleep 2
 open_downloads invalid-picker || bad "Downloads is selectable for the failure case"
 prepare_action "$INVALID_FILE" "$OUT/invalid-file.xml" 15 || bad "the invalid document is selectable"
-start_accessibility_events "$OUT/import-failure-events.log" || bad "rejected import accessibility events are observable"
 tap_prepared_action || bad "the invalid document remains actionable"
-if wait_accessibility_event "isn't a CopyPaste export" "$OUT/import-failure-events.log" 20; then
+if wait_authored_feedback "isn't a CopyPaste export" "$OUT/import-failure-toast.xml" 20; then
     ok "an invalid content URI reports a user-visible failure"
 else
     bad "an invalid content URI reports a user-visible failure" "the authored error toast did not appear"
