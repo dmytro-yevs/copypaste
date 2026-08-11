@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { HISTORY_KEY } from "@/hooks/useHistory";
+import { invalidateHistoryQueries } from "@/hooks/useHistory";
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import {
@@ -90,7 +90,7 @@ export function useCloudSyncNow() {
         );
       }
       void qc.invalidateQueries({ queryKey: CLOUD_STATUS_KEY });
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void invalidateHistoryQueries(qc);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });

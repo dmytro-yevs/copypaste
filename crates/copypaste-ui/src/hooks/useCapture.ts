@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 
-import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
+import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/useHistory";
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import {
@@ -69,7 +69,7 @@ export function useCaptureSync() {
     }).then(keep);
 
     void listen(EVENT_CAPTURED, () => {
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void invalidateHistoryQueries(qc);
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
     }).then(keep);
 
@@ -129,7 +129,7 @@ export function useCaptureNow() {
         return;
       }
       toast.success(t("capture.setup.always.saved"));
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void invalidateHistoryQueries(qc);
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
     onError: (raw) => toast.error(toFriendly(raw)),

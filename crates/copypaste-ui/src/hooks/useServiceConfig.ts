@@ -33,7 +33,7 @@ import {
   setPrivateMode,
   type PrivateModeData,
 } from "@/lib/ipc";
-import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
+import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/useHistory";
 
 export const CONFIG_KEY = ["config"] as const;
 export const PRIVATE_MODE_KEY = ["private-mode"] as const;
@@ -119,7 +119,7 @@ export function useSetPrivateMode() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: PRIVATE_MODE_KEY });
       void qc.invalidateQueries({ queryKey: CONFIG_KEY });
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void invalidateHistoryQueries(qc);
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
   });
@@ -200,7 +200,7 @@ export function useImportHistory() {
             : null,
         ]),
       );
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void invalidateHistoryQueries(qc);
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
     onError: (raw) => toast.error(toFriendly(raw)),
