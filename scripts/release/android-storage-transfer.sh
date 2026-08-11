@@ -11,7 +11,6 @@ set -uo pipefail
 
 MAIN="$PKG/$APP_NAMESPACE.MainActivity"
 export WAIT_SECS="${TRANSFER_WAIT_SECS:-45}"
-TRANSFER_READY_POLL_SECONDS="${TRANSFER_READY_POLL_SECONDS:-1}"
 REQUIRE_RUN_AS="${TRANSFER_REQUIRE_RUN_AS:-0}"
 CANARY="CopyPasteStorageTransfer$(date +%s)$RANDOM"
 SEED_FILE="copypaste-seed.json"
@@ -54,16 +53,14 @@ cleared_history_holds() { # <artifact>
         && [[ -z "$(node_center_exact "$1" "$CANARY")" ]]
 }
 
+history_state_holds() { # <artifact> <predicate> <dump function>
+    local artifact="$1" predicate="$2" dump="$3"
+    "$dump" "$artifact" && "$predicate" "$artifact"
+}
+
 wait_history_state() { # <artifact> <predicate> [timeout] [dump function]
-    local artifact="$1" predicate="$2" timeout="${3:-$WAIT_SECS}" dump="${4:-dump_hierarchy}" attempt=0
-    while (( attempt < timeout )); do
-        if "$dump" "$artifact" && "$predicate" "$artifact"; then
-            return 0
-        fi
-        attempt=$((attempt + 1))
-        (( attempt < timeout )) && sleep "$TRANSFER_READY_POLL_SECONDS"
-    done
-    return 1
+    local artifact="$1" predicate="$2" timeout="${3:-$WAIT_SECS}" dump="${4:-dump_hierarchy}"
+    wait_for "$timeout" history_state_holds "$artifact" "$predicate" "$dump"
 }
 
 wait_cleared_history() { # <artifact> [timeout] [dump function]
@@ -109,7 +106,6 @@ self_test_transfer() {
         || bad "an unfiltered empty history without the canary is ready"
     TRANSFER_FIXTURES=("$temp/filtered.xml" "$temp/delayed.xml" "$temp/ready.xml")
     TRANSFER_FIXTURE_INDEX=0
-    TRANSFER_READY_POLL_SECONDS=0
     wait_cleared_history "$temp/observed.xml" 3 transfer_fixture_dump \
         && [[ "$TRANSFER_FIXTURE_INDEX" == 3 ]] \
         && ok "clear readiness waits through retained search and delayed convergence" \

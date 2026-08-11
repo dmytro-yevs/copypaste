@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-selector_center() { # <xml> <selector alternatives separated by |> <any|action>
+selector_center() { # <xml> <selector alternatives separated by |> <any|exact|action>
     python3 - "$1" "$2" "$3" <<'PY'
 import re
 import sys
