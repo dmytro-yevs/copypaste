@@ -6,7 +6,7 @@
 //! arguments move with the definitions they are about.
 
 use clap::{Parser, Subcommand};
-use copypaste_ipc::ConfigPatch;
+use copypaste_ipc::{ConfigPatch, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -32,7 +32,7 @@ pub(crate) enum Command {
     /// Show recent clipboard items, newest first. Pinned items sort ahead.
     List {
         /// How many items to show.
-        #[arg(long, short = 'n', default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..))]
+        #[arg(long, short = 'n', default_value_t = DEFAULT_LIST_PAGE, value_parser = clap::value_parser!(u32).range(1..))]
         limit: u32,
         /// Continue from where a previous `list` stopped.
         ///
@@ -50,7 +50,7 @@ pub(crate) enum Command {
         /// What to search for.
         query: String,
         /// How many matches to show.
-        #[arg(long, short = 'n', default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..))]
+        #[arg(long, short = 'n', default_value_t = DEFAULT_SEARCH_PAGE, value_parser = clap::value_parser!(u32).range(1..))]
         limit: u32,
     },
 
@@ -401,6 +401,25 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_defaults_come_from_the_ipc_contract() {
+        let Command::List { limit, .. } = Cli::try_parse_from(["copypaste", "list"])
+            .expect("list parses with no flags")
+            .command
+        else {
+            panic!("expected list");
+        };
+        assert_eq!(limit, DEFAULT_LIST_PAGE);
+
+        let Command::Search { limit, .. } = Cli::try_parse_from(["copypaste", "search", "query"])
+            .expect("search parses with no flags")
+            .command
+        else {
+            panic!("expected search");
+        };
+        assert_eq!(limit, DEFAULT_SEARCH_PAGE);
+    }
 
     #[test]
     fn config_set_maps_every_flag_to_the_patch() {
