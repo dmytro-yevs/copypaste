@@ -1,4 +1,4 @@
-import type { Browser } from "./app.js";
+import type { Browser } from "./webview-guard.js";
 
 export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
 export const ROW = '[role="listitem"]';

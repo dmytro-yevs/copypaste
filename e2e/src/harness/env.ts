@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -61,9 +61,23 @@ export const NATIVE_DRIVER = nativeDriver();
  * daemon dies with "path must be shorter than SUN_LEN". The harness keeps the
  * data directory and socket together, and the usual per-run scratch directories
  * are already long enough to blow the limit, so run roots live directly under /tmp.
+ *
+ * DMY-54: `os.tmpdir()` reads TEMP, which on a hosted Windows runner is the
+ * runner account's own directory and not `RUNNER_TEMP`, so the workflow uploaded
+ * an empty path on every red run. The override lets that workflow name the root
+ * once and have both sides agree.
  */
 export const RUN_ROOT =
-  process.platform === "win32" ? path.join(os.tmpdir(), "cp-e2e") : "/tmp/cp-e2e";
+  process.env.COPYPASTE_E2E_RUN_ROOT ??
+  (process.platform === "win32" ? path.join(os.tmpdir(), "cp-e2e") : "/tmp/cp-e2e");
+
+/** A child's output on disk. In-memory logs die with the run that lost, and
+ *  this directory is what a failed CI job uploads. */
+export function runLogPath(name: string): string {
+  const directory = path.join(RUN_ROOT, "logs");
+  mkdirSync(directory, { recursive: true });
+  return path.join(directory, name);
+}
 
 export async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {

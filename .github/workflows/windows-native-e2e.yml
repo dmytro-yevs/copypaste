@@ -16,6 +16,11 @@ permissions:
 env:
   CARGO_INCREMENTAL: 0
   CARGO_TERM_COLOR: always
+  # One definition for both the harness that writes here and the step that
+  # uploads it. Node's os.tmpdir() reads TEMP, which on this runner is the
+  # runner account's own directory, not runner.temp — so the two disagreed and
+  # every red run uploaded nothing.
+  COPYPASTE_E2E_RUN_ROOT: ${{ runner.temp }}/cp-e2e
   COPYPASTE_WINDOWS_SHELL_E2E: 1
   MSEDGEDRIVER_TELEMETRY_OPTOUT: 1
   OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
@@ -110,14 +115,18 @@ jobs:
           "EDGEWEBDRIVER=$driverDirectory" >> $env:GITHUB_ENV
 
       - name: Run Windows native desktop E2E
+        id: native-e2e
         working-directory: e2e
         run: npm run test:windows
 
+      # Global setup writes a run manifest before anything else can fail, so an
+      # empty directory here means the harness lost its own diagnostics. That is
+      # the defect this step exists to report, not a condition to ignore.
       - name: Upload native E2E logs on failure
-        if: failure()
+        if: failure() && steps.native-e2e.conclusion == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-native-e2e-logs
-          path: ${{ runner.temp }}/cp-e2e/**
-          if-no-files-found: ignore
+          path: ${{ env.COPYPASTE_E2E_RUN_ROOT }}/logs/**
+          if-no-files-found: error
           retention-days: 7

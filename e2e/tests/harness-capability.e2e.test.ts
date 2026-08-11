@@ -5,12 +5,14 @@ import path from "node:path";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
+import { describeSessionFailure } from "../src/harness/app.js";
+import { startDaemon } from "../src/harness/daemon.js";
+import { track } from "../src/harness/process.js";
+import { recordRunEnvironment } from "../src/harness/run-manifest.js";
 import {
   assertTauriBridge,
   assertTauriBrowserName,
-} from "../src/harness/app.js";
-import { startDaemon } from "../src/harness/daemon.js";
-import { track } from "../src/harness/process.js";
+} from "../src/harness/webview-guard.js";
 
 describe("Tauri WebDriver capabilities", () => {
   it("accepts WebView2 only on Windows", () => {
@@ -55,6 +57,94 @@ describe("Tauri bridge startup", () => {
     expect(() =>
       assertTauriBridge({ bridge: false, url: "http://localhost:1420/" }, false),
     ).toThrow(/no IPC is under test/);
+  });
+});
+
+/**
+ * This is not the cold-start latency itself, which no warm runner can be made
+ * to reproduce. It pins the evidence DMY-54 lacked: a reader must be able to
+ * tell an exhausted budget from a crash without rerunning the job.
+ */
+describe("WebDriver session failure diagnostics", () => {
+  const failure = () =>
+    describeSessionFailure({
+      budgetMs: 120_000,
+      elapsedMs: 120_004,
+      driverState: "pid=4242 state=running exitCode=none signal=none",
+      driverLog: "hyper::Error(IncompleteMessage)\n",
+      logPath: "/tmp/cp-e2e/logs/run-abc-driver.log",
+    });
+
+  it("states the elapsed time against the budget before the log", () => {
+    const message = failure();
+    expect(message).toContain("gave up after 120004ms of a 120000ms budget");
+    expect(message.indexOf("120000ms budget")).toBeLessThan(
+      message.indexOf("hyper::Error"),
+    );
+  });
+
+  it("names the driver's state and where its full output was kept", () => {
+    const message = failure();
+    expect(message).toContain("pid=4242 state=running");
+    expect(message).toContain("/tmp/cp-e2e/logs/run-abc-driver.log");
+  });
+
+  it("says so when the driver printed nothing at all", () => {
+    expect(
+      describeSessionFailure({
+        budgetMs: 120_000,
+        elapsedMs: 1_200,
+        driverState: "pid=1 state=exited exitCode=1 signal=none",
+        driverLog: "   \n",
+        logPath: "/tmp/x.log",
+      }),
+    ).toContain("<no output captured>");
+  });
+});
+
+/**
+ * Run 31379514744 uploaded nothing at all, because the only file under the log
+ * root was written after the step that died. The environment has to be on disk
+ * before anything that can fail, and the failure has to end up beside it.
+ */
+describe("run manifest", () => {
+  const inTemporaryDirectory = async (
+    body: (manifest: string) => Promise<void>,
+  ) => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-manifest-test-"));
+    try {
+      await body(path.join(directory, "run.log"));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  it("keeps the environment and the reason when the probe fails", async () => {
+    await inTemporaryDirectory(async (manifest) => {
+      const failure = await recordRunEnvironment({
+        path: manifest,
+        probe: () => Promise.reject(new Error("Add-Type : assembly not found")),
+      }).then(
+        () => undefined,
+        (error: Error) => error,
+      );
+
+      expect(failure?.message).toMatch(/could not load System.Windows.Forms/);
+      const written = readFileSync(manifest, "utf8");
+      expect(written).toMatch(/^platform=/);
+      expect(written).toMatch(/powershellWinFormsColdStartFailedMs=\d+/);
+      expect(written).toContain("Add-Type : assembly not found");
+    });
+  });
+
+  it("records what a successful probe cost", async () => {
+    await inTemporaryDirectory(async (manifest) => {
+      await recordRunEnvironment({ path: manifest, probe: async () => undefined });
+
+      expect(readFileSync(manifest, "utf8")).toMatch(
+        /powershellWinFormsColdStartMs=\d+/,
+      );
+    });
   });
 });
 

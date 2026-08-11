@@ -8,7 +8,7 @@
  */
 import { expect } from "vitest";
 
-import type { Browser } from "./app.js";
+import type { Browser } from "./webview-guard.js";
 
 /** Attributes that carry a name, a tooltip or a value to a user or an AT. */
 const NAMING_ATTRIBUTES = [
