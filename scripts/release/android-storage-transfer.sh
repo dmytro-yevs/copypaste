@@ -53,6 +53,13 @@ history_unfiltered_holds() { # <artifact>
 # or private-mode empty state still fails, which is the point of naming them.
 EMPTY_HISTORY_TITLES="Nothing copied yet|Clipboard capture is paused"
 
+# INV-12: the WebView never renders a backend sentence, so the rejected import
+# arrives as the `invalid_request` code and the toast reads the catalogue copy
+# for it. Asserting the Rust `MSG_NOT_AN_EXPORT` text was asserting a string
+# the product cannot show, and no wait length would have found it.
+IMPORT_FAILURE_COPY="couldn't complete that action"
+ERROR_CATALOGUE="crates/copypaste-ui/src/i18n/en/common.ts"
+
 cleared_history_holds() { # <artifact>
     history_unfiltered_holds "$1" \
         && [[ -n "$(node_center_exact "$1" "$EMPTY_HISTORY_TITLES")" ]] \
@@ -119,6 +126,20 @@ self_test_transfer() {
     cleared_history_holds "$temp/locked.xml" \
         && bad "an unreadable history is not a cleared one" \
         || ok "an unreadable history is not a cleared one"
+    grep -qF "invalid_request: \"CopyPaste $IMPORT_FAILURE_COPY" "$ERROR_CATALOGUE" \
+        && ok "the rejected-import selector is the copy the app renders" \
+        || bad "the rejected-import selector is the copy the app renders" \
+               "$ERROR_CATALOGUE no longer spells errors.invalid_request that way"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node text=\"Notifications alt+T\" bounds=\"[12,572][308,572]\"><node text=\"CopyPaste $IMPORT_FAILURE_COPY. Try again.\" bounds=\"[49,524][263,563]\"/></node></hierarchy>" > "$temp/rejected.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Notifications alt+T" bounds="[12,572][308,572]"><node text="Imported 1 item" bounds="[49,524][263,563]"/></node></hierarchy>' > "$temp/accepted.xml"
+    ui_fixtures "$temp/rejected.xml"
+    wait_authored_feedback "$IMPORT_FAILURE_COPY" "$temp/observed.xml" 2 ui_fixture_dump \
+        && ok "the authored rejection toast is observed" \
+        || bad "the authored rejection toast is observed"
+    ui_fixtures "$temp/accepted.xml" "$temp/accepted.xml"
+    wait_authored_feedback "$IMPORT_FAILURE_COPY" "$temp/observed.xml" 2 ui_fixture_dump \
+        && bad "a successful import cannot satisfy the rejection assertion" \
+        || ok "a successful import cannot satisfy the rejection assertion"
     ui_fixtures "$temp/filtered.xml" "$temp/delayed.xml" "$temp/paused.xml"
     wait_cleared_history "$temp/observed.xml" 3 ui_fixture_dump \
         && [[ "$UI_FIXTURE_INDEX" == 3 ]] \
@@ -265,7 +286,7 @@ sleep 2
 open_downloads invalid-picker || bad "Downloads is selectable for the failure case"
 prepare_action "$INVALID_FILE" "$OUT/invalid-file.xml" 15 || bad "the invalid document is selectable"
 tap_prepared_action || bad "the invalid document remains actionable"
-if wait_authored_feedback "isn't a CopyPaste export" "$OUT/import-failure-toast.xml" 20; then
+if wait_authored_feedback "$IMPORT_FAILURE_COPY" "$OUT/import-failure-toast.xml" 20; then
     ok "an invalid content URI reports a user-visible failure"
 else
     bad "an invalid content URI reports a user-visible failure" "the authored error toast did not appear"
