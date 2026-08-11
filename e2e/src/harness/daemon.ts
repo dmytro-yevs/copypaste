@@ -6,7 +6,7 @@ import {
 import path from "node:path";
 import { execa } from "execa";
 
-import { RUN_ROOT, cliBinary, daemonBinary, freePort } from "./env.js";
+import { RUN_ROOT, cliBinary, daemonBinary, freePort, runLogPath } from "./env.js";
 import { sleep, track, type Child } from "./process.js";
 
 export interface Daemon {
@@ -61,12 +61,7 @@ export async function startDaemon(
 ): Promise<Daemon> {
   mkdirSync(RUN_ROOT, { recursive: true });
   const dataHome = mkdtempSync(path.join(RUN_ROOT, "run-"));
-  const logDirectory = path.join(RUN_ROOT, "logs");
-  mkdirSync(logDirectory, { recursive: true });
-  const daemonLog = path.join(
-    logDirectory,
-    `${path.basename(dataHome)}-daemon.log`,
-  );
+  const daemonLog = runLogPath(`${path.basename(dataHome)}-daemon.log`);
   const isolation: Record<string, string> = {
     COPYPASTE_DATA_DIR: dataHome,
     COPYPASTE_SOCKET: path.join(dataHome, "daemon.sock"),

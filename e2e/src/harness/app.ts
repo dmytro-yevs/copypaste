@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { execa } from "execa";
 import { remote } from "webdriverio";
 
@@ -8,11 +10,11 @@ import {
   appBinary,
   freePort,
   requireDisplay,
+  runLogPath,
 } from "./env.js";
 import { startDaemon, type Daemon } from "./daemon.js";
 import { sleep, track, type Child } from "./process.js";
-
-export type Browser = Awaited<ReturnType<typeof remote>>;
+import { assertReallyRunning, type Browser } from "./webview-guard.js";
 
 export interface App {
   readonly browser: Browser;
@@ -27,6 +29,16 @@ export interface StartOptions {
    *  wants a failure, has a reason to shorten it. */
   sessionTimeoutMs?: number;
 }
+
+/**
+ * DMY-54, run 31379514744: the job's first app launch aborted at 60s while the
+ * next file opened its session in seconds. A first WebView2 start pays for a new
+ * user-data directory and a Defender scan of a freshly built unsigned binary, so
+ * the budget must cover one cold start. It stays finite because a wrong binary
+ * fails by timing out, and `connectionRetryCount` stays 0 because a retry here
+ * would hide a product crash behind a second attempt.
+ */
+const COLD_SESSION_BUDGET_MS = 120_000;
 
 /**
  * No GPU or software-rendering flags are set here, and none are needed:
@@ -61,6 +73,11 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   const driverPort = await freePort();
   const nativePort = await freePort();
 
+  // tauri-driver 2.0.6 takes no pass-through for the native driver's own log
+  // flags, and it drops msedgedriver's stdout while forwarding its stderr
+  // (verified against a stub driver). This file is therefore the only surviving
+  // record of an Edge WebDriver that dies during startup.
+  const driverLogPath = runLogPath(`${path.basename(daemon.dataHome)}-driver.log`);
   const driver = track(
     execa(
       "tauri-driver",
@@ -81,6 +98,7 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
         killDescendants: true,
       },
     ),
+    driverLogPath,
   );
 
   try {
@@ -94,6 +112,8 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
     throw error;
   }
 
+  const sessionBudgetMs = options.sessionTimeoutMs ?? COLD_SESSION_BUDGET_MS;
+  const sessionStarted = Date.now();
   let browser: Browser;
   try {
     browser = await remote({
@@ -102,10 +122,8 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       path: "/",
       automationProtocol: "webdriver",
       logLevel: "error",
-      // A real app answers in a few seconds; the budget is generous for a cold
-      // cache but finite, because a wrong binary fails by timing out.
       connectionRetryCount: 0,
-      connectionRetryTimeout: options.sessionTimeoutMs ?? 60_000,
+      connectionRetryTimeout: sessionBudgetMs,
       capabilities: {
         // @ts-expect-error tauri-driver's vendor capability is not in the W3C types.
         "tauri:options": { application: appBinary() },
@@ -118,7 +136,13 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       await clipboard.restore();
     }
     throw new Error(
-      `could not open a WebDriver session against the app:\n${driver.log()}`,
+      describeSessionFailure({
+        budgetMs: sessionBudgetMs,
+        elapsedMs: Date.now() - sessionStarted,
+        driverState: driver.diagnostics(),
+        driverLog: driver.log(),
+        logPath: driverLogPath,
+      }),
       { cause },
     );
   }
@@ -201,108 +225,22 @@ async function shutdown(driver: Child, daemon: Daemon): Promise<void> {
 }
 
 /**
- * The guard against a suite that passes while testing nothing.
- *
- * Every check below has failed at least once during development, and each
- * failure mode is silent: a WebView that loads but runs no JavaScript still
- * answers `execute` with `null`, and a dev server that is down produces a
- * WebKit error page whose DOM is a valid, queryable, entirely wrong document.
+ * `hyper::Error(IncompleteMessage)` is what tauri-driver logs when webdriverio
+ * abandons its own `POST /session` at the budget — the echo of this client
+ * giving up, not a fault. DMY-54 was first read the other way round, so the
+ * elapsed time and the budget are stated before the log is quoted.
  */
-async function assertReallyRunning(browser: Browser, driver: Child): Promise<void> {
-  const capabilities = browser.capabilities as { browserName?: string };
-  assertTauriBrowserName(capabilities, process.platform);
-
-  // An app stuck in a render loop never yields its main thread, so `execute`
-  // does not return at all — the probe hangs instead of failing. Without this
-  // wall clock the whole suite stalls until the CI job is killed, which reads
-  // as an infrastructure problem rather than as the app being broken.
-  await Promise.race([
-    probeUntilMounted(browser, driver),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new Error(
-              "the WebView never answered a script within 90s. Its main thread " +
-                "is blocked — an infinite render loop does this — so the app is " +
-                "running but cannot paint or respond.\n" +
-                `tauri-driver log:\n${driver.log()}`,
-            ),
-          ),
-        90_000,
-      ),
-    ),
-  ]);
-}
-
-export function assertTauriBrowserName(
-  capabilities: { browserName?: string },
-  platform: NodeJS.Platform,
-): void {
-  const expected = platform === "win32" ? "webview2" : "wry";
-  if (capabilities.browserName !== expected) {
-    throw new Error(
-      `expected the Tauri WebView ("${expected}"), got "${capabilities.browserName}". ` +
-        `The session is not the app under test.`,
-    );
-  }
-}
-
-export function assertTauriBridge(
-  probe: { bridge: boolean; url: string },
-  bootstrapExpired: boolean,
-): void {
-  if (probe.bridge) return;
-  // DMY-41: EdgeDriver can attach while WebView2 still exposes its initial page.
-  if (!bootstrapExpired && probe.url === "about:blank") return;
-  throw new Error(
-    `window.__TAURI_INTERNALS__ is absent at ${probe.url} — the page is ` +
-      `loaded outside the Tauri bridge, so no IPC is under test.`,
+export function describeSessionFailure(context: {
+  budgetMs: number;
+  elapsedMs: number;
+  driverState: string;
+  driverLog: string;
+  logPath: string;
+}): string {
+  return (
+    `could not open a WebDriver session against the app: gave up after ` +
+    `${context.elapsedMs}ms of a ${context.budgetMs}ms budget. ` +
+    `tauri-driver ${context.driverState}, full output at ${context.logPath}.\n` +
+    `${context.driverLog.trim() || "<no output captured>"}`
   );
-}
-
-async function probeUntilMounted(browser: Browser, driver: Child): Promise<void> {
-  const deadline = Date.now() + 60_000;
-  let last = "";
-  for (;;) {
-    const probe = (await browser.execute(function () {
-      const root = document.getElementById("root");
-      return {
-        js: 2 + 2,
-        bridge: "__TAURI_INTERNALS__" in window,
-        nodes: document.querySelectorAll("*").length,
-        rootChildren: root ? root.childElementCount : -1,
-        text: document.body ? document.body.innerText.slice(0, 300) : "",
-        url: location.href,
-      };
-    })) as {
-      js: number;
-      bridge: boolean;
-      nodes: number;
-      rootChildren: number;
-      text: string;
-      url: string;
-    } | null;
-
-    if (probe === null) {
-      throw new Error(
-        "the WebView returned null for a script that cannot return null — " +
-          "JavaScript is not executing in the app.",
-      );
-    }
-    if (probe.js !== 4) {
-      throw new Error(`the WebView did not evaluate arithmetic: got ${probe.js}`);
-    }
-    assertTauriBridge(probe, Date.now() > deadline);
-    if (probe.rootChildren > 0 && probe.nodes > 30) return;
-
-    last = `url=${probe.url} nodes=${probe.nodes} rootChildren=${probe.rootChildren} text=${JSON.stringify(probe.text)}`;
-    if (Date.now() > deadline) {
-      throw new Error(
-        `the app never mounted a UI. Last probe: ${last}\n` +
-          `tauri-driver log:\n${driver.log()}`,
-      );
-    }
-    await sleep(250);
-  }
 }
