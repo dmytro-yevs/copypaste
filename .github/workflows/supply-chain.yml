@@ -40,6 +40,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  secrets:
+    name: secret scan
+    # Push and pull request scan the tree, which is where a newly introduced
+    # secret is; pulling the whole history on every run would cost more and
+    # find nothing the tree scan misses.
+    #
+    # The cron scans every commit, for the reason this file already runs a
+    # scheduled advisory check: a rule update finds a secret in a file nobody
+    # has touched, and a secret that was committed and then deleted is still in
+    # every clone, so the tree is the one place it is not.
+    uses: ./.github/workflows/secret-scan.yml
+    with:
+      history: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+
   dependency-review:
     name: dependency review (npm, Maven and Gradle)
     # GitHub resolves the dependency graph for the changed manifests, including

@@ -69,6 +69,14 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  # A release is the one build that leaves the repository, so it gets its own
+  # scan rather than trusting that supply-chain.yml ran on the same commit.
+  # Tree scan: the tag publishes the tree, and history is covered by the weekly
+  # run in supply-chain.yml.
+  secret-scan:
+    name: Secret scan
+    uses: ./.github/workflows/secret-scan.yml
+
   supabase-gate:
     name: Real Supabase integration gate
     runs-on: ubuntu-latest
@@ -1056,7 +1064,7 @@ jobs:
     # Android and Windows are hard dependencies: one release page serves all
     # shipped platforms, and a page that silently serves only some of them is
     # worse than a failed run.
-    needs: [version, supabase-gate, pairing-e2e, macos, android, android-smoke, android-smoke-api33, android-hardware, windows, native-parity, packaging]
+    needs: [version, supabase-gate, secret-scan, pairing-e2e, macos, android, android-smoke, android-smoke-api33, android-hardware, windows, native-parity, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
