@@ -51,13 +51,33 @@ action_center() { # <xml> <selector alternatives separated by |>
     selector_center "$1" "$2" action
 }
 
-wait_selector() { # <selector> <artifact> [timeout]
-    local selector="$1" artifact="$2" timeout="${3:-${WAIT_SECS:-45}}" started="$SECONDS"
+wait_selector() { # <selector> <artifact> [timeout] [dump function]
+    local selector="$1" artifact="$2" timeout="${3:-${WAIT_SECS:-45}}" dump="${4:-dump_hierarchy}"
+    local started="$SECONDS"
     while (( SECONDS - started < timeout )); do
-        if dump_hierarchy "$artifact" && [[ -n "$(node_center "$artifact" "$selector")" ]]; then
+        if "$dump" "$artifact" && [[ -n "$(node_center "$artifact" "$selector")" ]]; then
             return 0
         fi
         sleep 1
+    done
+    return 1
+}
+
+# Chromium exposes a WebView toast in the accessibility *tree* while it is on
+# screen and never as an accessibility *event*: it only generates web events
+# while a real accessibility service is connected, and uiautomator's event
+# stream is not one. Every authored storage toast was therefore invisible to the
+# release gate while the app was reporting them correctly. Dump back to back so
+# a 3 s toast cannot fall between two samples.
+wait_authored_feedback() { # <selector> <artifact> [timeout] [dump function]
+    local selector="$1" artifact="$2" timeout="${3:-${WAIT_SECS:-45}}" dump="${4:-dump_hierarchy}"
+    local started="$SECONDS"
+    while (( SECONDS - started < timeout )); do
+        if "$dump" "$artifact"; then
+            [[ -n "$(node_center "$artifact" "$selector")" ]] && return 0
+        else
+            sleep 1
+        fi
     done
     return 1
 }
@@ -93,31 +113,62 @@ screen_size() {
     sh_ wm size | sed -n 's/.* \([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' | tail -n 1
 }
 
-find_scrolling() { # <selector> <artifact> <up|down> [any|action]
-    local selector="$1" artifact="$2" direction="$3" mode="${4:-any}" width height point
+scroll_content() { # <up|down>
+    local width height
     read -r width height <<<"$(screen_size)"
     width="${width:-1080}"; height="${height:-1920}"
+    if [[ "$1" == up ]]; then
+        sh_ input swipe $((width / 2)) $((height * 3 / 4)) $((width / 2)) $((height / 3)) 250 >/dev/null
+    else
+        sh_ input swipe $((width / 2)) $((height / 3)) $((width / 2)) $((height * 3 / 4)) 250 >/dev/null
+    fi
+}
+
+find_scrolling() { # <selector> <artifact> <up|down> [any|action] [dump fn] [scroll fn]
+    local selector="$1" artifact="$2" direction="$3" mode="${4:-any}"
+    local dump="${5:-dump_hierarchy}" scroll="${6:-scroll_content}"
     for _ in $(seq 1 8); do
-        point=""
-        if dump_hierarchy "$artifact"; then
-            point="$(selector_center "$artifact" "$selector" "$mode")"
+        if "$dump" "$artifact" && [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]]; then
+            return 0
         fi
-        [[ -n "$point" ]] && return 0
-        if [[ "$direction" == up ]]; then
-            sh_ input swipe $((width / 2)) $((height * 3 / 4)) $((width / 2)) $((height / 3)) 250 >/dev/null
-        else
-            sh_ input swipe $((width / 2)) $((height / 3)) $((width / 2)) $((height * 3 / 4)) 250 >/dev/null
-        fi
+        "$scroll" "$direction"
         sleep 1
     done
     return 1
 }
 
-tap_scrolling() { # <selector> <artifact> <up|down>
-    find_scrolling "$@" action || return 1
+# A settings pane is taller than a phone viewport, so a control that is only
+# below the fold reads exactly like one that is missing. Bound by time rather
+# than swipe count, because the callers are the ones under a latency budget.
+wait_selector_scrolling() { # <selector> <artifact> <up|down> [timeout] [any|action] [dump fn] [scroll fn]
+    local selector="$1" artifact="$2" direction="$3" timeout="${4:-${WAIT_SECS:-45}}"
+    local mode="${5:-any}" dump="${6:-dump_hierarchy}" scroll="${7:-scroll_content}"
+    local started="$SECONDS"
+    while (( SECONDS - started < timeout )); do
+        if "$dump" "$artifact" && [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]]; then
+            return 0
+        fi
+        "$scroll" "$direction"
+        sleep 1
+    done
+    return 1
+}
+
+tap_found_action() { # <selector> <artifact>
     local point
     point="$(action_center "$2" "$1")"
+    [[ -n "$point" ]] || return 1
     sh_ input tap $point >/dev/null
+}
+
+tap_scrolling() { # <selector> <artifact> <up|down>
+    find_scrolling "$@" action || return 1
+    tap_found_action "$1" "$2"
+}
+
+tap_selector_scrolling() { # <selector> <artifact> <up|down> [timeout]
+    wait_selector_scrolling "$1" "$2" "$3" "${4:-${WAIT_SECS:-45}}" action || return 1
+    tap_found_action "$1" "$2"
 }
 
 capture_png() { # <path>
@@ -126,50 +177,60 @@ capture_png() { # <path>
     capture_android_png "$1" "$PKG" "$capture_serial"
 }
 
-AX_EVENTS_PID=""
+UI_FIXTURES=()
+UI_FIXTURE_INDEX=0
+UI_FIXTURE_SCROLLS=0
 
-start_accessibility_events() { # <artifact>
-    : > "$1"
-    adb shell timeout 90 uiautomator events > "$1" 2>&1 &
-    AX_EVENTS_PID=$!
-    for _ in $(seq 1 50); do
-        kill -0 "$AX_EVENTS_PID" 2>/dev/null || return 1
-        [[ -n "$(adb shell pidof uiautomator 2>/dev/null)" ]] && return 0
-        sleep 0.1
-    done
-    stop_accessibility_events
-    return 1
+ui_fixture_dump() { # <artifact>
+    local source="${UI_FIXTURES[$UI_FIXTURE_INDEX]:-}"
+    [[ -n "$source" ]] || return 1
+    cp "$source" "$1"
+    UI_FIXTURE_INDEX=$((UI_FIXTURE_INDEX + 1))
 }
 
-stop_accessibility_events() {
-    [[ -n "$AX_EVENTS_PID" ]] || return 0
-    adb shell pkill -f "uiautomator events" >/dev/null 2>&1 || true
-    kill "$AX_EVENTS_PID" 2>/dev/null || true
-    for _ in $(seq 1 20); do
-        kill -0 "$AX_EVENTS_PID" 2>/dev/null || break
-        sleep 0.1
-    done
-    kill -9 "$AX_EVENTS_PID" 2>/dev/null || true
-    wait "$AX_EVENTS_PID" 2>/dev/null || true
-    AX_EVENTS_PID=""
+ui_fixture_scroll() { UI_FIXTURE_SCROLLS=$((UI_FIXTURE_SCROLLS + 1)); }
+
+ui_fixtures() { # <artifact...>
+    UI_FIXTURES=("$@")
+    UI_FIXTURE_INDEX=0
+    UI_FIXTURE_SCROLLS=0
 }
 
-accessibility_event_holds() { # <selector regex> <artifact>
-    grep -Ei "PackageName: ${PKG//./\\.}.*($1)" "$2" >/dev/null 2>&1
-}
+android_ui_scroll_self_test() { # <temp>
+    local temp="$1" nav='<node text="Primary" bounds="[0,570][320,640]"/>'
+    # The release geometry this reproduces: Email cleared the tab bar, the field
+    # under it did not, and the submit button had left the viewport entirely.
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav<node text=\"Email\" bounds=\"[24,514][296,558]\" enabled=\"true\" clickable=\"true\"/><node text=\"Password\" bounds=\"[24,566][296,610]\" enabled=\"true\" clickable=\"true\"/><node text=\"Sign in\" bounds=\"[0,0][0,0]\" enabled=\"true\" clickable=\"true\"/></node></hierarchy>" > "$temp/below-fold.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav<node text=\"Email\" bounds=\"[24,300][296,344]\" enabled=\"true\" clickable=\"true\"/><node text=\"Password\" bounds=\"[24,352][296,396]\" enabled=\"true\" clickable=\"true\"/><node text=\"Sign in\" bounds=\"[24,470][296,514]\" enabled=\"true\" clickable=\"true\"/></node></hierarchy>" > "$temp/scrolled.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav<node text=\"Imported 1 item\" bounds=\"[24,510][296,558]\" enabled=\"true\"/></node></hierarchy>" > "$temp/toast.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav<node text=\"Import history\" bounds=\"[24,100][296,144]\" enabled=\"true\"/></node></hierarchy>" > "$temp/no-toast.xml"
 
-wait_accessibility_event() { # <selector regex> <artifact> [timeout]
-    local selector="$1" artifact="$2" timeout="${3:-${WAIT_SECS:-45}}" started="$SECONDS"
-    while (( SECONDS - started < timeout )); do
-        if accessibility_event_holds "$selector" "$artifact"; then
-            stop_accessibility_events
-            return 0
-        fi
-        kill -0 "$AX_EVENTS_PID" 2>/dev/null || break
-        sleep 0.2
-    done
-    stop_accessibility_events
-    return 1
+    ui_fixtures "$temp/below-fold.xml" "$temp/below-fold.xml"
+    wait_selector "Sign in" "$temp/seen.xml" 2 ui_fixture_dump \
+        && bad "a control below the fold is not reported as present" \
+        || ok "a control below the fold is not reported as present"
+    ui_fixtures "$temp/below-fold.xml" "$temp/below-fold.xml"
+    wait_selector "Password" "$temp/seen.xml" 2 ui_fixture_dump \
+        && bad "a field under the tab bar is not reported as present" \
+        || ok "a field under the tab bar is not reported as present"
+    ui_fixtures "$temp/below-fold.xml" "$temp/scrolled.xml"
+    wait_selector_scrolling "Sign in" "$temp/seen.xml" up 5 action ui_fixture_dump ui_fixture_scroll \
+        && (( UI_FIXTURE_SCROLLS == 1 )) \
+        && ok "scrolling reaches a control that is only below the fold" \
+        || bad "scrolling reaches a control that is only below the fold" "$UI_FIXTURE_SCROLLS swipes"
+    # Nine samples inside six seconds: a wait that paused a second between
+    # dumps runs out of budget here, and would miss a 3 s toast on a device for
+    # the same reason.
+    ui_fixtures "$temp/no-toast.xml" "$temp/no-toast.xml" "$temp/no-toast.xml" \
+                "$temp/no-toast.xml" "$temp/no-toast.xml" "$temp/no-toast.xml" \
+                "$temp/no-toast.xml" "$temp/no-toast.xml" "$temp/toast.xml"
+    wait_authored_feedback "Imported" "$temp/seen.xml" 6 ui_fixture_dump \
+        && ok "an authored toast is observed in the accessibility tree" \
+        || bad "an authored toast is observed in the accessibility tree"
+    ui_fixtures "$temp/no-toast.xml" "$temp/no-toast.xml"
+    wait_authored_feedback "Imported" "$temp/seen.xml" 2 ui_fixture_dump \
+        && bad "an absent authored toast is not reported" \
+        || ok "an absent authored toast is not reported"
 }
 
 android_ui_self_test() {
@@ -194,9 +255,7 @@ android_ui_self_test() {
     point="$(action_center "$temp/ui.xml" "copypaste-export.json")"
     [[ "$point" == "230 140" ]] && ok "an exact DocumentsUI row label resolves its action" || bad "an exact DocumentsUI row label resolves its action" "$point"
     [[ -z "$(node_center "$temp/ui.xml" "Import history")" ]] && ok "a missing selector is not reported as present" || bad "a missing selector is not reported as present"
-    printf '%s\n' 'EventType: TYPE_ANNOUNCEMENT; PackageName: com.copypaste.app; Text: [Imported 1 item]' > "$temp/events.log"
-    accessibility_event_holds "Imported" "$temp/events.log" && ok "an authored app event is observable" || bad "an authored app event is observable"
-    accessibility_event_holds "Exported" "$temp/events.log" && bad "an absent app event is not reported" || ok "an absent app event is not reported"
+    android_ui_scroll_self_test "$temp"
     android_screencap_self_test "$temp"
     android_adb_self_test
     rm -rf "$temp"
