@@ -584,11 +584,24 @@ targeted_words = [word for word, _ in shell_words(shell_function_body(android_sc
 production_screencap = android_screencap.partition("android_screencap_self_test()")[0]
 adb_violations = adb_guard_violations(production_screencap, allowed_raw_adb=1)
 rec(timeout_words[:2] == ["timeout", "--foreground"] and timeout_words[-1:] == ["$@"]
-    and bounded_words == ["run_with_android_screencap_timeout", "adb", "$@"]
+    and bounded_words == ["MSYS2_ARG_CONV_EXCL=$ANDROID_DEVICE_PATH_EXCL",
+                          "run_with_android_screencap_timeout", "adb", "$@"]
     and ["bounded_adb", "-s", "$serial", "$@"] == targeted_words[-4:]
     and not adb_violations,
     "Android screenshot adb calls use the targeted bounded wrapper",
-    "; ".join(adb_violations) or "timeout/bounded/targeted wrapper composition changed")
+    "; ".join(adb_violations)
+    or "timeout/bounded/targeted/path-exclusion wrapper composition changed")
+android_adb = pathlib.Path("scripts/release/android-adb-lib.sh").read_text()
+android_smoke_lib = pathlib.Path("scripts/release/android-smoke-lib.sh").read_text()
+android_transfer = pathlib.Path("scripts/release/android-storage-transfer.sh").read_text()
+rec("MSYS2_ARG_CONV_EXCL" in android_adb
+    and "android_adb_self_test" in android_ui_evidence
+    and "sh_() { adb_ shell" in android_smoke_lib
+    and "adb_ shell uiautomator dump" in android_smoke_lib
+    and "adb_ pull" in android_smoke_lib
+    and "adb shell dd" not in android_transfer,
+    "Android device paths survive a host shell that rewrites POSIX arguments",
+    "Git Bash rewrites /sdcard into C:/Program Files/Git/sdcard before adb sees it")
 rec("verified_android_serial" in android_screencap
     and "ANDROID_SERIAL" in android_screencap and "EMULATOR_PORT" in android_screencap
     and "append_bounded_adb_diagnostic" in android_screencap

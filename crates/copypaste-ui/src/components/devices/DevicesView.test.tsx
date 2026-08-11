@@ -247,6 +247,23 @@ describe("the supported device surfaces", () => {
     expect(screen.getAllByText("Recording").length).toBeGreaterThan(0);
   });
 
+  /** DMY-48: the Android Devices leg asserted "Nearby devices", a string this
+   *  screen has never rendered; the heading reads "Discovered on your network".
+   *  The emulator legs anchor on the labelling heading, so the anchor and the
+   *  copy it carries are pinned here — where a rename fails in milliseconds
+   *  rather than on a device nobody is watching. */
+  it("anchors the discovered-devices region on its rendered heading", async () => {
+    withUser(<DevicesView />);
+
+    const heading = await screen.findByRole("heading", {
+      name: "Discovered on your network",
+    });
+    expect(heading.id).toBe("discovered-devices-heading");
+    expect(
+      heading.closest('section[aria-labelledby="discovered-devices-heading"]'),
+    ).not.toBeNull();
+  });
+
   /** HB-9: passive discovery returning nothing must not remove the only way
    *  to ask the network again. */
   it("keeps manual discovery refresh reachable when nothing was found", async () => {

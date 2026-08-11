@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# shellcheck source=scripts/release/android-adb-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-adb-lib.sh"
+
 ANDROID_SCREENCAP_ATTEMPTS="${ANDROID_SCREENCAP_ATTEMPTS:-3}"
 ANDROID_SCREENCAP_RETRY_DELAY="${ANDROID_SCREENCAP_RETRY_DELAY:-1}"
 ANDROID_EMULATOR_SCREENCAP_TIMEOUT="${ANDROID_EMULATOR_SCREENCAP_TIMEOUT:-15}"
@@ -11,8 +14,11 @@ run_with_android_screencap_timeout() {
     timeout --foreground "${ANDROID_EMULATOR_SCREENCAP_TIMEOUT}s" "$@"
 }
 
+# The exclusion is exported rather than applied through [adb_], because the
+# timeout wrapper is a real process and cannot run a shell function — and it is
+# that process, not this shell, which spawns adb and rewrites its arguments.
 bounded_adb() {
-    run_with_android_screencap_timeout adb "$@"
+    MSYS2_ARG_CONV_EXCL="$ANDROID_DEVICE_PATH_EXCL" run_with_android_screencap_timeout adb "$@"
 }
 
 targeted_adb() { # <serial> <adb args...>

@@ -25,14 +25,30 @@ cleanup() {
     adb reverse --remove "tcp:$STUB_PORT" >/dev/null 2>&1 || true
 }
 
+# Artefacts are named, never pathed: the runner's absolute path discloses the
+# account name (AGENTS.md rule 4).
+evidence_name() { # <path>
+    printf '%s' "${1#"$OUT/"}"
+}
+
 install_and_open() { # <apk>
-    [[ -f "$1" ]] || { bad "the cloud evidence APK exists" "missing: $1"; return 1; }
+    [[ -f "$1" ]] || {
+        bad "the cloud evidence APK exists" "missing: $(basename "$1")"
+        return 1
+    }
     sh_ am force-stop "$PKG" >/dev/null 2>&1 || true
     adb uninstall "$PKG" >/dev/null 2>&1 || true
-    adb install -r -g "$1" >/dev/null || return 1
+    adb install -r -g "$1" >/dev/null || {
+        bad "the cloud evidence APK installs" "adb rejected $(basename "$1")"
+        return 1
+    }
     wake_screen
     sh_ am start -W -n "$MAIN" >/dev/null
-    wait_selector "Settings" "$OUT/launch.xml" 90
+    wait_selector "Settings" "$OUT/launch.xml" 90 || {
+        bad "the launched app exposes its Settings tab" \
+            "uiautomator did not expose Settings within 90s"
+        return 1
+    }
 }
 
 open_cloud() {
@@ -87,18 +103,53 @@ seed_forged_row() {
         --data "$payload" >/dev/null
 }
 
+# Every early return above recorded a verdict, but none of them proved the
+# evidence exists. The debug leg could therefore install nothing, wake the
+# screen and exit 0 with an empty latency table and no screenshot, which is how
+# a green API 36 job shipped `latency.tsv` with zero rows. What the artefact
+# must contain is asserted here, unconditionally, so an aborted scenario fails
+# closed and names what it did not produce.
+require_state_evidence() { # <state>
+    local ax="$OUT/$1/ax.xml" png="$OUT/$1/screenshot.png"
+    [[ -s "$ax" ]] \
+        && ok "$1 accessibility evidence is present and non-empty" \
+        || bad "$1 accessibility evidence is present and non-empty" \
+               "$(evidence_name "$ax") is missing or empty"
+    [[ -s "$png" ]] \
+        && ok "$1 screenshot evidence is present and non-empty" \
+        || bad "$1 screenshot evidence is present and non-empty" \
+               "$(evidence_name "$png") is missing or empty"
+}
+
+require_latency_evidence() { # <scenario...>
+    local scenario
+    for scenario in "$@"; do
+        grep -q "^$scenario$(printf '\t')" "$LATENCIES" 2>/dev/null \
+            && ok "$scenario recorded a latency measurement" \
+            || bad "$scenario recorded a latency measurement" \
+                   "$(evidence_name "$LATENCIES") has no $scenario row"
+    done
+}
+
 unconfigured_scenario() {
     local started elapsed
     group "Cloud UI: unconfigured build"
     started="$(now_ms)"
-    install_and_open "$APK_UNCONFIGURED" || return
-    open_cloud || { bad "the unconfigured cloud row is reachable"; return; }
-    expect_label "Not configured" "$OUT/unconfigured-status.xml"
-    elapsed=$(( $(now_ms) - started ))
-    cloud_latency_record "$LATENCIES" unconfigured-status "$elapsed" 90000 \
-        && ok "unconfigured cloud status meets its latency budget" \
-        || bad "unconfigured cloud status meets its latency budget" "${elapsed}ms"
-    capture_state unconfigured
+    if install_and_open "$APK_UNCONFIGURED"; then
+        if open_cloud; then
+            expect_label "Not configured" "$OUT/unconfigured-status.xml"
+            elapsed=$(( $(now_ms) - started ))
+            cloud_latency_record "$LATENCIES" unconfigured-status "$elapsed" 90000 \
+                && ok "unconfigured cloud status meets its latency budget" \
+                || bad "unconfigured cloud status meets its latency budget" "${elapsed}ms"
+            capture_state unconfigured
+        else
+            bad "the unconfigured cloud row is reachable" \
+                "Settings never reached the Sync tab's Cloud sync row"
+        fi
+    fi
+    require_latency_evidence unconfigured-status
+    require_state_evidence unconfigured
 }
 
 configured_scenario() {
@@ -157,11 +208,65 @@ configured_scenario() {
     capture_state signed-out-again
 }
 
+# Asserting a fail-closed helper means running it and reading the verdict it
+# recorded, so the surrounding counters are restored around each call.
+requirement_fails() { # <function> <args...>
+    local saved_pass="$PASS" saved_fail="$FAIL" observed
+    PASS=0
+    FAIL=0
+    "$@" >/dev/null
+    (( FAIL > 0 )) && observed=0 || observed=1
+    PASS="$saved_pass"
+    FAIL="$saved_fail"
+    return "$observed"
+}
+
+unconfigured_evidence_self_test() { # <temp>
+    local OUT="$1" LATENCIES="$1/latency.tsv"
+    mkdir -p "$OUT/unconfigured"
+    : > "$LATENCIES"
+    requirement_fails require_latency_evidence unconfigured-status \
+        && ok "an empty latency table cannot pass the unconfigured leg" \
+        || bad "an empty latency table cannot pass the unconfigured leg"
+    requirement_fails require_state_evidence unconfigured \
+        && ok "absent screenshot and accessibility evidence fails closed" \
+        || bad "absent screenshot and accessibility evidence fails closed"
+
+    printf 'unconfigured-status\t120\t90000\n' > "$LATENCIES"
+    printf '<hierarchy/>\n' > "$OUT/unconfigured/ax.xml"
+    : > "$OUT/unconfigured/screenshot.png"
+    requirement_fails require_state_evidence unconfigured \
+        && ok "a zero-byte screenshot is not screenshot evidence" \
+        || bad "a zero-byte screenshot is not screenshot evidence"
+    requirement_fails require_latency_evidence sign-in \
+        && ok "another scenario's latency row does not satisfy this one" \
+        || bad "another scenario's latency row does not satisfy this one"
+
+    printf 'PNG\n' > "$OUT/unconfigured/screenshot.png"
+    requirement_fails require_latency_evidence unconfigured-status \
+        && bad "a recorded latency row satisfies its requirement" \
+        || ok "a recorded latency row satisfies its requirement"
+    requirement_fails require_state_evidence unconfigured \
+        && bad "complete unconfigured evidence satisfies its requirement" \
+        || ok "complete unconfigured evidence satisfies its requirement"
+    # The empty table is the shipped defect: it wrote no latency.json and the
+    # caller ignored the refusal, so the leg summarised as passed.
+    : > "$LATENCIES"
+    rm -f "$OUT/latency.json"
+    cloud_latency_write "$LATENCIES" "$OUT/latency.json" android >/dev/null 2>&1 \
+        && bad "an empty latency table refuses to write structured evidence" \
+        || ok "an empty latency table refuses to write structured evidence"
+    [[ ! -e "$OUT/latency.json" ]] \
+        && ok "a refused write leaves no structured latency evidence behind" \
+        || bad "a refused write leaves no structured latency evidence behind"
+}
+
 if [[ "$MODE" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
     android_ui_self_test
     cloud_evidence_self_test "$SELF_TEST_TMP"
+    unconfigured_evidence_self_test "$SELF_TEST_TMP/unconfigured-leg"
     cloud_evidence_summary Android
     [[ $FAIL -eq 0 ]]
     exit
@@ -181,6 +286,9 @@ case "$MODE" in
     *) echo "usage: android-cloud-evidence.sh [--all|--unconfigured|--configured|--self-test]" >&2; exit 2 ;;
 esac
 
-cloud_latency_write "$LATENCIES" "$OUT/latency.json" android
+cloud_latency_write "$LATENCIES" "$OUT/latency.json" android \
+    && ok "structured latency evidence is written" \
+    || bad "structured latency evidence is written" \
+           "no measurement reached $(evidence_name "$LATENCIES")"
 cloud_evidence_summary Android
 [[ $FAIL -eq 0 ]]

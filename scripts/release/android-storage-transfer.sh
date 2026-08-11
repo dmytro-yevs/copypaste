@@ -138,7 +138,7 @@ adb logcat -c || true
 group "Seed encrypted history"
 sh_ mkdir -p /sdcard/Download >/dev/null
 sh_ rm -f "/sdcard/Download/$SEED_FILE" "/sdcard/Download/$EXPORT_FILE" "/sdcard/Download/$INVALID_FILE" >/dev/null
-python3 - "$CANARY" <<'PY' | adb shell dd "of=/sdcard/Download/$SEED_FILE" >/dev/null
+python3 - "$CANARY" <<'PY' | adb_ shell dd "of=/sdcard/Download/$SEED_FILE" >/dev/null
 import json
 import sys
 import time
@@ -253,7 +253,7 @@ else
 fi
 
 group "Rejected import is visible and non-destructive"
-printf 'not-json\n' | adb shell dd "of=/sdcard/Download/$INVALID_FILE" >/dev/null
+printf 'not-json\n' | adb_ shell dd "of=/sdcard/Download/$INVALID_FILE" >/dev/null
 open_storage || bad "Settings remains reachable after the persisted import"
 tap_scrolling "Import…" "$OUT/invalid-action.xml" up || bad "Storage exposes import for the failure case"
 sleep 2

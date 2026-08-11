@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# shellcheck source=scripts/release/android-adb-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-adb-lib.sh"
+
 metadata_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/android-metadata.mjs"
 PKG="${PKG:-$(node "$metadata_tool" --field releaseApplicationId)}"
 OUT="${SMOKE_OUT:-artifacts/android-smoke}"
@@ -102,11 +105,11 @@ if [[ -z "$dump" ]]; then
     mkdir -p "$OUT"
     dump="$OUT/native-accessibility.xml"
     rm -f "$dump"
-    adb shell uiautomator dump /sdcard/copypaste-native-accessibility.xml >/dev/null 2>&1 || {
+    adb_ shell uiautomator dump /sdcard/copypaste-native-accessibility.xml >/dev/null 2>&1 || {
         echo "native accessibility observation unavailable: uiautomator dump failed" >&2
         exit 1
     }
-    adb pull /sdcard/copypaste-native-accessibility.xml "$dump" >/dev/null 2>&1 || {
+    adb_ pull /sdcard/copypaste-native-accessibility.xml "$dump" >/dev/null 2>&1 || {
         echo "native accessibility observation unavailable: could not retrieve uiautomator tree" >&2
         exit 1
     }

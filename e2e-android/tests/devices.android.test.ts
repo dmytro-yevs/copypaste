@@ -14,9 +14,15 @@ import {
   expectNoRawError,
   outerHtml,
 } from "../src/harness/leaks.js";
-import { gotoView, visibleText, waitFor } from "../src/harness/ui.js";
+import { count, gotoView, visibleText, waitFor } from "../src/harness/ui.js";
 
 const PAIRING = 'section[aria-labelledby="pair-device-heading"]';
+/** DMY-48: this leg asserted the string "Nearby devices", which the screen has
+ *  never rendered — its heading reads "Discovered on your network". The region
+ *  is anchored on the heading that labels it and asserted against the copy the
+ *  screen actually shows — see DevicesView.test.tsx, which pins both. */
+const DISCOVERED = 'section[aria-labelledby="discovered-devices-heading"]';
+const DISCOVERED_HEADING = "Discovered on your network";
 const PAIRING_CODE = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}\b/;
 const SECURITY_CODE = /\b[0-9A-F]{6}\b/;
 const ACTIONS = ["Show pairing code", "Scan pairing code"];
@@ -29,7 +35,11 @@ beforeAll(async () => {
   await waitFor(
     async () => {
       const text = await visibleText(app);
-      return text.includes("This device") && text.includes("Nearby devices");
+      return (
+        text.includes("This device") &&
+        text.includes(DISCOVERED_HEADING) &&
+        (await count(app, DISCOVERED)) === 1
+      );
     },
     "the Devices screen never settled",
   );
@@ -69,7 +79,8 @@ describe("the screen", () => {
     const text = await visibleText(app);
     expect(text).toContain("This device");
     expect(text).toContain("Paired devices");
-    expect(text).toContain("Nearby devices");
+    expect(text).toContain(DISCOVERED_HEADING);
+    expect(await count(app, DISCOVERED)).toBe(1);
     expectNoRawError(await outerHtml(app));
     expectNoFilesystemPath(await accessibleSurface(app));
   });
