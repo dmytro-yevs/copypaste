@@ -432,7 +432,9 @@ assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
         sleep 2
     done
 
-    if ! capture_android_png "$png" "$PKG"; then
+    local capture_serial=""
+    capture_serial="$(android_serial_candidate)" || true
+    if ! capture_android_png "$png" "$PKG" "$capture_serial"; then
         bad "a native PNG screenshot was captured" \
             "$(tail -n 12 "${png%.png}-screencap.log" | tr '\n' ' ')"
     fi

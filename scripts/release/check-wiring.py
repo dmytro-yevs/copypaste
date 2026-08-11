@@ -7,7 +7,7 @@
 # Everything here is a mistake that only a real run would otherwise report, one
 # round trip at a time: an artifact name that does not match its producer, an
 # output nothing declares, a job that reads a file no job it depends on wrote.
-import json, pathlib, re, sys, yaml
+import json, pathlib, re, shlex, sys, yaml
 
 SELF_TEST = "--self-test" in sys.argv
 
@@ -31,6 +31,43 @@ def steps(job):
 
 def as_list(v):
     return [v] if isinstance(v, str) else (v or [])
+
+
+def shell_words(source):
+    lexer = shlex.shlex(source, posix=True, punctuation_chars=";&|(){}")
+    lexer.commenters = "#"
+    lexer.whitespace_split = True
+    words = []
+    while (word := lexer.get_token()) != lexer.eof:
+        words.append((word, lexer.lineno))
+    return words
+
+
+def shell_function_body(source, name):
+    match = re.search(
+        r"^{}\(\)\s*\{{[^\n]*\n(.*?)^\}}".format(re.escape(name)),
+        source,
+        re.M | re.S,
+    )
+    return match.group(1) if match else ""
+
+
+def adb_guard_violations(source, allowed_raw_adb=0):
+    words = shell_words(source)
+    raw = [(line, word) for word, line in words if word == "adb"]
+    violations = []
+    if len(raw) != allowed_raw_adb:
+        violations.append("found {} raw adb tokens, expected {}".format(len(raw), allowed_raw_adb))
+    controls = {"", "(", ")", "{", "}", ";", "&&", "||", "|"}
+    for index, (word, line) in enumerate(words):
+        next_word = words[index + 1][0] if index + 1 < len(words) else ""
+        if word == "bounded_adb" and "(" not in next_word:
+            if next_word != "-s":
+                violations.append("line {} calls bounded_adb without -s".format(line))
+        if word == "targeted_adb" and "(" not in next_word:
+            if next_word in controls or next_word.startswith("-"):
+                violations.append("line {} calls targeted_adb without a serial".format(line))
+    return violations
 
 
 def closure(jobs, name):
@@ -528,6 +565,7 @@ embedded_cloud = pathlib.Path("crates/copypaste-ui/src-tauri/src/backend/embedde
 android_cloud = pathlib.Path("scripts/release/android-cloud-evidence.sh").read_text()
 android_ui_evidence = pathlib.Path("scripts/release/android-ui-evidence-lib.sh").read_text()
 android_screencap = pathlib.Path("scripts/release/android-screencap-lib.sh").read_text()
+android_release = pathlib.Path("scripts/release/android-smoke-release.sh").read_text()
 png_evidence = pathlib.Path("scripts/release/png_evidence.py").read_text()
 rec('cloud-evidence = ["copypaste-cloud/test-endpoints"]' in ui_cargo
     and 'cfg(feature = "cloud-evidence")' in embedded_cloud
@@ -539,11 +577,22 @@ rec("capture_android_png" in android_ui_evidence
     and "adb exec-out screencap" not in android_ui_evidence,
     "Android UI evidence reuses the fail-closed PNG capture helper",
     "storage and cloud evidence must reject zero-byte and malformed screenshots")
-rec("bounded_adb -s \"$1\" emu screenrecord screenshot" in android_screencap
-    and "run_with_android_screencap_timeout" in android_screencap
-    and "bounded_adb get-serialno" in android_screencap
+timeout_words = [word for word, _ in shell_words(shell_function_body(
+    android_screencap, "run_with_android_screencap_timeout"))]
+bounded_words = [word for word, _ in shell_words(shell_function_body(android_screencap, "bounded_adb"))]
+targeted_words = [word for word, _ in shell_words(shell_function_body(android_screencap, "targeted_adb"))]
+production_screencap = android_screencap.partition("android_screencap_self_test()")[0]
+adb_violations = adb_guard_violations(production_screencap, allowed_raw_adb=1)
+rec(timeout_words[:2] == ["timeout", "--foreground"] and timeout_words[-1:] == ["$@"]
+    and bounded_words == ["run_with_android_screencap_timeout", "adb", "$@"]
+    and ["bounded_adb", "-s", "$serial", "$@"] == targeted_words[-4:]
+    and not adb_violations,
+    "Android screenshot adb calls use the targeted bounded wrapper",
+    "; ".join(adb_violations) or "timeout/bounded/targeted wrapper composition changed")
+rec("verified_android_serial" in android_screencap
+    and "ANDROID_SERIAL" in android_screencap and "EMULATOR_PORT" in android_screencap
     and "append_bounded_adb_diagnostic" in android_screencap
-    and "route=adb-get-serialno" in android_screencap
+    and "route=trusted-serial" in android_screencap
     and '[[ "$serial" == emulator-* ]]' in android_screencap
     and "Screenshot_*.png" in android_screencap
     and 'for attempt in $(seq 1 "$ANDROID_SCREENCAP_ATTEMPTS")' in android_screencap
@@ -551,10 +600,15 @@ rec("bounded_adb -s \"$1\" emu screenrecord screenshot" in android_screencap
     and "failed PNG evidence validation; not retried" in android_screencap,
     "Android emulator evidence uses bounded host transport retries",
     "guest adb screencap can return zero-byte or black frames while the host framebuffer is painted")
-rec("adb exec-out screencap -p" in android_screencap
-    and "adb shell screencap -p" in android_screencap
-    and "cleanup_status" in android_screencap,
+rec("cleanup_status" in android_screencap and not adb_violations,
     "physical Android evidence retains bounded adb capture and fail-closed cleanup")
+receipt_body = android_release[android_release.rfind("if [[ $FAIL -eq 0 ]]"):]
+receipt_violations = adb_guard_violations(receipt_body)
+rec("verified_android_serial" in receipt_body
+    and "release-receipt-route.log" in receipt_body
+    and not receipt_violations,
+    "Android receipt classification revalidates the targeted bounded route",
+    "; ".join(receipt_violations) or "receipt classification bypasses serial verification")
 rec("Image.alpha_composite" in png_evidence
     and "MIN_VISIBLE_CONTENT_FRACTION = 0.01" in png_evidence
     and "ImageFilter.BoxBlur(1)" in png_evidence
@@ -681,4 +735,25 @@ if SELF_TEST:
         ("unparseable workflow YAML is rejected", rejects_bad_yaml()),
     ):
         emit(held, "self-test: {}".format(desc), "the helper did not behave as stated")
+
+    guarded = """run_with_android_screencap_timeout() {
+    timeout --foreground 15s "$@"
+}
+bounded_adb() {
+    run_with_android_screencap_timeout adb "$@"
+}
+targeted_adb() {
+    bounded_adb -s "$serial" "$@"
+}
+targeted_adb "$serial" shell dumpsys power
+"""
+    for desc, held in (
+        ("targeted bounded adb is accepted", not adb_guard_violations(guarded, 1)),
+        ("a raw adb call is rejected", bool(adb_guard_violations(guarded + "adb shell id\n", 1))),
+        ("an unbounded targeted adb call is rejected",
+         bool(adb_guard_violations(guarded + "bounded_adb shell id\n", 1))),
+        ("a targeted wrapper without a serial is rejected",
+         bool(adb_guard_violations(guarded + "targeted_adb -s shell id\n", 1))),
+    ):
+        emit(held, "self-test: {}".format(desc), "the adb structure detector did not reject the fixture")
 sys.exit(0)
