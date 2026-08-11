@@ -370,6 +370,7 @@ check "android-smoke.sh --self-test" ./scripts/release/android-smoke.sh --self-t
 # The release leg is a second entry point onto the same detectors. Running its
 # --self-test too is what catches the entry point itself being broken.
 check "android-smoke-release.sh --self-test" ./scripts/release/android-smoke-release.sh --self-test
+check "png_evidence.py --self-test" python3 scripts/release/png_evidence.py --self-test
 check "write-native-evidence.py --self-test" python3 scripts/release/write-native-evidence.py --self-test
 check "android native accessibility self-test" ./scripts/release/android-native-accessibility.sh --self-test
 # The content-picker scenario uses accessibility labels and DocumentsUI ids.

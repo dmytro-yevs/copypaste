@@ -26,49 +26,69 @@ append_android_capture_diagnostics() { # <log> <package>
 capture_emulator_console_png() { # <png> <serial> <log>
     local png="$1" serial="$2" log="$3" candidate="${1}.candidate"
     local validation="${1}.validation" console_log="${1}.console-log"
-    local console_dir generated="" status bytes=0 valid=no cleanup_status poll
+    local console_dir generated status bytes valid cleanup_status poll attempt reason
 
-    console_dir="$(mktemp -d "${TMPDIR:-/tmp}/copypaste-emulator-screencap.XXXXXX")" || {
-        printf 'console_capture_failure=host temporary directory unavailable\n' >> "$log"
-        return 1
-    }
-    if emulator_console_screenshot "$serial" "$console_dir" > "$console_log" 2>&1; then
-        status=0
-    else
-        status=$?
-    fi
-    for poll in $(seq 1 "$ANDROID_EMULATOR_SCREENCAP_POLLS"); do
-        generated="$(find "$console_dir" -maxdepth 1 -type f -name 'Screenshot_*.png' -print -quit)"
-        [[ -z "$generated" ]] || break
-        [[ "$poll" -eq "$ANDROID_EMULATOR_SCREENCAP_POLLS" ]] \
-            || sleep "$ANDROID_EMULATOR_SCREENCAP_POLL_DELAY"
-    done
-    if [[ -n "$generated" ]]; then
-        mv "$generated" "$candidate"
-        bytes="$(stat -c %s "$candidate")"
-        if python3 "$ANDROID_PNG_VALIDATOR" "$candidate" 2> "$validation"; then
-            valid=yes
+    for attempt in $(seq 1 "$ANDROID_SCREENCAP_ATTEMPTS"); do
+        generated=""; status=0; bytes=0; valid=no; reason=""
+        rm -f "$candidate" "$console_log" "$validation"
+        console_dir="$(mktemp -d "${TMPDIR:-/tmp}/copypaste-emulator-screencap.XXXXXX")" || {
+            printf 'capture_failure=emulator console host temporary directory unavailable\n' >> "$log"
+            return 1
+        }
+        if emulator_console_screenshot "$serial" "$console_dir" > "$console_log" 2>&1; then
+            status=0
+        else
+            status=$?
         fi
+        for poll in $(seq 1 "$ANDROID_EMULATOR_SCREENCAP_POLLS"); do
+            generated="$(find "$console_dir" -maxdepth 1 -type f -name 'Screenshot_*.png' -print -quit)"
+            [[ -z "$generated" ]] || break
+            [[ "$poll" -eq "$ANDROID_EMULATOR_SCREENCAP_POLLS" ]] \
+                || sleep "$ANDROID_EMULATOR_SCREENCAP_POLL_DELAY"
+        done
+        if [[ -n "$generated" ]]; then
+            mv "$generated" "$candidate"
+            bytes="$(stat -c %s "$candidate")"
+            if [[ "$bytes" -gt 0 ]] \
+                && python3 "$ANDROID_PNG_VALIDATOR" "$candidate" 2> "$validation"; then
+                valid=yes
+            fi
+        fi
+        if rm -rf -- "$console_dir"; then cleanup_status=0; else cleanup_status=$?; fi
+        printf 'transport=emulator-console attempt=%s serial=%s console_status=%s bytes=%s decodable_contentful_png=%s cleanup_status=%s\n' \
+            "$attempt" "$serial" "$status" "$bytes" "$valid" "$cleanup_status" >> "$log"
+        [[ ! -s "$console_log" ]] || sed 's/^/emulator console: /' "$console_log" >> "$log"
+        [[ ! -s "$validation" ]] || sed 's/^/PNG decoder: /' "$validation" >> "$log"
+        rm -f "$console_log" "$validation"
+        if [[ "$cleanup_status" -ne 0 ]]; then
+            reason="emulator console temporary cleanup failed"
+            break
+        fi
+        if [[ "$bytes" -gt 0 && "$valid" != yes ]]; then
+            reason="emulator console output failed PNG evidence validation; not retried"
+            break
+        fi
+        if [[ "$status" -eq 0 && "$bytes" -gt 0 && "$valid" == yes ]]; then
+            mv "$candidate" "$png"
+            return 0
+        fi
+        if [[ "$status" -ne 0 ]]; then
+            reason="emulator console command failed"
+        elif [[ -z "$generated" ]]; then
+            reason="emulator console produced no Screenshot_*.png"
+        else
+            reason="emulator console produced a zero-byte Screenshot_*.png"
+        fi
+        if [[ "$attempt" -lt "$ANDROID_SCREENCAP_ATTEMPTS" ]]; then
+            printf 'capture_retry=%s next_attempt=%s\n' "$reason" "$((attempt + 1))" >> "$log"
+            sleep "$ANDROID_SCREENCAP_RETRY_DELAY"
+        fi
+    done
+    if [[ "$attempt" -eq "$ANDROID_SCREENCAP_ATTEMPTS" \
+          && "$reason" != *"not retried"* && "$reason" != *"cleanup failed"* ]]; then
+        reason="${reason}; transport retries exhausted after ${ANDROID_SCREENCAP_ATTEMPTS} attempts"
     fi
-    if rm -rf -- "$console_dir"; then cleanup_status=0; else cleanup_status=$?; fi
-    printf 'transport=emulator-console serial=%s console_status=%s bytes=%s decodable_contentful_png=%s cleanup_status=%s\n' \
-        "$serial" "$status" "$bytes" "$valid" "$cleanup_status" >> "$log"
-    [[ ! -s "$console_log" ]] || sed 's/^/emulator console: /' "$console_log" >> "$log"
-    [[ ! -s "$validation" ]] || sed 's/^/PNG decoder: /' "$validation" >> "$log"
-    rm -f "$console_log" "$validation"
-    if [[ "$status" -eq 0 && "$bytes" -gt 0 && "$valid" == yes && "$cleanup_status" -eq 0 ]]; then
-        mv "$candidate" "$png"
-        return 0
-    fi
-    if [[ "$status" -ne 0 ]]; then
-        printf 'capture_failure=emulator console command failed\n' >> "$log"
-    elif [[ -z "$generated" ]]; then
-        printf 'capture_failure=emulator console produced no Screenshot_*.png\n' >> "$log"
-    elif [[ "$valid" != yes ]]; then
-        printf 'capture_failure=emulator console output failed PNG evidence validation\n' >> "$log"
-    else
-        printf 'capture_failure=emulator console temporary cleanup failed\n' >> "$log"
-    fi
+    printf 'capture_failure=%s\n' "$reason" >> "$log"
     [[ ! -s "$candidate" ]] || mv "$candidate" "${png}.failed"
     return 1
 }
@@ -197,14 +217,15 @@ capture_android_png() { # <png> <package>
 android_screencap_self_test() { # <temporary directory>
     local temp="$1" calls=0 fallback_calls=0 pulls=0 cleanups=0 console_calls=0
     local mode=retry remote_file=""
+    ANDROID_SCREENCAP_ATTEMPTS=3
     ANDROID_SCREENCAP_RETRY_DELAY=0
     ANDROID_EMULATOR_SCREENCAP_POLL_DELAY=0
     python3 - "$temp/good.png" "$temp/black.png" <<'PY'
 import sys
 from PIL import Image
 
-good = Image.new("RGB", (2, 1), "black")
-good.putpixel((1, 0), (255, 255, 255))
+good = Image.new("RGB", (2, 2), (220, 38, 38))
+good.putpixel((1, 1), (255, 255, 255))
 good.save(sys.argv[1])
 Image.new("RGB", (8, 8), "black").save(sys.argv[2])
 PY
@@ -271,7 +292,8 @@ PY
     }
     emulator_console_screenshot() {
         console_calls=$((console_calls + 1))
-        if [[ "$mode" == console_success ]]; then
+        if [[ "$mode" == console_success \
+              || "$mode" == console_retry && "$console_calls" -eq 2 ]]; then
             command cp "$temp/good.png" "$2/Screenshot_fixture.png"
             return 0
         fi
@@ -280,6 +302,10 @@ PY
             return 0
         fi
         if [[ "$mode" == console_empty ]]; then
+            return 0
+        fi
+        if [[ "$mode" == console_corrupt ]]; then
+            command head -c 24 "$temp/good.png" > "$2/Screenshot_fixture.png"
             return 0
         fi
         printf 'emulator console unavailable\n' >&2
@@ -298,6 +324,35 @@ PY
     fi
 
     calls=0 fallback_calls=0 pulls=0 cleanups=0 console_calls=0
+    mode=console_retry
+    capture_android_png "$temp/console-retried.png" "$PKG"
+    if [[ "$console_calls" -eq 2 && "$calls" -eq 0 && "$fallback_calls" -eq 0 \
+          && -s "$temp/console-retried.png" && ! -e "$temp/console-retried.png.failed" \
+          && "$(< "$temp/console-retried-screencap.log")" == *"attempt=1 serial=emulator-5554 console_status=1"* \
+          && "$(< "$temp/console-retried-screencap.log")" == *"capture_retry=emulator console command failed next_attempt=2"* \
+          && "$(< "$temp/console-retried-screencap.log")" == *"attempt=2 serial=emulator-5554 console_status=0"* ]]; then
+        ok "an emulator console transport failure is retried into a PNG"
+    else
+        bad "an emulator console transport failure is retried into a PNG" \
+            "console=$console_calls exec=$calls fallback=$fallback_calls; $(< "$temp/console-retried-screencap.log")"
+    fi
+
+    calls=0 fallback_calls=0 pulls=0 cleanups=0 console_calls=0
+    mode=console_failure
+    if capture_android_png "$temp/console-failed.png" "$PKG"; then
+        bad "emulator console transport retries are bounded"
+    elif [[ "$console_calls" -eq 3 && "$calls" -eq 0 && "$fallback_calls" -eq 0 \
+            && ! -e "$temp/console-failed.png" && ! -e "$temp/console-failed.png.failed" \
+            && "$(< "$temp/console-failed-screencap.log")" == *"attempt=3 serial=emulator-5554 console_status=1"* \
+            && "$(< "$temp/console-failed-screencap.log")" == *"transport retries exhausted after 3 attempts"* \
+            && "$(< "$temp/console-failed-screencap.log")" == *"mCurrentFocus=$PKG"* ]]; then
+        ok "emulator console transport retries exhaust with state diagnostics"
+    else
+        bad "emulator console transport retries exhaust with state diagnostics" \
+            "console=$console_calls exec=$calls fallback=$fallback_calls; $(< "$temp/console-failed-screencap.log")"
+    fi
+
+    calls=0 fallback_calls=0 pulls=0 cleanups=0 console_calls=0
     mode=console_black
     if capture_android_png "$temp/console-black.png" "$PKG"; then
         bad "a decodable black emulator frame is rejected"
@@ -311,13 +366,26 @@ PY
     fi
 
     calls=0 fallback_calls=0 pulls=0 cleanups=0 console_calls=0
+    mode=console_corrupt
+    if capture_android_png "$temp/console-corrupt.png" "$PKG"; then
+        bad "a corrupt emulator frame is rejected"
+    elif [[ "$console_calls" -eq 1 && "$calls" -eq 0 && "$fallback_calls" -eq 0 \
+            && ! -e "$temp/console-corrupt.png" && -s "$temp/console-corrupt.png.failed" \
+            && "$(< "$temp/console-corrupt-screencap.log")" == *"failed PNG evidence validation; not retried"* ]]; then
+        ok "a corrupt emulator frame is rejected without transport retry"
+    else
+        bad "a corrupt emulator frame is rejected without transport retry" \
+            "console=$console_calls exec=$calls fallback=$fallback_calls; $(< "$temp/console-corrupt-screencap.log")"
+    fi
+
+    calls=0 fallback_calls=0 pulls=0 cleanups=0 console_calls=0
     mode=console_empty
     if capture_android_png "$temp/console-empty.png" "$PKG"; then
         bad "an empty emulator-console capture is rejected"
-    elif [[ "$console_calls" -eq 1 && "$calls" -eq 0 && "$fallback_calls" -eq 0 \
+    elif [[ "$console_calls" -eq 3 && "$calls" -eq 0 && "$fallback_calls" -eq 0 \
             && ! -e "$temp/console-empty.png" && ! -e "$temp/console-empty.png.failed" \
             && "$(< "$temp/console-empty-screencap.log")" == *"console_status=0 bytes=0"* \
-            && "$(< "$temp/console-empty-screencap.log")" == *"produced no Screenshot_*.png"* \
+            && "$(< "$temp/console-empty-screencap.log")" == *"produced no Screenshot_*.png; transport retries exhausted after 3 attempts"* \
             && "$(< "$temp/console-empty-screencap.log")" == *"mCurrentFocus=$PKG"* ]]; then
         ok "an empty emulator-console capture is rejected with state diagnostics"
     else
