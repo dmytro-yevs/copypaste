@@ -124,13 +124,18 @@ def self_test():
         Image.new("RGB", (8, 8), "black").save(black)
         white = root / "white.png"
         Image.new("RGB", (8, 8), "white").save(white)
-        near_black = root / "near-black.png"
+        near_black = root / "near-black-checker.png"
         image = Image.new("RGB", (100, 100), "black")
-        ImageDraw.Draw(image).rectangle((0, 0, 99, 0), fill=(8, 8, 8))
+        for y in range(100):
+            for x in range(100):
+                value = 8 + ((x + y) % 2)
+                image.putpixel((x, y), (value, value, value))
         image.save(near_black)
-        sparse = root / "sparse.png"
+        sparse = root / "isolated-one-percent.png"
         image = Image.new("RGB", (100, 100), "black")
-        image.putpixel((99, 99), (255, 255, 255))
+        for y in range(5, 100, 10):
+            for x in range(5, 100, 10):
+                image.putpixel((x, y), (255, 255, 255))
         image.save(sparse)
         transparent = root / "transparent-hidden-rgb.png"
         image = Image.new("RGBA", (100, 100), (255, 0, 0, 0))
@@ -145,8 +150,8 @@ def self_test():
             "chunk-corrupt.png": bytes(chunk_corrupt),
             "black.png": black.read_bytes(),
             "white.png": white.read_bytes(),
-            "near-black.png": near_black.read_bytes(),
-            "sparse.png": sparse.read_bytes(),
+            "near-black-checker.png": near_black.read_bytes(),
+            "isolated-one-percent.png": sparse.read_bytes(),
             "transparent-hidden-rgb.png": transparent.read_bytes(),
             "good.png": good.read_bytes(),
         }
