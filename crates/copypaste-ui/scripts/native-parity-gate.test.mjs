@@ -14,11 +14,11 @@ const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "123456789";
 const run = promisify(execFile);
 const WINDOWS_STATES = new Map([
-  ["history", { state: "populated", name: "Clipboard history", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jPwPAfAAUAAf+mXJtdAAAAAElFTkSuQmCC" }],
-  ["capture", { state: "service-capture-status", name: "Background capture", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY2BoYPgPAAKEAYDVwPBdAAAAAElFTkSuQmCC" }],
-  ["devices", { state: "ready-to-pair", name: "Ready to pair", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY2Bg+P8fAAMCAf/Jsq3uAAAAAElFTkSuQmCC" }],
-  ["settings-and-service", { state: "appearance", name: "Theme", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j/n+E/AAf9Av6JUWP0AAAAAElFTkSuQmCC" }],
-  ["cloud-account", { state: "not-configured", name: "Not configured", png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY2hgaPgPAAQEAgCs4Z27AAAAAElFTkSuQmCC" }],
+  ["history", { state: "populated", name: "Clipboard history", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGO8o6bGwMDAxMDAoHzzJgARtAMB3qLZtwAAAABJRU5ErkJggg==" }],
+  ["capture", { state: "service-capture-status", name: "Background capture", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGMUW+zFwMDAAKEAEOcCCBlQdmcAAAAASUVORK5CYII=" }],
+  ["devices", { state: "ready-to-pair", name: "Ready to pair", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGNUTX7NwMDAxMDAcGuOCAAUogMBx1ZqEgAAAABJRU5ErkJggg==" }],
+  ["settings-and-service", { state: "appearance", name: "Theme", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGOcbPyKgYGBiYGBIX2mNgAWpQLf2/uWLgAAAABJRU5ErkJggg==" }],
+  ["cloud-account", { state: "not-configured", name: "Not configured", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPkmLiJgYGBiYGBQWz9XwARoQMR3PtkxgAAAABJRU5ErkJggg==" }],
 ]);
 const PNG = Buffer.from(WINDOWS_STATES.get("history").png, "base64");
 

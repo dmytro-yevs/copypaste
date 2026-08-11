@@ -542,17 +542,22 @@ rec("capture_android_png" in android_ui_evidence
 rec("adb -s \"$1\" emu screenrecord screenshot" in android_screencap
     and "timeout --foreground" in android_screencap
     and '[[ "$serial" == emulator-* ]]' in android_screencap
-    and "Screenshot_*.png" in android_screencap,
-    "Android emulator evidence uses the bounded host screenshot transport",
+    and "Screenshot_*.png" in android_screencap
+    and 'for attempt in $(seq 1 "$ANDROID_SCREENCAP_ATTEMPTS")' in android_screencap
+    and "transport retries exhausted" in android_screencap
+    and "failed PNG evidence validation; not retried" in android_screencap,
+    "Android emulator evidence uses bounded host transport retries",
     "guest adb screencap can return zero-byte or black frames while the host framebuffer is painted")
 rec("adb exec-out screencap -p" in android_screencap
     and "adb shell screencap -p" in android_screencap
     and "cleanup_status" in android_screencap,
     "physical Android evidence retains bounded adb capture and fail-closed cleanup")
-rec("contentless: uniform RGB frame" in png_evidence
-    and "contentless: black RGB frame" in png_evidence
+rec("Image.alpha_composite" in png_evidence
+    and "MIN_VISIBLE_CONTENT_FRACTION = 0.01" in png_evidence
+    and "visible content pixels" in png_evidence
+    and "transparent-hidden-rgb" in png_evidence
     and "a decodable black emulator frame is rejected" in android_screencap,
-    "native screenshot validation rejects decodable contentless frames")
+    "native screenshot validation rejects sparse and transparent contentless frames")
 
 if emu:
     debug_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))
@@ -600,6 +605,7 @@ SELF_TESTED = {
     "macos-cloud-evidence.sh": "its accessibility evidence and latency verdicts must be fixture-tested off macOS",
     "macos-native-evidence.sh": "its accessibility detector must be fixture-tested off macOS",
     "android-rungs.sh": NO_DEVICE,
+    "png_evidence.py": "its content threshold and alpha handling must be fixture-tested",
     "check-wiring.py": "the runner-image table is data, and nothing else would notice it going empty",
 }
 for name, why in SELF_TESTED.items():

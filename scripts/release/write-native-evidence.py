@@ -113,19 +113,29 @@ def main():
 
 def self_test():
     with tempfile.TemporaryDirectory() as directory:
-        from PIL import Image
+        from PIL import Image, ImageDraw
 
         root = pathlib.Path(directory)
         good = root / "good.png"
-        image = Image.new("RGB", (2, 1), "black")
-        image.putpixel((1, 0), (255, 255, 255))
+        image = Image.new("RGB", (2, 2), (220, 38, 38))
+        image.putpixel((1, 1), (255, 255, 255))
         image.save(good)
         black = root / "black.png"
         Image.new("RGB", (8, 8), "black").save(black)
+        white = root / "white.png"
+        Image.new("RGB", (8, 8), "white").save(white)
         near_black = root / "near-black.png"
-        image = Image.new("RGB", (2, 1), "black")
-        image.putpixel((1, 0), (8, 8, 8))
+        image = Image.new("RGB", (100, 100), "black")
+        ImageDraw.Draw(image).rectangle((0, 0, 99, 0), fill=(8, 8, 8))
         image.save(near_black)
+        sparse = root / "sparse.png"
+        image = Image.new("RGB", (100, 100), "black")
+        image.putpixel((99, 99), (255, 255, 255))
+        image.save(sparse)
+        transparent = root / "transparent-hidden-rgb.png"
+        image = Image.new("RGBA", (100, 100), (255, 0, 0, 0))
+        ImageDraw.Draw(image).rectangle((50, 0, 99, 99), fill=(0, 255, 0, 0))
+        image.save(transparent)
         chunk_corrupt = bytearray(good.read_bytes())
         chunk_corrupt[chunk_corrupt.index(b"IDAT") + 4] ^= 0xFF
         fixtures = {
@@ -134,7 +144,10 @@ def self_test():
             "signature-truncated.png": good.read_bytes()[:24],
             "chunk-corrupt.png": bytes(chunk_corrupt),
             "black.png": black.read_bytes(),
+            "white.png": white.read_bytes(),
             "near-black.png": near_black.read_bytes(),
+            "sparse.png": sparse.read_bytes(),
+            "transparent-hidden-rgb.png": transparent.read_bytes(),
             "good.png": good.read_bytes(),
         }
         common = [
