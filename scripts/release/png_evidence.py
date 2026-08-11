@@ -3,6 +3,10 @@ import pathlib
 import sys
 
 
+class ContentlessPngError(ValueError):
+    pass
+
+
 def validate_png(path):
     try:
         from PIL import Image
@@ -15,6 +19,17 @@ def validate_png(path):
             image.verify()
         with Image.open(path) as image:
             image.load()
+            extrema = image.convert("RGB").getextrema()
+            if all(low == high for low, high in extrema):
+                raise ContentlessPngError(
+                    f"screenshot artifact is contentless: uniform RGB frame {extrema}"
+                )
+            if max(high for _, high in extrema) <= 8:
+                raise ContentlessPngError(
+                    f"screenshot artifact is contentless: black RGB frame {extrema}"
+                )
+    except ContentlessPngError:
+        raise
     except (OSError, SyntaxError, ValueError) as error:
         raise ValueError("screenshot artifact must be a complete decodable PNG") from error
 
