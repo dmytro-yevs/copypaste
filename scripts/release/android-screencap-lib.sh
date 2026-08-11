@@ -308,7 +308,7 @@ good.save(sys.argv[1])
 Image.new("RGB", (8, 8), "black").save(sys.argv[2])
 PY
     if [[ "$(ANDROID_SERIAL=device-123 EMULATOR_PORT=5554 android_serial_candidate)" == device-123 \
-          && "$(ANDROID_SERIAL= EMULATOR_PORT=5556 android_serial_candidate)" == emulator-5556 ]] \
+          && "$(ANDROID_SERIAL='' EMULATOR_PORT=5556 android_serial_candidate)" == emulator-5556 ]] \
        && ! (unset ANDROID_SERIAL EMULATOR_PORT; android_serial_candidate); then
         ok "the caller boundary resolves only an explicit device or runner emulator"
     else
