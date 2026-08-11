@@ -3,7 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 
-import { useHistory } from "@/hooks/useHistory";
+import { useHistory, useHistorySearch } from "@/hooks/useHistory";
 import { useOpenAtLogin } from "@/hooks/useOpenAtLogin";
 import { PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import {
@@ -94,6 +94,19 @@ function mountedOpenAtLogin(client = testClient()) {
   );
 }
 
+function mountedSearch(query: string, client = testClient()) {
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return renderHook(
+    () => {
+      usePush();
+      return useHistorySearch(query);
+    },
+    { wrapper: Wrapper },
+  );
+}
+
 beforeEach(() => {
   handlers.clear();
   listItems.mockReset();
@@ -119,6 +132,22 @@ describe("native launch-at-login changes", () => {
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("active search convergence", () => {
+  it("re-reads the active server search after an out-of-band item change", async () => {
+    let found = items(2);
+    searchItems.mockImplementation(async () => page(found));
+
+    const { result } = mountedSearch("needle");
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(2));
+
+    found = found.slice(1);
+    emitChanged({ topic: "items", item_count: 1 });
+
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(1));
+    expect(searchItems).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("manifest 05 §5.4: a remote change three pages down still reaches the window", () => {
   it("shows a remote delete of a page-3 item with no scroll and no refocus", async () => {

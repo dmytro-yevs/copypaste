@@ -27,8 +27,11 @@ beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "Devices");
   await waitFor(
-    async () => (await visibleText(app)).includes("This device"),
-    "the Devices screen never rendered",
+    async () => {
+      const text = await visibleText(app);
+      return text.includes("This device") && text.includes("Nearby devices");
+    },
+    "the Devices screen never settled",
   );
 }, 180_000);
 

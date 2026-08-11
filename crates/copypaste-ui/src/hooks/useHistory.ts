@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import {
   keepPreviousData,
+  type QueryClient,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -41,6 +42,13 @@ export const HISTORY_HEAD_KEY = [...HISTORY_KEY, "head"] as const;
 
 export const historyKey = (query: string) =>
   [...HISTORY_KEY, "pages", query] as const;
+
+export async function invalidateHistoryQueries(qc: QueryClient): Promise<void> {
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: HISTORY_KEY }),
+    qc.invalidateQueries({ queryKey: HISTORY_SEARCH_KEY }),
+  ]);
+}
 
 export interface History {
   readonly items: readonly Item[];
@@ -216,9 +224,9 @@ export function useCopy() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (item: Item) => copyItem(item.id),
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success(t("history.toast.copied"), { duration: 2500 });
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      await invalidateHistoryQueries(qc);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
@@ -229,9 +237,7 @@ export function usePin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (item: Item) => setPinned(item.id, !item.pinned),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
-    },
+    onSuccess: () => invalidateHistoryQueries(qc),
     onError: (raw) => toast.error(toFriendly(raw)),
   });
 }
@@ -242,11 +248,13 @@ export function useClearHistory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => deleteAll(),
-    onSuccess: (removed) => {
+    onSuccess: async (removed) => {
       toast.success(t("history.toast.cleared", { count: removed }));
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
-      void qc.invalidateQueries({ queryKey: STATUS_KEY });
       qc.removeQueries({ queryKey: IMAGE_PREVIEW_KEY });
+      await Promise.all([
+        invalidateHistoryQueries(qc),
+        qc.invalidateQueries({ queryKey: STATUS_KEY }),
+      ]);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
@@ -303,9 +311,9 @@ export function useBulkPin() {
   return useMutation({
     mutationFn: ({ items, pinned }: { items: readonly Item[]; pinned: boolean }) =>
       runBulk(items, (item) => setPinned(item.id, pinned)),
-    onSuccess: (outcome, { pinned }) => {
+    onSuccess: async (outcome, { pinned }) => {
       report(pinned ? "pinned" : "unpinned", outcome);
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      await invalidateHistoryQueries(qc);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
@@ -316,13 +324,15 @@ export function useBulkDelete() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (items: readonly Item[]) => runBulk(items, (item) => deleteItem(item.id)),
-    onSuccess: (outcome, items) => {
+    onSuccess: async (outcome, items) => {
       report("deleted", outcome);
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
-      void qc.invalidateQueries({ queryKey: STATUS_KEY });
       for (const item of items) {
         qc.removeQueries({ queryKey: imagePreviewKey(item.id) });
       }
+      await Promise.all([
+        invalidateHistoryQueries(qc),
+        qc.invalidateQueries({ queryKey: STATUS_KEY }),
+      ]);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
@@ -332,9 +342,7 @@ export function useReorderPinned() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (ids: readonly string[]) => reorderPinned(ids),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
-    },
+    onSuccess: () => invalidateHistoryQueries(qc),
     onError: (raw) => toast.error(toFriendly(raw)),
   });
 }
