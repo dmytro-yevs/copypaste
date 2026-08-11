@@ -15,6 +15,25 @@ primary = next((node for node in root.iter("node") if node.get("text") == "Prima
 primary_nodes = {id(node) for node in primary.iter()} if primary is not None else set()
 primary_bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", primary.get("bounds", "")) if primary is not None else None
 primary_top = int(primary_bounds.group(2)) if primary_bounds else None
+
+# Auto-dismiss pauses while a pointer is inside the toaster (06-ui-behaviour
+# §3.7), and on a touch device a tap is a pointer that never leaves: one
+# authored toast then sits over the next control for the rest of the run. The
+# release gate tapped `Sign out` through the sync summary and read the
+# unchanged pane as an app that never signed out. A covered control is not
+# actionable; the toast's own close button still is.
+parents = {id(child): node for node in root.iter("node") for child in node}
+feedback = [parents[id(node)] for node in root.iter("node") if id(node) in parents
+            and any(node.get(name, "") == "Close toast" for name in ("text", "content-desc"))]
+feedback_nodes = {id(item) for parent in feedback for item in parent.iter()}
+feedback_bounds = [re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", item.get("bounds", ""))
+                   for parent in feedback for item in parent.iter()]
+feedback_rects = [tuple(map(int, found.groups())) for found in feedback_bounds if found]
+
+def covered(x, y):
+    return any(left <= x <= right and top <= y <= bottom
+               for left, top, right, bottom in feedback_rects)
+
 candidates = []
 for node in root.iter("node"):
     attrs = [node.get(name, "") for name in ("text", "content-desc", "resource-id", "hint")]
@@ -31,6 +50,8 @@ for node in root.iter("node"):
         if right - left < 8 or bottom - top < 8:
             continue
         if primary_top is not None and id(node) not in primary_nodes and (top + bottom) // 2 >= primary_top:
+            continue
+        if action and id(node) not in feedback_nodes and covered((left + right) // 2, (top + bottom) // 2):
             continue
         candidates.append((not exact, not actionable, points, attrs))
 if candidates:
@@ -82,6 +103,22 @@ wait_authored_feedback() { # <selector> <artifact> [timeout] [dump function]
     return 1
 }
 
+# Only when a toast is what stands between a control and the tap: dismissing
+# feedback the caller has not asserted yet would destroy the evidence its next
+# assertion reads. Prints the authored close control's centre.
+blocking_feedback_center() { # <artifact> <selector>
+    [[ -n "$(node_center "$1" "$2")" ]] || return 1
+    [[ -z "$(action_center "$1" "$2")" ]] || return 1
+    action_center "$1" "Close toast"
+}
+
+dismiss_blocking_feedback() { # <artifact> <selector>
+    local point
+    point="$(blocking_feedback_center "$1" "$2")" || return 1
+    [[ -n "$point" ]] || return 1
+    sh_ input tap $point >/dev/null
+}
+
 PREPARED_ACTION_POINT=""
 
 prepare_action() { # <selector> <artifact> [timeout]
@@ -91,6 +128,7 @@ prepare_action() { # <selector> <artifact> [timeout]
         point=""
         if dump_hierarchy "$artifact"; then
             point="$(action_center "$artifact" "$selector")"
+            [[ -n "$point" ]] || dismiss_blocking_feedback "$artifact" "$selector" || true
         fi
         [[ -n "$point" ]] && break
         sleep 1
@@ -128,8 +166,9 @@ find_scrolling() { # <selector> <artifact> <up|down> [any|action] [dump fn] [scr
     local selector="$1" artifact="$2" direction="$3" mode="${4:-any}"
     local dump="${5:-dump_hierarchy}" scroll="${6:-scroll_content}"
     for _ in $(seq 1 8); do
-        if "$dump" "$artifact" && [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]]; then
-            return 0
+        if "$dump" "$artifact"; then
+            [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]] && return 0
+            [[ "$mode" == action ]] && dismiss_blocking_feedback "$artifact" "$selector"
         fi
         "$scroll" "$direction"
         sleep 1
@@ -145,8 +184,9 @@ wait_selector_scrolling() { # <selector> <artifact> <up|down> [timeout] [any|act
     local mode="${5:-any}" dump="${6:-dump_hierarchy}" scroll="${7:-scroll_content}"
     local started="$SECONDS"
     while (( SECONDS - started < timeout )); do
-        if "$dump" "$artifact" && [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]]; then
-            return 0
+        if "$dump" "$artifact"; then
+            [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]] && return 0
+            [[ "$mode" == action ]] && dismiss_blocking_feedback "$artifact" "$selector"
         fi
         "$scroll" "$direction"
         sleep 1
@@ -233,6 +273,39 @@ android_ui_scroll_self_test() { # <temp>
         || ok "an absent authored toast is not reported"
 }
 
+android_ui_feedback_self_test() { # <temp>
+    local temp="$1" nav='<node text="Primary" bounds="[0,570][320,640]"/>'
+    local row='<node text="Sign out" bounds="[200,538][296,582]" enabled="true" clickable="true"/>'
+    # The release geometry this reproduces: the sync summary from the previous
+    # action still on screen, its card covering the sign-out button's centre.
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav$row<node text=\"Notifications alt+T\" bounds=\"[12,572][308,572]\"><node text=\"Close toast Cloud sync finished\" bounds=\"[12,515][308,572]\"><node text=\"Close toast\" bounds=\"[275,533][295,554]\" enabled=\"true\" clickable=\"true\"/><node text=\"Cloud sync finished: 0 uploaded, 1 downloaded, 1 skipped\" bounds=\"[49,524][263,563]\"/></node></node></node></hierarchy>" > "$temp/covered.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav$row</node></hierarchy>" > "$temp/uncovered.xml"
+
+    [[ -z "$(action_center "$temp/covered.xml" "Sign out")" ]] \
+        && ok "an action under an authored toast is not tappable" \
+        || bad "an action under an authored toast is not tappable"
+    [[ -n "$(node_center "$temp/covered.xml" "Sign out")" ]] \
+        && ok "a covered action is still reported as rendered" \
+        || bad "a covered action is still reported as rendered"
+    [[ "$(action_center "$temp/covered.xml" "Close toast")" == "285 543" ]] \
+        && ok "the authored close control stays tappable inside the toast" \
+        || bad "the authored close control stays tappable inside the toast" \
+               "$(action_center "$temp/covered.xml" "Close toast")"
+    [[ "$(blocking_feedback_center "$temp/covered.xml" "Sign out")" == "285 543" ]] \
+        && ok "a blocked action resolves the toast to dismiss" \
+        || bad "a blocked action resolves the toast to dismiss"
+    [[ "$(action_center "$temp/uncovered.xml" "Sign out")" == "248 560" ]] \
+        && ok "the same action is tappable once the toast is gone" \
+        || bad "the same action is tappable once the toast is gone" \
+               "$(action_center "$temp/uncovered.xml" "Sign out")"
+    blocking_feedback_center "$temp/uncovered.xml" "Sign out" >/dev/null \
+        && bad "a reachable action never dismisses authored feedback" \
+        || ok "a reachable action never dismisses authored feedback"
+    blocking_feedback_center "$temp/covered.xml" "Restore…" >/dev/null \
+        && bad "an absent action never dismisses authored feedback" \
+        || ok "an absent action never dismisses authored feedback"
+}
+
 android_ui_self_test() {
     local temp point
     temp="$(mktemp -d)"
@@ -256,6 +329,7 @@ android_ui_self_test() {
     [[ "$point" == "230 140" ]] && ok "an exact DocumentsUI row label resolves its action" || bad "an exact DocumentsUI row label resolves its action" "$point"
     [[ -z "$(node_center "$temp/ui.xml" "Import history")" ]] && ok "a missing selector is not reported as present" || bad "a missing selector is not reported as present"
     android_ui_scroll_self_test "$temp"
+    android_ui_feedback_self_test "$temp"
     android_screencap_self_test "$temp"
     android_adb_self_test
     rm -rf "$temp"
