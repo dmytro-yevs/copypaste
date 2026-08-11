@@ -7,20 +7,45 @@ ANDROID_EMULATOR_SCREENCAP_POLLS="${ANDROID_EMULATOR_SCREENCAP_POLLS:-20}"
 ANDROID_EMULATOR_SCREENCAP_POLL_DELAY="${ANDROID_EMULATOR_SCREENCAP_POLL_DELAY:-0.25}"
 ANDROID_PNG_VALIDATOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/png_evidence.py"
 
-emulator_console_screenshot() { # <serial> <host directory>
-    timeout --foreground "${ANDROID_EMULATOR_SCREENCAP_TIMEOUT}s" \
-        adb -s "$1" emu screenrecord screenshot "$2"
+run_with_android_screencap_timeout() {
+    timeout --foreground "${ANDROID_EMULATOR_SCREENCAP_TIMEOUT}s" "$@"
 }
 
-append_android_capture_diagnostics() { # <log> <package>
-    {
-        printf '%s\n' '== adb state' "$(adb get-state 2>&1 || true)"
-        printf '%s\n' '== power/display' "$(adb shell dumpsys power 2>&1 || true)" \
-            "$(adb shell dumpsys display 2>&1 || true)"
-        printf '%s\n' '== focus' \
-            "$(adb shell dumpsys window 2>&1 | grep -E 'mCurrentFocus|mFocusedApp' | head -n 4 || true)"
-        printf 'expected_package=%s\n' "$2"
-    } >> "$1"
+bounded_adb() {
+    run_with_android_screencap_timeout adb "$@"
+}
+
+emulator_console_screenshot() { # <serial> <host directory>
+    bounded_adb -s "$1" emu screenrecord screenshot "$2"
+}
+
+append_bounded_adb_diagnostic() { # <log> <label> <serial> <filter> <adb args...>
+    local log="$1" label="$2" serial="$3" filter="$4" output status target=()
+    shift 4
+    [[ -z "$serial" ]] || target=(-s "$serial")
+    if output="$(bounded_adb "${target[@]}" "$@" 2>&1)"; then
+        status=0
+    else
+        status=$?
+    fi
+    printf '== %s adb_status=%s timeout=%ss serial=%s\n' \
+        "$label" "$status" "$ANDROID_EMULATOR_SCREENCAP_TIMEOUT" "${serial:-default}" >> "$log"
+    if [[ "$status" -eq 124 ]]; then
+        printf 'adb diagnostic timed out after %ss\n' "$ANDROID_EMULATOR_SCREENCAP_TIMEOUT" >> "$log"
+    fi
+    if [[ -n "$output" && "$filter" == focus ]]; then
+        printf '%s\n' "$output" | grep -E 'mCurrentFocus|mFocusedApp' | head -n 4 >> "$log" || true
+    elif [[ -n "$output" ]]; then
+        printf '%s\n' "$output" >> "$log"
+    fi
+}
+
+append_android_capture_diagnostics() { # <log> <package> <serial>
+    append_bounded_adb_diagnostic "$1" "adb state" "$3" all get-state
+    append_bounded_adb_diagnostic "$1" "power" "$3" all shell dumpsys power
+    append_bounded_adb_diagnostic "$1" "display" "$3" all shell dumpsys display
+    append_bounded_adb_diagnostic "$1" "focus" "$3" focus shell dumpsys window
+    printf 'expected_package=%s\n' "$2" >> "$1"
 }
 
 capture_emulator_console_png() { # <png> <serial> <log>
@@ -98,22 +123,36 @@ capture_android_png() { # <png> <package>
     local candidate="${png}.candidate" stderr="${png}.stderr"
     local validation="${png}.validation" fallback_log="${png}.fallback"
     local pull_log="${png}.pull" cleanup_log="${png}.cleanup"
+    local route_log="${png}.route"
     local remote="/data/local/tmp/copypaste-screencap-$$-${RANDOM}.png"
-    local attempt status bytes valid fallback_status pull_status cleanup_status serial
+    local attempt status bytes valid fallback_status pull_status cleanup_status serial route_status
 
     : > "$log"
     rm -f "$png" "$candidate" "$stderr" "$validation" "$fallback_log" \
-        "$pull_log" "$cleanup_log" "${png}.failed"
+        "$pull_log" "$cleanup_log" "$route_log" "${png}.failed"
     if ! python3 -c 'from PIL import Image' 2>> "$log"; then
         printf 'PNG validation unavailable: install requirements-ci.txt\n' >> "$log"
         return 1
     fi
 
-    serial="$(adb get-serialno 2>> "$log" | tr -d '\r')"
+    if bounded_adb get-serialno > "$route_log" 2>> "$log"; then
+        route_status=0
+    else
+        route_status=$?
+    fi
+    serial="$(tr -d '\r\n' < "$route_log")"
+    printf 'route=adb-get-serialno status=%s timeout=%ss serial=%s\n' \
+        "$route_status" "$ANDROID_EMULATOR_SCREENCAP_TIMEOUT" "${serial:-unresolved}" >> "$log"
+    rm -f "$route_log"
+    if [[ "$route_status" -ne 0 || -z "$serial" ]]; then
+        printf 'capture_failure=adb route selection failed or timed out; screenshot not attempted\n' >> "$log"
+        append_android_capture_diagnostics "$log" "$package" "$serial"
+        return 1
+    fi
     if [[ "$serial" == emulator-* ]]; then
         capture_emulator_console_png "$png" "$serial" "$log" || status=$?
         status="${status:-0}"
-        append_android_capture_diagnostics "$log" "$package"
+        append_android_capture_diagnostics "$log" "$package" "$serial"
         return "$status"
     fi
 
@@ -199,7 +238,7 @@ capture_android_png() { # <png> <package>
         fi
     fi
 
-    append_android_capture_diagnostics "$log" "$package"
+    append_android_capture_diagnostics "$log" "$package" "$serial"
     rm -f "$stderr" "$validation" "$fallback_log" "$pull_log" "$cleanup_log"
 
     if [[ -s "$png" ]]; then
@@ -229,6 +268,94 @@ good.putpixel((1, 1), (255, 255, 255))
 good.save(sys.argv[1])
 Image.new("RGB", (8, 8), "black").save(sys.argv[2])
 PY
+    mkdir -p "$temp/bounded-adb-bin"
+    command cat > "$temp/bounded-adb-bin/adb" <<'SH'
+#!/usr/bin/env bash
+if [[ "$ANDROID_TIMEOUT_FIXTURE_MODE" == route-hang ]]; then
+    while :; do :; done
+elif [[ "$*" == get-serialno ]]; then
+    printf 'emulator-5554\n'
+elif [[ "$*" == *"emu screenrecord screenshot"* ]]; then
+    if [[ "$ANDROID_TIMEOUT_FIXTURE_MODE" == diagnostic-success ]]; then
+        command cp "$ANDROID_TIMEOUT_FIXTURE_GOOD" "${!#}/Screenshot_fixture.png"
+    else
+        printf 'emulator console unavailable\n' >&2
+        exit 1
+    fi
+else
+    while :; do :; done
+fi
+SH
+    chmod +x "$temp/bounded-adb-bin/adb"
+
+    local started elapsed
+    started="$(date +%s%3N)"
+    if (export PATH="$temp/bounded-adb-bin:$PATH"
+        export ANDROID_TIMEOUT_FIXTURE_MODE=route-hang
+        export ANDROID_TIMEOUT_FIXTURE_GOOD="$temp/good.png"
+        export ANDROID_EMULATOR_SCREENCAP_TIMEOUT=0.1
+        capture_android_png "$temp/route-timeout.png" "$PKG"); then
+        bad "a hung adb route selection fails closed"
+    else
+        elapsed=$(( $(date +%s%3N) - started ))
+        if [[ "$elapsed" -lt 3000 && ! -e "$temp/route-timeout.png" \
+              && ! -e "$temp/route-timeout.png.failed" \
+              && "$(< "$temp/route-timeout-screencap.log")" == *"route=adb-get-serialno status=124"* \
+              && "$(< "$temp/route-timeout-screencap.log")" == *"screenshot not attempted"* \
+              && "$(< "$temp/route-timeout-screencap.log")" == *"adb diagnostic timed out after 0.1s"* ]]; then
+            ok "a hung adb route selection fails closed within the command budget"
+        else
+            bad "a hung adb route selection fails closed within the command budget" \
+                "elapsed=${elapsed}ms; $(< "$temp/route-timeout-screencap.log")"
+        fi
+    fi
+
+    started="$(date +%s%3N)"
+    if (export PATH="$temp/bounded-adb-bin:$PATH"
+        export ANDROID_TIMEOUT_FIXTURE_MODE=diagnostic-success
+        export ANDROID_TIMEOUT_FIXTURE_GOOD="$temp/good.png"
+        export ANDROID_EMULATOR_SCREENCAP_TIMEOUT=0.1
+        export ANDROID_EMULATOR_SCREENCAP_POLL_DELAY=0
+        capture_android_png "$temp/diagnostic-timeout-success.png" "$PKG"); then
+        elapsed=$(( $(date +%s%3N) - started ))
+        if [[ "$elapsed" -lt 3000 && -s "$temp/diagnostic-timeout-success.png" \
+              && "$(< "$temp/diagnostic-timeout-success-screencap.log")" == *"adb_status=124 timeout=0.1s serial=emulator-5554"* \
+              && "$(< "$temp/diagnostic-timeout-success-screencap.log")" == *"expected_package=$PKG"* ]]; then
+            ok "hung success diagnostics return with serial-targeted timeout evidence"
+        else
+            bad "hung success diagnostics return with serial-targeted timeout evidence" \
+                "elapsed=${elapsed}ms; $(< "$temp/diagnostic-timeout-success-screencap.log")"
+        fi
+    else
+        bad "hung success diagnostics return with serial-targeted timeout evidence" \
+            "$(< "$temp/diagnostic-timeout-success-screencap.log")"
+    fi
+
+    started="$(date +%s%3N)"
+    if (export PATH="$temp/bounded-adb-bin:$PATH"
+        export ANDROID_TIMEOUT_FIXTURE_MODE=diagnostic-failure
+        export ANDROID_TIMEOUT_FIXTURE_GOOD="$temp/good.png"
+        export ANDROID_EMULATOR_SCREENCAP_TIMEOUT=0.1
+        export ANDROID_SCREENCAP_RETRY_DELAY=0
+        capture_android_png "$temp/diagnostic-timeout-failure.png" "$PKG"); then
+        bad "hung failure diagnostics return without publishing evidence"
+    else
+        elapsed=$(( $(date +%s%3N) - started ))
+        if [[ "$elapsed" -lt 10000 && ! -e "$temp/diagnostic-timeout-failure.png" \
+              && ! -e "$temp/diagnostic-timeout-failure.png.failed" \
+              && "$(< "$temp/diagnostic-timeout-failure-screencap.log")" == *"transport retries exhausted after 3 attempts"* \
+              && "$(< "$temp/diagnostic-timeout-failure-screencap.log")" == *"adb_status=124 timeout=0.1s serial=emulator-5554"* ]]; then
+            ok "hung failure diagnostics return without publishing evidence"
+        else
+            bad "hung failure diagnostics return without publishing evidence" \
+                "elapsed=${elapsed}ms; $(< "$temp/diagnostic-timeout-failure-screencap.log")"
+        fi
+    fi
+
+    timeout() {
+        shift 2
+        "$@"
+    }
     adb() {
         if [[ "${1:-}" == "get-serialno" ]]; then
             [[ "$mode" == console_* ]] && printf 'emulator-5554\n' || printf 'device-123\n'
