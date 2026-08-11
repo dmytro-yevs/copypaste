@@ -11,6 +11,7 @@ set -uo pipefail
 
 MAIN="$PKG/$APP_NAMESPACE.MainActivity"
 export WAIT_SECS="${TRANSFER_WAIT_SECS:-45}"
+TRANSFER_READY_POLL_SECONDS="${TRANSFER_READY_POLL_SECONDS:-1}"
 REQUIRE_RUN_AS="${TRANSFER_REQUIRE_RUN_AS:-0}"
 CANARY="CopyPasteStorageTransfer$(date +%s)$RANDOM"
 SEED_FILE="copypaste-seed.json"
@@ -37,12 +38,46 @@ open_storage() {
     wait_selector "Export…|Import…" "$OUT/settings-storage-ready.xml" || return 1
 }
 
+history_toolbar_holds() { # <artifact>
+    [[ -n "$(node_center_exact "$1" "Select multiple items")" ]]
+}
+
+history_unfiltered_holds() { # <artifact>
+    history_toolbar_holds "$1" \
+        && [[ -z "$(node_center_exact "$1" "Clear search")" ]]
+}
+
+cleared_history_holds() { # <artifact>
+    history_unfiltered_holds "$1" \
+        && [[ -n "$(node_center_exact "$1" "Nothing copied yet")" ]] \
+        && [[ -n "$(node_center_exact "$1" "0 items")" ]] \
+        && [[ -z "$(node_center_exact "$1" "$CANARY")" ]]
+}
+
+wait_history_state() { # <artifact> <predicate> [timeout] [dump function]
+    local artifact="$1" predicate="$2" timeout="${3:-$WAIT_SECS}" dump="${4:-dump_hierarchy}" attempt=0
+    while (( attempt < timeout )); do
+        if "$dump" "$artifact" && "$predicate" "$artifact"; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        (( attempt < timeout )) && sleep "$TRANSFER_READY_POLL_SECONDS"
+    done
+    return 1
+}
+
+wait_cleared_history() { # <artifact> [timeout] [dump function]
+    local artifact="$1" timeout="${2:-$WAIT_SECS}" dump="${3:-dump_hierarchy}"
+    wait_history_state "$artifact" cleared_history_holds "$timeout" "$dump"
+}
+
 open_history() { # <artifact>
     local artifact="$1" point
     tap_selector "History" "$artifact" || return 1
-    wait_selector "Select multiple items" "$artifact" || return 1
+    wait_history_state "$artifact" history_toolbar_holds || return 1
     point="$(action_center "$artifact" "Clear search")"
     [[ -z "$point" ]] || sh_ input tap $point >/dev/null
+    wait_history_state "$artifact" history_unfiltered_holds || return 1
 }
 
 capture_screen() { # <name>
@@ -57,9 +92,40 @@ capture_screen() { # <name>
 }
 
 self_test_transfer() {
+    local temp CANARY="CopyPasteStorageTransferFixture"
     android_ui_self_test
+    temp="$(mktemp -d)"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history\" bounds=\"[0,0][200,40]\"/><node content-desc=\"Select multiple items\" clickable=\"true\" bounds=\"[240,0][280,40]\"/><node text=\"0 items\" bounds=\"[280,0][340,40]\"/><node text=\"$CANARY\" bounds=\"[0,50][300,90]\"/></hierarchy>" > "$temp/delayed.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
+    cleared_history_holds "$temp/filtered.xml" \
+        && bad "a retained zero-result search cannot prove cleared history" \
+        || ok "a retained zero-result search cannot prove cleared history"
+    cleared_history_holds "$temp/delayed.xml" \
+        && bad "a stale canary cannot prove unfiltered convergence" \
+        || ok "a stale canary cannot prove unfiltered convergence"
+    cleared_history_holds "$temp/ready.xml" \
+        && ok "an unfiltered empty history without the canary is ready" \
+        || bad "an unfiltered empty history without the canary is ready"
+    TRANSFER_FIXTURES=("$temp/filtered.xml" "$temp/delayed.xml" "$temp/ready.xml")
+    TRANSFER_FIXTURE_INDEX=0
+    TRANSFER_READY_POLL_SECONDS=0
+    wait_cleared_history "$temp/observed.xml" 3 transfer_fixture_dump \
+        && [[ "$TRANSFER_FIXTURE_INDEX" == 3 ]] \
+        && ok "clear readiness waits through retained search and delayed convergence" \
+        || bad "clear readiness waits through retained search and delayed convergence"
+    rm -rf "$temp"
     printf '\n%d transfer selector tests passed, %d failed\n' "$PASS" "$FAIL"
     [[ $FAIL -eq 0 ]]
+}
+
+TRANSFER_FIXTURES=()
+TRANSFER_FIXTURE_INDEX=0
+transfer_fixture_dump() { # <artifact>
+    local source="${TRANSFER_FIXTURES[$TRANSFER_FIXTURE_INDEX]:-}"
+    [[ -n "$source" ]] || return 1
+    cp "$source" "$1"
+    TRANSFER_FIXTURE_INDEX=$((TRANSFER_FIXTURE_INDEX + 1))
 }
 
 if [[ "${1:-}" == "--self-test" ]]; then
@@ -139,11 +205,10 @@ start_accessibility_events "$OUT/clear-events.log" || bad "clear accessibility e
 tap_prepared_action || bad "the clear confirmation remains actionable"
 wait_accessibility_event "Cleared" "$OUT/clear-events.log" 15 && ok "clear reports user-visible success" || bad "clear reports user-visible success"
 open_history "$OUT/clear-history-nav.xml" || bad "History is reachable after clearing"
-wait_selector "0 items" "$OUT/clear-history-ready.xml" 30 || bad "cleared history settles at zero items"
-if dump_hierarchy "$OUT/cleared-history.xml" && [[ -z "$(node_center "$OUT/cleared-history.xml" "$CANARY")" ]]; then
-    ok "the exported canary is absent before import"
+if wait_cleared_history "$OUT/cleared-history.xml" 30; then
+    ok "cleared unfiltered history settles without the exported canary"
 else
-    bad "the exported canary is absent before import" "the clear did not produce an inspectable history without it"
+    bad "cleared unfiltered history settles without the exported canary" "search state, empty history, total count, and canary absence did not converge together"
 fi
 open_storage || bad "Storage is reachable for import"
 tap_scrolling "Import…" "$OUT/import-action.xml" down || bad "Storage exposes the import action"
