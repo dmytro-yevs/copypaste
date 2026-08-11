@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 selectors = [part.casefold() for part in sys.argv[2].split("|")]
 action = sys.argv[3] == "action"
+exact_only = action or sys.argv[3] == "exact"
 primary = next((node for node in root.iter("node") if node.get("text") == "Primary"), None)
 primary_nodes = {id(node) for node in primary.iter()} if primary is not None else set()
 primary_bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", primary.get("bounds", "")) if primary is not None else None
@@ -24,7 +25,7 @@ for node in root.iter("node"):
     clickable = node.get("clickable", "false") == "true"
     documents_label = "documentsui" in node.get("package", "").casefold() and exact
     actionable = clickable or documents_label
-    if bounds and (exact if action else exact or partial) and (actionable or not action) and node.get("enabled", "true") != "false":
+    if bounds and (exact if exact_only else exact or partial) and (actionable or not action) and node.get("enabled", "true") != "false":
         points = tuple(map(int, bounds.groups()))
         left, top, right, bottom = points
         if right - left < 8 or bottom - top < 8:
@@ -40,6 +41,10 @@ PY
 
 node_center() { # <xml> <selector alternatives separated by |>
     selector_center "$1" "$2" any
+}
+
+node_center_exact() { # <xml> <selector alternatives separated by |>
+    selector_center "$1" "$2" exact
 }
 
 action_center() { # <xml> <selector alternatives separated by |>
@@ -173,6 +178,7 @@ android_ui_self_test() {
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text=""><node text="Primary" bounds="[0,240][320,300]"><node text="Devices" bounds="[110,245][210,295]" enabled="false" clickable="true"/><node text="Settings" bounds="[220,245][310,295]" enabled="true" clickable="true"/></node><node text="Clear history" bounds="[0,0][150,30]" enabled="true"/><node text="Clear history" bounds="[10,40][110,100]" enabled="true" clickable="true"/><node text="Export…" bounds="[10,110][110,170]" enabled="true" clickable="true"/><node content-desc="Save" resource-id="com.google.android.documentsui:id/action_menu_done" bounds="[200,40][300,100]" enabled="true" clickable="true"/><node text="copypaste-export.json" package="com.google.android.documentsui" bounds="[160,110][300,170]" enabled="true"/><node hint="Email" bounds="[10,180][190,230]" enabled="true" clickable="true"/><node text="Cloud sync" bounds="[10,238][190,240]" enabled="true"/><node text="Sign out" bounds="[10,220][190,270]" enabled="true" clickable="true"/><node text="Zero action" bounds="[0,0][0,0]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/ui.xml"
     point="$(action_center "$temp/ui.xml" "Export…")"
     [[ "$point" == "60 140" ]] && ok "an app label resolves to its tappable centre" || bad "an app label resolves to its tappable centre" "$point"
+    [[ -z "$(node_center_exact "$temp/ui.xml" "Export")" ]] && ok "an exact selector rejects a partial label" || bad "an exact selector rejects a partial label"
     point="$(action_center "$temp/ui.xml" "Clear history")"
     [[ "$point" == "60 70" ]] && ok "a clickable action wins over its duplicate title" || bad "a clickable action wins over its duplicate title" "$point"
     point="$(action_center "$temp/ui.xml" "action_menu_done")"

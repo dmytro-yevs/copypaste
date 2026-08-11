@@ -7,7 +7,7 @@
  * changing only on a real content change. That is what these tests do.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 
@@ -44,6 +44,14 @@ function wrapper(client = testClient()) {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
   return { client, Wrapper };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 beforeEach(() => {
@@ -334,11 +342,11 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
 describe("search", () => {
   it("settles an active server search before bulk delete completes", async () => {
     const initial = items(2);
-    let found = initial;
-    searchItems.mockImplementation(async () => page(found));
-    deleteItem.mockImplementation(async (id: string) => {
-      found = found.filter((entry) => entry.id !== id);
-    });
+    const refresh = deferred<ReturnType<typeof page>>();
+    searchItems
+      .mockResolvedValueOnce(page(initial))
+      .mockImplementationOnce(() => refresh.promise);
+    deleteItem.mockResolvedValue(undefined);
 
     const { Wrapper } = wrapper();
     const { result } = renderHook(
@@ -347,11 +355,22 @@ describe("search", () => {
     );
     await waitFor(() => expect(result.current.search.data?.items).toHaveLength(2));
 
-    await result.current.remove.mutateAsync([initial[0]]);
+    let completed = false;
+    const completion = result.current.remove.mutateAsync([initial[0]]).then(() => {
+      completed = true;
+    });
+
+    await waitFor(() => expect(searchItems).toHaveBeenCalledTimes(2));
+    await Promise.resolve();
+    expect(completed).toBe(false);
+
+    await act(async () => {
+      refresh.resolve(page([initial[1]]));
+      await completion;
+    });
 
     await waitFor(() => expect(result.current.search.data?.items).toHaveLength(1));
     expect(result.current.search.data?.items[0].id).toBe(initial[1].id);
-    expect(searchItems).toHaveBeenCalledTimes(2);
   });
 
   it("asks the service rather than paging the client (AT-73)", async () => {
