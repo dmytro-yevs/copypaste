@@ -960,6 +960,7 @@ dependencies = [
 name = "copypaste-cli"
 version = "2.0.0-alpha.16"
 dependencies = [
+ "backon",
  "clap",
  "comfy-table",
  "copypaste-clock",

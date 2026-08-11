@@ -11,6 +11,7 @@
 //! this crate.
 
 use crate::error::CliError;
+use backon::{ConstantBuilder, Retryable as _, Sleeper};
 use copypaste_ipc::transport;
 use copypaste_ipc::{
     socket_path, BackupData, CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredData,
@@ -20,6 +21,7 @@ use copypaste_ipc::{
 };
 use futures_util::{SinkExt, StreamExt};
 use std::future::Future;
+use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -53,6 +55,12 @@ struct Connection {
 }
 
 impl Connection {
+    fn from_stream(stream: transport::Stream) -> Self {
+        Self {
+            framed: Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES)),
+        }
+    }
+
     async fn open(path: &Path, deadline: Instant) -> Result<Self, CliError> {
         // The path is never surfaced to the user: it discloses the local
         // username (AGENTS.md rule 4). Every failure here collapses to one
@@ -60,9 +68,7 @@ impl Connection {
         let stream = before(deadline, transport::connect(path))
             .await?
             .map_err(|_| CliError::DaemonUnreachable)?;
-        Ok(Self {
-            framed: Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES)),
-        })
+        Ok(Self::from_stream(stream))
     }
 
     async fn call(&mut self, method: Method, deadline: Instant) -> Result<Response, CliError> {
@@ -113,6 +119,42 @@ fn timeout_for(method: &Method) -> Duration {
     }
 }
 
+fn not_ready_policy() -> ConstantBuilder {
+    ConstantBuilder::new()
+        .with_delay(NOT_READY_BACKOFF)
+        .with_max_times(NOT_READY_MAX_RETRIES as usize)
+}
+
+enum RequestAttemptError {
+    NotReady(Box<Response>),
+    Fatal(CliError),
+}
+
+async fn one_request_attempt<C>(
+    connect: C,
+    method: Method,
+    deadline: Instant,
+) -> Result<Response, RequestAttemptError>
+where
+    C: Future<Output = io::Result<transport::Stream>>,
+{
+    let stream = before(deadline, connect)
+        .await
+        .map_err(RequestAttemptError::Fatal)?
+        .map_err(|_| RequestAttemptError::Fatal(CliError::DaemonUnreachable))?;
+    let mut connection = Connection::from_stream(stream);
+    let response = connection
+        .call(method, deadline)
+        .await
+        .map_err(RequestAttemptError::Fatal)?;
+
+    if response.error_code == Some(ErrorCode::NotReady) {
+        Err(RequestAttemptError::NotReady(Box::new(response)))
+    } else {
+        Ok(response)
+    }
+}
+
 /// Send one request to the running daemon, honouring the `not_ready` retry
 /// contract.
 pub async fn request(method: Method) -> Result<Response, CliError> {
@@ -129,21 +171,44 @@ async fn request_at_with_timeout(
     method: Method,
     timeout: Duration,
 ) -> Result<Response, CliError> {
-    let deadline = Instant::now() + timeout;
-    let mut attempts = 0;
-    loop {
-        let mut connection = Connection::open(path, deadline).await?;
-        let response = connection.call(method.clone(), deadline).await?;
+    request_with_connector_and_sleep(
+        method,
+        timeout,
+        || transport::connect(path),
+        tokio::time::sleep,
+    )
+    .await
+}
 
-        if response.error_code == Some(ErrorCode::NotReady) && attempts < NOT_READY_MAX_RETRIES {
-            attempts += 1;
-            // Each retry reconnects: the daemon may close the connection after
-            // an error response.
-            drop(connection);
-            before(deadline, tokio::time::sleep(NOT_READY_BACKOFF)).await?;
-            continue;
-        }
-        return Ok(response);
+async fn request_with_connector_and_sleep<C, F, S>(
+    method: Method,
+    timeout: Duration,
+    mut connect: C,
+    sleep: S,
+) -> Result<Response, CliError>
+where
+    C: FnMut() -> F,
+    F: Future<Output = io::Result<transport::Stream>>,
+    S: Sleeper,
+{
+    let deadline = Instant::now() + timeout;
+    let call = || {
+        let method = method.clone();
+        one_request_attempt(connect(), method, deadline)
+    };
+    let result = timeout_at(
+        deadline,
+        call.retry(not_ready_policy())
+            .when(|err| matches!(err, RequestAttemptError::NotReady(_)))
+            .sleep(sleep),
+    )
+    .await
+    .map_err(|_| CliError::DaemonUnreachable)?;
+
+    match result {
+        Ok(response) => Ok(response),
+        Err(RequestAttemptError::NotReady(response)) => Ok(*response),
+        Err(RequestAttemptError::Fatal(err)) => Err(err),
     }
 }
 
@@ -348,6 +413,10 @@ pub fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>, CliErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use backon::BackoffBuilder;
+    use std::collections::VecDeque;
+    use std::future::{pending, ready};
+    use std::sync::{Arc, Mutex};
 
     // The stub daemon binds a real endpoint, which only Unix has one of yet.
     // Everything below that decodes a reply is platform-independent and stays
@@ -355,11 +424,84 @@ mod tests {
     #[cfg(unix)]
     use std::path::PathBuf;
     #[cfg(unix)]
-    use std::sync::{Arc, Mutex};
-    #[cfg(unix)]
     use tokio::io::AsyncWriteExt;
     #[cfg(unix)]
     use tokio::net::UnixListener;
+
+    enum PairAction {
+        Reply(String),
+        NeverReply,
+    }
+
+    async fn stream_pair() -> io::Result<(transport::Stream, transport::Stream)> {
+        #[cfg(unix)]
+        {
+            transport::Stream::pair()
+        }
+        #[cfg(windows)]
+        {
+            transport::Stream::pair().await
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(transport::unsupported())
+        }
+    }
+
+    async fn pair_client(action: PairAction, ids: Arc<Mutex<Vec<u64>>>) -> transport::Stream {
+        let (server, client) = stream_pair().await.expect("stream pair");
+        tokio::spawn(async move {
+            let mut framed = Framed::new(server, LinesCodec::new());
+            let Some(Ok(line)) = framed.next().await else {
+                return;
+            };
+            let request: Request = serde_json::from_str(&line).expect("valid request");
+            ids.lock().unwrap().push(request.id);
+            match action {
+                PairAction::Reply(reply) => {
+                    let reply = reply.replace("{id}", &request.id.to_string());
+                    let _ = framed.send(reply).await;
+                }
+                PairAction::NeverReply => {
+                    hold(framed).await;
+                }
+            }
+        });
+        client
+    }
+
+    async fn paired_request(
+        method: Method,
+        actions: impl IntoIterator<Item = PairAction>,
+        timeout: Duration,
+        sleep: impl Sleeper,
+    ) -> (Result<Response, CliError>, Vec<u64>) {
+        let ids = Arc::new(Mutex::new(Vec::new()));
+        let mut clients = VecDeque::new();
+        for action in actions {
+            clients.push_back(pair_client(action, Arc::clone(&ids)).await);
+        }
+        let clients = Arc::new(Mutex::new(clients));
+        let result = request_with_connector_and_sleep(
+            method,
+            timeout,
+            {
+                let clients = Arc::clone(&clients);
+                move || {
+                    let client = clients
+                        .lock()
+                        .unwrap()
+                        .pop_front()
+                        .expect("one stream per attempt");
+                    ready(Ok(client))
+                }
+            },
+            sleep,
+        )
+        .await;
+        let ids = ids.lock().unwrap().clone();
+        (result, ids)
+    }
 
     #[cfg(unix)]
     enum StubAction {
@@ -382,7 +524,6 @@ mod tests {
         task: tokio::task::JoinHandle<()>,
     }
 
-    #[cfg(unix)]
     async fn hold<T>(value: T) {
         std::future::pending::<()>().await;
         drop(value);
@@ -509,7 +650,6 @@ mod tests {
         assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
     }
 
-    #[cfg(unix)]
     fn assert_deadline_error_is_prompt_and_pathless(err: &CliError, started: Instant, path: &Path) {
         assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
         assert!(started.elapsed() < Duration::from_secs(2));
@@ -619,6 +759,118 @@ mod tests {
         ] {
             assert_eq!(timeout_for(&method), REQUEST_TIMEOUT);
         }
+    }
+
+    #[test]
+    fn not_ready_policy_is_fixed_and_attempt_exact() {
+        let mut policy = not_ready_policy().build();
+        assert_eq!(policy.next(), Some(NOT_READY_BACKOFF));
+        assert_eq!(policy.next(), Some(NOT_READY_BACKOFF));
+        assert_eq!(policy.next(), Some(NOT_READY_BACKOFF));
+        assert_eq!(policy.next(), None);
+    }
+
+    #[tokio::test]
+    async fn not_ready_backon_retry_reconnects_and_preserves_attempt_count() {
+        let sleeps = Arc::new(Mutex::new(Vec::new()));
+        let sleep_log = Arc::clone(&sleeps);
+        let not_ready =
+            r#"{"id":{id},"ok":false,"error":"still starting","error_code":"not_ready"}"#;
+        let ok = r#"{"id":{id},"ok":true,"data":{"status":{"version":"2.0.0","protocol_version":1,"item_count":0,"capture_running":true,"clipboard_backend":"fake","private_mode_epoch":0}}}"#;
+
+        let (response, ids) = paired_request(
+            Method::Status,
+            [
+                PairAction::Reply(not_ready.to_string()),
+                PairAction::Reply(not_ready.to_string()),
+                PairAction::Reply(not_ready.to_string()),
+                PairAction::Reply(ok.to_string()),
+            ],
+            REQUEST_TIMEOUT,
+            move |delay| {
+                sleep_log.lock().unwrap().push(delay);
+                ready(())
+            },
+        )
+        .await;
+
+        let status = expect_status(into_data(response.expect("response")).unwrap()).unwrap();
+        assert_eq!(status.item_count, 0);
+        assert_eq!(ids.len(), 4);
+        assert_eq!(
+            *sleeps.lock().unwrap(),
+            [NOT_READY_BACKOFF, NOT_READY_BACKOFF, NOT_READY_BACKOFF]
+        );
+    }
+
+    #[tokio::test]
+    async fn not_ready_deadline_caps_the_backon_sleep() {
+        let not_ready =
+            r#"{"id":{id},"ok":false,"error":"still starting","error_code":"not_ready"}"#;
+        let started = Instant::now();
+        let (err, ids) = paired_request(
+            Method::Status,
+            [PairAction::Reply(not_ready.to_string())],
+            Duration::from_millis(10),
+            |_| pending::<()>(),
+        )
+        .await;
+        let err = err.unwrap_err();
+
+        assert_deadline_error_is_prompt_and_pathless(
+            &err,
+            started,
+            Path::new("C:/Users/someone/AppData/Roaming/CopyPaste/daemon.sock"),
+        );
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn not_ready_exhaustion_returns_the_daemon_response_after_four_attempts() {
+        let reply = r#"{"id":{id},"ok":false,"error":"still starting","error_code":"not_ready"}"#;
+        let (response, ids) = paired_request(
+            Method::Status,
+            (0..=NOT_READY_MAX_RETRIES).map(|_| PairAction::Reply(reply.to_string())),
+            REQUEST_TIMEOUT,
+            |_| ready(()),
+        )
+        .await;
+        let err = into_data(response.expect("final not-ready response")).unwrap_err();
+
+        assert_eq!(ids.len(), 4);
+        assert_eq!(err.exit_code(), crate::error::EXIT_OTHER);
+        assert!(err.user_message().contains("starting up"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn non_not_ready_errors_do_not_retry() {
+        let mismatch = r#"{"id":{id},"ok":false,"error":"unsupported protocol version","error_code":"protocol_mismatch"}"#;
+        let (response, ids) = paired_request(
+            Method::Status,
+            [PairAction::Reply(mismatch.to_string())],
+            REQUEST_TIMEOUT,
+            |_| async { panic!("protocol mismatch must not sleep for retry") },
+        )
+        .await;
+        let err = into_data(response.expect("mismatch response")).unwrap_err();
+
+        assert_eq!(ids.len(), 1);
+        assert!(err.user_message().contains("versions differ"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn fatal_attempt_errors_do_not_retry() {
+        let (err, ids) = paired_request(
+            Method::Status,
+            [PairAction::NeverReply],
+            Duration::from_millis(10),
+            |_| async { panic!("unreachable attempts must not sleep for retry") },
+        )
+        .await;
+        let err = err.unwrap_err();
+
+        assert_eq!(ids.len(), 1);
+        assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
     }
 
     #[cfg(unix)]
