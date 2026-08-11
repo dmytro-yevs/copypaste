@@ -7,7 +7,10 @@ let app: App;
 
 beforeAll(async () => {
   app = await startApp({ seed: ["smoke one", "smoke two"] });
-}, 240_000);
+  // 300s like every other app-starting hook: file order is not fixed, so this
+  // one can be the cold first launch, and a hook that expires before the
+  // session budget replaces a precise diagnostic with "Hook timed out".
+}, 300_000);
 
 afterAll(async () => {
   await app?.stop();

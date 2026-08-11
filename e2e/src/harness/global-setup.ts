@@ -3,12 +3,20 @@ import path from "node:path";
 import { execa } from "execa";
 import waitOn from "wait-on";
 
-import { DEV_SERVER_PORT, DEV_SERVER_URL, UI_DIR, requireDisplay } from "./env.js";
+import {
+  DEV_SERVER_PORT,
+  DEV_SERVER_URL,
+  UI_DIR,
+  requireDisplay,
+  runLogPath,
+} from "./env.js";
 import { sleep, track, type Child } from "./process.js";
+import { recordRunEnvironment } from "./run-manifest.js";
 
 let server: Child | undefined;
 
 export async function setup(): Promise<void> {
+  await recordRunEnvironment();
   requireDisplay();
   await assertPortFree();
 
@@ -24,6 +32,7 @@ export async function setup(): Promise<void> {
       reject: false,
       killDescendants: true,
     }),
+    runLogPath("dev-server.log"),
   );
 
   try {
