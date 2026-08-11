@@ -34,6 +34,15 @@ open_downloads() { # <artifact prefix>
 open_storage() {
     tap_selector "Settings" "$OUT/settings-nav.xml" || return 1
     tap_selector "Storage" "$OUT/settings-storage.xml" || return 1
+    wait_selector "Export…|Import…" "$OUT/settings-storage-ready.xml" || return 1
+}
+
+open_history() { # <artifact>
+    local artifact="$1" point
+    tap_selector "History" "$artifact" || return 1
+    wait_selector "Select multiple items" "$artifact" || return 1
+    point="$(action_center "$artifact" "Clear search")"
+    [[ -z "$point" ]] || sh_ input tap $point >/dev/null
 }
 
 capture_screen() { # <name>
@@ -97,7 +106,7 @@ if open_storage && tap_scrolling "Import…" "$OUT/seed-import-action.xml" up; t
 else
     bad "Storage exposes import for the seed"
 fi
-tap_selector "History" "$OUT/seed-history-nav.xml" || bad "History is reachable before export"
+open_history "$OUT/seed-history-nav.xml" || bad "History is reachable before export"
 wait_selector "$CANARY" "$OUT/seed-history.xml" 30 && ok "the canary is visible before export" || bad "the canary is visible before export" "uiautomator did not expose it"
 
 group "Export through DocumentsUI"
@@ -129,8 +138,8 @@ prepare_action "Clear all" "$OUT/clear-confirm.xml" || bad "the clear confirmati
 start_accessibility_events "$OUT/clear-events.log" || bad "clear accessibility events are observable"
 tap_prepared_action || bad "the clear confirmation remains actionable"
 wait_accessibility_event "Cleared" "$OUT/clear-events.log" 15 && ok "clear reports user-visible success" || bad "clear reports user-visible success"
-tap_selector "History" "$OUT/clear-history-nav.xml" || bad "History is reachable after clearing"
-sleep 3
+open_history "$OUT/clear-history-nav.xml" || bad "History is reachable after clearing"
+wait_selector "0 items" "$OUT/clear-history-ready.xml" 30 || bad "cleared history settles at zero items"
 if dump_hierarchy "$OUT/cleared-history.xml" && [[ -z "$(node_center "$OUT/cleared-history.xml" "$CANARY")" ]]; then
     ok "the exported canary is absent before import"
 else
@@ -156,7 +165,7 @@ wait_for 20 no_pid || bad "force-stop ends the importing process" "pid $(app_pid
 sh_ am start -W -n "$MAIN" >/dev/null
 wait_for 60 has_pid || bad "the app relaunches after import"
 transfer_pid="$(app_pid)"
-tap_selector "History" "$OUT/transfer-history-nav.xml" || bad "History is reachable after restart"
+open_history "$OUT/transfer-history-nav.xml" || bad "History is reachable after restart"
 if wait_selector "$CANARY" "$OUT/transfer-persisted.xml" 45; then
     ok "the imported history survives a process restart"
 else
@@ -197,7 +206,7 @@ else
     bad "an invalid content URI reports a user-visible failure" "the authored error toast did not appear"
 fi
 capture_screen import-failure
-tap_selector "History" "$OUT/history-nav.xml" || bad "History remains reachable after the rejected import"
+open_history "$OUT/history-nav.xml" || bad "History remains reachable after the rejected import"
 wait_selector "$CANARY" "$OUT/history-after-failure.xml" 20 && ok "a rejected import leaves persisted history intact" || bad "a rejected import leaves persisted history intact"
 
 dump_logcat storage-transfer

@@ -16,7 +16,7 @@ import {
   syncNow,
   unpair,
 } from "@/lib/ipc";
-import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
+import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/useHistory";
 
 export const PEERS_KEY = ["peers"] as const;
 export const DISCOVERED_KEY = ["discovered"] as const;
@@ -133,7 +133,7 @@ export function useSyncNow() {
           }),
         );
       }
-      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void invalidateHistoryQueries(qc);
       void qc.invalidateQueries({ queryKey: PEERS_KEY });
     },
     onError: (raw) => toast.error(toFriendly(raw)),

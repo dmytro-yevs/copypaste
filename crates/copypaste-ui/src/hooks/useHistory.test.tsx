@@ -14,7 +14,9 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import {
   HISTORY_HEAD_KEY,
   HISTORY_KEY,
+  useBulkDelete,
   useHistory,
+  useHistorySearch,
   useReorderPinned,
 } from "@/hooks/useHistory";
 import { IpcFailure } from "@/lib/errors";
@@ -24,6 +26,7 @@ import { item, items, page, testClient } from "@/test/harness";
 const listItems = vi.fn();
 const searchItems = vi.fn();
 const reorderPinned = vi.fn();
+const deleteItem = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -32,6 +35,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     listItems: (...args: unknown[]) => listItems(...args),
     searchItems: (...args: unknown[]) => searchItems(...args),
     reorderPinned: (...args: unknown[]) => reorderPinned(...args),
+    deleteItem: (...args: unknown[]) => deleteItem(...args),
   };
 });
 
@@ -46,6 +50,7 @@ beforeEach(() => {
   listItems.mockReset();
   searchItems.mockReset();
   reorderPinned.mockReset();
+  deleteItem.mockReset();
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -327,6 +332,28 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
 });
 
 describe("search", () => {
+  it("settles an active server search before bulk delete completes", async () => {
+    const initial = items(2);
+    let found = initial;
+    searchItems.mockImplementation(async () => page(found));
+    deleteItem.mockImplementation(async (id: string) => {
+      found = found.filter((entry) => entry.id !== id);
+    });
+
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(
+      () => ({ search: useHistorySearch("needle"), remove: useBulkDelete() }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(result.current.search.data?.items).toHaveLength(2));
+
+    await result.current.remove.mutateAsync([initial[0]]);
+
+    await waitFor(() => expect(result.current.search.data?.items).toHaveLength(1));
+    expect(result.current.search.data?.items[0].id).toBe(initial[1].id);
+    expect(searchItems).toHaveBeenCalledTimes(2);
+  });
+
   it("asks the service rather than paging the client (AT-73)", async () => {
     // `search` runs against the whole database, so a match at index 800 is
     // found without loading 800 rows first (CopyPaste-crh3.106).
