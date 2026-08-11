@@ -198,5 +198,6 @@ android_ui_self_test() {
     accessibility_event_holds "Imported" "$temp/events.log" && ok "an authored app event is observable" || bad "an authored app event is observable"
     accessibility_event_holds "Exported" "$temp/events.log" && bad "an absent app event is not reported" || ok "an absent app event is not reported"
     android_screencap_self_test "$temp"
+    android_adb_self_test
     rm -rf "$temp"
 }
