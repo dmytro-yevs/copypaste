@@ -271,10 +271,17 @@ pathlib.Path(sys.argv[1]).write_text(json.dumps({
     "budget_ms": int(sys.argv[3]),
 }) + "\n")
 PY
-    serial="$(adb get-serialno | tr -d '\r')"
-    environment=physical-device
-    [[ "$serial" == emulator-* ]] && environment=emulator
-    if python3 scripts/release/write-native-evidence.py \
+    receipt_route_log="$OUT/release-receipt-route.log"
+    serial_candidate="$(android_serial_candidate)" || serial_candidate=""
+    environment=""
+    if serial="$(verified_android_serial "$serial_candidate" "$receipt_route_log")"; then
+        environment=physical-device
+        [[ "$serial" == emulator-* ]] && environment=emulator
+    fi
+    if [[ -z "$environment" ]]; then
+        bad "native evidence receipt was written" \
+            "$(tail -n 4 "$receipt_route_log" | tr '\n' ' ')"
+    elif python3 scripts/release/write-native-evidence.py \
         --output "$OUT/native-evidence.json" \
         --platform android \
         --environment "$environment" \
