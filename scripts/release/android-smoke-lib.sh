@@ -441,12 +441,10 @@ assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
         nodes="$(grep -o 'class="[^"]*"' "$dump" | sort | uniq -c | sort -rn | head -n 6 | tr '\n' ' ')"
         probe "the view hierarchy" "${nodes:-none}"
     fi
-    # Kept for a human to look at, and deliberately not read as evidence: run 4
-    # painted a full UI — 33 named nodes, "CopyPaste" among them — while
-    # screencap returned the same 2 KB it returns for a blank screen. Under
-    # `-gpu swiftshader_indirect -no-window` the captured framebuffer does not
-    # track what the WebView is showing. The accessibility tree does.
-    probe "the screenshot" "$shot bytes — size says nothing here, see the artifact"
+    # DMY-47: guest screencap can be black while the headless emulator's host
+    # framebuffer is painted. The capture helper selects that host transport
+    # and rejects contentless frames before this artifact can be published.
+    probe "the screenshot" "$shot bytes, decoded and non-contentless"
 
     if [[ "$AWAKE" != yes ]]; then
         bad "the WebView painted a UI with content" \

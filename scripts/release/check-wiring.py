@@ -527,6 +527,8 @@ ui_cargo = pathlib.Path("crates/copypaste-ui/src-tauri/Cargo.toml").read_text()
 embedded_cloud = pathlib.Path("crates/copypaste-ui/src-tauri/src/backend/embedded/cloud.rs").read_text()
 android_cloud = pathlib.Path("scripts/release/android-cloud-evidence.sh").read_text()
 android_ui_evidence = pathlib.Path("scripts/release/android-ui-evidence-lib.sh").read_text()
+android_screencap = pathlib.Path("scripts/release/android-screencap-lib.sh").read_text()
+png_evidence = pathlib.Path("scripts/release/png_evidence.py").read_text()
 rec('cloud-evidence = ["copypaste-cloud/test-endpoints"]' in ui_cargo
     and 'cfg(feature = "cloud-evidence")' in embedded_cloud
     and "CloudConfig::new_loopback" in embedded_cloud,
@@ -537,6 +539,20 @@ rec("capture_android_png" in android_ui_evidence
     and "adb exec-out screencap" not in android_ui_evidence,
     "Android UI evidence reuses the fail-closed PNG capture helper",
     "storage and cloud evidence must reject zero-byte and malformed screenshots")
+rec("adb -s \"$1\" emu screenrecord screenshot" in android_screencap
+    and "timeout --foreground" in android_screencap
+    and '[[ "$serial" == emulator-* ]]' in android_screencap
+    and "Screenshot_*.png" in android_screencap,
+    "Android emulator evidence uses the bounded host screenshot transport",
+    "guest adb screencap can return zero-byte or black frames while the host framebuffer is painted")
+rec("adb exec-out screencap -p" in android_screencap
+    and "adb shell screencap -p" in android_screencap
+    and "cleanup_status" in android_screencap,
+    "physical Android evidence retains bounded adb capture and fail-closed cleanup")
+rec("contentless: uniform RGB frame" in png_evidence
+    and "contentless: black RGB frame" in png_evidence
+    and "a decodable black emulator frame is rejected" in android_screencap,
+    "native screenshot validation rejects decodable contentless frames")
 
 if emu:
     debug_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))
