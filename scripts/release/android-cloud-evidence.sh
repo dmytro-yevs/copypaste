@@ -70,14 +70,26 @@ capture_state() { # <state>
     fi
 }
 
+# Cloud sync is the last row of the Sync pane, so on a phone viewport its form,
+# its actions and the status they produce all start below the fold. Every
+# lookup here scrolls towards the end of the pane; a plain wait reported the
+# whole configured account lifecycle as missing while the app rendered it.
 expect_label() { # <selector> <artifact>
-    wait_selector "$1" "$2" "$WAIT_SECS" \
+    wait_selector_scrolling "$1" "$2" up "$WAIT_SECS" \
+        && ok "cloud UI exposes $1" \
+        || bad "cloud UI exposes $1" "uiautomator did not find it"
+}
+
+# A sync summary is a toast, not a row: it is in the accessibility tree only
+# while it is on screen, and never in the accessibility event stream.
+expect_feedback() { # <selector> <artifact>
+    wait_authored_feedback "$1" "$2" "$WAIT_SECS" \
         && ok "cloud UI exposes $1" \
         || bad "cloud UI exposes $1" "uiautomator did not find it"
 }
 
 fill_field() { # <label> <value> <artifact>
-    tap_selector "$1" "$3" || return 1
+    tap_selector_scrolling "$1" "$3" up || return 1
     sh_ input keyevent KEYCODE_MOVE_END >/dev/null
     sh_ input text "$2" >/dev/null
     sh_ input keyevent KEYCODE_BACK >/dev/null
@@ -172,7 +184,7 @@ configured_scenario() {
     fill_field "Password" "stub-password" "$OUT/password.xml" || bad "password can be entered"
     fill_field "Sync passphrase" "native-evidence" "$OUT/passphrase.xml" || bad "passphrase can be entered"
     started="$(now_ms)"
-    tap_selector "Sign in" "$OUT/sign-in.xml" || bad "the native sign-in action is reachable"
+    tap_selector_scrolling "Sign in" "$OUT/sign-in.xml" up || bad "the native sign-in action is reachable"
     expect_label "Connected" "$OUT/connected.xml"
     elapsed=$(( $(now_ms) - started ))
     cloud_latency_record "$LATENCIES" sign-in "$elapsed" 30000 \
@@ -183,8 +195,8 @@ configured_scenario() {
 
     seed_forged_row || bad "the skip fixture reaches the stub backend"
     started="$(now_ms)"
-    tap_selector "Sync cloud now" "$OUT/sync.xml" || bad "the native cloud sync action is reachable"
-    expect_label "skipped" "$OUT/sync-skips.xml"
+    tap_selector_scrolling "Sync cloud now" "$OUT/sync.xml" up || bad "the native cloud sync action is reachable"
+    expect_feedback "skipped" "$OUT/sync-skips.xml"
     elapsed=$(( $(now_ms) - started ))
     cloud_latency_record "$LATENCIES" sync-with-skips "$elapsed" 30000 \
         && ok "cloud sync with skips meets its latency budget" \
@@ -195,7 +207,7 @@ configured_scenario() {
     wait "$STUB_PID" 2>/dev/null || true
     STUB_PID=""
     started="$(now_ms)"
-    tap_selector "Sync cloud now" "$OUT/offline-sync.xml" || bad "cloud sync remains actionable offline"
+    tap_selector_scrolling "Sync cloud now" "$OUT/offline-sync.xml" up || bad "cloud sync remains actionable offline"
     expect_label "The last cloud sync failed" "$OUT/offline-error.xml"
     elapsed=$(( $(now_ms) - started ))
     cloud_latency_record "$LATENCIES" offline-error "$elapsed" 60000 \
@@ -203,7 +215,7 @@ configured_scenario() {
         || bad "offline cloud error meets its latency budget" "${elapsed}ms"
     capture_state offline-error
 
-    tap_selector "Sign out" "$OUT/sign-out.xml" || bad "the native sign-out action is reachable"
+    tap_selector_scrolling "Sign out" "$OUT/sign-out.xml" up || bad "the native sign-out action is reachable"
     expect_label "Signed out" "$OUT/signed-out-again.xml"
     capture_state signed-out-again
 }
