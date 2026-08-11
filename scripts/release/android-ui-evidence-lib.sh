@@ -116,7 +116,9 @@ tap_scrolling() { # <selector> <artifact> <up|down>
 }
 
 capture_png() { # <path>
-    capture_android_png "$1" "$PKG"
+    local capture_serial=""
+    capture_serial="$(android_serial_candidate)" || true
+    capture_android_png "$1" "$PKG" "$capture_serial"
 }
 
 AX_EVENTS_PID=""
