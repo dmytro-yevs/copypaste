@@ -57,17 +57,39 @@ restart_app() { # <stage>
     fi
 }
 
-open_storage() {
-    tap_selector "Settings" "$OUT/settings-nav.xml" || return 1
-    tap_selector "Storage" "$OUT/settings-storage.xml" || return 1
-    wait_for "$WAIT_SECS" history_state_holds \
-        "$OUT/settings-storage-ready.xml" storage_transfer_actions_holds dump_hierarchy \
-        || return 1
+settings_pane_holds() { # <artifact>
+    [[ -n "$(node_center_exact "$1" "Settings sections")" ]]
 }
 
 storage_transfer_actions_holds() { # <artifact>
     [[ -n "$(action_center "$1" "Export…")" ]] \
         && [[ -n "$(action_center "$1" "Import…")" ]]
+}
+
+# Four stages open this pane, and every one of them wrote the same three
+# artifacts: run 31634096676 failed at the first stage and published the third
+# stage's screens, so which step had failed was no longer in the evidence.
+# Each step also names itself, because "Storage exposes import for the seed" was
+# what a swallowed Settings tap reported.
+open_storage() { # <stage>
+    local stage="$1" nav="$OUT/$1-settings-nav.xml"
+    local pane="$OUT/$1-settings-pane.xml" ready="$OUT/$1-storage-ready.xml"
+    tap_selector "Settings" "$nav" || {
+        bad "the Settings tab is actionable at $stage" "$(navigation_state "$nav")"
+        return 1
+    }
+    wait_history_state "$pane" settings_pane_holds || {
+        bad "Settings opens at $stage" "$(tap_landing "$pane" Settings)"
+        return 1
+    }
+    tap_selector "Storage" "$OUT/$1-settings-storage.xml" || {
+        bad "the Storage tab is actionable at $stage" "$(navigation_state "$pane")"
+        return 1
+    }
+    wait_history_state "$ready" storage_transfer_actions_holds || {
+        bad "Storage exposes its transfer actions at $stage" "$(tap_landing "$ready" Storage)"
+        return 1
+    }
 }
 
 history_toolbar_holds() { # <artifact>
@@ -135,11 +157,51 @@ capture_screen() { # <name>
     fi
 }
 
+# `open_storage` against a screen it cannot open, with adb stubbed out: the
+# verdict has to name the step that failed and leave that step's screen behind
+# under its own stage.
+storage_stage_self_test() { # <temp>
+    local temp="$1" verdict nav_open nav_starting
+    nav_open='<node text="Primary" bounds="[0,570][320,640]"><node text="History" bounds="[17,583][113,635]" enabled="true" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="true" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/></node>'
+    nav_starting="${nav_open//enabled=\"true\" clickable/enabled=\"false\" clickable}"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"0 items\" bounds=\"[12,126][52,142]\"/></node></hierarchy>" > "$temp/stuck-history.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\"/></node></hierarchy>" > "$temp/stuck-start.xml"
+
+    verdict="$(
+        OUT="$temp" WAIT_SECS=2
+        sh_() { :; }
+        dump_hierarchy() { cp "$temp/stuck-history.xml" "$1"; }
+        PASS=0 FAIL=0
+        open_storage seed-import
+    )"
+    [[ "$verdict" == *"FAIL  Settings opens at seed-import"* && "$verdict" == *"did not reach the app"* ]] \
+        && ok "a swallowed navigation tap is reported as one, not as a missing import" \
+        || bad "a swallowed navigation tap is reported as one, not as a missing import" "$verdict"
+
+    verdict="$(
+        OUT="$temp" WAIT_SECS=2
+        sh_() { :; }
+        dump_hierarchy() { cp "$temp/stuck-start.xml" "$1"; }
+        PASS=0 FAIL=0
+        open_storage rejected-import
+    )"
+    [[ "$verdict" == *"FAIL  the Settings tab is actionable at rejected-import"* \
+       && "$verdict" == *"Settings=disabled"* ]] \
+        && ok "an app that has not settled is reported as disabled navigation" \
+        || bad "an app that has not settled is reported as disabled navigation" "$verdict"
+
+    [[ -s "$temp/seed-import-settings-pane.xml" && -s "$temp/rejected-import-settings-nav.xml" ]] \
+        && ! cmp -s "$temp/seed-import-settings-pane.xml" "$temp/rejected-import-settings-nav.xml" \
+        && ok "each stage keeps its own screen instead of overwriting the last one's" \
+        || bad "each stage keeps its own screen instead of overwriting the last one's"
+}
+
 self_test_transfer() {
     local temp CANARY="CopyPasteStorageTransferFixture"
     android_ui_self_test
     temp="$(mktemp -d)"
     android_navigation_self_test "$temp"
+    storage_stage_self_test "$temp"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history\" bounds=\"[0,0][200,40]\"/><node content-desc=\"Select multiple items\" clickable=\"true\" bounds=\"[240,0][280,40]\"/><node text=\"0 items\" bounds=\"[280,0][340,40]\"/><node text=\"$CANARY\" bounds=\"[0,50][300,90]\"/></hierarchy>" > "$temp/delayed.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
@@ -229,7 +291,11 @@ print(json.dumps({
 }))
 PY
 restart_app seed-launch
-if open_storage && tap_selector "Import…" "$OUT/seed-import-action.xml"; then
+if ! open_storage seed-import; then
+    note "the seeded import through the picker" "Storage never opened at seed-import"
+elif ! tap_selector "Import…" "$OUT/seed-import-action.xml"; then
+    bad "Storage exposes import for the seed"
+else
     sleep 2
     open_downloads seed-picker || bad "Downloads is selectable for the seed import"
     tap_selector "$SEED_FILE" "$OUT/seed-file.xml" 15 || bad "the seed export is selectable"
@@ -238,33 +304,34 @@ if open_storage && tap_selector "Import…" "$OUT/seed-import-action.xml"; then
     wait_authored_feedback "Imported" "$OUT/seed-import-toast.xml" 20 \
         && ok "seed import reports user-visible success" \
         || bad "seed import reports user-visible success" "no Imported toast appeared"
-else
-    bad "Storage exposes import for the seed"
 fi
-open_history "$OUT/seed-history-nav.xml" || bad "History is reachable before export"
+open_history "$OUT/seed-history-nav.xml" \
+    || bad "History is reachable before export" "$(navigation_state "$OUT/seed-history-nav.xml")"
 wait_selector "$CANARY" "$OUT/seed-history.xml" 30 && ok "the canary is visible before export" || bad "the canary is visible before export" "uiautomator did not expose it"
 
 group "Export through DocumentsUI"
-if open_storage && tap_selector "Export…" "$OUT/export-action.xml"; then
+if ! open_storage export; then
+    note "the export through the picker" "Storage never opened at export"
+elif ! tap_selector "Export…" "$OUT/export-action.xml"; then
+    bad "Storage exposes the export action"
+else
     tap_selector "Choose where to save" "$OUT/export-confirm.xml" || bad "the export confirmation is actionable"
     sleep 2
     open_downloads export-picker || bad "Downloads is selectable in the save picker"
     prepare_action "Save|action_menu_done" "$OUT/export-save.xml" 15 || bad "the picker exposes its save action"
     tap_prepared_action || bad "the picker save action remains actionable"
-else
-    bad "Storage exposes the export action"
+    if wait_authored_feedback "Exported" "$OUT/export-toast.xml" 20; then
+        ok "export reports user-visible success"
+    else
+        bad "export reports user-visible success" "no Exported toast appeared"
+    fi
+    capture_screen export-success
+    export_path="$(sh_ find /sdcard/Download -maxdepth 1 -type f -name "$EXPORT_FILE" | head -n 1)"
+    [[ -n "$export_path" ]] && ok "the selected document contains the export" || bad "the selected document contains the export" "Downloads has no $EXPORT_FILE"
+    exported_text=""
+    [[ -n "$export_path" ]] && exported_text="$(sh_ cat "$export_path")"
+    grep -qF "$CANARY" <<<"$exported_text" && ok "the content URI received the captured history" || bad "the content URI received the captured history" "the exported document has no canary"
 fi
-if wait_authored_feedback "Exported" "$OUT/export-toast.xml" 20; then
-    ok "export reports user-visible success"
-else
-    bad "export reports user-visible success" "no Exported toast appeared"
-fi
-capture_screen export-success
-export_path="$(sh_ find /sdcard/Download -maxdepth 1 -type f -name "$EXPORT_FILE" | head -n 1)"
-[[ -n "$export_path" ]] && ok "the selected document contains the export" || bad "the selected document contains the export" "Downloads has no $EXPORT_FILE"
-exported_text=""
-[[ -n "$export_path" ]] && exported_text="$(sh_ cat "$export_path")"
-grep -qF "$CANARY" <<<"$exported_text" && ok "the content URI received the captured history" || bad "the content URI received the captured history" "the exported document has no canary"
 
 group "Clear and import through DocumentsUI"
 tap_scrolling "Clear history" "$OUT/clear-action.xml" up || bad "Storage exposes the clear action"
@@ -273,23 +340,27 @@ tap_prepared_action || bad "the clear confirmation remains actionable"
 wait_authored_feedback "Cleared" "$OUT/clear-toast.xml" 15 \
     && ok "clear reports user-visible success" \
     || bad "clear reports user-visible success" "no Cleared toast appeared"
-open_history "$OUT/clear-history-nav.xml" || bad "History is reachable after clearing"
+open_history "$OUT/clear-history-nav.xml" \
+    || bad "History is reachable after clearing" "$(navigation_state "$OUT/clear-history-nav.xml")"
 if wait_cleared_history "$OUT/cleared-history.xml" 30; then
     ok "cleared unfiltered history settles without the exported canary"
 else
     bad "cleared unfiltered history settles without the exported canary" "search state, empty history, total count, and canary absence did not converge together"
 fi
-open_storage || bad "Storage is reachable for import"
-tap_scrolling "Import…" "$OUT/import-action.xml" down || bad "Storage exposes the import action"
-sleep 2
-open_downloads import-picker || bad "Downloads is selectable in the open picker"
-tap_selector "$EXPORT_FILE" "$OUT/import-file.xml" 15 || bad "the exported document is selectable"
-prepare_action "Import" "$OUT/import-confirm.xml" 20 || bad "the import preview requires confirmation"
-tap_prepared_action || bad "the import confirmation remains actionable"
-if wait_authored_feedback "Imported" "$OUT/import-toast.xml" 20; then
-    ok "import reports user-visible success"
+if ! open_storage import; then
+    note "the import through the picker" "Storage never opened at import"
 else
-    bad "import reports user-visible success" "no Imported toast appeared"
+    tap_scrolling "Import…" "$OUT/import-action.xml" down || bad "Storage exposes the import action"
+    sleep 2
+    open_downloads import-picker || bad "Downloads is selectable in the open picker"
+    tap_selector "$EXPORT_FILE" "$OUT/import-file.xml" 15 || bad "the exported document is selectable"
+    prepare_action "Import" "$OUT/import-confirm.xml" 20 || bad "the import preview requires confirmation"
+    tap_prepared_action || bad "the import confirmation remains actionable"
+    if wait_authored_feedback "Imported" "$OUT/import-toast.xml" 20; then
+        ok "import reports user-visible success"
+    else
+        bad "import reports user-visible success" "no Imported toast appeared"
+    fi
 fi
 
 group "Persisted ciphertext"
@@ -324,19 +395,23 @@ fi
 
 group "Rejected import is visible and non-destructive"
 printf 'not-json\n' | adb_ shell dd "of=/sdcard/Download/$INVALID_FILE" >/dev/null
-open_storage || bad "Settings remains reachable after the persisted import"
-tap_scrolling "Import…" "$OUT/invalid-action.xml" up || bad "Storage exposes import for the failure case"
-sleep 2
-open_downloads invalid-picker || bad "Downloads is selectable for the failure case"
-prepare_action "$INVALID_FILE" "$OUT/invalid-file.xml" 15 || bad "the invalid document is selectable"
-tap_prepared_action || bad "the invalid document remains actionable"
-if wait_authored_feedback "$IMPORT_FAILURE_COPY" "$OUT/import-failure-toast.xml" 20; then
-    ok "an invalid content URI reports a user-visible failure"
+if ! open_storage rejected-import; then
+    note "the rejected import through the picker" "Storage never opened at rejected-import"
 else
-    bad "an invalid content URI reports a user-visible failure" "the authored error toast did not appear"
+    tap_scrolling "Import…" "$OUT/invalid-action.xml" up || bad "Storage exposes import for the failure case"
+    sleep 2
+    open_downloads invalid-picker || bad "Downloads is selectable for the failure case"
+    prepare_action "$INVALID_FILE" "$OUT/invalid-file.xml" 15 || bad "the invalid document is selectable"
+    tap_prepared_action || bad "the invalid document remains actionable"
+    if wait_authored_feedback "$IMPORT_FAILURE_COPY" "$OUT/import-failure-toast.xml" 20; then
+        ok "an invalid content URI reports a user-visible failure"
+    else
+        bad "an invalid content URI reports a user-visible failure" "the authored error toast did not appear"
+    fi
+    capture_screen import-failure
 fi
-capture_screen import-failure
-open_history "$OUT/history-nav.xml" || bad "History remains reachable after the rejected import"
+open_history "$OUT/history-nav.xml" \
+    || bad "History remains reachable after the rejected import" "$(navigation_state "$OUT/history-nav.xml")"
 wait_selector "$CANARY" "$OUT/history-after-failure.xml" 20 && ok "a rejected import leaves persisted history intact" || bad "a rejected import leaves persisted history intact"
 
 dump_logcat storage-transfer
