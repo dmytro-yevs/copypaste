@@ -119,6 +119,19 @@ dismiss_blocking_feedback() { # <artifact> <selector>
     sh_ input tap $point >/dev/null
 }
 
+# Best effort, and non-fatal by contract: no covering toast is the normal case,
+# so a caller under `set -e` must be told "nothing was dismissed" and go on to
+# scroll instead of dying here. Success means the target was covered and has
+# just been uncovered, which the caller owes a fresh dump before any swipe —
+# swiping now carries away the control it was about to tap. The settle covers
+# the frame the toast needs to leave the tree, so the next sample is not the
+# same covered one and the retry does not tap a close button that is gone.
+dismiss_covering_feedback() { # <artifact> <selector> <any|action>
+    [[ "$3" == action ]] || return 1
+    dismiss_blocking_feedback "$1" "$2" || return 1
+    sleep 1
+}
+
 PREPARED_ACTION_POINT=""
 
 prepare_action() { # <selector> <artifact> [timeout]
@@ -167,8 +180,12 @@ find_scrolling() { # <selector> <artifact> <up|down> [any|action] [dump fn] [scr
     local dump="${5:-dump_hierarchy}" scroll="${6:-scroll_content}"
     for _ in $(seq 1 8); do
         if "$dump" "$artifact"; then
-            [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]] && return 0
-            [[ "$mode" == action ]] && dismiss_blocking_feedback "$artifact" "$selector"
+            if [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]]; then
+                return 0
+            fi
+            if dismiss_covering_feedback "$artifact" "$selector" "$mode"; then
+                continue
+            fi
         fi
         "$scroll" "$direction"
         sleep 1
@@ -185,8 +202,12 @@ wait_selector_scrolling() { # <selector> <artifact> <up|down> [timeout] [any|act
     local started="$SECONDS"
     while (( SECONDS - started < timeout )); do
         if "$dump" "$artifact"; then
-            [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]] && return 0
-            [[ "$mode" == action ]] && dismiss_blocking_feedback "$artifact" "$selector"
+            if [[ -n "$(selector_center "$artifact" "$selector" "$mode")" ]]; then
+                return 0
+            fi
+            if dismiss_covering_feedback "$artifact" "$selector" "$mode"; then
+                continue
+            fi
         fi
         "$scroll" "$direction"
         sleep 1
@@ -220,6 +241,7 @@ capture_png() { # <path>
 UI_FIXTURES=()
 UI_FIXTURE_INDEX=0
 UI_FIXTURE_SCROLLS=0
+UI_FIXTURE_TAPS=0
 
 ui_fixture_dump() { # <artifact>
     local source="${UI_FIXTURES[$UI_FIXTURE_INDEX]:-}"
@@ -234,6 +256,30 @@ ui_fixtures() { # <artifact...>
     UI_FIXTURES=("$@")
     UI_FIXTURE_INDEX=0
     UI_FIXTURE_SCROLLS=0
+    UI_FIXTURE_TAPS=0
+}
+
+UI_FIXTURE_COUNTS=""
+
+# `set -e` here is the assertion, not the harness: a helper that aborts on a
+# best-effort dismissal must show up as a case that never scrolled, not as a
+# self-test that stops mid-file. So the run gets its own shell, and the counts
+# come back through a file an aborted shell still writes from its EXIT trap.
+# Errexit is also why nothing below may put the call in an `&&` list: bash
+# exempts a whole function from `set -e` when it is called from one. The
+# subshell scopes the stubbed tap too, so no case here reaches adb.
+ui_fixture_run() { # <helper> <args...> -> "<found|missing> scrolls=<n> taps=<n>"
+    local verdict
+    : >"$UI_FIXTURE_COUNTS"
+    verdict="$(
+        set -e
+        sh_() { UI_FIXTURE_TAPS=$((UI_FIXTURE_TAPS + 1)); }
+        trap 'printf "scrolls=%s taps=%s" "$UI_FIXTURE_SCROLLS" "$UI_FIXTURE_TAPS" \
+              >"$UI_FIXTURE_COUNTS"' EXIT
+        "$@"
+        printf 'found'
+    )"
+    printf '%s %s' "${verdict:-missing}" "$(cat "$UI_FIXTURE_COUNTS")"
 }
 
 android_ui_scroll_self_test() { # <temp>
@@ -306,6 +352,75 @@ android_ui_feedback_self_test() { # <temp>
         || ok "an absent action never dismisses authored feedback"
 }
 
+android_ui_dismissal_scroll_self_test() { # <temp>
+    local temp="$1" observed
+    UI_FIXTURE_COUNTS="$temp/fixture-counts"
+    local nav='<node text="Primary" bounds="[0,570][320,640]"/>'
+    local row='<node text="Sign out" bounds="[200,538][296,582]" enabled="true" clickable="true"/>'
+    local head='<node text="Notifications alt+T" bounds="[12,572][308,572]">' shut='</node>'
+    local toast="<node text=\"Close toast Cloud sync finished\" bounds=\"[12,515][308,572]\"><node text=\"Close toast\" bounds=\"[275,533][295,554]\" enabled=\"true\" clickable=\"true\"/></node>"
+    local stuck="<node text=\"Close toast Cloud sync finished\" bounds=\"[12,515][308,572]\"><node text=\"Close toast\" bounds=\"[275,533][295,554]\" enabled=\"false\" clickable=\"true\"/></node>"
+    local other="<node text=\"Close toast Import finished\" bounds=\"[12,90][308,140]\"><node text=\"Close toast\" bounds=\"[20,100][40,121]\" enabled=\"true\" clickable=\"true\"/></node>"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav$row$head$toast$shut</node></hierarchy>" > "$temp/blocked.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav$row$head$stuck$shut</node></hierarchy>" > "$temp/stuck.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav$row$head$other$toast$shut</node></hierarchy>" > "$temp/two-toasts.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav$row</node></hierarchy>" > "$temp/cleared.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav<node text=\"Import history\" bounds=\"[24,100][296,144]\" enabled=\"true\"/></node></hierarchy>" > "$temp/gone.xml"
+
+    ui_fixtures "$temp/blocked.xml" "$temp/cleared.xml"
+    observed="$(ui_fixture_run wait_selector_scrolling "Sign out" "$temp/seen.xml" up 5 action \
+        ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == "found scrolls=0 taps=1" && "$(action_center "$temp/seen.xml" "Sign out")" == "248 560" ]] \
+        && ok "a covered action is dismissed and read back without a swipe" \
+        || bad "a covered action is dismissed and read back without a swipe" "$observed"
+    ui_fixtures "$temp/blocked.xml" "$temp/cleared.xml"
+    observed="$(ui_fixture_run find_scrolling "Sign out" "$temp/seen.xml" up action \
+        ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == "found scrolls=0 taps=1" && "$(action_center "$temp/seen.xml" "Sign out")" == "248 560" ]] \
+        && ok "the counted search also samples the uncovered action first" \
+        || bad "the counted search also samples the uncovered action first" "$observed"
+
+    ui_fixtures "$temp/gone.xml" "$temp/cleared.xml"
+    observed="$(ui_fixture_run wait_selector_scrolling "Sign out" "$temp/seen.xml" up 5 action \
+        ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == "found scrolls=1 taps=0" ]] \
+        && ok "an offscreen action with no toast is still scrolled to" \
+        || bad "an offscreen action with no toast is still scrolled to" "$observed"
+    ui_fixtures "$temp/gone.xml" "$temp/cleared.xml"
+    observed="$(ui_fixture_run find_scrolling "Sign out" "$temp/seen.xml" up action \
+        ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == "found scrolls=1 taps=0" ]] \
+        && ok "the counted search scrolls when there is nothing to dismiss" \
+        || bad "the counted search scrolls when there is nothing to dismiss" "$observed"
+
+    ui_fixtures "$temp/stuck.xml" "$temp/cleared.xml"
+    observed="$(ui_fixture_run find_scrolling "Sign out" "$temp/seen.xml" up action \
+        ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == "found scrolls=1 taps=0" ]] \
+        && ok "a dismissal that fails does not short-circuit the search" \
+        || bad "a dismissal that fails does not short-circuit the search" "$observed"
+    ui_fixtures "$temp/blocked.xml" "$temp/blocked.xml"
+    observed="$(ui_fixture_run find_scrolling "Sign out" "$temp/seen.xml" up any \
+        ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == "found scrolls=0 taps=0" ]] \
+        && ok "observing a covered control dismisses nothing" \
+        || bad "observing a covered control dismisses nothing" "$observed"
+    ui_fixtures "$temp/gone.xml" "$temp/gone.xml"
+    observed="$(ui_fixture_run wait_selector_scrolling "Sign out" "$temp/seen.xml" up 3 action \
+        ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == missing\ scrolls=[1-9]*\ taps=0 ]] \
+        && ok "an action that is nowhere fails after scrolling for it" \
+        || bad "an action that is nowhere fails after scrolling for it" "$observed"
+    # One toast's close button is not the other's: dismissing the wrong one has
+    # to be retried against a fresh dump, never paid for with a swipe.
+    ui_fixtures "$temp/two-toasts.xml" "$temp/blocked.xml" "$temp/cleared.xml"
+    observed="$(ui_fixture_run wait_selector_scrolling "Sign out" "$temp/seen.xml" up 8 action \
+        ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == "found scrolls=0 taps=2" ]] \
+        && ok "a second toast over the action is dismissed without a swipe" \
+        || bad "a second toast over the action is dismissed without a swipe" "$observed"
+}
+
 android_ui_self_test() {
     local temp point
     temp="$(mktemp -d)"
@@ -330,6 +445,7 @@ android_ui_self_test() {
     [[ -z "$(node_center "$temp/ui.xml" "Import history")" ]] && ok "a missing selector is not reported as present" || bad "a missing selector is not reported as present"
     android_ui_scroll_self_test "$temp"
     android_ui_feedback_self_test "$temp"
+    android_ui_dismissal_scroll_self_test "$temp"
     android_screencap_self_test "$temp"
     android_adb_self_test
     rm -rf "$temp"
