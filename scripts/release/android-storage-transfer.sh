@@ -8,9 +8,14 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
 # shellcheck source=scripts/release/android-ui-evidence-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/android-ui-evidence-lib.sh"
+# shellcheck source=scripts/release/android-navigation-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-navigation-lib.sh"
 
 MAIN="$PKG/$APP_NAMESPACE.MainActivity"
 export WAIT_SECS="${TRANSFER_WAIT_SECS:-45}"
+# A cold start has to reach the store before the shell enables navigation, and
+# on the emulator that is minutes rather than the seconds a tap is allowed.
+READY_SECS="${TRANSFER_READY_SECS:-240}"
 REQUIRE_RUN_AS="${TRANSFER_REQUIRE_RUN_AS:-0}"
 CANARY="CopyPasteStorageTransferT$(date +%s)-R$RANDOM"
 SEED_FILE="copypaste-seed.json"
@@ -29,6 +34,27 @@ open_downloads() { # <artifact prefix>
 
     if tap_selector "Show roots|Roots" "$OUT/${prefix}-roots.xml" 15; then sleep 1; fi
     tap_selector "Downloads|downloads" "$OUT/${prefix}-downloads.xml" 30
+}
+
+# Cold, never "brought to front". `am start` on a live task is
+# DELIVERED_TO_TOP: it keeps the previous leg's view, its filters and its soft
+# keyboard. In run 31634096676 the UI leg left the keyboard over the tab bar and
+# the first Settings tap went to the IME window instead of the app
+# (`input_interaction: Interaction with: … InputMethod`), so the leg spent 45 s
+# looking for a Storage pane it had never opened and blamed the seed import.
+restart_app() { # <stage>
+    local stage="$1"
+    sh_ am force-stop "$PKG" >/dev/null
+    wait_for 20 no_pid || bad "the app stops at $stage" "pid $(app_pid) is still running"
+    sh_ am start -W -n "$MAIN" >/dev/null
+    wait_for 60 has_pid || bad "the app relaunches at $stage"
+    if wait_app_navigable "$OUT/$stage-navigable.xml" "$READY_SECS"; then
+        ok "the app's navigation is actionable at $stage"
+    else
+        bad "the app's navigation is actionable at $stage" \
+            "$(navigation_state "$OUT/$stage-navigable.xml")"
+        return 1
+    fi
 }
 
 open_storage() {
@@ -113,6 +139,7 @@ self_test_transfer() {
     local temp CANARY="CopyPasteStorageTransferFixture"
     android_ui_self_test
     temp="$(mktemp -d)"
+    android_navigation_self_test "$temp"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history\" bounds=\"[0,0][200,40]\"/><node content-desc=\"Select multiple items\" clickable=\"true\" bounds=\"[240,0][280,40]\"/><node text=\"0 items\" bounds=\"[280,0][340,40]\"/><node text=\"$CANARY\" bounds=\"[0,50][300,90]\"/></hierarchy>" > "$temp/delayed.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
@@ -201,7 +228,7 @@ print(json.dumps({
     "skipped_undecryptable": 0,
 }))
 PY
-sh_ am start -W -n "$MAIN" >/dev/null
+restart_app seed-launch
 if open_storage && tap_selector "Import…" "$OUT/seed-import-action.xml"; then
     sleep 2
     open_downloads seed-picker || bad "Downloads is selectable for the seed import"
@@ -266,12 +293,10 @@ else
 fi
 
 group "Persisted ciphertext"
-sh_ am force-stop "$PKG" >/dev/null
-wait_for 20 no_pid || bad "force-stop ends the importing process" "pid $(app_pid) is still running"
-sh_ am start -W -n "$MAIN" >/dev/null
-wait_for 60 has_pid || bad "the app relaunches after import"
+restart_app post-import-restart
 transfer_pid="$(app_pid)"
-open_history "$OUT/transfer-history-nav.xml" || bad "History is reachable after restart"
+open_history "$OUT/transfer-history-nav.xml" \
+    || bad "History is reachable after restart" "$(navigation_state "$OUT/transfer-history-nav.xml")"
 if wait_selector "$CANARY" "$OUT/transfer-persisted.xml" 45; then
     ok "the imported history survives a process restart"
 else

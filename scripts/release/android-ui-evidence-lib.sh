@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-selector_center() { # <xml> <selector alternatives separated by |> <any|exact|action>
+selector_center() { # <xml> <selector alternatives separated by |> <any|exact|action|rendered>
     python3 - "$1" "$2" "$3" <<'PY'
 import re
 import sys
@@ -10,7 +10,11 @@ import xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 selectors = [part.casefold() for part in sys.argv[2].split("|")]
 action = sys.argv[3] == "action"
-exact_only = action or sys.argv[3] == "exact"
+exact_only = action or sys.argv[3] in ("exact", "rendered")
+# `rendered` is the one mode that keeps a disabled node. Every other mode drops
+# it, so a control the app has painted but switched off is indistinguishable
+# from one that was never laid out — and those need different next steps.
+disabled_ok = sys.argv[3] == "rendered"
 primary = next((node for node in root.iter("node") if node.get("text") == "Primary"), None)
 primary_nodes = {id(node) for node in primary.iter()} if primary is not None else set()
 primary_bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", primary.get("bounds", "")) if primary is not None else None
@@ -44,7 +48,7 @@ for node in root.iter("node"):
     clickable = node.get("clickable", "false") == "true"
     documents_label = "documentsui" in node.get("package", "").casefold() and exact
     actionable = clickable or documents_label
-    if bounds and (exact if exact_only else exact or partial) and (actionable or not action) and node.get("enabled", "true") != "false":
+    if bounds and (exact if exact_only else exact or partial) and (actionable or not action) and (disabled_ok or node.get("enabled", "true") != "false"):
         points = tuple(map(int, bounds.groups()))
         left, top, right, bottom = points
         if right - left < 8 or bottom - top < 8:
@@ -70,6 +74,10 @@ node_center_exact() { # <xml> <selector alternatives separated by |>
 
 action_center() { # <xml> <selector alternatives separated by |>
     selector_center "$1" "$2" action
+}
+
+node_center_rendered() { # <xml> <selector alternatives separated by |>
+    selector_center "$1" "$2" rendered
 }
 
 wait_selector() { # <selector> <artifact> [timeout] [dump function]
@@ -440,6 +448,9 @@ android_ui_self_test() {
     point="$(action_center "$temp/ui.xml" "Settings")"
     [[ "$point" == "265 270" ]] && ok "an action inside app navigation remains actionable" || bad "an action inside app navigation remains actionable" "$point"
     [[ -z "$(action_center "$temp/ui.xml" "Devices")" ]] && ok "pending app navigation is not actionable" || bad "pending app navigation is not actionable"
+    point="$(node_center_rendered "$temp/ui.xml" "Devices")"
+    [[ "$point" == "160 270" ]] && ok "pending app navigation is still rendered" || bad "pending app navigation is still rendered" "$point"
+    [[ -z "$(node_center_rendered "$temp/ui.xml" "Restore…")" ]] && ok "an absent control is not rendered either" || bad "an absent control is not rendered either"
     point="$(action_center "$temp/ui.xml" "copypaste-export.json")"
     [[ "$point" == "230 140" ]] && ok "an exact DocumentsUI row label resolves its action" || bad "an exact DocumentsUI row label resolves its action" "$point"
     [[ -z "$(node_center "$temp/ui.xml" "Import history")" ]] && ok "a missing selector is not reported as present" || bad "a missing selector is not reported as present"
