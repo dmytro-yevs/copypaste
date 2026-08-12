@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, deleteItems, storedItems } from "../src/harness/bridge.js";
+import { fixtureMarker } from "../src/harness/fixtures.js";
 import { rowBoxes } from "../src/harness/list.js";
 import {
   SEARCH,
@@ -50,7 +51,7 @@ beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
 
-  marker = `bulk-${Date.now()}`;
+  marker = fixtureMarker("bulk");
   seeded = await addItems(
     app,
     ["alpha", "beta", "gamma", "delta"].map((word) => `${marker} ${word}`),

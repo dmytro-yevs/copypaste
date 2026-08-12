@@ -20,6 +20,10 @@ export function ordinaryFor(nonce: string): string {
   return `an ordinary clipping HARNESS${nonce}`;
 }
 
+export function fixtureMarker(prefix: string, entropy = Date.now()): string {
+  return `${prefix}-m${entropy.toString(36)}`;
+}
+
 /** Nine digits, so `secretFor` lands on exactly the 16 the rule wants. */
 export function freshNonce(): string {
   return String(Date.now() % 1_000_000_000).padStart(9, "0");

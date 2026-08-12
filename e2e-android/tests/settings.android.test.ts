@@ -18,11 +18,13 @@ import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { accessibleSurface, expectNoFilesystemPath } from "../src/harness/leaks.js";
 import { rowBoxes } from "../src/harness/list.js";
 import { addItems, deleteItems } from "../src/harness/bridge.js";
+import { fixtureMarker } from "../src/harness/fixtures.js";
 import {
   SEARCH,
   filterHistoryTo,
   gotoView,
   resetHistoryFilters,
+  reloadHistoryWith,
   scrollListToTop,
   tapButton,
   visibleText,
@@ -67,8 +69,9 @@ let marker = "";
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
-  marker = `settings-${Date.now()}`;
+  marker = fixtureMarker("settings");
   seeded = await addItems(app, [`${marker} first fixture`, `${marker} second fixture`]);
+  await reloadHistoryWith(app, `${marker} second fixture`);
   await filterHistoryTo(app, marker, marker);
   await waitForRows(app, 2);
   // The previous file may have left the list scrolled: a virtualised list
