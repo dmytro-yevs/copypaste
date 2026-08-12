@@ -1,15 +1,13 @@
 /**
  * What the UI leg records about the WebView it attached to.
  *
- * The run's nonce is deliberately not among it. Nine digits publishes
- * `AKIAHARNESS<nonce>` and, through `leaks.android.test.ts`'s `nonce + 1`,
- * the second credential too — and hashing nine digits is brute-forced in
- * milliseconds, so there is no safe representation of it to publish instead.
- * Tests receive it through `project.provide`, which is not an artifact.
+ * Not the run's nonce: nine digits publishes `AKIAHARNESS<nonce>` and, through
+ * `leaks.android.test.ts`'s `nonce + 1`, the second credential; nine digits is
+ * brute-forced, so no digest is safe either. Tests take it from `project.provide`.
  *
- * Device-free on purpose: `harness-guard.android.test.ts` composes the whole
- * uploaded directory from this, and every other harness module reaches
- * `adb.ts`, which shells out at import time.
+ * Device-free so `harness-guard.android.test.ts` can compose the whole uploaded
+ * directory from it; every other harness module reaches `adb.ts`, which shells
+ * out at import time.
  */
 import path from "node:path";
 
