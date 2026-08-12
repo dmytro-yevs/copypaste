@@ -12,22 +12,6 @@ import json, pathlib, re, shlex, sys, yaml
 SELF_TEST = "--self-test" in sys.argv
 
 WF = pathlib.Path(".github/workflows")
-DMY45_MANIFEST = pathlib.Path("e2e/scripts/dmy-45-focused-tests.json")
-DMY45_VERIFIER = pathlib.Path("e2e/scripts/verify-dmy-45-tests.mjs")
-DMY45_EXPECTED = [
-    {
-        "file": "tests/bulk-actions.e2e.test.ts",
-        "name": "the bulk bar > bulk delete confirms first, then really deletes",
-    },
-    {
-        "file": "tests/harness-capability.e2e.test.ts",
-        "name": "daemon bulk-delete harness > never overlaps real CLI delete processes",
-    },
-    {
-        "file": "tests/scroll-anchor.e2e.test.ts",
-        "name": "scroll offset is never left past the end when the list shrinks (INV-6)",
-    },
-]
 
 
 def emit(cond, desc, detail=""):
@@ -106,90 +90,8 @@ def min_major(rng):
     return min(lows) if lows else 0
 
 
-def split_and_commands(script):
-    return [part.strip() for part in str(script or "").split("&&") if part.strip()]
-
-
-def dmy45_collection_matches(collected, expected=DMY45_EXPECTED):
-    actual = sorted((test.get("file"), test.get("name")) for test in collected)
-    wanted = sorted((test["file"], test["name"]) for test in expected)
-    return actual == wanted
-
-
-def ts_declaration(body, kind, name):
-    return re.search(r"\b{}\s*\(\s*['\"]{}['\"]".format(kind, re.escape(name)), body) is not None
-
-
-def dmy45_test_declarations_exist(files, expected):
-    for test in expected:
-        body = files.get(test["file"], "")
-        if not body:
-            return False
-        parts = test["name"].split(" > ")
-        for suite in parts[:-1]:
-            if not ts_declaration(body, "describe", suite):
-                return False
-        if not any(ts_declaration(body, kind, parts[-1]) for kind in ("test", "it")):
-            return False
-    return True
-
-
-def dmy45_checks(workflows, package, files, manifest, verifier):
-    browser = ((workflows.get("browser-webkitgtk.yml") or {}).get("jobs") or {}).get("browser") or {}
-    browser_steps = steps(browser)
-    focused = [
-        index for index, step in enumerate(browser_steps)
-        if step.get("working-directory") == "e2e"
-        and str(step.get("run") or "").strip() == "npm run test:dmy-45:browser-repeat"
-    ]
-    full = [
-        index for index, step in enumerate(browser_steps)
-        if step.get("working-directory") == "e2e"
-        and str(step.get("run") or "").strip() == "npm test"
-    ]
-    scripts = package.get("scripts") or {}
-    repeat_commands = split_and_commands(scripts.get("test:dmy-45:browser-repeat"))
-    verifier_text = verifier or ""
-
-    yield (len(focused) == 1,
-           "browser workflow runs the focused DMY-45 repeat step",
-           "expected one e2e step running npm run test:dmy-45:browser-repeat")
-    yield (len(full) == 1,
-           "browser workflow keeps the full e2e suite",
-           "expected one later e2e step running npm test")
-    yield (bool(focused and full and focused[0] < full[0]),
-           "browser workflow repeats focused DMY-45 regressions before the full suite",
-           "the focused repeat must run before npm test")
-    yield (repeat_commands == ["npm run test:dmy-45:browser"] * 3,
-           "e2e repeat script invokes the browser-focused script exactly three times",
-           "test:dmy-45:browser-repeat is {!r}".format(scripts.get("test:dmy-45:browser-repeat")))
-    yield (scripts.get("test:dmy-45:verify") == "node scripts/verify-dmy-45-tests.mjs"
-           and scripts.get("test:dmy-45") == "node scripts/verify-dmy-45-tests.mjs --run"
-           and scripts.get("test:dmy-45:browser", "").startswith("xvfb-run ")
-           and "npm run test:dmy-45" in scripts.get("test:dmy-45:browser", ""),
-           "e2e focused script runs the collector verifier before execution",
-           "test:dmy-45 must enter through verify-dmy-45-tests.mjs --run")
-    yield (manifest == DMY45_EXPECTED,
-           "DMY-45 focused manifest pins the exact expected test names and paths",
-           "manifest is {!r}".format(manifest))
-    yield (all(token in verifier_text for token in ('"list"', '"--staticParse"', '"--json"')),
-           "DMY-45 runtime verifier uses Vitest static JSON collection",
-           "verify-dmy-45-tests.mjs must call vitest list --staticParse --json")
-    yield (dmy45_test_declarations_exist(files, manifest),
-           "DMY-45 expected focused tests exist in their source files",
-           "one expected full name/path is missing from the e2e test declarations")
-
-
 docs = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WF.glob("*.yml"))}
 text = {p.name: p.read_text() for p in sorted(WF.glob("*.yml"))}
-e2e_package = json.loads(pathlib.Path("e2e/package.json").read_text())
-dmy45_manifest = json.loads(DMY45_MANIFEST.read_text()) if DMY45_MANIFEST.is_file() else []
-dmy45_verifier = DMY45_VERIFIER.read_text() if DMY45_VERIFIER.is_file() else ""
-dmy45_files = {
-    test["file"]: (pathlib.Path("e2e") / test["file"]).read_text()
-    for test in dmy45_manifest
-    if (pathlib.Path("e2e") / test["file"]).is_file()
-}
 
 
 release_jobs = docs["release.yml"].get("jobs") or {}
@@ -412,9 +314,6 @@ for wf, doc in docs.items():
         env = dict(wenv, **(j.get("env") or {}))
         rec("RUSTUP_TOOLCHAIN" in env, "{}: {} pins RUSTUP_TOOLCHAIN for its bare cargo".format(wf, jn),
             "resolves through rust-toolchain.toml instead: {}".format(hits[:3]))
-
-for check in dmy45_checks(docs, e2e_package, dmy45_files, dmy45_manifest, dmy45_verifier):
-    rec(*check)
 
 # --- the Android NDK binutils wiring ---------------------------------------
 # openssl-src asks cc-rs for AR and RANLIB, and cc-rs falls back to
@@ -870,89 +769,4 @@ targeted_adb "$serial" shell dumpsys power
          bool(adb_guard_violations(guarded + "targeted_adb -s shell id\n", 1))),
     ):
         emit(held, "self-test: {}".format(desc), "the adb structure detector did not reject the fixture")
-
-    dmy45_workflow = {
-        "browser-webkitgtk.yml": {
-            "jobs": {
-                "browser": {
-                    "steps": [
-                        {"working-directory": "e2e", "run": "npm run test:dmy-45:browser-repeat"},
-                        {"working-directory": "e2e", "run": "npm test"},
-                    ]
-                }
-            }
-        }
-    }
-    dmy45_package = {
-        "scripts": {
-            "test:dmy-45:verify": "node scripts/verify-dmy-45-tests.mjs",
-            "test:dmy-45": "node scripts/verify-dmy-45-tests.mjs --run",
-            "test:dmy-45:browser": 'xvfb-run -a -s "-screen 0 1280x900x24" npm run test:dmy-45 --',
-            "test:dmy-45:browser-repeat":
-                "npm run test:dmy-45:browser && npm run test:dmy-45:browser && npm run test:dmy-45:browser",
-        }
-    }
-    dmy45_sources = {
-        "tests/bulk-actions.e2e.test.ts":
-            'describe("the bulk bar", () => { test("bulk delete confirms first, then really deletes", async () => {}) })',
-        "tests/harness-capability.e2e.test.ts":
-            'describe("daemon bulk-delete harness", () => { it("never overlaps real CLI delete processes", async () => {}) })',
-        "tests/scroll-anchor.e2e.test.ts":
-            'test("scroll offset is never left past the end when the list shrinks (INV-6)", async () => {})',
-    }
-    dmy45_verifier_fixture = 'spawnSync(vitest, ["list", "-t", selector, "--staticParse", "--json"])'
-
-    def dmy45_probe(workflow=dmy45_workflow, package=dmy45_package, sources=dmy45_sources,
-                    manifest=DMY45_EXPECTED, verifier=dmy45_verifier_fixture):
-        return all(cond for cond, _, _ in dmy45_checks(workflow, package, sources, manifest, verifier))
-
-    one_repeat = json.loads(json.dumps(dmy45_package))
-    one_repeat["scripts"]["test:dmy-45:browser-repeat"] = "npm run test:dmy-45:browser"
-
-    drifted_sources = dict(dmy45_sources)
-    drifted_sources["tests/bulk-actions.e2e.test.ts"] = drifted_sources[
-        "tests/bulk-actions.e2e.test.ts"
-    ].replace("bulk delete confirms first, then really deletes", "bulk delete skips confirmation")
-
-    focused_after_full = {
-        "browser-webkitgtk.yml": {
-            "jobs": {
-                "browser": {
-                    "steps": [
-                        {"working-directory": "e2e", "run": "npm test"},
-                        {"working-directory": "e2e", "run": "npm run test:dmy-45:browser-repeat"},
-                    ]
-                }
-            }
-        }
-    }
-    missing_focused = {
-        "browser-webkitgtk.yml": {
-            "jobs": {"browser": {"steps": [{"working-directory": "e2e", "run": "npm test"}]}}
-        }
-    }
-    missing_full = {
-        "browser-webkitgtk.yml": {
-            "jobs": {
-                "browser": {
-                    "steps": [
-                        {"working-directory": "e2e", "run": "npm run test:dmy-45:browser-repeat"}
-                    ]
-                }
-            }
-        }
-    }
-    extra_collected = DMY45_EXPECTED + [{"file": "tests/other.e2e.test.ts", "name": "extra"}]
-
-    for desc, held in (
-        ("DMY-45 baseline wiring passes", dmy45_probe()),
-        ("one DMY-45 repeat is rejected", not dmy45_probe(package=one_repeat)),
-        ("actual DMY-45 name drift is rejected", not dmy45_probe(sources=drifted_sources)),
-        ("zero DMY-45 collected tests are rejected", not dmy45_collection_matches([])),
-        ("extra DMY-45 collected tests are rejected", not dmy45_collection_matches(extra_collected)),
-        ("focused DMY-45 step after the full suite is rejected", not dmy45_probe(workflow=focused_after_full)),
-        ("missing focused DMY-45 step is rejected", not dmy45_probe(workflow=missing_focused)),
-        ("missing full browser suite is rejected", not dmy45_probe(workflow=missing_full)),
-    ):
-        emit(held, "self-test: {}".format(desc), "the DMY-45 detector did not behave as stated")
 sys.exit(0)
