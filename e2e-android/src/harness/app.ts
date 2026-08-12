@@ -2,6 +2,7 @@ import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
 import { sleep } from "./adb.js";
 import { DEFAULT_PORT, openDevtools, type DevtoolsEndpoint } from "./devtools.js";
+import { rememberAttachedApp } from "./evidence.js";
 
 export type { Page } from "puppeteer-core";
 
@@ -61,7 +62,9 @@ export class AndroidApp {
    * process that leaves behind.
    */
   static async attach(port = DEFAULT_PORT): Promise<AndroidApp> {
-    return new AndroidApp(await connect(port));
+    const app = new AndroidApp(await connect(port));
+    rememberAttachedApp(app);
+    return app;
   }
 
   get page(): Page {
