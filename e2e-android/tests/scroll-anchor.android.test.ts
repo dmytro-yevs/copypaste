@@ -49,6 +49,20 @@ let app: AndroidApp;
 let seeded: string[] = [];
 let marker = "";
 
+/**
+ * Fixed width, because this file isolates its rows through the product search
+ * path and that path ranks by relevance rather than recency (manifest 06
+ * §3.1.7). One character of label is enough to reorder the list: an unpadded
+ * `item 150` scores below all 150 shorter labels and is appended at the END,
+ * which grows the spacer under the viewport and prepends nothing.
+ *
+ * Equal length puts every candidate on the same score, and the tie-break is the
+ * caller's order — newest first — so the arrival lands at the top.
+ */
+function label(index: number): string {
+  return `${marker} item ${String(index).padStart(3, "0")}`;
+}
+
 /** The row occupying the top of the viewport, by list-space offset. */
 function topRow(snapshot: ListSnapshot) {
   const rows = [...snapshot.rows].sort((a, b) => a.start - b.start);
@@ -63,9 +77,9 @@ beforeAll(async () => {
   marker = fixtureMarker("anchor");
   seeded = await addItems(
     app,
-    Array.from({ length: COUNT }, (_, i) => `${marker} item ${i}`),
+    Array.from({ length: COUNT }, (_, i) => label(i)),
   );
-  await reloadHistoryWith(app, `${marker} item ${COUNT - 1}`);
+  await reloadHistoryWith(app, label(COUNT - 1));
   await filterHistoryTo(app, marker, marker);
   await waitForRows(app, 4);
   await scrollListToTop(app);
@@ -95,9 +109,9 @@ test("a prepend keeps the row under the viewport top where it was (INV-1)", asyn
   expect(before.row.text).toContain(marker);
 
   const grown = before.row.height;
-  const [added] = await addItems(app, [
-    `${marker} brand new clipping that arrives while scrolled ${fixtureMarker("prepend")}`,
-  ]);
+  // The same template as the seed, one index past its end, so the arrival is a
+  // prepend in the searched list and not merely a taller spacer below it.
+  const [added] = await addItems(app, [label(COUNT)]);
   seeded.push(added!);
 
   const after = topRow(
