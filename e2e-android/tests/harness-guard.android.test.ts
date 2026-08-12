@@ -1,9 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import { writeAttachment } from "../src/harness/attachment.js";
 import { fixtureMarker, ordinaryFor, secretFor } from "../src/harness/fixtures.js";
 import { writeRedacted } from "../src/harness/redact.js";
 
@@ -94,5 +96,79 @@ describe("failure evidence", () => {
     expect(parsed.list.rows.map((row: { start: number }) => row.start)).toEqual([2412, 2479]);
     expect(parsed.list.rows[1].text).toContain("long long");
     expect(parsed.list.rows[0].text).toContain("short");
+  });
+});
+
+/**
+ * The directory `android-emulator.yml` uploads whole, assembled from the calls
+ * that fill it. Asserting on one file is what let `attachment.json` publish the
+ * nonce: nine digits rebuilds `AKIAHARNESS<nonce>` and, through `leakNonce`,
+ * the leak suite's credential as well.
+ */
+describe("the uploaded android-ui directory", () => {
+  let out = "";
+
+  afterEach(() => {
+    if (out) rmSync(out, { recursive: true, force: true });
+    out = "";
+  });
+
+  function filesUnder(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      return entry.isDirectory() ? filesUnder(full) : [full];
+    });
+  }
+
+  test("contains no credential, no nonce and nothing either rebuilds from", () => {
+    const nonce = "564357103";
+    const leakNonce = String((Number(nonce) + 1) % 1_000_000_000).padStart(9, "0");
+    out = mkdtempSync(path.join(tmpdir(), "cp-android-ui-"));
+
+    // Both writers, as the leg calls them.
+    writeAttachment(out, {
+      package: "com.copypaste.app.debug",
+      pid: 4157,
+      socket: "webview_devtools_remote_4157",
+      url: "http://tauri.localhost/",
+      title: "CopyPaste",
+      version: { Browser: "Chrome/133.0.6943.137", "Android-Package": "com.copypaste.app.debug" },
+    });
+    writeRedacted(path.join(out, "failures", "leaks-plaintext.json"), {
+      rows: [
+        { text: `revealed ${secretFor(nonce)}` },
+        { text: `revealed ${secretFor(leakNonce)}` },
+        { text: ordinaryFor(nonce) },
+      ],
+    });
+
+    const files = filesUnder(out);
+    // An empty walk would satisfy every assertion below it.
+    expect(files.map((file) => path.relative(out, file).replace(/\\/g, "/")).sort()).toEqual([
+      "attachment.json",
+      "failures/leaks-plaintext.json",
+    ]);
+
+    const uploaded = files.map((file) => readFileSync(file, "utf8")).join("\n");
+    for (const value of [secretFor(nonce), secretFor(leakNonce), nonce, leakNonce]) {
+      expect(uploaded).not.toContain(value);
+    }
+    expect(uploaded).not.toMatch(/AKIA[0-9A-Z]{16}/);
+    // Still the record of which WebView the run drove.
+    expect(JSON.parse(readFileSync(path.join(out, "attachment.json"), "utf8"))).toMatchObject({
+      package: "com.copypaste.app.debug",
+      socket: "webview_devtools_remote_4157",
+    });
+  });
+
+  // The claim `redact.ts` makes about itself, held to the source: a second
+  // direct writer is how the nonce reached an upload in the first place.
+  test("is written only through the redacting path", () => {
+    const harness = fileURLToPath(new URL("../src/harness", import.meta.url));
+    const writers = filesUnder(harness).filter((file) =>
+      /\bwriteFileSync\b/.test(readFileSync(file, "utf8")),
+    );
+
+    expect(writers.map((file) => path.basename(file))).toEqual(["redact.ts"]);
   });
 });

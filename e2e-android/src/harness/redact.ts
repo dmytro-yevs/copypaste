@@ -1,5 +1,8 @@
 /**
- * Everything this harness publishes goes through here.
+ * Everything this harness publishes goes through here — `attachment.json` and
+ * the failure captures alike. `harness-guard.android.test.ts` holds that claim
+ * to the source rather than to this sentence: `global-setup.ts` used to write
+ * its attachment directly, and the sentence was simply wrong for a while.
  *
  * Its own module so the guard that proves it can run without a device: every
  * other harness file reaches `adb.ts`, which shells out at import time.
@@ -36,7 +39,8 @@ function redactFixtures(text: string): string {
   return out.replace(SENSITIVE_SHAPE, REDACTED);
 }
 
-/** The only way this harness writes a file a run publishes. */
+/** The only way this harness writes a file a run publishes, enforced by the
+ *  guard rather than asserted here. */
 export function writeRedacted(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, redactFixtures(JSON.stringify(value, null, 2)));

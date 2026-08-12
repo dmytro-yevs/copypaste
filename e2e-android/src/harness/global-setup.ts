@@ -1,10 +1,8 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
-
 import type { TestProject } from "vitest/node";
 
 import { PACKAGE, adb, isDebuggable, launchMain, shareText } from "./adb.js";
 import { attachToApp, type AndroidApp } from "./app.js";
+import { writeAttachment } from "./attachment.js";
 import { storedItems } from "./bridge.js";
 import { closeDevtools } from "./devtools.js";
 import { freshNonce, ordinaryFor, secretFor } from "./fixtures.js";
@@ -91,23 +89,14 @@ export default async function setup(project: TestProject): Promise<() => Promise
     );
     await waitForRows(app, 2, 60_000);
 
-    mkdirSync(OUT, { recursive: true });
-    writeFileSync(
-      path.join(OUT, "attachment.json"),
-      JSON.stringify(
-        {
-          package: PACKAGE,
-          pid: app.endpoint.pid,
-          socket: app.endpoint.socket,
-          url: app.page.url(),
-          title: await app.page.title(),
-          version: app.endpoint.version,
-          nonce,
-        },
-        null,
-        2,
-      ),
-    );
+    writeAttachment(OUT, {
+      package: PACKAGE,
+      pid: app.endpoint.pid,
+      socket: app.endpoint.socket,
+      url: app.page.url(),
+      title: await app.page.title(),
+      version: app.endpoint.version,
+    });
   } finally {
     await app.detach();
   }
