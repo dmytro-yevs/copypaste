@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, deleteItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
-import { listSnapshot, rowBoxes } from "../src/harness/list.js";
+import { listSnapshot, rowBoxes, settledList } from "../src/harness/list.js";
 import {
   ROW,
   SEARCH,
@@ -136,17 +136,39 @@ describe("the virtualiser", () => {
 });
 
 describe("row geometry (INV-5)", () => {
+  /**
+   * One query per fixture length, because the marker-wide search this suite
+   * isolates through ranks by relevance (manifest 06 §3.1.7): a 2000-character
+   * clip scores below every short one, so the list opens on 30 short rows and a
+   * long row is never on screen to compare against.
+   *
+   * `short` and `long` each occur in exactly one of the two fixtures, so either
+   * query selects its own half on the fuzzy and the FTS path alike.
+   */
   test("over-reserves: a 2000-character clip reserves what a 5-word clip does", async () => {
-    const rows = await rowBoxes(app);
-    const heights = [...new Set(rows.map((row) => Math.round(row.height)))];
+    await filterHistoryTo(app, `${marker} short`, marker);
+    const short = await settledList(
+      app,
+      (list) => list.rows.length > 0 && list.rows.every((row) => row.text.includes("short")),
+      { timeout: 30_000, describe: "the short-only search never came to rest on short rows" },
+    );
+
+    await filterHistoryTo(app, `${marker} long`, marker);
+    const long = await settledList(
+      app,
+      (list) => list.rows.length > 0 && list.rows.every((row) => row.text.includes("long long")),
+      { timeout: 30_000, describe: "the long-only search never came to rest on long rows" },
+    );
+
+    expect(short.rows.length).toBeGreaterThan(0);
+    expect(long.rows.length).toBeGreaterThan(0);
+
+    const heights = [
+      ...new Set([...short.rows, ...long.rows].map((row) => Math.round(row.height))),
+    ];
     expect(heights).toHaveLength(1);
     expect(reservationFor(heights[0]!)).toBeDefined();
-
-    const long = rows.filter((row) => row.text.includes("long long"));
-    const short = rows.filter((row) => row.text.includes("short"));
-    expect(long.length).toBeGreaterThan(0);
-    expect(short.length).toBeGreaterThan(0);
-  });
+  }, 120_000);
 
   test("rows never overlap", async () => {
     const rows = (await rowBoxes(app)).sort((a, b) => a.start - b.start);
