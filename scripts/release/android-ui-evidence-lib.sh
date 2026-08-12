@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-selector_center() { # <xml> <selector alternatives separated by |> <any|exact|action|rendered>
+selector_center() { # <xml> <selector alternatives separated by |> <any|exact|action|rendered|current>
     python3 - "$1" "$2" "$3" <<'PY'
 import re
 import sys
@@ -10,11 +10,16 @@ import xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 selectors = [part.casefold() for part in sys.argv[2].split("|")]
 action = sys.argv[3] == "action"
-exact_only = action or sys.argv[3] in ("exact", "rendered")
+exact_only = action or sys.argv[3] in ("exact", "rendered", "current")
 # `rendered` is the one mode that keeps a disabled node. Every other mode drops
 # it, so a control the app has painted but switched off is indistinguishable
 # from one that was never laid out — and those need different next steps.
 disabled_ok = sys.argv[3] == "rendered"
+# `current` is the destination signal: Chromium maps `aria-selected` onto the
+# accessibility `selected` flag, so the Settings tab strip says which pane the
+# app is on. It does *not* map `aria-current`, so the primary tab bar never
+# answers this and callers must not read a false negative as "the tap missed".
+current_only = sys.argv[3] == "current"
 primary = next((node for node in root.iter("node") if node.get("text") == "Primary"), None)
 primary_nodes = {id(node) for node in primary.iter()} if primary is not None else set()
 primary_bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", primary.get("bounds", "")) if primary is not None else None
@@ -48,7 +53,7 @@ for node in root.iter("node"):
     clickable = node.get("clickable", "false") == "true"
     documents_label = "documentsui" in node.get("package", "").casefold() and exact
     actionable = clickable or documents_label
-    if bounds and (exact if exact_only else exact or partial) and (actionable or not action) and (disabled_ok or node.get("enabled", "true") != "false"):
+    if bounds and (exact if exact_only else exact or partial) and (actionable or not action) and (disabled_ok or node.get("enabled", "true") != "false") and (not current_only or node.get("selected", "false") == "true"):
         points = tuple(map(int, bounds.groups()))
         left, top, right, bottom = points
         if right - left < 8 or bottom - top < 8:
@@ -78,6 +83,10 @@ action_center() { # <xml> <selector alternatives separated by |>
 
 node_center_rendered() { # <xml> <selector alternatives separated by |>
     selector_center "$1" "$2" rendered
+}
+
+node_center_current() { # <xml> <selector alternatives separated by |>
+    selector_center "$1" "$2" current
 }
 
 wait_selector() { # <selector> <artifact> [timeout] [dump function]
@@ -451,6 +460,7 @@ android_ui_self_test() {
     point="$(node_center_rendered "$temp/ui.xml" "Devices")"
     [[ "$point" == "160 270" ]] && ok "pending app navigation is still rendered" || bad "pending app navigation is still rendered" "$point"
     [[ -z "$(node_center_rendered "$temp/ui.xml" "Restore…")" ]] && ok "an absent control is not rendered either" || bad "an absent control is not rendered either"
+    [[ -z "$(node_center_current "$temp/ui.xml" "Export…")" ]] && ok "a control with no selection flag is not current" || bad "a control with no selection flag is not current"
     point="$(action_center "$temp/ui.xml" "copypaste-export.json")"
     [[ "$point" == "230 140" ]] && ok "an exact DocumentsUI row label resolves its action" || bad "an exact DocumentsUI row label resolves its action" "$point"
     [[ -z "$(node_center "$temp/ui.xml" "Import history")" ]] && ok "a missing selector is not reported as present" || bad "a missing selector is not reported as present"
