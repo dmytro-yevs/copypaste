@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "xvfb-run -a -s \"-screen 0 1280x900x24\" vitest run",
+    "test": "node scripts/verify-dmy-45-tests.mjs && xvfb-run -a -s \"-screen 0 1280x900x24\" vitest run",
+    "test:dmy-45:self-test": "node scripts/verify-dmy-45-tests.self-test.mjs",
     "test:dmy-45:verify": "node scripts/verify-dmy-45-tests.mjs",
     "test:dmy-45": "node scripts/verify-dmy-45-tests.mjs --run",
     "test:dmy-45:browser": "xvfb-run -a -s \"-screen 0 1280x900x24\" npm run test:dmy-45 --",
@@ -19,6 +20,7 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",
     "wait-on": "^9.1.0",
-    "webdriverio": "^9.30.0"
+    "webdriverio": "^9.30.0",
+    "yaml": "^2.8.1"
   }
 }
