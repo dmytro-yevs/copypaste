@@ -34,6 +34,17 @@ navigation_state() { # <artifact>
     printf '%s' "${report% }"
 }
 
+# A tap the app never received leaves its source control exactly where it was; a
+# pane that failed to open does not. Naming which of the two happened is the
+# difference between "the IME was over the tab bar" and "the pane is gone".
+tap_landing() { # <artifact> <control>
+    if [[ -n "$(action_center "$1" "$2")" ]]; then
+        printf '%s is still actionable, so the tap did not reach the app' "$2"
+    else
+        printf 'the pane never rendered; navigation was %s' "$(navigation_state "$1")"
+    fi
+}
+
 wait_app_navigable() { # <artifact> [timeout] [dump function]
     local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}" dump="${3:-dump_hierarchy}"
     local started="$SECONDS"
@@ -68,6 +79,15 @@ android_navigation_self_test() { # <temp>
     [[ "$(navigation_state "$temp/shell-less.xml")" == "History=absent Devices=absent Settings=absent" ]] \
         && ok "a shell that never rendered reports absent tabs" \
         || bad "a shell that never rendered reports absent tabs" "$(navigation_state "$temp/shell-less.xml")"
+
+    [[ "$(tap_landing "$temp/navigable.xml" Settings)" == *"did not reach the app"* ]] \
+        && ok "a tab still actionable after its tap is an undelivered tap" \
+        || bad "a tab still actionable after its tap is an undelivered tap" \
+               "$(tap_landing "$temp/navigable.xml" Settings)"
+    [[ "$(tap_landing "$temp/shell-less.xml" Settings)" == *"never rendered"* ]] \
+        && ok "a pane that never rendered is not blamed on the tap" \
+        || bad "a pane that never rendered is not blamed on the tap" \
+               "$(tap_landing "$temp/shell-less.xml" Settings)"
 
     ui_fixtures "$temp/starting.xml" "$temp/starting.xml" "$temp/navigable.xml"
     wait_app_navigable "$temp/observed.xml" 8 ui_fixture_dump \
