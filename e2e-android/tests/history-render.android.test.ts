@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, deleteItems } from "../src/harness/bridge.js";
+import { fixtureMarker } from "../src/harness/fixtures.js";
 import { listSnapshot, rowBoxes } from "../src/harness/list.js";
 import {
   ROW,
@@ -18,6 +19,7 @@ import {
   clearField,
   filterHistoryTo,
   gotoView,
+  reloadHistoryWith,
   scrollListToTop,
   waitFor,
   waitForRows,
@@ -61,7 +63,7 @@ let marker = "";
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
-  marker = `render-${Date.now()}`;
+  marker = fixtureMarker("render");
 
   // Alternating lengths: INV-5 says the reservation is a function of the
   // setting, so both must reserve identically.
@@ -72,6 +74,7 @@ beforeAll(async () => {
     ),
   );
 
+  await reloadHistoryWith(app, `${marker} item ${COUNT - 1}`);
   await filterHistoryTo(app, marker, marker);
   await waitForRows(app, 4);
   await scrollListToTop(app);

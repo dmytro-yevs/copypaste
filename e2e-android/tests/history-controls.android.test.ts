@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, deleteItems } from "../src/harness/bridge.js";
+import { fixtureMarker } from "../src/harness/fixtures.js";
 import { rowBoxes } from "../src/harness/list.js";
 import {
   SEARCH,
@@ -40,7 +41,7 @@ beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
 
-  marker = `controls-${Date.now()}`;
+  marker = fixtureMarker("controls");
   seeded = await addItems(app, [
     `https://example.com/one?${marker}`,
     `https://example.com/two?${marker}`,
