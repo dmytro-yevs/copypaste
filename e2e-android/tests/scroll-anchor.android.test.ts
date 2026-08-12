@@ -12,10 +12,12 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, deleteItems, storedItems } from "../src/harness/bridge.js";
+import { fixtureMarker } from "../src/harness/fixtures.js";
 import { scrollTo, settledList, type ListSnapshot } from "../src/harness/list.js";
 import {
   gotoView,
   filterHistoryTo,
+  reloadHistoryWith,
   resetHistoryFilters,
   scrollListToTop,
   waitForRows,
@@ -58,11 +60,12 @@ function topRow(snapshot: ListSnapshot) {
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
-  marker = `anchor-${Date.now()}`;
+  marker = fixtureMarker("anchor");
   seeded = await addItems(
     app,
     Array.from({ length: COUNT }, (_, i) => `${marker} item ${i}`),
   );
+  await reloadHistoryWith(app, `${marker} item ${COUNT - 1}`);
   await filterHistoryTo(app, marker, marker);
   await waitForRows(app, 4);
   await scrollListToTop(app);
@@ -93,7 +96,7 @@ test("a prepend keeps the row under the viewport top where it was (INV-1)", asyn
 
   const grown = before.row.height;
   const [added] = await addItems(app, [
-    `${marker} brand new clipping that arrives while scrolled ${Date.now()}`,
+    `${marker} brand new clipping that arrives while scrolled ${fixtureMarker("prepend")}`,
   ]);
   seeded.push(added!);
 

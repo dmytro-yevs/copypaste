@@ -12,7 +12,7 @@ set -uo pipefail
 MAIN="$PKG/$APP_NAMESPACE.MainActivity"
 export WAIT_SECS="${TRANSFER_WAIT_SECS:-45}"
 REQUIRE_RUN_AS="${TRANSFER_REQUIRE_RUN_AS:-0}"
-CANARY="CopyPasteStorageTransfer$(date +%s)$RANDOM"
+CANARY="CopyPasteStorageTransferT$(date +%s)-R$RANDOM"
 SEED_FILE="copypaste-seed.json"
 EXPORT_FILE="copypaste-export.json"
 INVALID_FILE="copypaste-invalid.json"
@@ -34,7 +34,14 @@ open_downloads() { # <artifact prefix>
 open_storage() {
     tap_selector "Settings" "$OUT/settings-nav.xml" || return 1
     tap_selector "Storage" "$OUT/settings-storage.xml" || return 1
-    wait_selector "Export…|Import…" "$OUT/settings-storage-ready.xml" || return 1
+    wait_for "$WAIT_SECS" history_state_holds \
+        "$OUT/settings-storage-ready.xml" storage_transfer_actions_holds dump_hierarchy \
+        || return 1
+}
+
+storage_transfer_actions_holds() { # <artifact>
+    [[ -n "$(action_center "$1" "Export…")" ]] \
+        && [[ -n "$(action_center "$1" "Import…")" ]]
 }
 
 history_toolbar_holds() { # <artifact>
@@ -130,6 +137,18 @@ self_test_transfer() {
         && ok "the rejected-import selector is the copy the app renders" \
         || bad "the rejected-import selector is the copy the app renders" \
                "$ERROR_CATALOGUE no longer spells errors.invalid_request that way"
+    local canary_sample="CopyPasteStorageTransferT1786494647-R12345"
+    ! grep -Eq '[0-9]([[:space:]-]?[0-9]){12,18}' <<<"$canary_sample" \
+        && ok "the storage canary cannot look like a card number" \
+        || bad "the storage canary cannot look like a card number" "$canary_sample"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage" bounds="[0,0][60,44]" enabled="true" clickable="true" selected="true"/><node text="Import history" bounds="[24,70][140,90]" enabled="true"/><node text="Import…" bounds="[0,0][0,0]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-title-only.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage" bounds="[0,0][60,44]" enabled="true" clickable="true" selected="true"/><node text="Export…" bounds="[20,80][120,124]" enabled="true" clickable="true"/><node text="Import…" bounds="[20,140][120,184]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-ready.xml"
+    storage_transfer_actions_holds "$temp/storage-title-only.xml" \
+        && bad "storage readiness requires actionable transfer buttons" \
+        || ok "storage readiness requires actionable transfer buttons"
+    storage_transfer_actions_holds "$temp/storage-ready.xml" \
+        && ok "storage readiness accepts visible transfer actions" \
+        || bad "storage readiness accepts visible transfer actions"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node text=\"Notifications alt+T\" bounds=\"[12,572][308,572]\"><node text=\"CopyPaste $IMPORT_FAILURE_COPY. Try again.\" bounds=\"[49,524][263,563]\"/></node></hierarchy>" > "$temp/rejected.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Notifications alt+T" bounds="[12,572][308,572]"><node text="Imported 1 item" bounds="[49,524][263,563]"/></node></hierarchy>' > "$temp/accepted.xml"
     ui_fixtures "$temp/rejected.xml"
@@ -183,7 +202,7 @@ print(json.dumps({
 }))
 PY
 sh_ am start -W -n "$MAIN" >/dev/null
-if open_storage && tap_scrolling "Import…" "$OUT/seed-import-action.xml" up; then
+if open_storage && tap_selector "Import…" "$OUT/seed-import-action.xml"; then
     sleep 2
     open_downloads seed-picker || bad "Downloads is selectable for the seed import"
     tap_selector "$SEED_FILE" "$OUT/seed-file.xml" 15 || bad "the seed export is selectable"
