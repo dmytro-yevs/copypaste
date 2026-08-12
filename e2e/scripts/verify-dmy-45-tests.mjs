@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -9,8 +10,22 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 export const e2eRoot = path.resolve(scriptDir, "..");
 export const repoRoot = path.resolve(e2eRoot, "..");
 export const manifestPath = path.join(scriptDir, "dmy-45-focused-tests.json");
+export const selfTestCommand = "node scripts/verify-dmy-45-tests.self-test.mjs";
 export const verifierCommand = "node scripts/verify-dmy-45-tests.mjs";
+export const guardedVerifyCommand = `${selfTestCommand} && ${verifierCommand}`;
+export const xvfbCommand = 'xvfb-run -a -s "-screen 0 1280x900x24"';
 export const expected = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+// Vitest exits 0 when a `-t` selector matches nothing, which is the DMY-45
+// hazard: every command below is pinned exactly, because a prefix match lets a
+// `-t nothing` suffix empty the suite while the guard stays green.
+export const requiredScripts = {
+  test: `${guardedVerifyCommand} && ${xvfbCommand} vitest run`,
+  "test:dmy-45:self-test": selfTestCommand,
+  "test:dmy-45:verify": guardedVerifyCommand,
+  "test:dmy-45": `${guardedVerifyCommand} --run`,
+  "test:dmy-45:browser": `${xvfbCommand} npm run test:dmy-45 --`,
+};
 
 const vitest = path.join(e2eRoot, "node_modules", "vitest", "vitest.mjs");
 const vitestOptions = { cwd: e2eRoot };
@@ -56,54 +71,39 @@ export function compareCollection(observed, wanted = expected) {
   };
 }
 
+function stepsRunning(steps, command) {
+  return steps
+    .map((step, index) => ({ step, index }))
+    .filter(
+      ({ step }) =>
+        step?.["working-directory"] === "e2e" &&
+        String(step?.run ?? "").trim() === command,
+    );
+}
+
 export function checkWiring({ workflow, packageJson }) {
   const failures = [];
   const steps = workflow?.jobs?.browser?.steps ?? [];
-  const focused = steps
-    .map((step, index) => ({ step, index }))
-    .filter(
-      ({ step }) =>
-        step?.["working-directory"] === "e2e" &&
-        String(step?.run ?? "").trim() === "npm run test:dmy-45:browser-repeat",
-    )
-    .map(({ index }) => index);
-  const full = steps
-    .map((step, index) => ({ step, index }))
-    .filter(
-      ({ step }) =>
-        step?.["working-directory"] === "e2e" &&
-        String(step?.run ?? "").trim() === "npm test",
-    )
-    .map(({ index }) => index);
+  const focused = stepsRunning(steps, "npm run test:dmy-45:browser-repeat");
+  const full = stepsRunning(steps, "npm test");
   const scripts = packageJson?.scripts ?? {};
   const repeat = splitAndCommands(scripts["test:dmy-45:browser-repeat"]);
-  const normal = splitAndCommands(scripts.test);
 
   if (focused.length !== 1) failures.push("browser workflow must have one focused DMY-45 repeat step");
   if (full.length !== 1) failures.push("browser workflow must have one full npm test step");
-  if (!(focused.length === 1 && full.length === 1 && focused[0] < full[0])) {
+  if (!(focused.length === 1 && full.length === 1 && focused[0].index < full[0].index)) {
     failures.push("focused DMY-45 repeat step must run before the full npm test step");
+  }
+  for (const { step } of [...focused, ...full]) {
+    for (const key of ["if", "continue-on-error"]) {
+      if (key in step) failures.push(`DMY-45 browser steps must not carry \`${key}\``);
+    }
   }
   if (repeat.length !== 3 || repeat.some((cmd) => cmd !== "npm run test:dmy-45:browser")) {
     failures.push("test:dmy-45:browser-repeat must invoke test:dmy-45:browser exactly three times");
   }
-  if (scripts["test:dmy-45:verify"] !== verifierCommand) {
-    failures.push("test:dmy-45:verify must run the verifier");
-  }
-  if (scripts["test:dmy-45"] !== `${verifierCommand} --run`) {
-    failures.push("test:dmy-45 must run the verifier before focused execution");
-  }
-  if (
-    !String(scripts["test:dmy-45:browser"] ?? "").startsWith("xvfb-run ") ||
-    !String(scripts["test:dmy-45:browser"] ?? "").includes("npm run test:dmy-45")
-  ) {
-    failures.push("test:dmy-45:browser must wrap the verified focused script in Xvfb");
-  }
-  if (
-    normal[0] !== verifierCommand ||
-    !normal.slice(1).join(" && ").startsWith('xvfb-run -a -s "-screen 0 1280x900x24" vitest run')
-  ) {
-    failures.push("npm test must run the verifier before the full browser suite");
+  for (const [name, command] of Object.entries(requiredScripts)) {
+    if (scripts[name] !== command) failures.push(`${name} must be exactly: ${command}`);
   }
 
   return failures;
@@ -157,13 +157,40 @@ export function assertFocusedCollection(observed = collectFocusedTests()) {
   return observed;
 }
 
+export function compareExecution(summary, wanted = expected) {
+  return summary?.numPassedTests === wanted.length && summary?.numFailedTests === 0;
+}
+
+export function assertFocusedExecution(reportPath) {
+  const summary = JSON.parse(readFileSync(reportPath, "utf8"));
+  if (!compareExecution(summary)) {
+    fail(
+      `expected ${expected.length} focused tests to execute and pass`,
+      `passed ${summary.numPassedTests}, failed ${summary.numFailedTests}`,
+    );
+  }
+  return summary;
+}
+
 export function runFocusedTests() {
-  const run = spawnSync(process.execPath, [vitest, "run", "-t", selectorFor(expected)], {
-    ...vitestOptions,
-    stdio: "inherit",
-  });
+  const reportPath = path.join(os.tmpdir(), "dmy-45-focused-report.json");
+  const run = spawnSync(
+    process.execPath,
+    [
+      vitest,
+      "run",
+      "-t",
+      selectorFor(expected),
+      "--reporter=default",
+      "--reporter=json",
+      `--outputFile.json=${reportPath}`,
+    ],
+    { ...vitestOptions, stdio: "inherit" },
+  );
   if (run.error) fail("could not start Vitest focused run", run.error.message);
-  return run.status ?? 1;
+  if (run.status !== 0) return run.status ?? 1;
+  assertFocusedExecution(reportPath);
+  return 0;
 }
 
 function main() {

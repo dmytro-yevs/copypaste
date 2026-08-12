@@ -4,10 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "node scripts/verify-dmy-45-tests.mjs && xvfb-run -a -s \"-screen 0 1280x900x24\" vitest run",
+    "test": "node scripts/verify-dmy-45-tests.self-test.mjs && node scripts/verify-dmy-45-tests.mjs && xvfb-run -a -s \"-screen 0 1280x900x24\" vitest run",
     "test:dmy-45:self-test": "node scripts/verify-dmy-45-tests.self-test.mjs",
-    "test:dmy-45:verify": "node scripts/verify-dmy-45-tests.mjs",
-    "test:dmy-45": "node scripts/verify-dmy-45-tests.mjs --run",
+    "test:dmy-45:verify": "node scripts/verify-dmy-45-tests.self-test.mjs && node scripts/verify-dmy-45-tests.mjs",
+    "test:dmy-45": "node scripts/verify-dmy-45-tests.self-test.mjs && node scripts/verify-dmy-45-tests.mjs --run",
     "test:dmy-45:browser": "xvfb-run -a -s \"-screen 0 1280x900x24\" npm run test:dmy-45 --",
     "test:dmy-45:browser-repeat": "npm run test:dmy-45:browser && npm run test:dmy-45:browser && npm run test:dmy-45:browser",
     "test:headed": "vitest run",
