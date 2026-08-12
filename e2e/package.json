@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "xvfb-run -a -s \"-screen 0 1280x900x24\" vitest run",
-    "test:dmy-45": "vitest run -t \"never overlaps real CLI delete processes|bulk delete confirms first, then really deletes|scroll offset is never left past the end when the list shrinks \\(INV-6\\)\"",
+    "test:dmy-45:verify": "node scripts/verify-dmy-45-tests.mjs",
+    "test:dmy-45": "node scripts/verify-dmy-45-tests.mjs --run",
     "test:dmy-45:browser": "xvfb-run -a -s \"-screen 0 1280x900x24\" npm run test:dmy-45 --",
     "test:dmy-45:browser-repeat": "npm run test:dmy-45:browser && npm run test:dmy-45:browser && npm run test:dmy-45:browser",
     "test:headed": "vitest run",
