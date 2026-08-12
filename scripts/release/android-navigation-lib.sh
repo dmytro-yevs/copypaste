@@ -34,14 +34,23 @@ navigation_state() { # <artifact>
     printf '%s' "${report% }"
 }
 
-# A tap the app never received leaves its source control exactly where it was; a
-# pane that failed to open does not. Naming which of the two happened is the
-# difference between "the IME was over the tab bar" and "the pane is gone".
+# What the dump says about a tap whose destination never rendered.
+#
+# Never "the tap missed the app": every primary tab stays enabled and clickable
+# after a successful switch (`Sidebar.tsx`), and Chromium does not map its
+# `aria-current` onto the accessibility `selected` flag — in run 31634096676 all
+# three tabs read `selected="false"` on a Settings screen. So a still-actionable
+# source control is evidence of nothing, and claiming otherwise turns a pane that
+# rendered late into a delivery failure. A control that does carry `selected` —
+# the Settings tab strip does — is evidence, and only that is stated as a cause.
 tap_landing() { # <artifact> <control>
-    if [[ -n "$(action_center "$1" "$2")" ]]; then
-        printf '%s is still actionable, so the tap did not reach the app' "$2"
+    if [[ -n "$(node_center_current "$1" "$2")" ]]; then
+        printf '%s is the current selection, so the tap landed and the pane did not render' "$2"
+    elif [[ -n "$(action_center "$1" "$2")" ]]; then
+        printf '%s is actionable and not marked current; navigation was %s' \
+            "$2" "$(navigation_state "$1")"
     else
-        printf 'the pane never rendered; navigation was %s' "$(navigation_state "$1")"
+        printf '%s is not on screen; navigation was %s' "$2" "$(navigation_state "$1")"
     fi
 }
 
@@ -80,13 +89,27 @@ android_navigation_self_test() { # <temp>
         && ok "a shell that never rendered reports absent tabs" \
         || bad "a shell that never rendered reports absent tabs" "$(navigation_state "$temp/shell-less.xml")"
 
-    [[ "$(tap_landing "$temp/navigable.xml" Settings)" == *"did not reach the app"* ]] \
-        && ok "a tab still actionable after its tap is an undelivered tap" \
-        || bad "a tab still actionable after its tap is an undelivered tap" \
+    # The decisive pair. Both are screens where the destination marker is absent
+    # while the source control is still actionable, which is the ordinary state
+    # after a tap that *did* land: neither may be reported as a missed tap.
+    local strip='<node text="Appearance" bounds="[17,78][110,122]" enabled="true" clickable="true" selected="false"/><node text="Storage" bounds="[217,126][284,170]" enabled="true" clickable="true" selected="true"/>'
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"Settings sections\" bounds=\"[12,73][308,223]\"/>$strip</node></hierarchy>" > "$temp/storage-current.xml"
+
+    [[ "$(tap_landing "$temp/storage-current.xml" Storage)" == *"current selection, so the tap landed"* ]] \
+        && ok "a current tab whose pane is incomplete is reported as a landed tap" \
+        || bad "a current tab whose pane is incomplete is reported as a landed tap" \
+               "$(tap_landing "$temp/storage-current.xml" Storage)"
+    [[ "$(tap_landing "$temp/navigable.xml" Settings)" != *"tap"* ]] \
+        && ok "an always-actionable primary tab claims nothing about its tap" \
+        || bad "an always-actionable primary tab claims nothing about its tap" \
                "$(tap_landing "$temp/navigable.xml" Settings)"
-    [[ "$(tap_landing "$temp/shell-less.xml" Settings)" == *"never rendered"* ]] \
-        && ok "a pane that never rendered is not blamed on the tap" \
-        || bad "a pane that never rendered is not blamed on the tap" \
+    [[ "$(tap_landing "$temp/storage-current.xml" Appearance)" != *"tap landed"* ]] \
+        && ok "an unselected sibling tab is not credited with the tap" \
+        || bad "an unselected sibling tab is not credited with the tap" \
+               "$(tap_landing "$temp/storage-current.xml" Appearance)"
+    [[ "$(tap_landing "$temp/shell-less.xml" Settings)" == *"not on screen"* ]] \
+        && ok "a control that is absent is reported as absent" \
+        || bad "a control that is absent is reported as absent" \
                "$(tap_landing "$temp/shell-less.xml" Settings)"
 
     ui_fixtures "$temp/starting.xml" "$temp/starting.xml" "$temp/navigable.xml"

@@ -166,6 +166,9 @@ storage_stage_self_test() { # <temp>
     nav_starting="${nav_open//enabled=\"true\" clickable/enabled=\"false\" clickable}"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"0 items\" bounds=\"[12,126][52,142]\"/></node></hierarchy>" > "$temp/stuck-history.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\"/></node></hierarchy>" > "$temp/stuck-start.xml"
+    # Settings open, Storage selected, and its transfer actions never rendered:
+    # the stage that must be blamed on the pane and never on the tap.
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"Settings sections\" bounds=\"[12,73][308,223]\"/><node text=\"Storage\" bounds=\"[217,126][284,170]\" enabled=\"true\" clickable=\"true\" selected=\"true\"/></node></hierarchy>" > "$temp/storage-empty-pane.xml"
 
     verdict="$(
         OUT="$temp" WAIT_SECS=2
@@ -174,9 +177,23 @@ storage_stage_self_test() { # <temp>
         PASS=0 FAIL=0
         open_storage seed-import
     )"
-    [[ "$verdict" == *"FAIL  Settings opens at seed-import"* && "$verdict" == *"did not reach the app"* ]] \
-        && ok "a swallowed navigation tap is reported as one, not as a missing import" \
-        || bad "a swallowed navigation tap is reported as one, not as a missing import" "$verdict"
+    [[ "$verdict" == *"FAIL  Settings opens at seed-import"* \
+       && "$verdict" == *"actionable and not marked current"* \
+       && "$verdict" != *"did not reach"* ]] \
+        && ok "a stage that never opened names its step without blaming the tap" \
+        || bad "a stage that never opened names its step without blaming the tap" "$verdict"
+
+    verdict="$(
+        OUT="$temp" WAIT_SECS=2
+        sh_() { :; }
+        dump_hierarchy() { cp "$temp/storage-empty-pane.xml" "$1"; }
+        PASS=0 FAIL=0
+        open_storage export
+    )"
+    [[ "$verdict" == *"FAIL  Storage exposes its transfer actions at export"* \
+       && "$verdict" == *"the tap landed and the pane did not render"* ]] \
+        && ok "a selected Storage tab with no transfer actions blames the pane" \
+        || bad "a selected Storage tab with no transfer actions blames the pane" "$verdict"
 
     verdict="$(
         OUT="$temp" WAIT_SECS=2
