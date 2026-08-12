@@ -71,23 +71,28 @@ storage_transfer_actions_holds() { # <artifact>
 # stage's screens, so which step had failed was no longer in the evidence.
 # Each step also names itself, because "Storage exposes import for the seed" was
 # what a swallowed Settings tap reported.
+#
+# `prepare_action` leaves the dump it aimed each tap from, so every stage already
+# holds the state immediately before its own tap: pass it, and the diagnostic can
+# tell a control that changed from one that was current all along.
 open_storage() { # <stage>
     local stage="$1" nav="$OUT/$1-settings-nav.xml"
-    local pane="$OUT/$1-settings-pane.xml" ready="$OUT/$1-storage-ready.xml"
+    local pane="$OUT/$1-settings-pane.xml" tab="$OUT/$1-settings-storage.xml"
+    local ready="$OUT/$1-storage-ready.xml"
     tap_selector "Settings" "$nav" || {
         bad "the Settings tab is actionable at $stage" "$(navigation_state "$nav")"
         return 1
     }
     wait_history_state "$pane" settings_pane_holds || {
-        bad "Settings opens at $stage" "$(tap_landing "$pane" Settings)"
+        bad "Settings opens at $stage" "$(tap_landing "$pane" Settings "$nav")"
         return 1
     }
-    tap_selector "Storage" "$OUT/$1-settings-storage.xml" || {
+    tap_selector "Storage" "$tab" || {
         bad "the Storage tab is actionable at $stage" "$(navigation_state "$pane")"
         return 1
     }
     wait_history_state "$ready" storage_transfer_actions_holds || {
-        bad "Storage exposes its transfer actions at $stage" "$(tap_landing "$ready" Storage)"
+        bad "Storage exposes its transfer actions at $stage" "$(tap_landing "$ready" Storage "$tab")"
         return 1
     }
 }
@@ -166,9 +171,12 @@ storage_stage_self_test() { # <temp>
     nav_starting="${nav_open//enabled=\"true\" clickable/enabled=\"false\" clickable}"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"0 items\" bounds=\"[12,126][52,142]\"/></node></hierarchy>" > "$temp/stuck-history.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\"/></node></hierarchy>" > "$temp/stuck-start.xml"
-    # Settings open, Storage selected, and its transfer actions never rendered:
-    # the stage that must be blamed on the pane and never on the tap.
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"Settings sections\" bounds=\"[12,73][308,223]\"/><node text=\"Storage\" bounds=\"[217,126][284,170]\" enabled=\"true\" clickable=\"true\" selected=\"true\"/></node></hierarchy>" > "$temp/storage-empty-pane.xml"
+    # Settings open and the transfer actions never rendered, with Storage already
+    # selected and not yet selected: the stage may only claim the transition when
+    # it observed one, and `prepare_action`'s own dump is what it observes it in.
+    local sections="<node text=\"Settings sections\" bounds=\"[12,73][308,223]\"/>"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"Storage\" bounds=\"[217,126][284,170]\" enabled=\"true\" clickable=\"true\" selected=\"true\"/></node></hierarchy>" > "$temp/storage-empty-pane.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"Storage\" bounds=\"[217,126][284,170]\" enabled=\"true\" clickable=\"true\" selected=\"false\"/></node></hierarchy>" > "$temp/storage-unselected.xml"
 
     verdict="$(
         OUT="$temp" WAIT_SECS=2
@@ -178,7 +186,7 @@ storage_stage_self_test() { # <temp>
         open_storage seed-import
     )"
     [[ "$verdict" == *"FAIL  Settings opens at seed-import"* \
-       && "$verdict" == *"actionable and not marked current"* \
+       && "$verdict" == *"actionable and not current"* \
        && "$verdict" != *"did not reach"* ]] \
         && ok "a stage that never opened names its step without blaming the tap" \
         || bad "a stage that never opened names its step without blaming the tap" "$verdict"
@@ -191,9 +199,29 @@ storage_stage_self_test() { # <temp>
         open_storage export
     )"
     [[ "$verdict" == *"FAIL  Storage exposes its transfer actions at export"* \
-       && "$verdict" == *"the tap landed and the pane did not render"* ]] \
-        && ok "a selected Storage tab with no transfer actions blames the pane" \
-        || bad "a selected Storage tab with no transfer actions blames the pane" "$verdict"
+       && "$verdict" == *"already current before the tap"* \
+       && "$verdict" != *"current now"* ]] \
+        && ok "a stage whose tab was already current claims no transition" \
+        || bad "a stage whose tab was already current claims no transition" "$verdict"
+
+    # The three dumps `open_storage` takes before its Storage tap see the tab
+    # unselected; every dump after it sees the pane it selected but never filled.
+    verdict="$(
+        OUT="$temp" WAIT_SECS=2
+        sh_() { :; }
+        taken=0
+        dump_hierarchy() {
+            taken=$((taken + 1))
+            if (( taken <= 3 )); then cp "$temp/storage-unselected.xml" "$1"
+            else cp "$temp/storage-empty-pane.xml" "$1"; fi
+        }
+        PASS=0 FAIL=0
+        open_storage import
+    )"
+    [[ "$verdict" == *"FAIL  Storage exposes its transfer actions at import"* \
+       && "$verdict" == *"was not current before the tap and is current now"* ]] \
+        && ok "a stage that observed the tab change reports the transition" \
+        || bad "a stage that observed the tab change reports the transition" "$verdict"
 
     verdict="$(
         OUT="$temp" WAIT_SECS=2
