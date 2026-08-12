@@ -8,11 +8,10 @@
  *
  * Row text goes into a published artifact, so it passes through `redact.ts`.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { listSnapshot } from "./list.js";
-import { redactFixtures } from "./redact.js";
+import { writeRedacted } from "./redact.js";
 import { HISTORY_LIST, NAV, NAVIGATION_READY, ROW, SEARCH } from "./ui.js";
 import type { AndroidApp } from "./app.js";
 
@@ -73,12 +72,7 @@ export async function captureFailure(name: string): Promise<void> {
     evidence.list = { unreadable: String(error) };
   }
   try {
-    const dir = path.join(OUT, "failures");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      path.join(dir, `${slug(name)}.json`),
-      redactFixtures(JSON.stringify(evidence, null, 2)),
-    );
+    writeRedacted(path.join(OUT, "failures", `${slug(name)}.json`), evidence);
   } catch {
     /* the assertion's own failure is the one worth reporting */
   }
