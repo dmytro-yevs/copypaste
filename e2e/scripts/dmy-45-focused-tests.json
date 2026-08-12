@@ -1,0 +1,14 @@
+[
+  {
+    "file": "tests/bulk-actions.e2e.test.ts",
+    "name": "the bulk bar > bulk delete confirms first, then really deletes"
+  },
+  {
+    "file": "tests/harness-capability.e2e.test.ts",
+    "name": "daemon bulk-delete harness > never overlaps real CLI delete processes"
+  },
+  {
+    "file": "tests/scroll-anchor.e2e.test.ts",
+    "name": "scroll offset is never left past the end when the list shrinks (INV-6)"
+  }
+]

@@ -122,6 +122,15 @@ describe("the bulk bar", () => {
   });
 
   test("bulk delete confirms first, then really deletes", async () => {
+    if (!(await visibleText(app.browser)).includes("2 items selected")) {
+      await enterSelectionMode();
+      await select(2);
+      await app.browser.waitUntil(
+        async () => (await visibleText(app.browser)).includes("2 items selected"),
+        { timeout: 10_000, timeoutMsg: "the bulk bar never counted the selection" },
+      );
+    }
+
     await clickButton(app.browser, "Delete", {
       within: '[aria-label="Selection actions"]',
     });
