@@ -34,23 +34,32 @@ navigation_state() { # <artifact>
     printf '%s' "${report% }"
 }
 
-# What the dump says about a tap whose destination never rendered.
+# What the dumps say about a tap whose destination never rendered.
 #
-# Never "the tap missed the app": every primary tab stays enabled and clickable
-# after a successful switch (`Sidebar.tsx`), and Chromium does not map its
-# `aria-current` onto the accessibility `selected` flag — in run 31634096676 all
-# three tabs read `selected="false"` on a Settings screen. So a still-actionable
-# source control is evidence of nothing, and claiming otherwise turns a pane that
-# rendered late into a delivery failure. A control that does carry `selected` —
-# the Settings tab strip does — is evidence, and only that is stated as a cause.
-tap_landing() { # <artifact> <control>
-    if [[ -n "$(node_center_current "$1" "$2")" ]]; then
-        printf '%s is the current selection, so the tap landed and the pane did not render' "$2"
-    elif [[ -n "$(action_center "$1" "$2")" ]]; then
-        printf '%s is actionable and not marked current; navigation was %s' \
-            "$2" "$(navigation_state "$1")"
+# Two states or none. A control that is current afterwards says which pane is
+# selected, not that this tap selected it — it may have been current already,
+# and a swallowed tap then reads exactly like a delivered one. Only a control
+# observed not-current before and current after has a transition to report.
+# Neither branch says the tap missed: every primary tab stays enabled and
+# clickable after a successful switch (`Sidebar.tsx`), and Chromium never maps
+# its `aria-current` onto `selected`, so those tabs answer nothing either way.
+tap_landing() { # <post artifact> <control> [pre artifact]
+    local post="$1" control="$2" pre="${3:-}" was_current="" is_current=""
+    [[ -n "$(node_center_current "$post" "$control")" ]] && is_current=yes
+    [[ -n "$pre" && -s "$pre" ]] || pre=""
+    [[ -n "$pre" && -n "$(node_center_current "$pre" "$control")" ]] && was_current=yes
+
+    if [[ "$is_current" == yes && -n "$pre" && "$was_current" != yes ]]; then
+        printf '%s was not current before the tap and is current now; the pane did not render' "$control"
+    elif [[ "$is_current" == yes && -n "$pre" ]]; then
+        printf '%s was already current before the tap; the pane did not render' "$control"
+    elif [[ "$is_current" == yes ]]; then
+        printf '%s is current and the pane did not render' "$control"
+    elif [[ -n "$(action_center "$post" "$control")" ]]; then
+        printf '%s is actionable and not current; navigation was %s' \
+            "$control" "$(navigation_state "$post")"
     else
-        printf '%s is not on screen; navigation was %s' "$2" "$(navigation_state "$1")"
+        printf '%s is not on screen; navigation was %s' "$control" "$(navigation_state "$post")"
     fi
 }
 
@@ -89,28 +98,44 @@ android_navigation_self_test() { # <temp>
         && ok "a shell that never rendered reports absent tabs" \
         || bad "a shell that never rendered reports absent tabs" "$(navigation_state "$temp/shell-less.xml")"
 
-    # The decisive pair. Both are screens where the destination marker is absent
-    # while the source control is still actionable, which is the ordinary state
-    # after a tap that *did* land: neither may be reported as a missed tap.
-    local strip='<node text="Appearance" bounds="[17,78][110,122]" enabled="true" clickable="true" selected="false"/><node text="Storage" bounds="[217,126][284,170]" enabled="true" clickable="true" selected="true"/>'
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"Settings sections\" bounds=\"[12,73][308,223]\"/>$strip</node></hierarchy>" > "$temp/storage-current.xml"
+    # Screens where the destination marker is absent while the source control is
+    # still actionable — the ordinary state after a tap that landed. What
+    # separates the two cases is the state *before* the tap, so both are built.
+    local sections='<node text="Settings sections" bounds="[12,73][308,223]"/><node text="Appearance" bounds="[17,78][110,122]" enabled="true" clickable="true" selected="false"/>'
+    local storage_on='<node text="Storage" bounds="[217,126][284,170]" enabled="true" clickable="true" selected="true"/>'
+    local storage_off='<node text="Storage" bounds="[217,126][284,170]" enabled="true" clickable="true" selected="false"/>'
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections$storage_on</node></hierarchy>" > "$temp/storage-current.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections$storage_off</node></hierarchy>" > "$temp/storage-not-current.xml"
 
-    [[ "$(tap_landing "$temp/storage-current.xml" Storage)" == *"current selection, so the tap landed"* ]] \
-        && ok "a current tab whose pane is incomplete is reported as a landed tap" \
-        || bad "a current tab whose pane is incomplete is reported as a landed tap" \
+    # Selected before the tap and selected after it: a swallowed tap reads
+    # exactly like a delivered one, so neither may be claimed.
+    [[ "$(tap_landing "$temp/storage-current.xml" Storage "$temp/storage-current.xml")" \
+       == *"already current before the tap; the pane did not render"* ]] \
+        && ok "a control current before its tap is not credited with a transition" \
+        || bad "a control current before its tap is not credited with a transition" \
+               "$(tap_landing "$temp/storage-current.xml" Storage "$temp/storage-current.xml")"
+    [[ "$(tap_landing "$temp/storage-current.xml" Storage "$temp/storage-not-current.xml")" \
+       == *"was not current before the tap and is current now"* ]] \
+        && ok "a control that became current reports the transition" \
+        || bad "a control that became current reports the transition" \
+               "$(tap_landing "$temp/storage-current.xml" Storage "$temp/storage-not-current.xml")"
+    [[ "$(tap_landing "$temp/storage-current.xml" Storage)" == *"is current and the pane did not render"* ]] \
+        && ok "with no pre-state a current control is reported, not explained" \
+        || bad "with no pre-state a current control is reported, not explained" \
                "$(tap_landing "$temp/storage-current.xml" Storage)"
-    [[ "$(tap_landing "$temp/navigable.xml" Settings)" != *"tap"* ]] \
+    [[ "$(tap_landing "$temp/navigable.xml" Settings "$temp/navigable.xml")" != *"tap"* ]] \
         && ok "an always-actionable primary tab claims nothing about its tap" \
         || bad "an always-actionable primary tab claims nothing about its tap" \
-               "$(tap_landing "$temp/navigable.xml" Settings)"
-    [[ "$(tap_landing "$temp/storage-current.xml" Appearance)" != *"tap landed"* ]] \
+               "$(tap_landing "$temp/navigable.xml" Settings "$temp/navigable.xml")"
+    [[ "$(tap_landing "$temp/storage-current.xml" Appearance "$temp/storage-not-current.xml")" \
+       != *"current now"* ]] \
         && ok "an unselected sibling tab is not credited with the tap" \
         || bad "an unselected sibling tab is not credited with the tap" \
-               "$(tap_landing "$temp/storage-current.xml" Appearance)"
-    [[ "$(tap_landing "$temp/shell-less.xml" Settings)" == *"not on screen"* ]] \
+               "$(tap_landing "$temp/storage-current.xml" Appearance "$temp/storage-not-current.xml")"
+    [[ "$(tap_landing "$temp/shell-less.xml" Settings "$temp/navigable.xml")" == *"not on screen"* ]] \
         && ok "a control that is absent is reported as absent" \
         || bad "a control that is absent is reported as absent" \
-               "$(tap_landing "$temp/shell-less.xml" Settings)"
+               "$(tap_landing "$temp/shell-less.xml" Settings "$temp/navigable.xml")"
 
     ui_fixtures "$temp/starting.xml" "$temp/starting.xml" "$temp/navigable.xml"
     wait_app_navigable "$temp/observed.xml" 8 ui_fixture_dump \
