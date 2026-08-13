@@ -1,16 +1,13 @@
 //! Enforcement of the staging deadline.
 //!
 //! The directory holds *decrypted* payloads, so the deadline is a security
-//! property rather than housekeeping. Every per-entry failure used to be
-//! discarded — `let _ = unlinkat(..)`, `let Ok(stat) = .. else { continue }` —
-//! so a sweep that left plaintext on disk was indistinguishable from one that
-//! removed it. The walk is still best-effort across entries; what changed is
-//! that it counts what it could not do and comes back sooner.
+//! property rather than housekeeping. Every per-entry failure is counted and
+//! retried sooner rather than discarded: plaintext the sweep could not delete
+//! must never read as a clean pass.
 
 use std::ffi::CStr;
 use std::io;
-use std::os::fd::BorrowedFd;
-use std::path::{Path, PathBuf};
+use std::os::fd::{BorrowedFd, OwnedFd};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -24,7 +21,8 @@ use super::report::SweepReport;
 
 /// Entries one sweep may classify. The sweep holds the staging lock, so an
 /// unbounded walk parks the interactive paste-back path behind however many
-/// files are in the directory. A truncated sweep asks to be resumed instead.
+/// files are in the directory. A sweep that hits the bound records where it
+/// stopped and the next pass continues from there.
 const SWEEP_BUDGET: u32 = 4096;
 
 /// The first retry after a sweep that left work behind. `interval` is the whole
@@ -33,105 +31,175 @@ const SWEEP_BUDGET: u32 = 4096;
 /// costs a short burst of wake-ups rather than a permanent 30-second timer.
 const RETRY_MIN: Duration = Duration::from_secs(30);
 
-/// Delete everything under `root` that is past `max_age`, and report what is
-/// left. Infallible by design: a sweeper that refused to run would take file
-/// paste-back down with it, and the caller cannot act on an error it is not
-/// also told the shape of.
-pub(super) fn sweep(root: &Path, now: SystemTime, max_age: Duration) -> SweepReport {
-    let report = sweep_within(root, now, max_age, SWEEP_BUDGET);
-    if report.unfinished() {
-        warn!(
-            examined = report.examined,
-            removed = report.removed,
-            retained = report.retained,
-            unreadable = report.unreadable,
-            truncated = report.truncated,
-            error_kinds = ?report.failures,
-            "paste-file staging cleanup left decrypted payloads past their deadline"
-        );
-    }
-    report
+/// Where the previous pass ran out of budget, as a position in the root's
+/// `readdir` order and a position within that entry if it is a directory.
+///
+/// A pass that restarted from the first entry could be consumed for ever by a
+/// prefix of live or undeletable files, and everything behind that prefix would
+/// keep its plaintext indefinitely. Continuing bounds the retained lifetime at
+/// `max_age` plus the passes one full cycle of `ceil(entries / SWEEP_BUDGET)`
+/// takes, whatever the prefix does.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct Cursor {
+    root: u32,
+    child: u32,
 }
 
-fn sweep_within(root: &Path, now: SystemTime, max_age: Duration, budget: u32) -> SweepReport {
-    let mut report = SweepReport::default();
-    let root_fd = match rustix::fs::open(
-        root,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) {
-        Ok(fd) => fd,
-        Err(Errno::NOENT) => return report,
-        Err(error) => {
-            report.unreadable_entry(error);
-            return report;
-        }
-    };
-    let mut root_dir = match Dir::new(root_fd) {
-        Ok(dir) => dir,
-        Err(error) => {
-            report.unreadable_entry(error);
-            return report;
-        }
-    };
+/// Deletes everything under the directory it was handed that is past `max_age`.
+///
+/// It holds the root as a *file descriptor*, never a path. A staging root that
+/// is renamed away and replaced must not redirect the sweep into whatever now
+/// answers to the same pathname, where it would unlink somebody else's files.
+pub(super) struct Sweeper {
+    root_fd: OwnedFd,
+    budget: u32,
+    resume: Cursor,
+}
 
-    let mut budget = budget;
-    while let Some(entry) = root_dir.read() {
-        let entry = match entry {
-            Ok(entry) => entry,
-            // A failed `readdir` leaves the stream at an offset nothing can
-            // reason about, so the rest of this directory is unvisited, not
-            // absent.
+impl Sweeper {
+    pub(super) fn new(root_fd: OwnedFd) -> Self {
+        Self {
+            root_fd,
+            budget: SWEEP_BUDGET,
+            resume: Cursor::default(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_budget(root_fd: OwnedFd, budget: u32) -> Self {
+        Self {
+            budget,
+            ..Self::new(root_fd)
+        }
+    }
+
+    /// One pass, and what it left behind. Infallible by design: a sweeper that
+    /// refused to run would take file paste-back down with it, and the caller
+    /// cannot act on an error it is not also told the shape of.
+    pub(super) fn pass(&mut self, now: SystemTime, max_age: Duration) -> SweepReport {
+        let report = self.walk(now, max_age);
+        if report.unfinished() {
+            warn!(
+                examined = report.examined,
+                removed = report.removed,
+                retained = report.retained,
+                unreadable = report.unreadable,
+                truncated = report.truncated,
+                error_kinds = ?report.failures,
+                "paste-file staging cleanup left decrypted payloads past their deadline"
+            );
+        }
+        report
+    }
+
+    fn walk(&mut self, now: SystemTime, max_age: Duration) -> SweepReport {
+        let mut report = SweepReport::default();
+        let resume = std::mem::take(&mut self.resume);
+        // `read_from` opens `.` relative to the retained descriptor, so the
+        // stream is this directory's however the pathname is repointed.
+        let mut root_dir = match Dir::read_from(&self.root_fd) {
+            Ok(dir) => dir,
+            Err(Errno::NOENT) => return report,
             Err(error) => {
                 report.unreadable_entry(error);
+                return report;
+            }
+        };
+
+        let mut budget = self.budget;
+        let mut position = 0;
+        while let Some(entry) = root_dir.read() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                // A failed `readdir` leaves the stream at an offset nothing can
+                // reason about, so the rest of this directory is unvisited, not
+                // absent.
+                Err(error) => {
+                    report.unreadable_entry(error);
+                    report.truncated = true;
+                    self.resume = Cursor {
+                        root: position,
+                        child: 0,
+                    };
+                    break;
+                }
+            };
+            let here = position;
+            position += 1;
+            let name = entry.file_name();
+            if is_dot(name) {
+                continue;
+            }
+            if here < resume.root {
+                continue;
+            }
+            if budget == 0 {
                 report.truncated = true;
+                self.resume = Cursor {
+                    root: here,
+                    child: 0,
+                };
                 break;
             }
-        };
-        let name = entry.file_name();
-        if is_dot(name) {
-            continue;
-        }
-        if budget == 0 {
-            report.truncated = true;
-            break;
-        }
-        budget -= 1;
-        report.examined += 1;
-        let root_fd = match root_dir.fd() {
-            Ok(fd) => fd,
-            Err(error) => {
-                report.unreadable_entry(error);
-                break;
+            budget -= 1;
+            report.examined += 1;
+            let root_fd = match root_dir.fd() {
+                Ok(fd) => fd,
+                Err(error) => {
+                    report.unreadable_entry(error);
+                    report.truncated = true;
+                    self.resume = Cursor {
+                        root: here,
+                        child: 0,
+                    };
+                    break;
+                }
+            };
+            let Some(stat) = classify(root_fd, name, &mut report) else {
+                continue;
+            };
+            match FileType::from_raw_mode(stat.st_mode) {
+                FileType::RegularFile if is_expired(&stat, now, max_age) => {
+                    remove_file(root_fd, name, &mut report);
+                }
+                // Any real subdirectory, not only a well-formed content id. A
+                // directory whose name does not parse still holds decrypted
+                // bytes, and skipping it exempted them from the deadline for
+                // ever.
+                FileType::Directory => {
+                    let skip = if here == resume.root { resume.child } else { 0 };
+                    let suspended = sweep_content_dir(
+                        root_fd,
+                        name,
+                        now,
+                        max_age,
+                        skip,
+                        &mut budget,
+                        &mut report,
+                    );
+                    if let Some(child) = suspended {
+                        self.resume = Cursor { root: here, child };
+                        break;
+                    }
+                }
+                _ => {}
             }
-        };
-        let Some(stat) = classify(root_fd, name, &mut report) else {
-            continue;
-        };
-        match FileType::from_raw_mode(stat.st_mode) {
-            FileType::RegularFile if is_expired(&stat, now, max_age) => {
-                remove_file(root_fd, name, &mut report);
-            }
-            // Any real subdirectory, not only a well-formed content id. A
-            // directory whose name does not parse still holds decrypted bytes,
-            // and skipping it exempted them from the deadline for ever.
-            FileType::Directory => {
-                sweep_content_dir(root_fd, name, now, max_age, &mut budget, &mut report);
-            }
-            _ => {}
         }
+        report
     }
-    report
 }
 
+/// `Some(position)` when the sweep stopped part-way through this directory, so
+/// the next pass resumes there rather than re-walking what it already did.
 fn sweep_content_dir(
     root_fd: BorrowedFd<'_>,
     name: &CStr,
     now: SystemTime,
     max_age: Duration,
+    skip: u32,
     budget: &mut u32,
     report: &mut SweepReport,
-) {
+) -> Option<u32> {
     let content_fd = match rustix::fs::openat(
         root_fd,
         name,
@@ -139,36 +207,56 @@ fn sweep_content_dir(
         Mode::empty(),
     ) {
         Ok(fd) => fd,
-        Err(Errno::NOENT) => return,
-        Err(error) => return report.unreadable_entry(error),
+        Err(Errno::NOENT) => return None,
+        Err(error) => {
+            report.unreadable_entry(error);
+            return None;
+        }
     };
     let mut content_dir = match Dir::new(content_fd) {
         Ok(dir) => dir,
-        Err(error) => return report.unreadable_entry(error),
+        Err(error) => {
+            report.unreadable_entry(error);
+            return None;
+        }
     };
 
+    let mut position = 0;
+    let mut suspended = None;
     while let Some(entry) = content_dir.read() {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
                 report.unreadable_entry(error);
                 report.truncated = true;
+                suspended = Some(position);
                 break;
             }
         };
+        let here = position;
+        position += 1;
         let filename = entry.file_name();
         if is_dot(filename) {
             continue;
         }
+        if here < skip {
+            continue;
+        }
         if *budget == 0 {
             report.truncated = true;
+            suspended = Some(here);
             break;
         }
         *budget -= 1;
         report.examined += 1;
         let content_fd = match content_dir.fd() {
             Ok(fd) => fd,
-            Err(error) => return report.unreadable_entry(error),
+            Err(error) => {
+                report.unreadable_entry(error);
+                report.truncated = true;
+                suspended = Some(here);
+                break;
+            }
         };
         let Some(stat) = classify(content_fd, filename, report) else {
             continue;
@@ -179,7 +267,10 @@ fn sweep_content_dir(
             remove_file(content_fd, filename, report);
         }
     }
-    remove_emptied(root_fd, name, report);
+    if suspended.is_none() {
+        remove_emptied(root_fd, name, report);
+    }
+    suspended
 }
 
 fn classify(dir_fd: BorrowedFd<'_>, name: &CStr, report: &mut SweepReport) -> Option<Stat> {
@@ -296,7 +387,7 @@ pub(super) struct CleanupWorker {
 
 impl CleanupWorker {
     pub(super) fn start(
-        root: PathBuf,
+        mut sweeper: Sweeper,
         access: Arc<Mutex<()>>,
         max_age: Duration,
         interval: Duration,
@@ -319,7 +410,7 @@ impl CleanupWorker {
                     }
                     drop(stopped);
                     let _access = access.lock().unwrap_or_else(|held| held.into_inner());
-                    wait = cadence.after(&sweep(&root, SystemTime::now(), max_age));
+                    wait = cadence.after(&sweeper.pass(SystemTime::now(), max_age));
                 }
             })?;
         Ok(Self {
@@ -347,8 +438,10 @@ mod tests {
     use super::*;
     use copypaste_core::FileMetadata;
     use std::fs;
+    use std::path::{Path, PathBuf};
 
     const MINUTE: Duration = Duration::from_secs(60);
+    const HOUR: Duration = Duration::from_secs(3600);
 
     fn metadata(filename: impl Into<String>) -> FileMetadata {
         FileMetadata {
@@ -370,6 +463,19 @@ mod tests {
         let root = parent.path().join("paste-files");
         fs::create_dir(&root).unwrap();
         (parent, root)
+    }
+
+    fn open_root(root: &Path) -> OwnedFd {
+        rustix::fs::open(
+            root,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .unwrap()
+    }
+
+    fn sweep_once(root: &Path, now: SystemTime, max_age: Duration) -> SweepReport {
+        Sweeper::new(open_root(root)).pass(now, max_age)
     }
 
     fn write_at(path: &Path, modified: SystemTime) {
@@ -409,13 +515,13 @@ mod tests {
         let locked = content_dir(&root, "11111111-1111-1111-1111-111111111111");
         let open = content_dir(&root, "22222222-2222-2222-2222-222222222222");
         let now = SystemTime::now();
-        write_at(&locked.join("a.txt"), now - Duration::from_secs(3600));
-        write_at(&open.join("b.txt"), now - Duration::from_secs(3600));
+        write_at(&locked.join("a.txt"), now - HOUR);
+        write_at(&open.join("b.txt"), now - HOUR);
         if !mode_bits_bind(&locked) {
             return;
         }
 
-        let report = sweep_within(&root, now, MINUTE, SWEEP_BUDGET);
+        let report = sweep_once(&root, now, MINUTE);
 
         assert!(locked.join("a.txt").exists(), "setup: must be undeletable");
         assert_eq!(report.retained, 1, "{report:?}");
@@ -441,7 +547,7 @@ mod tests {
         let skewed = dir.join("skewed.txt");
         write_at(&skewed, now + Duration::from_secs(86_400));
 
-        let report = sweep_within(&root, now, MINUTE, SWEEP_BUDGET);
+        let report = sweep_once(&root, now, MINUTE);
 
         assert!(!skewed.exists(), "a future mtime exempted plaintext");
         assert_eq!(report.removed, 1);
@@ -456,7 +562,7 @@ mod tests {
         let fresh = dir.join("fresh.txt");
         write_at(&fresh, now + Duration::from_secs(30));
 
-        let report = sweep_within(&root, now, MINUTE, SWEEP_BUDGET);
+        let report = sweep_once(&root, now, MINUTE);
 
         assert!(fresh.exists(), "{report:?}");
     }
@@ -467,9 +573,9 @@ mod tests {
         let dir = content_dir(&root, "not-a-content-id");
         let now = SystemTime::now();
         let orphan = dir.join("orphan.txt");
-        write_at(&orphan, now - Duration::from_secs(3600));
+        write_at(&orphan, now - HOUR);
 
-        let report = sweep_within(&root, now, MINUTE, SWEEP_BUDGET);
+        let report = sweep_once(&root, now, MINUTE);
 
         assert!(!report.unfinished(), "{report:?}");
         assert!(!orphan.exists(), "an unparsable name exempted plaintext");
@@ -485,11 +591,12 @@ mod tests {
                 &root,
                 &format!("00000000-0000-0000-0000-0000000000{index:02x}"),
             );
-            write_at(&dir.join("payload.bin"), now - Duration::from_secs(3600));
+            write_at(&dir.join("payload.bin"), now - HOUR);
         }
 
-        let first = sweep_within(&root, now, MINUTE, SWEEP_BUDGET);
-        let second = sweep_within(&root, now, MINUTE, SWEEP_BUDGET);
+        let mut sweeper = Sweeper::new(open_root(&root));
+        let first = sweeper.pass(now, MINUTE);
+        let second = sweeper.pass(now, MINUTE);
 
         assert_eq!(first.removed, 50);
         assert_eq!(first.directories_removed, 50);
@@ -509,18 +616,173 @@ mod tests {
             write_at(&root.join(format!("legacy-{index}.txt")), now - MINUTE * 2);
         }
 
-        let first = sweep_within(&root, now, MINUTE, 2);
+        let mut sweeper = Sweeper::with_budget(open_root(&root), 2);
+        let first = sweeper.pass(now, MINUTE);
         assert_eq!(first.examined, 2);
         assert_eq!(first.removed, 2);
         assert!(first.truncated);
         assert!(first.unfinished());
 
         let mut sweeps = 1;
-        while sweep_within(&root, now, MINUTE, 2).unfinished() {
+        while fs::read_dir(&root).unwrap().count() > 0 {
+            let _ = sweeper.pass(now, MINUTE);
             sweeps += 1;
             assert!(sweeps < 10, "the bounded sweep stopped making progress");
         }
-        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+    }
+
+    /// The bound this proves is the retained-plaintext lifetime: `max_age` plus
+    /// one full cycle of `ceil(entries / budget)` passes. Restarting `readdir`
+    /// from the first entry has no such bound — a prefix of live files consumes
+    /// every pass and everything behind it keeps its plaintext for ever.
+    #[test]
+    fn a_live_prefix_cannot_starve_the_expired_entries_behind_it() {
+        const LIVE: usize = 24;
+        const BUDGET: u32 = 4;
+
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        for index in 0..LIVE {
+            write_at(&root.join(format!("live-{index:02}.bin")), now);
+        }
+        let expired: Vec<PathBuf> = (0..4)
+            .map(|index| {
+                let path = root.join(format!("expired-{index}.bin"));
+                write_at(&path, now - HOUR);
+                path
+            })
+            .collect();
+
+        let mut sweeper = Sweeper::with_budget(open_root(&root), BUDGET);
+        // `.` and `..` hold two positions of their own, and a removal can shift
+        // an unvisited entry behind the cursor into the cycle after this one.
+        let cycle = (LIVE + expired.len() + 2).div_ceil(BUDGET as usize);
+        let mut passes = 0;
+        while expired.iter().any(|path| path.exists()) {
+            let _ = sweeper.pass(now, MINUTE);
+            passes += 1;
+            assert!(
+                passes <= 2 * cycle,
+                "a live prefix starved the entries behind it for {passes} passes"
+            );
+        }
+        assert!(
+            root.join("live-00.bin").exists(),
+            "the sweep removed a payload inside its deadline"
+        );
+    }
+
+    #[test]
+    fn a_live_prefix_inside_a_content_directory_cannot_starve_it_either() {
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        let dir = content_dir(&root, "55555555-5555-5555-5555-555555555555");
+        for index in 0..8 {
+            write_at(&dir.join(format!("live-{index}.bin")), now);
+        }
+        let expired: Vec<PathBuf> = (0..2)
+            .map(|index| {
+                let path = dir.join(format!("expired-{index}.bin"));
+                write_at(&path, now - HOUR);
+                path
+            })
+            .collect();
+
+        // Three units a pass: the content directory itself plus two children.
+        let mut sweeper = Sweeper::with_budget(open_root(&root), 3);
+        let mut passes = 0;
+        while expired.iter().any(|path| path.exists()) {
+            let _ = sweeper.pass(now, MINUTE);
+            passes += 1;
+            assert!(
+                passes <= 16,
+                "a truncated content directory restarted instead of resuming"
+            );
+        }
+    }
+
+    #[test]
+    fn a_completed_pass_starts_the_next_one_at_the_first_entry() {
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        for index in 0..3 {
+            write_at(&root.join(format!("live-{index}.bin")), now);
+        }
+
+        let mut sweeper = Sweeper::with_budget(open_root(&root), 2);
+        assert!(sweeper.pass(now, MINUTE).truncated);
+        assert_ne!(
+            sweeper.resume,
+            Cursor::default(),
+            "a truncated pass resumes"
+        );
+        assert!(!sweeper.pass(now, MINUTE).truncated);
+        assert_eq!(
+            sweeper.resume,
+            Cursor::default(),
+            "a completed cycle must start over, or new entries are never reached"
+        );
+    }
+
+    /// The budget exists to bound how long the interactive paste-back path can
+    /// be parked behind a sweep. Measured here rather than asserted from the
+    /// constant alone.
+    #[test]
+    fn a_full_budget_sweep_holds_the_staging_lock_briefly() {
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        for index in 0..SWEEP_BUDGET {
+            write_bytes_at(
+                &root.join(format!("payload-{index:05}.bin")),
+                b"x",
+                now - HOUR,
+            );
+        }
+
+        let mut sweeper = Sweeper::new(open_root(&root));
+        let started = std::time::Instant::now();
+        let report = sweeper.pass(now, MINUTE);
+        let held = started.elapsed();
+
+        assert_eq!(report.examined, SWEEP_BUDGET, "{report:?}");
+        assert_eq!(report.removed, SWEEP_BUDGET, "{report:?}");
+        assert!(!report.truncated, "{report:?}");
+        println!("a {SWEEP_BUDGET}-entry sweep held the staging lock for {held:?}");
+        assert!(
+            held < Duration::from_secs(2),
+            "a full-budget sweep held the staging lock for {held:?}"
+        );
+    }
+
+    /// A pathname can be renamed away and replaced between two sweeps; a
+    /// descriptor cannot. Following the pathname would let whoever wins that
+    /// race point the sweeper at a directory of somebody else's files.
+    #[cfg(unix)]
+    #[test]
+    fn a_root_replaced_by_rename_cannot_redirect_the_sweep() {
+        let (parent, root) = staging_root();
+        let now = SystemTime::now();
+        let ours = root.join("expired.bin");
+        write_at(&ours, now - HOUR);
+        let mut sweeper = Sweeper::new(open_root(&root));
+
+        let moved = parent.path().join("moved-away");
+        fs::rename(&root, &moved).unwrap();
+        fs::create_dir(&root).unwrap();
+        let theirs = root.join("someone-elses.bin");
+        write_at(&theirs, now - HOUR);
+
+        let report = sweeper.pass(now, MINUTE);
+
+        assert!(
+            theirs.exists(),
+            "the sweep followed the pathname into a replaced directory"
+        );
+        assert!(
+            !moved.join("expired.bin").exists(),
+            "the sweep lost the directory it was given"
+        );
+        assert_eq!(report.removed, 1, "{report:?}");
     }
 
     #[test]
@@ -578,14 +840,14 @@ mod tests {
         write_bytes_at(
             &locked.join("payslip.pdf"),
             b"sort-code-00-11-22",
-            now - Duration::from_secs(3600),
+            now - HOUR,
         );
         if !mode_bits_bind(&locked) {
             return;
         }
 
         let capture = CapturedLog::default();
-        let logged = capture.record(|| sweep(&root, now, MINUTE));
+        let logged = capture.record(|| sweep_once(&root, now, MINUTE));
         unlock(&locked);
 
         assert!(
@@ -631,7 +893,7 @@ mod tests {
         set_modified(&boundary, now - Duration::from_secs(60));
         set_modified(&legacy_stale, now - Duration::from_secs(61));
 
-        let report = sweep(staging.root(), now, MINUTE);
+        let report = staging.sweep_now(now, MINUTE);
 
         assert!(!stale.exists());
         assert!(fresh.exists());
@@ -680,8 +942,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = sweep(
-            staging.root(),
+        let report = staging.sweep_now(
             SystemTime::now() + Duration::from_secs(2),
             Duration::from_secs(1),
         );

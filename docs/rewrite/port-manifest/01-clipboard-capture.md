@@ -665,7 +665,8 @@ Three separate hard-won rules, all on the same subsystem:
 | Storage quota (floor) | **50 MiB** | A past bug set this to 200 bytes; the byte-cap prune then evicted nearly every unpinned row after **every insert**, producing self-clearing history and dropped images. `config/defaults.rs:34-40` |
 | Broadcast channel capacity | **256** | 64 dropped items on bursts (§3.22). `daemon/mod.rs:372` |
 | Paste-file staging max age | **10 min** | Files are not deleted immediately after paste because the receiving app may read the URL asynchronously. `ipc/pasteboard.rs:311` |
-| Paste-file sweep budget | **4096 entries** | The sweep holds the staging lock, so an unbounded walk parks the interactive paste-back path behind whatever is in the directory. A sweep that hits the bound reports itself unfinished and is resumed, never skipped. v2 `clipboard/file_materialize/sweep.rs` |
+| Paste-file sweep budget | **4096 entries** | The sweep holds the staging lock, so an unbounded walk parks the interactive paste-back path behind whatever is in the directory. A sweep that hits the bound records where it stopped and the next pass continues from there — restarting `readdir` instead would let a prefix of live or undeletable entries consume every pass, and everything behind that prefix would keep its plaintext indefinitely. Measured at **20 ms** for a full 4096-entry pass (Ubuntu 24.04 / ext4; unmeasured on APFS). v2 `clipboard/file_materialize/sweep.rs` |
+| Paste-file retained-plaintext bound | **max age + one cycle** | The lifetime a payload can reach is the max age plus `ceil(entries / 4096)` passes, whatever the directory holds. It is a bound only because the cursor continues; without it there is none. v2 `clipboard/file_materialize/sweep.rs` |
 | Paste-file sweep retry floor | **30 s** | A sweep that could not delete expired plaintext must not then wait the ordinary interval, which is the whole 10 min — a second full lifetime of exposure. The ladder doubles back up to 10 min, so a file nothing can ever delete costs a short burst of wake-ups rather than a permanent 30 s timer. v2 `clipboard/file_materialize/sweep.rs` |
 | Paste-file sweep failure kinds | **6 + overflow** | Per-`io::ErrorKind` counts, bounded so a directory of a million unreadable files cannot turn the report into a million-entry map. One kind alone hid every other cause behind whichever failed first. v2 `clipboard/file_materialize/report.rs` |
 | Self-write sentinel "none" | **-1** | Must be outside the valid `changeCount` domain (non-negative). `monitor.rs:104` |
@@ -957,6 +958,15 @@ keep both properties).
 - **T-88 — a restart is a sweep.** Startup sweeps before the first paste-back,
   and if that pass leaves work behind it starts the sweeper immediately rather
   than waiting for a paste-back that may never come.
+- **T-89 — no prefix can starve what is behind it.** Given more entries than
+  one sweep's budget, where the entries reached first are live or undeletable,
+  every expired payload behind them is still removed within one cycle of
+  `ceil(entries / budget)` passes. A sweep that restarts from the first entry
+  satisfies neither the bound nor this test.
+- **T-90 — the sweep cannot be redirected by renaming its directory.** The
+  staging root is renamed away and a different directory of old regular files is
+  put at the same pathname. The sweep deletes only from the directory it was
+  given, and the replacement's files survive.
 - **T-91 — a failed paste-back never leaves unowned plaintext.** A staging
   failure after the temporary file exists reports the rollback failure — error
   kind only — starts the sweeper even though `materialize` returns `Err`, and
