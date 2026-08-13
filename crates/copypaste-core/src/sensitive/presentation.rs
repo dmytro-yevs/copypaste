@@ -26,7 +26,7 @@ impl Detector {
             .iter()
             .max_by(|a, b| compare_rank(a, b))?
             .rule
-            .clone();
+            .to_owned();
         let mut spans_truncated = findings.len() > MAX_SURFACED_SENSITIVE_SPANS;
         let spans = findings
             .iter()
