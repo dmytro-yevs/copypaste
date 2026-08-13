@@ -58,9 +58,6 @@ pub struct SelectedRule {
     #[serde(default)]
     pub validator: Validator,
     pub secret_group: Option<usize>,
-    #[serde(default)]
-    pub placeholder_stopwords: Vec<String>,
-    pub placeholder_stopwords_decision: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,10 +80,10 @@ pub struct OverlayRule {
     #[serde(default)]
     pub secret_group: usize,
     #[serde(default)]
-    pub placeholder_stopwords: Vec<String>,
-    #[serde(default)]
     pub never_auto_delete: bool,
     pub never_auto_delete_decision: Option<String>,
+    pub entropy: Option<f64>,
+    pub entropy_decision: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -317,12 +314,6 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
         let secret_group = selected
             .secret_group
             .unwrap_or_else(|| sources.first().map_or(0, |source| source.secret_group));
-        push_placeholder_allowlist(
-            &mut allowlists,
-            &selected.name,
-            &selected.placeholder_stopwords,
-            secret_group,
-        )?;
         validate_rule(&selected.name, selected.confidence, &pattern, secret_group)?;
         insert_name(&mut names, &selected.name)?;
         rules.push(Rule {
@@ -358,14 +349,16 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             overlay.never_auto_delete,
             &overlay.never_auto_delete_decision,
         )?;
-        insert_name(&mut names, &overlay.name)?;
-        let mut allowlists = Vec::new();
-        push_placeholder_allowlist(
-            &mut allowlists,
+        // A local rule has no upstream threshold to inherit, so the number is
+        // ours to justify: it is the whole gate between a README example and a
+        // credential for the context-anchored rules.
+        require_decision(
             &overlay.name,
-            &overlay.placeholder_stopwords,
-            overlay.secret_group,
+            "entropy",
+            overlay.entropy.is_some(),
+            &overlay.entropy_decision,
         )?;
+        insert_name(&mut names, &overlay.name)?;
         rules.push(Rule {
             upstream_ids: Vec::new(),
             name: overlay.name.clone(),
@@ -375,9 +368,9 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             validator: overlay.validator,
             secret_group: overlay.secret_group,
             never_auto_delete: overlay.never_auto_delete,
-            entropy: None,
+            entropy: overlay.entropy,
             keywords: Vec::new(),
-            allowlists,
+            allowlists: Vec::new(),
         });
     }
 
@@ -387,31 +380,6 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
         rules,
         selected_ids: selected_ids.into_iter().collect(),
     })
-}
-
-/// Placeholder stopwords answer "is this a README example rather than a
-/// credential?", so they must see the credential and not the context anchor the
-/// rule matched around it. A rule whose secret is the whole match would test the
-/// keyword too, and `AWS_SECRET_ACCESS_KEY=` contains `secret`.
-fn push_placeholder_allowlist(
-    allowlists: &mut Vec<Allowlist>,
-    name: &str,
-    stopwords: &[String],
-    secret_group: usize,
-) -> Result<()> {
-    if stopwords.is_empty() {
-        return Ok(());
-    }
-    if secret_group == 0 {
-        bail!("{name} declares placeholder_stopwords without a secret_group");
-    }
-    allowlists.push(Allowlist {
-        condition: Condition::Any,
-        target: Target::Secret,
-        regexes: Vec::new(),
-        stopwords: stopwords.to_vec(),
-    });
-    Ok(())
 }
 
 fn validate_decisions(rule: &SelectedRule) -> Result<()> {
@@ -432,12 +400,6 @@ fn validate_decisions(rule: &SelectedRule) -> Result<()> {
         "keywords",
         rule.keywords_override.is_some(),
         &rule.keywords_decision,
-    )?;
-    require_decision(
-        &rule.name,
-        "placeholder_stopwords",
-        !rule.placeholder_stopwords.is_empty(),
-        &rule.placeholder_stopwords_decision,
     )?;
     if !rule.use_rule_allowlists
         && rule
