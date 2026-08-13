@@ -1,7 +1,7 @@
 use copypaste_ipc::{ConfigData, ExportItem, ImportData};
 use tracing::{info, warn};
 
-use crate::retention::RetentionBatch;
+use crate::retention;
 use crate::storage::{Store, StoreError};
 use crate::{
     ingest::ingest_into_batched, now_ms, CryptoError, Detector, IngestError, Ingested, Keyring,
@@ -60,9 +60,10 @@ pub fn import(
         skipped_duplicate: 0,
         skipped_empty: 0,
         skipped_too_large: 0,
+        pins_failed: 0,
     };
     let mut pin: Vec<String> = Vec::new();
-    let mut batch = RetentionBatch::new(store, settings);
+    let batch = retention::batch(store, settings);
     let mut fatal: Option<ImportError> = None;
 
     for item in items {
@@ -70,15 +71,13 @@ pub fn import(
             .created_at
             .min(now_ms().saturating_add(MAX_IMPORT_FUTURE_SKEW_MS));
         match ingest_into_batched(
-            store,
+            &batch,
             detector,
             keyring,
             &item.content,
             &item.content_type,
             created_at,
             item.is_sensitive,
-            settings,
-            &batch,
         ) {
             Ok(Ingested::Stored(stored)) => {
                 result.inserted += 1;
@@ -112,39 +111,34 @@ pub fn import(
         }
     }
 
-    // DMY-156 B1: nothing was written, so no sweep is owed and running one
-    // could hard-delete pre-existing history under a lowered cap.
-    if result.inserted == 0 {
-        batch.disarm();
-        if let Some(e) = fatal {
-            return Err(e);
-        }
-        info!(
-            skipped = result.skipped,
-            skipped_empty = result.skipped_empty,
-            skipped_too_large = result.skipped_too_large,
-            "imported history (nothing stored)"
-        );
-        return Ok(result);
-    }
-
-    // DMY-156 B2: pins are restored before the sweep on every exit path —
-    // normal completion, fatal error after prior writes, and Drop (which skips
-    // DB work during panic to avoid a double-panic abort). If any pin cannot be
-    // made durable, the sweep is skipped entirely so I9 is never violated.
-    let mut pin_failed = false;
+    // DMY-156: pin intent is not proportional to `result.inserted`. A duplicate
+    // writes no new row and still owes the pin the file named, so this loop
+    // runs before every exit — including the fatal one, whose rows are already
+    // committed.
     for item_id in &pin {
-        if let Err(e) = store.set_pinned(item_id, true) {
-            warn!(error = ?e, "could not restore a pin on an imported item");
-            pin_failed = true;
+        match batch.store().set_pinned(item_id, true) {
+            Ok(true) => {}
+            Ok(false) => {
+                warn!("an imported pin names an item that is no longer live");
+                result.pins_failed += 1;
+            }
+            Err(e) => {
+                warn!(error = ?e, "could not restore a pin on an imported item");
+                result.pins_failed += 1;
+            }
         }
     }
-    if pin_failed {
-        batch.disarm();
-        warn!("retention sweep skipped: pin restoration was incomplete");
-    }
 
-    batch.finish();
+    // DMY-156: only rows this batch *added* can put the history over a bound —
+    // a duplicate bump and a pin change move no row count and no byte total. An
+    // import that added nothing therefore owes no sweep, and running one applies
+    // a lowered cap to history the user never asked to trim. A failed pin blocks
+    // it too: the row it names is still unpinned, so I9 would not protect it.
+    if result.inserted > 0 && result.pins_failed == 0 {
+        retention::finish(batch);
+    } else {
+        retention::disarm(batch);
+    }
 
     info!(
         inserted = result.inserted,
@@ -152,6 +146,7 @@ pub fn import(
         skipped_duplicate = result.skipped_duplicate,
         skipped_empty = result.skipped_empty,
         skipped_too_large = result.skipped_too_large,
+        pins_failed = result.pins_failed,
         "imported history"
     );
     if let Some(e) = fatal {
@@ -496,6 +491,101 @@ mod tests {
         );
     }
 
+    /// DMY-156: `inserted` counts new rows, not durable intent. An import whose
+    /// every item deduplicates still owes the pins the file named, and skipping
+    /// the pin loop on `inserted == 0` dropped them — so re-importing a file to
+    /// restore a lost pin did nothing at all.
+    #[test]
+    fn an_all_duplicate_import_still_restores_the_pins_the_file_named() {
+        let mut f = fixture();
+        let alpha = f.add("alpha");
+        f.add("bravo");
+        f.settings.history_limit = 1;
+
+        crate::retention::sweeps::take();
+        let result = import_into(
+            &f,
+            vec![
+                ExportItem {
+                    pinned: true,
+                    ..item("alpha")
+                },
+                item("bravo"),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(result.inserted, 0);
+        assert_eq!(result.skipped_duplicate, 2);
+        assert!(
+            f.store.get(&alpha).unwrap().unwrap().pinned,
+            "the duplicate's pin was not restored"
+        );
+        assert_eq!(f.store.count().unwrap(), 2, "nothing may be evicted");
+        assert_eq!(crate::retention::sweeps::take(), 0);
+    }
+
+    /// DMY-156: the same, with a fatal item behind the duplicate. The early
+    /// return on `inserted == 0` skipped the pin loop here too, so the error
+    /// took the pin with it.
+    #[test]
+    fn a_fatal_item_after_a_duplicate_still_restores_the_duplicates_pin() {
+        let f = fixture();
+        let alpha = f.add("alpha");
+        crate::storage::test_support::reject_writes(&f.store, "no_inserts", "INSERT", "1");
+
+        let error = import_into(
+            &f,
+            vec![
+                ExportItem {
+                    pinned: true,
+                    ..item("alpha")
+                },
+                item("bravo"),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ImportError::Storage(_)), "{error:?}");
+        assert!(
+            f.store.get(&alpha).unwrap().unwrap().pinned,
+            "a fatal item must not take a prior item's pin with it"
+        );
+        assert_eq!(f.store.count().unwrap(), 1);
+    }
+
+    /// DMY-156: a pin that cannot be written is counted on the result, not
+    /// logged and swallowed. The rows stay — data loss is the worse outcome —
+    /// and no retention runs, because the row the pin names is still unpinned
+    /// and I9 would not protect it.
+    #[test]
+    fn a_failed_pin_update_is_reported_and_evicts_nothing() {
+        let mut f = fixture();
+        f.add("already here");
+        f.settings.history_limit = 1;
+        crate::storage::test_support::reject_writes(&f.store, "no_pins", "UPDATE OF pinned", "1");
+
+        crate::retention::sweeps::take();
+        let result = import_into(
+            &f,
+            vec![ExportItem {
+                pinned: true,
+                ..item("imported")
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(result.inserted, 1);
+        assert_eq!(result.pins_failed, 1, "the lost pin was not reported");
+        assert_eq!(
+            f.store.count().unwrap(),
+            2,
+            "a failed pin must not cost the rows that did land"
+        );
+        assert_eq!(crate::retention::sweeps::take(), 0);
+        assert!(f.store.list(10, 0).unwrap().iter().all(|row| !row.pinned));
+    }
+
     /// DMY-156 B1: zero-write with a pinned row (I9). If the sweep ran it
     /// could not touch the pinned row, but the other one would be evicted
     /// by a cap of 1. Both must survive.
@@ -528,30 +618,50 @@ mod tests {
         );
     }
 
-    /// DMY-156 B2: a fatal error after prior writes must still restore pins
-    /// for the items that were already committed. A pinned item (I9) must
-    /// survive the sweep the batch runs on drop.
+    /// DMY-156 B2: a fatal error after prior writes must still restore pins for
+    /// the items already committed, and the sweep those rows owe still runs —
+    /// after the pins, so I9 protects them. The second insert is refused by an
+    /// injected trigger, which is the failure the earlier version of this test
+    /// only described.
     #[test]
     fn a_fatal_later_item_still_restores_pins_for_prior_writes() {
         let mut f = fixture();
-        f.settings.history_limit = 2;
+        f.settings.history_limit = 1;
+        crate::storage::test_support::reject_writes(
+            &f.store,
+            "no_second_insert",
+            "INSERT",
+            "(SELECT COUNT(*) FROM clipboard_items) >= 1",
+        );
 
-        let mut pinned = item("pin me");
-        pinned.pinned = true;
-        pinned.created_at = 1_700_000_000_000;
-        let mut filler = item("ordinary");
-        filler.created_at = 1_700_000_600_000;
-        let mut newest = item("newest");
-        newest.created_at = 1_700_001_200_000;
+        crate::retention::sweeps::take();
+        let error = import_into(
+            &f,
+            vec![
+                ExportItem {
+                    pinned: true,
+                    created_at: 1_700_000_000_000,
+                    ..item("pin me")
+                },
+                ExportItem {
+                    created_at: 1_700_000_600_000,
+                    ..item("never lands")
+                },
+            ],
+        )
+        .unwrap_err();
 
-        let result = import_into(&f, vec![pinned, filler, newest]).unwrap();
-        assert_eq!(result.inserted, 3);
-
+        assert!(matches!(error, ImportError::Storage(_)), "{error:?}");
         let rows = f.store.list(10, 0).unwrap();
-        let pinned_rows: Vec<_> = rows.iter().filter(|r| r.pinned).collect();
+        assert_eq!(rows.len(), 1);
         assert!(
-            !pinned_rows.is_empty(),
-            "the pinned item must survive the post-import sweep"
+            rows[0].pinned,
+            "the committed row lost its pin to the error"
+        );
+        assert_eq!(
+            crate::retention::sweeps::take(),
+            1,
+            "a batch that did write rows still owes its sweep"
         );
     }
 

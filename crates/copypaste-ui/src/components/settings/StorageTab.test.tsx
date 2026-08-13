@@ -27,14 +27,18 @@ const backupDatabase = vi.fn();
 const restoreDatabase = vi.fn();
 
 const toasts: string[] = [];
+const toastKinds: string[] = [];
 
 vi.mock("sonner", () => {
-  const record = (message: string) => toasts.push(message);
+  const record = (kind: string) => (message: string) => {
+    toasts.push(message);
+    toastKinds.push(kind);
+  };
   return {
-    toast: Object.assign(record, {
-      success: record,
-      warning: record,
-      error: record,
+    toast: Object.assign(record("default"), {
+      success: record("success"),
+      warning: record("warning"),
+      error: record("error"),
     }),
   };
 });
@@ -69,6 +73,7 @@ function preview(over: Partial<ImportPreview> = {}): ImportPreview {
 
 beforeEach(() => {
   toasts.length = 0;
+  toastKinds.length = 0;
   getStatus.mockReset().mockResolvedValue(status());
   exportHistory.mockReset().mockResolvedValue(report());
   prepareImportHistory.mockReset().mockResolvedValue(preview());
@@ -78,6 +83,7 @@ beforeEach(() => {
     skipped_duplicate: 1,
     skipped_empty: 0,
     skipped_too_large: 0,
+    pins_failed: 0,
   });
   cancelImportHistory.mockReset().mockResolvedValue(undefined);
   backupDatabase.mockReset().mockResolvedValue(2_500_000);
@@ -240,6 +246,30 @@ describe("import", () => {
     await waitFor(() => expect(toasts).toHaveLength(1));
     expect(toasts[0]).toContain("Imported 3 items");
     expect(toasts[0]).toContain("1 was already here");
+    expect(toastKinds[0]).toBe("success");
+  });
+
+  /** DMY-156: the items landed, so this is not an error — but a pin the file
+   *  named is missing, and a plain success toast would let the user believe
+   *  their pinned items came back. */
+  it("warns rather than celebrating when a pin could not be restored", async () => {
+    applyImportHistory.mockResolvedValue({
+      inserted: 3,
+      skipped: 0,
+      skipped_duplicate: 0,
+      skipped_empty: 0,
+      skipped_too_large: 0,
+      pins_failed: 2,
+    });
+    const { user } = withUser(<StorageTab />);
+    await user.click(screen.getByRole("button", { name: "Import…" }));
+    await user.click(await screen.findByRole("button", { name: "Import" }));
+
+    await waitFor(() => expect(toasts).toHaveLength(1));
+    expect(toasts[0]).toContain("Imported 3 items");
+    expect(toasts[0]).toContain("2 items could not be pinned");
+    expect(toasts[0]).toContain("import the file again to retry");
+    expect(toastKinds[0]).toBe("warning");
   });
 });
 

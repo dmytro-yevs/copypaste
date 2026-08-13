@@ -122,6 +122,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             skipped_duplicate: 1,
             skipped_empty: 1,
             skipped_too_large: 0,
+            pins_failed: 1,
         }),
         ResponseData::Backup(BackupData { size_bytes: 3 }),
         ResponseData::Discovered(DiscoveredData {

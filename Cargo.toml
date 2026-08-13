@@ -98,6 +98,10 @@ regex = "1.10"
 unicode-normalization = "0.1"
 iban_validate = "=5.0.1"
 directories = "5"
+# Scope guards. `guard_on_success` is the unwind policy the retention batch
+# needs — running SQLite in a destructor while a panic unwinds can abort the
+# process — and `into_inner` is how a caller retires one without firing it.
+scopeguard = "1.2"
 # flock(2) for the socket-bind critical section (CopyPaste-ah1m). rustix rather
 # than a libc call: it is already in the tree, is maintained, and covers macOS
 # and Android.

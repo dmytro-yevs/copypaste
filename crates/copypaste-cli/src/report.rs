@@ -183,10 +183,20 @@ fn import_summary(result: &ImportData) -> String {
         result.skipped,
         plural(u64::from(result.skipped), "item", "items")
     );
-    if result.skipped == 0 {
-        return summary;
+    if result.skipped > 0 {
+        summary.push_str(&skip_reasons(result));
     }
+    if result.pins_failed > 0 {
+        summary.push_str(&format!(
+            "; {} {} could not be pinned",
+            result.pins_failed,
+            plural(u64::from(result.pins_failed), "item", "items")
+        ));
+    }
+    summary
+}
 
+fn skip_reasons(result: &ImportData) -> String {
     let mut reasons = Vec::new();
     if result.skipped_duplicate > 0 {
         reasons.push(format!(
@@ -226,11 +236,10 @@ fn import_summary(result: &ImportData) -> String {
         ));
     }
 
-    if !reasons.is_empty() {
-        summary.push_str(": ");
-        summary.push_str(&reasons.join(", "));
+    if reasons.is_empty() {
+        return String::new();
     }
-    summary
+    format!(": {}", reasons.join(", "))
 }
 
 fn encode_export(export: &ExportData) -> Result<String, CliError> {
@@ -285,6 +294,7 @@ mod tests {
             skipped_duplicate,
             skipped_empty,
             skipped_too_large,
+            pins_failed: 0,
         }
     }
 
@@ -332,10 +342,33 @@ mod tests {
             skipped_duplicate: 0,
             skipped_empty: 0,
             skipped_too_large: 0,
+            pins_failed: 0,
         };
         assert_eq!(
             import_summary(&older),
             "imported 7 items; skipped 2 items: 2 items without a reported reason"
+        );
+    }
+
+    /// DMY-156: a pin that could not be written is a fact about the import, not
+    /// a skip reason — the item is there and unpinned, so it must be named even
+    /// when nothing was skipped.
+    #[test]
+    fn a_pin_that_could_not_be_written_is_named_alongside_the_skips() {
+        assert_eq!(
+            import_summary(&ImportData {
+                pins_failed: 1,
+                ..import_data(2, 0, 0, 0)
+            }),
+            "imported 2 items; skipped 0 items; 1 item could not be pinned"
+        );
+        assert_eq!(
+            import_summary(&ImportData {
+                pins_failed: 2,
+                ..import_data(3, 1, 0, 0)
+            }),
+            "imported 3 items; skipped 1 item: 1 duplicate already present; \
+             2 items could not be pinned"
         );
     }
 }

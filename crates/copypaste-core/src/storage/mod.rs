@@ -95,6 +95,21 @@ pub(crate) mod test_support {
         Store::open_in_memory(&KEY).expect("in-memory store")
     }
 
+    /// Fails an `event` on `clipboard_items` whenever `when` holds, so a test
+    /// can prove what a caller does when the database refuses rather than assume
+    /// it. `event` is a trigger event such as `INSERT` or `UPDATE OF pinned`;
+    /// `when` is a SQL predicate, `1` to refuse every one.
+    pub(crate) fn reject_writes(store: &Store, name: &str, event: &str, when: &str) {
+        store
+            .conn()
+            .unwrap()
+            .execute_batch(&format!(
+                "CREATE TRIGGER {name} BEFORE {event} ON clipboard_items WHEN {when} \
+                 BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;"
+            ))
+            .unwrap();
+    }
+
     /// Distinct content gets a distinct hash; that is all the dedup index needs.
     pub(super) fn hash_of(text: &str) -> String {
         hex::encode(text.as_bytes())

@@ -224,6 +224,10 @@ export const settings = {
       done_other: "Imported {{count}} items",
       alreadyHere_one: "{{count}} was already here",
       alreadyHere_other: "{{count}} were already here",
+      pinsFailed_one:
+        "{{count}} item could not be pinned — import the file again to retry",
+      pinsFailed_other:
+        "{{count}} items could not be pinned — import the file again to retry",
     },
 
     backup: {

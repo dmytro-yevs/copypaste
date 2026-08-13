@@ -1,48 +1,54 @@
-# ADR-0023: RetentionBatch is a handwritten scope guard
+# ADR-0023: The retention batch is a scopeguard, not a handwritten one
 
 ## Status
 
-Accepted.
+Accepted. Supersedes the exemption claimed in the first draft of this ADR,
+which was wrong about what `scopeguard` provides.
 
 ## Context
 
-`RetentionBatch` (added in `b2d6ea5d`) is a typed proof-token that
-accumulates state during an import batch and makes a conditional
-sweep-or-skip decision on drop. `RetentionGate` is a debounce clock
-for the sync source. AGENTS.md rule 1 requires evaluating a maintained
-package before writing either.
+`RetentionBatch` defers a batch of writes to one end-of-batch retention sweep.
+It must carry the store and settings it will sweep, let the caller retire it
+without sweeping when no rows were added, and never run SQLite in a destructor
+while a panic unwinds. AGENTS.md rule 1 requires reaching for a maintained
+package first.
 
 ## Evaluated
 
-**`scopeguard` 1.2.0** — already a transitive dependency (via `lock_api`).
-Provides `ScopeGuard<T, F>` which runs a closure on drop, and
-`defer!`/`guard` macros.
+[`scopeguard`](https://crates.io/crates/scopeguard) 1.2.0
+([docs](https://docs.rs/scopeguard/1.2.0/scopeguard/),
+[source](https://github.com/bluss/scopeguard)) — already in `Cargo.lock` as a
+transitive dependency of `lock_api`; MIT/Apache-2.0; no dependencies of its own;
+`no_std`-capable pure Rust, so it builds unchanged on macOS, Android and
+Windows. It covers all four needs:
 
-`scopeguard` fits a stateless on-drop action. `RetentionBatch` is not
-that: it carries a `swept` flag, a `disarm()` gate, and references to
-the store and settings it will sweep. The DMY-156 correction adds a
-further conditional decision — skip the sweep when pin restoration
-failed — which is runtime state, not a fixed closure. Wrapping this in
-`ScopeGuard<(Store, Settings, bool, bool), F>` would reproduce the
-struct with an extra closure indirection and lose the `#[must_use]`
-proof-token contract that `ingest_into_batched` relies on.
+- `guard_on_success` skips the closure while unwinding, so the panic policy is
+  the guard's rather than a handwritten `thread::panicking()` branch;
+- `Deref`/`DerefMut` expose the protected value, which is where the store and
+  settings live;
+- `ScopeGuard::into_inner` retires a guard without firing it, which is both
+  `finish` and `disarm`;
+- its constructors are `#[must_use]`.
 
-`RetentionGate` is a `Mutex<Option<Instant>>` debounce; `scopeguard`
-has no debounce concept.
+Every claim above was checked against the vendored `scopeguard-1.2.0` source in
+the local registry, not inferred from its README. No exemption is claimed, so no
+survey of narrower guard crates is load-bearing here.
 
-No other maintained crate on crates.io provides a conditional-proof-token
-scope guard.
+`RetentionGate` is a `Mutex<Option<Instant>>` debounce clock, not a scope guard,
+and is out of this ADR's scope.
 
 ## Decision
 
-Exemption 1: no maintained package provides the behaviour. The handwritten
-`RetentionBatch` is 30 production lines of a typed struct with a
-conditional `Drop`; replacing it with `scopeguard` would not reduce code
-and would remove the type-level proof that a sweep is owed.
-`RetentionGate` is a debounce timer, not a scope guard.
+Depend on `scopeguard` directly and define `RetentionBatch` as
+`ScopeGuard<BatchScope, fn(BatchScope), OnSuccess>`. No rule 1 exemption is
+claimed.
+
+The cost is one direct dependency that was already compiled into every build,
+adding no new crate to the tree, no build time and no audit surface. It removes
+a `Drop` impl, a `swept` flag and the unwind branch.
 
 ## Consequences
 
-Both types stay in `crate::retention`. If a future change removes the
-conditional logic and the proof-token contract, `scopeguard::guard`
-becomes the simpler alternative and this ADR should be revisited.
+`finish` and `disarm` are free functions in `crate::retention`, because
+inherent methods cannot be added to a foreign type. Enabling `use_std` for
+`guard_on_success` is a feature addition to an already-linked crate.

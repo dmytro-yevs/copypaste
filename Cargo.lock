@@ -1027,6 +1027,7 @@ dependencies = [
  "rand 0.8.7",
  "regex",
  "rusqlite",
+ "scopeguard",
  "security-framework",
  "serde",
  "serde_json",
