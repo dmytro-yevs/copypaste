@@ -198,18 +198,16 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
     }
 
-    /// Manifest 04 §3.5. One cap, applied by the codec, and the refusal names
-    /// no path. The reply echoes id `0` because the real id was in the bytes
-    /// that were discarded.
+    /// Manifest 04 §6.2 over the pipe: the refusal is delivered, it names no
+    /// path, and the connection is then closed. `listener` used to resume at
+    /// the next newline instead; the pipe could not keep that promise, and
+    /// DMY-158 settled it the other way, so this and
+    /// `listener::tests::an_oversized_line_is_refused_and_the_connection_is_closed`
+    /// now assert one behaviour on two transports.
     ///
-    /// `listener` says the connection stays usable because the codec resumes at
-    /// the next newline. **On Windows it does not**: the daemon delivers the
-    /// refusal and the pipe then reports end of stream, measured here. The
-    /// daemon itself is unharmed and the next connection is served, which is
-    /// what the clients actually need — the CLI opens one connection per
-    /// command, and 32 MiB is far above any frame either client builds.
+    /// The reply echoes id `0` because the real id was in the discarded bytes.
     #[tokio::test]
-    async fn an_oversized_line_is_refused_and_the_daemon_keeps_serving() {
+    async fn an_oversized_line_is_refused_and_the_connection_is_closed() {
         let (state, dir) = test_state("pipe-oversized");
         let path = dir.path().join("daemon.sock");
         let listener = bind(&path).expect("bind");
@@ -222,17 +220,22 @@ mod tests {
         let mut client = Client::connect(&path).await;
         assert!(client.status(1).await.ok);
 
-        // The refusal arrives while the client is still writing, so the write
-        // and the read have to be concurrent: a client that finished writing
-        // first would be one the daemon had already had to buffer 32 MiB for.
+        // The refusal is sent as soon as the cap is passed, which is while the
+        // client is still writing, so the two have to be concurrent. The write
+        // itself may end in a broken pipe — that is the connection closing
+        // under it, which is the point.
         let Client {
             mut writer,
             mut lines,
         } = client;
         let overshoot = tokio::spawn(async move {
             writer.write_all(&vec![b'a'; MAX_FRAME_BYTES + 1]).await?;
-            writer.write_all(b"\n").await?;
-            Ok::<_, std::io::Error>(writer)
+            writer
+                .write_all(
+                    b"
+",
+                )
+                .await
         });
         let response = reply(&mut lines).await;
         assert!(!response.ok);
@@ -244,17 +247,14 @@ mod tests {
             "rule 4: no path in a user message"
         );
 
-        overshoot
-            .await
-            .expect("the writing task")
-            .expect("the daemon must keep reading the bytes it is discarding");
         let next = tokio::time::timeout(Duration::from_secs(10), lines.next())
             .await
             .expect("the refused connection must not hang");
         assert!(
             matches!(next, None | Some(Err(_))),
-            "this asserts the Windows behaviour, not the desirable one: if the              connection now survives a refusal, delete the caveat above rather              than this test ({next:?})"
+            "the refusal must be the last frame on this connection: {next:?}"
         );
+        let _ = tokio::time::timeout(Duration::from_secs(10), overshoot).await;
 
         let mut fresh = Client::connect(&path).await;
         let response = fresh.status(3).await;

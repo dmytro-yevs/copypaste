@@ -259,14 +259,19 @@ async fn handle_connection(
             None => break,
             Some(Ok(line)) => line,
             Some(Err(LinesCodecError::MaxLineLengthExceeded)) => {
-                // The id lived somewhere in the discarded bytes, so `0` is the
-                // best that can be echoed. The codec resumes at the next
-                // newline, so the connection stays usable.
+                // Answered, then closed — manifest 04 §6.2: after
+                // `request too large` "the connection is already closed", which
+                // is what `halted::refuse` and the Windows pipe already do.
+                //
+                // The codec *can* resume at the next newline, and this used to.
+                // Resuming means reading and discarding an unbounded stream, at
+                // the sender's rate, while holding one of 64 connection permits
+                // — and it held on a socket and not on a pipe, so the same
+                // client saw two protocols (DMY-158). The id lived somewhere in
+                // the discarded bytes, so `0` is the best that can be echoed.
                 let response = Response::err(0, ErrorCode::InvalidRequest, MSG_TOO_LARGE);
-                if send(&mut writer, &response).await.is_err() {
-                    break;
-                }
-                continue;
+                let _ = send(&mut writer, &response).await;
+                break;
             }
             Some(Err(e)) => {
                 debug!(error = %e, "ipc connection read failed");
@@ -984,6 +989,50 @@ mod tests {
             .expect("the sender outlives this");
         assert!(*stopping.borrow());
         let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+    }
+
+    /// Manifest 04 §6.2: `request too large` is answered and the connection is
+    /// then closed. It resumed at the next newline until DMY-158, which is a
+    /// promise the Windows pipe could not keep — and the daemon's own
+    /// `halted::refuse` never made it. The daemon keeps serving; only this
+    /// connection ends, which is the state `request_too_large` already tells
+    /// clients to expect.
+    #[tokio::test]
+    async fn an_oversized_line_is_refused_and_the_connection_is_closed() {
+        let (state, dir) = test_state("server-oversized");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let mut client = Client::new(transport::connect(&path).await.expect("connect"));
+        assert!(client.call(request(1, Method::Status)).await.ok);
+
+        client
+            .writer
+            .write_all(&vec![b'a'; MAX_FRAME_BYTES + 1])
+            .await
+            .expect("write");
+        client.writer.write_all(b"\n").await.expect("write");
+
+        let response = client.next_frame().await;
+        assert_eq!(response.id, 0);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(response.error.as_deref(), Some(MSG_TOO_LARGE));
+        assert!(
+            !response.error.unwrap_or_default().contains('/'),
+            "rule 4: no path in a user message"
+        );
+        assert_connection_closed(&mut client).await;
+
+        let mut fresh = Client::new(transport::connect(&path).await.expect("connect"));
+        assert!(
+            fresh.call(request(2, Method::Status)).await.ok,
+            "one client's oversized frame ended the daemon"
+        );
+
+        shutdown_tx.send(true).unwrap();
+        let _ = server.await;
     }
 
     /// The cap is non-blocking, so an over-cap connection is dropped rather
