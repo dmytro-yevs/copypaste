@@ -128,11 +128,14 @@ qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
 image.workspace = true
 # Source-app icon resolution: App Paths registry lookup, SHGetFileInfoW for the
 # icon, GDI to extract the bitmap. The path is transient and never stored (I-9).
+# `Win32_System_Threading` is `CREATE_NO_WINDOW` alone: naming the constant
+# rather than writing `0x0800_0000` into a spawn call.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_System_Environment",
     "Win32_System_Registry",
+    "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
@@ -141,6 +144,11 @@ windows-sys = { version = "0.61", features = [
 # by the updater command boundary; the dependency stays out of mobile builds.
 tauri-plugin-updater = "=2.10.1"
 url.workspace = true
+# The daemon must die with the app even when the app is killed outright, which
+# is a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. `win32job` wraps
+# exactly that trio of calls, so ADR-0018's preference for a maintained wrapper
+# over hand-written FFI holds here rather than its DPAPI exemption.
+win32job = "2"
 
 # ---------------------------------------------------------------------------
 # Android only
@@ -154,6 +162,18 @@ copypaste-cloud = { path = "../../copypaste-cloud" }
 zeroize.workspace = true
 jni = "0.21"
 ndk-context = "0.1"
+
+[dev-dependencies]
+# `start_paused` drives the client budgets without a test that actually waits
+# ten seconds. Tokio's own clock control, not a second one (CLAUDE.md rule 1).
+tokio = { workspace = true, features = ["test-util"] }
+
+# The client budgets have to be proved against a real endpoint on the platform
+# that has one. `interprocess` is already the workspace's named-pipe listener
+# (`copypaste_ipc::transport::pipe`); a test-only listener of any other shape
+# would be a second implementation of the thing under test.
+[target.'cfg(windows)'.dev-dependencies]
+interprocess.workspace = true
 
 [features]
 # Compile the in-process backend on a host that is not Android. Exists so this
