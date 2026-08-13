@@ -89,6 +89,19 @@ node_center_current() { # <xml> <selector alternatives separated by |>
     selector_center "$1" "$2" current
 }
 
+# actionable / disabled / absent. "Disabled" is a control the app has painted
+# and switched off, "absent" is one it never laid out, and the two need
+# different next steps: the first is waited for, the second is not there.
+control_state() { # <xml> <selector alternatives separated by |>
+    if [[ -n "$(action_center "$1" "$2")" ]]; then
+        printf actionable
+    elif [[ -n "$(node_center_rendered "$1" "$2")" ]]; then
+        printf disabled
+    else
+        printf absent
+    fi
+}
+
 wait_selector() { # <selector> <artifact> [timeout] [dump function]
     local selector="$1" artifact="$2" timeout="${3:-${WAIT_SECS:-45}}" dump="${4:-dump_hierarchy}"
     local started="$SECONDS"
