@@ -12,7 +12,7 @@ import { ExternalLink, RotateCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useStatus } from "@/hooks/useHistory";
+import { statusService, useStatus } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 import { classifyError, friendlyError } from "@/lib/errors";
 import { CURRENT_PROTOCOL_VERSION, hasBridge } from "@/lib/ipc";
@@ -39,7 +39,7 @@ const LINKS = [
 
 export function AboutTab() {
   const { t } = useTranslation();
-  const status = useStatus();
+  const status = useStatus(statusService);
   const resetPrefs = usePrefs((s) => s.reset);
 
   const appVersion = useQuery({

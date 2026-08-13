@@ -10,7 +10,7 @@
 import { ShieldAlert } from "lucide-react";
 
 import { StateNotice } from "@/components/StateNotice";
-import { useStatus } from "@/hooks/useHistory";
+import { useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
 import type { SettingsHealth, StatusData } from "@/generated/ipc";
 

@@ -27,7 +27,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Row } from "@/components/settings/Row";
-import { useClearHistory, useStatus } from "@/hooks/useHistory";
+import { statusItemCount, useClearHistory, useStatus } from "@/hooks/useHistory";
 import {
   useBackupDatabase,
   useExportHistory,
@@ -42,7 +42,7 @@ type Confirming = "none" | "clear" | "export" | "restore";
 
 export function StorageTab() {
   const { t } = useTranslation();
-  const status = useStatus();
+  const status = useStatus(statusItemCount);
   const clear = useClearHistory();
   const exportHistory = useExportHistory();
   const importHistory = useImportHistory();
@@ -62,8 +62,8 @@ export function StorageTab() {
         description={t("settings.storage.stored.description")}
       >
         <span className="text-sm tabular-nums text-muted-foreground">
-          {status.data
-            ? status.data.item_count.toLocaleString()
+          {status.data !== undefined
+            ? status.data.toLocaleString()
             : t("common.noValue")}
         </span>
       </Row>

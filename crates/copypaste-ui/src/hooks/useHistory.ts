@@ -13,6 +13,7 @@ import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import { IMAGE_PREVIEW_KEY, imagePreviewKey } from "@/hooks/useHistoryMedia";
 import {
+  HISTORY_DEEP_REFRESH_MS,
   PAGE_SIZE,
   POLL_ACTIVE_MS,
   POLL_BACKOFF_MS,
@@ -39,13 +40,54 @@ export const HISTORY_SEARCH_KEY = ["history-search"] as const;
 export const STATUS_KEY = ["status"] as const;
 
 export const HISTORY_HEAD_KEY = [...HISTORY_KEY, "head"] as const;
+export const HISTORY_PAGES_KEY = [...HISTORY_KEY, "pages"] as const;
 
 export const historyKey = (query: string) =>
-  [...HISTORY_KEY, "pages", query] as const;
+  [...HISTORY_PAGES_KEY, query] as const;
 
+/**
+ * For a write that re-sorts the list — pin, unpin, reorder, delete, clear. The
+ * cached pages are then wrong about *where* rows are, not just about the head,
+ * so they have to be re-walked.
+ */
 export async function invalidateHistoryQueries(qc: QueryClient): Promise<void> {
   await Promise.all([
     qc.invalidateQueries({ queryKey: HISTORY_KEY }),
+    qc.invalidateQueries({ queryKey: HISTORY_SEARCH_KEY }),
+  ]);
+}
+
+const deepRefresh = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>();
+
+/**
+ * Manifest 05 §5.4: a remote delete or pin three pages down has to reach the
+ * window with no scroll and no refocus, so the deeper pages cannot be left
+ * stale — nothing else would read them.
+ *
+ * They are re-walked on a trailing edge instead. `HISTORY_KEY` is a *prefix* of
+ * the paged query's key, so invalidating it walks every loaded page serially:
+ * one IPC, and one page decrypt, each. The rate of clipboard changes is not
+ * bounded, so a burst has to cost one walk rather than one per event.
+ */
+function scheduleDeepRefresh(qc: QueryClient): void {
+  if (deepRefresh.has(qc)) return;
+  deepRefresh.set(
+    qc,
+    setTimeout(() => {
+      deepRefresh.delete(qc);
+      void qc.invalidateQueries({ queryKey: HISTORY_PAGES_KEY });
+    }, HISTORY_DEEP_REFRESH_MS),
+  );
+}
+
+/** For a change the user did not ask for — a capture, a push stream resuming,
+ *  a sync round landing. */
+export async function invalidateHistoryHead(qc: QueryClient): Promise<void> {
+  scheduleDeepRefresh(qc);
+  // The head is immediate: it is where a capture lands, and waiting on the
+  // coalescing window to show the user their own copy would be a regression.
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: HISTORY_HEAD_KEY }),
     qc.invalidateQueries({ queryKey: HISTORY_SEARCH_KEY }),
   ]);
 }
@@ -211,6 +253,26 @@ export function useStatus<T = StatusData>(select?: (data: StatusData) => T) {
 
 export const statusReachable = (): true => true;
 export const statusItemCount = (data: StatusData): number => data.item_count;
+export const statusDeviceName = (data: StatusData): string => data.device_name;
+
+/** Module scope, not an inline arrow: React Query memoises on the selector's
+ *  identity, and a fresh closure each render defeats the structural sharing
+ *  that makes these return the previous object. */
+export const statusOwnDevice = (data: StatusData) => ({
+  device_name: data.device_name,
+  capture_running: data.capture_running,
+  private_mode: data.private_mode,
+  version: data.version,
+  item_count: data.item_count,
+});
+
+export const statusService = (data: StatusData) => ({
+  version: data.version,
+  capture_running: data.capture_running,
+  clipboard_backend: data.clipboard_backend,
+  protocol_version: data.protocol_version,
+  item_count: data.item_count,
+});
 
 /**
  * Not optimistic, and nothing here reorders locally: INV-31 (a pinned item

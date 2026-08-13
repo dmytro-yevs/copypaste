@@ -135,6 +135,7 @@ export const settings = {
     blocked:
       "Your system is still set to skip CopyPaste at startup. Check the Startup apps list.",
     failed: "That setting couldn't be changed.",
+    unknown: "Your system didn't report this setting, so it can't be changed here.",
   },
 
   sync: {
