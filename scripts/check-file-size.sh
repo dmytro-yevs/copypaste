@@ -9,18 +9,12 @@
 # at the first attribute reported a 729-line file as 38 and this check passed it
 # 229 lines over budget. A declaration ends in `;`; the module opens a block.
 #
-# Covers the frontend too. It did not until a review found `lib/ipc.ts` at 499
-# lines reading as a file at its limit when 154 of them are comment — the rule
-# had never been measured outside Rust, so "it passes" said nothing about it.
-# `.test.` and `.spec.` files are excluded the way Rust test modules are.
+# Covers .rs, .ts, .tsx; excludes `.test.*`, `.spec.*`, `.d.ts`. Frontend was
+# added after `lib/ipc.ts` at 499 lines read as within budget while 154 were
+# comment — the rule had never been measured outside Rust.
 #
-# Advisory, not a gate. The number is here to make the backlog visible.
-#
-# `--porcelain` is the contract check-file-size-gate.sh enforces against: one
-# tab-delimited record per line, the path last so spaces need no quoting, a
-# declared count and an `end` sentinel. The gate used to re-read the table
-# below with a regex that only knew `.rs`, which passed every `.ts` and `.tsx`
-# overage the table had just printed.
+# Advisory, not a gate. `--porcelain` emits tab-delimited records (header,
+# over*, count, end) for check-file-size-gate.sh.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
