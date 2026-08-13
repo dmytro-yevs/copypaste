@@ -26,6 +26,8 @@ describe("waiting for the app's page target", () => {
   test("attaches to the app's target and not to another one the WebView exposes", () => {
     expect(isAppTarget("http://tauri.localhost/index.html")).toBe(true);
     expect(isAppTarget("http://tauri.localhost/")).toBe(true);
+    // The default port is the origin's port, so spelling it out is the same page.
+    expect(isAppTarget("http://tauri.localhost:80/")).toBe(true);
     expect(isAppTarget("about:blank")).toBe(false);
     expect(isAppTarget("")).toBe(false);
   });
@@ -38,6 +40,21 @@ describe("waiting for the app's page target", () => {
       "https://example.test/?next=http://tauri.localhost/",
     ]) {
       expect(isAppTarget(impostor)).toBe(false);
+    }
+  });
+
+  // A host match accepted all of these: the same name is a different document
+  // under another scheme or port, and the harness drove it as the app.
+  test("does not attach to the app's host under another scheme or port", () => {
+    for (const elsewhere of [
+      "https://tauri.localhost/",
+      "http://tauri.localhost:444/",
+      "https://tauri.localhost:443/",
+      "ftp://tauri.localhost/",
+      "file://tauri.localhost/index.html",
+      "tauri://tauri.localhost/",
+    ]) {
+      expect(isAppTarget(elsewhere)).toBe(false);
     }
   });
 });
