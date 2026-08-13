@@ -46,8 +46,15 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
         if *shutdown.borrow() {
             break;
         }
+        // A tick that collides with a pass already in flight would dial the
+        // same peers a second time, and the far side's session limit is what
+        // would refuse it.
+        let Some(permit) = state.p2p.try_begin_round() else {
+            debug!("a peer sync pass is already running; skipping this tick");
+            continue;
+        };
         state.p2p.node().reconcile_discovery();
-        round(&state).await;
+        round(&state, permit, &shutdown).await;
     }
 
     debug!("peer sync loop stopped");
@@ -58,7 +65,12 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 /// Failures are per-peer and already reported by `sync_one`; nothing here can
 /// stop the loop, because a peer that is asleep is the normal case and must not
 /// end automatic sync for the rest of them.
-async fn round(state: &Arc<AppState>) {
+async fn round(
+    state: &Arc<AppState>,
+    permit: copypaste_core::sync::RoundGuard,
+    shutdown: &watch::Receiver<bool>,
+) {
+    let _permit = permit;
     // The master sync switch. Checked here rather than at start-up so turning
     // it off takes effect on the next round, which is what makes it live.
     if !state.settings.get().sync_enabled {
@@ -88,6 +100,13 @@ async fn round(state: &Arc<AppState>) {
 
     let mut moved = 0u64;
     for peer in &reachable {
+        // Between peers, not inside a session: a session that has already
+        // exchanged summaries finishes, and teardown does not wait out the
+        // rest of a peer list that may be asleep.
+        if *shutdown.borrow() {
+            debug!("a peer sync pass was cut short for shutdown");
+            break;
+        }
         let result = super::handlers::sync_one(state, peer).await;
         moved += u64::from(result.sent) + u64::from(result.received);
         if result.received > 0 {
@@ -105,9 +124,17 @@ async fn round(state: &Arc<AppState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::cadence::MIN_POLL_INTERVAL;
     use crate::testutil::test_state;
     use std::time::Duration;
+
+    /// One pass, with a permit of its own and nothing asking for shutdown.
+    async fn one_round(state: &Arc<AppState>) {
+        let permit = state.p2p.try_begin_round().expect("no pass in flight");
+        let (_tx, rx) = watch::channel(false);
+        round(state, permit, &rx).await;
+    }
 
     #[tokio::test]
     async fn the_loop_stops_on_shutdown() {
@@ -127,7 +154,7 @@ mod tests {
     #[tokio::test]
     async fn a_round_with_no_peers_leaves_the_cadence_alone() {
         let (state, _dir) = test_state("alpha");
-        round(&state).await;
+        one_round(&state).await;
         assert_eq!(state.p2p.idle().interval(), MIN_POLL_INTERVAL);
     }
 
@@ -165,7 +192,7 @@ mod tests {
             .unwrap();
         // No peers either way; what is asserted is that it returns without
         // consulting the peer list or the cadence.
-        round(&state).await;
+        one_round(&state).await;
         assert_eq!(state.p2p.idle().interval(), MIN_POLL_INTERVAL);
     }
 }

@@ -120,6 +120,10 @@ impl Cloud {
         });
         if switched {
             self.last_sync_ms.store(0, Ordering::Release);
+            // The count belongs to the history *this account* has scanned, and
+            // the new one has scanned none of it. Leaving it would show the
+            // previous account's figure until the first round finishes.
+            self.note_unreadable_uploads(0);
         }
         *self.lock_error() = None;
         drop(_cursor);
@@ -179,6 +183,7 @@ impl Cloud {
             tracing::warn!(error = ?error, "could not clear the stored cloud account");
         }
         self.last_sync_ms.store(0, Ordering::Release);
+        self.note_unreadable_uploads(0);
         *self.lock_error() = None;
         drop(account);
         self.notify_session_changed();
@@ -236,6 +241,20 @@ impl Cloud {
         if let Ok(ms) = state.store.state_ms(CloudStateKey::LastSyncMs.as_str()) {
             self.last_sync_ms.store(ms, Ordering::Release);
         }
+        // Seeded from the persisted record rather than waiting for the first
+        // round: a device restarted with rows it cannot upload should say so
+        // before it has had a chance to rediscover them.
+        self.note_unreadable_uploads(
+            copypaste_cloud::sync::UnreadableUploads::decode(
+                state
+                    .store
+                    .state(CloudStateKey::UnreadableUploads.as_str())
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+            )
+            .total,
+        );
         drop(account);
         self.notify_session_changed();
         tracing::info!("restored a cloud sync account");

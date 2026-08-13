@@ -127,6 +127,15 @@ export function SyncTab() {
             <span role="status" className="text-xs text-warn-strong">
               {t("settings.sync.cloud.lastError")}
             </span>
+          ) : cloudStatus?.unreadable_uploads ? (
+            // A separate line rather than an error badge: sync is working, and
+            // these rows are being retried. Without it, "everything but these"
+            // is indistinguishable from "everything".
+            <span role="status" className="text-xs text-warn-strong">
+              {t("settings.sync.cloud.unreadableUploads", {
+                count: cloudStatus.unreadable_uploads,
+              })}
+            </span>
           ) : undefined
         }
       >

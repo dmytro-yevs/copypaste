@@ -24,6 +24,7 @@ function cloudStatus(overrides = {}) {
     last_sync_ms: null,
     last_error: null,
     poll_interval_secs: 60,
+    unreadable_uploads: 0,
     ...overrides,
   };
 }
@@ -137,6 +138,38 @@ describe("SyncTab", () => {
       }),
     );
     expect(screen.queryByRole("button", { name: /^pair$/i })).toBeNull();
+  });
+
+  // A row this device cannot open is not going to the account, and sync is
+  // otherwise working — so nothing else on this screen would say so. It is
+  // announced (`role="status"`) rather than only drawn, and it never carries
+  // the row's identity or content.
+  it("says how many items could not be prepared for cloud sync", async () => {
+    getCloudStatus.mockResolvedValue(
+      cloudStatus({
+        configured: true,
+        signed_in: true,
+        key_ready: true,
+        email: "me@example.com",
+        unreadable_uploads: 3,
+      }),
+    );
+    withUser(<SyncTab />);
+
+    const note = await screen.findByText(/could not be prepared for cloud sync/);
+    expect(note.getAttribute("role")).toBe("status");
+    expect(note.textContent).toContain("3 items");
+    expect(screen.queryByText(en.settings.sync.cloud.lastError)).toBeNull();
+  });
+
+  it("says nothing about skipped items when there are none", async () => {
+    getCloudStatus.mockResolvedValue(
+      cloudStatus({ configured: true, signed_in: true, key_ready: true }),
+    );
+    withUser(<SyncTab />);
+
+    expect(await screen.findByText(en.settings.sync.cloud.badgeConnected)).not.toBeNull();
+    expect(screen.queryByText(/could not be prepared for cloud sync/)).toBeNull();
   });
 
   it("offers manual sync and sign out for an unlocked account", async () => {
