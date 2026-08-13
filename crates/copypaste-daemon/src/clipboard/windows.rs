@@ -15,6 +15,8 @@ use tracing::{debug, warn};
 mod attribution;
 mod read;
 mod transcode;
+#[cfg(test)]
+mod two_writers;
 
 use super::change::{Change, ChangeTracker};
 use super::windows_attribution::{is_excluded, Attribution};
@@ -391,7 +393,7 @@ mod tests {
 
     static CLIPBOARD: Mutex<()> = Mutex::new(());
 
-    fn serialised() -> MutexGuard<'static, ()> {
+    pub(super) fn serialised() -> MutexGuard<'static, ()> {
         CLIPBOARD.lock().unwrap_or_else(|held| held.into_inner())
     }
 
@@ -735,43 +737,6 @@ mod tests {
         );
         assert_eq!(clipboard.attribution.unattributed_count(), 0);
         assert!(first.app_bundle_id.is_some() && second.app_bundle_id.is_some());
-    }
-
-    /// DMY-158: two processes write the clipboard within the 500 ms poll
-    /// interval, and each resolves to a distinct owner identity. The child
-    /// process has a different PID and image name from the test process,
-    /// proving that `GetClipboardOwner` + `QueryFullProcessImageNameW`
-    /// distinguishes real writers — the property the same-process
-    /// `write_text` helper cannot show.
-    #[test]
-    #[ignore = "drives the real Windows clipboard and spawns a child process"]
-    fn two_processes_get_distinct_attributions() {
-        let _lock = serialised();
-        let mut clipboard = WindowsClipboard::new().unwrap();
-
-        write_text("from the test process");
-        let first = clipboard.poll().expect("first write captured");
-        let first_id = first.app_bundle_id.expect("first resolved");
-
-        std::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-Command", "Set-Clipboard 'from a child'"])
-            .status()
-            .expect("child process writes clipboard");
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        let second = clipboard.poll().expect("child write captured");
-        let second_id = second.app_bundle_id.expect("second resolved");
-
-        assert_eq!(clipboard.attribution.resolutions(), 2);
-        assert_ne!(
-            first_id, second_id,
-            "both writes resolved to the same identity ({first_id}); \
-             the child process must produce a different owner"
-        );
-        assert!(
-            second_id.contains("powershell"),
-            "expected a powershell image name, got {second_id}"
-        );
     }
 
     /// DMY-158 before/after comparison on equal workloads.
