@@ -51,7 +51,7 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
   let { browser, endpoint } = await open(port, msLeft());
 
   for (;;) {
-    const pages = await browser.pages().then(
+    const pages = await browser.pages(true).then(
       (found) => found,
       () => undefined,
     );
