@@ -9,18 +9,22 @@
 //! already exists, is encrypted at rest, and is deliberately the one thing
 //! `server::dbadmin` leaves alone when it restores a backup — so a restore
 //! brings back history without silently changing how the daemon behaves.
+
+//! # A bad value never bricks the daemon, and never opens it up either
 //!
-//! # A bad value never bricks the daemon
-//!
-//! Two places apply that rule. On load, anything unreadable or unparseable is
-//! logged and the defaults are used. On write, `ConfigPatch::apply` validates
-//! into a *new* value and the live one is replaced only on success, so a
-//! rejected `set_config` leaves the daemon running exactly as it was.
+//! On write, `ConfigPatch::apply` validates into a *new* value and the live one
+//! is replaced only on success, so a rejected `set_config` leaves the daemon
+//! running exactly as it was. On read, [`record`] keeps every field that
+//! decodes and fails the rest closed, and what fell back is reported as
+//! [`copypaste_ipc::SettingsHealth`] rather than rendered as if the user had
+//! chosen it.
+
+mod record;
 
 use std::ops::Deref;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
-use copypaste_ipc::{ConfigData, ConfigError, ConfigPatch};
+use copypaste_ipc::{ConfigData, ConfigError, ConfigPatch, SettingsHealth};
 use tracing::warn;
 
 use crate::meta::{Meta, MetaError};
@@ -44,6 +48,7 @@ pub struct Settings {
 struct SettingsState {
     config: ConfigData,
     private_mode_epoch: u64,
+    health: Option<SettingsHealth>,
 }
 
 pub(crate) struct SettingsReadGuard<'a>(RwLockReadGuard<'a, SettingsState>);
@@ -51,6 +56,11 @@ pub(crate) struct SettingsReadGuard<'a>(RwLockReadGuard<'a, SettingsState>);
 impl SettingsReadGuard<'_> {
     pub(crate) fn private_mode_epoch(&self) -> u64 {
         self.0.private_mode_epoch
+    }
+
+    /// What did not survive the last read, or `None` when the record was whole.
+    pub(crate) fn health(&self) -> Option<&SettingsHealth> {
+        self.0.health.as_ref()
     }
 }
 
@@ -68,36 +78,31 @@ pub(crate) struct SettingsApplied {
 }
 
 impl Settings {
-    /// Read the stored settings, falling back to the defaults.
+    /// Read the stored settings, failing closed on anything that will not read.
     ///
-    /// Never fails: an unreadable row, invalid JSON or a value the current
-    /// bounds reject all mean "run on the defaults and say so". Refusing to
-    /// start would turn one bad character into a daemon that cannot be reached
-    /// to fix it.
+    /// Never fails: refusing to start would turn one bad character into a
+    /// daemon that cannot be reached to fix it. What it will not do is run on
+    /// the *defaults*, which are the open value for every privacy field.
     pub fn load(meta: &Meta) -> Self {
-        let stored = match meta.state(KEY_SETTINGS) {
-            Ok(Some(raw)) => serde_json::from_str::<ConfigData>(&raw)
-                .map_err(
-                    |e| warn!(error = %e, "stored settings are unreadable; using the defaults"),
-                )
-                .ok()
-                .filter(|stored| match stored.validate() {
-                    Ok(()) => true,
-                    Err(e) => {
-                        warn!(error = %e, "stored settings are out of bounds; using the defaults");
-                        false
-                    }
-                }),
-            Ok(None) => None,
+        let (config, health) = match meta.state(KEY_SETTINGS) {
+            Ok(Some(raw)) => record::read(&raw),
+            Ok(None) => (ConfigData::default(), SettingsHealth::default()),
             Err(e) => {
-                warn!(error = ?e, "settings could not be read; using the defaults");
-                None
+                warn!(error = ?e, "settings could not be read; failing closed");
+                (
+                    record::all_closed(),
+                    SettingsHealth {
+                        record_unreadable: true,
+                        unreadable_fields: Vec::new(),
+                    },
+                )
             }
         };
         Self {
             current: RwLock::new(SettingsState {
-                config: stored.unwrap_or_default(),
+                config,
                 private_mode_epoch: 0,
+                health: health.is_degraded().then_some(health),
             }),
             applying: Mutex::new(()),
         }
@@ -109,6 +114,7 @@ impl Settings {
             current: RwLock::new(SettingsState {
                 config: ConfigData::default(),
                 private_mode_epoch: 0,
+                health: None,
             }),
             applying: Mutex::new(()),
         }
@@ -180,6 +186,10 @@ impl Settings {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         current.config = next.clone();
         current.private_mode_epoch = next_epoch;
+        // The record on disk has just been rewritten whole, so nothing is
+        // degraded any more and the notice has to go — leaving it would outlive
+        // the condition and disagree with what the next start reports.
+        current.health = None;
         Ok(SettingsApplied {
             config: next,
             private_mode_epoch: next_epoch,
@@ -246,6 +256,7 @@ mod tests {
         assert_eq!(loaded.max_image_size_bytes, 72 * 1024 * 1024);
         assert_eq!(loaded.max_file_size_bytes, 90 * 1024 * 1024);
         assert_eq!(loaded.max_decoded_image_mb, 75);
+        assert!(loaded.health().is_none());
     }
 
     /// The rule this whole module is shaped around.
@@ -380,29 +391,88 @@ mod tests {
         assert_eq!(stored, *current);
     }
 
+    /// The privacy half of the load contract, end to end through the database.
     #[test]
-    fn a_corrupt_stored_record_falls_back_to_the_defaults() -> Result<(), Box<dyn std::error::Error>>
+    fn a_corrupt_stored_record_fails_closed_and_says_so() -> Result<(), Box<dyn std::error::Error>>
     {
         let (state, _dir) = test_state("alpha");
         state.meta.set_state(KEY_SETTINGS, "{not json")?;
+
         let settings = Settings::load(&state.meta);
-        assert_eq!(*settings.get(), ConfigData::default());
+        let loaded = settings.get();
+        assert_ne!(*loaded, ConfigData::default());
+        assert!(loaded.private_mode);
+        assert!(!loaded.sync_enabled);
+        assert!(!loaded.lan_visibility);
+        assert!(
+            loaded
+                .health()
+                .expect("a degraded report")
+                .record_unreadable
+        );
         Ok(())
     }
 
     /// Deserializing checks the shape, never the bounds, so a stored value that
-    /// exceeds today's binding range must fall back atomically.
+    /// exceeds today's binding range falls back — but only that field, and only
+    /// after everything else in the record has been kept.
     #[test]
-    fn a_stored_value_the_current_bounds_reject_falls_back_to_the_defaults(
+    fn a_stored_value_the_current_bounds_reject_falls_back_alone(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (state, _dir) = test_state("alpha");
         let stale = serde_json::to_string(&ConfigData {
             max_file_size_bytes: copypaste_ipc::MAX_FILE_SIZE_BYTES + 1,
+            excluded_app_bundle_ids: vec!["com.1password.1password".into()],
             ..ConfigData::default()
         })?;
         state.meta.set_state(KEY_SETTINGS, &stale)?;
 
-        assert_eq!(*Settings::load(&state.meta).get(), ConfigData::default());
+        let settings = Settings::load(&state.meta);
+        let loaded = settings.get();
+        assert_eq!(
+            loaded.max_file_size_bytes,
+            ConfigData::default().max_file_size_bytes
+        );
+        assert_eq!(loaded.excluded_app_bundle_ids, ["com.1password.1password"]);
+        assert_eq!(
+            loaded
+                .health()
+                .expect("a degraded report")
+                .unreadable_fields,
+            ["max_file_size_bytes"]
+        );
+        Ok(())
+    }
+
+    /// Writing the record whole is what repairs it, so the notice must not
+    /// outlive the write that made it untrue.
+    #[test]
+    fn rewriting_the_record_clears_the_degraded_report() -> Result<(), Box<dyn std::error::Error>> {
+        let (state, dir) = test_state("alpha");
+        state.meta.set_state(KEY_SETTINGS, "{not json")?;
+        let settings = Settings::load(&state.meta);
+        assert!(settings.get().health().is_some());
+
+        settings.apply(
+            &state.meta,
+            &ConfigPatch {
+                poll_interval_ms: Some(250),
+                ..Default::default()
+            },
+        )?;
+        assert!(settings.get().health().is_none());
+
+        // And the repair survives a restart rather than being reported again.
+        drop(settings);
+        drop(state);
+        let (restarted, _dir) =
+            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
+        let reloaded = restarted.settings.get();
+        assert!(reloaded.health().is_none());
+        assert_eq!(reloaded.poll_interval_ms, 250);
+        // The fail-closed values are now the user's persisted settings, because
+        // that is what was written; nothing quietly reverted to the defaults.
+        assert!(reloaded.private_mode);
         Ok(())
     }
 

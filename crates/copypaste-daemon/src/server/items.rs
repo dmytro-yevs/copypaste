@@ -58,7 +58,10 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             private_mode: settings.private_mode,
             private_mode_epoch: settings.private_mode_epoch(),
             counters: state.counters(),
-            settings_health: None,
+            // Carried on `status` for the reason the counters are: a client
+            // that had to make a second call could render the settings screen
+            // before it learned they were not the user's own values.
+            settings_health: settings.health().cloned(),
         }),
     )
 }

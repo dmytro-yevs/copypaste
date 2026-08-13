@@ -474,8 +474,24 @@ is `Uuid::from_bytes(file_id)`.
 > lives in `sync_device_state` inside the SQLCipher database rather than in a
 > `config.toml`, which is what makes the last of those structural — there is no
 > path to leak — and is why a restore deliberately leaves that table alone.
+>
+> A fourth is binding and was **added in v2**: an unreadable record must fail
+> *closed*. v1's rule was "a bad value never bricks the daemon", satisfied by
+> falling back to the defaults — and the defaults have private mode off, LAN
+> visibility on and sync on, so one bad byte turned a user's privacy settings
+> back on and said nothing. v2 reads the record field by field, keeps every
+> field that decodes, and for one that does not takes the closed value rather
+> than the default: private mode on, sync and LAN visibility off. An unreadable
+> `excluded_app_bundle_ids` cannot be recovered, so it turns private mode on —
+> an empty list is the fail-open answer and means a password manager's copies
+> start being recorded. A field simply *absent* still takes its default, or
+> every downgrade would read as a privacy failure.
+>
+> What fell back is reported on `status` as `SettingsHealth` — field names only,
+> never a value — and the app announces it. Running on settings the user did not
+> choose while rendering them as if they had is the failure this closes.
 > Implemented in `crates/copypaste-ipc/src/config.rs`,
-> `crates/copypaste-daemon/src/settings.rs` and `server/config.rs`.
+> `crates/copypaste-daemon/src/settings/` and `server/config.rs`.
 
 | # | Method | Params | Success `data` | Errors | DB | Source |
 |---|---|---|---|---|---|---|
