@@ -52,7 +52,7 @@ impl CleanupWorker {
                 sweeper,
                 access,
                 alive: worker_alive,
-                stopped: false,
+                stop: Arc::clone(&worker_stop),
             };
             let mut cadence = SweepCadence::new(interval);
             let mut wait = cadence.after(&startup);
@@ -63,7 +63,6 @@ impl CleanupWorker {
                     .wait_timeout_while(stopped, wait, |stopped| !*stopped)
                     .unwrap_or_else(|held| held.into_inner());
                 if *stopped {
-                    owned.stopped = true;
                     break;
                 }
                 drop(stopped);
@@ -106,20 +105,32 @@ impl CleanupWorker {
                 .as_ref()
                 .is_some_and(|handle| !handle.is_finished())
     }
+
+    /// Asks the thread to stop and returns without waiting for it.
+    ///
+    /// Joining instead would deadlock: the caller holds the staging lock, and a
+    /// thread that is already dying takes that same lock for its final sweep.
+    /// Told before the lock is released, that thread also learns it has been
+    /// replaced, and leaves the staging area to the worker that replaced it.
+    pub(super) fn request_stop(&self) {
+        let (lock, wake) = &*self.stop;
+        *lock.lock().unwrap_or_else(|held| held.into_inner()) = true;
+        wake.notify_one();
+    }
 }
 
 /// The staged plaintext a running worker owns.
 ///
 /// A worker that stops without being asked is otherwise noticed only by the
 /// next paste-back, which may never come, so the thread that owned the bytes
-/// takes them on its way out. A paste-back racing this loses its staged copy,
-/// which the next paste re-derives from the encrypted row; decrypted bytes left
-/// with no owner are not recoverable that way.
+/// takes them on its way out. It gives them up instead when it has been asked
+/// to stop: either the staging area is going away, or a replacement worker owns
+/// them now and sweeping would delete plaintext that owner is still holding.
 struct Ownership {
     sweeper: Sweeper,
     access: Arc<Mutex<()>>,
     alive: Arc<AtomicBool>,
-    stopped: bool,
+    stop: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Ownership {
@@ -127,26 +138,42 @@ impl Ownership {
         let _access = self.access.lock().unwrap_or_else(|held| held.into_inner());
         self.sweeper.pass(SystemTime::now(), max_age)
     }
+
+    /// `None` once the staging area has been handed to somebody else.
+    ///
+    /// The question is asked under the staging lock, which is the lock a
+    /// replacing paste-back holds while it installs its worker and stages. That
+    /// is what orders the two: either this thread sweeps before any replacement
+    /// exists, or it finds the answer that replacement left and takes nothing.
+    fn final_sweep(&mut self) -> Option<SweepReport> {
+        let _access = self.access.lock().unwrap_or_else(|held| held.into_inner());
+        let (stop, _) = &*self.stop;
+        if *stop.lock().unwrap_or_else(|held| held.into_inner()) {
+            return None;
+        }
+        // Deadline zero: nothing is waiting on these bytes any more.
+        Some(self.sweeper.pass(SystemTime::now(), Duration::ZERO))
+    }
 }
 
 impl Drop for Ownership {
     fn drop(&mut self) {
         self.alive.store(false, Ordering::Relaxed);
-        if self.stopped {
-            return;
+        #[cfg(test)]
+        self.sweeper.wait_while_held();
+        for pass in 1..=FINAL_PASSES {
+            let Some(report) = self.final_sweep() else {
+                return;
+            };
+            if !report.truncated || pass == FINAL_PASSES {
+                warn!(
+                    passes = pass,
+                    unfinished = report.unfinished(),
+                    "the paste-file cleanup worker stopped without being asked and took the plaintext it owned"
+                );
+                return;
+            }
         }
-        // Deadline zero: nothing is waiting on these bytes any more.
-        let mut report = self.sweep(Duration::ZERO);
-        let mut passes = 1;
-        while report.truncated && passes < FINAL_PASSES {
-            report = self.sweep(Duration::ZERO);
-            passes += 1;
-        }
-        warn!(
-            passes,
-            unfinished = report.unfinished(),
-            "the paste-file cleanup worker stopped without being asked and took the plaintext it owned"
-        );
     }
 }
 
@@ -158,9 +185,7 @@ fn spawn(body: impl FnOnce() + Send + 'static) -> io::Result<JoinHandle<()>> {
 
 impl Drop for CleanupWorker {
     fn drop(&mut self) {
-        let (lock, wake) = &*self.stop;
-        *lock.lock().unwrap_or_else(|held| held.into_inner()) = true;
-        wake.notify_one();
+        self.request_stop();
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }

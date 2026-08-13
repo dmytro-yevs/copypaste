@@ -62,7 +62,7 @@ pub(super) struct Sweeper {
     budget: u32,
     cycle: Option<Cycle>,
     #[cfg(test)]
-    doom: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    fault: Option<std::sync::Arc<SweepFault>>,
 }
 
 impl Sweeper {
@@ -72,7 +72,7 @@ impl Sweeper {
             budget: SWEEP_BUDGET,
             cycle: None,
             #[cfg(test)]
-            doom: None,
+            fault: None,
         }
     }
 
@@ -84,14 +84,20 @@ impl Sweeper {
         }
     }
 
-    /// Kills the worker thread this sweeper is handed to, once. A pass that
-    /// panics is how a live owner of staged plaintext dies, and the death it
-    /// provokes sweeps on this same sweeper — a second panic there would land
-    /// in a `Drop` during an unwind and abort the process.
     #[cfg(test)]
-    pub(super) fn armed(mut self, doom: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
-        self.doom = Some(doom);
+    pub(super) fn armed(mut self, fault: std::sync::Arc<SweepFault>) -> Self {
+        self.fault = Some(fault);
         self
+    }
+
+    /// Holds the dying thread before it claims the staging area, which is the
+    /// only way a test can put a paste-back and a death in the interleaving
+    /// that has to be proven.
+    #[cfg(test)]
+    pub(super) fn wait_while_held(&self) {
+        if let Some(fault) = &self.fault {
+            fault.wait_while_held();
+        }
     }
 
     /// One pass, and what it left behind. Infallible by design: a sweeper that
@@ -99,11 +105,7 @@ impl Sweeper {
     /// cannot act on an error it is not also told the shape of.
     pub(super) fn pass(&mut self, now: SystemTime, max_age: Duration) -> SweepReport {
         #[cfg(test)]
-        if self
-            .doom
-            .as_ref()
-            .is_some_and(|doom| doom.swap(false, std::sync::atomic::Ordering::Relaxed))
-        {
+        if self.fault.as_ref().is_some_and(|fault| fault.take_panic()) {
             panic!("injected paste-file sweep panic");
         }
         let report = self.walk(now, max_age);
@@ -201,6 +203,52 @@ impl Sweeper {
         report.truncated = true;
         self.cycle = Some(cycle);
         report
+    }
+}
+
+/// Test-only control of the worker thread a sweeper belongs to: kill it on its
+/// next pass, and hold it at the start of its final sweep.
+///
+/// The panic trips once. The death it provokes sweeps on this same sweeper, and
+/// a second panic there would land in a `Drop` during an unwind and abort the
+/// process.
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct SweepFault {
+    panic_next_pass: std::sync::atomic::AtomicBool,
+    held: std::sync::Mutex<bool>,
+    released: std::sync::Condvar,
+}
+
+#[cfg(test)]
+impl SweepFault {
+    pub(super) fn panic_next_pass(&self) {
+        self.panic_next_pass
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(super) fn hold(&self) {
+        *self.held.lock().unwrap_or_else(|held| held.into_inner()) = true;
+    }
+
+    pub(super) fn release(&self) {
+        *self.held.lock().unwrap_or_else(|held| held.into_inner()) = false;
+        self.released.notify_all();
+    }
+
+    fn take_panic(&self) -> bool {
+        self.panic_next_pass
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn wait_while_held(&self) {
+        let mut held = self.held.lock().unwrap_or_else(|held| held.into_inner());
+        while *held {
+            held = self
+                .released
+                .wait(held)
+                .unwrap_or_else(|held| held.into_inner());
+        }
     }
 }
 

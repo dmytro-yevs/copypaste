@@ -53,7 +53,7 @@ pub(super) struct StagingArea {
     #[cfg(test)]
     worker_starts: std::sync::atomic::AtomicU32,
     #[cfg(test)]
-    worker_doom: Arc<std::sync::atomic::AtomicBool>,
+    worker_fault: Arc<sweep::SweepFault>,
 }
 
 impl StagingArea {
@@ -81,14 +81,15 @@ impl StagingArea {
             #[cfg(test)]
             worker_starts: std::sync::atomic::AtomicU32::new(0),
             #[cfg(test)]
-            worker_doom: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            worker_fault: Arc::new(sweep::SweepFault::default()),
         };
         if startup.unfinished() {
             // The plaintext this pass could not remove is already decrypted and
             // already past its deadline. Nothing but the worker will ever take
             // it, so failing here is better than handing back a staging area
-            // that only looks supervised.
-            area.install_worker(sweeper, startup)?;
+            // that only looks supervised. The slot was empty, so nothing is
+            // retired here.
+            let _ = area.install_worker(sweeper, startup)?;
         }
         Ok(area)
     }
@@ -105,8 +106,14 @@ impl StagingArea {
 
     pub(super) fn materialize(&self, bytes: &[u8], metadata: &FileMetadata) -> io::Result<PathBuf> {
         let filename = safe_filename(metadata)?;
+        // Declared before the lock, so the worker this paste-back replaces is
+        // joined only once the lock is released — including when `stage`
+        // unwinds. A dying worker takes that lock for its final sweep, so a
+        // join under it waits for a thread that is waiting for the joiner.
+        let retired;
         let _access = self.access.lock().unwrap_or_else(|held| held.into_inner());
-        self.ensure_cleanup()?;
+        retired = self.ensure_cleanup()?;
+        debug_assert!(!is_running(&retired), "a running worker was retired");
         self.stage(bytes, filename)
     }
 
@@ -114,13 +121,15 @@ impl StagingArea {
     /// and a worker that has died is not one. A descriptor-clone or
     /// thread-spawn failure here prevents staging so that decrypted bytes are
     /// never left with no timed cleanup owner.
-    fn ensure_cleanup(&self) -> io::Result<()> {
+    ///
+    /// Returns the worker that was replaced, for the caller to join.
+    fn ensure_cleanup(&self) -> io::Result<Option<CleanupWorker>> {
         if is_running(&self.worker()) {
-            return Ok(());
+            return Ok(None);
         }
         let sweeper = Sweeper::new(self.clone_root_fd()?);
         #[cfg(test)]
-        let sweeper = sweeper.armed(Arc::clone(&self.worker_doom));
+        let sweeper = sweeper.armed(Arc::clone(&self.worker_fault));
         self.install_worker(sweeper, SweepReport::default())
     }
 
@@ -139,10 +148,19 @@ impl StagingArea {
     /// Installs a worker unless a running one is already in the slot. A failure
     /// leaves whatever was there, so the caller stays refused rather than
     /// proceeding under a worker that does not exist.
-    fn install_worker(&self, sweeper: Sweeper, startup: SweepReport) -> io::Result<()> {
+    ///
+    /// The replaced worker is handed back rather than dropped here: joining it
+    /// under either lock deadlocks against its own final sweep. It is told to
+    /// stop while the staging lock is still held, which is what keeps that
+    /// sweep from taking the plaintext the replacement now owns.
+    fn install_worker(
+        &self,
+        sweeper: Sweeper,
+        startup: SweepReport,
+    ) -> io::Result<Option<CleanupWorker>> {
         let mut slot = self.worker();
         if is_running(&slot) {
-            return Ok(());
+            return Ok(None);
         }
         #[cfg(test)]
         if let Some(error) = cleanup_fault::injected_spawn_failure() {
@@ -155,13 +173,14 @@ impl StagingArea {
             self.interval,
             startup,
         )?;
-        // Assigning drops a worker whose thread has already finished, so the
-        // join in its `Drop` returns at once.
-        *slot = Some(worker);
+        let retired = slot.replace(worker);
+        if let Some(retired) = &retired {
+            retired.request_stop();
+        }
         #[cfg(test)]
         self.worker_starts
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(())
+        Ok(retired)
     }
 
     fn stage(&self, bytes: &[u8], filename: &str) -> io::Result<PathBuf> {
@@ -457,9 +476,32 @@ mod tests {
         /// Panics the *running* worker on its next pass, which is how the owner
         /// of plaintext already on disk dies.
         fn doom_the_running_worker(&self) {
-            self.worker_doom
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.worker_fault.panic_next_pass();
         }
+
+        /// Parks the dying thread after it stops reading as an owner and before
+        /// it claims the staging area, so a paste-back can be driven into the
+        /// window between the two.
+        fn hold_the_death_sweep(&self) {
+            self.worker_fault.hold();
+        }
+
+        fn release_the_death_sweep(&self) {
+            self.worker_fault.release();
+        }
+    }
+
+    /// Bounded so a lock-order regression fails the test instead of hanging the
+    /// suite on it.
+    fn wait_until(within: Duration, mut ready: impl FnMut() -> bool) -> bool {
+        let give_up = std::time::Instant::now() + within;
+        while !ready() {
+            if std::time::Instant::now() >= give_up {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
     }
 
     fn metadata(filename: impl Into<String>) -> FileMetadata {
@@ -835,6 +877,69 @@ mod tests {
         assert!(
             !path.parent().unwrap().exists(),
             "the emptied content directory outlived its owner"
+        );
+    }
+
+    /// B4: a paste-back that replaces a dying worker must not join it while it
+    /// holds the staging lock. The dying thread takes that same lock for its
+    /// final sweep, so the joiner waits for a thread that is waiting for the
+    /// joiner, and the paste-back never returns. The replacement also has to
+    /// take the plaintext over rather than have it swept out from under it.
+    #[test]
+    fn a_paste_back_that_replaces_a_dying_worker_returns_and_keeps_its_plaintext() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = Arc::new(
+            StagingArea::with_timing(
+                data_dir.path(),
+                Duration::from_secs(600),
+                Duration::from_millis(20),
+            )
+            .unwrap(),
+        );
+        let first = staging
+            .materialize(b"first", &metadata("first.txt"))
+            .unwrap();
+
+        staging.hold_the_death_sweep();
+        staging.doom_the_running_worker();
+        assert!(
+            wait_until(Duration::from_secs(10), || !staging.has_live_cleanup()),
+            "setup: the worker had to die and stop reading as an owner"
+        );
+
+        let racing = Arc::clone(&staging);
+        let (finished, returned) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = finished.send(racing.materialize(b"second", &metadata("second.txt")));
+        });
+        assert!(
+            wait_until(Duration::from_secs(10), || staging.worker_starts() == 2),
+            "the paste-back never installed a replacement: it is joining the dying worker under the staging lock"
+        );
+        staging.release_the_death_sweep();
+
+        let second = returned
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the paste-back that replaced a dying worker never returned")
+            .expect("the paste-back that replaced a dying worker failed");
+        assert!(
+            second.exists(),
+            "the dying worker swept its replacement's plaintext"
+        );
+        assert!(
+            first.exists(),
+            "the dying worker swept plaintext a live worker had taken over"
+        );
+        assert!(staging.has_live_cleanup());
+
+        // The replacement is a real owner, not just an occupant of the slot.
+        let expired = SystemTime::now() - Duration::from_secs(601);
+        set_modified(&first, expired);
+        set_modified(&second, expired);
+        wait_until_gone(&second, Duration::from_secs(10));
+        assert!(
+            !first.exists() && !second.exists(),
+            "the replacement never enforced the deadline"
         );
     }
 

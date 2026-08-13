@@ -989,7 +989,11 @@ keep both properties).
   A worker that stops without being asked accounts for the plaintext it owned
   before its thread ends, and stops reading as an owner at that moment: a death
   noticed only by the next paste-back is not noticed at all on a machine that
-  pastes a file back once.
+  pastes a file back once. It gives that plaintext up instead when a
+  replacement has taken the staging area over, asked under the same lock the
+  replacement holds while it installs and stages. A paste-back never waits for
+  a worker it replaced while holding that lock: the dying thread wants it too,
+  so the paste-back would wait for a thread waiting for the paste-back.
 
 ### 5.14 Resource & platform
 
