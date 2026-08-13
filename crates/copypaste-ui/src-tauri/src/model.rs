@@ -152,6 +152,20 @@ impl UiInstalledSourceApp {
 impl UiSourceAppIcon {
     #[cfg(any(target_os = "macos", target_os = "windows", test))]
     pub(crate) fn from_png(png: Vec<u8>, width: u32, height: u32) -> Self {
+        #[cfg(not(test))]
+        {
+            const MAX_EDGE: u32 = 512;
+            const MAX_BYTES: usize = 512 * 1024;
+            debug_assert!(
+                width > 0
+                    && height > 0
+                    && width <= MAX_EDGE
+                    && height <= MAX_EDGE
+                    && png.len() <= MAX_BYTES
+                    && png.starts_with(b"\x89PNG"),
+                "icon dimensions or size out of bounds"
+            );
+        }
         Self {
             png_base64: STANDARD.encode(png),
             width,
