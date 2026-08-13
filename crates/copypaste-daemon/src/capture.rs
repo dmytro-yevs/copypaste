@@ -329,7 +329,7 @@ mod tests {
     /// across two changes (the TTL bug), a credential store's password passes
     /// the sensitivity floor, reaches full-text search and is offered to sync.
     #[test]
-    fn shared_attribution_lets_a_credential_stores_copy_into_search() {
+    fn shared_attribution_lets_a_credential_stores_copy_into_search_and_sync() {
         let (state, _dir) = test_state("shared-attribution-vuln");
         let mut attribution = Attribution::default();
 
@@ -345,8 +345,9 @@ mod tests {
         );
 
         let now = copypaste_core::now_ms();
-        let _notes =
-            ingest_capture(&state, captured("thursday agenda notes", ordinary), now).unwrap();
+        let notes = ingest_capture(&state, captured("thursday agenda notes", ordinary), now)
+            .unwrap()
+            .into_item();
         let wrong = ingest_capture(
             &state,
             captured("correct horse battery staple", misattributed),
@@ -363,6 +364,74 @@ mod tests {
             !state.store.search("battery", 10).unwrap().is_empty(),
             "the password reached full-text search under the wrong identity"
         );
+        let advertised: Vec<String> = state
+            .store
+            .summaries_since(0, None, 100)
+            .expect("summaries")
+            .into_iter()
+            .map(|version| version.id)
+            .collect();
+        assert!(
+            advertised.contains(&wrong.id),
+            "the password must leak to sync under shared attribution"
+        );
+        assert!(
+            advertised.contains(&notes.id),
+            "the ordinary item must still be advertised"
+        );
+    }
+
+    /// DMY-158: the two writers resolve within 750 ms, which is the window
+    /// the old TTL cache would have collapsed. Measured to confirm the fix
+    /// does not regress even with per-change resolution.
+    #[test]
+    fn two_writer_attribution_is_measured_within_750ms() {
+        let (state, _dir) = test_state("timed-two-writer");
+        let mut attribution = Attribution::default();
+
+        let started = std::time::Instant::now();
+        let ordinary =
+            attribution.for_change(51, || SourceApp::from_image_path(r"C:\Windows\notepad.exe"));
+        let credential = attribution.for_change(52, || {
+            SourceApp::from_image_path(r"C:\Users\ann\AppData\Local\1Password\app\8\1Password.exe")
+        });
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 750,
+            "two resolutions took {}ms; must fit in the old 750ms window",
+            elapsed.as_millis()
+        );
+        let ordinary = ordinary.expect("first writer");
+        let credential = credential.expect("second writer");
+        assert_eq!(ordinary.id, "notepad.exe");
+        assert_eq!(credential.id, "1password.exe");
+        assert_ne!(ordinary.id, credential.id, "distinct writers");
+
+        let now = copypaste_core::now_ms();
+        let notes = ingest_capture(&state, captured("meeting agenda", Some(ordinary)), now)
+            .expect("ordinary")
+            .into_item();
+        let secret = ingest_capture(
+            &state,
+            captured("correct horse battery staple", Some(credential)),
+            now + 1,
+        )
+        .expect("credential")
+        .into_item();
+
+        assert!(secret.is_sensitive);
+        assert!(!notes.is_sensitive);
+        assert!(state.store.search("battery", 10).unwrap().is_empty());
+        let advertised: Vec<String> = state
+            .store
+            .summaries_since(0, None, 100)
+            .unwrap()
+            .into_iter()
+            .map(|v| v.id)
+            .collect();
+        assert!(!advertised.contains(&secret.id));
+        assert!(advertised.contains(&notes.id));
     }
 
     #[test]
