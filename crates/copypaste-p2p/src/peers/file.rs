@@ -40,6 +40,11 @@ pub(super) struct State {
     /// is the audit trail, and it is what stops a revoked pairing being
     /// re-added by a code someone still has.
     pub(super) revoked: BTreeMap<String, i64>,
+    /// How many times each pairing's slot has been written in this process.
+    /// In memory only: it exists so a pairing ceremony can tell its own
+    /// tentative write from somebody else's (see [`super::tentative`]), and
+    /// across a restart there is no ceremony left to tell apart.
+    pub(super) generations: HashMap<String, u64>,
 }
 
 /// On-disk envelope.
@@ -71,6 +76,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
         peers,
         pending,
         revoked: file.revoked,
+        generations: HashMap::new(),
     })
 }
 
