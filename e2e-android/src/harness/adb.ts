@@ -67,6 +67,12 @@ export async function appPid(): Promise<number | undefined> {
   return Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
+/** `-t` bounds what a long-lived emulator hands back; the harness only reads
+ *  this to explain a failure it has already decided on. */
+export async function logcatDump(lines = 500): Promise<string> {
+  return adb("logcat", "-d", "-t", String(lines));
+}
+
 export async function isDebuggable(): Promise<boolean> {
   const dump = await shell("dumpsys", "package", PACKAGE);
   return /flags=\[[^\]]*\bDEBUGGABLE\b/.test(dump);

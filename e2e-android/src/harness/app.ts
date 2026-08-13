@@ -1,13 +1,29 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
-import { sleep } from "./adb.js";
+import { appPid, logcatDump, sleep } from "./adb.js";
+import { APP_ORIGIN, isAppTarget, nextAttachStep, webviewComplaints } from "./attach.js";
 import { DEFAULT_PORT, openDevtools, type DevtoolsEndpoint } from "./devtools.js";
-import { rememberAttachedApp } from "./evidence.js";
+import { rememberAttachedApp, writeAttachFailure } from "./evidence.js";
 
 export type { Page } from "puppeteer-core";
 
-/** Tauri serves the frontend from its own protocol; nothing else in the app has a page target. */
-const APP_ORIGIN = "tauri.localhost";
+/**
+ * One budget for resolving the socket and for the page target behind it.
+ *
+ * A cold start on an emulator is minutes, not seconds: run 31671766432's API 33
+ * and 34 legs published a WebView that answered `/json/version` with no page
+ * target yet, and the storage leg found the same app navigable eight seconds
+ * after the harness had given up on it. The bound stays — an app that never
+ * paints must still fail — it is just no longer shorter than a start.
+ */
+const ATTACH_TIMEOUT_MS = Number(process.env.COPYPASTE_ATTACH_TIMEOUT_MS ?? 150_000);
+
+/**
+ * A warm app that lost its WebView comes back in seconds, and the startup
+ * budget would outlive the shortest hook timeout in `tests/` — which replaces
+ * this harness's reason with vitest's "hook timed out".
+ */
+const REATTACH_TIMEOUT_MS = 20_000;
 
 /**
  * Android may destroy and recreate the activity — a configuration change, a
@@ -18,30 +34,65 @@ const APP_ORIGIN = "tauri.localhost";
  */
 const GONE = /detached Frame|Target closed|Session closed|Execution context was destroyed|Connection closed/i;
 
-async function connect(port: number): Promise<{
+interface Attached {
   browser: Browser;
   page: Page;
   endpoint: DevtoolsEndpoint;
-}> {
-  const endpoint = await openDevtools(port);
-  const browser = await puppeteer.connect({
-    browserURL: endpoint.browserUrl,
-    defaultViewport: null,
-  });
+}
 
-  const deadline = Date.now() + 30_000;
-  let seen: string[] = [];
-  while (Date.now() < deadline) {
-    const pages = await browser.pages();
-    seen = pages.map((page) => page.url());
-    const page = pages.find((candidate) => candidate.url().includes(APP_ORIGIN));
+async function open(port: number, msLeft: number): Promise<{ browser: Browser; endpoint: DevtoolsEndpoint }> {
+  const endpoint = await openDevtools(port, msLeft);
+  const browser = await puppeteer.connect({ browserURL: endpoint.browserUrl, defaultViewport: null });
+  return { browser, endpoint };
+}
+
+async function resolveAppPage(port: number, deadline: number): Promise<Attached> {
+  const msLeft = () => Math.max(0, deadline - Date.now());
+  let { browser, endpoint } = await open(port, msLeft());
+
+  for (;;) {
+    const pages = await browser.pages().then(
+      (found) => found,
+      () => undefined,
+    );
+    const page = pages?.find((candidate) => isAppTarget(candidate.url()));
     if (page) return { browser, page, endpoint };
-    await sleep(500);
+
+    const step = nextAttachStep({
+      targets: pages?.map((candidate) => candidate.url()),
+      pid: await appPid(),
+      endpointPid: endpoint.pid,
+      msLeft: msLeft(),
+    });
+    if (step.do === "wait") {
+      await sleep(500);
+      continue;
+    }
+    await browser.disconnect().catch(() => undefined);
+    if (step.do === "give-up") throw new Error(step.why);
+    ({ browser, endpoint } = await open(port, msLeft()));
   }
-  await browser.disconnect();
-  throw new Error(
-    `the WebView exposes no ${APP_ORIGIN} page target; it has ${seen.length ? seen.join(", ") : "none at all"}`,
+}
+
+/** Best effort by contract: this runs while attachment has already failed, and
+ *  an error raised here would replace the reason with this function's. */
+async function explained(error: unknown, waitedMs: number): Promise<Error> {
+  const reason = error instanceof Error ? error.message : String(error);
+  const waited = `${Math.round(waitedMs / 1000)}s`;
+  const complaints = webviewComplaints(await logcatDump().catch(() => ""));
+  writeAttachFailure({ waited, origin: APP_ORIGIN, reason, complaints });
+  return new Error(
+    `no ${APP_ORIGIN} page target after ${waited}: ${reason}` +
+      (complaints.length ? `. The device said: ${complaints.join(" | ")}` : ""),
   );
+}
+
+async function connect(port: number, timeoutMs = ATTACH_TIMEOUT_MS): Promise<Attached> {
+  try {
+    return await resolveAppPage(port, Date.now() + timeoutMs);
+  } catch (error) {
+    throw await explained(error, timeoutMs);
+  }
 }
 
 export class AndroidApp {
@@ -88,7 +139,7 @@ export class AndroidApp {
 
   async #reattach(): Promise<void> {
     await this.#browser.disconnect().catch(() => undefined);
-    const parts = await connect(this.#endpoint.port);
+    const parts = await connect(this.#endpoint.port, REATTACH_TIMEOUT_MS);
     this.#browser = parts.browser;
     this.#page = parts.page;
     this.#endpoint = parts.endpoint;

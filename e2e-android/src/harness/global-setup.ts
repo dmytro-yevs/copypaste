@@ -58,6 +58,22 @@ export default async function setup(project: TestProject): Promise<() => Promise
   const ordinary = ordinaryFor(nonce);
 
   await launchMain();
+  // The teardown below only runs for a setup that returned it, and `forward`
+  // binds the local port whether or not the remote name resolves — so a setup
+  // that throws hands the next leg a forward to a pid that is gone.
+  try {
+    await seed(secret, ordinary);
+  } catch (error) {
+    await closeDevtools();
+    throw error;
+  }
+
+  return async () => {
+    await closeDevtools();
+  };
+}
+
+async function seed(secret: string, ordinary: string): Promise<void> {
   const app = await attachToApp();
   try {
     // The activity is `singleTask` and comes back exactly where it was left,
@@ -100,8 +116,4 @@ export default async function setup(project: TestProject): Promise<() => Promise
   } finally {
     await app.detach();
   }
-
-  return async () => {
-    await closeDevtools();
-  };
 }

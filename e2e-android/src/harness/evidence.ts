@@ -54,6 +54,18 @@ async function shellState(app: AndroidApp): Promise<unknown> {
 }
 
 /**
+ * The UI leg publishes nothing when it never attaches, so run 31671766432's
+ * API 29 legs were diagnosable only from a different leg's logcat.
+ */
+export function writeAttachFailure(record: unknown): void {
+  try {
+    writeRedacted(path.join(OUT, "attach-failure.json"), record);
+  } catch {
+    /* the attachment failure is the one worth reporting */
+  }
+}
+
+/**
  * Best effort by contract: this runs while a test is already failing, and an
  * error raised here would replace the assertion's message with this file's.
  */
