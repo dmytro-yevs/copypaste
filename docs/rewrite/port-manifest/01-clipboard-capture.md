@@ -667,6 +667,7 @@ Three separate hard-won rules, all on the same subsystem:
 | Paste-file staging max age | **10 min** | Files are not deleted immediately after paste because the receiving app may read the URL asynchronously. `ipc/pasteboard.rs:311` |
 | Paste-file sweep budget | **4096 entries** | The sweep holds the staging lock, so an unbounded walk parks the interactive paste-back path behind whatever is in the directory. A sweep that hits the bound reports itself unfinished and is resumed, never skipped. v2 `clipboard/file_materialize/sweep.rs` |
 | Paste-file sweep retry floor | **30 s** | A sweep that could not delete expired plaintext must not then wait the ordinary interval, which is the whole 10 min — a second full lifetime of exposure. The ladder doubles back up to 10 min, so a file nothing can ever delete costs a short burst of wake-ups rather than a permanent 30 s timer. v2 `clipboard/file_materialize/sweep.rs` |
+| Paste-file sweep failure kinds | **6 + overflow** | Per-`io::ErrorKind` counts, bounded so a directory of a million unreadable files cannot turn the report into a million-entry map. One kind alone hid every other cause behind whichever failed first. v2 `clipboard/file_materialize/report.rs` |
 | Self-write sentinel "none" | **-1** | Must be outside the valid `changeCount` domain (non-negative). `monitor.rs:104` |
 | Change-count cursor initial | **-1** | Same reason; also suppresses the first-poll burst signal. `monitor.rs:100`, `:433` |
 | Expected self-write delta | v1: **+2**; measured on macOS 14.8.7: **+1** | v1's value, from `handlers_items_paste.rs:212`, is contradicted by the first run that ever measured it (§3.3). Wrong in either direction it breaks self-write suppression *and* eats a later genuine copy |
@@ -941,9 +942,11 @@ keep both properties).
   allows a previously-rejected image.
 - **T-85 — an expired paste-file that cannot be deleted is reported, not
   discarded.** Given a staged decrypted payload past the max age that the sweep
-  cannot unlink, then the sweep counts it as retained, names only the error kind
-  — no path, no filename, no content id — continues to the remaining entries,
-  and schedules its next pass at the retry floor rather than the full interval.
+  cannot unlink, then the sweep counts it as retained, continues to the
+  remaining entries, and schedules its next pass at the retry floor rather than
+  the full interval. The emitted warning carries counts and a per-error-kind
+  tally and nothing else — asserted against a captured log, not read off the
+  source: no path, no filename, no content id, no payload byte.
 - **T-86 — nothing escapes the max age through its metadata.** A staging
   directory whose name is not a content id, and a payload whose mtime is stamped
   further ahead than the max age, are both swept. Neither may buy an unbounded
