@@ -74,6 +74,12 @@ Two further properties are asserted rather than assumed:
   change, memory pressure, a relaunch. CDP then answers every call with
   "detached Frame", so `AndroidApp.withPage` reattaches instead of failing the
   assertion that happened to be in flight.
+- The socket answers before the page target exists, and a cold start on an
+  emulator takes most of a minute. `src/harness/attach.ts` spends one budget
+  (`COPYPASTE_ATTACH_TIMEOUT_MS`) on both, re-resolves when the pid changes
+  under it, and publishes `attach-failure.json` naming the process state and
+  what the device logged. The bound is still a bound: an app that never paints
+  fails, and says so with the WebView's own complaint.
 
 ## Why this cannot reach a release build
 

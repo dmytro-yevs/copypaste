@@ -8,7 +8,7 @@ repo="$(cd "$here/../.." && pwd)"
 cd "$repo" || exit 1
 
 "$here/android-smoke.sh"; smoke=$?
-npm --prefix e2e-android test; ui=$?
+npm --prefix e2e-android run test:harness && npm --prefix e2e-android test; ui=$?
 SMOKE_OUT=artifacts/android-storage TRANSFER_REQUIRE_RUN_AS=1 \
     "$here/android-storage-transfer.sh"; storage=$?
 APK_UNCONFIGURED="$APK" CLOUD_OUT=artifacts/android-cloud-unconfigured \
