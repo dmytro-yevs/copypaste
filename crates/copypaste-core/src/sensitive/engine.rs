@@ -11,7 +11,7 @@ use super::redact::redact_findings;
 use super::rules::{GLOBAL_ALLOWLISTS, RULES};
 use super::spec::{AllowlistCondition, AllowlistSpec, AllowlistTarget, RuleSpec, Validator};
 use super::validators::{
-    iban_valid, luhn_valid, phone_is_formatted, ssn_structure_plausible, value_is_strong,
+    card_number_valid, iban_valid, phone_is_formatted, ssn_structure_plausible, value_is_strong,
 };
 
 /// Regex compilation failures. No variant carries a path or any input text
@@ -169,7 +169,7 @@ impl Detector {
                 .cmp(&b.start)
                 .then_with(|| b.end.cmp(&a.end))
                 .then_with(|| b.confidence.total_cmp(&a.confidence))
-                .then_with(|| a.rule.cmp(&b.rule))
+                .then_with(|| a.rule.cmp(b.rule))
         });
         findings
     }
@@ -214,7 +214,7 @@ pub(super) fn compare_rank(a: &SpannedFinding, b: &SpannedFinding) -> std::cmp::
     a.confidence
         .total_cmp(&b.confidence)
         .then_with(|| (a.end - a.start).cmp(&(b.end - b.start)))
-        .then_with(|| b.rule.cmp(&a.rule))
+        .then_with(|| b.rule.cmp(a.rule))
         .then_with(|| b.start.cmp(&a.start))
 }
 
@@ -241,13 +241,20 @@ impl Rule {
         let mut spans = Vec::new();
         for caps in self.regex.captures_iter(text) {
             let Some(whole) = caps.get(0) else { continue };
-            let secret = secret(&caps, self.spec.secret_group, whole.as_str());
+            // A rule that names a secret group and does not get one cannot be
+            // judged: its entropy threshold and its stopwords were both written
+            // against the value, and scoring them against the whole match reads
+            // the keyword and the context anchor as if they were the credential.
+            // That direction ends in a deletion, so the candidate is dropped.
+            let Some(secret) = secret(&caps, self.spec.secret_group, whole.as_str()) else {
+                continue;
+            };
             let ok = match self.spec.validator {
                 Validator::None => true,
                 Validator::ValueStrength => {
                     caps.get(1).is_some_and(|v| value_is_strong(v.as_str()))
                 }
-                Validator::Luhn => luhn_valid(whole.as_str()),
+                Validator::CardNumber => card_number_valid(whole.as_str()),
                 Validator::Iban => iban_valid(whole.as_str()),
                 Validator::SsnStructure => ssn_structure_plausible(whole.as_str()),
                 Validator::PhoneShape => phone_is_formatted(whole.as_str()),
@@ -322,11 +329,11 @@ fn compile_allowlists(
         .collect()
 }
 
-fn secret<'a>(caps: &'a Captures<'a>, group: usize, whole: &'a str) -> &'a str {
+fn secret<'a>(caps: &'a Captures<'a>, group: usize, whole: &'a str) -> Option<&'a str> {
     if group == 0 {
-        return whole;
+        return Some(whole);
     }
-    caps.get(group).map_or(whole, |matched| matched.as_str())
+    caps.get(group).map(|matched| matched.as_str())
 }
 
 fn shannon_entropy(value: &str) -> f64 {
@@ -362,17 +369,27 @@ fn is_allowed(allowlists: &[CompiledAllowlist], secret: &str, matched: &str, lin
         };
         let regex_match = (!allowlist.regexes.is_empty())
             .then(|| allowlist.regexes.iter().any(|regex| regex.is_match(target)));
-        let lowered_secret = secret.to_lowercase();
         let stopword_match = (!allowlist.stopwords.is_empty()).then(|| {
+            let lowered_secret = secret.to_lowercase();
             allowlist
                 .stopwords
                 .iter()
                 .any(|word| lowered_secret.contains(word))
         });
-        let mut checks = [regex_match, stopword_match].into_iter().flatten();
         match allowlist.condition {
-            AllowlistCondition::Any => checks.any(|matched| matched),
-            AllowlistCondition::All => checks.all(|matched| matched),
+            AllowlistCondition::Any => {
+                regex_match.unwrap_or(false) || stopword_match.unwrap_or(false)
+            }
+            // `all` over nothing is true, and an allowlist that suppresses
+            // everything it is attached to is the one direction this module may
+            // never fail in: the rule stops firing and the item is neither
+            // flagged nor masked. An allowlist carrying neither a regex nor a
+            // stopword allows nothing.
+            AllowlistCondition::All => {
+                (regex_match.is_some() || stopword_match.is_some())
+                    && regex_match.unwrap_or(true)
+                    && stopword_match.unwrap_or(true)
+            }
         }
     })
 }
@@ -445,6 +462,11 @@ pub(super) mod test_support {
         "The api_key returns 401, please investigate",
         "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
         "fn main() { println!(\"Hello, world!\"); }",
+        // the keyword spellings the delimiter-tolerant rule 23 added
+        "rotate the api-key before the next release",
+        "the client secret is stored in the password manager",
+        "run with --api-key=<token> to authenticate",
+        "see docs for db-password rotation steps",
     ];
 }
 
@@ -893,6 +915,50 @@ mod tests {
         }
     }
 
+    /// A rule that declares a secret group and does not get one is unjudgeable:
+    /// its entropy threshold and its stopwords were written against the value,
+    /// and the whole match carries the keyword and the context anchor as well.
+    /// Scoring those as if they were the credential is how a placeholder clears
+    /// an entropy floor, so the fallback is `None` and the candidate is dropped.
+    #[test]
+    fn an_absent_secret_group_never_falls_back_to_the_whole_match() {
+        let regex = Regex::new("key=(?:(alpha)|beta)").unwrap();
+
+        let taken = regex.captures("key=alpha").unwrap();
+        assert_eq!(secret(&taken, 1, "key=alpha"), Some("alpha"));
+
+        let skipped = regex.captures("key=beta").unwrap();
+        assert_eq!(secret(&skipped, 1, "key=beta"), None);
+        assert_eq!(secret(&skipped, 0, "key=beta"), Some("key=beta"));
+    }
+
+    /// `all` over nothing is true, so an `All` allowlist carrying neither a
+    /// regex nor a stopword would suppress every match of the rule it is
+    /// attached to — the rule would stop flagging and stop masking with nothing
+    /// to say so. Allowlists fail closed.
+    #[test]
+    fn an_allowlist_with_nothing_to_check_allows_nothing() {
+        for condition in [AllowlistCondition::Any, AllowlistCondition::All] {
+            let empty = [CompiledAllowlist {
+                condition,
+                target: AllowlistTarget::Secret,
+                regexes: Vec::new(),
+                stopwords: Vec::new(),
+            }];
+            assert!(!is_allowed(&empty, "s3cret", "s3cret", "s3cret"));
+        }
+
+        let both = [CompiledAllowlist {
+            condition: AllowlistCondition::All,
+            target: AllowlistTarget::Secret,
+            regexes: vec![Regex::new("^ex").unwrap()],
+            stopwords: vec!["ample".to_string()],
+        }];
+        assert!(is_allowed(&both, "example", "example", "example"));
+        assert!(!is_allowed(&both, "exabcdef", "exabcdef", "exabcdef"));
+        assert!(!is_allowed(&both, "sample", "sample", "sample"));
+    }
+
     #[test]
     fn word_anchors_reject_glued_tokens() {
         let det = detector();
@@ -975,7 +1041,7 @@ mod tests {
         assert_eq!(
             findings
                 .iter()
-                .map(|finding| finding.rule.as_str())
+                .map(|finding| finding.rule)
                 .collect::<Vec<_>>(),
             ["email", "aws_access_key", "email"]
         );
