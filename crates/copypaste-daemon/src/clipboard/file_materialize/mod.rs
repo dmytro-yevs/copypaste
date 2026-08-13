@@ -16,13 +16,15 @@ use rustix::fs::{AtFlags, Mode, OFlags};
 use rustix::io::Errno;
 use tracing::warn;
 
-use sweep::{sweep, CleanupWorker};
+use report::SweepReport;
+use sweep::{CleanupWorker, Sweeper};
 
 const DIRECTORY_MODE: Mode = Mode::RWXU;
 const FILE_MODE: Mode = Mode::RUSR.union(Mode::WUSR);
 const MAX_AGE: Duration = Duration::from_secs(10 * 60);
 /// Matched to `MAX_AGE`: the sweep enforces a deadline nothing waits on, so
 /// sampling it more often than it can expire is a resident timer for nothing.
+/// A sweep that leaves work behind is retried far sooner — see `sweep::RETRY_MIN`.
 const CLEANUP_INTERVAL: Duration = MAX_AGE;
 
 /// Whether a staging attempt left decrypted bytes on disk. It is plaintext, not
@@ -37,7 +39,9 @@ enum Plaintext {
 pub(super) struct StagingArea {
     root: PathBuf,
     /// Opened once. Re-`open`ing and re-`fchmod`ing per paste-back put six
-    /// syscalls on the interactive path to reassert a mode nothing changes.
+    /// syscalls on the interactive path to reassert a mode nothing changes, and
+    /// it is the sweeper's only handle on the directory: a pathname can be
+    /// renamed out from under it, this descriptor cannot.
     root_fd: std::os::fd::OwnedFd,
     access: Arc<Mutex<()>>,
     /// Started on the first `materialize` that put plaintext on disk, or at
@@ -58,6 +62,13 @@ impl StagingArea {
     fn with_timing(data_dir: &Path, max_age: Duration, interval: Duration) -> io::Result<Self> {
         let root = std::path::absolute(data_dir)?.join("paste-files");
         let root_fd = open_or_create_root(&root)?;
+        // Whatever the previous run left is already decrypted and already past
+        // its deadline. If this pass could not finish the job the sweeper has
+        // to start now — on a machine that never pastes a file back, nothing
+        // else ever will — and it carries this sweeper, so it resumes where the
+        // pass stopped rather than walking the same prefix again.
+        let mut sweeper = Sweeper::new(root_fd.try_clone()?);
+        let startup = sweeper.pass(SystemTime::now(), max_age);
         let area = Self {
             root,
             root_fd,
@@ -66,12 +77,8 @@ impl StagingArea {
             max_age,
             interval,
         };
-        // Whatever the previous run left is already decrypted and already past
-        // its deadline. If this pass could not finish the job the sweeper has to
-        // start now: on a machine that never pastes a file back, nothing else
-        // ever will.
-        if sweep(&area.root, SystemTime::now(), max_age).unfinished() {
-            area.start_cleanup();
+        if startup.unfinished() {
+            area.start_cleanup_with(sweeper);
         }
         Ok(area)
     }
@@ -79,6 +86,11 @@ impl StagingArea {
     #[cfg(test)]
     fn root(&self) -> &Path {
         &self.root
+    }
+
+    #[cfg(test)]
+    fn sweep_now(&self, now: SystemTime, max_age: Duration) -> SweepReport {
+        Sweeper::new(self.root_fd.try_clone().unwrap()).pass(now, max_age)
     }
 
     pub(super) fn materialize(&self, bytes: &[u8], metadata: &FileMetadata) -> io::Result<PathBuf> {
@@ -98,8 +110,21 @@ impl StagingArea {
         if self.cleanup.get().is_some() {
             return;
         }
+        match self.root_fd.try_clone() {
+            Ok(root_fd) => self.start_cleanup_with(Sweeper::new(root_fd)),
+            Err(error) => warn!(
+                error_kind = ?error.kind(),
+                "could not start the paste-file staging sweeper"
+            ),
+        }
+    }
+
+    fn start_cleanup_with(&self, sweeper: Sweeper) {
+        if self.cleanup.get().is_some() {
+            return;
+        }
         match CleanupWorker::start(
-            self.root.clone(),
+            sweeper,
             Arc::clone(&self.access),
             self.max_age,
             self.interval,
@@ -185,8 +210,8 @@ impl StagingArea {
 }
 
 /// Removing the temporary is the only thing that unmakes the decrypted bytes
-/// the caller just wrote. A silent failure here was how a partial or complete
-/// plaintext payload could outlive a staging error unreported.
+/// this function's caller just wrote. A silent failure here was how a partial
+/// or complete plaintext payload could outlive a staging error unreported.
 fn rollback_temporary(content_fd: &std::os::fd::OwnedFd, name: &str) -> io::Result<()> {
     let removed = match injected_failure() {
         Some(injected) => Err(injected),
@@ -536,7 +561,7 @@ mod tests {
         set_modified(&file, now - Duration::from_secs(61));
 
         let reused = staging.materialize(b"same", &metadata("same.txt")).unwrap();
-        let report = sweep(&staging.root, now, Duration::from_secs(60));
+        let report = staging.sweep_now(now, Duration::from_secs(60));
 
         assert_eq!(reused, file);
         assert!(reused.exists());
