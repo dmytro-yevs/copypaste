@@ -42,6 +42,12 @@ gethostname = "1"
 base64.workspace = true
 url.workspace = true
 tempfile.workspace = true
+# Windows path parsing on every host: an exclusion entry and a process image
+# path are Windows paths whatever the machine is, and `std::path` would call an
+# entire `C:\…` string one file name off Windows — so the tests would pass while
+# the shipped behaviour did the opposite. One package, no transitive
+# dependencies. See ADR-0024.
+typed-path = "0.12"
 
 # flock(2) around the socket-bind critical section (CopyPaste-ah1m), and the
 # `*at` syscalls the file-drop staging directory is built from. A maintained
