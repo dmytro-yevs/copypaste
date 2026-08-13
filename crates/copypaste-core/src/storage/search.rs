@@ -29,6 +29,8 @@ pub struct IndexedText {
     /// which only ever remove rows already passed.
     pub rowid: i64,
     pub id: String,
+    /// Lossily decoded, because a row that will not decode is the one row that
+    /// must not stop the pass. See [`indexed_texts_in`].
     pub text: String,
 }
 
@@ -57,7 +59,8 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// A page of the index in `rowid` order, after `after_rowid` exclusive.
+    /// A page of the index in `rowid` order, after `after_rowid` exclusive,
+    /// bounded by both `max_rows` and `max_bytes`.
     ///
     /// Paged rather than collected: the index holds every searchable clipboard
     /// item's plaintext, and a rescan that materialised all of it at once would
@@ -65,10 +68,11 @@ impl Store {
     pub fn indexed_texts(
         &self,
         after_rowid: i64,
-        limit: u32,
+        max_rows: u32,
+        max_bytes: usize,
     ) -> Result<Vec<IndexedText>, StoreError> {
         let conn = self.conn()?;
-        Ok(indexed_texts_in(&conn, after_rowid, limit)?)
+        Ok(indexed_texts_in(&conn, after_rowid, max_rows, max_bytes)?)
     }
 
     /// Removes every index row without a live, non-sensitive text item,
@@ -103,10 +107,29 @@ impl Store {
     }
 }
 
+/// Two bounds, because a row cap alone is not one. The item cap is 4 MiB, so
+/// `max_rows` of 512 permits a 2 GiB page; the byte budget is what makes peak
+/// memory a number rather than a function of what the user copied.
+///
+/// The budget is applied while streaming rather than as a SQL running sum —
+/// `retention`'s `BYTE_VICTIMS_SQL` shape does not transfer, because there is no
+/// indexed length on an FTS5 content column and summing one would read every
+/// row's text to decide not to read it. The row that would cross the budget ends
+/// the page instead of joining it, unless the page is empty: a single row larger
+/// than the whole budget must still make progress or the cursor never advances.
+///
+/// **The text is decoded lossily.** `content_text` is written as UTF-8 by every
+/// path in this crate, but the column is `TEXT` in a file the process does not
+/// exclusively own, and typing it as `String` made one undecodable row abort the
+/// read — taking every *later* page with it, so a genuine secret behind it stayed
+/// indexed indefinitely. Replacement characters can only ever make the detector
+/// see more, never split an ASCII credential, and the consequence of a match here
+/// is an index row removed rather than an item deleted (see [`crate::sensitive`]).
 pub(crate) fn indexed_texts_in(
     conn: &Connection,
     after_rowid: i64,
-    limit: u32,
+    max_rows: u32,
+    max_bytes: usize,
 ) -> rusqlite::Result<Vec<IndexedText>> {
     let mut stmt = conn.prepare_cached(
         "SELECT fts.rowid, fts.id, fts.content_text FROM clipboard_fts fts \
@@ -115,14 +138,28 @@ pub(crate) fn indexed_texts_in(
             AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
           ORDER BY fts.rowid LIMIT ?2",
     )?;
-    let rows = stmt.query_map(params![after_rowid, i64::from(limit)], |row| {
-        Ok(IndexedText {
+    let mut rows = stmt.query(params![after_rowid, i64::from(max_rows)])?;
+    let mut page: Vec<IndexedText> = Vec::new();
+    let mut bytes = 0usize;
+    while let Some(row) = rows.next()? {
+        // `get::<String>` rejects both of these; `get::<Vec<u8>>` rejects TEXT.
+        // Anything else stored in the column carries no text a rule could match,
+        // so there is nothing to judge and the row keeps its index entry.
+        let raw = match row.get_ref(2)? {
+            rusqlite::types::ValueRef::Text(raw) | rusqlite::types::ValueRef::Blob(raw) => raw,
+            _ => b"",
+        };
+        if !page.is_empty() && bytes.saturating_add(raw.len()) > max_bytes {
+            break;
+        }
+        bytes = bytes.saturating_add(raw.len());
+        page.push(IndexedText {
             rowid: row.get(0)?,
             id: row.get(1)?,
-            text: row.get(2)?,
-        })
-    })?;
-    rows.collect()
+            text: String::from_utf8_lossy(raw).into_owned(),
+        });
+    }
+    Ok(page)
 }
 
 pub(crate) fn purge_index_of_unsearchable_in(conn: &Connection) -> rusqlite::Result<u64> {
@@ -358,7 +395,7 @@ mod tests {
         plant_fts_row(&s, &image.id, "private image caption");
 
         assert!(s.search("caption", 10).unwrap().is_empty());
-        assert!(s.indexed_texts(0, 10).unwrap().is_empty());
+        assert!(s.indexed_texts(0, 10, 4096).unwrap().is_empty());
         assert_eq!(s.purge_index_of_unsearchable().unwrap(), 1);
         assert_eq!(fts_row_count(&s, &image.id), 0);
     }
