@@ -110,3 +110,27 @@ describe("a startup that never reaches the first render", () => {
     expect(notice().textContent).toContain("screens did not load");
   });
 });
+
+/**
+ * The render boundary: a component that throws during React 19's asynchronous
+ * first render must still reach the application-owned notice, not a blank root.
+ */
+describe("a component that throws during the first render", () => {
+  test("shows the render stage and redacts the thrown error", async () => {
+    vi.resetModules();
+    vi.doMock("@/App", () => ({
+      default: function BrokenApp(): never {
+        throw new Error("render exploded: /Users/someone/CopyPaste/src/App.tsx");
+      },
+    }));
+    await import("@/main");
+    await vi.waitFor(() => notice());
+
+    expect(notice().dataset.startupFailure).toBe("render");
+    expect(notice().textContent).toContain("could not draw its first screen");
+    expect(notice().textContent).not.toContain("/");
+    expect(notice().getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement).toBe(notice());
+    expect(console.error).toHaveBeenCalledWith("[copypaste] startup failed: render");
+  });
+});
