@@ -20,14 +20,17 @@ struct ConfirmationCopy {
     details: String,
 }
 
-pub(super) fn prompt(progress: &PairingProgressData) -> Option<PairingDecision> {
+pub(super) fn prompt(
+    progress: &PairingProgressData,
+    affinity: common::Affinity,
+) -> Option<PairingDecision> {
     let copy = copy(progress)?;
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
         .name("copypaste-pairing-confirm".into())
         .spawn(move || {
             let decision = common::lock_ui()
-                .and_then(|_guard| run(copy).ok())
+                .and_then(|_guard| run(copy, affinity).ok())
                 .unwrap_or(PairingDecision::Cancel);
             let _ = sender.send(decision);
         })
@@ -35,7 +38,7 @@ pub(super) fn prompt(progress: &PairingProgressData) -> Option<PairingDecision> 
     receiver.recv().ok()
 }
 
-fn run(copy: ConfirmationCopy) -> winsafe::AnyResult<PairingDecision> {
+fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult<PairingDecision> {
     let wnd = common::window("Confirm device pairing", (620, 430));
     let _heading = common::label(&wnd, &copy.heading, (24, 18), (560, 36));
     let instructions = common::label(
@@ -81,7 +84,7 @@ fn run(copy: ConfirmationCopy) -> winsafe::AnyResult<PairingDecision> {
         let sas = sas.clone();
         let details = details.clone();
         move |_| {
-            if !common::protect_from_capture(wnd.hwnd()) {
+            if !common::protect_from_capture(wnd.hwnd(), affinity) {
                 sas.hwnd().SetWindowText("")?;
                 details.hwnd().SetWindowText("")?;
                 instructions

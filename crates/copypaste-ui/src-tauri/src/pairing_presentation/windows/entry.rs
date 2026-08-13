@@ -11,19 +11,22 @@ const MAX_PAYLOAD_CHARS: u32 = 384;
 
 pub(super) type PayloadDecoder = fn(Zeroizing<String>) -> Option<ScannedPairing>;
 
-pub(super) fn prompt(decode: PayloadDecoder) -> Option<ScannedPairing> {
+pub(super) fn prompt(decode: PayloadDecoder, affinity: common::Affinity) -> Option<ScannedPairing> {
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
         .name("copypaste-pairing-entry".into())
         .spawn(move || {
-            let result = common::lock_ui().and_then(|_guard| run(decode).ok().flatten());
+            let result = common::lock_ui().and_then(|_guard| run(decode, affinity).ok().flatten());
             let _ = sender.send(result);
         })
         .ok()?;
     receiver.recv().ok().flatten()
 }
 
-fn run(decode: PayloadDecoder) -> winsafe::AnyResult<Option<ScannedPairing>> {
+fn run(
+    decode: PayloadDecoder,
+    affinity: common::Affinity,
+) -> winsafe::AnyResult<Option<ScannedPairing>> {
     let wnd = common::window("Add a CopyPaste device", (560, 280));
     let _instructions = common::label(
         &wnd,
@@ -89,7 +92,7 @@ fn run(decode: PayloadDecoder) -> winsafe::AnyResult<Option<ScannedPairing>> {
         let payload = payload.clone();
         let wnd = wnd.clone();
         move |_| {
-            if !common::protect_from_capture(wnd.hwnd()) {
+            if !common::protect_from_capture(wnd.hwnd(), affinity) {
                 // Nothing is typed yet, so closing is all that is needed: the
                 // invite must not be entered into a window that can be filmed.
                 wnd.close();

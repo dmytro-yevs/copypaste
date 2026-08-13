@@ -23,6 +23,7 @@ pub(super) fn spawn(
     code: Zeroizing<String>,
     address: Zeroizing<String>,
     expires_in_secs: u64,
+    affinity: common::Affinity,
 ) -> Option<CloseHandle> {
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
@@ -32,7 +33,7 @@ pub(super) fn spawn(
                 let _ = sender.send(None);
                 return;
             };
-            let _ = run(payload, code, address, expires_in_secs, sender);
+            let _ = run(payload, code, address, expires_in_secs, sender, affinity);
         })
         .ok()?;
     receiver.recv_timeout(Duration::from_secs(5)).ok().flatten()
@@ -44,6 +45,7 @@ fn run(
     address: Zeroizing<String>,
     expires_in_secs: u64,
     ready: mpsc::SyncSender<Option<CloseHandle>>,
+    affinity: common::Affinity,
 ) -> winsafe::AnyResult<i32> {
     let qr_bitmap = qr_bitmap(payload.as_bytes()).ok_or("QR generation failed")?;
     let qr_size = qr_bitmap.size;
@@ -114,7 +116,7 @@ fn run(
         let code_label = code_label.clone();
         let address_label = address_label.clone();
         move |_| {
-            if !common::protect_from_capture(wnd.hwnd()) {
+            if !common::protect_from_capture(wnd.hwnd(), affinity) {
                 // The QR is painted only once revealed, so clearing these two
                 // is what leaves nothing of the invite to capture.
                 code_label.hwnd().SetWindowText("")?;
@@ -248,6 +250,7 @@ mod tests {
             Zeroizing::new("ABCD-EFGH".into()),
             Zeroizing::new("192.0.2.1:47654".into()),
             120,
+            common::system_affinity,
         )
         .expect("the native invite window opens");
         close.close();
