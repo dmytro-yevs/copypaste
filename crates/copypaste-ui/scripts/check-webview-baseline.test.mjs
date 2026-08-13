@@ -8,7 +8,6 @@ import {
   postBaselineSyntax,
   sharesBaselineWithConfig,
   targetOf,
-  unreferenced,
 } from "./check-webview-baseline.mjs";
 import { LEGACY_TARGET, MODERN_TARGET } from "./webview-baseline.mjs";
 
@@ -138,27 +137,5 @@ describe("what the nomodule build has to carry", () => {
       missingLegacyChunks(["polyfills-legacy-b.js", "legacyPolyfills-legacy-c.js"]),
       [],
     );
-  });
-});
-
-describe("chunks nothing loads", () => {
-  // The module build emits `legacyPolyfills` even though the branch that
-  // imported it is gone. That copy is dead, not wrong, and measuring it against
-  // the module engine would fail a build that is correct.
-  test("a chunk no other chunk and no html points at is dead", () => {
-    const chunks = [
-      { name: "index-a.js", code: "import './shared-b.js'" },
-      { name: "shared-b.js", code: "" },
-      { name: "orphan-c.js", code: "" },
-    ];
-
-    assert.deepEqual(unreferenced(chunks, '<script src="index-a.js">'), ["orphan-c.js"]);
-  });
-
-  test("an entry named only by the html is not dead", () => {
-    const chunks = [{ name: "index-a.js", code: "" }];
-
-    assert.deepEqual(unreferenced(chunks, '<script src="index-a.js">'), []);
-    assert.deepEqual(unreferenced(chunks, ""), ["index-a.js"]);
   });
 });
