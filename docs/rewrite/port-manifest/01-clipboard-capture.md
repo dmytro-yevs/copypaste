@@ -666,7 +666,7 @@ Three separate hard-won rules, all on the same subsystem:
 | Broadcast channel capacity | **256** | 64 dropped items on bursts (§3.22). `daemon/mod.rs:372` |
 | Paste-file staging max age | **10 min** | Files are not deleted immediately after paste because the receiving app may read the URL asynchronously. `ipc/pasteboard.rs:311` |
 | Paste-file sweep budget | **4096 directory reads** | The sweep holds the staging lock, so an unbounded walk parks the interactive paste-back path behind whatever is in the directory. One unit is charged before every `readdir`, on the root and on any content directory it descends into, including the `.` and `..` entries and the read that reports end-of-directory; nothing else in a pass touches a directory stream, and each charged read costs at most one `statat` and one `unlinkat`, so a pass is 4096 reads and O(4096) syscalls. A pass that runs out keeps its streams open and the next one reads on from where it stopped, paying nothing to get back there. A first pass and a resumed pass both measured under 2 s on Ubuntu 24.04 / ext4, and are unmeasured on APFS. v2 `clipboard/file_materialize/sweep.rs` |
-| Paste-file retained-plaintext bound | **max age + one cycle** | A cycle is `ceil((entries + 3) / 4096)` passes: the entries, plus `.`, `..` and the end-of-directory read. Resumption keeps the `readdir` streams open across passes instead of saving a position and reopening — Apple and POSIX both scope a `telldir` value to the lifetime of its `DIR*`, so a cookie carried across `closedir` has no defined behaviour on macOS and proves no bound at all. On a stream that stays open POSIX leaves only entries *added or removed* during the cycle unspecified, so every payload present when the stream opened is returned exactly once within that cycle; a payload that appears mid-cycle is bounded by the following one. An ordinal position is not a resume either: under deletion it skips entries or revisits a prefix indefinitely. v2 `clipboard/file_materialize/sweep.rs` |
+| Paste-file retained-plaintext bound | **max age + one cycle** | A cycle is `ceil(reads / 4096)` passes, over *every* directory stream the cycle opens: `reads` is the root's entries plus 3, plus each content directory's entries plus 3, the 3 being `.`, `..` and that stream's end-of-directory read. Counting only the root understates a cycle by three reads per content directory, and a staging tree keeps nearly all of its payloads one level down. Resumption keeps the `readdir` streams open across passes instead of saving a position and reopening — Apple and POSIX both scope a `telldir` value to the lifetime of its `DIR*`, so a cookie carried across `closedir` has no defined behaviour on macOS and proves no bound at all. On a stream that stays open POSIX leaves only entries *added or removed* during the cycle unspecified, so every payload present when the stream opened is returned exactly once within that cycle; a payload that appears mid-cycle is bounded by the following one. An ordinal position is not a resume either: under deletion it skips entries or revisits a prefix indefinitely. v2 `clipboard/file_materialize/sweep.rs` |
 | Paste-file sweep retry floor | **30 s**, and never over a quarter of the interval | A sweep that could not delete expired plaintext must not then wait the ordinary interval, which is the whole 10 min — a second full lifetime of exposure. This includes the *first* wait after startup: a restart whose sweep left work behind starts its worker at the floor, not at the interval. The ladder doubles back up to 10 min, so a file nothing can ever delete costs a short burst of wake-ups rather than a permanent 30 s timer. v2 `clipboard/file_materialize/sweep.rs` |
 | Paste-file sweep failure kinds | **20 kinds + unclassified** | Per-kind counts over a fixed, canonically ordered taxonomy of every errno the sweep's `openat`, `readdir`, `statat`, `unlinkat` and `rmdir` are documented to return here, with `Unclassified` reserved for values none of them names. Fixed-size, so a directory of a million unreadable files cannot turn the report into a million-entry map; canonical, so neither which kinds are retained nor the order they render in depends on the order the filesystem handed entries back — first-seen slots made both of those a property of the walk. Counts and kind names only: no path, filename, content id or payload byte. v2 `clipboard/file_materialize/failure.rs` |
 | Self-write sentinel "none" | **-1** | Must be outside the valid `changeCount` domain (non-negative). `monitor.rs:104` |
@@ -964,8 +964,12 @@ keep both properties).
 - **T-89 — no prefix can starve what is behind it.** Given more entries than
   one sweep's budget, where the entries reached first are live or undeletable,
   every expired payload behind them is still removed within one cycle of
-  `ceil(entries / budget)` passes. A sweep that restarts from the first entry
-  satisfies neither the bound nor this test.
+  `ceil(reads / budget)` passes, `reads` being every directory stream the cycle
+  opens — the root and each content directory it descends into — counted as
+  that stream's entries plus `.`, `..` and its end-of-directory read. Asserted
+  against the reads a cycle actually charges, not against the root's entries. A
+  sweep that restarts from the first entry satisfies neither the bound nor this
+  test.
 - **T-90 — the sweep cannot be redirected by renaming its directory.** The
   staging root is renamed away and a different directory of old regular files is
   put at the same pathname. The sweep deletes only from the directory it was
@@ -982,6 +986,10 @@ keep both properties).
   at startup with plaintext already on disk, or on a later paste-back —
   staging fails rather than creating bytes nothing will ever delete.
   Occupying the worker slot is not liveness and must not be asserted as it.
+  A worker that stops without being asked accounts for the plaintext it owned
+  before its thread ends, and stops reading as an owner at that moment: a death
+  noticed only by the next paste-back is not noticed at all on a machine that
+  pastes a file back once.
 
 ### 5.14 Resource & platform
 

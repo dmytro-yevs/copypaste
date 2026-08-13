@@ -61,6 +61,8 @@ pub(super) struct Sweeper {
     root_fd: OwnedFd,
     budget: u32,
     cycle: Option<Cycle>,
+    #[cfg(test)]
+    doom: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Sweeper {
@@ -69,6 +71,8 @@ impl Sweeper {
             root_fd,
             budget: SWEEP_BUDGET,
             cycle: None,
+            #[cfg(test)]
+            doom: None,
         }
     }
 
@@ -80,10 +84,28 @@ impl Sweeper {
         }
     }
 
+    /// Kills the worker thread this sweeper is handed to, once. A pass that
+    /// panics is how a live owner of staged plaintext dies, and the death it
+    /// provokes sweeps on this same sweeper — a second panic there would land
+    /// in a `Drop` during an unwind and abort the process.
+    #[cfg(test)]
+    pub(super) fn armed(mut self, doom: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.doom = Some(doom);
+        self
+    }
+
     /// One pass, and what it left behind. Infallible by design: a sweeper that
     /// refused to run would take file paste-back down with it, and the caller
     /// cannot act on an error it is not also told the shape of.
     pub(super) fn pass(&mut self, now: SystemTime, max_age: Duration) -> SweepReport {
+        #[cfg(test)]
+        if self
+            .doom
+            .as_ref()
+            .is_some_and(|doom| doom.swap(false, std::sync::atomic::Ordering::Relaxed))
+        {
+            panic!("injected paste-file sweep panic");
+        }
         let report = self.walk(now, max_age);
         if report.unfinished() {
             warn!(
@@ -677,6 +699,54 @@ mod tests {
         assert!(
             expired.iter().all(|path| !path.exists()),
             "a truncated content directory restarted instead of resuming"
+        );
+    }
+
+    /// B1: a cycle is bounded over every directory stream it opens, not over
+    /// the root's entries alone. Each stream charges its entries plus `.`, `..`
+    /// and its own end-of-directory read, and a staging tree keeps nearly all
+    /// of its payloads one level down — so counting only the root understates
+    /// the retained-plaintext bound by three reads per content directory.
+    #[test]
+    fn one_cycle_charges_three_fixed_reads_for_every_stream_it_opens() {
+        const DIRS: u32 = 3;
+        const LIVE: u32 = 4;
+        const EXPIRED: u32 = 2;
+        const BUDGET: u32 = 5;
+
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        let mut expired = Vec::new();
+        for dir in 0..DIRS {
+            let content = content_dir(&root, &format!("0000000{dir}-0000-0000-0000-000000000000"));
+            for index in 0..LIVE {
+                write_at(&content.join(format!("live-{index}.bin")), now);
+            }
+            for index in 0..EXPIRED {
+                let path = content.join(format!("expired-{index}.bin"));
+                write_at(&path, now - HOUR);
+                expired.push(path);
+            }
+        }
+        let reads = (DIRS + FIXED_READS) + DIRS * (LIVE + EXPIRED + FIXED_READS);
+
+        let mut sweeper = Sweeper::with_budget(open_root(&root), BUDGET);
+        let mut charged = 0;
+        for _ in 0..reads.div_ceil(BUDGET) {
+            charged += sweeper.pass(now, MINUTE).operations;
+        }
+
+        assert_eq!(
+            charged, reads,
+            "the advertised cycle is not what a cycle costs"
+        );
+        assert!(
+            sweeper.cycle.is_none(),
+            "the cycle did not complete inside its advertised bound"
+        );
+        assert!(
+            expired.iter().all(|path| !path.exists()),
+            "expired plaintext survived one cycle"
         );
     }
 
