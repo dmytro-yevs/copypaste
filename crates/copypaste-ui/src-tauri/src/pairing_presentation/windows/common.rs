@@ -82,13 +82,32 @@ pub(super) fn hide(hwnd: &winsafe::HWND) {
 /// here clears what it was about to show and closes instead. Called from
 /// `WM_CREATE`, before the window is shown.
 pub(super) fn protect_from_capture(hwnd: &winsafe::HWND) -> bool {
-    if hwnd
-        .SetWindowDisplayAffinity(co::WDA::EXCLUDEFROMCAPTURE)
-        .is_ok()
-    {
+    protect_from_capture_with(|| {
+        hwnd.SetWindowDisplayAffinity(co::WDA::EXCLUDEFROMCAPTURE)
+            .is_ok()
+    })
+}
+
+fn protect_from_capture_with(set_affinity: impl FnOnce() -> bool) -> bool {
+    if set_affinity() {
         return true;
     }
     // INV-13: the refusal, never the code, the invite or the peer.
     warn!("Windows refused screenshot protection for a pairing window; it was not shown");
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refusal_returns_false() {
+        assert!(!protect_from_capture_with(|| false));
+    }
+
+    #[test]
+    fn acceptance_returns_true() {
+        assert!(protect_from_capture_with(|| true));
+    }
 }

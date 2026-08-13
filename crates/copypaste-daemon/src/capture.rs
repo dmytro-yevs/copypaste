@@ -325,6 +325,46 @@ mod tests {
         );
     }
 
+    /// DMY-158 failure-before: when the attribution cache shares one identity
+    /// across two changes (the TTL bug), a credential store's password passes
+    /// the sensitivity floor, reaches full-text search and is offered to sync.
+    #[test]
+    fn shared_attribution_lets_a_credential_stores_copy_into_search() {
+        let (state, _dir) = test_state("shared-attribution-vuln");
+        let mut attribution = Attribution::default();
+
+        let ordinary =
+            attribution.for_change(41, || SourceApp::from_image_path(r"C:\Windows\notepad.exe"));
+        // Same sequence number: the cache answers from the first resolution,
+        // so the credential store is attributed to Notepad.
+        let misattributed = attribution.for_change(41, || unreachable!("the cache must answer"));
+        assert_eq!(
+            misattributed.as_ref().map(|a| a.id.as_str()),
+            Some("notepad.exe"),
+            "the cache must return the first identity"
+        );
+
+        let now = copypaste_core::now_ms();
+        let _notes =
+            ingest_capture(&state, captured("thursday agenda notes", ordinary), now).unwrap();
+        let wrong = ingest_capture(
+            &state,
+            captured("correct horse battery staple", misattributed),
+            now + 1,
+        )
+        .unwrap()
+        .into_item();
+
+        assert!(
+            !wrong.is_sensitive,
+            "misattributed to Notepad, the secret was not flagged"
+        );
+        assert!(
+            !state.store.search("battery", 10).unwrap().is_empty(),
+            "the password reached full-text search under the wrong identity"
+        );
+    }
+
     #[test]
     fn non_text_capture_values_are_not_ingested() {
         let (state, _dir) = test_state("text-capture-only");
