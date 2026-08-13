@@ -34,18 +34,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Listener, Manager, Runtime};
 
 use crate::backend::{Backend, BackendError, Result, SelectedBackend};
+use crate::events::TauriEventName;
 use crate::model::UiItem;
-use crate::service::push::{ChangePayload, EVENT_CHANGED};
+use crate::service::push::ChangePayload;
 
 use super::model::{CaptureSource, Clip};
 use super::{CaptureControl, SelectedCapture};
-
-/// One clip reached the database. Carries no content — the frontend re-reads
-/// through `list`, so there is one set of rules about what the WebView may see.
-pub const EVENT_CAPTURED: &str = "copypaste://captured";
-
-/// Capture state changed: armed, lost, proven, or the user changed it.
-pub const EVENT_CAPTURE_STATE: &str = "copypaste://capture-state";
 
 /// How often the drain task asks the platform for what it has captured.
 ///
@@ -55,8 +49,6 @@ pub const EVENT_CAPTURE_STATE: &str = "copypaste://capture-state";
 /// of latency to storage is invisible; what it buys is not needing a JNI
 /// callback into a crate that forbids unsafe code.
 const DRAIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
-
-const PRIVATE_MODE_EVENT: &str = "private-mode-changed";
 
 /// How many clips may wait for a sink that is refusing before the oldest are
 /// counted as lost.
@@ -211,7 +203,7 @@ pub async fn capture_once<R: Runtime>(
 /// be the second one in a module that exists to have none.
 pub fn spawn<R: Runtime>(app: AppHandle<R>) {
     let (private_mode_tx, mut private_mode_rx) = tokio::sync::mpsc::unbounded_channel();
-    app.listen(PRIVATE_MODE_EVENT, move |event| {
+    app.listen(TauriEventName::PrivateModeChanged.as_str(), move |event| {
         let Ok(enabled) = serde_json::from_str::<bool>(event.payload()) else {
             tracing::warn!("private mode changed without a boolean value");
             return;
@@ -343,7 +335,7 @@ fn report_dropped<R: Runtime>(app: &AppHandle<R>, lost: u64) {
         );
         let capture = app.state::<SelectedCapture>();
         capture.note_dropped(lost);
-        let _ = app.emit(EVENT_CAPTURE_STATE, capture.snapshot());
+        let _ = app.emit(TauriEventName::CaptureState.as_str(), capture.snapshot());
     }
 }
 
@@ -401,10 +393,10 @@ async fn announce<R: Runtime>(
     {
         let capture = app.state::<SelectedCapture>();
         capture.note_stored(at_ms);
-        let _ = app.emit(EVENT_CAPTURE_STATE, capture.snapshot());
+        let _ = app.emit(TauriEventName::CaptureState.as_str(), capture.snapshot());
     }
     let _ = app.emit(
-        EVENT_CAPTURED,
+        TauriEventName::Captured.as_str(),
         CapturedPayload {
             id: item.id().to_string(),
             source,
@@ -419,7 +411,7 @@ async fn announce<R: Runtime>(
         backend.status().await.map(|s| s.item_count).unwrap_or(0)
     };
     let _ = app.emit(
-        EVENT_CHANGED,
+        TauriEventName::Changed.as_str(),
         ChangePayload {
             topic: EventKind::Items,
             item_count,
@@ -554,12 +546,6 @@ mod tests {
         // The oldest went, not the newest: the most recent copies are the ones
         // a user is most likely to still want.
         assert_eq!(buffer.pop().unwrap().text, "clip 5");
-    }
-
-    #[test]
-    fn the_event_names_are_the_ones_the_frontend_listens_for() {
-        assert_eq!(EVENT_CAPTURED, "copypaste://captured");
-        assert_eq!(EVENT_CAPTURE_STATE, "copypaste://capture-state");
     }
 
     #[test]

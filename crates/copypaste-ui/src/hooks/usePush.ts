@@ -14,16 +14,19 @@ import { PEERS_KEY } from "@/hooks/useDevices";
 import { CONFIG_KEY, PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import { OPEN_AT_LOGIN_KEY } from "@/hooks/useOpenAtLogin";
 import { hasBridge, type PrivateModeData } from "@/lib/ipc";
+import {
+  EVENT_AUTOSTART_CHANGED,
+  EVENT_CHANGED,
+  EVENT_PRIVATE_MODE_CHANGED,
+  EVENT_PUSH_STATE,
+} from "@/lib/tauriEvents";
 
-/** Must match `service::push::EVENT_CHANGED`, which has a test asserting it. */
-export const EVENT_CHANGED = "copypaste://changed";
-/** Must match `service::push::EVENT_PUSH_STATE`. */
-export const EVENT_PUSH_STATE = "copypaste://push-state";
-/** Emitted by the native tray after the daemon persisted its confirmed value. */
-export const EVENT_PRIVATE_MODE_CHANGED = "private-mode-changed";
-/** Must match `shell::autostart::EVENT_CHANGED`. The tray menu can change this
- *  setting without Settings ever being open. */
-export const EVENT_AUTOSTART_CHANGED = "autostart-changed";
+export {
+  EVENT_AUTOSTART_CHANGED,
+  EVENT_CHANGED,
+  EVENT_PRIVATE_MODE_CHANGED,
+  EVENT_PUSH_STATE,
+} from "@/lib/tauriEvents";
 
 /** What the bridge sends on a change. Carries no clipboard content: a
  *  subscriber re-reads through the ordinary commands. */

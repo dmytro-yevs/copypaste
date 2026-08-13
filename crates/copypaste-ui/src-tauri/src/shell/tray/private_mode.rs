@@ -8,9 +8,7 @@ use tokio::sync::{Mutex, Notify};
 
 use super::menu::TrayMenu;
 use crate::backend::{Backend as _, SelectedBackend};
-use crate::service::push::EVENT_PUSH_STATE;
-
-pub const EVENT_CHANGED: &str = "private-mode-changed";
+use crate::events::TauriEventName;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RESYNC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -65,14 +63,14 @@ fn reconciliation_update(current: bool, confirmed: bool) -> Option<Update> {
 pub(super) fn spawn<R: Runtime>(app: AppHandle<R>, menu: Arc<TrayMenu<R>>, backstop: Duration) {
     let wake = Arc::new(Notify::new());
     let on_push = Arc::clone(&wake);
-    app.listen(EVENT_PUSH_STATE, move |event| {
+    app.listen(TauriEventName::PushState.as_str(), move |event| {
         if serde_json::from_str::<PushState>(event.payload()).is_ok_and(|state| state.live) {
             on_push.notify_one();
         }
     });
 
     let on_change = Arc::clone(&menu);
-    app.listen(EVENT_CHANGED, move |event| {
+    app.listen(TauriEventName::PrivateModeChanged.as_str(), move |event| {
         if let Ok(enabled) = serde_json::from_str::<bool>(event.payload()) {
             on_change.set_private_mode(enabled);
         }
@@ -134,7 +132,7 @@ async fn reconcile<R: Runtime>(app: &AppHandle<R>, menu: &TrayMenu<R>, retries: 
         return;
     }
     if update.broadcast {
-        let _ = app.emit(EVENT_CHANGED, update.value);
+        let _ = app.emit(TauriEventName::PrivateModeChanged.as_str(), update.value);
     }
 }
 

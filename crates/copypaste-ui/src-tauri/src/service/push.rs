@@ -26,16 +26,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio_util::sync::CancellationToken;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
-
-/// Something changed; re-read through the ordinary commands.
-///
-/// Carries no clipboard content — the wire event does not either. A subscriber
-/// re-reads through `list`/`search`, so there is one set of rules about what
-/// the WebView may see rather than two.
-pub const EVENT_CHANGED: &str = "copypaste://changed";
-
-/// Whether the change stream is currently delivering.
-pub const EVENT_PUSH_STATE: &str = "copypaste://push-state";
+use crate::events::TauriEventName;
 
 /// How long to wait before reconnecting a stream that ended.
 const RECONNECT_MIN: Duration = Duration::from_secs(5);
@@ -160,7 +151,7 @@ async fn subscribe<R: Runtime>(app: &AppHandle<R>) -> Result<(), BackendError> {
 
 fn emit_change<R: Runtime>(app: &AppHandle<R>, event: EventData) {
     let _ = app.emit(
-        EVENT_CHANGED,
+        TauriEventName::Changed.as_str(),
         ChangePayload {
             topic: event.event,
             item_count: event.item_count,
@@ -175,22 +166,15 @@ fn emit_change<R: Runtime>(app: &AppHandle<R>, event: EventData) {
 }
 
 fn set_live<R: Runtime>(app: &AppHandle<R>, live: bool) {
-    let _ = app.emit(EVENT_PUSH_STATE, PushStatePayload { live });
+    let _ = app.emit(
+        TauriEventName::PushState.as_str(),
+        PushStatePayload { live },
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The names are a contract with `src/hooks/usePush.ts`, which cannot
-    /// import them. Spelling one of them differently on either side produces a
-    /// UI that silently never updates, so they are asserted rather than left to
-    /// a grep.
-    #[test]
-    fn the_event_names_are_the_ones_the_frontend_listens_for() {
-        assert_eq!(EVENT_CHANGED, "copypaste://changed");
-        assert_eq!(EVENT_PUSH_STATE, "copypaste://push-state");
-    }
 
     /// The payload the WebView receives must name the topic in the same words
     /// the wire does, so a client can tell an item change from a peer change

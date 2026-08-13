@@ -12,6 +12,8 @@
 
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow};
 
+use crate::events::TauriEventName;
+
 #[cfg(not(target_os = "android"))]
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
@@ -104,7 +106,7 @@ pub fn show_main_settings<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.eval(
             "window.__copypasteRequestedView = 'settings'; window.dispatchEvent(new Event('copypaste:open-settings'));",
         );
-        let _ = window.emit("open-settings", ());
+        let _ = window.emit(TauriEventName::OpenSettings.as_str(), ());
     }
 }
 

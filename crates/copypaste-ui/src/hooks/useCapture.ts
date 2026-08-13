@@ -24,16 +24,13 @@ import {
   captureToastExplanation,
   hasBridge,
 } from "@/lib/ipc";
+import { EVENT_CAPTURED, EVENT_CAPTURE_STATE } from "@/lib/tauriEvents";
 import { useUi } from "@/store/ui";
+
+export { EVENT_CAPTURED, EVENT_CAPTURE_STATE } from "@/lib/tauriEvents";
 
 export const CAPTURE_KEY = ["capture"] as const;
 export const TOAST_EXPLANATION_KEY = ["capture", "toast-explanation"] as const;
-
-/** Must match `capture::intake::EVENT_CAPTURE_STATE`, which has a test
- *  asserting it. */
-export const EVENT_CAPTURE_STATE = "copypaste://capture-state";
-/** Must match `capture::intake::EVENT_CAPTURED`. */
-export const EVENT_CAPTURED = "copypaste://captured";
 
 /** Matches the Tauri bridge's own `DEFAULT_READ_TIMEOUT` (port manifest
  *  §3.4): `capture_state` is not on the long-read allowlist, so the frontend
