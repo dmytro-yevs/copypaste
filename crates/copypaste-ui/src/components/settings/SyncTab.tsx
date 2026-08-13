@@ -14,7 +14,6 @@ import {
 } from "@/hooks/useCloud";
 import { usePeers, useSyncNow } from "@/hooks/useDevices";
 import { useTranslation } from "@/i18n";
-import { isUnavailable } from "@/lib/errors";
 import { useUi } from "@/store/ui";
 
 export function SyncTab() {
@@ -30,7 +29,10 @@ export function SyncTab() {
   const [password, setPassword] = useState("");
   const [passphrase, setPassphrase] = useState("");
 
-  const unavailable = peers.error !== null && isUnavailable(peers.error);
+  // Any failed read, not only `unavailable`. A backend error left `count` at
+  // zero, which rendered the confident "None" badge and disabled Sync Now as
+  // though the service had answered with an empty list.
+  const unanswered = peers.error !== null && peers.error !== undefined;
   const count = peers.data?.length ?? 0;
   const cloudStatus = cloud.data;
   const cloudBusy = cloudSignIn.isPending || cloudSignOut.isPending || cloudSync.isPending;
@@ -63,10 +65,10 @@ export function SyncTab() {
         <div className="flex items-center gap-s-2">
           <Badge
             variant={
-              unavailable ? "secondary" : count > 0 ? "secondary" : "warn"
+              unanswered ? "secondary" : count > 0 ? "secondary" : "warn"
             }
           >
-            {unavailable
+            {unanswered
               ? t("settings.sync.paired.unavailable")
               : count === 0
                 ? t("settings.sync.paired.none")
@@ -86,7 +88,7 @@ export function SyncTab() {
         <Button
           variant="outline"
           size="sm"
-          disabled={sync.isPending || count === 0 || unavailable}
+          disabled={sync.isPending || count === 0 || unanswered}
           onClick={() => sync.mutate(undefined)}
         >
           <RefreshCw aria-hidden="true" />

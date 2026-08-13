@@ -11,18 +11,11 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 
-import {
-  HISTORY_HEAD_KEY,
-  HISTORY_KEY,
-  invalidateHistoryHead,
-  invalidateHistoryQueries,
-  useBulkDelete,
-  useHistory,
-  useHistorySearch,
-  useReorderPinned,
-} from "@/hooks/useHistory";
+import { HISTORY_HEAD_KEY, HISTORY_KEY } from "@/hooks/historyRefresh";
+import { useHistory, useHistorySearch } from "@/hooks/useHistory";
+import { useBulkDelete, useReorderPinned } from "@/hooks/useHistoryMutations";
 import { IpcFailure } from "@/lib/errors";
-import { HISTORY_DEEP_REFRESH_MS, PAGE_SIZE } from "@/lib/layout";
+import { PAGE_SIZE } from "@/lib/layout";
 import { item, items, page, testClient } from "@/test/harness";
 
 const listItems = vi.fn();
@@ -65,75 +58,8 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("what a capture costs (DMY-157)", () => {
-  /**
-   * `HISTORY_KEY` is a *prefix* of the paged query's key, so invalidating it
-   * re-walked every loaded page serially. A window scrolled three pages down
-   * paid four reads — and four page decrypts — for every item copied anywhere
-   * on the machine, at up to one event per clipboard change.
-   */
-  /** Reads of a *cursor* page — the part that grows with how far the user has
-   *  scrolled, and the part a capture used to pay for in full. */
-  const deepReads = () =>
-    listItems.mock.calls.filter(([, cursor]) => cursor !== null).length;
-
-  it("collapses a burst of captures into one page walk", async () => {
-    listItems.mockImplementation(async (_limit: number, cursor: string | null) => {
-      if (cursor === null) return page(items(3), 0, "cursor-1");
-      if (cursor === "cursor-1") return page(items(3), 0, "cursor-2");
-      return page(items(3));
-    });
-    const { client, Wrapper } = wrapper();
-    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
-
-    await waitFor(() => expect(result.current.hasNextPage).toBe(true));
-    await act(async () => {
-      await result.current.fetchNextPage();
-    });
-    await act(async () => {
-      await result.current.fetchNextPage();
-    });
-    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
-
-    listItems.mockClear();
-    await act(async () => {
-      for (let event = 0; event < 10; event += 1) {
-        await invalidateHistoryHead(client);
-      }
-    });
-
-    // Ten events over two loaded cursor pages was twenty reads, and twenty page
-    // decrypts. One trailing walk is two.
-    await waitFor(() => expect(deepReads()).toBe(2));
-    await new Promise((settle) => setTimeout(settle, HISTORY_DEEP_REFRESH_MS * 2));
-    expect(deepReads()).toBe(2);
-  });
-
-  /** A user write does re-walk: pin, unpin and delete move rows between
-   *  sections, so the cached pages are wrong about *where* things are. */
-  it("still re-walks the loaded pages after a write that re-sorts", async () => {
-    listItems.mockImplementation(async (_limit: number, cursor: string | null) =>
-      cursor === null ? page(items(3), 0, "cursor-1") : page(items(3)),
-    );
-    const { client, Wrapper } = wrapper();
-    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
-
-    await waitFor(() => expect(result.current.hasNextPage).toBe(true));
-    await act(async () => {
-      await result.current.fetchNextPage();
-    });
-    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
-
-    listItems.mockClear();
-    await act(async () => {
-      await invalidateHistoryQueries(client);
-    });
-
-    // Both cursor pages, and the head.
-    await waitFor(() => expect(listItems).toHaveBeenCalledTimes(3));
-  });
-});
-
+/** What a capture costs the loaded pages is measured in
+ *  `historyRefresh.test.tsx`, against a walked 10,000-row history. */
 describe("pinned reorder IPC", () => {
   it("sends the complete stable order in one mutation", async () => {
     reorderPinned.mockResolvedValue(undefined);

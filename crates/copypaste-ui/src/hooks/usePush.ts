@@ -13,7 +13,7 @@ import {
   invalidateHistoryHead,
   invalidateHistoryQueries,
   STATUS_KEY,
-} from "@/hooks/useHistory";
+} from "@/hooks/historyRefresh";
 import { PEERS_KEY } from "@/hooks/useDevices";
 import { CONFIG_KEY, PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import { OPEN_AT_LOGIN_KEY } from "@/hooks/useOpenAtLogin";

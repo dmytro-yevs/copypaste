@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRenameDevice } from "@/hooks/useDevices";
-import { statusDeviceName, useStatus } from "@/hooks/useHistory";
+import { statusDeviceName, useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
 
 export function DeviceNameField() {
