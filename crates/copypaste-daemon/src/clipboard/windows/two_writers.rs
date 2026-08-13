@@ -117,10 +117,11 @@ fn two_processes_get_distinct_attributions() {
     // sensitive is its origin, since nothing in its text is a secret shape.
     let (state, _data) = test_state("two-writer-attribution");
     let now = copypaste_core::now_ms();
-    let notes = ingest_capture(&state, first, now)
+    let settings = state.settings.get().clone();
+    let notes = ingest_capture(&state, &settings, first, now)
         .expect("the ordinary capture")
         .into_item();
-    let secret = ingest_capture(&state, second, now + 1)
+    let secret = ingest_capture(&state, &settings, second, now + 1)
         .expect("the credential capture")
         .into_item();
 
