@@ -43,6 +43,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
+          # tools/sensitive-rules' regeneration tests spawn `rustfmt`, so the
+          # component belongs to `test --workspace` and not only to the fmt
+          # gate. Run 31671766432 failed here on macos-14 and macos-15 at once.
+          components: rustfmt
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
