@@ -71,12 +71,23 @@ self_test() {
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     mkdir -p "$tmp/scripts"
-    cp "$SELF" "$tmp/scripts/gate.sh"
-    chmod +x "$tmp/scripts/gate.sh"
 
     checker() {
         cat > "$tmp/scripts/check-file-size.sh"
         chmod +x "$tmp/scripts/check-file-size.sh"
+    }
+    # No in-place edit: BSD sed rejects GNU `sed -i 's|x|y|' file`, and the
+    # release checker runs this self-test on macOS.
+    install_gate() {
+        awk -v exempt="${1:-}" '
+            index($0, "case \"${1:-}\" in") == 1 && !hit {
+                printf "EXEMPT=\"%s\"\n", exempt
+                hit = 1
+            }
+            { print }
+            END { if (!hit) exit 1 }
+        ' "$SELF" > "$tmp/scripts/gate.sh" || return 1
+        chmod +x "$tmp/scripts/gate.sh"
     }
     assert() {
         local desc="$1" want="$2" needle="$3" out got
@@ -93,6 +104,12 @@ self_test() {
     }
 
     printf '\n== file-size gate self-test\n'
+
+    if ! install_gate; then
+        printf '  FAIL  the self-test could not build a gate copy from %s\n' "${SELF##*/}"
+        printf '  passed 0, failed 1\n'
+        return 1
+    fi
 
     checker <<'EOF'
 #!/usr/bin/env bash
@@ -125,7 +142,10 @@ EOF
     assert "an overage fails the gate" 1 "over the 500-line budget"
 
     # Same report, with the file registered as exempt.
-    sed -i 's|^EXEMPT=""$|EXEMPT="daemon/src/huge.rs"|' "$tmp/scripts/gate.sh"
+    if ! install_gate "daemon/src/huge.rs"; then
+        printf '  FAIL  the self-test could not register an exemption\n'
+        bad=$((bad + 1))
+    fi
     assert "a registered exemption passes" 0 "exempt (rule 5)"
 
     printf '  passed %d, failed %d\n' "$pass" "$bad"
