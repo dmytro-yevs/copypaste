@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { IpcFailure } from "@/lib/errors";
+import { atStartup, reportStartupFailure } from "@/startupFailure";
 import { isQuickPasteSurface } from "@/surface";
 import "@/index.css";
 
@@ -60,26 +61,38 @@ const isQuickPaste = isQuickPasteSurface(window.location.search);
  * API 24's Chromium 53 that throws before a component ever renders — a static
  * import would put it ahead of the only code that can supply it.
  *
- * `import.meta.env.LEGACY` is false in the module build, so the branch and the
- * chunk behind it are dropped and modern engines pay nothing for either.
+ * `import.meta.env.LEGACY` is a marker plugin-legacy replaces per output, so the
+ * branch leaves the module build — after chunking, which is why `vite.config.ts`
+ * has to drop the chunk it left behind for modern engines to pay nothing.
  */
 async function boot(): Promise<void> {
-  if (import.meta.env.LEGACY) await import("@/legacyPolyfills");
+  if (import.meta.env.LEGACY) {
+    await atStartup("polyfills", () => import("@/legacyPolyfills"));
+  }
 
-  const [{ default: App }, { QuickPasteApp }, { AppToaster }] = await Promise.all([
-    import("@/App"),
-    import("@/components/quick-paste/QuickPasteApp"),
-    import("@/components/shell/AppToaster"),
-  ]);
+  const [{ default: App }, { QuickPasteApp }, { AppToaster }] = await atStartup("screens", () =>
+    Promise.all([
+      import("@/App"),
+      import("@/components/quick-paste/QuickPasteApp"),
+      import("@/components/shell/AppToaster"),
+    ]),
+  );
 
-  createRoot(root).render(
-    <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        {isQuickPaste ? <QuickPasteApp /> : <App />}
-        <AppToaster />
-      </QueryClientProvider>
-    </StrictMode>,
+  await atStartup("render", () =>
+    createRoot(root).render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          {isQuickPaste ? <QuickPasteApp /> : <App />}
+          <AppToaster />
+        </QueryClientProvider>
+      </StrictMode>,
+    ),
   );
 }
 
-void boot();
+// Every way the app can fail to appear ends here, because a rejected import
+// leaves `#root` empty and a blank window is not a diagnosis. `startupFailure`
+// is statically imported so this path never fetches anything.
+void boot().catch((failure: unknown) => {
+  reportStartupFailure(root, failure);
+});
