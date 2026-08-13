@@ -53,7 +53,7 @@ escape_property() {
 # gate must never treat a row it failed to understand as a row that was clean.
 # Record sequence: header → over* → count → end.
 read_report() {
-    local kind lines path extra state=init declared="" seen=0
+    local raw kind lines path extra state=init declared="" seen=0
     OVER_PATHS=()
     OVER_LINES=()
     OVER_COUNT=0
@@ -61,7 +61,13 @@ read_report() {
     [[ -n "$1" ]] ||
         reject "${CHECKER##*/} printed nothing; the file-size budget was not measured."
 
-    while IFS=$'\t' read -r kind lines path extra; do
+    while IFS= read -r raw; do
+        # IFS=$'\t' read strips leading tabs, collapses doubled tabs, and
+        # discards trailing empty fields — all valid-looking to the parser.
+        case "$raw" in
+            $'\t'*|*$'\t'|*$'\t\t'*) reject "${CHECKER##*/} emitted a record with malformed tab fields." ;;
+        esac
+        IFS=$'\t' read -r kind lines path extra <<< "$raw"
         case "$state" in
             ended) reject "${CHECKER##*/} emitted '$kind' after its end record." ;;
         esac
@@ -315,6 +321,31 @@ EOF
 printf 'file-size\t1\t500\nover\t1\tdaemon/src/huge.rs\ncount\t1\nend\n'
 EOF
     assert "an exempt under-budget overage still fails" 2 "not over"
+
+    checker <<'EOF'
+printf '\tfile-size\t1\t500\ncount\t0\nend\n'
+EOF
+    assert "a leading tab on the header fails the gate" 2 "malformed tab"
+
+    checker <<'EOF'
+printf 'file-size\t\t1\t500\ncount\t0\nend\n'
+EOF
+    assert "a doubled tab in the header fails the gate" 2 "malformed tab"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\t\ncount\t0\nend\n'
+EOF
+    assert "a trailing tab on file-size fails the gate" 2 "malformed tab"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\ncount\t0\t\nend\n'
+EOF
+    assert "a trailing tab on the count fails the gate" 2 "malformed tab"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\ncount\t0\nend\t\n'
+EOF
+    assert "a trailing tab on the end fails the gate" 2 "malformed tab"
 
     printf '  passed %d, failed %d\n' "$pass" "$bad"
     [[ "$bad" -eq 0 ]]
