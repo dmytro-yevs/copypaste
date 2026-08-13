@@ -2,19 +2,22 @@
 
 /// Windows process image names that no substring below would recognise.
 ///
-/// Each verified from the vendor's own deployment documentation:
+/// From the vendor's own deployment documentation:
 ///
 /// * `nordpass.exe` — support.nordpass.com/hc/en-us/articles/360004799257
 /// * `enpass.exe` — help.enpass.io/business/latest/microsoft-365/packaging-enpass-for-windows-via-microsoft-intune
 /// * `keeperpasswordmanager.exe` — docs.keeper.io/enterprise-guide/deploying-keeper-to-end-users/desktop-application
-/// * `robotaskbaricon.exe` / `robotaskbaricon-x64.exe` — RoboForm tray
-///   executables observed to own the clipboard during a password fill;
-///   these are not documented in vendor deployment guides. The substring
-///   match on `roboform` covers `RoboForm.exe` itself.
 const WINDOWS_CREDENTIAL_STORES: [&str; 5] = [
     "nordpass.exe",
     "enpass.exe",
     "keeperpasswordmanager.exe",
+    // Not vendor-documented and unverified on an installed system: RoboForm's
+    // manual and help centre name the tray program ("AI RoboForm -> Taskbar
+    // Icon") but no executable except the installer, so both spellings come
+    // from third-party process catalogues (file.net, glarysoft.com) that
+    // attribute them to Siber Systems. Kept because the `roboform` fragment
+    // below matches neither, and dropping them would index a fill from the
+    // tray icon as ordinary text.
     "robotaskbaricon.exe",
     "robotaskbaricon-x64.exe",
 ];

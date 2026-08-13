@@ -6,6 +6,7 @@
 //! an unattributable change costs — is exercised by `cargo test` on any host.
 
 use tracing::{info, warn};
+use typed_path::Utf8WindowsPath;
 
 /// The process that wrote the clipboard, as an item carries it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,12 +38,19 @@ impl SourceApp {
     }
 }
 
-/// `std::path::Path::file_name` answers with the *host's* separators, so off
-/// Windows it would call an entire `C:\…` path the file name and these tests
-/// would pass while the shipped behaviour did the opposite.
+/// The last segment of a Windows path, parsed on any host.
+///
+/// `typed-path` owns the parsing, including the `C:` drive prefix that makes
+/// `C:chrome.exe` one relative path rather than two segments. What is left is
+/// input cleanup: the shell wraps a path pasted from Explorer's address bar in
+/// quotes, and an entry ending in a separator names a directory rather than the
+/// image of any process.
 fn file_name(path: &str) -> Option<&str> {
-    let trimmed = path.trim().trim_matches('"');
-    let name = trimmed.rsplit(['\\', '/', ':']).next()?.trim();
+    let trimmed = path.trim().trim_matches('"').trim();
+    if trimmed.ends_with(['\\', '/']) {
+        return None;
+    }
+    let name = Utf8WindowsPath::new(trimmed).file_name()?.trim();
     (!name.is_empty()).then_some(name)
 }
 
@@ -258,6 +266,13 @@ mod tests {
         );
         assert!(SourceApp::from_image_path("").is_none());
         assert!(SourceApp::from_image_path(r"C:\Program Files\").is_none());
+        assert_eq!(
+            SourceApp::from_image_path("C:chrome.exe")
+                .expect("a drive-relative path is a path")
+                .id,
+            "chrome.exe",
+            "`C:` is a drive prefix, not a separator between two names"
+        );
     }
 
     /// DMY-158: every one of these is the same process, and every one of them
