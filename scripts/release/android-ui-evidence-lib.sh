@@ -268,10 +268,14 @@ capture_png() { # <path>
     capture_android_png "$1" "$PKG" "$capture_serial"
 }
 
+# The frame a device is being given to redraw before it is sampled again.
+settle_pace() { sleep 1; }
+
 UI_FIXTURES=()
 UI_FIXTURE_INDEX=0
 UI_FIXTURE_SCROLLS=0
 UI_FIXTURE_TAPS=0
+UI_FIXTURE_PACES=0
 
 ui_fixture_dump() { # <artifact>
     local source="${UI_FIXTURES[$UI_FIXTURE_INDEX]:-}"
@@ -282,11 +286,21 @@ ui_fixture_dump() { # <artifact>
 
 ui_fixture_scroll() { UI_FIXTURE_SCROLLS=$((UI_FIXTURE_SCROLLS + 1)); }
 
+# A fixture list is already the sequence of frames the redraw would have
+# produced, so counting the pace is the assertion and waiting a second for it is
+# not. The remaining fraction is only so a case that never settles spends its
+# ceiling in a hundred iterations rather than a hot loop.
+ui_fixture_pace() {
+    UI_FIXTURE_PACES=$((UI_FIXTURE_PACES + 1))
+    sleep 0.05
+}
+
 ui_fixtures() { # <artifact...>
     UI_FIXTURES=("$@")
     UI_FIXTURE_INDEX=0
     UI_FIXTURE_SCROLLS=0
     UI_FIXTURE_TAPS=0
+    UI_FIXTURE_PACES=0
 }
 
 UI_FIXTURE_COUNTS=""
