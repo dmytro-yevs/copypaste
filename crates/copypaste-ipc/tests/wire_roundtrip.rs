@@ -109,6 +109,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             private_mode: false,
             private_mode_epoch: 0,
             counters: DiagnosticCounters::default(),
+            settings_health: None,
         }),
         ResponseData::Export(ExportData {
             items: vec![export_item()],

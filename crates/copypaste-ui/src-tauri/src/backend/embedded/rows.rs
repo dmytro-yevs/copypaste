@@ -184,6 +184,9 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
             index_purged: inner.state.index_purged,
             ..Default::default()
         },
+        // The in-process backend keeps its settings in the app's own store and
+        // has no persisted daemon record to fail closed on.
+        settings_health: None,
     })
 }
 

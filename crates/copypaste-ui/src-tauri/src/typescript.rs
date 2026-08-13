@@ -5,7 +5,7 @@ use std::path::Path;
 use copypaste_ipc::{
     CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, DiagnosticCounters,
     DiscoveredDevice, ErrorCode, ImportData, Liveness, PairingRole, PairingState, PeerInfo,
-    PrivateModeData, SensitiveFinding, SensitiveSpan, StatusData,
+    PrivateModeData, SensitiveFinding, SensitiveSpan, SettingsHealth, StatusData,
 };
 use ts_rs::{Config, ExportError, TS};
 
@@ -71,6 +71,7 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<PeerInfo>(&config, &mut output);
     declaration::<PrivateModeData>(&config, &mut output);
     declaration::<ServiceState>(&config, &mut output);
+    declaration::<SettingsHealth>(&config, &mut output);
     declaration::<StatusData>(&config, &mut output);
     declaration::<UiSyncResult>(&config, &mut output);
     declaration::<UiError>(&config, &mut output);

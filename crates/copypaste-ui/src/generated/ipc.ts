@@ -74,7 +74,9 @@ export type PrivateModeData = { private_mode: boolean, private_mode_epoch: numbe
 
 export type ServiceState = { "state": "running", version: string, matches_app: boolean, ours: boolean, } | { "state": "unhealthy" } | { "state": "stopped" } | { "state": "not_installed" };
 
-export type StatusData = { device_name: string, version: string, protocol_version: number, item_count: number, capture_running: boolean, clipboard_backend: string, private_mode: boolean, private_mode_epoch: number, counters: DiagnosticCounters, };
+export type SettingsHealth = { record_unreadable: boolean, unreadable_fields: Array<string>, };
+
+export type StatusData = { device_name: string, version: string, protocol_version: number, item_count: number, capture_running: boolean, clipboard_backend: string, private_mode: boolean, private_mode_epoch: number, counters: DiagnosticCounters, settings_health: SettingsHealth | null, };
 
 export type SyncResult = { pairing_id: string, name: string, sent: number, received: number, error: UiError | null, };
 

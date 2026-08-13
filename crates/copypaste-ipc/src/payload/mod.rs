@@ -9,6 +9,8 @@ mod cloud;
 
 pub use cloud::{CloudStatusData, CloudSyncData};
 
+use crate::health::SettingsHealth;
+
 /// One page of history, and how much of it could not be shown.
 ///
 /// `skipped_undecryptable` is on the wire because the alternative is what v1
@@ -319,6 +321,15 @@ pub struct StatusData {
     /// `#[serde(default)]` for the same reason as the field above.
     #[serde(default)]
     pub counters: DiagnosticCounters,
+
+    /// Set when the persisted settings did not read back cleanly.
+    ///
+    /// `None` is the healthy case and the only one a client may render
+    /// silently. Anything else means the daemon is running on values the user
+    /// did not choose, and the failure it exists for is a private-mode user
+    /// never told that capture stopped following their setting.
+    #[serde(default)]
+    pub settings_health: Option<SettingsHealth>,
 }
 
 /// The private capture gate's authoritative value.

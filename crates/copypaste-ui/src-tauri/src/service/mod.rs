@@ -525,6 +525,7 @@ mod tests {
                 private_mode: false,
                 private_mode_epoch: 0,
                 counters: DiagnosticCounters::default(),
+                settings_health: None,
             })
         }
 

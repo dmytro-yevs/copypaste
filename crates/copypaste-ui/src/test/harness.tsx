@@ -74,6 +74,7 @@ export function status(over: Partial<StatusData> = {}): StatusData {
       index_purged: 0,
       uptime_secs: 60,
     },
+    settings_health: null,
     ...over,
     private_mode: over.private_mode ?? false,
     private_mode_epoch: over.private_mode_epoch ?? 0,
