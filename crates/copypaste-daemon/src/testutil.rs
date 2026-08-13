@@ -146,3 +146,22 @@ pub fn contents(state: &Arc<AppState>) -> Vec<String> {
         })
         .collect()
 }
+
+/// A paired device this daemon has reached before, so [`crate::p2p::poll`]
+/// treats it as dialable rather than as unauthenticated discovery hearsay.
+pub fn peer_at(state: &Arc<AppState>, name: &str, addr: &str) -> copypaste_p2p::peers::Peer {
+    let token = copypaste_p2p::PairingToken::generate();
+    let peer = copypaste_p2p::peers::Peer {
+        pairing_id: token.pairing_id(),
+        name: name.to_string(),
+        psk: token.psk(),
+        last_addr: Some(addr.parse().expect("a peer address")),
+        last_seen_ms: copypaste_core::now_ms(),
+    };
+    state
+        .p2p
+        .peers()
+        .upsert(peer.clone())
+        .expect("store a peer");
+    peer
+}

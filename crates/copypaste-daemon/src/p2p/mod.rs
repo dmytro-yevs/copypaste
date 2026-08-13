@@ -43,7 +43,13 @@ pub struct P2p {
     /// Woken by a local capture and by `copypaste sync`, so neither waits out
     /// the idle interval. Mirrors `Cloud::wake`.
     wake: Notify,
-    /// The idle cadence [`poll::run`] waits on.
+    /// The idle cadence [`poll::run`] waits on, capped at the shared
+    /// **non-push** ceiling.
+    ///
+    /// `Idle::default()`'s five minutes is only defensible for cloud sync
+    /// because `cloud::realtime` carries the latency in front of it. Peer sync
+    /// has no push channel at all, so the poll is the sole path by which one
+    /// idle laptop learns the other copied something.
     idle: Idle,
     /// One outbound pass over the peers at a time. Two passes dial the same
     /// peers at once, and the second one is refused by the far side's session
@@ -67,7 +73,10 @@ impl P2p {
         Self {
             node: Arc::new(Node::new(peers, discovery, port, lan_visible)),
             wake: Notify::new(),
-            idle: Idle::default(),
+            idle: Idle::new(
+                crate::cadence::MIN_POLL_INTERVAL,
+                crate::cadence::MAX_POLL_INTERVAL_WITHOUT_PUSH,
+            ),
             rounds: RoundGate::new(),
         }
     }

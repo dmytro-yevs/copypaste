@@ -100,14 +100,21 @@ async fn round(
 
     let mut moved = 0u64;
     for peer in &reachable {
-        // Between peers, not inside a session: a session that has already
-        // exchanged summaries finishes, and teardown does not wait out the
-        // rest of a peer list that may be asleep.
-        if *shutdown.borrow() {
-            debug!("a peer sync pass was cut short for shutdown");
-            break;
-        }
-        let result = super::handlers::sync_one(state, peer).await;
+        // Inside the session, not only between peers. A peer that answers the
+        // TCP connect and then says nothing has no timeout of its own, so
+        // checking only between peers let one asleep laptop hold teardown for
+        // as long as it stayed silent — past the app's quit budget, which then
+        // kills the daemon and takes the peer flush and the socket removal with
+        // it. Abandoning a session costs nothing: nothing is committed until it
+        // completes.
+        let result = tokio::select! {
+            biased;
+            () = crate::shutdown::requested(Some(shutdown.clone())) => {
+                debug!("a peer sync pass was cut short for shutdown");
+                break;
+            }
+            result = super::handlers::sync_one(state, peer) => result,
+        };
         moved += u64::from(result.sent) + u64::from(result.received);
         if result.received > 0 {
             state.note_remote_change();
@@ -125,8 +132,8 @@ async fn round(
 mod tests {
     use super::*;
 
-    use crate::cadence::MIN_POLL_INTERVAL;
-    use crate::testutil::test_state;
+    use crate::cadence::{MAX_POLL_INTERVAL_WITHOUT_PUSH, MIN_POLL_INTERVAL};
+    use crate::testutil::{peer_at, test_state};
     use std::time::Duration;
 
     /// One pass, with a permit of its own and nothing asking for shutdown.
@@ -173,6 +180,79 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), state.p2p.wake_signal())
             .await
             .expect("the wake must be waiting for the loop");
+    }
+
+    /// The ceiling that applies when nothing pushes.
+    ///
+    /// `Idle::default()` caps at five minutes, and its own doc comment says
+    /// that is only defensible because `cloud::realtime` carries the latency in
+    /// front of it. Peer sync has no push channel, so an idle pair of laptops
+    /// would have waited out five minutes per hop before seeing each other's
+    /// clipboard.
+    #[test]
+    fn the_peer_cadence_stops_at_the_non_push_ceiling() {
+        let (state, _dir) = test_state("alpha");
+        for _ in 0..20 {
+            state.p2p.idle().note_activity(false);
+        }
+        assert_eq!(state.p2p.idle().interval(), MAX_POLL_INTERVAL_WITHOUT_PUSH);
+        assert!(MAX_POLL_INTERVAL_WITHOUT_PUSH < Duration::from_secs(300));
+    }
+
+    /// A peer that completes the TCP connect and then says nothing. There is no
+    /// timeout inside the session, so before the select below this round waited
+    /// on it for as long as it stayed quiet — past the app's fifteen-second
+    /// quit budget, which then killed the daemon and took the peer flush and
+    /// the socket removal with it.
+    #[tokio::test]
+    async fn a_silent_peer_does_not_hold_shutdown() {
+        let (state, _dir) = test_state("alpha");
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = silent.local_addr().unwrap();
+        // Accepted and then never answered, which is what makes it silent
+        // rather than merely closed.
+        let _accepting = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = silent.accept().await {
+                held.push(stream);
+            }
+        });
+        peer_at(&state, "asleep", &addr.to_string());
+
+        let (tx, rx) = watch::channel(false);
+        let permit = state.p2p.try_begin_round().expect("no pass in flight");
+        let pass = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { round(&state, permit, &rx).await }
+        });
+        // Long enough for the session to be inside its handshake read.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        tx.send(true).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), pass)
+            .await
+            .expect("the round must abandon a silent peer on shutdown")
+            .expect("no panic");
+    }
+
+    /// The other half of the same rule: cancellation must not become the
+    /// ordinary path. A reachable-but-refusing peer still completes the round,
+    /// so an unpaired-at-the-far-end device does not look like a shutdown.
+    #[tokio::test]
+    async fn a_round_nobody_cancels_still_finishes_its_peer_list() {
+        let (state, _dir) = test_state("alpha");
+        // Bound and immediately dropped, so connect is refused rather than left
+        // hanging: the round has to come back on its own.
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = closed.local_addr().unwrap();
+        drop(closed);
+        peer_at(&state, "refusing", &addr.to_string());
+
+        let permit = state.p2p.try_begin_round().expect("no pass in flight");
+        let (_tx, rx) = watch::channel(false);
+        tokio::time::timeout(Duration::from_secs(20), round(&state, permit, &rx))
+            .await
+            .expect("a refused peer must not wedge the round");
     }
 
     /// The master switch is read at the top of each round, which is what makes

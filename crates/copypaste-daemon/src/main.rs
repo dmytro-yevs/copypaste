@@ -13,6 +13,7 @@ mod notify;
 mod p2p;
 mod server;
 mod settings;
+mod shutdown;
 mod startup;
 mod state;
 mod sync;
@@ -34,7 +35,7 @@ use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
 use crate::settings::Settings;
-use crate::startup::{halt_or_fail, relocate, remove_socket, wait_for_shutdown};
+use crate::startup::{halt_or_fail, relocate, wait_for_shutdown};
 
 pub use crate::state::AppState;
 
@@ -225,38 +226,20 @@ async fn main() -> anyhow::Result<()> {
     state.set_ready(false);
     state.request_shutdown();
 
-    // Both tasks finish the unit of work they are in before observing the
-    // signal, so a capture already past the clipboard read still reaches the
-    // database.
-    if let Err(e) = capture.await {
-        warn!(error = ?e, "capture loop did not shut down cleanly");
-    }
-    if let Some(peers_task) = peers_task {
-        if let Err(e) = peers_task.await {
-            warn!(error = ?e, "peer listener did not shut down cleanly");
-        }
-    }
-    if let Err(e) = cloud_task.await {
-        warn!(error = ?e, "cloud sync loop did not shut down cleanly");
-    }
-    if let Err(e) = refresh_task.await {
-        warn!(error = ?e, "cloud refresh loop did not shut down cleanly");
-    }
-    if let Err(e) = realtime_task.await {
-        warn!(error = ?e, "cloud realtime loop did not shut down cleanly");
-    }
-    if let Err(e) = peer_sync.await {
-        warn!(error = ?e, "peer sync loop did not shut down cleanly");
-    }
-    if let Err(e) = server.await {
-        warn!(error = ?e, "ipc server did not shut down cleanly");
-    }
-
-    if let Err(e) = state.p2p.peers().flush() {
-        warn!(error = ?e, "could not persist the paired-device list on shutdown");
-    }
-
-    remove_socket(&socket_path);
+    // Each loop finishes the unit of work it is in before observing the signal,
+    // so a capture already past the clipboard read still reaches the database —
+    // but the wait for them is bounded, because the peer flush and the socket
+    // removal below are what a killed daemon never reaches.
+    let mut loops = vec![
+        ("capture", capture),
+        ("cloud sync", cloud_task),
+        ("cloud refresh", refresh_task),
+        ("cloud realtime", realtime_task),
+        ("peer sync", peer_sync),
+        ("ipc server", server),
+    ];
+    loops.extend(peers_task.map(|task| ("peer listener", task)));
+    shutdown::teardown(&state, loops, &socket_path).await;
     Ok(())
 }
 
