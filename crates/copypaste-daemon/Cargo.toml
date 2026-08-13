@@ -80,6 +80,10 @@ security-framework.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 copypaste-cloud = { path = "../copypaste-cloud", features = ["test-endpoints"] }
+# The paste-file staging diagnostics are the one place a filename, a content id
+# or decrypted bytes could reach a log, so the tests assert on what is emitted
+# rather than on a reading of the source. Capturing that needs a subscriber.
+tracing-subscriber.workspace = true
 
 [features]
 # Demos and profiling only. Release and product builds pass no features.

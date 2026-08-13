@@ -158,6 +158,7 @@ mime_guess = "2"
 
 [dev-dependencies]
 tempfile = "3"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [features]
 # Named so the cfg in keystore/mod.rs is not an unexpected one. Never enabled.

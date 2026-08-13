@@ -954,6 +954,11 @@ keep both properties).
 - **T-88 — a restart is a sweep.** Startup sweeps before the first paste-back,
   and if that pass leaves work behind it starts the sweeper immediately rather
   than waiting for a paste-back that may never come.
+- **T-91 — a failed paste-back never leaves unowned plaintext.** A staging
+  failure after the temporary file exists reports the rollback failure — error
+  kind only — starts the sweeper even though `materialize` returns `Err`, and
+  the leaked decrypted bytes are removed by the deadline like any other. A
+  paste-back that put nothing on disk still starts no sweeper.
 
 ### 5.14 Resource & platform
 
