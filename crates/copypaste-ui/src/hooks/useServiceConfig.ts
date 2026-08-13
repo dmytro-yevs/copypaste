@@ -33,7 +33,7 @@ import {
   setPrivateMode,
   type PrivateModeData,
 } from "@/lib/ipc";
-import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/useHistory";
+import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/historyRefresh";
 
 export const CONFIG_KEY = ["config"] as const;
 export const PRIVATE_MODE_KEY = ["private-mode"] as const;

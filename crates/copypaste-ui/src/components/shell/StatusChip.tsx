@@ -10,7 +10,7 @@ import {
   peerLastSyncAt,
 } from "@/components/devices/peerState";
 import { SYNC_KEY, usePeers } from "@/hooks/useDevices";
-import { useStatus } from "@/hooks/useHistory";
+import { useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError } from "@/lib/errors";
