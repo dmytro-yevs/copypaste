@@ -43,6 +43,7 @@ test("prereleases and releases are strictly monotonic", () => {
   const versions = [
     "2.0.0-alpha.15",
     "2.0.0-alpha.16",
+    "2.0.0-alpha.17",
     "2.0.0-beta.0",
     "2.0.0-rc.0",
     "2.0.0",
@@ -52,6 +53,7 @@ test("prereleases and releases are strictly monotonic", () => {
   assert.deepEqual(codes, [...codes].sort((a, b) => a - b));
   assert.equal(new Set(codes).size, codes.length);
   assert.equal(versionCodeFor("2.0.0-alpha.16"), 200000016);
+  assert.equal(versionCodeFor("2.0.0-alpha.17"), 200000017);
 });
 
 test("unsupported SemVer shapes fail closed", () => {
@@ -63,6 +65,7 @@ test("unsupported SemVer shapes fail closed", () => {
 test("upgrade fixture precedes the product version", () => {
   const cases = {
     "2.0.0-alpha.16": "2.0.0-alpha.15",
+    "2.0.0-alpha.17": "2.0.0-alpha.16",
     "2.0.0-beta.0": "2.0.0-alpha.2999",
     "2.0.0-rc.0": "2.0.0-beta.2999",
     "2.0.1-alpha.0": "2.0.0",
