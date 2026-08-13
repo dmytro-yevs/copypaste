@@ -59,6 +59,13 @@ describe("the startup boundary", () => {
     expect(notice().textContent).toContain("The app did not finish starting.");
   });
 
+  test("a name off Object.prototype is not a stage", () => {
+    reportStartupFailure(root(), { startupStage: "toString" });
+
+    expect(notice().dataset.startupFailure).toBe("unknown");
+    expect(notice().textContent).toContain("The app did not finish starting.");
+  });
+
   // Rule 4: a failed import's message is a URL, and neither the notice nor the
   // log may repeat it.
   test("keeps the failed asset out of the notice and the log", async () => {
