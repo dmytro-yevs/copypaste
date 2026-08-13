@@ -38,8 +38,9 @@ const NOT_READY_BACKOFF: Duration = Duration::from_millis(500);
 /// One end-to-end budget covers connect, write, reply and readiness retries.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// These methods move a bounded but potentially large history on local disk.
-/// 180 seconds matches manifest 04's long client budget for the same methods.
+/// Manifest 04's long client budget, for the verbs
+/// [`Method::is_long_running`] names: local I/O across a whole history, a round
+/// trip over the network, or a step waiting on a human.
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// A CLI invocation is one command, but a `not_ready` retry reconnects, so ids
@@ -106,16 +107,29 @@ impl Connection {
     }
 }
 
+/// Run one step of a request against the deadline the whole request shares.
+///
+/// A blown deadline is [`CliError::DaemonTimeout`], never `DaemonUnreachable`.
+/// Reaching this point means a listener took the connection, so the daemon is
+/// there; only an outright connect *error* means it is not, and that is mapped
+/// by the callers below.
 async fn before<T>(deadline: Instant, future: impl Future<Output = T>) -> Result<T, CliError> {
     timeout_at(deadline, future)
         .await
-        .map_err(|_| CliError::DaemonUnreachable)
+        .map_err(|_| CliError::DaemonTimeout)
 }
 
+/// The classification is [`copypaste_ipc`]'s, not this crate's.
+///
+/// It used to be a `match` here naming three methods, so `sync`, `cloud sync`
+/// and `pair` ran on the five-second budget: a sync over a slow LAN reported a
+/// failure the daemon had not had — and reported it as *unreachable*, about a
+/// daemon that was working. One list, shared with the app (AGENTS.md rule 1).
 fn timeout_for(method: &Method) -> Duration {
-    match method {
-        Method::Import { .. } | Method::Backup { .. } | Method::Restore { .. } => TRANSFER_TIMEOUT,
-        _ => REQUEST_TIMEOUT,
+    if method.is_long_running() {
+        TRANSFER_TIMEOUT
+    } else {
+        REQUEST_TIMEOUT
     }
 }
 
@@ -203,7 +217,7 @@ where
             .sleep(sleep),
     )
     .await
-    .map_err(|_| CliError::DaemonUnreachable)?;
+    .map_err(|_| CliError::DaemonTimeout)?;
 
     match result {
         Ok(response) => Ok(response),
@@ -650,12 +664,16 @@ mod tests {
         assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
     }
 
+    /// A blown deadline against a live stub is a timeout, not an unreachable
+    /// daemon: the stub accepted the connection, so it is plainly running.
     fn assert_deadline_error_is_prompt_and_pathless(err: &CliError, started: Instant, path: &Path) {
-        assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
+        assert_eq!(err.exit_code(), crate::error::EXIT_TIMEOUT);
+        assert!(matches!(err, CliError::DaemonTimeout), "{err:?}");
         assert!(started.elapsed() < Duration::from_secs(2));
         let message = err.user_message();
         assert!(!message.contains(&*path.to_string_lossy()), "{message}");
         assert!(!message.contains('/'), "{message}");
+        assert!(!message.contains("cannot reach"), "{message}");
     }
 
     #[cfg(unix)]
@@ -736,8 +754,11 @@ mod tests {
         assert_eq!(observed.unwrap().item_count, 7);
     }
 
+    /// The network verbs are the ones this test was missing. On the five-second
+    /// budget a `sync` across a slow LAN, a cloud round or a pairing handshake
+    /// failed while the daemon was still working, and failed as *unreachable*.
     #[test]
-    fn only_local_history_transfers_receive_the_long_deadline() {
+    fn history_transfers_and_network_rounds_receive_the_long_deadline() {
         for method in [
             Method::Import { items: Vec::new() },
             Method::Backup {
@@ -747,17 +768,34 @@ mod tests {
                 src_path: "backup.db".into(),
                 confirm: true,
             },
+            Method::SyncNow { pairing_id: None },
+            Method::CloudSyncNow,
+            Method::CloudSignIn {
+                email: "a@b.c".into(),
+                password: "p".into(),
+                passphrase: "s".into(),
+            },
+            Method::PairJoin {
+                code: "code".into(),
+                addr: "127.0.0.1:1".into(),
+            },
+            Method::PairConfirm { accept: true },
         ] {
-            assert_eq!(timeout_for(&method), TRANSFER_TIMEOUT);
+            assert_eq!(timeout_for(&method), TRANSFER_TIMEOUT, "{method:?}");
         }
+        // Both read a cache the daemon already holds. `Rescan` republishes an
+        // mDNS record on the way past and still blocks on nothing.
         for method in [
             Method::Status,
+            Method::Discovered,
+            Method::Rescan,
+            Method::CloudStatus,
             Method::Export {
                 limit: 0,
                 include_sensitive: false,
             },
         ] {
-            assert_eq!(timeout_for(&method), REQUEST_TIMEOUT);
+            assert_eq!(timeout_for(&method), REQUEST_TIMEOUT, "{method:?}");
         }
     }
 
@@ -870,7 +908,10 @@ mod tests {
         let err = err.unwrap_err();
 
         assert_eq!(ids.len(), 1);
-        assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
+        // The stub answered the connection and then went quiet, so this is a
+        // timeout — not "unreachable", which would send the user to start a
+        // daemon that is plainly already there.
+        assert_eq!(err.exit_code(), crate::error::EXIT_TIMEOUT);
     }
 
     #[cfg(unix)]

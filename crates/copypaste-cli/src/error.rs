@@ -24,12 +24,23 @@ pub const EXIT_UNREACHABLE: i32 = 1;
 pub const EXIT_NOT_FOUND: i32 = 2;
 /// Everything else.
 pub const EXIT_OTHER: i32 = 3;
+/// The daemon took the request and did not answer in time.
+pub const EXIT_TIMEOUT: i32 = 4;
 
 #[derive(Debug)]
 pub enum CliError {
     /// The socket is absent, refused the connection, or the daemon hung up
     /// before answering. Exit [`EXIT_UNREACHABLE`].
     DaemonUnreachable,
+    /// The connection was accepted and no reply arrived inside the budget.
+    /// Exit [`EXIT_TIMEOUT`].
+    ///
+    /// Split from [`Self::DaemonUnreachable`] because the two need opposite
+    /// things from the user. "Start it with `copypaste-daemon`" is the wrong
+    /// advice for a daemon that is already running and busy, and a script that
+    /// retried on exit 1 would spend its retries starting a second daemon that
+    /// cannot bind. A running daemon must never be reported as unreachable.
+    DaemonTimeout,
     /// The daemon answered `ok: false`. `code` is `None` for an untagged
     /// failure, which the protocol permits and clients must tolerate.
     Daemon {
@@ -56,6 +67,7 @@ impl CliError {
     pub fn exit_code(&self) -> i32 {
         match self {
             CliError::DaemonUnreachable => EXIT_UNREACHABLE,
+            CliError::DaemonTimeout => EXIT_TIMEOUT,
             // A missing device is the same answer to a script as a missing
             // item — "the thing you named is not here" — so splitting the code
             // on the wire must not split the exit status.
@@ -76,6 +88,12 @@ impl CliError {
                 // local username (AGENTS.md rule 4).
                 "cannot reach the CopyPaste daemon. Start it with `copypaste-daemon`, \
                  then run this command again."
+                    .to_string()
+            }
+            CliError::DaemonTimeout => {
+                "the CopyPaste daemon accepted the request but did not answer in time. \
+                 It is running; try again, or check whether it is busy with a large \
+                 import, backup or sync."
                     .to_string()
             }
             CliError::Daemon {
@@ -208,6 +226,24 @@ mod tests {
         let msg = CliError::DaemonUnreachable.user_message();
         assert!(msg.contains("copypaste-daemon"), "{msg}");
         assert!(!msg.contains('/'), "message must not contain a path: {msg}");
+    }
+
+    /// The distinction the variant exists for. A running daemon reported as
+    /// unreachable sends a user to start a second one, which cannot bind.
+    #[test]
+    fn a_slow_daemon_is_not_reported_as_a_missing_one() {
+        let slow = CliError::DaemonTimeout;
+        assert_eq!(slow.exit_code(), EXIT_TIMEOUT);
+        assert_ne!(slow.exit_code(), CliError::DaemonUnreachable.exit_code());
+
+        let msg = slow.user_message();
+        assert!(!msg.contains("cannot reach"), "{msg}");
+        assert!(
+            !msg.contains("Start it with"),
+            "advice to start a daemon that is already running: {msg}"
+        );
+        assert!(msg.contains("running"), "{msg}");
+        assert!(!msg.contains('/'), "{msg}");
     }
 
     #[test]

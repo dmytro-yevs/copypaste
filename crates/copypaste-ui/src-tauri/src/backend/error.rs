@@ -75,6 +75,17 @@ pub enum BackendError {
     #[error("The background service isn't running.")]
     Unreachable,
 
+    /// The daemon accepted the connection and then did not answer inside the
+    /// client budget.
+    ///
+    /// Deliberately not [`Self::Unreachable`]. A process that took the
+    /// connection is alive, and reporting it as "not running" would put a Start
+    /// button in front of a daemon that is already holding the endpoint — the
+    /// one action that cannot help. It also has to stay distinct so
+    /// `Supervisor::state` reads it as `Unhealthy` rather than `Stopped`.
+    #[error("The background service isn't responding.")]
+    Timeout,
+
     /// The daemon answered, and said no.
     #[error("{message}")]
     Daemon { message: String, ui: UiError },
@@ -209,6 +220,7 @@ impl BackendError {
     pub fn ui_error(&self) -> UiError {
         match self {
             Self::Unreachable => UiError::new("offline", true),
+            Self::Timeout => UiError::new("timeout", true),
             Self::Daemon { ui, .. } => ui.clone(),
             Self::NotReady => UiError::from_error_code(Some(ErrorCode::NotReady)),
             Self::ProtocolMismatch => UiError::from_error_code(Some(ErrorCode::ProtocolMismatch)),
@@ -269,6 +281,7 @@ mod tests {
     fn no_variant_renders_a_path() {
         let cases = [
             BackendError::Unreachable,
+            BackendError::Timeout,
             BackendError::NotReady,
             BackendError::ProtocolMismatch,
             BackendError::NotFound("That item is no longer there."),
@@ -353,6 +366,24 @@ mod tests {
         assert_ne!(item.to_string(), device.to_string());
         assert!(item.to_string().contains("item"), "{item}");
         assert!(device.to_string().contains("device"), "{device}");
+    }
+
+    /// A daemon that took the connection and went quiet is not a daemon that
+    /// is missing, and the two must not render or serialise alike: one asks the
+    /// user to start the service, the other cannot be fixed that way.
+    #[test]
+    fn a_silent_daemon_does_not_read_as_a_missing_one() {
+        assert_ne!(
+            BackendError::Timeout.to_string(),
+            BackendError::Unreachable.to_string()
+        );
+        assert_eq!(
+            serde_json::to_string(&BackendError::Timeout).unwrap(),
+            r#"{"code":"timeout","retryable":true}"#
+        );
+        let shown = BackendError::Timeout.to_string();
+        assert!(!shown.contains('/'), "{shown}");
+        assert!(!shown.contains("daemon"), "{shown}");
     }
 
     #[test]

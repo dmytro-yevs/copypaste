@@ -359,6 +359,37 @@ pub enum Method {
     Shutdown,
 }
 
+impl Method {
+    /// Whether this verb needs the long client budget rather than the ordinary
+    /// one (manifest 04 §3.4, `CopyPaste-8ebg.4`).
+    ///
+    /// Here rather than in each client because v1 kept three models of the wire
+    /// contract and they disagreed (AGENTS.md rule 1). A client that classified
+    /// this on its own would eventually cancel an operation the other client
+    /// waits for, and the difference would show up as an intermittent failure
+    /// on one surface only.
+    ///
+    /// Three reasons, all of them "the work is genuinely longer than a request":
+    /// local I/O across a whole history, a round trip over the network, and a
+    /// step that waits on a human comparing a SAS. The daemon writes nothing
+    /// until its handler returns, so a budget shorter than the work does not
+    /// protect the client — it cancels an operation that was going to succeed.
+    #[must_use]
+    pub fn is_long_running(&self) -> bool {
+        matches!(
+            self,
+            Self::Import { .. }
+                | Self::Backup { .. }
+                | Self::Restore { .. }
+                | Self::SyncNow { .. }
+                | Self::CloudSyncNow
+                | Self::CloudSignIn { .. }
+                | Self::PairJoin { .. }
+                | Self::PairConfirm { .. }
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +405,72 @@ mod tests {
         assert!(!status.private_mode);
         assert_eq!(status.private_mode_epoch, 0);
         assert_eq!(status.counters, DiagnosticCounters::default());
+        assert!(status.settings_health.is_none());
+    }
+
+    /// The classification both clients share. `Status` is the one that matters
+    /// most for the ordinary budget: it is what quit and restart poll, so a
+    /// long budget there is a hung app.
+    #[test]
+    fn only_the_verbs_that_outlast_a_request_get_the_long_budget() {
+        for long in [
+            Method::Import { items: Vec::new() },
+            Method::Backup {
+                dest_path: "d".into(),
+            },
+            Method::Restore {
+                src_path: "s".into(),
+                confirm: true,
+            },
+            Method::SyncNow { pairing_id: None },
+            Method::CloudSyncNow,
+            Method::PairJoin {
+                code: "c".into(),
+                addr: "a".into(),
+            },
+            Method::PairConfirm { accept: true },
+        ] {
+            assert!(long.is_long_running(), "{long:?}");
+        }
+        for ordinary in [
+            Method::Status,
+            Method::Shutdown,
+            Method::List {
+                limit: 1,
+                cursor: None,
+            },
+            Method::GetConfig,
+            Method::GetPrivateMode,
+            Method::Peers,
+            Method::Discovered,
+            // `rescan` republishes an mDNS record and returns the cache it
+            // already holds; it blocks on nothing. The long budget here left
+            // the Refresh button — `disabled={rescan.isPending}` — dead for
+            // three minutes whenever a reply went missing.
+            Method::Rescan,
+            Method::CloudStatus,
+            Method::Watch,
+        ] {
+            assert!(!ordinary.is_long_running(), "{ordinary:?}");
+        }
+    }
+
+    /// Absent means healthy, and it has to stay distinguishable from a health
+    /// record that reports nothing wrong — a client renders one silently and
+    /// must never render the other that way.
+    #[test]
+    fn an_absent_settings_health_is_not_the_same_as_an_empty_one() {
+        assert!(!SettingsHealth::default().is_degraded());
+        assert!(SettingsHealth {
+            record_unreadable: true,
+            unreadable_fields: Vec::new(),
+        }
+        .is_degraded());
+        assert!(SettingsHealth {
+            record_unreadable: false,
+            unreadable_fields: vec!["private_mode".into()],
+        }
+        .is_degraded());
     }
 
     #[test]

@@ -227,18 +227,37 @@ Its id is recovered by `echo_id_from_prefix` → `extract_json_string_field(pref
 |---|---|---|---|
 | `IPC_READ_TIMEOUT` | 30 s per read (applied to both phases) | Daemon | `ipc/consts.rs:315` (CopyPaste-cce1) |
 | `IPC_WRITE_TIMEOUT` | 10 s per write | Daemon | `ipc/consts.rs:331` (CopyPaste-c4q2.24) |
-| CLI `IO_TIMEOUT` | 5 s read + 5 s write | CLI | `cli/src/ipc.rs:55` |
-| Tauri `DEFAULT_READ_TIMEOUT` | 10 s | UI bridge | `src-tauri/src/ipc.rs:42` |
-| Tauri `LONG_READ_TIMEOUT` | 180 s | UI bridge | `src-tauri/src/ipc.rs:60` |
+| CLI ordinary request | 5 s end to end | CLI | `cli/src/client.rs` |
+| Tauri `DEFAULT_BUDGET` | 10 s end to end | UI backend | `backend/daemon.rs` |
+| Tauri / CLI long budget | 180 s end to end | Both clients | `Method::is_long_running` |
 | Takeover probe | 3 s | Daemon startup | `ipc/socket.rs:60` |
 | `list_peers` bootstrap join | 5 s | Daemon-internal | `handlers_peers.rs:81` (CopyPaste-7mf) |
 
-Tauri applies `LONG_READ_TIMEOUT` to exactly: `vacuum`, `db_backup`, `db_restore`,
-`import`, `pair_with_discovered`, `pair_peer_with_password` (CopyPaste-8ebg.4) —
-because those block on real I/O or on a **human** SAS confirmation. The daemon
-writes nothing until the handler completes, so any rewrite that keeps synchronous
-request/response must preserve these client-side budgets or introduce progress
-frames.
+**v2 amendment.** v1 applied the long budget to exactly `vacuum`, `db_backup`,
+`db_restore`, `import`, `pair_with_discovered`, `pair_peer_with_password`
+(CopyPaste-8ebg.4). v2 keeps the reason and widens the set, because the same
+argument covers work v1 never drove from a client: `sync_now`, `cloud_sync_now`
+and `cloud_sign_in` are round trips over a network, and five or ten seconds
+cancels one the daemon was going to finish. `rescan` is **not** in the set — it
+republishes an mDNS record and returns a cache, blocking on nothing, and the
+long budget left the Refresh button disabled for three minutes. The set is
+`Method::is_long_running` in `copypaste-ipc` — one list both clients read, since
+v1 kept three models of this contract and they disagreed.
+
+The budget is **end to end** rather than per read: connect, write and reply
+share one deadline, because the number a caller can reason about is how long the
+request can take, not how long one of its three steps can.
+
+The daemon writes nothing until the handler completes, so a client budget
+shorter than the work does not protect the client — it cancels an operation that
+was going to succeed. Any rewrite keeping synchronous request/response must
+preserve these budgets or introduce progress frames.
+
+**A blown budget is not "unreachable".** The connection was accepted, so a
+process is there. Both clients report it as its own condition — `EXIT_TIMEOUT`
+(4) in the CLI, `BackendError::Timeout` in the app, which `Supervisor::state`
+reads as `Unhealthy` rather than `Stopped`. Reporting it as unreachable told a
+user to start a daemon that was already holding the endpoint.
 
 On read timeout the daemon **drops the connection without sending a response** —
 the client sees EOF, which its retry logic must handle.
@@ -1039,7 +1058,7 @@ long form is what ships on the wire.**
 | `CopyPaste-c4q2.10` | `map_content_type_to_uti` lives in `copypaste-ipc` as the single content_type→UTI source of truth. |
 | `CopyPaste-8ebg.59` / `.65` | `MAX_IPC_REQUEST_BYTES` and `QR_PAIRING_TTL_SECS` are single-source-of-truth in `copypaste-ipc`; `copypaste-p2p` depends on it. |
 | `CopyPaste-c4q2.2` | The `src-tauri` socket-path copy was collapsed onto `copypaste_ipc::paths::socket_path()`. |
-| `CopyPaste-8ebg.4` | Tauri applies a 180 s read timeout to `vacuum`/`db_backup`/`db_restore`/`import`/`pair_with_discovered`/`pair_peer_with_password`. |
+| `CopyPaste-8ebg.4` | The long client budget covers work that outlasts a request. v2 set: see `Method::is_long_running` and §3.4's amendment. |
 | `CopyPaste-liaz` | Retry exhaustion returns `Err`, never `process::exit` — `Zeroizing` destructors must run. |
 | `CopyPaste-FEACLI-8` | Client keeps `raw_error_code` verbatim so unknown daemon codes are still displayed. |
 | `CopyPaste-2l1e` | Exhaustive serde round-trip test over every `ErrorCode` variant, with a no-`_`-arm match to force updates. |
