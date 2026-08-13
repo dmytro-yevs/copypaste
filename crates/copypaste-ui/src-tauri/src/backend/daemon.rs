@@ -25,12 +25,23 @@
 //! decision about what to do with in-flight requests when the peer goes away.
 //! Connecting per call makes "the daemon went away" the same code path as "the
 //! daemon was never there", which is also what the user sees.
+//!
+//! # Every call is bounded
+//!
+//! One deadline spans connect, write and read (manifest 04 §3.4). Without it a
+//! daemon that accepts the connection and never answers holds the caller
+//! forever, and the callers include quit and restart — so the app hangs on the
+//! way out with no window left to explain why. A blown budget is
+//! [`BackendError::Timeout`], never `Unreachable`: the process took the
+//! connection, so it is alive.
 
 mod pairing;
 mod response;
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use copypaste_ipc::transport;
 use copypaste_ipc::{
@@ -41,6 +52,7 @@ use copypaste_ipc::{
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::{self, Receiver};
+use tokio::time::{timeout_at, Instant};
 use tokio_util::codec::{Framed, LinesCodec};
 
 use super::{Backend, BackendError, Page, Result};
@@ -49,6 +61,33 @@ use response::*;
 /// Ids only have to be unique within this process; the daemon echoes them back
 /// so a reply can be matched to its request.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Manifest 04 §3.4 `DEFAULT_READ_TIMEOUT`. Long enough for a cold SQLCipher
+/// page read, short enough that quitting the app is not a wait.
+const DEFAULT_BUDGET: Duration = Duration::from_secs(10);
+
+/// Manifest 04 §3.4 `LONG_READ_TIMEOUT`, for the verbs
+/// [`Method::is_long_running`] names.
+const LONG_BUDGET: Duration = Duration::from_secs(180);
+
+fn budget_for(method: &Method) -> Duration {
+    if method.is_long_running() {
+        LONG_BUDGET
+    } else {
+        DEFAULT_BUDGET
+    }
+}
+
+/// Run one step of a request against the deadline the whole request shares.
+///
+/// Per-step budgets were the alternative and are worse: three ten-second steps
+/// are a thirty-second call, and the number a caller needs to reason about is
+/// how long the *request* can take.
+async fn within<T>(deadline: Instant, step: impl Future<Output = T>) -> Result<T> {
+    timeout_at(deadline, step)
+        .await
+        .map_err(|_| BackendError::Timeout)
+}
 
 #[derive(Debug, Clone)]
 pub struct DaemonBackend {
@@ -76,9 +115,10 @@ impl DaemonBackend {
     /// Send one request and return its payload.
     async fn call(&self, method: Method) -> Result<Option<ResponseData>> {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let deadline = Instant::now() + budget_for(&method);
 
-        let stream = transport::connect(&self.endpoint)
-            .await
+        let stream = within(deadline, transport::connect(&self.endpoint))
+            .await?
             .map_err(|_| BackendError::Unreachable)?;
         let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
 
@@ -89,12 +129,11 @@ impl DaemonBackend {
         })
         .map_err(|_| BackendError::Internal("Could not encode the request.".into()))?;
 
-        framed
-            .send(line)
-            .await
+        within(deadline, framed.send(line))
+            .await?
             .map_err(|_| BackendError::Unreachable)?;
 
-        let line = match framed.next().await {
+        let line = match within(deadline, framed.next()).await? {
             Some(Ok(line)) => line,
             // A hang-up with no reply is the daemon's read-timeout behaviour
             // and is indistinguishable from it having gone away.
@@ -113,6 +152,24 @@ impl DaemonBackend {
 
         into_data(response)
     }
+}
+
+/// The acknowledgement contract, checked before the stream is handed over.
+///
+/// The same two checks every other reply gets. The id proves the
+/// acknowledgement answers *this* request rather than a queued one, and the
+/// empty shape proves a subscription was opened rather than some other payload
+/// returned — either of which would otherwise be accepted and then read as the
+/// first event.
+fn acknowledged(id: u64, reply: &str) -> Result<()> {
+    let response: Response = serde_json::from_str(reply)
+        .map_err(|_| BackendError::Internal("Could not understand the daemon's reply.".into()))?;
+    if response.id != id {
+        return Err(BackendError::Internal(
+            "The daemon answered a different request.".into(),
+        ));
+    }
+    expect_empty(into_data(response)?)
 }
 
 impl Backend for DaemonBackend {
@@ -357,8 +414,12 @@ impl Backend for DaemonBackend {
     /// owns it and ends when the receiver is dropped, which is what makes the
     /// lifetime the caller's rather than a background task's.
     async fn watch(&self) -> Result<Receiver<EventData>> {
-        let stream = transport::connect(&self.endpoint)
-            .await
+        // The budget covers the handshake only. Past the acknowledgement,
+        // silence is the normal state of a subscription — a deadline there
+        // would drop the stream on a quiet clipboard.
+        let deadline = Instant::now() + DEFAULT_BUDGET;
+        let stream = within(deadline, transport::connect(&self.endpoint))
+            .await?
             .map_err(|_| BackendError::Unreachable)?;
         let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
 
@@ -369,22 +430,16 @@ impl Backend for DaemonBackend {
             method: Method::Watch,
         })
         .map_err(|_| BackendError::Internal("Could not encode the request.".into()))?;
-        framed
-            .send(line)
-            .await
+        within(deadline, framed.send(line))
+            .await?
             .map_err(|_| BackendError::Unreachable)?;
 
         // The acknowledgement is read here rather than in the task, so a
         // daemon that refuses `watch` — an older one, or one at its watcher
         // cap — is an error the caller can fall back from instead of a
         // subscription that silently never delivers anything.
-        match framed.next().await {
-            Some(Ok(reply)) => {
-                let response: Response = serde_json::from_str(&reply).map_err(|_| {
-                    BackendError::Internal("Could not understand the daemon\'s reply.".into())
-                })?;
-                into_data(response)?;
-            }
+        match within(deadline, framed.next()).await? {
+            Some(Ok(reply)) => acknowledged(id, &reply)?,
             Some(Err(_)) | None => return Err(BackendError::Unreachable),
         }
 
@@ -703,6 +758,170 @@ mod tests {
     #[test]
     fn a_restore_succeeds_on_an_empty_reply() {
         assert!(into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).is_ok());
+    }
+
+    /// Quit and restart poll `status`, so its budget is the one that decides
+    /// how long the app can hang on the way out. It must be the ordinary one.
+    #[test]
+    fn the_verbs_quit_depends_on_take_the_ordinary_budget() {
+        assert_eq!(budget_for(&Method::Status), DEFAULT_BUDGET);
+        assert_eq!(budget_for(&Method::Shutdown), DEFAULT_BUDGET);
+        assert_eq!(
+            budget_for(&Method::Backup {
+                dest_path: "d".into()
+            }),
+            LONG_BUDGET
+        );
+        assert!(DEFAULT_BUDGET < LONG_BUDGET);
+    }
+
+    /// A listener on this platform's own transport, and the path that dials it.
+    ///
+    /// The budget tests below were `#[cfg(unix)]`, so the deadlines they pin
+    /// were never executed on Windows — whose named pipe they also bound.
+    struct Endpoint {
+        path: PathBuf,
+        listener: transport::Listener,
+        _dir: tempfile::TempDir,
+    }
+
+    fn endpoint(name: &str) -> Endpoint {
+        let dir = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let (path, listener) = {
+            let path = dir.path().join(name);
+            let bound = tokio::net::UnixListener::bind(&path).unwrap();
+            (path, transport::Listener::from(bound))
+        };
+        #[cfg(windows)]
+        let (path, listener) = {
+            use interprocess::os::windows::named_pipe::{pipe_mode::Bytes, PipeListenerOptions};
+            // `COPYPASTE_SOCKET` accepts a pipe name verbatim, so the backend
+            // dials this by exactly the path recorded here.
+            let raw = format!(r"\\.\pipe\copypaste.test.{}.{name}", std::process::id());
+            let bound = PipeListenerOptions::new()
+                .path(raw.as_str())
+                .create_tokio_duplex::<Bytes>()
+                .unwrap();
+            (PathBuf::from(raw), transport::Listener::from(bound))
+        };
+        Endpoint {
+            path,
+            listener,
+            _dir: dir,
+        }
+    }
+
+    /// Accept one connection, read the request, then say nothing at all —
+    /// which is a handler that never returns, not a hang-up. The receiver
+    /// resolves when the client releases the connection.
+    fn silent(listener: transport::Listener) -> tokio::sync::oneshot::Receiver<()> {
+        let (hung_up, observed) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let stream = listener.accept().await.expect("a connection");
+            let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+            let _request = framed.next().await;
+            // A reset and a clean EOF are both the client letting go; which one
+            // arrives is the platform's business.
+            while let Some(Ok(_)) = framed.next().await {}
+            let _ = hung_up.send(());
+        });
+        observed
+    }
+
+    /// A daemon that accepts the connection and never writes a reply. Before
+    /// the budget this returned nothing at all, and the caller — including the
+    /// one that runs on quit — waited for as long as the process lived.
+    ///
+    /// `start_paused` advances tokio's clock only when every task is idle, so
+    /// this proves the deadline fires without spending ten seconds to do it.
+    #[tokio::test(start_paused = true)]
+    async fn a_daemon_that_never_answers_is_a_timeout_rather_than_a_wait() {
+        let served = endpoint("silent");
+        let _held = silent(served.listener);
+
+        let backend = DaemonBackend::at_endpoint(served.path);
+        let started = Instant::now();
+        let err = backend.status().await.unwrap_err();
+
+        assert!(matches!(err, BackendError::Timeout), "{err:?}");
+        assert!(started.elapsed() >= DEFAULT_BUDGET);
+        // The distinction the variant exists for: a live process that went
+        // quiet must not be reported as one that is not running.
+        assert_ne!(err.to_string(), BackendError::Unreachable.to_string());
+    }
+
+    /// The same silent daemon on a long verb waits the long budget and no
+    /// longer. A single budget for everything would either cancel a real
+    /// restore or hang quit; this is the assertion that keeps them apart.
+    #[tokio::test(start_paused = true)]
+    async fn a_long_verb_waits_the_long_budget_and_still_ends() {
+        let served = endpoint("silent-long");
+        let _held = silent(served.listener);
+
+        let backend = DaemonBackend::at_endpoint(served.path);
+        let started = Instant::now();
+        let err = backend
+            .import(vec![])
+            .await
+            .expect_err("the handler never replies");
+
+        assert!(matches!(err, BackendError::Timeout), "{err:?}");
+        assert!(started.elapsed() >= LONG_BUDGET);
+    }
+
+    /// A subscription is silent by design, so the budget has to stop at the
+    /// acknowledgement. A deadline over the stream would drop the watcher on
+    /// any clipboard that was merely quiet.
+    ///
+    /// The second assertion is the server's, not an inference from the client:
+    /// a deadline that cancelled the read but left the connection open would
+    /// leak one pipe or socket per attempt for as long as the app ran.
+    #[tokio::test(start_paused = true)]
+    async fn a_watch_that_is_never_acknowledged_gives_up_and_lets_go() {
+        let served = endpoint("silent-watch");
+        let hung_up = silent(served.listener);
+
+        let backend = DaemonBackend::at_endpoint(served.path);
+        let err = backend.watch().await.expect_err("no acknowledgement");
+        assert!(matches!(err, BackendError::Timeout), "{err:?}");
+
+        // Real time from here: the hang-up is the OS delivering an event, and
+        // a paused clock would run the bound out before it arrived.
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(10), hung_up)
+            .await
+            .expect("the server never saw the client let go")
+            .expect("the watcher task ended without observing a hang-up");
+    }
+
+    /// The acknowledgement is a reply like any other. An id that answers some
+    /// other request, or a payload that is not the empty acknowledgement, means
+    /// no subscription was opened — and accepting either would hand back a
+    /// receiver whose first "event" is somebody else's answer.
+    #[test]
+    fn a_watch_acknowledgement_must_match_the_request_and_be_empty() {
+        assert!(acknowledged(7, r#"{"id":7,"ok":true}"#).is_ok());
+        assert!(acknowledged(7, r#"{"id":7,"ok":true,"data":{"empty":{}}}"#).is_ok());
+
+        for reply in [
+            // Another request's answer, arriving first.
+            r#"{"id":8,"ok":true,"data":{"empty":{}}}"#,
+            r#"{"id":8,"ok":true}"#,
+            // Acknowledged with a payload, so this is not a subscription.
+            r#"{"id":7,"ok":true,"data":{"count":3}}"#,
+            r#"{"id":7,"ok":true,"data":{"peers":[]}}"#,
+            "not json",
+        ] {
+            assert!(acknowledged(7, reply).is_err(), "{reply}");
+        }
+
+        let refused = acknowledged(
+            7,
+            r#"{"id":7,"ok":false,"error":"too many watchers","error_code":"unsupported"}"#,
+        )
+        .expect_err("a refusal is not an acknowledgement");
+        assert!(!refused.to_string().contains('/'), "{refused}");
     }
 
     #[test]
