@@ -10,6 +10,7 @@ import { t } from "@/i18n";
 /** Rust error codes plus boundary conditions owned by the desktop app. */
 export type ErrorKind = ErrorCode
   | "offline"
+  | "timeout"
   | "unavailable"
   | "update_busy"
   | "update_unconfigured"
@@ -22,6 +23,7 @@ export type ErrorKind = ErrorCode
 
 const FRIENDLY = {
   offline: "errors.offline",
+  timeout: "errors.timeout",
   not_ready: "errors.not_ready",
   protocol_mismatch: "errors.protocol_mismatch",
   not_found: "errors.not_found",
