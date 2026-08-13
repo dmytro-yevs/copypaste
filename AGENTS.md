@@ -379,13 +379,6 @@ and release evidence. A missing platform means removing the capability from
 the product and marking it `removed`, not leaving a TODO, waiver, placeholder,
 or skipped green check. See `docs/development.md` for the maintained commands.
 
-A feature is not always the unit a platform is missing: `history` ships
-everywhere while `get_source_app_icon` has no Windows answer at all. Record that
-as a `platform_gaps` entry naming the contract, the platform, what the product
-does instead, and the document that decided it; the checker requires that
-document to name the contract. A capability the ledger claims while the code
-silently declines it is the failure this closes.
-
 ## Linear is the development source of truth
 
 Linear owns the persistent backlog for work managed through Orca. Orca
