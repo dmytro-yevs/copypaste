@@ -137,7 +137,7 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
         return Ok(());
     };
 
-    match ingest_capture(state, capture, copypaste_core::now_ms()) {
+    match ingest_capture(state, &settings, capture, copypaste_core::now_ms()) {
         Ok(Ingested::Stored(item)) => {
             debug!(id = %item.id, content_type = %item.content_type, "captured clipboard item");
             // Wakes the watchers and pulls both sync loops to their floor, so a
@@ -166,8 +166,14 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
     }
 }
 
+/// `settings` is the caller's snapshot, not a second read.
+///
+/// A `set_config` landing between the pasteboard read and the ingest let an
+/// item pass `CapturePolicy`'s limit and then meet a different one here. One
+/// snapshot per capture makes the gate and the ingest the same decision.
 pub(crate) fn ingest_capture(
     state: &AppState,
+    settings: &copypaste_ipc::ConfigData,
     capture: crate::clipboard::Capture,
     created_at: i64,
 ) -> Result<Ingested, IngestError> {
@@ -179,7 +185,6 @@ pub(crate) fn ingest_capture(
     {
         return Err(IngestError::Empty);
     }
-    let settings = state.settings.get().clone();
     let sensitive_floor = capture
         .app_bundle_id
         .as_deref()
@@ -194,7 +199,7 @@ pub(crate) fn ingest_capture(
         sensitive_floor,
         capture.app_bundle_id.as_deref(),
         capture.app_name.as_deref(),
-        &settings,
+        settings,
     )
 }
 
@@ -274,11 +279,17 @@ mod tests {
             SourceApp::from_image_path(r"C:\Users\ann\AppData\Local\1Password\app\8\1Password.exe")
         });
         let now = copypaste_core::now_ms();
-        let notes = ingest_capture(&state, captured("thursday agenda notes", ordinary), now)
-            .expect("the ordinary capture is stored")
-            .into_item();
+        let notes = ingest_capture(
+            &state,
+            &state.settings.get(),
+            captured("thursday agenda notes", ordinary),
+            now,
+        )
+        .expect("the ordinary capture is stored")
+        .into_item();
         let secret = ingest_capture(
             &state,
+            &state.settings.get(),
             captured("correct horse battery staple", credential),
             now + 1,
         )
@@ -345,11 +356,17 @@ mod tests {
         );
 
         let now = copypaste_core::now_ms();
-        let notes = ingest_capture(&state, captured("thursday agenda notes", ordinary), now)
-            .unwrap()
-            .into_item();
+        let notes = ingest_capture(
+            &state,
+            &state.settings.get(),
+            captured("thursday agenda notes", ordinary),
+            now,
+        )
+        .unwrap()
+        .into_item();
         let wrong = ingest_capture(
             &state,
+            &state.settings.get(),
             captured("correct horse battery staple", misattributed),
             now + 1,
         )
@@ -409,11 +426,17 @@ mod tests {
         assert_ne!(ordinary.id, credential.id, "distinct writers");
 
         let now = copypaste_core::now_ms();
-        let notes = ingest_capture(&state, captured("meeting agenda", Some(ordinary)), now)
-            .expect("ordinary")
-            .into_item();
+        let notes = ingest_capture(
+            &state,
+            &state.settings.get(),
+            captured("meeting agenda", Some(ordinary)),
+            now,
+        )
+        .expect("ordinary")
+        .into_item();
         let secret = ingest_capture(
             &state,
+            &state.settings.get(),
             captured("correct horse battery staple", Some(credential)),
             now + 1,
         )
@@ -439,6 +462,7 @@ mod tests {
         let (state, _dir) = test_state("text-capture-only");
         let result = ingest_capture(
             &state,
+            &state.settings.get(),
             crate::clipboard::Capture {
                 content: String::new(),
                 binary_content: Some(vec![1, 2, 3]),
@@ -562,6 +586,7 @@ mod tests {
         let (state, _dir) = test_state("credential-store-origin");
         let stored = ingest_capture(
             &state,
+            &state.settings.get(),
             crate::clipboard::Capture {
                 content: "xK9mQ3nR7pT2vW5".to_string(),
                 binary_content: None,
@@ -600,6 +625,7 @@ mod tests {
 
         let duplicate = ingest_capture(
             &state,
+            &state.settings.get(),
             crate::clipboard::Capture {
                 content: content.to_string(),
                 binary_content: None,
