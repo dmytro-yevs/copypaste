@@ -188,8 +188,11 @@ mod tests {
         fn new(label: &str) -> Self {
             static NEXT: AtomicU32 = AtomicU32::new(0);
             let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+            // One key, not a shared container with a child: deleting a subkey
+            // leaves its parent behind, and an empty `CopyPaste-icon-test` key
+            // in the user's hive is still litter from a test.
             let base = format!(
-                "SOFTWARE\\CopyPaste-icon-test\\{}-{label}-{unique}",
+                "SOFTWARE\\CopyPaste-icon-test-{}-{label}-{unique}",
                 std::process::id()
             );
             Self { base }
