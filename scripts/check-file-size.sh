@@ -15,13 +15,30 @@
 # `.test.` and `.spec.` files are excluded the way Rust test modules are.
 #
 # Advisory, not a gate. The number is here to make the backlog visible.
+#
+# `--porcelain` is the contract check-file-size-gate.sh enforces against: one
+# tab-delimited record per line, the path last so spaces need no quoting, a
+# declared count and an `end` sentinel. The gate used to re-read the table
+# below with a regex that only knew `.rs`, which passed every `.ts` and `.tsx`
+# overage the table had just printed.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-TARGET=${1:-500}
+PORCELAIN=0
+TARGET=500
+for arg in "$@"; do
+    case "$arg" in
+        --porcelain) PORCELAIN=1 ;;
+        *)           TARGET=$arg ;;
+    esac
+done
 over=0
 
-printf '%-52s %7s\n' "FILE" "SOURCE"
+if [ "$PORCELAIN" -eq 1 ]; then
+    printf 'file-size\t1\t%s\n' "$TARGET"
+else
+    printf '%-52s %7s\n' "FILE" "SOURCE"
+fi
 while read -r f; do
     src=$(awk '
         /^#\[cfg\(test\)\]/ { pending = NR; next }
@@ -33,7 +50,11 @@ while read -r f; do
         END { if (!found) print NR }
     ' "$f")
     if [ "$src" -gt "$TARGET" ]; then
-        printf '%-52s %7s\n' "${f#crates/}" "$src"
+        if [ "$PORCELAIN" -eq 1 ]; then
+            printf 'over\t%s\t%s\n' "$src" "${f#crates/}"
+        else
+            printf '%-52s %7s\n' "${f#crates/}" "$src"
+        fi
         over=$((over + 1))
     fi
 done < <(find crates \( -name '*.rs' -o -name '*.ts' -o -name '*.tsx' \) \
@@ -45,9 +66,14 @@ done < <(find crates \( -name '*.rs' -o -name '*.ts' -o -name '*.tsx' \) \
              -not -name '*.spec.*' \
              -not -name '*.d.ts' | sort)
 
+if [ "$PORCELAIN" -eq 1 ]; then
+    printf 'count\t%s\nend\n' "$over"
+    exit 0
+fi
+
 echo
 if [ "$over" -eq 0 ]; then
     echo "All files within the ${TARGET}-line budget."
 else
-    echo "$over file(s) over the ${TARGET}-line budget (CLAUDE.md rule 5)."
+    echo "$over file(s) over the ${TARGET}-line budget (AGENTS.md rule 5)."
 fi
