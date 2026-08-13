@@ -317,6 +317,42 @@ for wf, doc in docs.items():
         rec("RUSTUP_TOOLCHAIN" in env, "{}: {} pins RUSTUP_TOOLCHAIN for its bare cargo".format(wf, jn),
             "resolves through rust-toolchain.toml instead: {}".format(hits[:3]))
 
+# --- the toolchain components a workspace test run needs --------------------
+# `cargo test --workspace` builds tools/sensitive-rules, whose regeneration
+# tests spawn `rustfmt` as a child process. rust-toolchain.toml requests the
+# component, but dtolnay/rust-toolchain installs only what the step names, so a
+# job that omits it passes every other gate and fails there alone: nightly run
+# 31671766432 died that way on macos-14 and macos-15 at once.
+TEST_SPAWNED_COMPONENTS = {"rustfmt": pathlib.Path("tools/sensitive-rules/src/main.rs")}
+
+for component, source in sorted(TEST_SPAWNED_COMPONENTS.items()):
+    rec(source.is_file() and 'Command::new("{}")'.format(component) in source.read_text(),
+        "{} still spawns {}".format(source, component),
+        "the requirement below is derived from this call; retire the pair together")
+
+
+def toolchain_component_checks(workflows, required):
+    for wf, doc in workflows.items():
+        for jn, j in (doc.get("jobs") or {}).items():
+            setups = [s for s in steps(j) if (s.get("uses") or "").startswith("dtolnay/rust-toolchain")]
+            if not setups:
+                continue
+            if not any(re.search(r"\bcargo\s+(?:\+\S+\s+)?test\b.*--workspace", line)
+                       for s in steps(j) for line in (s.get("run") or "").splitlines()):
+                continue
+            installed = set()
+            for s in setups:
+                installed |= {c.strip() for c in
+                              str((s.get("with") or {}).get("components", "")).split(",") if c.strip()}
+            for component in sorted(required):
+                yield (component in installed,
+                       "{}: {} installs {} for cargo test --workspace".format(wf, jn, component),
+                       "components installed: {}".format(sorted(installed)))
+
+
+for check in toolchain_component_checks(docs, TEST_SPAWNED_COMPONENTS):
+    rec(*check)
+
 # --- the Android NDK binutils wiring ---------------------------------------
 # openssl-src asks cc-rs for AR and RANLIB, and cc-rs falls back to
 # `<triple>-ranlib` — a wrapper no NDK has shipped since r23 — unless something
@@ -730,6 +766,28 @@ if SELF_TEST:
         ("an empty matrix is not", not probe_matrix()),
     ):
         emit(held, "self-test: {}".format(desc), "the detector did not behave as stated")
+
+    def components_probe(components, run="cargo +1.96 test --workspace --locked"):
+        setup = {"uses": "dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c"}
+        if components is not None:
+            setup["with"] = {"toolchain": "1.96", "components": components}
+        jobs = {"j": {"steps": [setup, {"run": run}]}}
+        return all(cond for cond, _, _ in
+                   toolchain_component_checks({"probe.yml": {"jobs": jobs}}, ["rustfmt"]))
+
+    for desc, held in (
+        ("a workspace test job installing rustfmt is accepted", components_probe("rustfmt")),
+        ("clippy alongside rustfmt is accepted", components_probe("clippy, rustfmt")),
+        ("a workspace test job installing nothing is rejected", not components_probe(None)),
+        ("clippy without rustfmt is rejected", not components_probe("clippy")),
+        ("a component the name merely contains is rejected", not components_probe("rustfmt-preview")),
+        ("a job whose only cargo run is clippy is not asked",
+         components_probe(None, "cargo +1.96 clippy --workspace --all-targets --locked")),
+        ("a single-crate test run is not asked",
+         components_probe(None, "cargo +1.96 test -p copypaste-core --locked")),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the toolchain component detector did not behave as stated")
 
     fixture = yaml.safe_load(
         "jobs:\n  build: {}\n  smoke:\n    needs: build\n  publish:\n    needs: [smoke]\n"
