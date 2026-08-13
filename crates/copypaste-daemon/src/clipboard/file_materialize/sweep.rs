@@ -6,13 +6,9 @@
 //! must never read as a clean pass.
 
 use std::ffi::CStr;
-use std::io;
 use std::os::fd::{BorrowedFd, OwnedFd};
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use backon::{BackoffBuilder, ExponentialBuilder};
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, Stat};
 use rustix::io::Errno;
 use tracing::warn;
@@ -24,19 +20,6 @@ use super::report::SweepReport;
 /// files are in the directory. A sweep that hits the bound records where it
 /// stopped and the next pass continues from there.
 const SWEEP_BUDGET: u32 = 4096;
-
-/// The first retry after a sweep that left work behind. `interval` is the whole
-/// `MAX_AGE`, so waiting it out doubles the exposure of anything still on disk.
-/// The ladder climbs back to `interval`, so a file nothing can ever delete
-/// costs a short burst of wake-ups rather than a permanent 30-second timer.
-const RETRY_MIN: Duration = Duration::from_secs(30);
-
-/// Never more than a quarter of the ordinary interval: a "retry" scheduled at
-/// the interval is not a retry, and the sweeper is constructed with short
-/// intervals under test.
-fn retry_floor(interval: Duration) -> Duration {
-    RETRY_MIN.min(interval / 4)
-}
 
 /// Where the previous pass ran out of budget, as a position in the root's
 /// `readdir` order and a position within that entry if it is a directory.
@@ -352,94 +335,6 @@ fn modified_nanos(stat: &Stat) -> i64 {
 
 fn is_dot(name: &CStr) -> bool {
     name.to_bytes() == b"." || name.to_bytes() == b".."
-}
-
-/// When the next sweep runs. One schedule, from the workspace's only retry
-/// crate; the worker's condvar stays the sole timer.
-struct SweepCadence {
-    interval: Duration,
-    policy: ExponentialBuilder,
-    schedule: <ExponentialBuilder as BackoffBuilder>::Backoff,
-}
-
-impl SweepCadence {
-    fn new(interval: Duration) -> Self {
-        let policy = ExponentialBuilder::new()
-            .with_min_delay(retry_floor(interval))
-            .with_max_delay(interval)
-            .without_max_times();
-        Self {
-            interval,
-            policy,
-            schedule: policy.build(),
-        }
-    }
-
-    fn after(&mut self, report: &SweepReport) -> Duration {
-        if !report.unfinished() {
-            self.schedule = self.policy.build();
-            return self.interval;
-        }
-        self.schedule
-            .next()
-            .unwrap_or(self.interval)
-            .min(self.interval)
-    }
-}
-
-pub(super) struct CleanupWorker {
-    stop: Arc<(Mutex<bool>, Condvar)>,
-    handle: Option<JoinHandle<()>>,
-}
-
-impl CleanupWorker {
-    /// `startup` is the pass that ran before the worker existed. Starting at
-    /// `interval` regardless would give plaintext the startup sweep could not
-    /// remove another whole `MAX_AGE` on disk.
-    pub(super) fn start(
-        mut sweeper: Sweeper,
-        access: Arc<Mutex<()>>,
-        max_age: Duration,
-        interval: Duration,
-        startup: SweepReport,
-    ) -> io::Result<Self> {
-        let stop = Arc::new((Mutex::new(false), Condvar::new()));
-        let worker_stop = Arc::clone(&stop);
-        let handle = std::thread::Builder::new()
-            .name("paste-file-cleanup".to_string())
-            .spawn(move || {
-                let mut cadence = SweepCadence::new(interval);
-                let mut wait = cadence.after(&startup);
-                loop {
-                    let (lock, wake) = &*worker_stop;
-                    let stopped = lock.lock().unwrap_or_else(|held| held.into_inner());
-                    let (stopped, _) = wake
-                        .wait_timeout_while(stopped, wait, |stopped| !*stopped)
-                        .unwrap_or_else(|held| held.into_inner());
-                    if *stopped {
-                        break;
-                    }
-                    drop(stopped);
-                    let _access = access.lock().unwrap_or_else(|held| held.into_inner());
-                    wait = cadence.after(&sweeper.pass(SystemTime::now(), max_age));
-                }
-            })?;
-        Ok(Self {
-            stop,
-            handle: Some(handle),
-        })
-    }
-}
-
-impl Drop for CleanupWorker {
-    fn drop(&mut self) {
-        let (lock, wake) = &*self.stop;
-        *lock.lock().unwrap_or_else(|held| held.into_inner()) = true;
-        wake.notify_one();
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -795,53 +690,6 @@ mod tests {
             "the sweep lost the directory it was given"
         );
         assert_eq!(report.removed, 1, "{report:?}");
-    }
-
-    #[test]
-    fn an_unfinished_sweep_is_retried_long_before_the_next_interval() {
-        let interval = Duration::from_secs(600);
-        let mut cadence = SweepCadence::new(interval);
-        let clean = SweepReport::default();
-        let blocked = SweepReport {
-            retained: 1,
-            ..SweepReport::default()
-        };
-
-        assert_eq!(cadence.after(&clean), interval);
-        let first = cadence.after(&blocked);
-        assert_eq!(first, RETRY_MIN);
-
-        let mut previous = first;
-        for _ in 0..12 {
-            let next = cadence.after(&blocked);
-            assert!(next >= previous, "the ladder went backwards");
-            assert!(next <= interval, "a retry outran the ordinary interval");
-            previous = next;
-        }
-        assert_eq!(previous, interval, "the ladder must settle at the interval");
-
-        assert_eq!(cadence.after(&clean), interval);
-        assert_eq!(
-            cadence.after(&blocked),
-            RETRY_MIN,
-            "a clean sweep must reset the ladder"
-        );
-    }
-
-    #[test]
-    fn a_short_interval_never_produces_a_longer_retry() {
-        let interval = Duration::from_millis(10);
-        let mut cadence = SweepCadence::new(interval);
-        let blocked = SweepReport {
-            unreadable: 1,
-            ..SweepReport::default()
-        };
-
-        for _ in 0..5 {
-            let next = cadence.after(&blocked);
-            assert!(next <= interval);
-            assert!(next >= retry_floor(interval));
-        }
     }
 
     #[cfg(unix)]

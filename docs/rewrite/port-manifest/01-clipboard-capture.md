@@ -975,6 +975,13 @@ keep both properties).
   kind only — starts the sweeper even though `materialize` returns `Err`, and
   the leaked decrypted bytes are removed by the deadline like any other. A
   paste-back that put nothing on disk still starts no sweeper.
+- **T-92 — plaintext never exists without a live cleanup owner.** The
+  sweeper thread is proven running before any staging writes decrypted bytes,
+  and a worker whose thread has returned or panicked is replaced before the
+  next paste-back writes any. When no running worker can be established —
+  at startup with plaintext already on disk, or on a later paste-back —
+  staging fails rather than creating bytes nothing will ever delete.
+  Occupying the worker slot is not liveness and must not be asserted as it.
 
 ### 5.14 Resource & platform
 
