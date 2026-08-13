@@ -20,6 +20,17 @@ export const settingsService = {
     },
   },
 
+  /** Never names a file or a value: the setting that would not read is the one
+   *  most likely to hold clipboard text (AGENTS.md rule 4). */
+  degraded: {
+    title: "Some saved settings couldn't be read.",
+    privacy:
+      "CopyPaste chose the safer setting for these until you set them again: {{fields}}.",
+    others_one: "One other setting went back to its default.",
+    others_other: "{{count}} other settings went back to their defaults.",
+    remedy: "Changing any setting here saves the whole set again and clears this.",
+  },
+
   liveness: {
     pending: "Saved. It takes effect after the service restarts.",
     restart: "Restart the service",

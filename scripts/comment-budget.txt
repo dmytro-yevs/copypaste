@@ -69,7 +69,6 @@ crates/copypaste-daemon/src/server/listener.rs
 crates/copypaste-daemon/src/server/messages.rs
 crates/copypaste-daemon/src/server/mod.rs
 crates/copypaste-daemon/src/server/watch.rs
-crates/copypaste-daemon/src/settings.rs
 crates/copypaste-ipc/src/config.rs
 crates/copypaste-ipc/src/content_type.rs
 crates/copypaste-ipc/src/lib.rs
