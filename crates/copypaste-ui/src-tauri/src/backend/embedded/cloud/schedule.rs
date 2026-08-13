@@ -37,7 +37,10 @@ pub(super) async fn poll(inner: Weak<Inner>, shutdown: CancellationToken) {
             break;
         };
         if owner.settings().sync_enabled {
-            let _ = owner.cloud.sync_now(&owner).await;
+            // Skips rather than queues: a tick that collides with a round in
+            // flight would push the same window and race it to commit the
+            // upload floor, and the loop ticks again anyway.
+            let _ = owner.cloud.poll_round(&owner).await;
         }
     }
 }

@@ -22,7 +22,7 @@ pub mod realtime;
 pub mod refresh;
 pub mod source;
 
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use copypaste_cloud::auth::SupabaseAuth;
@@ -30,6 +30,7 @@ use copypaste_cloud::credentials::CloudStateKey;
 use copypaste_cloud::rest::SupabaseRest;
 use copypaste_cloud::sync::{CloudSync, SensitiveGuard};
 use copypaste_cloud::CloudConfig;
+use copypaste_core::sync::{RoundGate, RoundGuard};
 use copypaste_ipc::CloudStatusData;
 use tokio::sync::{watch, Notify};
 use tracing::warn;
@@ -63,6 +64,9 @@ pub(crate) const KEY_UPLOAD_FLOOR: &str = CloudStateKey::UploadFloorMs.as_str();
 /// upload scan resume after `(created_at, item_id)` instead of re-reading a
 /// full boundary page forever.
 pub(crate) const KEY_UPLOAD_FLOOR_ITEM: &str = CloudStateKey::UploadFloorItemId.as_str();
+/// Local rows this device could not open for upload. Ids only — see
+/// [`copypaste_cloud::sync::UnreadableUploads`].
+pub(crate) const KEY_UNREADABLE_UPLOADS: &str = CloudStateKey::UnreadableUploads.as_str();
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct UploadFloor {
@@ -100,6 +104,12 @@ pub struct Cloud {
     /// Woken by sign-in and by `cloud sync`, so neither has to wait out the
     /// idle interval.
     wake: Notify,
+    /// One round at a time. Without it `cloud sync` ran a second round beside
+    /// the poll loop's, against the same history and the same floor.
+    rounds: RoundGate,
+    /// How many local rows the last upload scan could not open. Read by
+    /// `status`, which must not take a lock a round may be holding.
+    unreadable_uploads: AtomicU32,
 }
 
 impl std::fmt::Debug for Cloud {
@@ -124,6 +134,8 @@ impl Cloud {
             upload_floor_lock: Mutex::new(()),
             upload_floor_epoch: AtomicU64::new(0),
             wake: Notify::new(),
+            rounds: RoundGate::new(),
+            unreadable_uploads: AtomicU32::new(0),
             session_revision,
         }
     }
@@ -144,6 +156,28 @@ impl Cloud {
         self.lock_account()
             .as_ref()
             .map(|account| Arc::clone(&account.driver))
+    }
+
+    /// The permit for one round, or `None` when a round is already running.
+    ///
+    /// The poll loop takes this one: a tick that collides with a round in
+    /// flight has nothing to add, and it will tick again.
+    pub(crate) fn try_begin_round(&self) -> Option<RoundGuard> {
+        self.rounds.try_enter()
+    }
+
+    /// The permit for one round, waiting for any running round first.
+    ///
+    /// `cloud sync` takes this one: the user asked after the running round
+    /// began its scan, so answering with that round's result would answer for
+    /// a history older than the request.
+    pub(crate) async fn begin_round(&self) -> RoundGuard {
+        self.rounds.enter().await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn round_in_flight(&self) -> bool {
+        self.rounds.is_running()
     }
 
     /// Ask the poll loop to run a round now.
@@ -182,6 +216,7 @@ impl Cloud {
             email: account.as_ref().map(|a| a.email.clone()),
             last_sync_ms: (last_sync_ms > 0).then_some(last_sync_ms),
             last_error: self.lock_error().map(str::to_string),
+            unreadable_uploads: self.unreadable_uploads.load(Ordering::Acquire),
             poll_interval_secs: account
                 .as_ref()
                 .map_or(poll::SIGNED_OUT_INTERVAL, |a| a.driver.poll_interval())
@@ -225,6 +260,14 @@ impl Cloud {
                 floor.item_id.as_deref().unwrap_or(""),
             ),
         ])
+    }
+
+    /// Record how many local rows an upload scan could not open.
+    ///
+    /// A count, never an id: what reaches `status` reaches a client, and
+    /// `AGENTS.md` rule 4 keeps paths and row identity out of both.
+    pub(crate) fn note_unreadable_uploads(&self, total: u32) {
+        self.unreadable_uploads.store(total, Ordering::Release);
     }
 
     pub(crate) fn upload_floor_epoch(&self) -> u64 {
@@ -454,6 +497,63 @@ mod tests {
         restarted.cloud.sign_out(&restarted.store);
         assert_eq!(restarted.meta.state(KEY_LAST_SYNC).unwrap(), None);
         assert_eq!(restarted.cloud.status().last_sync_ms, None);
+    }
+
+    /// N1. The count is what *this account's* scan of the history found. A
+    /// second account has scanned none of it, so carrying the number over shows
+    /// the previous account's figure — and the rows behind it are not even
+    /// necessarily this account's problem — until the first round finishes.
+    #[test]
+    fn switching_accounts_clears_the_unreadable_upload_count() {
+        let (state, _dir) = test_state_with_cloud("alpha", Cloud::new(Some(config())));
+        state.cloud.install(
+            &state,
+            config(),
+            "old@example.com".into(),
+            "user-1".into(),
+            derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+            session(),
+        );
+        state.cloud.note_unreadable_uploads(7);
+        assert_eq!(state.cloud.status().unreadable_uploads, 7);
+
+        state.cloud.install(
+            &state,
+            config(),
+            "new@example.com".into(),
+            "user-2".into(),
+            derive_sync_key("correct horse battery staple", "user-2").unwrap(),
+            Session {
+                access_token: "access-2".into(),
+                refresh_token: "refresh-2".into(),
+                user_id: "user-2".into(),
+                expires_at_ms: 1_700_000_000_000,
+            },
+        );
+        assert_eq!(
+            state.cloud.status().unreadable_uploads,
+            0,
+            "the new account inherited the old one's count"
+        );
+    }
+
+    /// Re-activating the *same* account is not a switch — a token refresh runs
+    /// this path — and must not throw away a count the running rounds produced.
+    #[test]
+    fn re_activating_the_same_account_keeps_the_unreadable_upload_count() {
+        let (state, _dir) = test_state_with_cloud("alpha", Cloud::new(Some(config())));
+        for _ in 0..2 {
+            state.cloud.install(
+                &state,
+                config(),
+                "same@example.com".into(),
+                "user-1".into(),
+                derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+                session(),
+            );
+            state.cloud.note_unreadable_uploads(3);
+        }
+        assert_eq!(state.cloud.status().unreadable_uploads, 3);
     }
 
     #[test]
