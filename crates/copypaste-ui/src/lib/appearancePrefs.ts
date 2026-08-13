@@ -54,9 +54,13 @@ type ParseAppearanceFields = (
   onInvalid: (field: AppearanceField) => void,
 ) => AppearancePrefs;
 
+// `Object.assign` rather than a spread below: `themeBootstrapSource` embeds
+// this function's own text in a classic script no build step lowers, and object
+// spread is Chromium 60 — a syntax error on API 24's WebView, which took the
+// whole appearance bootstrap down with it.
 export const parseAppearanceFields: ParseAppearanceFields =
   function parseAppearanceFields(raw, contract, onInvalid) {
-    const appearance = { ...contract.defaults };
+    const appearance = Object.assign({}, contract.defaults);
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       return appearance;
     }
