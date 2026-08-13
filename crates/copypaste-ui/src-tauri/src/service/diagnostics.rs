@@ -249,6 +249,7 @@ mod tests {
                 index_purged: 5,
                 uptime_secs: 12_045,
             },
+            settings_health: None,
         }
     }
 

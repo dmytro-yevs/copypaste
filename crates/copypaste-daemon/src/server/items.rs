@@ -58,6 +58,7 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             private_mode: settings.private_mode,
             private_mode_epoch: settings.private_mode_epoch(),
             counters: state.counters(),
+            settings_health: None,
         }),
     )
 }
