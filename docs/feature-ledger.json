@@ -5,6 +5,9 @@
       "id": "history",
       "status": "product",
       "contracts": ["list", "search", "add_item", "copy_item", "copy_item_as_plain_text", "reveal_item", "copy_items", "get_image_preview", "get_source_app_icon", "list_installed_source_apps", "delete_item", "delete_all", "set_pinned", "reorder_pinned"],
+      "platform_gaps": [
+        {"contract": "get_source_app_icon", "platform": "windows", "behaviour": "answers no icon; the history row keeps the semantic icon its content type already has", "decided_in": "docs/adr/0013-windows-as-a-third-platform.md"}
+      ],
       "backend_tests": ["cargo test -p copypaste-ipc -p copypaste-core"],
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["loading", "empty", "error", "keyboard", "screen_reader"],

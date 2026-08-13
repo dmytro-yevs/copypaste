@@ -211,6 +211,53 @@ def performance_errors(feature, root=ROOT):
     return errors
 
 
+def gap_errors(feature, root=ROOT):
+    """A contract that is shipped on some platforms and not on others.
+
+    Removing the whole feature is the rule (AGENTS.md 12), but a feature is not
+    the unit a platform can be missing: `history` ships everywhere while
+    `get_source_app_icon` has no Windows answer at all. Silence there is what
+    this rejects — the ledger claimed the capability, the code returned nothing,
+    and only a comment said so. A gap has to name what the product does instead
+    and point at the decision, and the decision has to mention the contract.
+    """
+    feature_id = feature.get("id", "<missing id>")
+    gaps = feature.get("platform_gaps", [])
+    if not isinstance(gaps, list):
+        return [f"{feature_id}: platform_gaps must be a list"]
+    contracts = set(feature.get("contracts", []))
+    errors = []
+    seen = set()
+    for gap in gaps:
+        label = f"{feature_id}: platform gap"
+        if not isinstance(gap, dict) or set(gap) != {"contract", "platform", "behaviour", "decided_in"}:
+            errors.append(f"{label} fields are incomplete or unknown")
+            continue
+        contract, platform = gap["contract"], gap["platform"]
+        label = f"{feature_id}: {contract} on {platform}"
+        if contract not in contracts:
+            errors.append(f"{label} is not a contract of this feature")
+            continue
+        if platform not in SHIPPED_PLATFORMS:
+            errors.append(f"{label} is not a shipped platform")
+            continue
+        if (contract, platform) in seen:
+            errors.append(f"{label} is recorded twice")
+            continue
+        seen.add((contract, platform))
+        if not isinstance(gap["behaviour"], str) or not gap["behaviour"].strip():
+            errors.append(f"{label} does not say what the product does instead")
+            continue
+        try:
+            decision, _ = repo_file(root, gap["decided_in"])
+        except ValueError as error:
+            errors.append(f"{label}: {error}")
+            continue
+        if contract not in decision.read_text(encoding="utf-8"):
+            errors.append(f"{label}: the decision does not mention {contract}")
+    return errors
+
+
 def platform_errors(feature, root=ROOT):
     feature_id = feature.get("id", "<missing id>")
     errors = []
@@ -231,6 +278,7 @@ def platform_errors(feature, root=ROOT):
                 value = scenario.get(field, "")
                 if f"/{feature_id}/" not in value:
                     errors.append(f"{feature_id}: windows {field} must be feature-specific")
+    errors.extend(gap_errors(feature, root))
     errors.extend(performance_errors(feature, root))
     return errors
 
@@ -339,6 +387,47 @@ def self_test():
     probe = copy.deepcopy(product)
     del probe["performance"]["windows"]
     checks.append(("missing Windows performance record fails", any("android, macos, and windows" in error for error in platform_errors(probe, root))))
+    # Its own directory: `root` above belongs to a `with` block that has already
+    # closed, and these checks read the decision file they name.
+    gap_dir = tempfile.TemporaryDirectory()
+    root = pathlib.Path(gap_dir.name)
+    (root / "docs").mkdir()
+    (root / "docs/decision.md").write_text("get_source_app_icon answers nothing here\n", encoding="utf-8")
+    gapped = {
+        "id": "fixture",
+        "contracts": ["get_source_app_icon", "copy_item"],
+        "platform_gaps": [{
+            "contract": "get_source_app_icon",
+            "platform": "windows",
+            "behaviour": "the row keeps its semantic icon",
+            "decided_in": "docs/decision.md",
+        }],
+    }
+    checks.append(("a documented platform gap passes", not gap_errors(gapped, root)))
+    probe = copy.deepcopy(gapped)
+    probe["platform_gaps"][0]["contract"] = "not_a_contract"
+    checks.append(("a gap on an unlisted contract fails", any("not a contract" in e for e in gap_errors(probe, root))))
+    probe = copy.deepcopy(gapped)
+    probe["platform_gaps"][0]["platform"] = "linux"
+    checks.append(("a gap on an unshipped platform fails", any("not a shipped platform" in e for e in gap_errors(probe, root))))
+    probe = copy.deepcopy(gapped)
+    probe["platform_gaps"][0]["behaviour"] = "  "
+    checks.append(("a gap with no replacement behaviour fails", any("what the product does instead" in e for e in gap_errors(probe, root))))
+    probe = copy.deepcopy(gapped)
+    probe["platform_gaps"][0]["decided_in"] = "docs/missing.md"
+    checks.append(("a gap with no decision file fails", any("does not exist" in e for e in gap_errors(probe, root))))
+    (root / "docs/silent.md").write_text("windows is different\n", encoding="utf-8")
+    probe = copy.deepcopy(gapped)
+    probe["platform_gaps"][0]["decided_in"] = "docs/silent.md"
+    checks.append(("a decision that never names the contract fails", any("does not mention" in e for e in gap_errors(probe, root))))
+    probe = copy.deepcopy(gapped)
+    probe["platform_gaps"].append(copy.deepcopy(gapped["platform_gaps"][0]))
+    checks.append(("the same gap recorded twice fails", any("recorded twice" in e for e in gap_errors(probe, root))))
+    probe = copy.deepcopy(gapped)
+    del probe["platform_gaps"][0]["behaviour"]
+    checks.append(("a gap missing a field fails", any("incomplete or unknown" in e for e in gap_errors(probe, root))))
+    checks.append(("a feature with no gaps passes", not gap_errors({"id": "fixture", "contracts": []}, root)))
+    gap_dir.cleanup()
     handler = """tauri::generate_handler![
         commands::history::copy_item,
         updater::update_status,
