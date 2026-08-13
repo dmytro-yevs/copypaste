@@ -40,7 +40,7 @@ import {
   useSyncNow,
   useUnpair,
 } from "@/hooks/useDevices";
-import { useStatus } from "@/hooks/useHistory";
+import { statusOwnDevice, useStatus } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
@@ -55,7 +55,7 @@ export function DevicesView() {
   const sync = useSyncNow();
   const discovered = useDiscovered();
   const rescan = useRescan();
-  const own = useStatus();
+  const own = useStatus(statusOwnDevice);
 
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
