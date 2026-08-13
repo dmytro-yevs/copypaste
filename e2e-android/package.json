@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:harness": "vitest run --config vitest.harness.config.ts"
   },
   "overrides": {
     "@puppeteer/browsers": "^3.2.0"
