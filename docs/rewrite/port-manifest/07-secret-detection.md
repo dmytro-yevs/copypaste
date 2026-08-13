@@ -257,9 +257,12 @@ numeric data, **10.8 % classified as `credit_card` at 0.99** and were hard-
 deleted wherever auto-wipe was on. v2 changes both halves:
 
 - A separator is one space or one hyphen between groups — never a newline, a
-  tab, or a mixture — and the leading group is four digits. Uniformity is
-  checked in the validator rather than by spelling the two spacings as separate
-  regex alternatives.
+  tab, a mixture, or a repetition — and the leading group is four digits. Each
+  spelling is its own regex alternative, because that is the only form in which
+  the group boundary is structural: with the separator written optional, the
+  leading group is four digits only when the writer happened to put a separator
+  after it, and `41111111 11111111` and `4111 111111111111` are both accepted.
+  A validator cannot recover the boundary the pattern has already dissolved.
 - The digit run must be a card: issuer range and per-brand length, from the
   maintained `card-validate` crate, on top of the `13 ≤ len ≤ 19` clamp, which
   stays because it is load-bearing independently of any brand table.

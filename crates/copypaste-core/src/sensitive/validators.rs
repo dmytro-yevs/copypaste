@@ -116,18 +116,12 @@ fn unquote(value: &str) -> &str {
 /// `card-validate` supplies the issuer ranges and per-brand lengths. §7.3 names
 /// taking Luhn from a crate as the preferred outcome; this crate carries both.
 pub(super) fn card_number_valid(matched: &str) -> bool {
-    // A card is written with one kind of separator throughout.
-    let mut separators = matched.chars().filter(|c| !c.is_ascii_digit());
-    let first = separators.next();
-    if separators.any(|c| Some(c) != first) {
-        return false;
-    }
-    // Order is load-bearing: every digit run in ordinary text reaches here, and
-    // the clamp and Luhn are one pass each where `Validate::from` walks twelve
-    // brand regexes. Reversed, a 16-digit hex id cost 33 % of a small scan.
-    // The clamp stays ours — §5.4 pins it, and Maestro alone would admit twelve
-    // digits — and the crate's lengths are narrower still, so a 19-digit Visa is
-    // a false negative now, the direction I1 chooses.
+    // Grouping and separator uniformity are the candidate pattern's job, not a
+    // second check here: one alternative per spelling is what makes the
+    // four-digit leading group structural. Order the rest cheapest-first — every
+    // digit run in ordinary text reaches this function, and `Validate::from`
+    // walks twelve brand regexes where the clamp is a length test. The clamp
+    // stays ours: §5.4 pins it, and it holds whatever a brand table says.
     let digits: String = matched.chars().filter(char::is_ascii_digit).collect();
     (13..=19).contains(&digits.len())
         && card_validate::Validate::is_luhn_valid(&digits)
@@ -371,23 +365,33 @@ mod tests {
         assert!(corpus.len() >= 500, "the corpus must stay large enough");
     }
 
-    /// The separator rule on its own, stated as the property it defends: a card
-    /// is written with one kind of separator between its groups, and a column of
-    /// numbers is not a card however the checksum lands.
+    /// The grouping rule on its own, stated as the property it defends: a card
+    /// is written as a four-digit leading group followed by groups joined by one
+    /// uniform separator, and a column of numbers is not a card however the
+    /// checksum lands.
+    ///
+    /// The last two entries are the ones an optional separator lets through.
+    /// Every digit here comes from the manifest's own `4111 1111 1111 1111`
+    /// fixture, so the checksum passes and the grouping is the only thing that
+    /// can reject them.
     #[test]
-    fn card_candidates_do_not_span_lines_tabs_or_mixed_separators() {
+    fn card_candidates_require_a_four_digit_group_and_one_uniform_separator() {
         let det = detector();
         for text in [
             "4111\n1111\n1111\n1111",
             "4111\t1111\t1111\t1111",
             "4111 1111-1111 1111",
             "4111  1111  1111  1111",
+            "41111111 11111111",
+            "4111 111111111111",
+            "41111111-11111111",
+            "4111-111111111111",
         ] {
             assert!(
                 !fired(&det, text, "credit_card"),
                 "credit_card fired on {text:?}"
             );
-            assert!(!det.may_auto_wipe(text), "{text:?}");
+            assert!(!det.is_sensitive(text), "{text:?}");
         }
     }
 
