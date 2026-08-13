@@ -249,7 +249,10 @@ fn ingest_text(
     // Classify before dedup. A password-manager capture can be identical to a
     // row first copied from an ordinary app; dedup must promote that row rather
     // than returning it with its old, searchable classification.
-    let is_sensitive = sensitive_floor || detector.may_auto_wipe(content);
+    // The withholding gate, not the deletion gate: this flag decides indexing,
+    // sync and the preview, and `sweep_sensitive` re-derives its own verdict
+    // from the plaintext before anything is removed (manifest I2, §6.2).
+    let is_sensitive = sensitive_floor || detector.is_sensitive(content);
     let hash = crate::storage::compute_content_hash(content.as_bytes());
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must

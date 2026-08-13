@@ -9,10 +9,23 @@ use std::ops::Range;
 /// (`CopyPaste-8ys1`). Pinned by `no_rule_sits_exactly_on_the_floor`.
 pub(super) const AUTOWIPE_CONFIDENCE_FLOOR: f32 = 0.70;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a match permits, in increasing order of consequence. Ordered so a
+/// caller states the least severity it acts on rather than listing variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     /// Detected and maskable, but inert for whole-item classification and wipe.
     Flag,
+    /// Classified sensitive — kept out of the search index, out of sync and out
+    /// of previews — and never a reason to delete.
+    ///
+    /// The band exists because those are two decisions, and a rule can be
+    /// certain of the first while proving nothing about the second. A validated
+    /// card number is the case: nothing in the digits separates the user's own
+    /// card from a Luhn-valid order id in an issuer range, and I1 ranks an
+    /// irreversible deletion of the second above the cost of keeping the first
+    /// unsearchable. `sweep_sensitive` already withheld deletion this way for
+    /// payloads it could not read; this makes the state reachable from a rule.
+    Restricted,
     /// Above the auto-wipe floor.
     HighConfidence,
 }
