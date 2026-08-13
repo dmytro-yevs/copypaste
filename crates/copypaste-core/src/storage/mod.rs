@@ -44,6 +44,7 @@ mod connection;
 mod dbfile;
 mod identity;
 mod items;
+mod merge_page;
 mod model;
 mod page;
 mod pinning;
@@ -59,6 +60,7 @@ pub use dbfile::{
     attach_key_literal, open_validated, verify_integrity, verify_schema, RestoreError,
 };
 pub use identity::DeviceIdentity;
+pub(crate) use merge_page::MergePageError;
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
 pub use page::{ItemCursor, Page};
 pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};

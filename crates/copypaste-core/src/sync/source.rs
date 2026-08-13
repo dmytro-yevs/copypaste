@@ -159,6 +159,42 @@ impl StoreSource {
         Ok(applied)
     }
 
+    /// Merge a whole page in, answering positionally.
+    ///
+    /// The retention bound and the applied hook fire **once for the page**, not
+    /// once per row. Both are already page-shaped jobs: retention is a bound on
+    /// the history rather than a step of the merge (see [`RetentionGate`]), and
+    /// the hook lowers a cursor, so the oldest stamp in the page is the only
+    /// value that changes the outcome — reporting the rest would move the same
+    /// cursor to the same place several more times.
+    ///
+    /// # Errors
+    ///
+    /// [`MergeError`] if the store or the seal fails. A version this device
+    /// declines is `false`.
+    pub fn apply_versions(&self, incoming: &[RemoteVersion<'_>]) -> Result<Vec<bool>, MergeError> {
+        let applied = super::batch::apply_remote_versions(
+            &self.store,
+            &self.keyring,
+            &self.detector,
+            &self.device_id,
+            incoming,
+        )?;
+        let floor = incoming
+            .iter()
+            .zip(&applied)
+            .filter(|(_, stored)| **stored)
+            .map(|(item, _)| item.created_at)
+            .min();
+        if let Some(floor) = floor {
+            self.enforce_retention(None);
+            if let Some(hook) = &self.on_applied {
+                hook(floor);
+            }
+        }
+        Ok(applied)
+    }
+
     /// Hold the retention bound after a stored version, at most once per
     /// [`RETENTION_DEBOUNCE`]. `settings` is the clone this apply already made,
     /// where it has one.
