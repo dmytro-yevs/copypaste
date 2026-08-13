@@ -31,6 +31,13 @@ const SWEEP_BUDGET: u32 = 4096;
 /// costs a short burst of wake-ups rather than a permanent 30-second timer.
 const RETRY_MIN: Duration = Duration::from_secs(30);
 
+/// Never more than a quarter of the ordinary interval: a "retry" scheduled at
+/// the interval is not a retry, and the sweeper is constructed with short
+/// intervals under test.
+fn retry_floor(interval: Duration) -> Duration {
+    RETRY_MIN.min(interval / 4)
+}
+
 /// Where the previous pass ran out of budget, as a position in the root's
 /// `readdir` order and a position within that entry if it is a directory.
 ///
@@ -358,7 +365,7 @@ struct SweepCadence {
 impl SweepCadence {
     fn new(interval: Duration) -> Self {
         let policy = ExponentialBuilder::new()
-            .with_min_delay(RETRY_MIN.min(interval))
+            .with_min_delay(retry_floor(interval))
             .with_max_delay(interval)
             .without_max_times();
         Self {
@@ -386,11 +393,15 @@ pub(super) struct CleanupWorker {
 }
 
 impl CleanupWorker {
+    /// `startup` is the pass that ran before the worker existed. Starting at
+    /// `interval` regardless would give plaintext the startup sweep could not
+    /// remove another whole `MAX_AGE` on disk.
     pub(super) fn start(
         mut sweeper: Sweeper,
         access: Arc<Mutex<()>>,
         max_age: Duration,
         interval: Duration,
+        startup: SweepReport,
     ) -> io::Result<Self> {
         let stop = Arc::new((Mutex::new(false), Condvar::new()));
         let worker_stop = Arc::clone(&stop);
@@ -398,7 +409,7 @@ impl CleanupWorker {
             .name("paste-file-cleanup".to_string())
             .spawn(move || {
                 let mut cadence = SweepCadence::new(interval);
-                let mut wait = interval;
+                let mut wait = cadence.after(&startup);
                 loop {
                     let (lock, wake) = &*worker_stop;
                     let stopped = lock.lock().unwrap_or_else(|held| held.into_inner());
@@ -826,7 +837,9 @@ mod tests {
         };
 
         for _ in 0..5 {
-            assert!(cadence.after(&blocked) <= interval);
+            let next = cadence.after(&blocked);
+            assert!(next <= interval);
+            assert!(next >= retry_floor(interval));
         }
     }
 

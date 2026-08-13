@@ -667,7 +667,7 @@ Three separate hard-won rules, all on the same subsystem:
 | Paste-file staging max age | **10 min** | Files are not deleted immediately after paste because the receiving app may read the URL asynchronously. `ipc/pasteboard.rs:311` |
 | Paste-file sweep budget | **4096 entries** | The sweep holds the staging lock, so an unbounded walk parks the interactive paste-back path behind whatever is in the directory. A sweep that hits the bound records where it stopped and the next pass continues from there — restarting `readdir` instead would let a prefix of live or undeletable entries consume every pass, and everything behind that prefix would keep its plaintext indefinitely. Measured at **20 ms** for a full 4096-entry pass (Ubuntu 24.04 / ext4; unmeasured on APFS). v2 `clipboard/file_materialize/sweep.rs` |
 | Paste-file retained-plaintext bound | **max age + one cycle** | The lifetime a payload can reach is the max age plus `ceil(entries / 4096)` passes, whatever the directory holds. It is a bound only because the cursor continues; without it there is none. v2 `clipboard/file_materialize/sweep.rs` |
-| Paste-file sweep retry floor | **30 s** | A sweep that could not delete expired plaintext must not then wait the ordinary interval, which is the whole 10 min — a second full lifetime of exposure. The ladder doubles back up to 10 min, so a file nothing can ever delete costs a short burst of wake-ups rather than a permanent 30 s timer. v2 `clipboard/file_materialize/sweep.rs` |
+| Paste-file sweep retry floor | **30 s**, and never over a quarter of the interval | A sweep that could not delete expired plaintext must not then wait the ordinary interval, which is the whole 10 min — a second full lifetime of exposure. This includes the *first* wait after startup: a restart whose sweep left work behind starts its worker at the floor, not at the interval. The ladder doubles back up to 10 min, so a file nothing can ever delete costs a short burst of wake-ups rather than a permanent 30 s timer. v2 `clipboard/file_materialize/sweep.rs` |
 | Paste-file sweep failure kinds | **6 + overflow** | Per-`io::ErrorKind` counts, bounded so a directory of a million unreadable files cannot turn the report into a million-entry map. One kind alone hid every other cause behind whichever failed first. v2 `clipboard/file_materialize/report.rs` |
 | Self-write sentinel "none" | **-1** | Must be outside the valid `changeCount` domain (non-negative). `monitor.rs:104` |
 | Change-count cursor initial | **-1** | Same reason; also suppresses the first-poll burst signal. `monitor.rs:100`, `:433` |
@@ -955,9 +955,12 @@ keep both properties).
 - **T-87 — sweep work does not grow with history.** After every staged payload
   has expired and been removed, the next sweep examines zero entries: emptied
   content directories are removed rather than re-walked for ever.
-- **T-88 — a restart is a sweep.** Startup sweeps before the first paste-back,
-  and if that pass leaves work behind it starts the sweeper immediately rather
-  than waiting for a paste-back that may never come.
+- **T-88 — a restart is a sweep, and an unfinished one comes back at the
+  floor.** Startup sweeps before the first paste-back; if that pass leaves work
+  behind it starts the sweeper immediately rather than waiting for a paste-back
+  that may never come, *and* the worker's first wait is the retry floor. Proven
+  by clearing the obstruction and observing the deletion well inside the
+  ordinary interval, not by observing that a thread exists.
 - **T-89 — no prefix can starve what is behind it.** Given more entries than
   one sweep's budget, where the entries reached first are live or undeletable,
   every expired payload behind them is still removed within one cycle of
