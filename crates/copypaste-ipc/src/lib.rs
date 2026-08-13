@@ -17,6 +17,7 @@
 pub mod config;
 pub mod content_type;
 pub mod error;
+pub mod health;
 pub mod limits;
 pub mod paths;
 pub mod payload;
@@ -33,6 +34,7 @@ pub use config::{
     MIN_TEXT_SIZE_BYTES, POLL_INTERVAL_MAX_MS, POLL_INTERVAL_MIN_MS,
 };
 pub use error::ErrorCode;
+pub use health::SettingsHealth;
 pub use limits::{
     clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CONTENT_BYTES, MAX_FRAME_BYTES,
     MAX_PAGE, MAX_PAGE_CONTENT_BYTES,
