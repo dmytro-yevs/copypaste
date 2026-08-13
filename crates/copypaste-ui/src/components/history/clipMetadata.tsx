@@ -77,7 +77,10 @@ export interface ClipSourceMetadata {
 
 function appName(bundleId: string): string | null {
   if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)+$/i.test(bundleId)) return null;
-  const candidate = bundleId.split(".").at(-1)?.replaceAll(/[-_]+/g, " ").trim();
+  // Index and `replace` rather than `at(-1)` and `replaceAll`: neither is in
+  // Chromium 74, the WebView baseline. A global regex makes the two identical.
+  const parts = bundleId.split(".");
+  const candidate = parts[parts.length - 1]?.replace(/[-_]+/g, " ").trim();
   if (!candidate || !/^[a-z0-9 ]+$/i.test(candidate)) return null;
   return candidate.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

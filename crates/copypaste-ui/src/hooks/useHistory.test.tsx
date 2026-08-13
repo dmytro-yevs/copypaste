@@ -246,7 +246,7 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
     listItems.mockImplementation(async (limit: number, cursor: string | null) => {
       const start = cursor === null ? 0 : list.findIndex((e) => e.id === cursor) + 1;
       const slice = list.slice(start, start + limit);
-      const last = slice.at(-1);
+      const last = slice[slice.length - 1];
       const more = last !== undefined && list.indexOf(last) < list.length - 1;
       return page(slice, 0, more ? (last?.id ?? null) : null);
     });
