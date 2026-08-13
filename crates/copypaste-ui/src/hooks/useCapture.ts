@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 
-import { invalidateHistoryHead, STATUS_KEY } from "@/hooks/useHistory";
+import { invalidateHistoryHead, STATUS_KEY } from "@/hooks/historyRefresh";
 import { t } from "@/i18n";
 import { isRetryable, toFriendly } from "@/lib/errors";
 import {

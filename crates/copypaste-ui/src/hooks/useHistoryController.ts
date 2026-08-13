@@ -4,14 +4,9 @@ import { toast } from "sonner";
 
 import { type OriginDevice, originsOf } from "@/components/history/origin";
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
-import {
-  historyOf,
-  statusItemCount,
-  useClearHistory,
-  useHistory,
-  useHistorySearch,
-  useStatus,
-} from "@/hooks/useHistory";
+import { historyOf, useHistory, useHistorySearch } from "@/hooks/useHistory";
+import { useClearHistory } from "@/hooks/useHistoryMutations";
+import { statusItemCount, useStatus } from "@/hooks/useStatus";
 import { type ErrorKind, ipcFailure, toFriendly } from "@/lib/errors";
 import type { Item } from "@/lib/ipc";
 import { FILTER_DEBOUNCE_MS, SEARCH_DEBOUNCE_MS } from "@/lib/layout";

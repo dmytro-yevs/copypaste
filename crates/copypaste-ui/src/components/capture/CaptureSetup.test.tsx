@@ -232,7 +232,10 @@ describe("in every state", () => {
 
     expect(disclosure.getAttribute("aria-expanded")).toBe("false");
     expect(controlsId).toBeTruthy();
-    expect(document.getElementById(controlsId!)).toBeNull();
+    // INV-7: the controlled region is mounted and `hidden`, never absent — an
+    // `aria-controls` naming nothing is a dangling pointer, not a closed
+    // panel. What stays unmounted is the editor holding the history query.
+    expect(document.getElementById(controlsId!)).toHaveProperty("hidden", true);
     expect(document.getElementById("android-exclusion-search")).toBeNull();
 
     await user.click(disclosure);

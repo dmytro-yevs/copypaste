@@ -27,7 +27,8 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Row } from "@/components/settings/Row";
-import { statusItemCount, useClearHistory, useStatus } from "@/hooks/useHistory";
+import { useClearHistory } from "@/hooks/useHistoryMutations";
+import { statusItemCount, useStatus } from "@/hooks/useStatus";
 import {
   useBackupDatabase,
   useExportHistory,
