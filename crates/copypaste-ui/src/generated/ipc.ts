@@ -34,6 +34,8 @@ export type DiscoveredDevice = { discovery_id: string, name: string, addr: strin
 
 export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "pairing_code" | "pairing_address" | "rate_limited" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_version" | "peer_not_found" | "internal";
 
+export type TauriEventName = "copypaste://changed" | "copypaste://push-state" | "copypaste://captured" | "copypaste://capture-state" | "private-mode-changed" | "autostart-changed" | "open-settings";
+
 export type ExportReport = { exported: number, skipped_sensitive: number, skipped_non_text: number, skipped_undecryptable: number, };
 
 export type ImportData = { inserted: number, skipped: number, skipped_duplicate: number, skipped_empty: number, skipped_too_large: number, };

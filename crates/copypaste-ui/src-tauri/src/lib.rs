@@ -49,6 +49,7 @@ pub mod capture;
 pub mod commands;
 #[cfg(all(feature = "dev-web-bridge", not(target_os = "android")))]
 pub mod dev_web_bridge;
+pub mod events;
 pub mod model;
 #[cfg(target_os = "android")]
 pub mod network_discovery;

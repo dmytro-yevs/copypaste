@@ -18,10 +18,8 @@ use tauri::Emitter as _;
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 
 use crate::backend::BackendError;
-
-/// Emitted after the setting changes. The tray menu and the Settings row are
-/// separate readers of one system fact, and only the writer knows it moved.
-pub const EVENT_CHANGED: &str = "autostart-changed";
+#[cfg(not(target_os = "android"))]
+use crate::events::TauriEventName;
 
 pub const MSG_ENABLE_FAILED: &str = "CopyPaste couldn't be set to open at login.";
 pub const MSG_DISABLE_FAILED: &str = "CopyPaste couldn't be stopped from opening at login.";
@@ -76,7 +74,7 @@ pub fn set_enabled<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> Result<(), 
     // The observed state, not `enabled`: on Windows the write can succeed while
     // Task Manager's override still holds the app off, and a menu that reported
     // the request rather than the result would then be lying.
-    let _ = app.emit(EVENT_CHANGED, is_enabled(app));
+    let _ = app.emit(TauriEventName::AutostartChanged.as_str(), is_enabled(app));
     Ok(())
 }
 
