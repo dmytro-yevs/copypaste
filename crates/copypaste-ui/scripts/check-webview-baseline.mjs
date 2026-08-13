@@ -130,10 +130,12 @@ export function postBaselineRuntime(code, target) {
 }
 
 /**
- * `-legacy-` is `@vitejs/plugin-legacy`'s naming for the nomodule build, and a
- * chunk classified as legacy is checked against Chromium 53.
+ * `-legacy-` is `@vitejs/plugin-legacy`'s naming for the nomodule build. A
+ * script outside `assets/` was copied from `public/`, so the plugin never saw
+ * it and both engines load it: its floor is the older one.
  */
-export function targetOf(name) {
+export function targetOf(name, fromPublic = false) {
+  if (fromPublic) return LEGACY_TARGET;
   return /-legacy-|^polyfills-legacy/.test(name) ? LEGACY_TARGET : MODERN_TARGET;
 }
 
@@ -158,15 +160,19 @@ export function sharesBaselineWithConfig(config) {
   return /from\s+"\.\/scripts\/webview-baseline\.mjs"/.test(config);
 }
 
-function bundles() {
-  const assets = path.join(root, "dist", "assets");
-  return readdirSync(assets)
-    .filter((name) => name.endsWith(".js"))
-    .map((name) => ({
+function scripts(dir, fromPublic) {
+  return readdirSync(path.join(root, "dist", ...dir), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
+    .map(({ name }) => ({
       name,
-      target: targetOf(name),
-      code: readFileSync(path.join(assets, name), "utf8"),
+      target: targetOf(name, fromPublic),
+      code: readFileSync(path.join(root, "dist", ...dir, name), "utf8"),
     }));
+}
+
+/** Everything the packaged frontend ships, including what `public/` contributed. */
+function bundles() {
+  return [...scripts(["assets"], false), ...scripts([], true)];
 }
 
 function main() {
