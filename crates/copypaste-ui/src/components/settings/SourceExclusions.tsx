@@ -8,10 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useHistory } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
-import { isAndroidPlatform } from "@/lib/platform";
+import { canonicalExclusion, findExclusion } from "@/lib/exclusions";
+import { isAndroidPlatform, isWindowsPlatform } from "@/lib/platform";
 import { listInstalledSourceApps, type InstalledSourceApp } from "@/lib/ipc";
-
-const APP_ID = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/;
 
 interface SourceExclusionsProps {
   ids: readonly string[];
@@ -32,9 +31,13 @@ export function SourceExclusions({
   const history = useHistory("");
   const [query, setQuery] = useState("");
   const [validation, setValidation] = useState<string | null>(null);
+  const [normalizedNotice, setNormalizedNotice] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(!collapsible);
   const controlsId = useId();
+  const validationId = useId();
+  const noticeId = useId();
   const android = isAndroidPlatform();
+  const windows = isWindowsPlatform();
   const installedApps = useQuery({
     queryKey: ["installed-source-apps"],
     queryFn: listInstalledSourceApps,
@@ -65,18 +68,32 @@ export function SourceExclusions({
     [installedApps.data],
   );
 
+  /** The entry the user typed, in the identity the daemon will compare. On
+   *  Windows `Chrome.exe`, `chrome` and a pasted path are one program, so the
+   *  duplicate check is on that identity and not on the typed string. */
   const add = (id: string) => {
-    const next = id.trim();
-    if (!APP_ID.test(next)) {
-      setValidation(t("settings.service.exclusions.invalid"));
+    setNormalizedNotice(null);
+    const next = canonicalExclusion(id, windows);
+    if (next === null) {
+      setValidation(t(windows
+        ? "settings.service.exclusions.windowsInvalid"
+        : "settings.service.exclusions.invalid"));
       return;
     }
-    if (ids.includes(next)) {
-      setValidation(t("settings.service.exclusions.exists"));
+    const existing = findExclusion(ids, next, windows);
+    if (existing !== undefined) {
+      setValidation(windows
+        ? t("settings.service.exclusions.windowsExists", { id: existing })
+        : t("settings.service.exclusions.exists"));
       return;
     }
     setValidation(null);
     setQuery("");
+    // Said, not silent: an entry that comes back spelled differently from what
+    // was typed is the moment a user decides whether it worked.
+    if (next !== id.trim()) {
+      setNormalizedNotice(t("settings.service.exclusions.normalized", { id: next }));
+    }
     onChange([...ids, next]);
   };
 
@@ -103,7 +120,9 @@ export function SourceExclusions({
         {t(
           android
             ? "settings.service.exclusions.androidLimitation"
-            : "settings.service.exclusions.description",
+            : windows
+              ? "settings.service.exclusions.windowsDescription"
+              : "settings.service.exclusions.description",
         )}
       </p>
     </div>
@@ -143,14 +162,20 @@ export function SourceExclusions({
       <>
           <div className="flex flex-col gap-s-2 sm:flex-row">
             <Input
-              aria-label={t("settings.service.exclusions.inputLabel")}
+              aria-label={t(windows
+                ? "settings.service.exclusions.windowsInputLabel"
+                : "settings.service.exclusions.inputLabel")}
               value={query}
               disabled={disabled}
-              placeholder={t("settings.service.exclusions.placeholder")}
+              placeholder={t(windows
+                ? "settings.service.exclusions.windowsPlaceholder"
+                : "settings.service.exclusions.placeholder")}
               aria-invalid={validation !== null || undefined}
+              aria-describedby={validation ? validationId : normalizedNotice ? noticeId : undefined}
               onChange={(event) => {
                 setQuery(event.target.value);
                 setValidation(null);
+                setNormalizedNotice(null);
               }}
               onKeyDown={(event) => {
                 if (event.key !== "Enter") return;
@@ -167,7 +192,16 @@ export function SourceExclusions({
               {t("settings.service.exclusions.add")}
             </Button>
           </div>
-          {validation && <p role="alert" className="text-xs text-destructive">{validation}</p>}
+          {validation && (
+            <p id={validationId} role="alert" className="text-xs text-destructive">
+              {validation}
+            </p>
+          )}
+          {!validation && normalizedNotice && (
+            <p id={noticeId} role="status" className="text-xs text-muted-foreground">
+              {normalizedNotice}
+            </p>
+          )}
 
           {knownIds.length > 0 && (
             <div className="flex flex-col gap-s-1">

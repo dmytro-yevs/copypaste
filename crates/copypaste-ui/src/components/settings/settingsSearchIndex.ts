@@ -42,7 +42,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { tab: "service", section: "settings.service.groups.capture.title", title: "settings.service.maxImage.title", description: "settings.service.maxImage.description" },
   { tab: "service", section: "settings.service.groups.capture.title", title: "settings.service.maxFile.title", description: "settings.service.maxFile.description" },
   { tab: "service", section: "settings.service.groups.capture.title", title: "settings.service.maxDecodedImage.title", description: "settings.service.maxDecodedImage.description" },
-  { tab: "service", section: "settings.service.groups.capture.title", title: "settings.service.exclusions.title", description: "settings.service.exclusions.description", keywords: ["app", "application", "exclude", "source", "bundle", "package", "privacy"] },
+  { tab: "service", section: "settings.service.groups.capture.title", title: "settings.service.exclusions.title", description: "settings.service.exclusions.description", keywords: ["app", "application", "exclude", "source", "bundle", "package", "privacy", "program", "exe"] },
   { tab: "service", section: "settings.service.groups.keeping.title", title: "settings.service.historyLimit.title", description: "settings.service.historyLimit.description" },
   { tab: "service", section: "settings.service.groups.keeping.title", title: "settings.service.storageQuota.title", description: "settings.service.storageQuota.description" },
   { tab: "service", section: "settings.service.groups.keeping.title", title: "settings.service.retention.title", description: "settings.service.retention.description" },
