@@ -34,10 +34,26 @@ reject() {
     exit 2
 }
 
+is_uint() {
+    [[ "$1" =~ ^(0|[1-9][0-9]{0,8})$ ]]
+}
+
+# Per actions/toolkit escapeProperty: %, CR, LF, colon, comma.
+escape_property() {
+    local v="$1"
+    v="${v//%/%25}"
+    v="${v//$'\r'/%0D}"
+    v="${v//$'\n'/%0A}"
+    v="${v//:/%3A}"
+    v="${v//,/%2C}"
+    printf '%s' "$v"
+}
+
 # Fills OVER_PATHS/OVER_LINES, or exits 2. Every record is accounted for: the
 # gate must never treat a row it failed to understand as a row that was clean.
+# Record sequence: header → over* → count → end.
 read_report() {
-    local kind lines path extra header=0 declared="" ended=0 seen=0
+    local kind lines path extra state=init declared="" seen=0
     OVER_PATHS=()
     OVER_LINES=()
     OVER_COUNT=0
@@ -46,28 +62,39 @@ read_report() {
         reject "${CHECKER##*/} printed nothing; the file-size budget was not measured."
 
     while IFS=$'\t' read -r kind lines path extra; do
-        [[ "$ended" -eq 0 ]] || reject "${CHECKER##*/} emitted '$kind' after its end record."
+        case "$state" in
+            ended) reject "${CHECKER##*/} emitted '$kind' after its end record." ;;
+        esac
         case "$kind" in
             file-size)
-                [[ "$header" -eq 0 && "$lines" == "$REPORT_VERSION" && "$path" == "$TARGET" && -z "$extra" ]] ||
+                [[ "$state" == "init" && "$lines" == "$REPORT_VERSION" && "$path" == "$TARGET" && -z "$extra" ]] ||
                     reject "${CHECKER##*/} report header is not version $REPORT_VERSION for $TARGET lines: '$kind $lines $path'."
-                header=1
+                state=rows
                 ;;
             over)
-                [[ "$header" -eq 1 && "$lines" =~ ^[0-9]+$ && -n "$path" && -z "$extra" ]] ||
+                [[ "$state" == "rows" ]] ||
+                    reject "${CHECKER##*/} emitted an overage record out of sequence."
+                is_uint "$lines" && [[ -n "$path" && -z "$extra" ]] ||
                     reject "${CHECKER##*/} emitted an unreadable overage record: '$kind $lines $path $extra'."
+                [[ "$lines" -gt "$TARGET" ]] ||
+                    reject "${CHECKER##*/} reported $lines source lines for $path, not over the $TARGET-line budget."
                 OVER_LINES[$seen]="$lines"
                 OVER_PATHS[$seen]="$path"
                 seen=$((seen + 1))
                 ;;
             count)
-                [[ "$header" -eq 1 && -z "$declared" && "$lines" =~ ^[0-9]+$ && -z "$path$extra" ]] ||
+                [[ "$state" == "rows" ]] ||
+                    reject "${CHECKER##*/} emitted a count record out of sequence."
+                is_uint "$lines" && [[ -z "$path$extra" ]] ||
                     reject "${CHECKER##*/} emitted an unreadable count record: '$kind $lines $path'."
                 declared="$lines"
+                state=counted
                 ;;
             end)
+                [[ "$state" == "counted" ]] ||
+                    reject "${CHECKER##*/} emitted an end record without a preceding count."
                 [[ -z "$lines$path$extra" ]] || reject "${CHECKER##*/} emitted a malformed end record."
-                ended=1
+                state=ended
                 ;;
             *)
                 reject "${CHECKER##*/} emitted a record the gate does not recognise: '$kind'."
@@ -75,7 +102,7 @@ read_report() {
         esac
     done <<< "$1"
 
-    [[ "$header" -eq 1 && -n "$declared" && "$ended" -eq 1 ]] ||
+    [[ "$state" == "ended" ]] ||
         reject "${CHECKER##*/} report is incomplete; it stopped before its end record."
     [[ "$declared" -eq "$seen" ]] ||
         reject "${CHECKER##*/} declared $declared overage(s) and emitted $seen; its report is inconsistent."
@@ -123,12 +150,13 @@ gate() {
     for (( i = 0; i < OVER_COUNT; i++ )); do
         path="${OVER_PATHS[$i]}"
         lines="${OVER_LINES[$i]}"
+        escaped="$(escape_property "crates/$path")"
         if printf '%s\n' "$EXEMPT" | grep -qxF "$path"; then
-            printf '::notice file=crates/%s::%s source lines, exempt (rule 5)\n' "$path" "$lines"
+            printf '::notice file=%s::%s source lines, exempt (rule 5)\n' "$escaped" "$lines"
             continue
         fi
-        printf '::error file=crates/%s::%s source lines, over the %d-line budget (AGENTS.md rule 5). Split it, or claim the indivisible-responsibility exemption in the module header and add it to EXEMPT in %s.\n' \
-            "$path" "$lines" "$TARGET" "${SELF##*/}"
+        printf '::error file=%s::%s source lines, over the %d-line budget (AGENTS.md rule 5). Split it, or claim the indivisible-responsibility exemption in the module header and add it to EXEMPT in %s.\n' \
+            "$escaped" "$lines" "$TARGET" "${SELF##*/}"
         fail=1
     done
 
@@ -239,6 +267,37 @@ EOF
     assert "a report measured against another budget fails the gate" 2 "report header is not version"
 
     checker <<'EOF'
+printf 'file-size\t1\t500\nover\t812\tdaemon/src/huge.rs\ncount\t1\n'
+EOF
+    assert "a report missing only its end record fails" 2 "stopped before its end record"
+
+    checker <<'EOF'
+[[ "$1" == "--porcelain" ]] || { echo "not --porcelain" >&2; exit 99; }
+printf 'file-size\t1\t500\ncount\t0\nend\n'
+EOF
+    assert "the gate passes --porcelain to the checker" 0 "All files within"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\ncount\t18446744073709551616\nend\n'
+EOF
+    assert "an overflowing count fails the gate" 2 "unreadable count"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\ncount\t1\nover\t812\tdaemon/src/huge.rs\nend\n'
+EOF
+    assert "an overage after the count fails the gate" 2 "out of sequence"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\nover\t1\tdaemon/src/huge.rs\ncount\t1\nend\n'
+EOF
+    assert "an overage not over the budget fails the gate" 2 "not over"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\nover\t812\tui/src/has,comma.ts\ncount\t1\nend\n'
+EOF
+    assert "a comma in a path is escaped in annotations" 1 "%2C"
+
+    checker <<'EOF'
 printf 'file-size\t1\t500\nover\t812\tdaemon/src/huge.rs\ncount\t1\nend\n'
 EOF
     if ! install_gate "daemon/src/huge.rs"; then
@@ -246,6 +305,16 @@ EOF
         bad=$((bad + 1))
     fi
     assert "a registered exemption passes" 0 "exempt (rule 5)"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\ncount\t1\nover\t812\tdaemon/src/huge.rs\nend\n'
+EOF
+    assert "an exempt overage after the count still fails" 2 "out of sequence"
+
+    checker <<'EOF'
+printf 'file-size\t1\t500\nover\t1\tdaemon/src/huge.rs\ncount\t1\nend\n'
+EOF
+    assert "an exempt under-budget overage still fails" 2 "not over"
 
     printf '  passed %d, failed %d\n' "$pass" "$bad"
     [[ "$bad" -eq 0 ]]
