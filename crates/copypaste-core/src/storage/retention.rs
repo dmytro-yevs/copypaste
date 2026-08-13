@@ -43,8 +43,7 @@ fn unpinned_bytes(conn: &Connection) -> rusqlite::Result<u64> {
     Ok(total.max(0) as u64)
 }
 
-const BYTE_CAP_TOTAL_SQL: &str =
-    "SELECT COALESCE(SUM(LENGTH(COALESCE(content_ciphertext, X''))), 0) \
+const BYTE_CAP_TOTAL_SQL: &str = "SELECT COALESCE(SUM(content_bytes), 0) \
     FROM clipboard_items INDEXED BY idx_items_unpinned_bytes \
     WHERE deleted = 0 AND pinned = 0";
 
@@ -54,8 +53,7 @@ const BYTE_CAP_TOTAL_SQL: &str =
 //
 // Each also gates on its own connection before promoting it to an IMMEDIATE
 // transaction and re-checks inside, so what gets deleted is unchanged and a
-// no-op sweep stops taking the write lock — three per imported item. Sweeping
-// one capture later can only delete less, later.
+// no-op sweep stops taking the write lock. Sweeping later deletes less, later.
 
 /// The newest unpinned live row — the one [`Store::evict_over_cap`] documents as
 /// never evictable. Empty-string sentinel, so `id <> ?1` matches every real row.
@@ -97,14 +95,12 @@ const CAP_VICTIMS_SQL: &str = concat!(
       ORDER BY created_at ASC, id ASC LIMIT ?2"
 );
 
-/// Ranking runs in index order, so the window needs no sort. Row lengths still
-/// come from the table: index-only needs a stored byte column, which `dbfile`'s
-/// `INSERT ... SELECT *` restore cannot carry.
+/// Covering: ranking runs in index order so the window needs no sort, and the
+/// sizes come out of the index, so weighing the history fetches no payload.
 const BYTE_VICTIMS_SQL: &str = concat!(
     "WITH ranked AS ( \
-        SELECT id, \
-               LENGTH(COALESCE(content_ciphertext, X'')) AS row_bytes, \
-               SUM(LENGTH(COALESCE(content_ciphertext, X''))) OVER ( \
+        SELECT id, content_bytes AS row_bytes, \
+               SUM(content_bytes) OVER ( \
                    ORDER BY created_at ASC, id ASC ROWS UNBOUNDED PRECEDING \
                ) AS cumulative_bytes \
           FROM ",
@@ -431,6 +427,107 @@ mod tests {
                 "{label} must take its order from the index, got {plan:?}"
             );
         }
+    }
+
+    /// The byte sweep weighs every candidate row. Reading those sizes off the
+    /// index is the difference between measuring the history and decrypting it,
+    /// and `content_bytes` is the column that makes it possible: an index on the
+    /// bare `LENGTH(...)` expression left the plan a non-covering `SCAN`.
+    #[test]
+    fn the_byte_sweep_weighs_the_history_without_fetching_a_payload() {
+        let s = store();
+        s.insert(item("payload", T0)).unwrap();
+        let gate = plan_of(&s, BYTE_CAP_TOTAL_SQL);
+        let victims = plan_of(&s, BYTE_VICTIMS_SQL);
+        assert!(
+            gate.iter().any(|d| d.contains("COVERING INDEX"))
+                && victims.iter().any(|d| d.contains("COVERING INDEX")),
+            "gate {gate:?} victims {victims:?}"
+        );
+    }
+
+    /// `content_bytes` is derived state written by hand, so the thing to hold is
+    /// that no write path can leave it disagreeing with the payload it measures.
+    /// Every writer that touches a ciphertext is exercised here.
+    #[test]
+    fn no_write_path_leaves_content_bytes_disagreeing_with_its_payload() {
+        let s = store();
+
+        let short = s.insert(item(&"a".repeat(10), T0)).unwrap();
+        let long = s.insert(item(&"b".repeat(500), T0 + 60_000)).unwrap();
+        assert_no_byte_drift(&s, "insert");
+        assert_eq!(
+            bytes_of(&s, &short.id),
+            short.content_ciphertext.len() as i64
+        );
+        assert_eq!(bytes_of(&s, &long.id), long.content_ciphertext.len() as i64);
+
+        // A bump restamps without touching the payload.
+        s.insert_or_bump(item(&"a".repeat(10), T0 + 600_000))
+            .unwrap();
+        assert_no_byte_drift(&s, "bump");
+
+        // A tombstone drops its payload, so its share of the quota goes with it
+        // rather than being remembered by a stale count.
+        s.delete(&long.id).unwrap();
+        assert_eq!(bytes_of(&s, &long.id), 0);
+        assert_no_byte_drift(&s, "soft delete");
+
+        // The sync writer is the other insert path, on both of its branches.
+        let remote = crate::storage::IncomingItem {
+            id: "from-a-peer",
+            content_ciphertext: Some(&[7u8; 321]),
+            nonce: Some(&[1u8; 24]),
+            content_type: "text",
+            content_hash: "peerhash",
+            created_at: T0 + 900_000,
+            deleted: false,
+            is_sensitive: false,
+            origin_device_id: "peer",
+            pinned: false,
+            pin_order: None,
+            pin_updated_at: 0,
+            search_text: Some("from a peer"),
+            payload_metadata: None,
+        };
+        s.upsert(&remote).unwrap();
+        assert_eq!(bytes_of(&s, "from-a-peer"), 321);
+        assert_no_byte_drift(&s, "upsert insert");
+
+        s.upsert(&crate::storage::IncomingItem {
+            content_ciphertext: Some(&[7u8; 40]),
+            created_at: T0 + 960_000,
+            ..remote
+        })
+        .unwrap();
+        assert_eq!(bytes_of(&s, "from-a-peer"), 40);
+        assert_no_byte_drift(&s, "upsert replace");
+    }
+
+    fn bytes_of(s: &Store, id: &str) -> i64 {
+        s.conn()
+            .unwrap()
+            .query_row(
+                "SELECT content_bytes FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[track_caller]
+    fn assert_no_byte_drift(s: &Store, after: &str) {
+        let drifted: i64 = s
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items \
+                  WHERE content_bytes <> LENGTH(COALESCE(content_ciphertext, X''))",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(drifted, 0, "content_bytes drifted after {after}");
     }
 
     #[test]

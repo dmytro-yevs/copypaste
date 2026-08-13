@@ -30,7 +30,20 @@ macro_rules! item_columns_ci {
     };
 }
 
-pub(super) use {item_columns, item_columns_ci};
+/// Every column of `clipboard_items` a copy should carry, in schema order.
+///
+/// `content_bytes` is derived and absent, which is why a copy of the table has
+/// to name its columns rather than `SELECT *`: the triggers recompute it from
+/// the payload that actually landed, so a restore cannot import a stale size.
+macro_rules! stored_item_columns {
+    () => {
+        "id, content_ciphertext, nonce, content_type, content_hash, is_sensitive, \
+         pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, \
+         app_bundle_id, app_name, payload_metadata, fts_rowid"
+    };
+}
+
+pub(super) use {item_columns, item_columns_ci, stored_item_columns};
 
 /// An item on its way into the store.
 pub struct NewItem {
