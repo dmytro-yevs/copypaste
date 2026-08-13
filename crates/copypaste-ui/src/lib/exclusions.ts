@@ -8,13 +8,27 @@
 // name from Task Manager — `chrome.exe`, `chrome`, or a pasted path all
 // name one process.
 
+import pathBrowserify from "path-browserify-win32";
+
+/** The package's own `index.d.ts` declares itself in terms of itself, so its
+ *  module type is `any`. Node's signature is the API it implements. */
+const win32 = (pathBrowserify as { win32: typeof import("node:path").win32 }).win32;
+
 const BUNDLE_ID = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/;
 
-/** The last path segment, by Windows' separators rather than the host's. */
+/**
+ * The last path segment, by Windows' separators rather than the host's.
+ *
+ * `path-browserify-win32` owns the parsing, as `typed-path` does in the daemon,
+ * so both sides read a `C:` drive prefix as a prefix rather than a separator.
+ * What is left is the same input cleanup the daemon keeps: the shell wraps a
+ * path pasted from Explorer's address bar in quotes, and an entry ending in a
+ * separator names a directory rather than the image of any process.
+ */
 function imageName(entry: string): string {
-  const trimmed = entry.trim().replace(/^"+|"+$/g, "");
-  const segments = trimmed.split(/[\\/:]/);
-  return (segments[segments.length - 1] ?? "").trim();
+  const trimmed = entry.trim().replace(/^"+|"+$/g, "").trim();
+  if (/[\\/]$/.test(trimmed)) return "";
+  return win32.basename(trimmed).trim();
 }
 
 /**

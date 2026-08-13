@@ -290,6 +290,8 @@ mod tests {
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r#""C:\Program Files\Google\Chrome\Application\chrome.exe""#,
             "C:/Program Files/Google/Chrome/Application/chrome.exe",
+            "C:chrome.exe",
+            r"C:\chrome.exe",
         ] {
             assert!(
                 is_excluded(&[entry.to_owned()], Some(excluded)),
