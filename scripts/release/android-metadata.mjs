@@ -6,6 +6,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { projectDeepLinkConfigs, staleDeepLinkConfigs } from "./product-config.mjs";
+
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const uiPackagePath = join(repo, "crates/copypaste-ui/package.json");
 const requireFromUi = createRequire(pathToFileURL(uiPackagePath));
@@ -78,6 +80,7 @@ function repositoryProduct() {
   const releaseApplicationId = product["android-release-application-id"];
   const debugSuffix = product["android-debug-application-id-suffix"];
   const releaseCertificateSha256 = product["android-release-certificate-sha256"];
+  const deepLinkScheme = product["deep-link-scheme"];
   if (typeof releaseApplicationId !== "string" || !/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(releaseApplicationId)) {
     throw new Error("Cargo.toml contains an invalid Android release application id");
   }
@@ -87,13 +90,44 @@ function repositoryProduct() {
   if (typeof releaseCertificateSha256 !== "string" || !/^[0-9a-f]{64}$/.test(releaseCertificateSha256)) {
     throw new Error("Cargo.toml must contain one lowercase Android release certificate SHA-256 fingerprint");
   }
+  if (typeof deepLinkScheme !== "string" || !/^[a-z][a-z0-9+.-]*$/.test(deepLinkScheme)) {
+    throw new Error("Cargo.toml contains an invalid deep-link scheme");
+  }
   return {
     versionName: ui.version,
     releaseApplicationId,
     debugApplicationIdSuffix: debugSuffix,
     debugApplicationId: `${releaseApplicationId}${debugSuffix}`,
     releaseCertificateSha256,
+    deepLinkScheme,
   };
+}
+
+const deepLinkPaths = {
+  tauri: join(repo, "crates/copypaste-ui/src-tauri/tauri.conf.json"),
+  androidManifest: join(repo, "crates/copypaste-ui/src-tauri/gen/android/app/src/main/AndroidManifest.xml"),
+  capability: join(repo, "crates/copypaste-ui/src-tauri/capabilities/default.json"),
+};
+
+function readDeepLinkConfigs() {
+  return Object.fromEntries(Object.entries(deepLinkPaths)
+    .map(([name, path]) => [name, readFileSync(path, "utf8")]));
+}
+
+function checkDeepLinkConfigs(product) {
+  const stale = staleDeepLinkConfigs(readDeepLinkConfigs(), product.deepLinkScheme);
+  if (stale.length !== 0) {
+    const paths = stale.map((name) => deepLinkPaths[name].slice(repo.length + 1));
+    throw new Error(`deep-link configuration is stale; run --sync (${paths.join(", ")})`);
+  }
+}
+
+function syncDeepLinkConfigs(product) {
+  const source = readDeepLinkConfigs();
+  const projected = projectDeepLinkConfigs(source, product.deepLinkScheme);
+  for (const [name, updated] of Object.entries(projected)) {
+    if (source[name] !== updated) writeFileSync(deepLinkPaths[name], updated);
+  }
 }
 
 export function resolveIdentity() {
@@ -166,6 +200,7 @@ export function resolveMetadata(versionOverride) {
       || android?.bundle?.android?.debugApplicationIdSuffix !== product.debugApplicationIdSuffix) {
     throw new Error("tauri.android.conf.json is stale; run --sync");
   }
+  checkDeepLinkConfigs(product);
 
   return {
     ...product,
@@ -193,6 +228,7 @@ function syncDerivatives() {
     writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
   }
   syncAndroidConfig(androidPath, product);
+  syncDeepLinkConfigs(product);
 }
 
 function main() {

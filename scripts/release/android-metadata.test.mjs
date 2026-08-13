@@ -5,6 +5,39 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { previousFixtureVersion, syncAndroidConfig, versionCodeFor, writeVersionOverlay } from "./android-metadata.mjs";
+import { projectDeepLinkConfigs, staleDeepLinkConfigs } from "./product-config.mjs";
+
+const deepLinkFixtures = {
+  tauri: `${JSON.stringify({
+    plugins: {
+      "deep-link": {
+        desktop: { schemes: ["old-scheme"] },
+        mobile: [{ scheme: ["old-scheme"], appLink: false }],
+      },
+    },
+  }, null, 2)}\n`,
+  androidManifest: `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.MAIN" />
+      <category android:name="android.intent.category.LAUNCHER" />
+    </intent>
+    <package android:name="moe.shizuku.privileged.api" />
+  </queries>
+  <application><activity android:name=".MainActivity">
+    <intent-filter>
+      <action android:name="android.intent.action.VIEW" />
+      <category android:name="android.intent.category.BROWSABLE" />
+      <data android:scheme="old-scheme" android:host="pair" />
+    </intent-filter>
+  </activity></application>
+</manifest>
+`,
+  capability: `${JSON.stringify({
+    permissions: ["core:default", "deep-link:allow-get-current", "store:default"],
+  }, null, 2)}\n`,
+};
 
 test("prereleases and releases are strictly monotonic", () => {
   const versions = [
@@ -76,4 +109,40 @@ test("previous-version overlay carries versionName and versionCode", (context) =
     version: "2.0.0-alpha.15",
     bundle: { android: { versionCode: 200000015 } },
   });
+});
+
+test("canonical scheme projects to every deep-link registration", () => {
+  const projected = projectDeepLinkConfigs(deepLinkFixtures, "copy-test");
+  const tauri = JSON.parse(projected.tauri);
+  const capability = JSON.parse(projected.capability);
+
+  assert.deepEqual(tauri.plugins["deep-link"].desktop.schemes, ["copy-test"]);
+  assert.deepEqual(tauri.plugins["deep-link"].mobile[0], {
+    scheme: ["copy-test"],
+    appLink: false,
+  });
+  assert.match(projected.androidManifest, /android:scheme="copy-test" android:host="pair"/);
+  assert.match(projected.androidManifest, /android\.intent\.action\.MAIN/);
+  assert.match(projected.androidManifest, /android\.intent\.category\.LAUNCHER/);
+  assert.match(projected.androidManifest, /moe\.shizuku\.privileged\.api/);
+  assert.deepEqual(capability.permissions, [
+    "core:default",
+    "deep-link:default",
+    "store:default",
+  ]);
+  assert.deepEqual(projectDeepLinkConfigs(projected, "copy-test"), projected);
+  assert.throws(() => projectDeepLinkConfigs(projected, "CopyPaste"), /invalid deep-link scheme/);
+});
+
+test("drift check identifies each generated deep-link surface", () => {
+  const projected = projectDeepLinkConfigs(deepLinkFixtures, "copypaste");
+  const drift = {
+    tauri: projected.tauri.replace('"copypaste"', '"wrong"'),
+    androidManifest: projected.androidManifest.replace('android:scheme="copypaste"', 'android:scheme="wrong"'),
+    capability: projected.capability.replace('"deep-link:default",', ""),
+  };
+
+  for (const name of Object.keys(drift)) {
+    assert.deepEqual(staleDeepLinkConfigs({ ...projected, [name]: drift[name] }, "copypaste"), [name]);
+  }
 });
