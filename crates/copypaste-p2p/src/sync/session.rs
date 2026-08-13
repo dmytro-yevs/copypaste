@@ -155,7 +155,11 @@ async fn recv_hello<C: SyncChannel, S: SyncSource>(
             Ok((
                 device_id,
                 device_name,
-                listen_addr.and_then(|addr| addr.parse().ok()),
+                // Validated, not merely parsed: this becomes the address every
+                // later round dials, and it replaces one that worked.
+                listen_addr
+                    .and_then(|addr| addr.parse().ok())
+                    .filter(crate::netif::is_dialable),
                 since_ms,
             ))
         }

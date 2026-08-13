@@ -37,6 +37,9 @@ if-addrs = "0.15"
 
 [dev-dependencies]
 tempfile.workspace = true
+# `start_paused`, so the pairing commit deadline is asserted without a test
+# that really waits it out.
+tokio = { workspace = true, features = ["test-util"] }
 # Benchmark harness, configured exactly as `copypaste-core`'s is: no plotters,
 # no rayon, and the numbers land in `docs/rewrite/performance.md`.
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }

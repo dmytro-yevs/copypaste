@@ -32,6 +32,12 @@ pub enum PeerStoreError {
     #[error("this device is already paired with as many devices as it can hold; unpair one first")]
     TooManyPairings,
 
+    /// Another write landed on this pairing between reading it and writing it
+    /// back. The caller decided from a record that is no longer there, and
+    /// overwriting it would discard whatever replaced it.
+    #[error("that pairing changed while this one was being agreed")]
+    Contended,
+
     /// A thread panicked while holding the store's lock. Surfaced rather than
     /// swallowed: the map may have been observed mid-update, and its contents
     /// decide who is allowed to connect.

@@ -53,7 +53,7 @@ pub use pairing::{
 /// in memory, and a device has a handful of peers, not hundreds. Connections
 /// past the limit are dropped without a handshake: refusing early tells an
 /// unauthenticated dialler nothing it did not already know from the open port.
-const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
+pub(super) const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
 
 const DISCOVERY_INTEREST_MS: i64 = 60_000;
 
