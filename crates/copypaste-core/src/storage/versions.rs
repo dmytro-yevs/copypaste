@@ -403,7 +403,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::test_support::{fts_row_count, item, sensitive_item, store, T0};
+    use crate::storage::test_support::{fts_row_count, item, plan_of, sensitive_item, store, T0};
 
     fn incoming<'a>(id: &'a str, hash: &'a str, created_at: i64) -> IncomingItem<'a> {
         IncomingItem {
@@ -683,22 +683,6 @@ mod tests {
     #[test]
     fn an_empty_history_has_no_oldest_version() {
         assert_eq!(store().oldest_version_ms().unwrap(), None);
-    }
-
-    fn plan_of(store: &Store, sql: &str) -> Vec<String> {
-        let conn = store.conn().unwrap();
-        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-        let bound: Vec<rusqlite::types::Null> = (0..stmt.parameter_count())
-            .map(|_| rusqlite::types::Null)
-            .collect();
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(bound), |row| {
-                row.get::<_, String>(3)
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        rows
     }
 
     /// F-STOR-2. Without an index the sync read scans `clipboard_items` — whose

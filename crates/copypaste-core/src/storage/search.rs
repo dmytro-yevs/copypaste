@@ -253,25 +253,9 @@ mod tests {
 
     use super::super::model::NewItem;
     use super::super::test_support::{
-        fts_dump, fts_row_count, item, plant_fts_row, sensitive_item, store, T0,
+        fts_dump, fts_row_count, item, plan_of, plant_fts_row, sensitive_item, store, T0,
     };
     use super::*;
-
-    fn plan_of(store: &Store, sql: &str) -> Vec<String> {
-        let conn = store.conn().unwrap();
-        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-        let bound: Vec<rusqlite::types::Null> = (0..stmt.parameter_count())
-            .map(|_| rusqlite::types::Null)
-            .collect();
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(bound), |row| {
-                row.get::<_, String>(3)
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        rows
-    }
 
     #[test]
     fn search_finds_a_non_sensitive_item() {
