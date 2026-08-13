@@ -626,6 +626,55 @@ mod tests {
         );
     }
 
+    /// INV-N7b, the stale cycle. A cycle spanning several rounds settles on a
+    /// figure for its region, and repairing rows there left that older, larger
+    /// figure on screen for the whole of the next cycle: 1,500 reported while
+    /// 500 were really unreadable. Every round rebuilds the view, so the low
+    /// figures here are read back from a part-walked cycle, not held in memory.
+    #[test]
+    fn a_repair_between_cycles_is_not_reported_at_the_last_cycles_figure() {
+        let device = device();
+        for n in 1..=1500 {
+            device.put(&format!("row-{n:04}"), n, false);
+        }
+
+        let mut floor = UploadFloor::default();
+        let mut persisted = None;
+        let mut settled = 0;
+        for _ in 0..5 {
+            device.round(&mut floor, &mut persisted);
+            settled = UnreadableUploads::decode(persisted.as_deref()).total;
+        }
+        assert_eq!(settled, 1500, "a completed cycle must be exact");
+
+        // Rows 1..=256 are the tracked ids; the walk carries the rest. Repairing
+        // the first 1,000 rows it carries leaves 500 unreadable.
+        for n in 257..=1256 {
+            device.put(&format!("row-{n:04}"), n, true);
+        }
+
+        let mut reported = Vec::new();
+        let mut walked_mid_cycle = false;
+        for _ in 0..3 {
+            device.round(&mut floor, &mut persisted);
+            let record = UnreadableUploads::decode(persisted.as_deref());
+            walked_mid_cycle |= record
+                .sweep
+                .as_ref()
+                .is_some_and(|sweep| sweep.next > sweep.from);
+            reported.push(record.total);
+        }
+        assert!(
+            reported.iter().all(|total| *total <= 500),
+            "more items reported than are unreadable: {reported:?}"
+        );
+        assert!(
+            walked_mid_cycle,
+            "no round read back a part-walked cycle: {reported:?}"
+        );
+        assert_eq!(reported.last(), Some(&500), "{reported:?}");
+    }
+
     /// A restart carries nothing but the persisted record, so the walk's
     /// position has to live in it. 1,500 rows make a cycle span several rounds,
     /// which is the case a restart can lose: a device restarted more often than
