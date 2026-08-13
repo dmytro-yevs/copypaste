@@ -5,8 +5,8 @@
 //! retried sooner rather than discarded: plaintext the sweep could not delete
 //! must never read as a clean pass.
 
-use std::ffi::CStr;
-use std::os::fd::{BorrowedFd, OwnedFd};
+use std::ffi::{CStr, CString};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, Stat};
@@ -15,24 +15,41 @@ use tracing::warn;
 
 use super::report::SweepReport;
 
-/// Entries one sweep may classify. The sweep holds the staging lock, so an
+/// Directory reads one sweep may perform, over the root and any content
+/// directory it descends into. The sweep holds the staging lock, so an
 /// unbounded walk parks the interactive paste-back path behind however many
-/// files are in the directory. A sweep that hits the bound records where it
-/// stopped and the next pass continues from there.
+/// files are in the directory.
+///
+/// One unit is charged before every read, including the `.` and `..` entries
+/// and the read that reports end-of-directory. Nothing else in a pass touches a
+/// directory stream, so a pass performs at most this many reads and, since each
+/// charged read costs at most a `statat` and an `unlinkat`, O(budget) syscalls.
 const SWEEP_BUDGET: u32 = 4096;
 
-/// Where the previous pass ran out of budget, as a position in the root's
-/// `readdir` order and a position within that entry if it is a directory.
+/// The streams of a cycle in progress, kept open across passes.
 ///
-/// A pass that restarted from the first entry could be consumed for ever by a
-/// prefix of live or undeletable files, and everything behind that prefix would
-/// keep its plaintext indefinitely. Continuing bounds the retained lifetime at
-/// `max_age` plus the passes one full cycle of `ceil(entries / SWEEP_BUDGET)`
-/// takes, whatever the prefix does.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct Cursor {
-    root: u32,
-    child: u32,
+/// A `readdir` position is only meaningful while its stream is open: Apple and
+/// POSIX both scope a `telldir` value to the lifetime of its `DIR*`, and leave
+/// a value carried across `closedir` unspecified. Holding the stream is the
+/// resume that *is* documented, and it is the one the cycle bound needs —
+/// POSIX leaves only entries added or removed mid-cycle unspecified, so every
+/// other entry present when the stream opened is returned exactly once.
+struct Cycle {
+    root: Dir,
+    child: Option<ChildCycle>,
+}
+
+struct ChildCycle {
+    name: CString,
+    /// Kept beside the stream because `Dir::fd` borrows what `Dir::read` needs
+    /// mutably, and the entries are unlinked relative to this descriptor.
+    fd: OwnedFd,
+    dir: Dir,
+}
+
+enum ChildOutcome {
+    Suspended(ChildCycle),
+    Finished(CString),
 }
 
 /// Deletes everything under the directory it was handed that is past `max_age`.
@@ -43,7 +60,7 @@ struct Cursor {
 pub(super) struct Sweeper {
     root_fd: OwnedFd,
     budget: u32,
-    resume: Cursor,
+    cycle: Option<Cycle>,
 }
 
 impl Sweeper {
@@ -51,7 +68,7 @@ impl Sweeper {
         Self {
             root_fd,
             budget: SWEEP_BUDGET,
-            resume: Cursor::default(),
+            cycle: None,
         }
     }
 
@@ -70,6 +87,7 @@ impl Sweeper {
         let report = self.walk(now, max_age);
         if report.unfinished() {
             warn!(
+                operations = report.operations,
                 examined = report.examined,
                 removed = report.removed,
                 retained = report.retained,
@@ -84,67 +102,57 @@ impl Sweeper {
 
     fn walk(&mut self, now: SystemTime, max_age: Duration) -> SweepReport {
         let mut report = SweepReport::default();
-        let resume = std::mem::take(&mut self.resume);
-        // `read_from` opens `.` relative to the retained descriptor, so the
-        // stream is this directory's however the pathname is repointed.
-        let mut root_dir = match Dir::read_from(&self.root_fd) {
-            Ok(dir) => dir,
-            Err(Errno::NOENT) => return report,
-            Err(error) => {
-                report.unreadable_entry(error);
-                return report;
-            }
-        };
-
-        let mut budget = self.budget;
-        let mut position = 0;
-        while let Some(entry) = root_dir.read() {
-            let entry = match entry {
-                Ok(entry) => entry,
-                // A failed `readdir` leaves the stream at an offset nothing can
-                // reason about, so the rest of this directory is unvisited, not
-                // absent.
+        let root_fd = self.root_fd.as_fd();
+        let mut cycle = match self.cycle.take() {
+            Some(cycle) => cycle,
+            None => match Dir::read_from(root_fd) {
+                Ok(root) => Cycle { root, child: None },
+                Err(Errno::NOENT) => return report,
                 Err(error) => {
                     report.unreadable_entry(error);
+                    return report;
+                }
+            },
+        };
+        let mut budget = self.budget;
+
+        // What is left in a suspended content directory is the oldest unvisited
+        // plaintext of the cycle, so it comes before another root entry.
+        if let Some(child) = cycle.child.take() {
+            match sweep_content_dir(child, now, max_age, &mut budget, &mut report) {
+                ChildOutcome::Suspended(child) => {
+                    cycle.child = Some(child);
+                    self.cycle = Some(cycle);
+                    return report;
+                }
+                ChildOutcome::Finished(name) => remove_emptied(root_fd, &name, &mut report),
+            }
+        }
+
+        while budget > 0 {
+            budget -= 1;
+            report.operations += 1;
+            let Some(result) = cycle.root.read() else {
+                // The cycle is complete. Dropping it starts the next pass on a
+                // fresh stream, which is the only way entries added since this
+                // one opened are ever reached.
+                return report;
+            };
+            let entry = match result {
+                Ok(entry) => entry,
+                Err(error) => {
+                    // A stream that has failed reads no further, so this cycle
+                    // cannot be resumed and the next pass opens a new one.
+                    report.unreadable_entry(error);
                     report.truncated = true;
-                    self.resume = Cursor {
-                        root: position,
-                        child: 0,
-                    };
-                    break;
+                    return report;
                 }
             };
-            let here = position;
-            position += 1;
             let name = entry.file_name();
             if is_dot(name) {
                 continue;
             }
-            if here < resume.root {
-                continue;
-            }
-            if budget == 0 {
-                report.truncated = true;
-                self.resume = Cursor {
-                    root: here,
-                    child: 0,
-                };
-                break;
-            }
-            budget -= 1;
             report.examined += 1;
-            let root_fd = match root_dir.fd() {
-                Ok(fd) => fd,
-                Err(error) => {
-                    report.unreadable_entry(error);
-                    report.truncated = true;
-                    self.resume = Cursor {
-                        root: here,
-                        child: 0,
-                    };
-                    break;
-                }
-            };
             let Some(stat) = classify(root_fd, name, &mut report) else {
                 continue;
             };
@@ -152,45 +160,34 @@ impl Sweeper {
                 FileType::RegularFile if is_expired(&stat, now, max_age) => {
                     remove_file(root_fd, name, &mut report);
                 }
-                // Any real subdirectory, not only a well-formed content id. A
-                // directory whose name does not parse still holds decrypted
-                // bytes, and skipping it exempted them from the deadline for
-                // ever.
                 FileType::Directory => {
-                    let skip = if here == resume.root { resume.child } else { 0 };
-                    let suspended = sweep_content_dir(
-                        root_fd,
-                        name,
-                        now,
-                        max_age,
-                        skip,
-                        &mut budget,
-                        &mut report,
-                    );
-                    if let Some(child) = suspended {
-                        self.resume = Cursor { root: here, child };
-                        break;
+                    let Some(child) = open_content_dir(root_fd, name, &mut report) else {
+                        continue;
+                    };
+                    match sweep_content_dir(child, now, max_age, &mut budget, &mut report) {
+                        ChildOutcome::Suspended(child) => {
+                            cycle.child = Some(child);
+                            self.cycle = Some(cycle);
+                            return report;
+                        }
+                        ChildOutcome::Finished(name) => remove_emptied(root_fd, &name, &mut report),
                     }
                 }
                 _ => {}
             }
         }
+        report.truncated = true;
+        self.cycle = Some(cycle);
         report
     }
 }
 
-/// `Some(position)` when the sweep stopped part-way through this directory, so
-/// the next pass resumes there rather than re-walking what it already did.
-fn sweep_content_dir(
+fn open_content_dir(
     root_fd: BorrowedFd<'_>,
     name: &CStr,
-    now: SystemTime,
-    max_age: Duration,
-    skip: u32,
-    budget: &mut u32,
     report: &mut SweepReport,
-) -> Option<u32> {
-    let content_fd = match rustix::fs::openat(
+) -> Option<ChildCycle> {
+    let fd = match rustix::fs::openat(
         root_fd,
         name,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
@@ -203,64 +200,59 @@ fn sweep_content_dir(
             return None;
         }
     };
-    let mut content_dir = match Dir::new(content_fd) {
-        Ok(dir) => dir,
+    match Dir::read_from(&fd) {
+        Ok(dir) => Some(ChildCycle {
+            name: name.to_owned(),
+            fd,
+            dir,
+        }),
         Err(error) => {
             report.unreadable_entry(error);
-            return None;
+            None
         }
-    };
+    }
+}
 
-    let mut position = 0;
-    let mut suspended = None;
-    while let Some(entry) = content_dir.read() {
-        let entry = match entry {
+fn sweep_content_dir(
+    mut child: ChildCycle,
+    now: SystemTime,
+    max_age: Duration,
+    budget: &mut u32,
+    report: &mut SweepReport,
+) -> ChildOutcome {
+    while *budget > 0 {
+        *budget -= 1;
+        report.operations += 1;
+        let Some(result) = child.dir.read() else {
+            return ChildOutcome::Finished(child.name);
+        };
+        let entry = match result {
             Ok(entry) => entry,
             Err(error) => {
+                // The stream is spent, and `rmdir` will refuse the directory
+                // while anything the pass did not reach is still in it.
                 report.unreadable_entry(error);
                 report.truncated = true;
-                suspended = Some(position);
-                break;
+                return ChildOutcome::Finished(child.name);
             }
         };
-        let here = position;
-        position += 1;
-        let filename = entry.file_name();
-        if is_dot(filename) {
+        let name = entry.file_name();
+        if is_dot(name) {
             continue;
         }
-        if here < skip {
-            continue;
-        }
-        if *budget == 0 {
-            report.truncated = true;
-            suspended = Some(here);
-            break;
-        }
-        *budget -= 1;
         report.examined += 1;
-        let content_fd = match content_dir.fd() {
-            Ok(fd) => fd,
-            Err(error) => {
-                report.unreadable_entry(error);
-                report.truncated = true;
-                suspended = Some(here);
-                break;
-            }
-        };
-        let Some(stat) = classify(content_fd, filename, report) else {
+        let content_fd = child.fd.as_fd();
+        let Some(stat) = classify(content_fd, name, report) else {
             continue;
         };
         if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile
             && is_expired(&stat, now, max_age)
         {
-            remove_file(content_fd, filename, report);
+            remove_file(content_fd, name, report);
         }
     }
-    if suspended.is_none() {
-        remove_emptied(root_fd, name, report);
-    }
-    suspended
+    report.truncated = true;
+    ChildOutcome::Suspended(child)
 }
 
 fn classify(dir_fd: BorrowedFd<'_>, name: &CStr, report: &mut SweepReport) -> Option<Stat> {
@@ -349,6 +341,9 @@ mod tests {
 
     const MINUTE: Duration = Duration::from_secs(60);
     const HOUR: Duration = Duration::from_secs(3600);
+    /// `.`, `..` and the read that reports end-of-directory. Every complete
+    /// pass over a directory charges these on top of its entries.
+    const FIXED_READS: u32 = 3;
 
     fn metadata(filename: impl Into<String>) -> FileMetadata {
         FileMetadata {
@@ -515,6 +510,81 @@ mod tests {
         assert!(!second.unfinished());
     }
 
+    /// B1: the budget counts directory reads, and the count is exact. A pass
+    /// that stops at the bound performs the bound, and a pass that completes
+    /// charges every entry plus `.`, `..` and the end-of-directory read.
+    #[test]
+    fn a_complete_root_pass_charges_every_entry_and_the_dot_entries() {
+        const ENTRIES: u32 = 6;
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        for index in 0..ENTRIES {
+            write_at(&root.join(format!("live-{index}.bin")), now);
+        }
+
+        let report = sweep_once(&root, now, MINUTE);
+
+        assert_eq!(report.operations, ENTRIES + FIXED_READS, "{report:?}");
+        assert_eq!(report.examined, ENTRIES, "{report:?}");
+        assert!(!report.truncated, "{report:?}");
+    }
+
+    /// B1: a content directory is charged the same way, on the same budget.
+    #[test]
+    fn a_complete_pass_charges_the_content_directory_it_descends_into() {
+        const CHILDREN: u32 = 5;
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        let dir = content_dir(&root, "77777777-7777-7777-7777-777777777777");
+        for index in 0..CHILDREN {
+            write_at(&dir.join(format!("live-{index}.bin")), now);
+        }
+
+        let report = sweep_once(&root, now, MINUTE);
+
+        // The root charges its one entry plus the fixed three; the child
+        // charges its children plus its own fixed three.
+        assert_eq!(
+            report.operations,
+            1 + FIXED_READS + CHILDREN + FIXED_READS,
+            "{report:?}"
+        );
+        assert_eq!(report.examined, 1 + CHILDREN, "{report:?}");
+        assert!(!report.truncated, "{report:?}");
+    }
+
+    /// B1: a truncated pass performs its budget and not one read more, and the
+    /// pass that resumes it charges from the bound again rather than paying to
+    /// skip back to where it stopped.
+    #[test]
+    fn a_truncated_pass_charges_exactly_its_budget_and_the_resume_charges_nothing() {
+        const BUDGET: u32 = 4;
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        for index in 0..8 {
+            write_at(&root.join(format!("live-{index}.bin")), now);
+        }
+
+        let mut sweeper = Sweeper::with_budget(open_root(&root), BUDGET);
+        let first = sweeper.pass(now, MINUTE);
+        let second = sweeper.pass(now, MINUTE);
+        let third = sweeper.pass(now, MINUTE);
+
+        assert_eq!(first.operations, BUDGET, "{first:?}");
+        assert!(first.truncated);
+        assert_eq!(second.operations, BUDGET, "{second:?}");
+        assert!(second.truncated);
+        // 8 entries + 2 dots + end-of-directory = 11 reads, of which 8 are
+        // spent; the third pass completes the cycle in the remaining 3.
+        assert_eq!(third.operations, 8 + FIXED_READS - 2 * BUDGET, "{third:?}");
+        assert!(!third.truncated, "{third:?}");
+        assert_eq!(
+            first.examined + second.examined + third.examined,
+            8,
+            "the cycle examined an entry twice or not at all"
+        );
+    }
+
     #[test]
     fn a_sweep_stops_at_its_budget_and_asks_to_be_resumed() {
         let (_parent, root) = staging_root();
@@ -525,8 +595,7 @@ mod tests {
 
         let mut sweeper = Sweeper::with_budget(open_root(&root), 2);
         let first = sweeper.pass(now, MINUTE);
-        assert_eq!(first.examined, 2);
-        assert_eq!(first.removed, 2);
+        assert_eq!(first.operations, 2);
         assert!(first.truncated);
         assert!(first.unfinished());
 
@@ -539,12 +608,13 @@ mod tests {
     }
 
     /// The bound this proves is the retained-plaintext lifetime: `max_age` plus
-    /// one full cycle of `ceil(entries / budget)` passes. Restarting `readdir`
-    /// from the first entry has no such bound — a prefix of live files consumes
-    /// every pass and everything behind it keeps its plaintext for ever.
+    /// one cycle of `ceil(reads / budget)` passes. Restarting `readdir` from the
+    /// first entry has no such bound — a prefix of live files consumes every
+    /// pass and everything behind it keeps its plaintext for ever.
     #[test]
     fn a_live_prefix_cannot_starve_the_expired_entries_behind_it() {
-        const LIVE: usize = 24;
+        const LIVE: u32 = 24;
+        const EXPIRED: u32 = 4;
         const BUDGET: u32 = 4;
 
         let (_parent, root) = staging_root();
@@ -552,7 +622,7 @@ mod tests {
         for index in 0..LIVE {
             write_at(&root.join(format!("live-{index:02}.bin")), now);
         }
-        let expired: Vec<PathBuf> = (0..4)
+        let expired: Vec<PathBuf> = (0..EXPIRED)
             .map(|index| {
                 let path = root.join(format!("expired-{index}.bin"));
                 write_at(&path, now - HOUR);
@@ -561,18 +631,15 @@ mod tests {
             .collect();
 
         let mut sweeper = Sweeper::with_budget(open_root(&root), BUDGET);
-        // `.` and `..` hold two positions of their own, and a removal can shift
-        // an unvisited entry behind the cursor into the cycle after this one.
-        let cycle = (LIVE + expired.len() + 2).div_ceil(BUDGET as usize);
-        let mut passes = 0;
-        while expired.iter().any(|path| path.exists()) {
+        let cycle = (LIVE + EXPIRED + FIXED_READS).div_ceil(BUDGET);
+        for _ in 0..cycle {
             let _ = sweeper.pass(now, MINUTE);
-            passes += 1;
-            assert!(
-                passes <= 2 * cycle,
-                "a live prefix starved the entries behind it for {passes} passes"
-            );
         }
+
+        assert!(
+            expired.iter().all(|path| !path.exists()),
+            "a live prefix starved the entries behind it past one cycle"
+        );
         assert!(
             root.join("live-00.bin").exists(),
             "the sweep removed a payload inside its deadline"
@@ -581,13 +648,17 @@ mod tests {
 
     #[test]
     fn a_live_prefix_inside_a_content_directory_cannot_starve_it_either() {
+        const LIVE: u32 = 8;
+        const EXPIRED: u32 = 2;
+        const BUDGET: u32 = 3;
+
         let (_parent, root) = staging_root();
         let now = SystemTime::now();
         let dir = content_dir(&root, "55555555-5555-5555-5555-555555555555");
-        for index in 0..8 {
+        for index in 0..LIVE {
             write_at(&dir.join(format!("live-{index}.bin")), now);
         }
-        let expired: Vec<PathBuf> = (0..2)
+        let expired: Vec<PathBuf> = (0..EXPIRED)
             .map(|index| {
                 let path = dir.join(format!("expired-{index}.bin"));
                 write_at(&path, now - HOUR);
@@ -595,17 +666,18 @@ mod tests {
             })
             .collect();
 
-        // Three units a pass: the content directory itself plus two children.
-        let mut sweeper = Sweeper::with_budget(open_root(&root), 3);
-        let mut passes = 0;
-        while expired.iter().any(|path| path.exists()) {
+        let mut sweeper = Sweeper::with_budget(open_root(&root), BUDGET);
+        // The root's one entry and fixed three, then the child's entries and
+        // its own fixed three.
+        let cycle = (1 + FIXED_READS + LIVE + EXPIRED + FIXED_READS).div_ceil(BUDGET);
+        for _ in 0..cycle {
             let _ = sweeper.pass(now, MINUTE);
-            passes += 1;
-            assert!(
-                passes <= 16,
-                "a truncated content directory restarted instead of resuming"
-            );
         }
+
+        assert!(
+            expired.iter().all(|path| !path.exists()),
+            "a truncated content directory restarted instead of resuming"
+        );
     }
 
     #[test]
@@ -616,17 +688,12 @@ mod tests {
             write_at(&root.join(format!("live-{index}.bin")), now);
         }
 
-        let mut sweeper = Sweeper::with_budget(open_root(&root), 2);
+        let mut sweeper = Sweeper::with_budget(open_root(&root), 4);
         assert!(sweeper.pass(now, MINUTE).truncated);
-        assert_ne!(
-            sweeper.resume,
-            Cursor::default(),
-            "a truncated pass resumes"
-        );
+        assert!(sweeper.cycle.is_some(), "a truncated pass resumes");
         assert!(!sweeper.pass(now, MINUTE).truncated);
-        assert_eq!(
-            sweeper.resume,
-            Cursor::default(),
+        assert!(
+            sweeper.cycle.is_none(),
             "a completed cycle must start over, or new entries are never reached"
         );
     }
@@ -636,9 +703,10 @@ mod tests {
     /// constant alone.
     #[test]
     fn a_full_budget_sweep_holds_the_staging_lock_briefly() {
+        let entries = SWEEP_BUDGET - FIXED_READS;
         let (_parent, root) = staging_root();
         let now = SystemTime::now();
-        for index in 0..SWEEP_BUDGET {
+        for index in 0..entries {
             write_bytes_at(
                 &root.join(format!("payload-{index:05}.bin")),
                 b"x",
@@ -651,10 +719,11 @@ mod tests {
         let report = sweeper.pass(now, MINUTE);
         let held = started.elapsed();
 
-        assert_eq!(report.examined, SWEEP_BUDGET, "{report:?}");
-        assert_eq!(report.removed, SWEEP_BUDGET, "{report:?}");
+        assert_eq!(report.operations, SWEEP_BUDGET, "{report:?}");
+        assert_eq!(report.examined, entries, "{report:?}");
+        assert_eq!(report.removed, entries, "{report:?}");
         assert!(!report.truncated, "{report:?}");
-        println!("a {SWEEP_BUDGET}-entry sweep held the staging lock for {held:?}");
+        println!("a {SWEEP_BUDGET}-read sweep held the staging lock for {held:?}");
         assert!(
             held < Duration::from_secs(2),
             "a full-budget sweep held the staging lock for {held:?}"
@@ -839,5 +908,106 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(!path.exists(), "the cleanup worker left stale plaintext");
+    }
+
+    /// B1: deletions are the mutation an ordinal cursor could not survive —
+    /// each one shifts an unvisited entry behind the cursor, and the cycle
+    /// never finishes. On a stream that stays open, POSIX leaves only the
+    /// removed entry unspecified, and it has already been visited.
+    #[test]
+    fn deleting_entries_does_not_break_the_one_cycle_claim() {
+        const ENTRIES: u32 = 64;
+        const BUDGET: u32 = 4;
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        for index in 0..ENTRIES {
+            write_at(&root.join(format!("expired-{index:03}.bin")), now - HOUR);
+        }
+
+        let mut sweeper = Sweeper::with_budget(open_root(&root), BUDGET);
+        for _ in 0..(ENTRIES + FIXED_READS).div_ceil(BUDGET) {
+            let _ = sweeper.pass(now, MINUTE);
+        }
+
+        let remaining = fs::read_dir(&root).unwrap().count();
+        assert_eq!(
+            remaining, 0,
+            "{remaining} entries survived one advertised cycle"
+        );
+    }
+
+    /// B1: a resumed pass must hold the staging lock for O(budget), not
+    /// O(saved position + budget). A retained stream skips nothing.
+    #[test]
+    fn a_resumed_pass_holds_the_lock_briefly() {
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        for index in 0..SWEEP_BUDGET {
+            write_bytes_at(&root.join(format!("payload-{index:05}.bin")), b"x", now);
+        }
+        for index in 0..SWEEP_BUDGET {
+            write_bytes_at(
+                &root.join(format!("z-tail-{index:05}.bin")),
+                b"x",
+                now - HOUR,
+            );
+        }
+
+        let mut sweeper = Sweeper::new(open_root(&root));
+        let first = sweeper.pass(now, MINUTE);
+        assert!(first.truncated, "setup: first pass must truncate");
+
+        let started = std::time::Instant::now();
+        let second = sweeper.pass(now, MINUTE);
+        let held = started.elapsed();
+
+        assert_eq!(second.operations, SWEEP_BUDGET, "{second:?}");
+        println!("a resumed {SWEEP_BUDGET}-read pass held the staging lock for {held:?}");
+        assert!(
+            held < Duration::from_secs(2),
+            "a resumed pass held the staging lock for {held:?}"
+        );
+    }
+
+    /// B1: entries inserted mid-cycle are the half POSIX leaves unspecified.
+    /// They cost at most the following cycle, and they must not extend the one
+    /// the entries already on disk are being deleted in.
+    #[test]
+    fn entries_inserted_mid_cycle_do_not_extend_the_cycle_they_arrived_in() {
+        const ORIGINAL: u32 = 32;
+        const INSERTED: u32 = 8;
+        const BUDGET: u32 = 8;
+        let (_parent, root) = staging_root();
+        let now = SystemTime::now();
+        for index in 0..ORIGINAL {
+            write_at(&root.join(format!("original-{index:02}.bin")), now - HOUR);
+        }
+
+        let mut sweeper = Sweeper::with_budget(open_root(&root), BUDGET);
+        let cycle = (ORIGINAL + FIXED_READS).div_ceil(BUDGET);
+        for pass in 0..cycle {
+            let _ = sweeper.pass(now, MINUTE);
+            if pass == 1 {
+                for index in 0..INSERTED {
+                    write_at(&root.join(format!("inserted-{index}.bin")), now - HOUR);
+                }
+            }
+        }
+
+        let survivors: Vec<String> = fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("original-"))
+            .collect();
+        assert!(
+            survivors.is_empty(),
+            "insertions extended the cycle: {survivors:?}"
+        );
+
+        // The inserted entries are bounded by the next cycle, not by this one.
+        for _ in 0..(INSERTED + FIXED_READS).div_ceil(BUDGET) + 1 {
+            let _ = sweeper.pass(now, MINUTE);
+        }
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
     }
 }
