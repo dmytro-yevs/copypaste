@@ -225,6 +225,34 @@ mod tests {
         assert_eq!(raw_row_count(&f.store, &id), 1);
     }
 
+    /// The restricted band, end to end (§3.3, DMY-162). A captured card is
+    /// classified — kept out of the search index, so a real PAN never reaches
+    /// the one table outside the item AEAD — and the sweep must still refuse it
+    /// however long it sits there. Nothing in the digits separates it from an
+    /// order id, and I1 decides which way that uncertainty falls.
+    #[test]
+    fn a_classified_card_is_kept_out_of_the_index_and_never_swept() {
+        let f = fixture();
+        let card = "Customer card: 4111 1111 1111 1111 — expires 12/26";
+        let id = capture(&f, card, T0);
+
+        assert!(f.store.get(&id).unwrap().unwrap().is_sensitive);
+        assert_eq!(fts_row_count(&f.store, &id), 0, "a card reached the index");
+        assert!(f.store.search("Customer", 10).unwrap().is_empty());
+
+        let removed = sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 86_400_000,
+        )
+        .unwrap();
+        assert_eq!(removed, 0, "a card was auto-deleted");
+        assert!(f.store.get(&id).unwrap().is_some(), "the item survived");
+        assert_eq!(raw_row_count(&f.store, &id), 1);
+    }
+
     /// `AGENTS.md` rule 4: detection may flag, but only the high-confidence band
     /// may delete. An email address is flagged and must still be there.
     #[test]

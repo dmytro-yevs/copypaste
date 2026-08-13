@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use regex::{Captures, Regex, RegexSet, RegexSetBuilder};
 
-use super::finding::{Finding, SpannedFinding, AUTOWIPE_CONFIDENCE_FLOOR};
+use super::finding::{Finding, Severity, SpannedFinding};
 use super::normalise::normalise;
 use super::redact::redact_findings;
 use super::rules::{GLOBAL_ALLOWLISTS, RULES};
@@ -57,11 +57,11 @@ pub struct Detector {
     /// degrade-to-empty mechanism to hold this invariant; here it is
     /// structural, §7.6).
     rules: Vec<Rule>,
-    /// Index-aligned with `rules`: can this rule alone answer
-    /// [`Detector::may_auto_wipe`]? Derived from `confidence` at construction
-    /// and never listed by hand, or a new rule above the floor would silently
-    /// drop out of the gate between detection and destruction.
-    above_autowipe_floor: Vec<bool>,
+    /// Index-aligned with `rules`: what a match from this rule permits. Derived
+    /// from the rule table at construction and never listed by hand, or a new
+    /// rule would silently drop out of the gate between detection and
+    /// destruction.
+    severities: Vec<Severity>,
     global_allowlists: Vec<CompiledAllowlist>,
 }
 
@@ -72,9 +72,9 @@ pub struct Detector {
 enum ScanMode {
     /// Every validated match, ranked.
     AllSpans,
-    /// The first validated match from a rule at or above the auto-wipe floor.
-    /// Rules below it cannot change the answer, so they are not run at all.
-    AutoWipeOnly,
+    /// The first validated match this severe or worse. Rules that cannot reach
+    /// it cannot change the answer, so they are not run at all.
+    FirstAtLeast(Severity),
 }
 
 impl Detector {
@@ -104,14 +104,14 @@ impl Detector {
             .build()
             .map_err(DetectorError::RuleSet)?;
         let global_allowlists = compile_allowlists("global", GLOBAL_ALLOWLISTS)?;
-        let above_autowipe_floor = rules
+        let severities = rules
             .iter()
-            .map(|rule| rule.spec.confidence >= AUTOWIPE_CONFIDENCE_FLOOR)
+            .map(|rule| rule.spec.finding().severity)
             .collect();
         Ok(Self {
             set,
             rules,
-            above_autowipe_floor,
+            severities,
             global_allowlists,
         })
     }
@@ -141,17 +141,19 @@ impl Detector {
     }
 
     fn scan_normalised(&self, text: &str, mode: ScanMode) -> Vec<SpannedFinding> {
-        let first_only = mode == ScanMode::AutoWipeOnly;
+        let first_only = matches!(mode, ScanMode::FirstAtLeast(_));
         let mut findings = Vec::new();
         let lowered = text.to_lowercase();
         for idx in self.set.matches(text) {
-            // Below the floor a match can never make `may_auto_wipe` true, and
-            // these are the rules ordinary content fires: any email address,
-            // any `host:port` in a config paste. Running their `captures_iter`
-            // and their checksum validators to build findings the caller throws
-            // away is the whole of F-CORE-4.
-            if first_only && !self.above_autowipe_floor[idx] {
-                continue;
+            // A rule that cannot reach the caller's severity can never change
+            // its answer, and these are the rules ordinary content fires: any
+            // email address, any `host:port` in a config paste. Running their
+            // `captures_iter` and their checksum validators to build findings
+            // the caller throws away is the whole of F-CORE-4.
+            if let ScanMode::FirstAtLeast(least) = mode {
+                if self.severities[idx] < least {
+                    continue;
+                }
             }
             let rule = &self.rules[idx];
             if !rule.keyword_matches(&lowered) {
@@ -174,25 +176,32 @@ impl Detector {
         findings
     }
 
-    /// True when this text may be deleted automatically: the highest-confidence
-    /// match sits above the auto-wipe floor.
+    /// True when this text may be **deleted** automatically.
     ///
-    /// The one gate between detection and destruction, and the only caller of
-    /// [`Severity::HighConfidence`] that deletes anything. v1 collapsed this
-    /// with [`Detector::is_sensitive`] three separate times (`AB-6a`, `PG-23`,
-    /// `PG-3`) and destroyed unrecoverable user data each time.
+    /// The one gate between detection and destruction. v1 collapsed it with
+    /// [`Detector::is_sensitive`] three separate times (`AB-6a`, `PG-23`,
+    /// `PG-3`) and destroyed unrecoverable user data each time; manifest I2
+    /// keeps them apart, and [`Severity::Restricted`] is the band where they
+    /// disagree.
     pub fn may_auto_wipe(&self, text: &str) -> bool {
-        let normalised = normalise(text);
-        !self
-            .scan_normalised(&normalised, ScanMode::AutoWipeOnly)
-            .is_empty()
+        self.reaches(text, Severity::HighConfidence)
     }
 
-    /// Compatibility predicate for whole-item sensitive classification. This
-    /// is the same high-confidence gate as [`Detector::may_auto_wipe`]; use
-    /// [`Detector::scan_all`] for inert findings.
+    /// True when this text must be **withheld**: kept out of the search index,
+    /// out of sync and out of previews.
+    ///
+    /// Weaker than [`Detector::may_auto_wipe`] by exactly the restricted band,
+    /// and the one every storage and sync guard wants. Withholding costs the
+    /// user searchability; deleting costs them the data (`AGENTS.md` rule 4).
     pub fn is_sensitive(&self, text: &str) -> bool {
-        self.may_auto_wipe(text)
+        self.reaches(text, Severity::Restricted)
+    }
+
+    fn reaches(&self, text: &str, least: Severity) -> bool {
+        let normalised = normalise(text);
+        !self
+            .scan_normalised(&normalised, ScanMode::FirstAtLeast(least))
+            .is_empty()
     }
 
     /// Redact every validated match. When matches exist, surrounding text is
@@ -656,7 +665,6 @@ mod tests {
             "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA".to_string(),
             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
                 .to_string(),
-            "4111111111111111".to_string(),
             "{\"private_key\": \"-----BEGIN RSA PRIVATE KEY-----\\nMIIEo\"}".to_string(),
         ];
         for input in &inputs {
@@ -664,6 +672,11 @@ mod tests {
             assert_eq!(f.severity, Severity::HighConfidence, "{input:?} -> {f:?}");
             assert!(f.confidence >= AUTOWIPE_CONFIDENCE_FLOOR);
         }
+        // The card fixture used to be in that list. It is still above the floor
+        // and still classified; §3.3 takes away only the deletion.
+        let card = det.scan("4111111111111111").unwrap();
+        assert!(card.confidence >= AUTOWIPE_CONFIDENCE_FLOOR);
+        assert_eq!(card.severity, Severity::Restricted);
     }
 
     /// The `sk-proj-` exclusion is structural, not a lookahead (P2 `r6cw`).
@@ -835,13 +848,23 @@ mod tests {
         corpus.push(format!("notes\n{}\nmore notes", "AKIAIOSFODNN7EXAMPLE"));
 
         for text in &corpus {
-            let ranked = det
-                .scan_all(text)
-                .iter()
-                .any(|finding| finding.severity == Severity::HighConfidence);
-            assert_eq!(det.may_auto_wipe(text), ranked, "{text:?}");
-            assert_eq!(det.is_sensitive(text), ranked, "{text:?}");
+            let reaches = |least| det.scan_all(text).iter().any(|f| f.severity >= least);
+            assert_eq!(
+                det.may_auto_wipe(text),
+                reaches(Severity::HighConfidence),
+                "{text:?}"
+            );
+            assert_eq!(
+                det.is_sensitive(text),
+                reaches(Severity::Restricted),
+                "{text:?}"
+            );
         }
+        // The corpus carries the case the two predicates answer differently, or
+        // the loop above would pass without ever exercising the split.
+        let card = "please charge 4111 1111 1111 1111 today";
+        assert!(det.is_sensitive(card));
+        assert!(!det.may_auto_wipe(card));
     }
 
     #[test]
@@ -881,26 +904,47 @@ mod tests {
         );
     }
 
-    /// The floor-membership index is derived, never listed: a rule added above
-    /// the floor must join the predicate without anyone remembering to add it.
+    /// The severity index is derived, never listed: a rule added above the
+    /// floor must join the predicate without anyone remembering to add it, and
+    /// a rule that refuses deletion must leave it the same way.
     #[test]
-    fn the_predicate_index_is_derived_from_the_floor() {
+    fn the_predicate_index_is_derived_from_the_rule_table() {
         let det = detector();
-        assert_eq!(det.above_autowipe_floor.len(), det.rules.len());
-        for (rule, above) in det.rules.iter().zip(&det.above_autowipe_floor) {
-            assert_eq!(
-                *above,
+        assert_eq!(det.severities.len(), det.rules.len());
+        for (rule, severity) in det.rules.iter().zip(&det.severities) {
+            let expected = match (
                 rule.spec.confidence >= AUTOWIPE_CONFIDENCE_FLOOR,
-                "{}",
-                rule.spec.name
-            );
+                rule.spec.never_auto_delete,
+            ) {
+                (true, false) => Severity::HighConfidence,
+                (true, true) => Severity::Restricted,
+                (false, _) => Severity::Flag,
+            };
+            assert_eq!(*severity, expected, "{}", rule.spec.name);
             assert_eq!(
-                *above,
-                rule.spec.finding().severity == Severity::HighConfidence,
+                *severity,
+                rule.spec.finding().severity,
                 "{}",
                 rule.spec.name
             );
         }
+    }
+
+    /// The restricted band is the one place the two predicates disagree, and the
+    /// disagreement is the whole point: a validated card is withheld from the
+    /// index and never deleted. Derived from the table so the pin cannot go
+    /// stale against a rule that changes bands.
+    #[test]
+    fn withholding_and_deleting_are_the_same_gate_except_for_the_restricted_band() {
+        let det = detector();
+        let restricted: Vec<_> = det
+            .rules
+            .iter()
+            .zip(&det.severities)
+            .filter(|(_, severity)| **severity == Severity::Restricted)
+            .map(|(rule, _)| rule.spec.name)
+            .collect();
+        assert_eq!(restricted, ["credit_card"]);
     }
 
     /// I8: no silent drops. Name, category and confidence travel *with* the
@@ -1105,8 +1149,12 @@ mod tests {
         assert_eq!(&normalised[findings[0].byte_range()], normalised);
     }
 
+    /// §3.3's known gap in v1 was that the card check produced no span, so a
+    /// card embedded in benign text could never be masked. It is a first-class
+    /// rule here, and the restricted band is what lets the span exist without
+    /// the item becoming deletable.
     #[test]
-    fn luhn_valid_card_is_a_spanned_high_confidence_finding() {
+    fn luhn_valid_card_is_a_spanned_restricted_finding() {
         let det = detector();
         let text = "please charge 4111-1111-1111-1111 today";
         let finding = det
@@ -1118,7 +1166,10 @@ mod tests {
         assert_eq!(&text[finding.byte_range()], "4111-1111-1111-1111");
         assert_eq!(finding.category, "financial");
         assert_eq!(finding.confidence, 0.99);
-        assert_eq!(finding.severity, Severity::HighConfidence);
+        assert_eq!(finding.severity, Severity::Restricted);
+        assert!(det.is_sensitive(text));
+        assert!(!det.may_auto_wipe(text));
+        assert!(det.redact(text).contains("***REDACTED***"));
     }
 
     #[test]
