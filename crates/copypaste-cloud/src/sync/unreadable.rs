@@ -36,7 +36,7 @@ pub struct Sweep {
     /// the row itself is the first thing a walk from here reads.
     pub from: UploadFloor,
     pub next: UploadFloor,
-    /// Rows counted in the cycle under way.
+    /// Rows of the cycle under way that the id list had no room for.
     pub seen: u32,
     /// What the last completed cycle counted. Reported while the next one
     /// walks, so a page of readable rows cannot flash the figure to zero.
@@ -124,6 +124,17 @@ impl UnreadableUploads {
                     settled: 0,
                 });
             }
+        }
+    }
+
+    /// Which list owns a row the walk found unreadable. The id list has first
+    /// claim: counting one it also holds reports the row twice (INV-N7b), and
+    /// the last completed cycle no longer owns what the id list has taken on.
+    pub(super) fn record_walked(&mut self, id: &str, sweep: &mut Sweep) {
+        if self.track(id) {
+            sweep.settled = sweep.settled.saturating_sub(1);
+        } else {
+            sweep.seen = sweep.seen.saturating_add(1);
         }
     }
 
@@ -237,6 +248,31 @@ mod tests {
             at(400, "walked"),
             "a position already covered must not rewind the walk"
         );
+    }
+
+    /// INV-N7b. A row the id list has room for is not also counted by the
+    /// cycle, and it comes off the figure the last cycle settled on.
+    #[test]
+    fn a_walked_row_is_counted_once_by_whichever_list_owns_it() {
+        let mut record = UnreadableUploads::default();
+        let mut sweep = Sweep {
+            settled: 2,
+            ..Sweep::default()
+        };
+
+        record.record_walked("taken", &mut sweep);
+        assert_eq!((record.ids.len(), sweep.seen, sweep.settled), (1, 0, 1));
+
+        for n in 0..MAX_UNREADABLE_TRACKED {
+            record.track(&format!("filler-{n:04}"));
+        }
+        record.record_walked("no-room", &mut sweep);
+        assert_eq!(sweep.seen, 1);
+        assert!(!record.ids.contains("no-room"));
+
+        record.sweep = Some(sweep);
+        record.settle_total();
+        assert_eq!(record.total, MAX_UNREADABLE_TRACKED as u32 + 1);
     }
 
     /// The figure only settles at the end of a cycle, and until then it holds
