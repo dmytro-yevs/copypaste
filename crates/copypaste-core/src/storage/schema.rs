@@ -62,10 +62,18 @@ CREATE UNIQUE INDEX idx_items_dedup
     ON clipboard_items(content_hash, created_at / 60000, origin_device_id)
     WHERE deleted = 0 AND content_hash <> '';
 
--- Serves the eviction scans (oldest unpinned live rows first).
+-- Serves the eviction scans (oldest unpinned live rows first) and the unpinned
+-- half of the history page, whose seek predicate is this partial one exactly.
 CREATE INDEX idx_items_evictable
     ON clipboard_items(created_at, id)
     WHERE deleted = 0 AND pinned = 0;
+
+-- Serves the sensitive TTL sweep and the probe that keeps it off the write
+-- path. Empty on a machine that has never copied a secret, which is what makes
+-- that probe free.
+CREATE INDEX idx_items_sensitive_wipe
+    ON clipboard_items(created_at, id)
+    WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0;
 
 -- The byte quota's hot gate reads only this expression and its partial
 -- predicate. Keeping ciphertext out of the table scan avoids touching every
