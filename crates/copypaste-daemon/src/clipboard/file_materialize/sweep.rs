@@ -20,6 +20,8 @@ use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, Stat};
 use rustix::io::Errno;
 use tracing::warn;
 
+use super::report::SweepReport;
+
 /// Entries one sweep may classify. The sweep holds the staging lock, so an
 /// unbounded walk parks the interactive paste-back path behind however many
 /// files are in the directory. A truncated sweep asks to be resumed instead.
@@ -30,40 +32,6 @@ const SWEEP_BUDGET: u32 = 4096;
 /// The ladder climbs back to `interval`, so a file nothing can ever delete
 /// costs a short burst of wake-ups rather than a permanent 30-second timer.
 const RETRY_MIN: Duration = Duration::from_secs(30);
-
-/// What one sweep achieved. Counts and an [`io::ErrorKind`] only: the sweeper's
-/// inputs are user filenames and content digests, and this is logged.
-#[must_use]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) struct SweepReport {
-    pub(super) examined: u32,
-    pub(super) removed: u32,
-    pub(super) directories_removed: u32,
-    /// Expired plaintext that was still on disk when the sweep ended.
-    pub(super) retained: u32,
-    /// Entries the sweep could not classify. Each one may be hiding expired
-    /// plaintext, so it is unfinished work rather than nothing.
-    pub(super) unreadable: u32,
-    /// The entry budget ran out or a `readdir` failed, leaving part of the tree
-    /// unvisited.
-    pub(super) truncated: bool,
-    pub(super) failure: Option<io::ErrorKind>,
-}
-
-impl SweepReport {
-    pub(super) fn unfinished(&self) -> bool {
-        self.retained > 0 || self.unreadable > 0 || self.truncated
-    }
-
-    fn note(&mut self, error: Errno) {
-        self.failure.get_or_insert(io::Error::from(error).kind());
-    }
-
-    fn unreadable_entry(&mut self, error: Errno) {
-        self.unreadable += 1;
-        self.note(error);
-    }
-}
 
 /// Delete everything under `root` that is past `max_age`, and report what is
 /// left. Infallible by design: a sweeper that refused to run would take file
@@ -78,7 +46,7 @@ pub(super) fn sweep(root: &Path, now: SystemTime, max_age: Duration) -> SweepRep
             retained = report.retained,
             unreadable = report.unreadable,
             truncated = report.truncated,
-            error_kind = ?report.failure,
+            error_kinds = ?report.failures,
             "paste-file staging cleanup left decrypted payloads past their deadline"
         );
     }
@@ -374,6 +342,7 @@ impl Drop for CleanupWorker {
 
 #[cfg(test)]
 mod tests {
+    use super::super::testutil::CapturedLog;
     use super::super::StagingArea;
     use super::*;
     use copypaste_core::FileMetadata;
@@ -404,7 +373,11 @@ mod tests {
     }
 
     fn write_at(path: &Path, modified: SystemTime) {
-        fs::write(path, b"decrypted").unwrap();
+        write_bytes_at(path, b"decrypted", modified);
+    }
+
+    fn write_bytes_at(path: &Path, bytes: &[u8], modified: SystemTime) {
+        fs::write(path, bytes).unwrap();
         set_modified(path, modified);
     }
 
@@ -446,7 +419,11 @@ mod tests {
 
         assert!(locked.join("a.txt").exists(), "setup: must be undeletable");
         assert_eq!(report.retained, 1, "{report:?}");
-        assert_eq!(report.failure, Some(io::ErrorKind::PermissionDenied));
+        assert_eq!(
+            report.failures.count(io::ErrorKind::PermissionDenied),
+            1,
+            "{report:?}"
+        );
         assert!(report.unfinished());
         assert!(
             !open.join("b.txt").exists(),
@@ -588,6 +565,47 @@ mod tests {
 
         for _ in 0..5 {
             assert!(cadence.after(&blocked) <= interval);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_warning_names_no_path_filename_content_id_or_payload() {
+        let (parent, root) = staging_root();
+        let content_id = "66666666-6666-6666-6666-666666666666";
+        let locked = content_dir(&root, content_id);
+        let now = SystemTime::now();
+        write_bytes_at(
+            &locked.join("payslip.pdf"),
+            b"sort-code-00-11-22",
+            now - Duration::from_secs(3600),
+        );
+        if !mode_bits_bind(&locked) {
+            return;
+        }
+
+        let capture = CapturedLog::default();
+        let logged = capture.record(|| sweep(&root, now, MINUTE));
+        unlock(&locked);
+
+        assert!(
+            logged.contains("paste-file staging cleanup left decrypted payloads"),
+            "{logged}"
+        );
+        assert!(logged.contains("retained=1"), "{logged}");
+        assert!(
+            logged.contains("error_kinds={PermissionDenied: 1}"),
+            "the per-kind counts did not reach the log: {logged}"
+        );
+        for secret in [
+            root.to_str().unwrap(),
+            parent.path().to_str().unwrap(),
+            content_id,
+            "payslip",
+            ".pdf",
+            "sort-code",
+        ] {
+            assert!(!logged.contains(secret), "the warning disclosed {secret}");
         }
     }
 
