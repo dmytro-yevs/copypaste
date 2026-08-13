@@ -15,7 +15,9 @@ mod error;
 mod expiry;
 mod file;
 mod peer;
+mod revocation;
 mod store;
+mod tentative;
 
 #[cfg(test)]
 mod testutil;
@@ -26,6 +28,7 @@ pub use cursor::{CursorStore, DEFAULT_CURSOR_FILE_NAME};
 pub use error::PeerStoreError;
 pub use peer::Peer;
 pub use store::PeerStore;
+pub use tentative::{PeerSnapshot, Rollback};
 
 /// How long a freshly minted pairing code stays redeemable.
 ///
