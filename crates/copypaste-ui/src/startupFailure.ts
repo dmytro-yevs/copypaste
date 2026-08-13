@@ -31,7 +31,11 @@ function stageOf(failure: unknown): StartupStage | undefined {
     typeof failure === "object" && failure !== null
       ? (failure as Record<string, unknown>)[STAGE_KEY]
       : undefined;
-  return typeof stage === "string" && stage in WHAT ? (stage as StartupStage) : undefined;
+  // Own property, not `in`: `"toString" in WHAT` is true, and the notice would
+  // have stringified a function into its own text.
+  return typeof stage === "string" && Object.prototype.hasOwnProperty.call(WHAT, stage)
+    ? (stage as StartupStage)
+    : undefined;
 }
 
 /** Runs one startup stage under this boundary; any failure becomes its stage. */
