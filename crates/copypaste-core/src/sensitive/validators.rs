@@ -163,7 +163,9 @@ pub(super) fn phone_is_formatted(matched: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sensitive::engine::test_support::{all_rules, detector, fired, rep};
+    use crate::sensitive::engine::test_support::{
+        all_rules, detector, fired, noise, rep, ALNUM, BASE64, HEX,
+    };
     use crate::sensitive::Severity;
 
     #[test]
@@ -667,11 +669,14 @@ mod tests {
         ));
     }
 
-    /// The three rules that earn their place above the floor with a context
-    /// anchor rather than a distinctive token. The anchor proves which *field*
-    /// was matched and says nothing about the *value*, so a README example
-    /// classified at 0.90-0.99 and was deleted. Placeholder stopwords run
-    /// against the captured value, which is why each rule now captures one.
+    /// The rules that earn their place above the floor with a context anchor
+    /// rather than a distinctive token. The anchor proves which *field* was
+    /// matched and says nothing about the *value*, so a README example
+    /// classified at 0.90-0.99 and was deleted.
+    ///
+    /// The gate is the value's **randomness**, not a list of words. Every
+    /// placeholder below is repetitive or a template — which is what a
+    /// placeholder is — and none of them names a word the code knows.
     #[test]
     fn context_anchored_placeholders_are_not_credentials() {
         let det = detector();
@@ -679,6 +684,14 @@ mod tests {
             format!("AccountKey=your{}==", rep('A', 82)),
             format!("CLOUDFLARE_API_TOKEN=your{}", rep('b', 36)),
             format!("aws_secret_access_key = your{}", rep('c', 36)),
+            format!("AccountKey=fake{}==", rep('A', 82)),
+            format!("CLOUDFLARE_API_TOKEN=sample{}", rep('b', 34)),
+            "MY_API_TOKEN=TODO_before_release".to_string(),
+            "CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_XXXXXXXXXXXXXXXXXXXXXX".to_string(),
+            // No word at all — the point of dropping the list. A repetitive
+            // value is a placeholder whatever it spells.
+            format!("AccountKey={}==", rep('A', 86)),
+            format!("CLOUDFLARE_API_TOKEN={}", rep('b', 40)),
         ] {
             assert!(
                 det.scan_all(&placeholder).is_empty(),
@@ -686,13 +699,73 @@ mod tests {
                 all_rules(&det, &placeholder)
             );
         }
-        // …while the values that are not placeholders still auto-wipe.
+        // …while values with a credential's randomness still auto-wipe.
         for real in [
-            format!("AccountKey={}==", rep('A', 86)),
-            format!("CLOUDFLARE_API_TOKEN={}", rep('b', 40)),
+            format!("AccountKey={}==", noise(86, BASE64)),
+            format!("CLOUDFLARE_API_TOKEN={}", noise(40, ALNUM)),
             "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         ] {
             assert!(det.may_auto_wipe(&real), "{real}");
+        }
+    }
+
+    /// The control that rejected both spellings of a word list. A real
+    /// credential that merely *carries* a placeholder word was suppressed
+    /// outright by the `contains` form — not made inert, but dropped from every
+    /// finding, so it was neither flagged, nor masked, nor kept out of
+    /// `clipboard_fts`. The `starts_with` form that replaced it moved the same
+    /// failure to values that *begin* with one, which is rarer and no safer:
+    /// both fail open, and §5.6 requires a suppressing gate to fail closed.
+    ///
+    /// There is no list now. Each value below is credential-shaped and carries
+    /// `your`, `todo`, `dummy`, `sample` or `example` — at the start for the
+    /// first three — and every one must be detected on its randomness alone.
+    #[test]
+    fn real_credentials_carrying_a_placeholder_word_are_still_detected() {
+        let det = detector();
+        for (text, rule) in [
+            (
+                format!("AccountKey=your{}==", noise(82, BASE64)),
+                "azure_storage_key",
+            ),
+            (
+                format!("CLOUDFLARE_API_TOKEN=todo{}", noise(36, ALNUM)),
+                "cloudflare_api_token",
+            ),
+            (
+                format!("aws_secret_access_key = sample{}", noise(34, ALNUM)),
+                "aws_secret_access_key",
+            ),
+            (
+                format!(
+                    "DATADOG_API_TOKEN=x{}dummy{}",
+                    noise(12, HEX),
+                    noise(12, HEX)
+                ),
+                "dotenv_secret",
+            ),
+            (
+                format!(
+                    "AccountKey={}todo{}==",
+                    noise(41, BASE64),
+                    noise(41, BASE64)
+                ),
+                "azure_storage_key",
+            ),
+            (
+                // AWS's own published secret key, which ends EXAMPLEKEY and
+                // which §9.1 binds. Nothing carves `example` out any more.
+                "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                "aws_secret_access_key",
+            ),
+        ] {
+            assert!(
+                fired(&det, &text, rule),
+                "{rule} suppressed by a placeholder word: {text} -> {:?}",
+                all_rules(&det, &text)
+            );
+            assert!(det.is_sensitive(&text), "{text} would reach the index");
+            assert_eq!(det.scan(&text).unwrap().severity, Severity::HighConfidence);
         }
     }
 
@@ -736,7 +809,7 @@ mod tests {
     #[test]
     fn gitlab_pat_is_detected() {
         let det = detector();
-        let token = format!("glpat-{}", rep('A', 20));
+        let token = format!("glpat-{}", noise(20, ALNUM));
         assert!(fired(&det, &token, "gitlab_pat"));
         assert_eq!(det.scan(&token).unwrap().severity, Severity::HighConfidence);
         // \b anchor: glued into a longer identifier it is not a token.

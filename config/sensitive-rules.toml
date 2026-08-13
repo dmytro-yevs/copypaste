@@ -29,16 +29,12 @@ upstream_ids = ["github-fine-grained-pat"]
 name = "github_fine_grained"
 category = "credential"
 confidence = 0.99
-entropy_override = 0.0
-entropy_decision = "Manifest 07 pins a repetitive synthetic token that upstream entropy rejects."
 
 [[rules]]
 upstream_ids = ["github-pat"]
 name = "github_classic_pat"
 category = "credential"
 confidence = 0.99
-entropy_override = 0.0
-entropy_decision = "Manifest 07 pins ghp_ plus 36 repeated characters."
 
 [[rules]]
 upstream_ids = ["github-app-token"]
@@ -79,16 +75,12 @@ category = "credential"
 confidence = 0.99
 pattern_override = '''\b(?:sk|rk)_(?:live|prod)_[0-9A-Za-z]{10,99}\b'''
 pattern_decision = "Test keys occur in public examples; CopyPaste only classifies live and prod keys."
-entropy_override = 0.0
-entropy_decision = "Manifest 07 pins a repeated-character Stripe fixture."
 
 [[rules]]
 upstream_ids = ["npm-access-token"]
 name = "npm_token"
 category = "credential"
 confidence = 0.99
-entropy_override = 0.0
-entropy_decision = "Manifest 07 pins npm_ plus 36 repeated characters."
 
 [[rules]]
 upstream_ids = ["pypi-upload-token"]
@@ -123,16 +115,12 @@ category = "credential"
 confidence = 0.65
 pattern_override = '''\bSK[a-f0-9]{32}\b'''
 pattern_decision = "The shape identifies a signing-key SID, not an auth token; word boundaries and inert confidence prevent deletion."
-entropy_override = 0.0
-entropy_decision = "The inert compatibility corpus requires repeated lowercase hex to remain detectable."
 
 [[rules]]
 upstream_ids = ["sendgrid-api-token"]
 name = "sendgrid_api_key"
 category = "credential"
 confidence = 0.99
-entropy_override = 0.0
-entropy_decision = "Manifest 07 pins repeated payload segments while preserving the SG dot structure."
 
 [[rules]]
 upstream_ids = ["hashicorp-tf-api-token"]
@@ -141,8 +129,6 @@ category = "credential"
 confidence = 0.99
 pattern_override = '''\batlasv1\.[A-Za-z0-9_-]{64,}\b'''
 pattern_decision = "Manifest 07 requires legacy tokens without the newer organization prefix."
-entropy_override = 0.0
-entropy_decision = "Manifest 07 pins atlasv1. plus 64 repeated characters."
 
 [[rules]]
 upstream_ids = ["gcp-api-key"]
@@ -165,8 +151,8 @@ category = "credential"
 confidence = 0.95
 pattern_override = '''\b(?:hv[sb]\.[A-Za-z0-9_-]{32,}|s\.[A-Za-z0-9]{24})\b'''
 pattern_decision = "Keep the reviewed 32-character minimum while adding the upstream legacy service-token form."
-entropy_override = 0.0
-entropy_decision = "Manifest 07 requires hvs. plus 32 repeated characters."
+entropy_override = 3.5
+entropy_decision = "One rule merges vault-service-token (3.5) and vault-batch-token (4.0), so the merge has no threshold to inherit. The lower of the two keeps the service-token recall upstream intends; a batch token's own randomness clears it easily."
 keywords_override = ["hvs.", "hvb.", "s."]
 keywords_decision = "The merged service and batch rule must prefilter all three accepted prefixes."
 
@@ -181,12 +167,9 @@ name = "cloudflare_api_token"
 category = "credential"
 confidence = 0.92
 pattern_override = '''(?i)\b(?:CLOUDFLARE_API_(?:TOKEN|KEY)|CF_API_TOKEN)\s*=\s*([A-Za-z0-9_-]{40})\b'''
-pattern_decision = "The env-var context anchor is the reason a bare 40-character blob cannot auto-wipe; the value is captured so the placeholder stopwords see the token rather than the variable name."
+pattern_decision = "The env-var context anchor is the reason a bare 40-character blob cannot auto-wipe; the value is captured so the value validator sees the token rather than the variable name, which contains the keyword."
 secret_group = 1
-placeholder_stopwords = ["your", "example", "placeholder", "changeme", "change_me", "replace", "redacted", "insert", "dummy", "sample", "notreal", "todo"]
-placeholder_stopwords_decision = "A 40-character alphanumeric run is exactly the shape of a README placeholder, and the context anchor cannot tell the two apart."
-entropy_override = 0.0
-entropy_decision = "The context anchor is sufficient and the compatibility test uses a repeated value."
+validator = "value_strength"
 keywords_override = ["cloudflare_api_", "cf_api_token"]
 keywords_decision = "The local CF_API_TOKEN alias is absent from the upstream keyword list."
 
@@ -225,8 +208,6 @@ category = "credential"
 confidence = 0.99
 pattern_override = '''\bglpat-[0-9a-zA-Z_-]{20}\b'''
 pattern_decision = "Word boundaries preserve the glued-token false-positive guard."
-entropy_override = 0.0
-entropy_decision = "The direct compatibility test uses a repeated payload."
 
 [[overlay]]
 name = "aws_arn"
@@ -276,7 +257,9 @@ category = "credential"
 confidence = 0.90
 pattern = '''AccountKey=([A-Za-z0-9+/]{86})=='''
 secret_group = 1
-placeholder_stopwords = ["your", "example", "placeholder", "changeme", "change_me", "replace", "redacted", "insert", "dummy", "sample", "notreal", "todo"]
+validator = "value_strength"
+entropy = 3.0
+entropy_decision = "The AccountKey= anchor proves the field and says nothing about the value, so the value's own randomness is the only thing separating a real 86-character key from a README placeholder. 3.0 matches the upstream threshold for context-anchored credential rules; a real base64 key measures above 5."
 
 [[overlay]]
 name = "azure_sas_token"
@@ -318,10 +301,9 @@ category = "credential"
 confidence = 0.99
 pattern = '''(?i)aws_secret_access_key["']?\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})'''
 secret_group = 1
-# No "example" here, for the reason aws_access_key gives up the upstream
-# .+EXAMPLE allowlist: AWS's own published secret key ends EXAMPLEKEY and the
-# manifest binds it as a true positive.
-placeholder_stopwords = ["your", "placeholder", "changeme", "change_me", "replace", "redacted", "insert", "dummy", "notreal", "todo"]
+validator = "value_strength"
+entropy = 3.0
+entropy_decision = "Same reasoning as azure_storage_key: the keyword anchor proves the field, not the value. AWS's own published EXAMPLEKEY secret measures above 4."
 
 [[overlay]]
 name = "http_basic_auth"
@@ -334,12 +316,13 @@ name = "dotenv_secret"
 category = "infrastructure"
 confidence = 0.80
 pattern = '''(?m)^(?:export\s+)?[A-Z][A-Z0-9_]{2,}(?:_KEY|_SECRET|_TOKEN|_PASSWORD|_PASS|_PWD|_CREDENTIALS?)\s*=\s*(\S+)'''
+# The variable name is the only evidence this rule has, and a README's
+# CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE line carries the same name as the real
+# one. Value strength cannot separate them on its own: a placeholder is long.
 validator = "value_strength"
 secret_group = 1
-# The variable name is the only evidence this rule has, and a README's
-# CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE line carries exactly the same name as the
-# real one. Value strength cannot separate them: a placeholder is long.
-placeholder_stopwords = ["your", "example", "placeholder", "changeme", "change_me", "replace", "redacted", "insert", "dummy", "sample", "notreal", "todo"]
+entropy = 3.5
+entropy_decision = "The variable name is the only evidence, so the value's randomness is what separates MY_API_TOKEN=<real> from the identical line in a README. 3.5 is upstream's own generic-api-key number and is the tightest of the four context rules because this one has the weakest anchor and still auto-wipes at 0.80: a mixed-case template like TODO_before_release measures 3.3, and a real 32-hex token measures above 3.8."
 
 [[overlay]]
 name = "db_conn_string"

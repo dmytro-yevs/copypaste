@@ -516,14 +516,41 @@ empty set is true, so an `AND` allowlist carrying neither a regex nor a stopword
 would silence every match of the rule it is attached to, with nothing to say so.
 An allowlist with no checks allows nothing.
 
-**v2 amendment — placeholder stopwords for the context-anchored rules.** A
-context anchor (§5.2) proves which *field* matched and says nothing about the
-*value*, so `AccountKey=`, `CLOUDFLARE_API_TOKEN=`, `aws_secret_access_key =`
-and `dotenv_secret`'s variable-name suffix all matched README examples at
-0.80-0.99. Each of those rules now captures its value and gates it against a
-placeholder stopword list. `aws_secret_access_key` omits `example` for the same
-reason `aws_access_key` gives up gitleaks' `.+EXAMPLE` allowlist: AWS's own
-published secret key ends `EXAMPLEKEY` and §9.1 binds it.
+**v2 amendment — randomness, not a word list (DMY-162).** A context anchor
+(§5.2) proves which *field* matched and says nothing about the *value*, so
+`AccountKey=`, `CLOUDFLARE_API_TOKEN=`, `aws_secret_access_key =` and
+`dotenv_secret`'s variable-name suffix all matched README examples at 0.80-0.99.
+Each of those rules captures its value and gates it on two things it already
+had: §5.3's value-strength model, and an **entropy threshold**.
+
+**Two word lists were tried first and both were wrong.** A per-rule stopword
+allowlist tested with `contains` suppressed any real Azure, Cloudflare, AWS or
+dotenv credential carrying `todo` or `your` anywhere inside it — suppressed
+*entirely*, not made inert, so it was neither flagged, nor masked, nor kept out
+of `clipboard_fts`. Anchoring the same list to the *start* of the value made
+that rarer and no safer: it moved the failure to credentials beginning with a
+listed word, and it still fails **open**, which is the one direction the
+fail-closed amendment above forbids. No finite word list closes either end.
+
+Randomness does. A placeholder is repetitive or a template; a credential is
+neither, and that is a property of the value rather than a guess about its
+spelling. `AccountKey=<86 identical characters>` measures 0.0 and is rejected;
+`AccountKey=your<82 random characters>` measures above 5 and is detected, which
+is the correct answer and the one no word list could give.
+
+**This costs the synthetic fixtures, and that is the trade.** Ten rules carried
+`entropy_override = 0.0` for no reason but to admit a repeated-character
+fixture from §9.1, which is the same as having no gate. Those overrides are
+gone and §9.1's fixtures are now credential-*shaped*: random over the rule's own
+alphabet. Only `hashicorp_vault` keeps an override, because it merges two
+upstream rules whose thresholds differ and so has none to inherit.
+
+Two consequences worth stating. A carve-out disappears —
+`aws_secret_access_key` needed one for `example`, because AWS's own published
+key *ends* `EXAMPLEKEY`, and nothing tests for that word now. And
+`dotenv_secret` is held to 3.5 rather than 3.0, tighter than the other three,
+because its anchor is only a variable name and it still auto-wipes at 0.80: a
+mixed-case template such as `TODO_before_release` measures 3.3.
 
 ### 5.7 Defence layers, in order
 
@@ -945,6 +972,13 @@ and `crates/copypaste-core/tests/false_positive_corpus.rs`.
 
 ### 9.1 True positives — MUST be detected
 
+**Fixture rule (DMY-162).** Where a row below is written `<prefix>` + *n*×`A`,
+read *n* **random** characters over that rule's own alphabet, not *n* identical
+ones. Every rule above the floor gates on its value's entropy (§5.6), so a
+repeated-character fixture is a placeholder by construction and is rejected on
+purpose; spelling these as repeats is what forced ten `entropy_override = 0.0`
+entries and left the gate off. The lengths and the structure are what bind.
+
 | Input | Expected |
 |---|---|
 | `AKIAIOSFODNN7EXAMPLE` | detected; `AwsKey`; **auto-wipes** |
@@ -990,7 +1024,8 @@ and `crates/copypaste-core/tests/false_positive_corpus.rs`.
 | `SG.` + 22×`A` + `.` + 43×`B` | detected; auto-wipes |
 | `atlasv1.` + 64×`A` | detected; auto-wipes |
 | `{"private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEo..."}` | detected; auto-wipes |
-| `AccountKey=` + 86×`A` + `==` | detected; auto-wipes |
+| `AccountKey=` + 86 random base64 chars + `==` | detected; auto-wipes |
+| an Azure, Cloudflare, AWS or dotenv value of a credential's randomness that *contains or begins with* `todo`, `your`, `dummy` or `sample` | detected; auto-wipes — nothing tests the value for words (§5.6) |
 | `4111111111111111` | `CreditCard`; classified, **never auto-wipes** (§3.3, DMY-162) |
 | `Customer card: 4111 1111 1111 1111 — expires 12/26` | `CreditCard` (Audit MED #6); classified, never auto-wipes |
 | `please charge 4111-1111-1111-1111 today` | `CreditCard`; classified, never auto-wipes |
@@ -1028,9 +1063,12 @@ and `crates/copypaste-core/tests/false_positive_corpus.rs`.
 | `9780132350883` | Luhn-valid ISBN-13 prefix — not an issuer range |
 | `ISBN 978-012-13-234567 qty 12` | ISBN plus quantity must produce no card candidate |
 | `order <Luhn-valid 16 digits beginning 4, 51, 35 or 60>` | indistinguishable from a card, so it *is* classified — and must never be **deleted** (§3.3, DMY-162) |
-| `AccountKey=your` + 82×`A` + `==` | placeholder value, context anchor present (§5.6) |
-| `CLOUDFLARE_API_TOKEN=your` + 36×`b` | placeholder value, and `dotenv_secret` must not classify it either |
-| `aws_secret_access_key = your` + 36×`c` | placeholder value |
+| `AccountKey=your` + 82×`A` + `==` | repetitive value, context anchor present (§5.6) |
+| `CLOUDFLARE_API_TOKEN=your` + 36×`b` | repetitive value, and `dotenv_secret` must not classify it either |
+| `aws_secret_access_key = your` + 36×`c` | repetitive value |
+| `AccountKey=` + 86×`A` + `==`, `CLOUDFLARE_API_TOKEN=` + 40×`b` | **no word at all** — a repetitive value is a placeholder whatever it spells |
+| `CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_XXXXXXXXXXXXXXXXXXXXXX` | a template, by its own low variety |
+| `MY_API_TOKEN=TODO_before_release` | 3.3 — under `dotenv_secret`'s 3.5, which is why that rule is held tighter than the other three |
 | `api-key: see the wiki`, `client secret: ask ops`, `db-password: ${VAULT_DB}` | the widened rule-23 keyword is still value-gated |
 
 **The 50-entry benign corpus** (`tests/false_positive_corpus.rs:14-73`) must be

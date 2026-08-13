@@ -258,11 +258,13 @@ impl Rule {
             let Some(secret) = secret(&caps, self.spec.secret_group, whole.as_str()) else {
                 continue;
             };
+            // Both value validators judge the rule's declared secret group, not
+            // group 1: `secret_group` is what the entropy threshold and the
+            // allowlists already use, and a rule whose value lives elsewhere
+            // would otherwise be gated on whatever group 1 happened to be.
             let ok = match self.spec.validator {
                 Validator::None => true,
-                Validator::ValueStrength => {
-                    caps.get(1).is_some_and(|v| value_is_strong(v.as_str()))
-                }
+                Validator::ValueStrength => value_is_strong(secret),
                 Validator::CardNumber => card_number_valid(whole.as_str()),
                 Validator::Iban => iban_valid(whole.as_str()),
                 Validator::SsnStructure => ssn_structure_plausible(whole.as_str()),
@@ -436,6 +438,37 @@ pub(super) mod test_support {
         std::iter::repeat_n(c, n).collect()
     }
 
+    pub(in crate::sensitive) const ALNUM: &str =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    pub(in crate::sensitive) const BASE64: &str =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    pub(in crate::sensitive) const HEX: &str = "0123456789abcdef";
+
+    /// A deterministic pseudo-random fixture of `n` characters over `alphabet`.
+    ///
+    /// Positive fixtures have to be *shaped* like the credential they stand for,
+    /// and randomness is part of that shape: every context-anchored rule gates on
+    /// its value's entropy, because the anchor proves which field matched and
+    /// says nothing about the value (§5.6). A repeated-character fixture measures
+    /// near zero and would force the threshold off — which is exactly what the
+    /// ten `entropy_override = 0.0` entries used to do, and what left
+    /// `AccountKey=<86 identical chars>` indistinguishable from a README example.
+    ///
+    /// Deterministic so a failure reproduces: xorshift64 from a fixed seed, no
+    /// dependency and no `rand` in the test tree.
+    pub(in crate::sensitive) fn noise(n: usize, alphabet: &str) -> String {
+        let chars: Vec<char> = alphabet.chars().collect();
+        let mut state = 0x243f_6a88_85a3_08d3_u64;
+        (0..n)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                chars[(state % chars.len() as u64) as usize]
+            })
+            .collect()
+    }
+
     /// The benign corpus. §7.7: v1's `max(len * 5 / 100, 2)` budget tolerated
     /// two unnamed FPs — `const password = prompt(...)` was one of them. v2
     /// asserts **zero**; any accepted FP must be named here with a reason.
@@ -481,7 +514,9 @@ pub(super) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{all_rules, detector, fired, rep, BENIGN_CORPUS};
+    use super::test_support::{
+        all_rules, detector, fired, noise, ALNUM, BASE64, BENIGN_CORPUS, HEX,
+    };
     use super::*;
     use crate::sensitive::finding::{Severity, AUTOWIPE_CONFIDENCE_FLOOR};
 
@@ -492,21 +527,21 @@ mod tests {
     #[test]
     fn manifest_true_positives_are_detected() {
         let det = detector();
-        let ghp = format!("ghp_{}", rep('A', 36));
-        let fine = format!("github_pat_{}_{}", rep('A', 22), rep('B', 59));
-        let openai_new = format!("sk-proj-{}", rep('A', 48));
-        let openai_legacy = format!("sk-{}", rep('A', 48));
-        let anthropic = format!("sk-ant-api03-{}", rep('A', 80));
-        let stripe = format!("sk_live_{}", rep('A', 24));
-        let npm = format!("npm_{}", rep('A', 36));
+        let ghp = format!("ghp_{}", noise(36, ALNUM));
+        let fine = format!("github_pat_{}_{}", noise(22, ALNUM), noise(59, ALNUM));
+        let openai_new = format!("sk-proj-{}", noise(48, ALNUM));
+        let openai_legacy = format!("sk-{}", noise(48, ALNUM));
+        let anthropic = format!("sk-ant-api03-{}", noise(80, ALNUM));
+        let stripe = format!("sk_live_{}", noise(24, ALNUM));
+        let npm = format!("npm_{}", noise(36, ALNUM));
         let slack_hook = format!(
             "https://hooks.slack.com/services/T00000000/B00000000/{}",
-            rep('X', 24)
+            noise(24, ALNUM)
         );
-        let vault = format!("hvs.{}", rep('A', 32));
-        let sendgrid = format!("SG.{}.{}", rep('A', 22), rep('B', 43));
-        let terraform = format!("atlasv1.{}", rep('A', 64));
-        let azure = format!("AccountKey={}==", rep('A', 86));
+        let vault = format!("hvs.{}", noise(32, ALNUM));
+        let sendgrid = format!("SG.{}.{}", noise(22, ALNUM), noise(43, ALNUM));
+        let terraform = format!("atlasv1.{}", noise(64, ALNUM));
+        let azure = format!("AccountKey={}==", noise(86, BASE64));
 
         let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.\
                    SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
@@ -657,11 +692,11 @@ mod tests {
         let det = detector();
         let inputs = [
             "AKIAIOSFODNN7EXAMPLE".to_string(),
-            format!("sk-{}", rep('A', 48)),
-            format!("hvs.{}", rep('A', 32)),
-            format!("SG.{}.{}", rep('A', 22), rep('B', 43)),
-            format!("atlasv1.{}", rep('A', 64)),
-            format!("AccountKey={}==", rep('A', 86)),
+            format!("sk-{}", noise(48, ALNUM)),
+            format!("hvs.{}", noise(32, ALNUM)),
+            format!("SG.{}.{}", noise(22, ALNUM), noise(43, ALNUM)),
+            format!("atlasv1.{}", noise(64, ALNUM)),
+            format!("AccountKey={}==", noise(86, BASE64)),
             "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA".to_string(),
             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
                 .to_string(),
@@ -683,7 +718,7 @@ mod tests {
     #[test]
     fn openai_legacy_does_not_double_fire_on_proj_keys() {
         let det = detector();
-        let key = format!("sk-proj-{}", rep('A', 48));
+        let key = format!("sk-proj-{}", noise(48, ALNUM));
         assert!(fired(&det, &key, "openai_new"));
         assert!(!fired(&det, &key, "openai_legacy"));
     }
@@ -716,8 +751,8 @@ mod tests {
             // below the {32,} vault minimum
             "hvs.abc123".into(),
             // context anchors missing
-            rep('A', 40),
-            format!("{}==", rep('A', 86)),
+            noise(40, ALNUM),
+            format!("{}==", noise(86, BASE64)),
             // SG without the two-dot structure
             "SGfoo bar".into(),
             // \b anchor: must not classify as a JWT
@@ -766,7 +801,7 @@ mod tests {
     #[test]
     fn inert_band_is_detected_but_never_auto_wipes() {
         let det = detector();
-        let twilio = format!("SK{}", rep('a', 32));
+        let twilio = format!("SK{}", noise(32, HEX));
         let cases: &[(&str, &str)] = &[
             ("Call me at (555) 867-5309", "phone_us"),
             ("Send to alice@example.com", "email"),
@@ -819,8 +854,8 @@ mod tests {
     #[test]
     fn the_predicate_answers_what_the_full_scan_answers() {
         let det = detector();
-        let ghp = format!("ghp_{}", rep('A', 36));
-        let twilio = format!("SK{}", rep('a', 32));
+        let ghp = format!("ghp_{}", noise(36, ALNUM));
+        let twilio = format!("SK{}", noise(32, HEX));
         let mut corpus: Vec<String> = BENIGN_CORPUS.iter().map(|t| (*t).to_string()).collect();
         corpus.extend(
             [
@@ -1006,7 +1041,7 @@ mod tests {
     #[test]
     fn word_anchors_reject_glued_tokens() {
         let det = detector();
-        let sg = format!("SG.{}.{}", rep('A', 22), rep('B', 43));
+        let sg = format!("SG.{}.{}", noise(22, ALNUM), noise(43, ALNUM));
         assert!(fired(&det, &sg, "sendgrid_api_key"));
         assert!(!fired(&det, &format!("XX{sg}"), "sendgrid_api_key"));
         assert!(!fired(&det, "mykeyeyJabc.eyJdef.ghi", "jwt"));
@@ -1017,11 +1052,11 @@ mod tests {
     #[test]
     fn context_anchored_rules_do_not_match_without_their_anchor() {
         let det = detector();
-        let blob = rep('A', 86);
+        let blob = noise(86, BASE64);
         assert!(!det.is_sensitive(&format!("{blob}==")));
         assert!(det.is_sensitive(&format!("AccountKey={blob}==")));
 
-        let token = rep('b', 40);
+        let token = noise(40, ALNUM);
         assert!(!det.is_sensitive(&token));
         assert!(det.is_sensitive(&format!("CLOUDFLARE_API_TOKEN={token}")));
 
@@ -1069,7 +1104,10 @@ mod tests {
     #[test]
     fn scan_ranks_by_confidence_not_declaration_order() {
         let det = detector();
-        let text = format!("mail alice@example.com the token atlasv1.{}", rep('A', 64));
+        let text = format!(
+            "mail alice@example.com the token atlasv1.{}",
+            noise(64, ALNUM)
+        );
         let names = all_rules(&det, &text);
         assert!(names.contains(&"email"));
         assert!(names.contains(&"terraform_cloud_token"));
