@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 
 import {
-  configuredTarget,
   loweredFor,
+  missingLegacyChunks,
   postBaselineRuntime,
   postBaselineSyntax,
+  sharesBaselineWithConfig,
   targetOf,
+  unreferenced,
 } from "./check-webview-baseline.mjs";
 import { LEGACY_TARGET, MODERN_TARGET } from "./webview-baseline.mjs";
 
@@ -111,7 +113,52 @@ describe("which engine a chunk is measured against", () => {
     assert.equal(targetOf("polyfills-legacy-xDQuuDc8.js"), LEGACY_TARGET);
   });
 
-  test("the declared target is the one the bundle is checked against", () => {
-    assert.equal(configuredTarget(), MODERN_TARGET);
+  test("the config has to take its engines from the shared module", () => {
+    assert.equal(
+      sharesBaselineWithConfig('import { X } from "./scripts/webview-baseline.mjs";'),
+      true,
+    );
+    assert.equal(sharesBaselineWithConfig('build: { target: "chrome74" }'), false);
+  });
+});
+
+describe("what the nomodule build has to carry", () => {
+  // Removing the import in `main.tsx` deletes the chunk rather than the call,
+  // so the engine that needs these would load neither and say nothing.
+  test("a missing polyfill chunk is named by what stops loading", () => {
+    const missing = missingLegacyChunks(["index-legacy-a.js", "polyfills-legacy-b.js"]);
+
+    assert.equal(missing.length, 1);
+    assert.equal(missing[0][0], "legacyPolyfills-legacy");
+    assert.match(missing[0][1], /Intl\.RelativeTimeFormat/);
+  });
+
+  test("both chunks present satisfies it", () => {
+    assert.deepEqual(
+      missingLegacyChunks(["polyfills-legacy-b.js", "legacyPolyfills-legacy-c.js"]),
+      [],
+    );
+  });
+});
+
+describe("chunks nothing loads", () => {
+  // The module build emits `legacyPolyfills` even though the branch that
+  // imported it is gone. That copy is dead, not wrong, and measuring it against
+  // the module engine would fail a build that is correct.
+  test("a chunk no other chunk and no html points at is dead", () => {
+    const chunks = [
+      { name: "index-a.js", code: "import './shared-b.js'" },
+      { name: "shared-b.js", code: "" },
+      { name: "orphan-c.js", code: "" },
+    ];
+
+    assert.deepEqual(unreferenced(chunks, '<script src="index-a.js">'), ["orphan-c.js"]);
+  });
+
+  test("an entry named only by the html is not dead", () => {
+    const chunks = [{ name: "index-a.js", code: "" }];
+
+    assert.deepEqual(unreferenced(chunks, '<script src="index-a.js">'), []);
+    assert.deepEqual(unreferenced(chunks, ""), ["index-a.js"]);
   });
 });

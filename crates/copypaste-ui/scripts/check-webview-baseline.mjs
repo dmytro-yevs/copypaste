@@ -138,11 +138,39 @@ export function targetOf(name) {
   return /-legacy-|^polyfills-legacy/.test(name) ? LEGACY_TARGET : MODERN_TARGET;
 }
 
-/** The config is the only thing that makes the emitted bundle target-clean, so
- *  it is read rather than trusted. */
-export function configuredTarget() {
-  const config = readFileSync(path.join(root, "vite.config.ts"), "utf8");
-  return /\btarget:\s*"([^"]+)"/.exec(config)?.[1];
+/**
+ * What the nomodule build must carry, named by the chunk that carries it.
+ * Asserting each builtin by name would re-implement `core-js-compat`, which is
+ * what decides them from the same browserslist target; asserting the chunks
+ * exist and are reachable is the part that can silently stop being true.
+ */
+const LEGACY_CHUNKS = [
+  ["polyfills-legacy", "the core-js builtins @vitejs/plugin-legacy derives from the target"],
+  ["legacyPolyfills-legacy", "ResizeObserver, AbortController and Intl.RelativeTimeFormat"],
+];
+
+export function missingLegacyChunks(names) {
+  return LEGACY_CHUNKS.filter(([prefix]) => !names.some((name) => name.startsWith(prefix)));
+}
+
+/** Both engines have to come from one place or the config and this check drift
+ *  apart; the config is read rather than trusted to be importing them. */
+export function sharesBaselineWithConfig(config) {
+  return /from\s+"\.\/scripts\/webview-baseline\.mjs"/.test(config);
+}
+
+/**
+ * A chunk nothing points at is never fetched, so it cannot break an engine.
+ * The module build emits `legacyPolyfills` even though `import.meta.env.LEGACY`
+ * removed its only import, and that copy is dead rather than wrong.
+ */
+export function unreferenced(chunks, entryHtml = "") {
+  return chunks
+    .filter(({ name }) => {
+      const elsewhere = chunks.filter((other) => other.name !== name);
+      return !entryHtml.includes(name) && !elsewhere.some((other) => other.code.includes(name));
+    })
+    .map(({ name }) => name);
 }
 
 function bundles() {
@@ -157,15 +185,16 @@ function bundles() {
 }
 
 function main() {
-  const declared = configuredTarget();
-  if (declared !== MODERN_TARGET) {
-    console.error(`FAIL vite.config.ts builds for ${declared ?? "no declared target"}, not ${MODERN_TARGET}`);
+  if (!sharesBaselineWithConfig(readFileSync(path.join(root, "vite.config.ts"), "utf8"))) {
+    console.error("FAIL vite.config.ts does not take its engines from scripts/webview-baseline.mjs");
     return 1;
   }
 
   let chunks = [];
+  let entryHtml = "";
   try {
     chunks = bundles();
+    entryHtml = readFileSync(path.join(root, "dist", "index.html"), "utf8");
   } catch {
     chunks = [];
   }
@@ -174,11 +203,27 @@ function main() {
     return 1;
   }
 
-  const byTarget = [MODERN_TARGET, LEGACY_TARGET]
-    .map((target) => ({ target, chunks: chunks.filter((chunk) => chunk.target === target) }))
-    .filter(({ chunks: forTarget }) => forTarget.length > 0);
+  const dead = new Set(unreferenced(chunks, entryHtml));
+  for (const name of dead) console.log(`ok   ${name} is emitted but unreferenced, so nothing loads it`);
+
+  const byTarget = [MODERN_TARGET, LEGACY_TARGET].map((target) => ({
+    target,
+    chunks: chunks.filter((chunk) => chunk.target === target && !dead.has(chunk.name)),
+  }));
+  for (const { target, chunks: forTarget } of byTarget) {
+    if (forTarget.length === 0) {
+      console.error(`FAIL nothing reachable was emitted for ${target}; both builds must ship`);
+      return 1;
+    }
+  }
 
   let failed = 0;
+  const legacyNames = byTarget.find(({ target }) => target === LEGACY_TARGET)?.chunks ?? [];
+  for (const [prefix, what] of missingLegacyChunks(legacyNames.map(({ name }) => name))) {
+    console.error(`FAIL ${LEGACY_TARGET}: no reachable ${prefix}* chunk, so ${what} never load`);
+    failed += 1;
+  }
+
   for (const { target, chunks: forTarget } of byTarget) {
     // Whole-build, not per chunk: a polyfill is a side effect the entry runs
     // once, so it covers a call that code-splitting put in another chunk.
