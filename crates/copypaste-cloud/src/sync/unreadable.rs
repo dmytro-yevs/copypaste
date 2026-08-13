@@ -38,9 +38,22 @@ pub struct Sweep {
     pub next: UploadFloor,
     /// Rows of the cycle under way that the id list had no room for.
     pub seen: u32,
-    /// What the last completed cycle counted. Reported while the next one
-    /// walks, so a page of readable rows cannot flash the figure to zero.
+    /// What the last completed cycle counted.
     pub settled: u32,
+}
+
+impl Sweep {
+    /// What the walk can still prove (INV-N7b). Only at a cycle boundary
+    /// (`next == from`) is `settled` a statement about the region now: past it
+    /// the region may have been repaired under the walk, so the cycle under way
+    /// speaks for itself rather than carrying the last one's larger figure.
+    fn proven(&self) -> u32 {
+        if self.next == self.from {
+            self.settled
+        } else {
+            self.seen
+        }
+    }
 }
 
 /// Local rows this device could not open for upload.
@@ -128,22 +141,16 @@ impl UnreadableUploads {
     }
 
     /// Which list owns a row the walk found unreadable. The id list has first
-    /// claim: counting one it also holds reports the row twice (INV-N7b), and
-    /// the last completed cycle no longer owns what the id list has taken on.
+    /// claim: counting one it also holds reports the row twice (INV-N7b).
     pub(super) fn record_walked(&mut self, id: &str, sweep: &mut Sweep) {
-        if self.track(id) {
-            sweep.settled = sweep.settled.saturating_sub(1);
-        } else {
+        if !self.track(id) {
             sweep.seen = sweep.seen.saturating_add(1);
         }
     }
 
-    /// What is retried by id, plus what the walk knows about (INV-N7b).
+    /// What is retried by id, plus what the walk has proven (INV-N7b).
     pub(super) fn settle_total(&mut self) {
-        let backlog = self
-            .sweep
-            .as_ref()
-            .map_or(0, |sweep| sweep.seen.max(sweep.settled));
+        let backlog = self.sweep.as_ref().map_or(0, Sweep::proven);
         self.total = u32::try_from(self.ids.len())
             .unwrap_or(u32::MAX)
             .saturating_add(backlog);
@@ -251,17 +258,18 @@ mod tests {
     }
 
     /// INV-N7b. A row the id list has room for is not also counted by the
-    /// cycle, and it comes off the figure the last cycle settled on.
+    /// cycle, so the two halves of the figure never hold the same row.
     #[test]
     fn a_walked_row_is_counted_once_by_whichever_list_owns_it() {
         let mut record = UnreadableUploads::default();
         let mut sweep = Sweep {
-            settled: 2,
+            from: at(0, "a"),
+            next: at(10, "b"),
             ..Sweep::default()
         };
 
         record.record_walked("taken", &mut sweep);
-        assert_eq!((record.ids.len(), sweep.seen, sweep.settled), (1, 0, 1));
+        assert_eq!((record.ids.len(), sweep.seen), (1, 0));
 
         for n in 0..MAX_UNREADABLE_TRACKED {
             record.track(&format!("filler-{n:04}"));
@@ -275,20 +283,30 @@ mod tests {
         assert_eq!(record.total, MAX_UNREADABLE_TRACKED as u32 + 1);
     }
 
-    /// The figure only settles at the end of a cycle, and until then it holds
-    /// the last settled answer rather than dropping to what one page saw.
+    /// INV-N7b. A completed cycle's figure is evidence about the region as it
+    /// was, so it stands only until the next cycle reads its first page; from
+    /// there the figure is what that cycle has verified, and it climbs back as
+    /// the walk goes on. Reporting the older, larger figure through a repair
+    /// is the over-count this replaced.
     #[test]
-    fn the_count_does_not_dip_while_a_cycle_is_still_walking() {
+    fn a_walking_cycle_reports_what_it_has_verified_not_the_last_one() {
         let mut record = UnreadableUploads::default();
         record.track("tracked");
         record.sweep = Some(Sweep {
             from: at(0, "a"),
-            next: at(10, "b"),
-            seen: 2,
+            next: at(0, "a"),
+            seen: 0,
             settled: 40,
         });
         record.settle_total();
-        assert_eq!(record.total, 41);
+        assert_eq!(record.total, 41, "a completed cycle is exact");
+
+        record.sweep.as_mut().unwrap().next = at(10, "b");
+        record.settle_total();
+        assert_eq!(
+            record.total, 1,
+            "a cycle that has proven nothing yet says so"
+        );
 
         record.sweep.as_mut().unwrap().seen = 60;
         record.settle_total();
