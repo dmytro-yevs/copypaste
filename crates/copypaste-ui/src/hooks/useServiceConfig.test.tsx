@@ -8,7 +8,12 @@ import {
   PRIVATE_MODE_KEY,
   useSetPrivateMode,
 } from "@/hooks/useServiceConfig";
-import { HISTORY_KEY, STATUS_KEY } from "@/hooks/historyRefresh";
+import {
+  HISTORY_HEAD_KEY,
+  HISTORY_PAGES_KEY,
+  HISTORY_SEARCH_KEY,
+  STATUS_KEY,
+} from "@/hooks/historyRefresh";
 import type { PrivateModeData } from "@/lib/ipc";
 import { testClient } from "@/test/harness";
 
@@ -132,7 +137,9 @@ describe("private-mode mutation", () => {
     for (const queryKey of [
       PRIVATE_MODE_KEY,
       CONFIG_KEY,
-      HISTORY_KEY,
+      HISTORY_PAGES_KEY,
+      HISTORY_HEAD_KEY,
+      HISTORY_SEARCH_KEY,
       STATUS_KEY,
     ]) {
       expect(invalidate).toHaveBeenCalledWith({ queryKey });

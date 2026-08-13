@@ -74,7 +74,7 @@ describe("what clearing a run of rows costs the loaded pages", () => {
     listItems.mockImplementation(async (limit: number, cursor: string | null) => {
       const start = cursor === null ? 0 : rows.findIndex((e) => e.id === cursor) + 1;
       const slice = rows.slice(start, start + limit);
-      const last = slice.at(-1);
+      const last = slice[slice.length - 1];
       const more = last !== undefined && rows.indexOf(last) < rows.length - 1;
       return page(slice, 0, more ? (last?.id ?? null) : null, rows.length);
     });
@@ -106,5 +106,45 @@ describe("what clearing a run of rows costs the loaded pages", () => {
     await waitFor(() => expect(deleteItem).toHaveBeenCalledTimes(4));
     await new Promise((settle) => setTimeout(settle, HISTORY_COALESCE_MS * 3));
     expect(deepReads()).toBe(2);
+  }, 20_000);
+});
+
+describe("pending mask and refresh failures", () => {
+  it("keeps rows hidden when the post-delete refresh fails", async () => {
+    const rows = items(PAGE_SIZE).map((entry, index) => ({
+      ...entry,
+      id: `row-${index}`,
+    }));
+    let failRefresh = false;
+    listItems.mockImplementation(async (limit: number, cursor: string | null) => {
+      if (failRefresh) throw new Error("refresh failed");
+      const start = cursor === null ? 0 : rows.findIndex((e) => e.id === cursor) + 1;
+      const slice = rows.slice(start, start + limit);
+      const last = slice[slice.length - 1];
+      const more = last !== undefined && rows.indexOf(last) < rows.length - 1;
+      return page(slice, 0, more ? (last?.id ?? null) : null, rows.length);
+    });
+
+    const Wrapper = wrapper();
+    const { result } = renderHook(
+      () => ({ history: useHistory(""), deletes: useDeferredDelete() }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(result.current.history.data?.items).toHaveLength(PAGE_SIZE));
+
+    // Make the refresh fail, then delete two rows in rapid succession.
+    // The second `remove` flushes the first, whose commit triggers the
+    // failed refresh.
+    failRefresh = true;
+    await act(async () => {
+      result.current.deletes.remove(rows[0]!);
+      await new Promise((tick) => setTimeout(tick, 20));
+      result.current.deletes.remove(rows[1]!);
+    });
+    await waitFor(() => expect(deleteItem).toHaveBeenCalledWith("row-0"));
+    await new Promise((settle) => setTimeout(settle, HISTORY_COALESCE_MS * 3));
+
+    // B3: pending mask must stay — the row is still in stale cache.
+    expect(result.current.deletes.pending.has("row-0")).toBe(true);
   }, 20_000);
 });

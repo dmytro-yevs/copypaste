@@ -13,6 +13,7 @@ import { toFriendly } from "@/lib/errors";
 import { UNDO_WINDOW_MS } from "@/lib/layout";
 import { type Item, deleteItem } from "@/lib/ipc";
 import {
+  HISTORY_PAGES_KEY,
   STATUS_KEY,
   coalesceHistoryInvalidation,
   invalidateHistoryQueries,
@@ -69,15 +70,20 @@ export function useDeferredDelete() {
           }
         }
         if (deleted) {
-          // INV-3: the write invalidates, and we only stop hiding the rows once
-          // the refetch has settled — otherwise they flash back into the list.
           await coalesceHistoryInvalidation(qc);
           void qc.invalidateQueries({ queryKey: STATUS_KEY });
+          // B3/INV-3: release only after a proven successful post-delete read.
+          // React Query preserves stale data on error, so a failed refresh
+          // would expose the cached row the delete just removed.
+          const errored = qc.getQueryCache()
+            .findAll({ queryKey: HISTORY_PAGES_KEY })
+            .some((q) => q.state.status === "error");
+          if (errored) return;
         }
-      } finally {
-        // INV-30: released whatever happened above.
-        setPending((prev) => without(prev, ids));
+      } catch {
+        return;
       }
+      setPending((prev) => without(prev, ids));
     },
     [clearTimer, qc],
   );

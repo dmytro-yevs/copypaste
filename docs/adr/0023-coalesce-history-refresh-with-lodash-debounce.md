@@ -24,6 +24,17 @@ walk starting while the first is still reading amplifies rather than coalesces,
 which no debounce knows about. The in-flight guard defers the next run and
 re-enters the same debounce, so `maxWait` keeps bounding it.
 
+**One guard, not two.** A single `Coalesced` instance per `QueryClient` is
+shared across capture walks, deferred-delete refreshes, and user-initiated
+invalidations. Peak concurrent page walks is exactly one. User-initiated writes
+(pin, reorder, clear) bypass the debounce via lodash's `.flush()` but still
+serialise through the in-flight guard.
+
+**Cancellation.** The IPC layer (`@/lib/ipcCall`) does not propagate
+`AbortSignal` to Tauri invocations, so React Query's query-function signal is
+not consumed. A cancelled refetch therefore still completes its underlying IPC
+round trip; the guard serialises the next walk regardless.
+
 ## Cost
 
 `lodash.debounce` is 3 kB minified with no dependencies of its own and is
@@ -31,6 +42,8 @@ already in the lockfile and in the bundle, so the shipped size does not change.
 It has not been published since 2016. That is a completed package rather than an
 abandoned one — one function, no transitive surface, and the alternative on
 offer was a sixth hand-written scheduler (CLAUDE.md rule 1 lists five).
+`usehooks-ts` also depends on it, so the package is exercised by a larger
+consumer base. No open CVEs as of 2026-08.
 
 `@types/lodash.debounce` is a dev dependency; the package ships no types.
 

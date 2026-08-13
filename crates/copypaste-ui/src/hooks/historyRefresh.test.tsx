@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 import {
+  coalesceHistoryInvalidation,
   invalidateHistoryHead,
   invalidateHistoryQueries,
 } from "@/hooks/historyRefresh";
@@ -68,7 +69,7 @@ function history(rows: number, delayMs = 0) {
     if (delayMs > 0) await wait(delayMs);
     const start = cursor === null ? 0 : all.findIndex((e) => e.id === cursor) + 1;
     const slice = all.slice(start, start + limit);
-    const last = slice.at(-1);
+    const last = slice[slice.length - 1];
     const more = last !== undefined && all.indexOf(last) < all.length - 1;
     if (deep) concurrent -= 1;
     return page(slice, 0, more ? (last?.id ?? null) : null, all.length);
@@ -190,6 +191,35 @@ describe("the coalescing window", () => {
 
     // Serial by construction inside one walk, so anything above 1 is a second
     // walk started while the first was still reading.
+    expect(service.peakDeep()).toBe(1);
+  }, 30_000);
+
+  it("never runs two walks even across both schedulers", async () => {
+    const { client, service } = await loadEveryPage(1_000, 15);
+
+    await act(async () => {
+      await Promise.all([
+        invalidateHistoryHead(client),
+        coalesceHistoryInvalidation(client),
+      ]);
+    });
+    await wait(HISTORY_COALESCE_MAX_MS * 2);
+
+    expect(service.peakDeep()).toBe(1);
+  }, 30_000);
+
+  it("never runs two walks when invalidateHistoryQueries runs during a coalesced walk", async () => {
+    const { client, service } = await loadEveryPage(1_000, 15);
+
+    await act(async () => {
+      await invalidateHistoryHead(client);
+    });
+    await wait(HISTORY_COALESCE_MS * 1.2);
+    await act(async () => {
+      await invalidateHistoryQueries(client);
+    });
+    await wait(HISTORY_COALESCE_MAX_MS);
+
     expect(service.peakDeep()).toBe(1);
   }, 30_000);
 });
