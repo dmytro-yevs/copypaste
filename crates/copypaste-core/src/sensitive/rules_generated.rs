@@ -2301,7 +2301,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         name: "credit_card",
         category: Category::Financial,
         confidence: 0.99,
-        pattern: "\\b\\d{4}(?:[ -]?\\d{2,6}){2,4}\\b",
+        pattern: "\\b(?:\\d{4}(?: \\d{2,6}){2,4}|\\d{4}(?:-\\d{2,6}){2,4}|\\d{13,19})\\b",
         validator: Validator::CardNumber,
         secret_group: 0,
         entropy: None,
