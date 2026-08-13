@@ -12,14 +12,14 @@
     "dev:web:daemon": "sh scripts/dev-web-daemon.sh",
     "dev:native": "sh scripts/dev-native.sh",
     "dev:android": "tauri android dev",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-webview-baseline.mjs",
     "generate:icons": "sh scripts/generate-icons.sh",
     "generate:ipc": "sh scripts/generate-ipc-bindings.sh",
     "check:ipc": "sh scripts/generate-ipc-bindings.sh --check",
     "check:native-parity": "node scripts/native-parity-gate.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run && node --test scripts/native-parity-gate.test.mjs",
+    "test": "vitest run && node --test scripts/native-parity-gate.test.mjs scripts/check-webview-baseline.test.mjs",
     "test:native-parity": "node --test scripts/native-parity-gate.test.mjs"
   },
   "dependencies": {

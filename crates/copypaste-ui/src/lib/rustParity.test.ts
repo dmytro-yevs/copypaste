@@ -123,7 +123,7 @@ function frontendListenersInSource(file: string, text: string): string[] {
         throw new Error(`listen() has no static event in ${file}`);
       }
       listeners.push(
-        `${file.replaceAll("\\", "/")}:${text.slice(event.start ?? 0, event.end ?? 0)}`,
+        `${file.replace(/\\/g, "/")}:${text.slice(event.start ?? 0, event.end ?? 0)}`,
       );
     },
   });
@@ -267,7 +267,7 @@ test(`MAX_PAIRINGS matches ${P2P_PEERS}`, () => {
 });
 
 test(`DEFAULT_SHORTCUT matches ${SHORTCUT}`, () => {
-  expect(DEFAULT_SHORTCUT).toBe(value(SHORTCUT, "DEFAULT_SHORTCUT").replaceAll('"', ""));
+  expect(DEFAULT_SHORTCUT).toBe(value(SHORTCUT, "DEFAULT_SHORTCUT").replace(/"/g, ""));
 });
 
 describe("event names the frontend listens for", () => {

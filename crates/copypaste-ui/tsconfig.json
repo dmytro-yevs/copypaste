@@ -1,7 +1,13 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Below the target deliberately. The bundler lowers syntax to the Chromium
+    // 74 WebView baseline (vite.config.ts) but cannot add a method that engine
+    // never had: `Object.hasOwn` type-checked here and was waiting on API 29
+    // behind the syntax error that got there first. ES2019 is the closest lib
+    // to that engine, and it makes the next one a compile error rather than a
+    // hosted failure.
+    "lib": ["ES2019", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",

@@ -58,7 +58,11 @@ function safeCode(code: string): string {
 }
 
 function errorKind(code: string): ErrorKind {
-  return Object.hasOwn(FRIENDLY, code) ? (code as ErrorKind) : "unknown";
+  // Not `Object.hasOwn`, which the Chromium 74 WebView baseline does not have
+  // (`scripts/check-webview-baseline.mjs`).
+  return Object.prototype.hasOwnProperty.call(FRIENDLY, code)
+    ? (code as ErrorKind)
+    : "unknown";
 }
 
 function isUiError(raw: unknown): raw is UiError {
