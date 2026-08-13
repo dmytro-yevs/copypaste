@@ -18,9 +18,8 @@
 //! [`fetch`]: SyncSource::fetch
 //! [`apply`]: SyncSource::apply
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use copypaste_p2p::protocol::{
     ItemSummary, SyncItem, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
@@ -33,6 +32,7 @@ use super::merge::{
     OpenVersionError, RemoteVersion,
 };
 use super::MSG_STORE;
+use crate::retention::{RetentionGate, RETENTION_DEBOUNCE};
 use crate::sensitive::Detector;
 use crate::storage::{origin_or, Store, StoredItem};
 use crate::Keyring;
@@ -41,43 +41,6 @@ const MSG_SYNC_DISABLED: &str = "sync is disabled";
 
 const MAX_SUMMARIES_PER_SESSION: i64 =
     (MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION) as i64;
-
-/// How long applied versions may coalesce onto one retention sweep.
-const RETENTION_DEBOUNCE: Duration = Duration::from_millis(250);
-
-/// Retention is a *bound* on the history, not a step of the merge. Enforcing it
-/// after every applied item runs the same `O(history)` sweep pair a thousand
-/// times over a first sync where sweeping a handful of times leaves the
-/// identical history — and that is the first-pair-of-devices path.
-///
-/// Leading edge inline, so a lone merge still returns with the limits enforced;
-/// a burst coalesces onto a trailing run scheduled on the reactor, which is
-/// what makes the bound hold when a session ends by error or disconnect and not
-/// only when it ends by agreement. Sweeping later can only delete less, later,
-/// which is the safe direction under AGENTS.md rule 4 — skipping the trailing
-/// run is not, so with no reactor to carry it the sweep happens inline instead.
-#[derive(Default)]
-struct RetentionGate {
-    last_run: Mutex<Option<Instant>>,
-    trailing_scheduled: AtomicBool,
-}
-
-impl RetentionGate {
-    /// True when this caller owns the sweep for the current window.
-    fn claim(&self) -> bool {
-        let mut last = self.last_run.lock().unwrap_or_else(PoisonError::into_inner);
-        if last.is_none_or(|at| at.elapsed() >= RETENTION_DEBOUNCE) {
-            *last = Some(Instant::now());
-            true
-        } else {
-            false
-        }
-    }
-
-    fn stamp(&self) {
-        *self.last_run.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
-    }
-}
 
 /// A [`SyncSource`] over a [`Store`].
 ///
