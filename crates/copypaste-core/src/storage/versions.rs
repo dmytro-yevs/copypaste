@@ -349,10 +349,12 @@ impl Store {
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
                   is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, payload_metadata, \
-                  fts_rowid) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+                  fts_rowid, content_bytes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
+                     LENGTH(COALESCE(?2, X''))) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
+                 content_bytes      = excluded.content_bytes, \
                  nonce              = excluded.nonce, \
                  content_type       = excluded.content_type, \
                  content_hash       = excluded.content_hash, \

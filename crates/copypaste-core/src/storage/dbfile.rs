@@ -18,7 +18,7 @@ use rusqlite::{Connection, OpenFlags};
 use zeroize::Zeroizing;
 
 use super::connection::{apply_connection_pragmas, apply_key, validate_key};
-use super::model::StoreError;
+use super::model::{stored_item_columns, StoreError};
 
 // The live counter is derived by the target database's item triggers.
 const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_device_name"];
@@ -141,8 +141,18 @@ impl super::Store {
             for table in RESTORED_TABLES {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
             }
+            // `content_bytes` is recomputed from the payload that actually
+            // arrives rather than copied, so a source file whose column had
+            // drifted cannot import a byte quota that disagrees with its rows.
             tx.execute(
-                "INSERT INTO clipboard_items SELECT * FROM restore_src.clipboard_items",
+                concat!(
+                    "INSERT INTO clipboard_items (",
+                    stored_item_columns!(),
+                    ", content_bytes) SELECT ",
+                    stored_item_columns!(),
+                    ", LENGTH(COALESCE(content_ciphertext, X'')) \
+                     FROM restore_src.clipboard_items"
+                ),
                 [],
             )?;
             tx.execute(
@@ -374,6 +384,40 @@ mod tests {
             .restore_from(&foreign, &KEY, &crate::Detector::new().unwrap())
             .is_err());
         assert_eq!(store.count().unwrap(), 1);
+    }
+
+    /// A restore is the one writer that copies rows rather than making them, so
+    /// it is the one that could import a `content_bytes` disagreeing with the
+    /// payload beside it and hand the byte quota a number it cannot act on.
+    #[test]
+    fn restore_recomputes_the_byte_column_rather_than_trusting_the_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        store.insert(item("restored payload", T0)).unwrap();
+        let backup = dir.path().join("drifted.backup");
+        store.backup_to(&backup).unwrap();
+
+        // Corrupt the source's derived column the way a stale writer would.
+        let conn = open_validated(&backup, &KEY).unwrap();
+        conn.execute("UPDATE clipboard_items SET content_bytes = 999999", [])
+            .unwrap();
+        drop(conn);
+
+        store
+            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
+            .unwrap();
+
+        let drifted: i64 = store
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items \
+                  WHERE content_bytes <> LENGTH(COALESCE(content_ciphertext, X''))",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(drifted, 0, "the restore imported a stale byte count");
     }
 
     #[test]

@@ -749,6 +749,16 @@ after the bump and wipes content the user just re-copied).
 * Gate: `SELECT COALESCE(SUM(LENGTH(COALESCE(content,''))),0) FROM clipboard_items WHERE pinned = 0`
   — matches `idx_clipboard_unpinned_len` verbatim → index-only.
   `total_unpinned <= max_bytes` → return 0.
+
+  **v2 correction (DMY-156): "index-only" does not hold, and neither does X7.**
+  Measured on SQLite 3.45.3, an index over an *expression* is not a covering
+  index — nor is one over a `GENERATED ALWAYS AS … STORED` column. Both plan as
+  `SCAN … USING INDEX`, and the row is read to evaluate the expression, which is
+  the payload read the index was added to avoid. Only a plain column is covering.
+  v2 therefore stores `clipboard_items.content_bytes`, carries it in both byte
+  indexes, and writes it from the same statement that writes the payload — not
+  from a trigger, which has to UPDATE the row it just inserted and puts a 1 MiB
+  capture in the WAL twice.
 * `excess = total_unpinned - max_bytes`.
 * **Never evict the newest unpinned live row**: `SELECT id … WHERE pinned = 0
   AND deleted = 0 ORDER BY wall_time DESC, id DESC LIMIT 1` → `keep_id`
@@ -1127,7 +1137,7 @@ not the implementation.
 | X4 | `bump_item_recency` recomputes `expires_at` for sensitive items only | | `items/tests.rs::bump_item_recency_recomputes_expires_at_for_sensitive_items`, `::bump_item_recency_does_not_set_expires_at_for_non_sensitive_items` |
 | X5 | `prune_to_cap`: no-op under/at quota; evicts oldest-first; **the tipping row is evicted**; pinned never evicted; NULL content counts as 0; no FTS orphans; cleans `pending_uploads`; never evicts tombstones | | `items/tests.rs::prune_to_cap_*` (11 tests) |
 | X6 | `prune_to_cap` single-pass result equals the naive reference on a large dataset | | `items/tests.rs::prune_to_cap_large_dataset_matches_naive_eviction`, `::prune_to_cap_single_pass_matches_reference` |
-| X7 | The size gate uses the covering index (`EXPLAIN QUERY PLAN`) and the index exists | | `items/tests.rs::schema_has_unpinned_len_covering_index`, `::prune_to_cap_size_gate_uses_covering_index` |
+| X7 | The size gate uses the covering index (`EXPLAIN QUERY PLAN`) and the index exists — **v2: only true of a plain column, see the `prune_to_cap` correction** | | `items/tests.rs::schema_has_unpinned_len_covering_index`, `::prune_to_cap_size_gate_uses_covering_index` |
 
 ### 5.8 Query / pagination / FTS behaviour
 

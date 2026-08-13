@@ -36,7 +36,22 @@ CREATE TABLE clipboard_items (
     -- `clipboard_fts.rowid` of this row's index entry, NULL when it has none.
     -- FTS5 seeks on nothing but its rowid: `WHERE id = ?` against the
     -- UNINDEXED column is filtered after a full scan of the plaintext index.
-    fts_rowid          INTEGER
+    fts_rowid          INTEGER,
+    -- LENGTH of the ciphertext, as a plain column so an index can carry it and
+    -- the byte quota can be answered without touching a payload.
+    --
+    -- Plain and not `GENERATED ALWAYS AS ... STORED`, which says the same thing
+    -- in one line and would be the obvious choice. Measured on SQLite 3.45.3:
+    -- an index over a generated column is not covering — the planner resolves
+    -- the column back to the expression's inputs and reads the row anyway, as
+    -- does an index on the bare expression. A plain column is the only one of
+    -- the three the byte scans can read without touching a payload.
+    --
+    -- Written by the same statement that writes the payload, never by a
+    -- trigger: an AFTER INSERT trigger has to UPDATE the row it just saw, and
+    -- that rewrites the whole record — a 1 MiB capture went into the WAL twice
+    -- (`items::a_capture_writes_its_payload_to_the_wal_once`).
+    content_bytes      INTEGER NOT NULL DEFAULT 0
 );
 
 -- Serves the list query verbatim: pinned first, then pin order, then newest
@@ -64,8 +79,11 @@ CREATE UNIQUE INDEX idx_items_dedup
 
 -- Serves the eviction scans (oldest unpinned live rows first) and the unpinned
 -- half of the history page, whose seek predicate is this partial one exactly.
+-- `content_bytes` rides along so the byte sweep can rank victims by cumulative
+-- size out of the index; without it that scan read every payload in the history
+-- to measure it.
 CREATE INDEX idx_items_evictable
-    ON clipboard_items(created_at, id)
+    ON clipboard_items(created_at, id, content_bytes)
     WHERE deleted = 0 AND pinned = 0;
 
 -- Serves the sensitive TTL sweep and the probe that keeps it off the write
@@ -75,11 +93,11 @@ CREATE INDEX idx_items_sensitive_wipe
     ON clipboard_items(created_at, id)
     WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0;
 
--- The byte quota's hot gate reads only this expression and its partial
--- predicate. Keeping ciphertext out of the table scan avoids touching every
--- encrypted payload on each accepted capture.
+-- The byte quota's hot gate reads only this column and its partial predicate.
+-- Keeping ciphertext out of the table scan avoids touching every encrypted
+-- payload on each accepted capture.
 CREATE INDEX idx_items_unpinned_bytes
-    ON clipboard_items(LENGTH(COALESCE(content_ciphertext, X'')))
+    ON clipboard_items(content_bytes)
     WHERE deleted = 0 AND pinned = 0;
 
 -- Serves the sync read, covering. The partial predicate must stay written
