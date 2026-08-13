@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  FOLLOW_CATCHUP_PAGES,
   followHead,
   mergeFollowed,
   unionEvents,
@@ -73,10 +74,11 @@ describe("catching a poll up to a burst larger than one window", () => {
       { events: [event(1_010, "older")], next_cursor: null },
     ]);
 
-    const caught = await followHead(read, 1_049);
+    const result = await followHead(read, 1_049);
 
     expect(read).toHaveBeenCalledTimes(2);
-    expect(caught.map((e) => e.message)).toEqual(["new", "gap-edge", "gap", "known"]);
+    expect(result.events.map((e) => e.message)).toEqual(["new", "gap-edge", "gap", "known"]);
+    expect(result.overrun).toBe(false);
   });
 
   it("reads once when the window already reaches the held row", async () => {
@@ -84,27 +86,117 @@ describe("catching a poll up to a burst larger than one window", () => {
       { events: [event(1_050, "new"), event(1_020, "known")], next_cursor: "1" },
     ]);
 
-    await followHead(read, 1_049);
+    const result = await followHead(read, 1_049);
 
     expect(read).toHaveBeenCalledTimes(1);
+    expect(result.overrun).toBe(false);
   });
 
-  it("stops at its ceiling rather than walking the whole log", async () => {
+  it("stops at its ceiling and signals overrun rather than walking the whole log", async () => {
     const read = vi.fn(async (cursor: string | null) => ({
       events: [event(9_000 + Number(cursor ?? 0), "always newer")],
       next_cursor: String(Number(cursor ?? 0) + 1),
     }));
 
-    await followHead(read, 1, 3);
+    const result = await followHead(read, 1, 3);
 
     expect(read).toHaveBeenCalledTimes(3);
+    expect(result.overrun).toBe(true);
   });
 
   it("reads one window when nothing is held yet", async () => {
     const read = service([{ events: [event(1_000, "first")], next_cursor: "1" }]);
 
-    await followHead(read, undefined);
+    const result = await followHead(read, undefined);
 
     expect(read).toHaveBeenCalledTimes(1);
+    expect(result.overrun).toBe(false);
+  });
+});
+
+describe("burst above the page ceiling — overrun", () => {
+  it("signals overrun when a burst exceeds the ceiling", async () => {
+    const pageSize = 50;
+    const burstSize = FOLLOW_CATCHUP_PAGES * pageSize + 100;
+    const pages: RuntimeLogPage[] = [];
+    for (let i = 0; i < FOLLOW_CATCHUP_PAGES + 2; i += 1) {
+      const start = i * pageSize;
+      const end = Math.min(start + pageSize, burstSize);
+      const events = Array.from({ length: end - start }, (_, j) =>
+        event(10_000 - start - j, `burst-${start + j}`),
+      );
+      pages.push({
+        events,
+        next_cursor: end < burstSize ? String(i + 1) : null,
+      });
+    }
+    const read = vi.fn(async (cursor: string | null) => {
+      const index = cursor === null ? 0 : Number(cursor);
+      return pages[index]!;
+    });
+
+    const result = await followHead(read, 1_000);
+
+    expect(read).toHaveBeenCalledTimes(FOLLOW_CATCHUP_PAGES);
+    expect(result.overrun).toBe(true);
+    expect(result.events).toHaveLength(FOLLOW_CATCHUP_PAGES * pageSize);
+  });
+
+  it("is not overrun when the log ends before the ceiling", async () => {
+    const read = vi.fn(async (cursor: string | null) => ({
+      events: cursor === null
+        ? [event(5_000, "a"), event(4_000, "b")]
+        : [event(3_000, "c")],
+      next_cursor: cursor === null ? "1" : null,
+    }));
+
+    const result = await followHead(read, 1_000);
+
+    expect(result.overrun).toBe(false);
+    expect(result.events).toHaveLength(3);
+  });
+});
+
+describe("same-millisecond multiset across multiple pages", () => {
+  it("continues paging through events at the held timestamp", async () => {
+    const read = vi.fn(async (cursor: string | null) => {
+      const index = cursor === null ? 0 : Number(cursor);
+      const pages: RuntimeLogPage[] = [
+        {
+          events: Array.from({ length: 50 }, () => event(2_000, "same")),
+          next_cursor: "1",
+        },
+        {
+          events: Array.from({ length: 50 }, () => event(2_000, "same")),
+          next_cursor: "2",
+        },
+        {
+          events: Array.from({ length: 10 }, () => event(2_000, "same")),
+          next_cursor: null,
+        },
+      ];
+      return pages[index]!;
+    });
+
+    const previousSame = Array.from({ length: 50 }, () => event(2_000, "same"));
+    const result = await followHead(read, 2_000);
+
+    // `<` not `<=`: at the held timestamp, paging continues
+    expect(read).toHaveBeenCalledTimes(3);
+    const merged = mergeFollowed(previousSame, result.events);
+    expect(merged).toHaveLength(110);
+    expect(result.overrun).toBe(false);
+  });
+
+  it("signals overrun when same-ms events exceed the ceiling", async () => {
+    const read = vi.fn(async (cursor: string | null) => ({
+      events: Array.from({ length: 50 }, () => event(2_000, "same")),
+      next_cursor: String(Number(cursor ?? 0) + 1),
+    }));
+
+    const result = await followHead(read, 2_000, 4);
+
+    expect(read).toHaveBeenCalledTimes(4);
+    expect(result.overrun).toBe(true);
   });
 });

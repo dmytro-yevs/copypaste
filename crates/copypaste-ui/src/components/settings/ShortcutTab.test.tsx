@@ -86,6 +86,18 @@ describe("desktop shortcut settings", () => {
   });
 });
 
+describe("launch at login — initial read failure", () => {
+  it("shows unknown alert and disables the switch when the initial read fails", async () => {
+    getOpenAtLogin.mockRejectedValue(new Error("system unavailable"));
+    withUser(<ShortcutTab />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/didn't report this setting/i);
+    const toggle = screen.getByRole("switch", { name: /open copypaste at login/i });
+    expect((toggle as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
 describe("launch at login", () => {
   const checked = (toggle: HTMLElement) => toggle.getAttribute("aria-checked");
 
