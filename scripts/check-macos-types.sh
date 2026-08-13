@@ -149,6 +149,7 @@ zeroize = { version = "1.7", features = ["derive"] }
 thiserror = "1"
 anyhow = "1"
 tracing = "0.1"
+backon = { version = "1.6", default-features = false, features = ["std"] }
 rustix = { version = "1", features = ["fs"] }
 uuid = { version = "1", features = ["v4"] }
 url = "2"
