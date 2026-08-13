@@ -25,8 +25,20 @@ describe("waiting for the app's page target", () => {
 
   test("attaches to the app's target and not to another one the WebView exposes", () => {
     expect(isAppTarget("http://tauri.localhost/index.html")).toBe(true);
+    expect(isAppTarget("http://tauri.localhost/")).toBe(true);
     expect(isAppTarget("about:blank")).toBe(false);
-    expect(isAppTarget("https://tauri.localhost.example.test/")).toBe(true);
+    expect(isAppTarget("")).toBe(false);
+  });
+
+  // A substring match attached to any of these and then drove it as the app.
+  test("does not attach to a host that merely contains the origin", () => {
+    for (const impostor of [
+      "https://tauri.localhost.example.test/",
+      "https://not-tauri.localhost/",
+      "https://example.test/?next=http://tauri.localhost/",
+    ]) {
+      expect(isAppTarget(impostor)).toBe(false);
+    }
   });
 });
 
