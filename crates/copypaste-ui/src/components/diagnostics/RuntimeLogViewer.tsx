@@ -1,5 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ClipboardCopy, LoaderCircle, Pause, Radio, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -7,17 +6,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { useRuntimeLog } from "@/components/diagnostics/useRuntimeLog";
 import { copyText } from "@/lib/ipc";
 import { t } from "@/i18n";
 import { isAndroid } from "@/lib/platform";
-import {
-  getRuntimeLogEvents,
-  type RuntimeLogEvent,
-  type RuntimeLogLevel,
-  type RuntimeLogProcess,
-} from "@/service/runtimeLogs";
-
-const PAGE_SIZE = 50;
+import type { RuntimeLogEvent, RuntimeLogLevel, RuntimeLogProcess } from "@/service/runtimeLogs";
 
 const LEVELS: readonly (RuntimeLogLevel | "all")[] = [
   "all",
@@ -55,66 +48,15 @@ export function RuntimeLogViewer() {
   const [follow, setFollow] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const olderEventsSentinelRef = useRef<HTMLDivElement>(null);
-  const loadingOlderRef = useRef(false);
   const deferredQuery = useDeferredValue(query);
-  const queryKey = ["runtime-log-events", deferredQuery, level, process] as const;
-  const filters = {
-    limit: PAGE_SIZE,
-    level: level === "all" ? null : level,
-    process: process === "all" ? null : process,
-    query: deferredQuery || null,
-  };
-  const logs = useInfiniteQuery({
-    queryKey,
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => getRuntimeLogEvents({ ...filters, cursor: pageParam }),
-    getNextPageParam: (page) => page.next_cursor,
-    // Following polls the head query below. A periodic refetch here re-reads
-    // every page the user has scrolled back through, so following a busy log
-    // twenty pages deep cost twenty reads every three seconds.
-    refetchInterval: false,
-    retry: false,
-  });
-  const head = useQuery({
-    queryKey: [...queryKey, "head"],
-    queryFn: () => getRuntimeLogEvents({ ...filters, cursor: null }),
-    enabled: follow,
-    refetchInterval: follow ? 3_000 : false,
-    refetchIntervalInBackground: false,
-    retry: false,
-  });
 
-  /**
-   * The head is the authority for its own window: every cached event at or
-   * after the head's oldest timestamp is inside it. Older pages are appended
-   * untouched, because a cursor page cannot gain rows.
-   *
-   * Keys are content-derived and carry an occurrence number, so two identical
-   * lines logged in the same millisecond stay two rows. Keying by list index
-   * remounted every row each time an event arrived at the head.
-   */
-  const rows = useMemo(() => {
-    const paged = logs.data?.pages.flatMap((page) => page.events) ?? [];
-    const fresh = head.data?.events ?? [];
-    const oldest = fresh[fresh.length - 1]?.timestamp_ms;
-    // Strictly older: an event sharing the boundary millisecond is one the head
-    // already returned, or one it truncated at its limit and the next poll
-    // brings back.
-    const merged =
-      oldest === undefined
-        ? paged
-        : [...fresh, ...paged.filter((event) => event.timestamp_ms < oldest)];
+  const filters = useMemo(
+    () => ({ query: deferredQuery, level, process }),
+    [deferredQuery, level, process],
+  );
+  const logs = useRuntimeLog(filters, follow);
+  const { events, loadOlder, rows } = logs;
 
-    const seen = new Map<string, number>();
-    return merged.map((event) => {
-      const base = `${event.process}:${event.timestamp_ms}:${event.level}:${event.target}:${event.message}`;
-      const repeat = seen.get(base) ?? 0;
-      seen.set(base, repeat + 1);
-      return { event, key: repeat === 0 ? base : `${base}#${repeat}` };
-    });
-  }, [head.data, logs.data]);
-
-  const events = useMemo(() => rows.map((row) => row.event), [rows]);
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -127,14 +69,6 @@ export function RuntimeLogViewer() {
   useEffect(() => {
     if (follow && events.length > 0) virtualizer.scrollToIndex(0, { align: "start" });
   }, [events.length, follow, virtualizer]);
-
-  const loadOlder = useCallback(() => {
-    if (!logs.hasNextPage || logs.isFetchingNextPage || loadingOlderRef.current) return;
-    loadingOlderRef.current = true;
-    void logs.fetchNextPage().finally(() => {
-      loadingOlderRef.current = false;
-    });
-  }, [logs.fetchNextPage, logs.hasNextPage, logs.isFetchingNextPage]);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -223,10 +157,7 @@ export function RuntimeLogViewer() {
         <Button
           size="icon-sm"
           variant="ghost"
-          onClick={() => {
-            void logs.refetch();
-            void head.refetch();
-          }}
+          onClick={logs.refetch}
           aria-label={t("runtimeLog.refresh")}
           title={t("runtimeLog.refresh")}
         >
@@ -256,6 +187,15 @@ export function RuntimeLogViewer() {
           <ClipboardCopy aria-hidden="true" />
         </Button>
       </div>
+
+      {logs.followFailed && (
+        <div
+          role="alert"
+          className="rounded-lg border border-divider bg-panel px-s-3 py-s-2 text-sm text-err-strong"
+        >
+          {t("runtimeLog.followFailed")}
+        </div>
+      )}
 
       {logs.isPending ? (
         <div className="flex min-h-40 items-center justify-center gap-s-2 text-sm text-muted-foreground">
