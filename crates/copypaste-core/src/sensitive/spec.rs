@@ -72,6 +72,12 @@ pub(super) struct RuleSpec {
     pub(super) pattern: &'static str,
     pub(super) validator: Validator,
     pub(super) secret_group: usize,
+    /// Classify, but never delete. Opt-in per rule and never derived from the
+    /// confidence, because the two answer different questions: confidence is
+    /// how sure the match is, this is what a correct match licenses. A rule
+    /// that omits it stays wipeable above the floor, so a new rule cannot drop
+    /// out of the gate by being forgotten — only by being argued for.
+    pub(super) never_auto_delete: bool,
     pub(super) entropy: Option<f64>,
     pub(super) keywords: &'static [&'static str],
     pub(super) allowlists: &'static [AllowlistSpec],
@@ -83,10 +89,13 @@ impl RuleSpec {
             rule: self.name,
             category: self.category.as_str(),
             confidence: self.confidence,
-            severity: if self.confidence >= AUTOWIPE_CONFIDENCE_FLOOR {
-                Severity::HighConfidence
-            } else {
-                Severity::Flag
+            severity: match (
+                self.confidence >= AUTOWIPE_CONFIDENCE_FLOOR,
+                self.never_auto_delete,
+            ) {
+                (true, false) => Severity::HighConfidence,
+                (true, true) => Severity::Restricted,
+                (false, _) => Severity::Flag,
             },
         }
     }
