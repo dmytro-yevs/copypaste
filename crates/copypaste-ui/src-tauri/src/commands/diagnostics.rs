@@ -39,6 +39,12 @@ pub async fn diagnostics(
 /// The runtime-log crate accepts only its own message-only format. Android has
 /// no daemon, so it can return app-process events only rather than presenting
 /// an empty source as if a background service should exist.
+///
+/// On a blocking thread, because the read is one: up to a megabyte of log off
+/// disk, decoded and filtered. ADR-0011 promises the runtime log never stalls
+/// the app, and doing this on the reactor would break that promise from the
+/// read side — with the whole UI, including the panel showing the log, frozen
+/// behind it.
 #[tauri::command]
 pub async fn runtime_log_events<R: Runtime>(
     app: AppHandle<R>,
@@ -46,8 +52,21 @@ pub async fn runtime_log_events<R: Runtime>(
 ) -> std::result::Result<copypaste_runtime_log::RuntimeLogPage, BackendError> {
     let log_dir = crate::runtime_log_dir(&app)
         .map_err(|_| BackendError::Internal(MSG_LOGS_NOT_READ.into()))?;
-    copypaste_runtime_log::list(&log_dir, &query, !cfg!(target_os = "android"))
+    off_reactor(move || copypaste_runtime_log::list(&log_dir, &query, !cfg!(target_os = "android")))
+        .await
         .map_err(|_| BackendError::Internal(MSG_LOGS_NOT_READ.into()))
+}
+
+/// Run one blocking runtime-log read on a thread that is allowed to block.
+///
+/// A join failure is folded into the same `io::Error` the read itself returns,
+/// so callers keep one failure to map and the panel keeps one sentence.
+async fn off_reactor<T: Send + 'static>(
+    read: impl FnOnce() -> std::io::Result<T> + Send + 'static,
+) -> std::io::Result<T> {
+    tokio::task::spawn_blocking(read)
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::other("the runtime log read did not finish")))
 }
 
 /// Export the same redacted support report the UI can show and copy.
@@ -88,8 +107,16 @@ pub async fn export_support_bundle<R: Runtime>(
     let diagnostics = Diagnostics::new(service, status, history_read).report;
     let log_dir = crate::runtime_log_dir(&app)
         .map_err(|_| BackendError::Internal(MSG_BUNDLE_NOT_WRITTEN.into()))?;
-    let app_events = copypaste_runtime_log::export(&log_dir, copypaste_runtime_log::Process::App)
-        .map_err(|_| BackendError::Internal(MSG_BUNDLE_NOT_WRITTEN.into()))?;
+    // Off the reactor for the reason `runtime_log_events` is, and more so: an
+    // export reads every retained file rather than one page of tails.
+    let app_events = {
+        let log_dir = log_dir.clone();
+        off_reactor(move || {
+            copypaste_runtime_log::export(&log_dir, copypaste_runtime_log::Process::App)
+        })
+        .await
+        .map_err(|_| BackendError::Internal(MSG_BUNDLE_NOT_WRITTEN.into()))?
+    };
     // Android has no daemon: capture, storage and peer sync run in this app
     // process and are therefore already in `app_events`. Do not write a blank
     // daemon section that implies there ought to be a second log source.
@@ -97,8 +124,11 @@ pub async fn export_support_bundle<R: Runtime>(
         None
     } else {
         Some(
-            copypaste_runtime_log::export(&log_dir, copypaste_runtime_log::Process::Daemon)
-                .map_err(|_| BackendError::Internal(MSG_BUNDLE_NOT_WRITTEN.into()))?,
+            off_reactor(move || {
+                copypaste_runtime_log::export(&log_dir, copypaste_runtime_log::Process::Daemon)
+            })
+            .await
+            .map_err(|_| BackendError::Internal(MSG_BUNDLE_NOT_WRITTEN.into()))?,
         )
     };
     let bundle = format_support_bundle(&diagnostics, &app_events, daemon_events.as_deref());
@@ -153,5 +183,31 @@ mod tests {
         let bundle = format_support_bundle("app: 2", "capture armed\n", None);
         assert!(bundle.contains("=== App runtime events ===\ncapture armed"));
         assert!(!bundle.contains("Background service runtime events"));
+    }
+
+    /// ADR-0011's promise, from the read side.
+    ///
+    /// The regression is silent: calling `list` or `export` directly still
+    /// compiles and still returns the right page, and the only symptom is a UI
+    /// that stops repainting while a megabyte of log is decoded — on the very
+    /// panel that is showing it. Checked against the source because there is no
+    /// runtime assertion for "this ran on the reactor".
+    #[test]
+    fn every_runtime_log_read_goes_through_a_blocking_thread() {
+        let source = include_str!("diagnostics.rs");
+        let body = source.split_once("#[cfg(test)]").expect("a test module").0;
+        for call in [
+            "copypaste_runtime_log::list(",
+            "copypaste_runtime_log::export(",
+        ] {
+            for (offset, _) in body.match_indices(call) {
+                let before = &body[..offset];
+                let enclosing = before
+                    .rfind("off_reactor(")
+                    .zip(before.rfind("#[tauri::command]"))
+                    .is_some_and(|(wrapped, command)| wrapped > command);
+                assert!(enclosing, "{call} is not inside an off_reactor call");
+            }
+        }
     }
 }

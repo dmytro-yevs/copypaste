@@ -17,3 +17,9 @@ fields cannot safely be treated as diagnostic data.
 `tracing-appender` supplies rotation, retention and async writing. The small
 formatter is the required final privacy boundary; no maintained dependency can
 decide which application event fields are clipboard content or secrets.
+
+Reads are blocking and the promise covers them too. `list` and `export` open
+files and decode up to a megabyte, so the Tauri commands run them on a blocking
+thread. A viewer that read the log on the reactor would freeze the UI showing
+it — the same stall this ADR avoids on the write side, arrived at from the
+other end.
