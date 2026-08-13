@@ -193,4 +193,72 @@ mod tests {
             assert!(refused.contains("wnd.close()"), "{refused}");
         }
     }
+
+    /// INV-35 caller behavior: a confirm refusal clears the SAS code and
+    /// the peer details before closing; the result stays Cancel so the peer
+    /// is rejected rather than confirmed against a code nobody could read.
+    #[test]
+    fn confirm_refusal_clears_sas_and_details_and_cancels() {
+        let source = production(include_str!("confirm.rs"));
+        let refused = source
+            .split_once("if !common::protect_from_capture(wnd.hwnd())")
+            .expect("guard")
+            .1;
+        let (refused, _) = refused.split_once("return Ok(0);").expect("early return");
+        assert!(
+            refused.contains(r#"sas.hwnd().SetWindowText("")"#),
+            "the SAS code must be cleared on refusal"
+        );
+        assert!(
+            refused.contains(r#"details.hwnd().SetWindowText("")"#),
+            "peer details must be cleared on refusal"
+        );
+        assert!(
+            !refused.contains("Accept"),
+            "a refused confirmation must not accept"
+        );
+    }
+
+    /// INV-35 caller behavior: an invite refusal clears the pairing code
+    /// and address labels before closing, and sends None through the ready
+    /// channel so the caller knows the window did not present.
+    #[test]
+    fn invite_refusal_clears_code_and_address_and_signals_unavailable() {
+        let source = production(include_str!("invite.rs"));
+        let refused = source
+            .split_once("if !common::protect_from_capture(wnd.hwnd())")
+            .expect("guard")
+            .1;
+        let (refused, _) = refused.split_once("return Ok(0);").expect("early return");
+        assert!(
+            refused.contains(r#"code_label.hwnd().SetWindowText("")"#),
+            "the pairing code must be cleared on refusal"
+        );
+        assert!(
+            refused.contains(r#"address_label.hwnd().SetWindowText("")"#),
+            "the address must be cleared on refusal"
+        );
+        assert!(
+            refused.contains("ready.send(None)"),
+            "refusal must signal unavailable to the caller"
+        );
+    }
+
+    /// INV-35 caller behavior: an entry refusal closes before the user
+    /// has typed anything, so no secret is exposed. The window must not
+    /// accept input or report a result.
+    #[test]
+    fn entry_refusal_closes_before_accepting_input() {
+        let source = production(include_str!("entry.rs"));
+        let guard = source
+            .split_once("if !common::protect_from_capture(wnd.hwnd())")
+            .expect("guard");
+        let (refused, _) = guard.1.split_once("return Ok(0);").expect("early return");
+        assert!(refused.contains("wnd.close()"));
+        let before_guard = guard.0;
+        assert!(
+            !before_guard.contains("payload.focus()"),
+            "the edit control must not receive focus before the guard runs"
+        );
+    }
 }
