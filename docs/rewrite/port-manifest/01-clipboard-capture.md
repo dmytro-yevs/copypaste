@@ -455,6 +455,15 @@ Three separate hard-won rules, all on the same subsystem:
   tick period, so at most one extra tick can observe a stale value.
   **Bug id.** **CopyPaste-44rq.33** (cache), **CopyPaste-8ebg.57** (2000 → 750 ms).
   **v1 site.** `frontmost.rs:6-61`, `frontmost.rs:91-148`; test `frontmost.rs:167-233`.
+- **Rule (c) on Windows — key the cache to the change, not to the clock.**
+  `GetClipboardOwner` is answered per clipboard change, and
+  `GetClipboardSequenceNumber` names which change, so the staleness bound is
+  zero rather than 750 ms. A TTL there is strictly worse: it spans more than
+  one 500 ms tick, so an ordinary copy followed by a password manager's copy
+  inherits the first app past both the exclusion list and the sensitivity floor
+  — CopyPaste-8ebg.57 again, at a third of a second.
+  **Bug id.** **DMY-158.**
+  **v2 site.** `clipboard/windows_attribution.rs`.
 - **Known limitation to fix in the rewrite (PRIV-6 / PRIV-2).** v1 shells out to
   `lsappinfo`, an undocumented Apple CLI. It can be absent, sandboxed, or return
   a helper process's bundle id instead of the password manager's. The documented
@@ -644,7 +653,7 @@ Three separate hard-won rules, all on the same subsystem:
 | Poll interval (min) | **100 ms** | Below this the poll loop's own CPU cost becomes visible. Clamped on config load. `config/defaults.rs:6` |
 | Poll interval (max) | **5000 ms** | Above this the daemon feels broken; also bursts become the norm rather than the exception. `config/defaults.rs:7` |
 | Burst threshold (changeCount delta) | **3** | Delta of 1 = normal; 2 = a paste-back pair (`clearContents` + `set…`); ≥3 = a genuine burst worth reporting. `content.rs:12` |
-| Frontmost-app cache TTL | **750 ms** | Must be **just above** one poll period: amortises the lookup across consecutive ticks of the same app while bounding staleness to at most one extra tick. Was 2000 ms → up to ~1.5 s of stale bundle id bypassing the exclusion list and sensitive-app detection (**CopyPaste-8ebg.57**). `frontmost.rs:18` |
+| Frontmost-app cache TTL | **750 ms** on macOS; **no TTL** on Windows | Must be **just above** one poll period: amortises the lookup across consecutive ticks of the same app while bounding staleness to at most one extra tick. Was 2000 ms → up to ~1.5 s of stale bundle id bypassing the exclusion list and sensitive-app detection (**CopyPaste-8ebg.57**). Windows resolves per clipboard change instead, so the bound is zero (**DMY-158**, §3.9c). `frontmost.rs:18` |
 | Sensitive-TTL cleanup interval | **5 s** | Sensitive items must disappear promptly; 5 s is short enough to feel automatic, long enough that the gated scan (§3.18) is negligible. `monitor_loop.rs:24` |
 | General-TTL cleanup interval | **60 s** | Non-sensitive expiry has no urgency. `monitor_loop.rs:27` |
 | Sensitive TTL (default) | **30 s** in v1; **`0` — off — in v2** | 30 s is long enough to paste a password once, short enough that it does not linger, and is still the value the setting should offer when a user turns it on. It is not v2's *default*: v2 has no Settings control for the TTL and the sweep raises no notice, so the delete would be silent, irreversible and undiscoverable — CLAUDE.md rule 4 by way of rule 6. Restore the 30 s default once a Settings control and a visible notice both exist. `0` = disabled (§3.17). `config/defaults.rs:51`; v2 `copypaste_ipc::ConfigData::sensitive_ttl_secs` |

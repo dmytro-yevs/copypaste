@@ -110,10 +110,22 @@ fn run(
         let wnd = wnd.clone();
         let reveal = reveal.clone();
         let ready = ready.clone();
+        let qr_description = qr_description.clone();
+        let code_label = code_label.clone();
+        let address_label = address_label.clone();
         move |_| {
-            let _ = wnd
-                .hwnd()
-                .SetWindowDisplayAffinity(co::WDA::EXCLUDEFROMCAPTURE);
+            if !common::protect_from_capture(wnd.hwnd()) {
+                // The QR is painted only once revealed, so clearing these two
+                // is what leaves nothing of the invite to capture.
+                code_label.hwnd().SetWindowText("")?;
+                address_label.hwnd().SetWindowText("")?;
+                qr_description
+                    .hwnd()
+                    .SetWindowText("Pairing cannot be shown on this display")?;
+                let _ = ready.send(None);
+                wnd.close();
+                return Ok(0);
+            }
             wnd.hwnd().SetTimer(TIMER_ID, 1_000, None)?;
             reveal.focus()?;
             let _ = ready.send(Some(CloseHandle::new(wnd.clone())));

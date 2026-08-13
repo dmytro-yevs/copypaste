@@ -1,4 +1,4 @@
-//! Which application put this on the clipboard.
+//! Which application put this on the clipboard, asked of Win32.
 //!
 //! Manifest 07 wants the source as a sensitivity signal — a credential store's
 //! copy is sensitive whatever its text looks like — and the settings want it as
@@ -8,70 +8,31 @@
 //!
 //! `GetClipboardOwner` names the window that wrote the data, which is the
 //! question actually asked; the foreground window is the fallback for a writer
-//! that opened the clipboard with no owner window.
+//! that opened the clipboard with no owner window. What is done with the answer
+//! is [`super::super::windows_attribution`], which runs on every host.
 
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
-use std::path::Path;
-use std::time::{Duration, Instant};
 
-use tracing::{info, warn};
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GetLastError, ERROR_INSUFFICIENT_BUFFER, HANDLE, HWND,
+};
 use windows_sys::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
+use super::super::windows_attribution::SourceApp;
 use super::WindowsClipboard;
 
-/// Bounds how stale an exclusion decision can be, as on macOS.
-const CACHE_FOR: Duration = Duration::from_millis(750);
-
-/// Most process paths fit; `QueryFullProcessImageNameW` is retried once at the
-/// documented ceiling for the ones that do not.
+/// `MAX_PATH` covers almost every process; the retry is at the documented
+/// ceiling for a long path, and happens only for the one error that a larger
+/// buffer can fix.
 const PATH_ATTEMPTS: [usize; 2] = [260, 32_768];
 
-#[derive(Clone)]
-pub(super) struct SourceApp {
-    /// The process image file name, lowercased: `1password.exe`.
-    ///
-    /// Windows has no bundle identifier. The file name is the only stable
-    /// identity a process reliably has, and lowercasing it is what makes it
-    /// comparable — `copypaste_core::sensitive::is_password_manager_app`
-    /// lowercases before matching, and the exclusion list compares exactly.
-    ///
-    /// The *path* is discarded here rather than later: it contains the local
-    /// user name (I-9), and this value is about to be stored on an item.
-    pub(super) id: String,
-    /// The same name without its extension, for display.
-    pub(super) name: String,
-}
-
 impl WindowsClipboard {
-    pub(super) fn source_app(&mut self) -> Option<SourceApp> {
-        if let Some((seen, app)) = &self.source_cache {
-            if seen.elapsed() < CACHE_FOR {
-                return app.clone();
-            }
-        }
-        let app = resolve();
-        self.source_cache = Some((Instant::now(), app.clone()));
-        app
-    }
-
-    /// Said once per transition, not once per poll: an exclusion list that
-    /// silently matches nothing is the failure this makes visible.
-    pub(super) fn note_attribution(&mut self, app: Option<&SourceApp>) {
-        let available = app.is_some();
-        if self.attribution_available == Some(available) {
-            return;
-        }
-        self.attribution_available = Some(available);
-        if available {
-            info!("Windows capture source attribution is available");
-        } else {
-            warn!("Windows could not identify the source application for clipboard capture");
-        }
+    pub(super) fn source_app(&mut self, change: i64) -> Option<SourceApp> {
+        self.attribution.for_change(change, resolve)
     }
 }
 
@@ -81,17 +42,7 @@ fn resolve() -> Option<SourceApp> {
         .map(|owner| owner.as_ptr())
         .or_else(foreground_window)?;
     let path = image_path(process_id(window)?)?;
-    // `file_name`, never the path.
-    let file_name = Path::new(&path).file_name()?.to_str()?.to_owned();
-    let name = Path::new(&file_name)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or(&file_name)
-        .to_owned();
-    Some(SourceApp {
-        id: file_name.to_lowercase(),
-        name,
-    })
+    SourceApp::from_image_path(&path.to_string_lossy())
 }
 
 fn foreground_window() -> Option<HWND> {
@@ -132,6 +83,11 @@ fn query_image_path(process: HANDLE) -> Option<OsString> {
         };
         if queried != 0 {
             return Some(OsString::from_wide(&buffer[..length as usize]));
+        }
+        // A 32 KiB allocation cannot answer `ERROR_ACCESS_DENIED` or an exited
+        // process, and retrying one is how a per-tick syscall becomes two.
+        if unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER {
+            return None;
         }
     }
     None

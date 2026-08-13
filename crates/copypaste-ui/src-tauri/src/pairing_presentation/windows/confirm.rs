@@ -45,7 +45,7 @@ fn run(copy: ConfirmationCopy) -> winsafe::AnyResult<PairingDecision> {
         (560, 42),
     );
     let sas = common::label(&wnd, &copy.sas, (24, 108), (560, 66));
-    let _details = common::label(&wnd, &copy.details, (24, 184), (560, 94));
+    let details = common::label(&wnd, &copy.details, (24, 184), (560, 94));
     let reject = common::button(&wnd, "&Doesn't match", (164, 326), (130, 36), 1001);
     let accept = common::button(&wnd, "&Match", (314, 326), (130, 36), co::DLGID::OK.raw());
     let cancel = common::button(
@@ -77,10 +77,21 @@ fn run(copy: ConfirmationCopy) -> winsafe::AnyResult<PairingDecision> {
     wnd.on().wm_create({
         let wnd = wnd.clone();
         let reject = reject.clone();
+        let instructions = instructions.clone();
+        let sas = sas.clone();
+        let details = details.clone();
         move |_| {
-            let _ = wnd
-                .hwnd()
-                .SetWindowDisplayAffinity(co::WDA::EXCLUDEFROMCAPTURE);
+            if !common::protect_from_capture(wnd.hwnd()) {
+                sas.hwnd().SetWindowText("")?;
+                details.hwnd().SetWindowText("")?;
+                instructions
+                    .hwnd()
+                    .SetWindowText("Pairing cannot be confirmed on this display.")?;
+                // `result` is still `Cancel`, so the peer is rejected rather
+                // than confirmed against a code nobody could safely read.
+                wnd.close();
+                return Ok(0);
+            }
             wnd.hwnd().SetTimer(TIMER_ID, 1_000, None)?;
             reject.focus()?;
             Ok(0)

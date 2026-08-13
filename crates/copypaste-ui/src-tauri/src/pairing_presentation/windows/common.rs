@@ -1,5 +1,6 @@
 use std::sync::{Mutex, MutexGuard};
 
+use tracing::warn;
 use winsafe::{co, gui, prelude::*};
 
 #[derive(Clone)]
@@ -70,4 +71,24 @@ pub(super) fn button(
 
 pub(super) fn hide(hwnd: &winsafe::HWND) {
     hwnd.ShowWindow(co::SW::HIDE);
+}
+
+/// INV-35 in Windows spelling, and it is asked rather than assumed.
+///
+/// `WDA_EXCLUDEFROMCAPTURE` needs Windows 10 2004 or later and can be refused
+/// by the session — a remote desktop is the ordinary case. A window that shows
+/// a pairing secret while the compositor declined to keep it out of screen
+/// captures claims a protection it does not have, so a caller that gets `false`
+/// here clears what it was about to show and closes instead. Called from
+/// `WM_CREATE`, before the window is shown.
+pub(super) fn protect_from_capture(hwnd: &winsafe::HWND) -> bool {
+    if hwnd
+        .SetWindowDisplayAffinity(co::WDA::EXCLUDEFROMCAPTURE)
+        .is_ok()
+    {
+        return true;
+    }
+    // INV-13: the refusal, never the code, the invite or the peer.
+    warn!("Windows refused screenshot protection for a pairing window; it was not shown");
+    false
 }

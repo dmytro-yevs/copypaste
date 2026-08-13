@@ -89,9 +89,12 @@ fn run(decode: PayloadDecoder) -> winsafe::AnyResult<Option<ScannedPairing>> {
         let payload = payload.clone();
         let wnd = wnd.clone();
         move |_| {
-            let _ = wnd
-                .hwnd()
-                .SetWindowDisplayAffinity(co::WDA::EXCLUDEFROMCAPTURE);
+            if !common::protect_from_capture(wnd.hwnd()) {
+                // Nothing is typed yet, so closing is all that is needed: the
+                // invite must not be entered into a window that can be filmed.
+                wnd.close();
+                return Ok(0);
+            }
             payload.limit_text(Some(MAX_PAYLOAD_CHARS));
             payload.focus()?;
             Ok(0)

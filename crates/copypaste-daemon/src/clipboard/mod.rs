@@ -60,8 +60,11 @@ mod fake;
 #[cfg(any(target_os = "macos", all(test, unix)))]
 mod file_materialize;
 pub(crate) mod format;
-/// The Windows opt-out vocabulary. Built everywhere, like `change`, because the
-/// decision it encodes is the one that must not regress unnoticed.
+/// The Windows opt-out vocabulary, and which application a change belongs to.
+/// Built everywhere, like `change`, because the decisions they encode are the
+/// ones that must not regress unnoticed.
+#[cfg(any(target_os = "windows", test))]
+mod windows_attribution;
 #[cfg(any(target_os = "windows", test))]
 mod windows_optout;
 

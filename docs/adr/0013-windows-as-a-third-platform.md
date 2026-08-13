@@ -73,6 +73,13 @@ story, and a CI job — every runner in every workflow today is `ubuntu-*` or
 `macos-14`. Until that job exists, Windows code is unverified in the sense the
 README's middle column uses.
 
+**The source-application icon is not a Windows capability.** `get_source_app_icon`
+answers `None` on Windows and the row keeps its semantic icon. A Windows item
+carries a process image name and no path, because the path names the local user
+(I-9); every route from a name to an icon resolves a path first, and the one
+that does not returns the same generic executable icon for every application.
+Reopen this only with a name → icon source that is per-application.
+
 ## Not decided
 
 - Installer format — MSI, NSIS or MSIX.
