@@ -52,8 +52,9 @@ done
 # prove 3.2 compatibility, only that it parses; the script's header records the
 # constructs that were avoided and why.
 check "bash -n packaging/macos/selfsign.sh" bash -n packaging/macos/selfsign.sh
+check "bash -n scripts/check-file-size-gate.sh" bash -n scripts/check-file-size-gate.sh
 
-for f in scripts/release/*.sh packaging/macos/selfsign.sh; do
+for f in scripts/release/*.sh scripts/check-file-size-gate.sh packaging/macos/selfsign.sh; do
     mode="$(git ls-files --stage -- "$f" | awk '{print $1}')"
     if [[ "$mode" == 100755 ]]; then
         ok "executable bit set on $f"
@@ -62,20 +63,41 @@ for f in scripts/release/*.sh packaging/macos/selfsign.sh; do
     fi
 done
 
-if command -v shellcheck >/dev/null 2>&1; then
-    for f in scripts/release/*.sh packaging/macos/selfsign.sh; do
+group "Lint toolchain"
+# A missing linter used to print `skip` and leave the run green. Measured on a
+# runner without either tool: 36 shellcheck legs and 4 ruby legs stopped
+# running, the pass count fell from 601 to 565, and the failure count did not
+# move. Absence of the tool is a failure of the check, not an absence of one.
+tool_version() {
+    case "$1" in
+        shellcheck) shellcheck --version 2>&1 | awk '/^version:/ { print $2; exit }' ;;
+        *)          "$1" --version 2>&1 | head -1 ;;
+    esac
+}
+require_tool() {
+    local tool="$1" consequence="$2"
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        bad "$tool is installed" "$consequence"
+        return 1
+    fi
+    ok "$tool $(tool_version "$tool")"
+}
+
+HAVE_SHELLCHECK=0
+HAVE_RUBY=0
+require_tool shellcheck "every shell script would go unlinted" && HAVE_SHELLCHECK=1
+require_tool ruby       "the cask and the formula would go unparsed" && HAVE_RUBY=1
+
+if [[ "$HAVE_SHELLCHECK" == 1 ]]; then
+    for f in scripts/release/*.sh scripts/check-file-size-gate.sh packaging/macos/selfsign.sh; do
         check "shellcheck $f" shellcheck -S warning "$f"
     done
-else
-    printf '  skip  shellcheck (not installed)\n'
 fi
 
 group "Ruby syntax"
-if command -v ruby >/dev/null 2>&1; then
+if [[ "$HAVE_RUBY" == 1 ]]; then
     check "ruby -c Casks/copypaste.rb"                    ruby -c Casks/copypaste.rb
     check "ruby -c packaging/homebrew/copypaste-cli.rb"   ruby -c packaging/homebrew/copypaste-cli.rb
-else
-    printf '  skip  ruby (not installed)\n'
 fi
 
 group "Install-time tooling uses the application data directory"
@@ -145,7 +167,7 @@ for pair in "Casks/copypaste.rb:$SHA_A" "packaging/homebrew/copypaste-cli.rb:$SH
     fi
 done
 
-if command -v ruby >/dev/null 2>&1; then
+if [[ "$HAVE_RUBY" == 1 ]]; then
     check "stamped cask is still valid Ruby"    ruby -c Casks/copypaste.rb
     check "stamped formula is still valid Ruby" ruby -c packaging/homebrew/copypaste-cli.rb
 fi
@@ -380,6 +402,10 @@ check "android-cloud-evidence.sh --self-test" ./scripts/release/android-cloud-ev
 check "macos-cloud-evidence.sh --self-test" ./scripts/release/macos-cloud-evidence.sh --self-test
 check "macos-native-evidence.sh --self-test" ./scripts/release/macos-native-evidence.sh --self-test
 check "check-feature-ledger.py --self-test" python3 scripts/check-feature-ledger.py --self-test
+# The file-size checker is advisory and exits 0 on an overage, so the gate is
+# the only thing that fails. Its self-test is what keeps a checker that died
+# from reading as a clean tree.
+check "check-file-size-gate.sh --self-test" bash scripts/check-file-size-gate.sh --self-test
 # The four surfaces README.md calls unverified, and the same reason again: a
 # parcel reader that never finds a canary, or a flag reader that says SECURE
 # about everything, would turn the rung assertions into decoration.
