@@ -31,8 +31,8 @@ pub(super) enum Validator {
     None,
     /// Capture group 1 must survive [`super::validators::value_is_strong`].
     ValueStrength,
-    /// Luhn checksum over the digit run (§5.4).
-    Luhn,
+    /// Issuer range, per-brand length and Luhn over the digit run (§5.4).
+    CardNumber,
     /// Registered country structure and checksum for an IBAN (§8.1.4).
     Iban,
     /// SSN group-structure check (§4.2 — "the correct fix is the structural
@@ -80,8 +80,8 @@ pub(super) struct RuleSpec {
 impl RuleSpec {
     pub(super) fn finding(&self) -> Finding {
         Finding {
-            rule: self.name.to_string(),
-            category: self.category.as_str().to_string(),
+            rule: self.name,
+            category: self.category.as_str(),
             confidence: self.confidence,
             severity: if self.confidence >= AUTOWIPE_CONFIDENCE_FLOOR {
                 Severity::HighConfidence

@@ -42,6 +42,7 @@ hex.workspace = true
 regex.workspace = true
 unicode-normalization.workspace = true
 iban_validate.workspace = true
+card-validate.workspace = true
 image.workspace = true
 # Owner-only staging files close the restore validation/swap race. This crate
 # already ships through both product backends, so the dependency graph is unchanged.

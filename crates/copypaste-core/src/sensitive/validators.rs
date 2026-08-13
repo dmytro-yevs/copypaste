@@ -108,37 +108,30 @@ fn unquote(value: &str) -> &str {
     }
 }
 
-/// Luhn checksum over a candidate digit run (§5.4). **One implementation**
-/// (§7.3): v1 shipped `luhn_valid` and `luhn_valid_strict` as byte-for-byte the
-/// same algorithm. The `13 ..= 19` clamp is load-bearing — it rejects short and
-/// long numeric runs independently of the checksum.
-pub(super) fn luhn_valid(candidate: &str) -> bool {
-    let digits: Vec<u32> = candidate
-        .bytes()
-        .filter(u8::is_ascii_digit)
-        .map(|b| u32::from(b - b'0'))
-        .collect();
-    if !(13..=19).contains(&digits.len()) {
+/// A payment card, not merely a Luhn-valid digit run (§5.4).
+///
+/// Luhn accepts about one arbitrary 13-19 digit run in ten and the card rule
+/// sits at 0.99, so an ISBN with a quantity beside it or a column of amounts was
+/// hard-deleted: a measured 10.8 % of a realistic numeric corpus (DMY-162).
+/// `card-validate` supplies the issuer ranges and per-brand lengths. §7.3 names
+/// taking Luhn from a crate as the preferred outcome; this crate carries both.
+pub(super) fn card_number_valid(matched: &str) -> bool {
+    // A card is written with one kind of separator throughout.
+    let mut separators = matched.chars().filter(|c| !c.is_ascii_digit());
+    let first = separators.next();
+    if separators.any(|c| Some(c) != first) {
         return false;
     }
-    let sum: u32 = digits
-        .iter()
-        .rev()
-        .enumerate()
-        .map(|(i, &d)| {
-            if i % 2 == 1 {
-                let doubled = d * 2;
-                if doubled > 9 {
-                    doubled - 9
-                } else {
-                    doubled
-                }
-            } else {
-                d
-            }
-        })
-        .sum();
-    sum.is_multiple_of(10)
+    // Order is load-bearing: every digit run in ordinary text reaches here, and
+    // the clamp and Luhn are one pass each where `Validate::from` walks twelve
+    // brand regexes. Reversed, a 16-digit hex id cost 33 % of a small scan.
+    // The clamp stays ours — §5.4 pins it, and Maestro alone would admit twelve
+    // digits — and the crate's lengths are narrower still, so a 19-digit Visa is
+    // a false negative now, the direction I1 chooses.
+    let digits: String = matched.chars().filter(char::is_ascii_digit).collect();
+    (13..=19).contains(&digits.len())
+        && card_validate::Validate::is_luhn_valid(&digits)
+        && card_validate::Validate::from(&digits).is_ok()
 }
 
 pub(super) fn iban_valid(candidate: &str) -> bool {
@@ -252,18 +245,150 @@ mod tests {
     /// test passed vacuously. **Assert your negative fixtures are negative.**
     #[test]
     fn negative_card_fixtures_are_actually_negative() {
+        let luhn = card_validate::Validate::is_luhn_valid;
+        assert!(luhn("4242424242422"), "the old fixture really was valid");
+        assert!(!luhn("4242424242421"), "the replacement must be invalid");
+        assert!(!card_number_valid("4242424242421"));
+        assert!(card_number_valid("4111111111111111"));
+        // The 13..=19 clamp, independent of the checksum and of any brand table.
+        // Both fixtures pass Luhn, so the clamp is the only thing rejecting them.
+        for outside_the_clamp in ["42424242420", "41111111111111111115"] {
+            assert!(luhn(outside_the_clamp), "{outside_the_clamp}");
+            assert!(!card_number_valid(outside_the_clamp));
+        }
+    }
+
+    /// The gate DMY-162 added: a Luhn-valid digit run is not a card. Both
+    /// fixtures below pass the checksum and belong to no issuer range, which is
+    /// what a book's ISBN and a warehouse order id look like.
+    #[test]
+    fn luhn_valid_runs_outside_every_issuer_range_are_not_cards() {
+        let luhn = card_validate::Validate::is_luhn_valid;
+        for not_a_card in ["9780132350883", "1234567890123452"] {
+            assert!(luhn(not_a_card), "fixture must be Luhn-valid: {not_a_card}");
+            assert!(!card_number_valid(not_a_card), "{not_a_card}");
+        }
+    }
+
+    /// Every brand the manifest's card contract has to keep, in the bare and the
+    /// grouped spelling. Separators are stripped before the brand and length
+    /// rules run, so the two spellings must agree.
+    #[test]
+    fn real_cards_are_detected_bare_and_grouped() {
+        let det = detector();
+        for (bare, grouped) in [
+            ("4111111111111111", "4111 1111 1111 1111"),
+            ("5555555555554444", "5555 5555 5555 4444"),
+            ("378282246310005", "3782 822463 10005"),
+            ("30569309025904", "3056 930902 5904"),
+            ("6011111111111117", "6011-1111-1111-1117"),
+            ("3530111333300000", "3530-1113-3330-0000"),
+        ] {
+            for form in [bare, grouped] {
+                assert!(card_number_valid(form), "card rejected: {form}");
+                assert!(fired(&det, form, "credit_card"), "rule missed {form}");
+                assert!(det.may_auto_wipe(form), "{form}");
+            }
+        }
+    }
+
+    /// Deterministic stand-in for the numeric data people copy all day: a column
+    /// of amounts one per line, a tab-separated reading, an ISBN with a quantity
+    /// beside it, and order or tracking ids. Every entry is structurally not a
+    /// card — the separator is a newline or a tab, or the leading digits belong
+    /// to no issuer — so none may ever reach `HighConfidence`, whatever the
+    /// checksum says.
+    ///
+    /// Before DMY-162 the candidate scanner joined across newlines and tabs and
+    /// the only gate was Luhn, so roughly one entry in eight was classified
+    /// `credit_card` at 0.99 and hard-deleted whenever auto-wipe was on.
+    fn realistic_numeric_corpus() -> Vec<String> {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut digits = move |count: u32, lead: char| {
+            let mut out = String::from(lead);
+            for _ in 1..count {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                out.push(char::from(b'0' + (state % 10) as u8));
+            }
+            out
+        };
+        let mut corpus = Vec::new();
+        for _ in 0..120 {
+            // amounts, one per line
+            corpus.push(format!(
+                "{}\n{}\n{}\n{}",
+                digits(4, '1'),
+                digits(4, '2'),
+                digits(4, '3'),
+                digits(4, '4')
+            ));
+            // a tab-separated meter reading
+            corpus.push(format!(
+                "reading\t{}\t{}\t{}\t{}",
+                digits(4, '9'),
+                digits(4, '8'),
+                digits(4, '7'),
+                digits(4, '6')
+            ));
+            // ISBN-13 with a quantity after it
+            corpus.push(format!(
+                "ISBN 978-{}-{}-{} qty {}",
+                digits(3, '0'),
+                digits(2, '1'),
+                digits(6, '2'),
+                digits(2, '1')
+            ));
+            // an order id, bare and grouped
+            corpus.push(format!("order {}", digits(16, '1')));
+            corpus.push(format!(
+                "tracking {} {} {} {}",
+                digits(4, '0'),
+                digits(4, '9'),
+                digits(4, '7'),
+                digits(4, '1')
+            ));
+        }
+        corpus
+    }
+
+    #[test]
+    fn realistic_numeric_data_is_never_classified_for_deletion() {
+        let det = detector();
+        let corpus = realistic_numeric_corpus();
+        let wiped: Vec<_> = corpus
+            .iter()
+            .filter(|text| det.may_auto_wipe(text))
+            .take(5)
+            .collect();
         assert!(
-            luhn_valid("4242424242422"),
-            "the old fixture really was valid"
+            wiped.is_empty(),
+            "{} of {} realistic numeric samples would be deleted, e.g. {wiped:#?}",
+            corpus.iter().filter(|t| det.may_auto_wipe(t)).count(),
+            corpus.len()
         );
-        assert!(
-            !luhn_valid("4242424242421"),
-            "the replacement must be invalid"
-        );
-        assert!(luhn_valid("4111111111111111"));
-        // the 13..=19 clamp, independent of the checksum
-        assert!(!luhn_valid("42424242424"));
-        assert!(!luhn_valid("41111111111111111111"));
+        assert!(corpus.len() >= 500, "the corpus must stay large enough");
+    }
+
+    /// The separator rule on its own, stated as the property it defends: a card
+    /// is written with one kind of separator between its groups, and a column of
+    /// numbers is not a card however the checksum lands.
+    #[test]
+    fn card_candidates_do_not_span_lines_tabs_or_mixed_separators() {
+        let det = detector();
+        for text in [
+            "4111\n1111\n1111\n1111",
+            "4111\t1111\t1111\t1111",
+            "4111 1111-1111 1111",
+            "4111  1111  1111  1111",
+        ] {
+            assert!(
+                !fired(&det, text, "credit_card"),
+                "credit_card fired on {text:?}"
+            );
+            assert!(!det.may_auto_wipe(text), "{text:?}");
+        }
     }
 
     #[test]
@@ -430,6 +555,72 @@ mod tests {
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
             "aws_secret_access_key"
         ));
+    }
+
+    /// The three rules that earn their place above the floor with a context
+    /// anchor rather than a distinctive token. The anchor proves which *field*
+    /// was matched and says nothing about the *value*, so a README example
+    /// classified at 0.90-0.99 and was deleted. Placeholder stopwords run
+    /// against the captured value, which is why each rule now captures one.
+    #[test]
+    fn context_anchored_placeholders_are_not_credentials() {
+        let det = detector();
+        for placeholder in [
+            format!("AccountKey=your{}==", rep('A', 82)),
+            format!("CLOUDFLARE_API_TOKEN=your{}", rep('b', 36)),
+            format!("aws_secret_access_key = your{}", rep('c', 36)),
+        ] {
+            assert!(
+                det.scan_all(&placeholder).is_empty(),
+                "placeholder classified: {placeholder} -> {:?}",
+                all_rules(&det, &placeholder)
+            );
+        }
+        // …while the values that are not placeholders still auto-wipe.
+        for real in [
+            format!("AccountKey={}==", rep('A', 86)),
+            format!("CLOUDFLARE_API_TOKEN={}", rep('b', 40)),
+            "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+        ] {
+            assert!(det.may_auto_wipe(&real), "{real}");
+        }
+    }
+
+    /// The keyword spellings §3.2 rule 23 left out. `api-key:`, `access.token:`
+    /// and `auth token =` are the ordinary YAML, CLI-flag and prose forms and
+    /// reached no rule at all, because there is no bare `key` or `token` keyword
+    /// to fall back on. `client secret` and `db-password` are here to pin that
+    /// the bare `secret` and `password` keywords still cover them. The
+    /// value-strength gate is untouched, so the weak column stays undetected.
+    #[test]
+    fn delimiter_spellings_of_the_password_keyword_are_covered() {
+        let det = detector();
+        for strong in [
+            "api-key: abc123XYZlong",
+            "api.key = abc123XYZlong",
+            "api key: abc123XYZlong",
+            "access-token: rt_abc123XYZlong_value",
+            "refresh.token=rt_abc123XYZlongval",
+            "auth token = abc123XYZlongvalue99",
+            "auth-token = abc123XYZlongvalue99",
+            // already covered by the bare `secret` and `password` keywords
+            "client secret = Sup3rS3cr3tV@lue!",
+            "db-password: S3cur3Pass!word",
+        ] {
+            assert!(fired(&det, strong, "generic_password_kv"), "{strong}");
+            assert!(det.is_sensitive(strong), "{strong}");
+        }
+        for weak in [
+            "api-key: see the wiki",
+            "client secret: ask ops",
+            "db-password: ${VAULT_DB}",
+        ] {
+            assert!(
+                !det.is_sensitive(weak),
+                "{weak} -> {:?}",
+                all_rules(&det, weak)
+            );
+        }
     }
 
     #[test]

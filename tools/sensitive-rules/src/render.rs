@@ -156,7 +156,7 @@ fn validator(value: Validator) -> &'static str {
     match value {
         Validator::None => "None",
         Validator::ValueStrength => "ValueStrength",
-        Validator::Luhn => "Luhn",
+        Validator::CardNumber => "CardNumber",
         Validator::Iban => "Iban",
         Validator::SsnStructure => "SsnStructure",
         Validator::PhoneShape => "PhoneShape",

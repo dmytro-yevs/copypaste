@@ -129,6 +129,29 @@ mod tests {
             .any(|allowlist| allowlist.target == AllowlistTarget::Line));
     }
 
+    /// A context anchor proves which field matched, never that the value is a
+    /// credential. These three are above the floor on the strength of the anchor
+    /// alone, so each must capture its value and gate it against the placeholder
+    /// stopwords — otherwise the stopwords would be tested against the anchor,
+    /// and `AWS_SECRET_ACCESS_KEY=` contains `secret`.
+    #[test]
+    fn context_anchored_rules_gate_their_captured_value() {
+        for name in [
+            "azure_storage_key",
+            "cloudflare_api_token",
+            "aws_secret_access_key",
+        ] {
+            let rule = rule(name);
+            assert!(rule.secret_group > 0, "{name} does not capture its value");
+            assert!(
+                rule.allowlists
+                    .iter()
+                    .any(|allowlist| !allowlist.stopwords.is_empty()),
+                "{name} has no placeholder stopwords"
+            );
+        }
+    }
+
     #[test]
     fn local_overlay_rules_have_no_upstream_identity() {
         for name in [

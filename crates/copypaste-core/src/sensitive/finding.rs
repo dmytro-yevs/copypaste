@@ -18,14 +18,19 @@ pub enum Severity {
 }
 
 /// Metadata for the highest-confidence rule that matched.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Every field is a copy of something the rule table already owns for the
+/// program's lifetime, so it is borrowed rather than allocated: a page of
+/// history scans thousands of items and the two `String`s this used to build
+/// per match were the whole cost of describing a match.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Finding {
     /// Stable rule id, e.g. `aws_access_key`. The label belongs to the rule
     /// definition — v1 derived it by string-prefix dispatch on the name, so
     /// renaming a rule silently changed its label (manifest §7.8).
-    pub rule: String,
+    pub rule: &'static str,
     /// One of `credential`, `financial`, `personal_id`, `infrastructure`.
-    pub category: String,
+    pub category: &'static str,
     pub confidence: f32,
     pub severity: Severity,
 }
@@ -33,10 +38,10 @@ pub struct Finding {
 /// One validated match. `start` and `end` are UTF-8 byte offsets into the
 /// NFKC-normalised string scanned by [`super::Detector::scan_all`], not
 /// necessarily into the caller's original input (manifest I3).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpannedFinding {
-    pub rule: String,
-    pub category: String,
+    pub rule: &'static str,
+    pub category: &'static str,
     pub confidence: f32,
     pub severity: Severity,
     pub start: usize,

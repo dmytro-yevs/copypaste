@@ -669,6 +669,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "card-validate"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "655fa70596e2a38372c0c0c4449ec0166ad9cc43d91558bbecc1a6f38bf9eb91"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
+
+[[package]]
 name = "cargo-platform"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1013,6 +1023,7 @@ name = "copypaste-core"
 version = "2.0.0-alpha.17"
 dependencies = [
  "android-native-keyring-store",
+ "card-validate",
  "chacha20poly1305",
  "copypaste-clock",
  "copypaste-ipc",

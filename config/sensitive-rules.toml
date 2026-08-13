@@ -180,8 +180,11 @@ upstream_ids = ["cloudflare-api-key"]
 name = "cloudflare_api_token"
 category = "credential"
 confidence = 0.92
-pattern_override = '''(?i)\b(?:CLOUDFLARE_API_(?:TOKEN|KEY)|CF_API_TOKEN)\s*=\s*[A-Za-z0-9_-]{40}\b'''
-pattern_decision = "The env-var context anchor is the reason a bare 40-character blob cannot auto-wipe."
+pattern_override = '''(?i)\b(?:CLOUDFLARE_API_(?:TOKEN|KEY)|CF_API_TOKEN)\s*=\s*([A-Za-z0-9_-]{40})\b'''
+pattern_decision = "The env-var context anchor is the reason a bare 40-character blob cannot auto-wipe; the value is captured so the placeholder stopwords see the token rather than the variable name."
+secret_group = 1
+placeholder_stopwords = ["your", "example", "placeholder", "changeme", "change_me", "replace", "redacted", "insert", "dummy", "sample", "notreal", "todo"]
+placeholder_stopwords_decision = "A 40-character alphanumeric run is exactly the shape of a README placeholder, and the context anchor cannot tell the two apart."
 entropy_override = 0.0
 entropy_decision = "The context anchor is sufficient and the compatibility test uses a repeated value."
 keywords_override = ["cloudflare_api_", "cf_api_token"]
@@ -271,7 +274,9 @@ pattern = '''(?m)"private_key"\s*:\s*"-----BEGIN RSA PRIVATE KEY-----'''
 name = "azure_storage_key"
 category = "credential"
 confidence = 0.90
-pattern = '''AccountKey=[A-Za-z0-9+/]{86}=='''
+pattern = '''AccountKey=([A-Za-z0-9+/]{86})=='''
+secret_group = 1
+placeholder_stopwords = ["your", "example", "placeholder", "changeme", "change_me", "replace", "redacted", "insert", "dummy", "sample", "notreal", "todo"]
 
 [[overlay]]
 name = "azure_sas_token"
@@ -295,7 +300,15 @@ pattern = '''(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}'''
 name = "generic_password_kv"
 category = "credential"
 confidence = 0.75
-pattern = '''(?i)(?:password|passwd|secret|api_key|apikey|auth_token|access_token|client_secret|refresh_token|db_password)["']?\s*[:=]\s*(\S{6,})'''
+# Manifest 07 §3.2 rule 23 spelled each compound keyword one way, so `api-key:`
+# and `access.token:` — the ordinary YAML and CLI-flag spellings — reached no
+# rule at all. The delimiter is one character and deliberately not optional:
+# written `api[-_. ]?key` the literal the prefilter can require collapses from
+# `api_key` to `api`, and every rule in the set pays for that. `db password` and
+# `client secret` need no branch of their own; the bare `password` and `secret`
+# keywords already match inside them. The value-strength gate is unchanged, so a
+# wider keyword cannot make a weak value wipeable.
+pattern = '''(?i)(?:password|passwd|secret|api[-_. ]key|apikey|auth[-_. ]token|access[-_. ]token|client_secret|refresh[-_. ]token|db_password)["']?\s*[:=]\s*(\S{6,})'''
 validator = "value_strength"
 secret_group = 1
 
@@ -305,6 +318,10 @@ category = "credential"
 confidence = 0.99
 pattern = '''(?i)aws_secret_access_key["']?\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})'''
 secret_group = 1
+# No "example" here, for the reason aws_access_key gives up the upstream
+# .+EXAMPLE allowlist: AWS's own published secret key ends EXAMPLEKEY and the
+# manifest binds it as a true positive.
+placeholder_stopwords = ["your", "placeholder", "changeme", "change_me", "replace", "redacted", "insert", "dummy", "notreal", "todo"]
 
 [[overlay]]
 name = "http_basic_auth"
@@ -319,6 +336,10 @@ confidence = 0.80
 pattern = '''(?m)^(?:export\s+)?[A-Z][A-Z0-9_]{2,}(?:_KEY|_SECRET|_TOKEN|_PASSWORD|_PASS|_PWD|_CREDENTIALS?)\s*=\s*(\S+)'''
 validator = "value_strength"
 secret_group = 1
+# The variable name is the only evidence this rule has, and a README's
+# CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE line carries exactly the same name as the
+# real one. Value strength cannot separate them: a placeholder is long.
+placeholder_stopwords = ["your", "example", "placeholder", "changeme", "change_me", "replace", "redacted", "insert", "dummy", "sample", "notreal", "todo"]
 
 [[overlay]]
 name = "db_conn_string"
@@ -336,8 +357,14 @@ pattern = '''\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?
 name = "credit_card"
 category = "financial"
 confidence = 0.99
-pattern = '''\b(?:\d[\s-]?){12,18}\d\b'''
-validator = "luhn"
+# Manifest 07 §3.3's scanner accepted any single [\s-] between digits, so a
+# column of amounts one per line, or an ISBN with a quantity after it, became
+# one candidate and passed Luhn about one time in ten. A separator is now one
+# space or one hyphen between groups, never a newline or a tab, and the leading
+# group is four digits. The validator rejects a mixture of separators and adds
+# the issuer-range and length gate.
+pattern = '''\b\d{4}(?:[ -]?\d{2,6}){2,4}\b'''
+validator = "card_number"
 
 [[overlay]]
 name = "iban"

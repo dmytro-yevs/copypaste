@@ -222,6 +222,17 @@ All 40 regexes below are copied verbatim from
 | 38 | `sendgrid_api_key` | `\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b` | 0 | 0.99 | **P2 ozzt** |
 | 39 | `terraform_cloud_token` | `\batlasv1\.[A-Za-z0-9_-]{64,}\b` | 0 | 0.99 | **P2 ozzt** |
 
+**v2 amendment — rule 23 tolerates one internal delimiter.** v1 spelled each
+compound keyword with an underscore only, so `api-key:`, `access.token:` and
+`auth token =` reached no rule at all: there is no bare `key` or `token`
+keyword to fall back on, unlike `client secret` and `db-password`, which the
+bare `secret` and `password` keywords already match inside. v2 accepts exactly
+one `-`, `_`, `.` or space in `api…key`, `auth…token`, `access…token` and
+`refresh…token`. The delimiter is not optional — written `api[-_. ]?key` the
+literal the prefilter can require collapses from `api_key` to `api`, and every
+rule in the set pays for that. The value-strength gate is unchanged, so a wider
+keyword cannot make a weak value wipeable.
+
 ### 3.3 Rule 41 — credit card (NOT a regex rule)
 
 Credit cards are **not** in the pattern table. They are a separate,
@@ -237,6 +248,29 @@ always-on check with **implicit confidence 0.99**:
 - Consequences: `SensitiveKind::CreditCard`, and it triggers auto-wipe even
   when **no** regex rule fired (`engine.rs:146-149`) and even when all regex
   rules that did fire were below the floor (`engine.rs:166-167`).
+
+**v2 amendment — Luhn is not enough, and `\s` was too much (DMY-162).** The v1
+scanner above accepts a newline or a tab between digits, so a column of amounts
+one per line, or an ISBN with a quantity beside it, becomes one candidate; Luhn
+then passes about one run in ten. Measured on a 600-sample corpus of ordinary
+numeric data, **10.8 % classified as `credit_card` at 0.99** and were hard-
+deleted wherever auto-wipe was on. v2 changes both halves:
+
+- A separator is one space or one hyphen between groups — never a newline, a
+  tab, or a mixture — and the leading group is four digits. Uniformity is
+  checked in the validator rather than by spelling the two spacings as separate
+  regex alternatives.
+- The digit run must be a card: issuer range and per-brand length, from the
+  maintained `card-validate` crate, on top of the `13 ≤ len ≤ 19` clamp, which
+  stays because it is load-bearing independently of any brand table.
+- **Order the validator cheapest-first.** Every digit run in ordinary text is a
+  candidate, and `Validate::from` walks twelve brand regexes. Running it before
+  the clamp and Luhn made a 16-digit hex id cost 33 % of a 64-byte scan.
+
+The same corpus now yields **0 %**, and every §9.1 card fixture, plus the Amex,
+Diners, Discover, Mastercard and JCB grouped forms, is still detected. The
+narrowing is one-directional by choice: a 19-digit Visa is now a false negative,
+which is the direction I1 requires.
 
 **Bug history — Audit MED #6:** the original gate was
 `normalised.len() <= 25 && luhn_valid(normalised)`, i.e. cards were only
@@ -407,6 +441,11 @@ test was passing vacuously. Replaced with `"4242424242421"` (sum 49).
 (`detector/mod.rs:129-132`.) In v2, **assert your negative fixtures are
 actually negative.**
 
+**v2 amendment:** §7.3's preferred outcome — take Luhn from a crate — is what
+v2 does. `card-validate` carries the checksum, the issuer ranges and the
+per-brand lengths together, and §3.3 records why the checksum alone was a
+data-loss defect.
+
 ### 5.5 Entropy / variety gate — asymmetry to resolve
 
 There is **no entropy gate in the core detector.** The only variety heuristic
@@ -437,6 +476,20 @@ This is a real gap and the strongest single argument for re-sourcing from
 gitleaks, which ships curated allowlists and stopwords per rule. **v2 SHOULD
 adopt gitleaks' allowlist model** (regex + stopword + path allowlists, and an
 inline-suppression comment convention).
+
+**v2 amendment — an allowlist suppresses, so it fails closed.** `all` over an
+empty set is true, so an `AND` allowlist carrying neither a regex nor a stopword
+would silence every match of the rule it is attached to, with nothing to say so.
+An allowlist with no checks allows nothing.
+
+**v2 amendment — placeholder stopwords for the context-anchored rules.** A
+context anchor (§5.2) proves which *field* matched and says nothing about the
+*value*, so `AccountKey=`, `CLOUDFLARE_API_TOKEN=`, `aws_secret_access_key =`
+and `dotenv_secret`'s variable-name suffix all matched README examples at
+0.80-0.99. Each of those rules now captures its value and gates it against a
+placeholder stopword list. `aws_secret_access_key` omits `example` for the same
+reason `aws_access_key` gives up gitleaks' `.+EXAMPLE` allowlist: AWS's own
+published secret key ends `EXAMPLEKEY` and §9.1 binds it.
 
 ### 5.7 Defence layers, in order
 
@@ -907,6 +960,11 @@ and `crates/copypaste-core/tests/false_positive_corpus.rs`.
 | `4111111111111111` | `CreditCard`; auto-wipes |
 | `Customer card: 4111 1111 1111 1111 — expires 12/26` | `CreditCard` (Audit MED #6) |
 | `please charge 4111-1111-1111-1111 today` | `CreditCard` |
+| `378282246310005` / `3782 822463 10005` (Amex 4-6-5) | `CreditCard`; the bare and grouped spellings must agree |
+| `30569309025904` / `3056 930902 5904` (Diners 4-6-4) | `CreditCard` |
+| `5555555555554444`, `6011111111111117`, `3530111333300000` | `CreditCard`, bare and in 4-4-4-4 groups |
+| `api-key: abc123XYZlong`, `api key: abc123XYZlong`, `access-token: rt_abc123XYZlong_value`, `auth token = abc123XYZlongvalue99` | detected — the delimiter spellings of rule 23 |
+| `client secret = Sup3rS3cr3tV@lue!`, `db-password: S3cur3Pass!word` | detected via the bare `secret` / `password` keyword, with no branch of their own |
 | `\u{FF21}\u{FF2B}\u{FF29}\u{FF21}IOSFODNN7EXAMPLE` (full-width AKIA) | detected as AWS key **after NFKC** |
 | 9 CJK chars, e.g. `私的秘密言葉確認鍵` as a KV value | value-strength = **weak** (char gate) |
 | 10 CJK chars `私的秘密言葉確認鍵値` as a KV value | value-strength = **strong** |
@@ -929,6 +987,15 @@ and `crates/copypaste-core/tests/false_positive_corpus.rs`.
 | `SGfoo bar` | `SG` without the two-dot structure |
 | `configsomethingeyJabc.def.ghi notajwt` | must NOT classify as `Jwt` (`\b` anchor) |
 | `ref=4242424242421 EOT` | Luhn-invalid 13-digit run must NOT classify as `CreditCard` |
+| `4111\n1111\n1111\n1111`, `4111\t1111\t1111\t1111` | a column is not a card: the separator may not be a newline or a tab (§3.3, DMY-162) |
+| `4111 1111-1111 1111`, `4111  1111  1111  1111` | mixed or repeated separators are not a card spelling |
+| `1234567890123452` | Luhn-valid, no issuer range — an order id, not a card |
+| `9780132350883` | Luhn-valid ISBN-13 prefix — not an issuer range |
+| `ISBN 978-012-13-234567 qty 12` | ISBN plus quantity must produce no card candidate |
+| `AccountKey=your` + 82×`A` + `==` | placeholder value, context anchor present (§5.6) |
+| `CLOUDFLARE_API_TOKEN=your` + 36×`b` | placeholder value, and `dotenv_secret` must not classify it either |
+| `aws_secret_access_key = your` + 36×`c` | placeholder value |
+| `api-key: see the wiki`, `client secret: ask ops`, `db-password: ${VAULT_DB}` | the widened rule-23 keyword is still value-gated |
 
 **The 50-entry benign corpus** (`tests/false_positive_corpus.rs:14-73`) must be
 re-created verbatim. Highlights that specifically stress `generic_password_kv`:

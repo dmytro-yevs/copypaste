@@ -97,6 +97,11 @@ hex = "0.4"
 regex = "1.10"
 unicode-normalization = "0.1"
 iban_validate = "=5.0.1"
+# Card brand ranges + per-brand length + Luhn. A Luhn-valid 13-19 digit run is
+# not a card: an ISBN, an order id and a column of amounts all pass the
+# checksum about one time in ten, and the card rule auto-wipes at 0.99
+# (DMY-162). The brand table is the part nobody should maintain by hand.
+card-validate = "2.4"
 directories = "5"
 # Scope guards. `guard_on_success` is the unwind policy the retention batch
 # needs — running SQLite in a destructor while a panic unwinds can abort the
