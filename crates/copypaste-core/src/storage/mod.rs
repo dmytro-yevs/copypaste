@@ -148,8 +148,7 @@ pub(crate) mod test_support {
     /// `EXPLAIN QUERY PLAN` for a statement, one string per step.
     ///
     /// Parameters are bound to NULL: the plan is chosen from the statement, not
-    /// from the values. `search` and `versions` each still carry their own copy
-    /// of this.
+    /// from the values.
     pub(crate) fn plan_of(store: &Store, sql: &str) -> Vec<String> {
         let conn = store.conn().unwrap();
         let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
