@@ -155,11 +155,17 @@ chunking, UI. (Those live in sibling manifests.)
   still advances and later clips still upload. A bounded id list *without* the
   walk is the defect this rule exists for: rows past the bound sat behind an
   advanced floor and repairing one did not bring it back.
-- **INV-N7b (the count is a lower bound, never an over-count).** While a walk
-  cycle is still in progress the figure is what the id list holds plus what the
-  last completed cycle counted, so it does not dip when one page happens to hold
-  only readable rows. It is exact whenever the backlog fits the id list, and
-  exact again at the end of every cycle.
+- **INV-N7b (the count is the current cycle's lower bound, never an
+  over-count).** The figure is what the id list holds — each id re-verified
+  unreadable at the head of the round that reports it — plus what the walk has
+  proven in the cycle under way, and the two sets are disjoint. It is exact
+  whenever the backlog fits the id list, and exact again at the end of every
+  cycle. A completed cycle's figure is evidence about the region as it was, so
+  it stands only until the next cycle reads its first page: the figure then
+  falls to what that cycle has verified and climbs back as the walk goes on.
+  Carrying a completed figure through the next cycle is the over-count this
+  rule replaced — a repair inside a multi-page region reported 1,500 rows
+  while 500 were unreadable, and it would not correct until the cycle ended.
 
 ---
 
