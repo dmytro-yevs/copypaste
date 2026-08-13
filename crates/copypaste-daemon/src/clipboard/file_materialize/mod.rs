@@ -65,8 +65,8 @@ impl StagingArea {
         // Whatever the previous run left is already decrypted and already past
         // its deadline. If this pass could not finish the job the sweeper has
         // to start now — on a machine that never pastes a file back, nothing
-        // else ever will — and it carries this sweeper, so it resumes where the
-        // pass stopped rather than walking the same prefix again.
+        // else ever will — and it carries this sweeper, so the retry lands at
+        // the floor and resumes where the pass stopped.
         let mut sweeper = Sweeper::new(root_fd.try_clone()?);
         let startup = sweeper.pass(SystemTime::now(), max_age);
         let area = Self {
@@ -78,7 +78,7 @@ impl StagingArea {
             interval,
         };
         if startup.unfinished() {
-            area.start_cleanup_with(sweeper);
+            area.start_cleanup_with(sweeper, startup);
         }
         Ok(area)
     }
@@ -111,7 +111,9 @@ impl StagingArea {
             return;
         }
         match self.root_fd.try_clone() {
-            Ok(root_fd) => self.start_cleanup_with(Sweeper::new(root_fd)),
+            Ok(root_fd) => {
+                self.start_cleanup_with(Sweeper::new(root_fd), SweepReport::default());
+            }
             Err(error) => warn!(
                 error_kind = ?error.kind(),
                 "could not start the paste-file staging sweeper"
@@ -119,7 +121,7 @@ impl StagingArea {
         }
     }
 
-    fn start_cleanup_with(&self, sweeper: Sweeper) {
+    fn start_cleanup_with(&self, sweeper: Sweeper, startup: SweepReport) {
         if self.cleanup.get().is_some() {
             return;
         }
@@ -128,6 +130,7 @@ impl StagingArea {
             Arc::clone(&self.access),
             self.max_age,
             self.interval,
+            startup,
         ) {
             Ok(worker) => {
                 let _ = self.cleanup.set(worker);
@@ -516,7 +519,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_restart_that_cannot_finish_its_sweep_starts_the_sweeper_anyway() {
+    fn a_startup_sweep_that_left_plaintext_retries_before_the_ordinary_interval() {
         use std::os::unix::fs::PermissionsExt;
 
         let data_dir = tempfile::tempdir().unwrap();
@@ -533,18 +536,21 @@ mod tests {
             return;
         }
 
-        let staging = StagingArea::with_timing(
-            data_dir.path(),
-            Duration::from_secs(60),
-            Duration::from_secs(3600),
-        )
-        .unwrap();
-
+        let interval = Duration::from_secs(2);
+        let staging =
+            StagingArea::with_timing(data_dir.path(), Duration::from_secs(60), interval).unwrap();
         assert!(
             staging.cleanup.get().is_some(),
             "plaintext the startup sweep could not remove must stay under a sweeper"
         );
+
         std::fs::set_permissions(&left_behind, std::fs::Permissions::from_mode(0o700)).unwrap();
+        wait_until_gone(&stale, interval - Duration::from_millis(500));
+
+        assert!(
+            !stale.exists(),
+            "an unfinished startup sweep waited the whole interval before retrying"
+        );
     }
 
     #[test]
