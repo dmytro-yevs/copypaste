@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -82,6 +85,14 @@ describe("recovering from a lifecycle transition", () => {
       why: "pid 3761 is running but its devtools connection stopped answering",
     });
   });
+});
+
+// DMY-141: WebView 109 (API 33) exposes targets with type "webview"; Puppeteer
+// 24's pages() excludes them unless includeAll is true.
+test("requests all target types so WebView pages are not excluded", () => {
+  const here = fileURLToPath(import.meta.url);
+  const app = readFileSync(resolve(here, "../../src/harness/app.ts"), "utf8");
+  expect(app).toMatch(/\.pages\(\s*true\s*\)/);
 });
 
 describe("giving up", () => {
