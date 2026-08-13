@@ -126,6 +126,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: python3 scripts/check-docs.py
+      - run: python3 scripts/check-docs.test.py
 
   file-size:
     name: file-size budget
