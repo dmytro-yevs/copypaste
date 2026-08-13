@@ -48,7 +48,34 @@ pub fn routable_ip() -> Option<IpAddr> {
         .min_by_key(|ip| u8::from(ip.is_ipv6()))
 }
 
+/// Is this a dial target worth storing against a peer?
+///
+/// A peer's `listen_addr` is a claim, and storing it *replaces* the address
+/// that worked. Authentication says who is speaking, not that what they said
+/// is a socket: `0.0.0.0`, port 0, a link-local address without its scope,
+/// broadcast and multicast are all storable and none of them dials the peer —
+/// the last two aim this device at the network instead.
+///
+/// Loopback is **kept**, unlike in [`routable_ip`]. There it is excluded
+/// because a peer elsewhere cannot use ours; here two daemons on one host is a
+/// supported topology and `127.0.0.1` is the address they exchange.
+#[must_use]
+pub fn is_dialable(addr: &std::net::SocketAddr) -> bool {
+    if addr.port() == 0 {
+        return false;
+    }
+    // Normalise IPv4-mapped IPv6 so the v4 checks apply (N2).
+    let ip = to_canonical(addr.ip());
+    match ip {
+        IpAddr::V4(ip) => {
+            !ip.is_unspecified() && !ip.is_broadcast() && !ip.is_link_local() && !ip.is_multicast()
+        }
+        IpAddr::V6(ip) => !ip.is_unspecified() && !ip.is_unicast_link_local() && !ip.is_multicast(),
+    }
+}
+
 fn is_peer_reachable(ip: &IpAddr) -> bool {
+    let ip = to_canonical(*ip);
     match ip {
         IpAddr::V4(ip) => {
             !ip.is_loopback()
@@ -63,6 +90,15 @@ fn is_peer_reachable(ip: &IpAddr) -> bool {
                 && !ip.is_unicast_link_local()
                 && !ip.is_multicast()
         }
+    }
+}
+
+/// Map `::ffff:a.b.c.d` to its IPv4 equivalent so classification uses
+/// the richer IPv4 checks (broadcast, link-local, etc.).
+fn to_canonical(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        other => other,
     }
 }
 
@@ -127,5 +163,38 @@ mod tests {
         ] {
             assert!(!is_peer_reachable(&ip), "{ip}");
         }
+    }
+
+    /// An IPv4-mapped IPv6 address must be classified by its IPv4 rules (N2).
+    #[test]
+    fn ipv4_mapped_ipv6_is_classified_as_ipv4() {
+        use std::net::{Ipv6Addr, SocketAddr};
+        let mapped_broadcast: IpAddr =
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff));
+        let mapped_link_local: IpAddr =
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xa9fe, 0x0101));
+        let mapped_routable: IpAddr =
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101));
+
+        assert!(
+            !is_dialable(&SocketAddr::new(mapped_broadcast, 9000)),
+            "mapped broadcast"
+        );
+        assert!(
+            !is_dialable(&SocketAddr::new(mapped_link_local, 9000)),
+            "mapped link-local"
+        );
+        assert!(
+            is_dialable(&SocketAddr::new(mapped_routable, 9000)),
+            "mapped routable"
+        );
+        assert!(
+            !is_peer_reachable(&mapped_link_local),
+            "mapped link-local reachable"
+        );
+        assert!(
+            is_peer_reachable(&mapped_routable),
+            "mapped routable reachable"
+        );
     }
 }
