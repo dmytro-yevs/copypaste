@@ -1,17 +1,19 @@
 //! Private, time-bounded staging for native file paste-back.
 
-use std::ffi::CStr;
+mod sweep;
+
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::thread::JoinHandle;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 
 use copypaste_core::FileMetadata;
-use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags};
+use rustix::fs::{AtFlags, Mode, OFlags};
 use rustix::io::Errno;
 use tracing::warn;
+
+use sweep::{sweep, CleanupWorker};
 
 const DIRECTORY_MODE: Mode = Mode::RWXU;
 const FILE_MODE: Mode = Mode::RUSR.union(Mode::WUSR);
@@ -26,11 +28,10 @@ pub(super) struct StagingArea {
     /// syscalls on the interactive path to reassert a mode nothing changes.
     root_fd: std::os::fd::OwnedFd,
     access: Arc<Mutex<()>>,
-    /// Started on the first successful `materialize`, not at construction: on a
-    /// machine that never pastes a file back the sweeper has nothing to sweep,
-    /// and it was costing a resident OS thread for the life of the daemon. The
-    /// start-time sweep in `with_timing` still bounds anything a previous run
-    /// left behind.
+    /// Started on the first successful `materialize`, or at construction when
+    /// the start-time sweep could not finish. On a machine that never pastes a
+    /// file back and has nothing left over, the sweeper has nothing to sweep and
+    /// was costing a resident OS thread for the life of the daemon.
     cleanup: OnceLock<CleanupWorker>,
     max_age: Duration,
     interval: Duration,
@@ -44,15 +45,27 @@ impl StagingArea {
     fn with_timing(data_dir: &Path, max_age: Duration, interval: Duration) -> io::Result<Self> {
         let root = std::path::absolute(data_dir)?.join("paste-files");
         let root_fd = open_or_create_root(&root)?;
-        cleanup_stale_at(&root, SystemTime::now(), max_age)?;
-        Ok(Self {
+        let area = Self {
             root,
             root_fd,
             access: Arc::new(Mutex::new(())),
             cleanup: OnceLock::new(),
             max_age,
             interval,
-        })
+        };
+        // Whatever the previous run left is already decrypted and already past
+        // its deadline. If this pass could not finish the job the sweeper has to
+        // start now: on a machine that never pastes a file back, nothing else
+        // ever will.
+        if sweep(&area.root, SystemTime::now(), max_age).unfinished() {
+            area.start_cleanup();
+        }
+        Ok(area)
+    }
+
+    #[cfg(test)]
+    fn root(&self) -> &Path {
+        &self.root
     }
 
     pub(super) fn materialize(&self, bytes: &[u8], metadata: &FileMetadata) -> io::Result<PathBuf> {
@@ -212,155 +225,6 @@ fn renew(file: &File) -> io::Result<()> {
     file.set_times(std::fs::FileTimes::new().set_modified(SystemTime::now()))
 }
 
-struct CleanupWorker {
-    stop: Arc<(Mutex<bool>, Condvar)>,
-    handle: Option<JoinHandle<()>>,
-}
-
-impl CleanupWorker {
-    fn start(
-        root: PathBuf,
-        access: Arc<Mutex<()>>,
-        max_age: Duration,
-        interval: Duration,
-    ) -> io::Result<Self> {
-        let stop = Arc::new((Mutex::new(false), Condvar::new()));
-        let worker_stop = Arc::clone(&stop);
-        let handle = std::thread::Builder::new()
-            .name("paste-file-cleanup".to_string())
-            .spawn(move || loop {
-                let (lock, wake) = &*worker_stop;
-                let stopped = lock.lock().unwrap_or_else(|held| held.into_inner());
-                let (stopped, _) = wake
-                    .wait_timeout_while(stopped, interval, |stopped| !*stopped)
-                    .unwrap_or_else(|held| held.into_inner());
-                if *stopped {
-                    break;
-                }
-                drop(stopped);
-                let _access = access.lock().unwrap_or_else(|held| held.into_inner());
-                if let Err(error) = cleanup_stale_at(&root, SystemTime::now(), max_age) {
-                    warn!(
-                        error_kind = ?error.kind(),
-                        "paste-file staging cleanup did not finish"
-                    );
-                }
-            })?;
-        Ok(Self {
-            stop,
-            handle: Some(handle),
-        })
-    }
-}
-
-impl Drop for CleanupWorker {
-    fn drop(&mut self) {
-        let (lock, wake) = &*self.stop;
-        *lock.lock().unwrap_or_else(|held| held.into_inner()) = true;
-        wake.notify_one();
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
-fn cleanup_stale_at(root: &Path, now: SystemTime, max_age: Duration) -> io::Result<()> {
-    let root_fd = match rustix::fs::open(
-        root,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) {
-        Ok(fd) => fd,
-        Err(Errno::NOENT) => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-    let mut root_dir = Dir::new(root_fd)?;
-    while let Some(entry) = root_dir.read() {
-        let entry = entry?;
-        let name = entry.file_name();
-        if is_dot(name) {
-            continue;
-        }
-        let root_fd = root_dir.fd()?;
-        let Ok(stat) = rustix::fs::statat(root_fd, name, AtFlags::SYMLINK_NOFOLLOW) else {
-            continue;
-        };
-        match FileType::from_raw_mode(stat.st_mode) {
-            FileType::RegularFile if is_older_than(&stat, now, max_age) => {
-                let _ = rustix::fs::unlinkat(root_fd, name, AtFlags::empty());
-            }
-            FileType::Directory if is_content_id(name) => {
-                cleanup_content_dir(root_fd, name, now, max_age);
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-fn cleanup_content_dir(
-    root_fd: std::os::fd::BorrowedFd<'_>,
-    name: &CStr,
-    now: SystemTime,
-    max_age: Duration,
-) {
-    let Ok(content_fd) = rustix::fs::openat(
-        root_fd,
-        name,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) else {
-        return;
-    };
-    let Ok(mut content_dir) = Dir::new(content_fd) else {
-        return;
-    };
-    while let Some(Ok(entry)) = content_dir.read() {
-        let filename = entry.file_name();
-        if is_dot(filename) {
-            continue;
-        }
-        let Ok(content_fd) = content_dir.fd() else {
-            return;
-        };
-        let Ok(stat) = rustix::fs::statat(content_fd, filename, AtFlags::SYMLINK_NOFOLLOW) else {
-            continue;
-        };
-        if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile
-            && is_older_than(&stat, now, max_age)
-        {
-            let _ = rustix::fs::unlinkat(content_fd, filename, AtFlags::empty());
-        }
-    }
-}
-
-fn is_older_than(stat: &rustix::fs::Stat, now: SystemTime, max_age: Duration) -> bool {
-    let Ok(now) = now.duration_since(UNIX_EPOCH) else {
-        return false;
-    };
-    let Some(cutoff) = now.checked_sub(max_age) else {
-        return false;
-    };
-    let modified_secs = stat.st_mtime;
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    let modified_nanos = i64::try_from(stat.st_mtime_nsec).unwrap_or(i64::MAX);
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    let modified_nanos = stat.st_mtime_nsec;
-    let cutoff_secs = i64::try_from(cutoff.as_secs()).unwrap_or(i64::MAX);
-    let cutoff_nanos = i64::from(cutoff.subsec_nanos());
-    modified_secs < cutoff_secs || (modified_secs == cutoff_secs && modified_nanos < cutoff_nanos)
-}
-
-fn is_content_id(name: &CStr) -> bool {
-    name.to_str()
-        .ok()
-        .is_some_and(|name| name.len() == 36 && uuid::Uuid::parse_str(name).is_ok())
-}
-
-fn is_dot(name: &CStr) -> bool {
-    name.to_bytes() == b"." || name.to_bytes() == b".."
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,90 +322,37 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
-    fn cleanup_deletes_only_stale_regular_staging_files() {
+    fn a_restart_that_cannot_finish_its_sweep_starts_the_sweeper_anyway() {
+        use std::os::unix::fs::PermissionsExt;
+
         let data_dir = tempfile::tempdir().unwrap();
+        let root = data_dir.path().join("paste-files");
+        std::fs::create_dir(&root).unwrap();
+        let left_behind = root.join("11111111-1111-1111-1111-111111111111");
+        std::fs::create_dir(&left_behind).unwrap();
+        let stale = left_behind.join("from-the-last-run.bin");
+        std::fs::write(&stale, b"decrypted").unwrap();
+        set_modified(&stale, SystemTime::now() - Duration::from_secs(3600));
+        std::fs::set_permissions(&left_behind, std::fs::Permissions::from_mode(0o500)).unwrap();
+        // Root ignores the mode bits, so the fault cannot be injected there.
+        if std::fs::write(left_behind.join(".probe"), b"").is_ok() {
+            return;
+        }
+
         let staging = StagingArea::with_timing(
             data_dir.path(),
             Duration::from_secs(60),
             Duration::from_secs(3600),
         )
         .unwrap();
-        let stale = staging
-            .materialize(b"stale", &metadata("stale.txt"))
-            .unwrap();
-        let fresh = staging
-            .materialize(b"fresh", &metadata("fresh.txt"))
-            .unwrap();
-        let boundary = staging
-            .materialize(b"boundary", &metadata("boundary.txt"))
-            .unwrap();
-        let legacy_stale = staging.root.join("legacy-stale.txt");
-        std::fs::write(&legacy_stale, b"old layout").unwrap();
-        let now = SystemTime::now();
-        set_modified(&stale, now - Duration::from_secs(61));
-        set_modified(&fresh, now - Duration::from_secs(59));
-        set_modified(&boundary, now - Duration::from_secs(60));
-        set_modified(&legacy_stale, now - Duration::from_secs(61));
 
-        cleanup_stale_at(&staging.root, now, Duration::from_secs(60)).unwrap();
-        assert!(!stale.exists());
-        assert!(fresh.exists());
-        assert!(boundary.exists());
-        assert!(!legacy_stale.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn cleanup_never_follows_symlinks_or_removes_fifos() {
-        use std::os::unix::fs::symlink;
-
-        let data_dir = tempfile::tempdir().unwrap();
-        let staging = StagingArea::with_timing(
-            data_dir.path(),
-            Duration::from_secs(1),
-            Duration::from_secs(3600),
-        )
-        .unwrap();
-        let content_dir = staging
-            .materialize(b"seed", &metadata("seed.txt"))
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
-        let external = data_dir.path().join("external.txt");
-        std::fs::write(&external, b"outside").unwrap();
-        symlink(&external, content_dir.join("linked.txt")).unwrap();
-        assert!(std::process::Command::new("mkfifo")
-            .arg(content_dir.join("receiver.fifo"))
-            .status()
-            .unwrap()
-            .success());
-        let nested = content_dir.join("nested");
-        std::fs::create_dir(&nested).unwrap();
-        let nested_file = nested.join("keep.txt");
-        std::fs::write(&nested_file, b"keep").unwrap();
-        let external_dir = data_dir.path().join("external-dir");
-        std::fs::create_dir(&external_dir).unwrap();
-        let external_child = external_dir.join("keep.txt");
-        std::fs::write(&external_child, b"keep").unwrap();
-        symlink(
-            &external_dir,
-            staging.root.join("00000000-0000-0000-0000-000000000000"),
-        )
-        .unwrap();
-
-        cleanup_stale_at(
-            &staging.root,
-            SystemTime::now() + Duration::from_secs(2),
-            Duration::from_secs(1),
-        )
-        .unwrap();
-        assert!(external.exists());
-        assert!(content_dir.join("linked.txt").symlink_metadata().is_ok());
-        assert!(content_dir.join("receiver.fifo").exists());
-        assert!(nested_file.exists());
-        assert!(external_child.exists());
+        assert!(
+            staging.cleanup.get().is_some(),
+            "plaintext the startup sweep could not remove must stay under a sweeper"
+        );
+        std::fs::set_permissions(&left_behind, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 
     #[test]
@@ -558,36 +369,10 @@ mod tests {
         set_modified(&file, now - Duration::from_secs(61));
 
         let reused = staging.materialize(b"same", &metadata("same.txt")).unwrap();
-        cleanup_stale_at(&staging.root, now, Duration::from_secs(60)).unwrap();
+        let report = sweep(&staging.root, now, Duration::from_secs(60));
+
         assert_eq!(reused, file);
         assert!(reused.exists());
-    }
-
-    #[test]
-    fn asynchronous_receiver_can_open_before_cleanup_removes_the_file() {
-        let data_dir = tempfile::tempdir().unwrap();
-        let staging = StagingArea::with_timing(
-            data_dir.path(),
-            Duration::from_secs(60),
-            Duration::from_millis(10),
-        )
-        .unwrap();
-        let path = staging
-            .materialize(b"received later", &metadata("later.txt"))
-            .unwrap();
-        let receiver_path = path.clone();
-        let receiver = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(40));
-            std::fs::read(receiver_path)
-        });
-
-        assert_eq!(receiver.join().unwrap().unwrap(), b"received later");
-        assert!(path.exists());
-        set_modified(&path, SystemTime::now() - Duration::from_secs(61));
-        let deadline = SystemTime::now() + Duration::from_secs(2);
-        while path.exists() && SystemTime::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert!(!path.exists(), "the cleanup worker left stale plaintext");
+        assert_eq!(report.removed, 0, "{report:?}");
     }
 }
