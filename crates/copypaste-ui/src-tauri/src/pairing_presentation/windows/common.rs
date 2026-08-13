@@ -73,6 +73,19 @@ pub(super) fn hide(hwnd: &winsafe::HWND) {
     hwnd.ShowWindow(co::SW::HIDE);
 }
 
+/// Whether the session accepted a window's display affinity.
+///
+/// Injected rather than called in place because the answer is a property of the
+/// session, not of the code: a test cannot make a real compositor refuse, and
+/// the refusal branch is the one that keeps a pairing secret off a screen
+/// recording.
+pub(super) type Affinity = fn(&winsafe::HWND) -> bool;
+
+pub(super) fn system_affinity(hwnd: &winsafe::HWND) -> bool {
+    hwnd.SetWindowDisplayAffinity(co::WDA::EXCLUDEFROMCAPTURE)
+        .is_ok()
+}
+
 /// INV-35 in Windows spelling, and it is asked rather than assumed.
 ///
 /// `WDA_EXCLUDEFROMCAPTURE` needs Windows 10 2004 or later and can be refused
@@ -81,15 +94,8 @@ pub(super) fn hide(hwnd: &winsafe::HWND) {
 /// captures claims a protection it does not have, so a caller that gets `false`
 /// here clears what it was about to show and closes instead. Called from
 /// `WM_CREATE`, before the window is shown.
-pub(super) fn protect_from_capture(hwnd: &winsafe::HWND) -> bool {
-    protect_from_capture_with(|| {
-        hwnd.SetWindowDisplayAffinity(co::WDA::EXCLUDEFROMCAPTURE)
-            .is_ok()
-    })
-}
-
-fn protect_from_capture_with(set_affinity: impl FnOnce() -> bool) -> bool {
-    if set_affinity() {
+pub(super) fn protect_from_capture(hwnd: &winsafe::HWND, affinity: Affinity) -> bool {
+    if affinity(hwnd) {
         return true;
     }
     // INV-13: the refusal, never the code, the invite or the peer.
@@ -99,15 +105,33 @@ fn protect_from_capture_with(set_affinity: impl FnOnce() -> bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use winsafe::prelude::Handle;
+
     use super::*;
 
     #[test]
     fn refusal_returns_false() {
-        assert!(!protect_from_capture_with(|| false));
+        assert!(!protect_from_capture(&winsafe::HWND::NULL, |_| false));
     }
 
     #[test]
     fn acceptance_returns_true() {
-        assert!(protect_from_capture_with(|| true));
+        assert!(protect_from_capture(&winsafe::HWND::NULL, |_| true));
+    }
+
+    /// The window whose affinity is being set is the one that was asked about;
+    /// a guard that protected a different window would still return `true`.
+    #[test]
+    fn the_window_reaches_the_affinity_call() {
+        static SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        fn record(hwnd: &winsafe::HWND) -> bool {
+            SEEN.store(
+                *hwnd == winsafe::HWND::NULL,
+                std::sync::atomic::Ordering::Release,
+            );
+            true
+        }
+        assert!(protect_from_capture(&winsafe::HWND::NULL, record));
+        assert!(SEEN.load(std::sync::atomic::Ordering::Acquire));
     }
 }
