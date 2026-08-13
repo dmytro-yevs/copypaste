@@ -9,8 +9,15 @@
 /** Tauri serves the frontend from its own protocol; nothing else in the app has a page target. */
 export const APP_ORIGIN = "tauri.localhost";
 
+/** The host, not a substring: `tauri.localhost.example.test` contains the
+ *  origin and is a different site, and a WebView that loaded one would have
+ *  been attached to and driven as if it were the app. */
 export function isAppTarget(url: string): boolean {
-  return url.includes(APP_ORIGIN);
+  try {
+    return new URL(url).hostname === APP_ORIGIN;
+  } catch {
+    return false;
+  }
 }
 
 export interface AttachSample {

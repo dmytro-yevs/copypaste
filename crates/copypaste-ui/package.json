@@ -59,6 +59,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@babel/compat-data": "^8.0.0",
     "@babel/parser": "^8.0.4",
     "@babel/traverse": "^8.0.4",
     "@tailwindcss/vite": "^4.3.3",
