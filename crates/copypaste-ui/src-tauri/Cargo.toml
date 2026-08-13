@@ -126,6 +126,15 @@ copypaste-core = { path = "../../copypaste-core" }
 winsafe = { version = "0.0.28", features = ["gui", "gdi"] }
 qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
 image.workspace = true
+# Source-app icon resolution: App Paths registry lookup, SHGetFileInfoW for the
+# icon, GDI to extract the bitmap. The path is transient and never stored (I-9).
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 # Tauri owns feed parsing, version comparison, signature verification,
 # download, installation and restart under ADR-0020. Pin the exact API audited
 # by the updater command boundary; the dependency stays out of mobile builds.
