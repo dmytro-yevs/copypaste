@@ -5,6 +5,7 @@ import legacy from "@vitejs/plugin-legacy";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+import { dropOrphanChunks } from "./scripts/orphan-chunks.mjs";
 import { LEGACY_BROWSERSLIST, MODERN_BROWSERSLIST } from "./scripts/webview-baseline.mjs";
 
 // Tailwind v4 is a Vite plugin — no postcss.config, no tailwind.config.
@@ -31,6 +32,11 @@ export default defineConfig({
       // core-js would add.
       modernPolyfills: false,
     }),
+    // The branch in `main.tsx` is dropped from the module build too late to
+    // drop the chunk with it; `scripts/orphan-chunks.mjs` says why that is and
+    // why removal waits for the output that does not name it. The nomodule
+    // output loads its copy, so only the modern one loses anything.
+    dropOrphanChunks(/^legacyPolyfills-/),
   ],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },

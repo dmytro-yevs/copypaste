@@ -19,7 +19,7 @@
     "check:native-parity": "node scripts/native-parity-gate.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run && node --test scripts/native-parity-gate.test.mjs scripts/check-webview-baseline.test.mjs",
+    "test": "vitest run && node --test scripts/native-parity-gate.test.mjs scripts/check-webview-baseline.test.mjs scripts/orphan-chunks.test.mjs",
     "test:native-parity": "node --test scripts/native-parity-gate.test.mjs"
   },
   "dependencies": {

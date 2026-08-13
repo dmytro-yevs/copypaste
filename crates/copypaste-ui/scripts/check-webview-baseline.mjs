@@ -21,6 +21,7 @@ import _traverse from "@babel/traverse";
 // different import syntax.
 const compatData = createRequire(import.meta.url)("@babel/compat-data/plugins");
 
+import { unreferenced } from "./orphan-chunks.mjs";
 import { LEGACY_TARGET, MODERN_TARGET } from "./webview-baseline.mjs";
 
 const traverse = _traverse.default ?? _traverse;
@@ -129,10 +130,8 @@ export function postBaselineRuntime(code, target) {
 }
 
 /**
- * `-legacy-` is `@vitejs/plugin-legacy`'s naming for the nomodule build. No
- * such chunk is emitted yet — API 24 has no delivery path, and
- * `webview-baseline.mjs` records why — but a chunk classified as legacy is
- * checked against Chromium 53 the moment one appears.
+ * `-legacy-` is `@vitejs/plugin-legacy`'s naming for the nomodule build, and a
+ * chunk classified as legacy is checked against Chromium 53.
  */
 export function targetOf(name) {
   return /-legacy-|^polyfills-legacy/.test(name) ? LEGACY_TARGET : MODERN_TARGET;
@@ -157,20 +156,6 @@ export function missingLegacyChunks(names) {
  *  apart; the config is read rather than trusted to be importing them. */
 export function sharesBaselineWithConfig(config) {
   return /from\s+"\.\/scripts\/webview-baseline\.mjs"/.test(config);
-}
-
-/**
- * A chunk nothing points at is never fetched, so it cannot break an engine.
- * The module build emits `legacyPolyfills` even though `import.meta.env.LEGACY`
- * removed its only import, and that copy is dead rather than wrong.
- */
-export function unreferenced(chunks, entryHtml = "") {
-  return chunks
-    .filter(({ name }) => {
-      const elsewhere = chunks.filter((other) => other.name !== name);
-      return !entryHtml.includes(name) && !elsewhere.some((other) => other.code.includes(name));
-    })
-    .map(({ name }) => name);
 }
 
 function bundles() {
@@ -203,12 +188,18 @@ function main() {
     return 1;
   }
 
-  const dead = new Set(unreferenced(chunks, entryHtml));
-  for (const name of dead) console.log(`ok   ${name} is emitted but unreferenced, so nothing loads it`);
+  // Unreachable is not harmless: an orphan is still packaged, still shipped and
+  // still downloaded with the app. `vite.config.ts` removes the one the two
+  // outputs are known to leave behind, so anything left here is a new one.
+  let failed = 0;
+  for (const name of unreferenced(chunks, entryHtml)) {
+    console.error(`FAIL ${name} is packaged and nothing loads it; the build must not emit it`);
+    failed += 1;
+  }
 
   const byTarget = [MODERN_TARGET, LEGACY_TARGET].map((target) => ({
     target,
-    chunks: chunks.filter((chunk) => chunk.target === target && !dead.has(chunk.name)),
+    chunks: chunks.filter((chunk) => chunk.target === target),
   }));
   for (const { target, chunks: forTarget } of byTarget) {
     if (forTarget.length === 0) {
@@ -217,7 +208,6 @@ function main() {
     }
   }
 
-  let failed = 0;
   const legacyNames = byTarget.find(({ target }) => target === LEGACY_TARGET)?.chunks ?? [];
   for (const [prefix, what] of missingLegacyChunks(legacyNames.map(({ name }) => name))) {
     console.error(`FAIL ${LEGACY_TARGET}: no reachable ${prefix}* chunk, so ${what} never load`);
