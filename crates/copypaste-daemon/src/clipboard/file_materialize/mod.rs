@@ -52,6 +52,8 @@ pub(super) struct StagingArea {
     interval: Duration,
     #[cfg(test)]
     worker_starts: std::sync::atomic::AtomicU32,
+    #[cfg(test)]
+    worker_doom: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl StagingArea {
@@ -78,6 +80,8 @@ impl StagingArea {
             interval,
             #[cfg(test)]
             worker_starts: std::sync::atomic::AtomicU32::new(0),
+            #[cfg(test)]
+            worker_doom: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         if startup.unfinished() {
             // The plaintext this pass could not remove is already decrypted and
@@ -115,6 +119,8 @@ impl StagingArea {
             return Ok(());
         }
         let sweeper = Sweeper::new(self.clone_root_fd()?);
+        #[cfg(test)]
+        let sweeper = sweeper.armed(Arc::clone(&self.worker_doom));
         self.install_worker(sweeper, SweepReport::default())
     }
 
@@ -446,6 +452,13 @@ mod tests {
             let worker = CleanupWorker::doomed(doom).unwrap();
             worker.wait_until_dead(Duration::from_secs(5));
             *self.worker() = Some(worker);
+        }
+
+        /// Panics the *running* worker on its next pass, which is how the owner
+        /// of plaintext already on disk dies.
+        fn doom_the_running_worker(&self) {
+            self.worker_doom
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -781,6 +794,48 @@ mod tests {
                 "the replacement worker never removed the plaintext"
             );
         }
+    }
+
+    /// B3/T-92: the worker that owns staged plaintext dies, and nothing pastes
+    /// back afterwards. Waiting for a later `materialize` to notice is not
+    /// ownership: on a machine that pastes a file back once, there is no later
+    /// one, and the decrypted bytes stay for ever. The deadline here is ten
+    /// minutes away and the file's mtime is now, so only the death can account
+    /// for it.
+    #[test]
+    fn a_worker_that_dies_owning_plaintext_takes_it_with_no_second_paste_back() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::with_timing(
+            data_dir.path(),
+            Duration::from_secs(600),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let path = staging
+            .materialize(b"payload", &metadata("statement.pdf"))
+            .unwrap();
+        assert!(staging.has_live_cleanup(), "setup: an owner had to exist");
+
+        staging.doom_the_running_worker();
+
+        wait_until_gone(&path, Duration::from_secs(10));
+        assert!(
+            !path.exists(),
+            "a dead worker left decrypted bytes that only a later paste-back would notice"
+        );
+        assert!(
+            !staging.has_live_cleanup(),
+            "the dead worker is still reported as an owner"
+        );
+        assert_eq!(
+            staging.worker_starts(),
+            1,
+            "the plaintext was accounted for by a second paste-back, not by the death"
+        );
+        assert!(
+            !path.parent().unwrap().exists(),
+            "the emptied content directory outlived its owner"
+        );
     }
 
     /// B3: and when the replacement cannot be started, the staging that would
