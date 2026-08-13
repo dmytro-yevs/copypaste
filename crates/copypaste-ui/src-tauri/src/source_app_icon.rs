@@ -2,6 +2,13 @@
 
 #![allow(unsafe_code)]
 
+#[cfg(target_os = "windows")]
+mod gdi;
+#[cfg(target_os = "windows")]
+mod registry;
+#[cfg(target_os = "windows")]
+mod win_icon;
+
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -173,244 +180,6 @@ fn resolve_desktop(_bundle_id: &str) -> Option<UiSourceAppIcon> {
     None
 }
 
-#[cfg(target_os = "windows")]
-mod win_icon {
-    use std::ffi::c_void;
-    use std::io::Cursor;
-    use std::os::windows::ffi::OsStrExt;
-    use std::path::PathBuf;
-    use std::{mem, ptr};
-
-    use image::{ImageBuffer, ImageFormat, RgbaImage};
-    use windows_sys::Win32::Foundation::MAX_PATH;
-    use windows_sys::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
-    };
-    use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
-        KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_EXPAND_SZ, REG_SZ,
-    };
-    use windows_sys::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
-
-    type HIcon = *mut c_void;
-
-    use super::{MAX_ICON_BYTES, MAX_ICON_EDGE};
-    use crate::model::UiSourceAppIcon;
-
-    pub(super) fn resolve(image_name: &str) -> Option<UiSourceAppIcon> {
-        let path = find_exe(image_name)?;
-        let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-
-        unsafe {
-            let mut sfi: SHFILEINFOW = mem::zeroed();
-            let ok = SHGetFileInfoW(
-                path_wide.as_ptr(),
-                0,
-                &mut sfi,
-                mem::size_of::<SHFILEINFOW>() as u32,
-                SHGFI_ICON | SHGFI_LARGEICON,
-            );
-            if ok == 0 {
-                return None;
-            }
-            let icon = sfi.hIcon;
-            let result = hicon_to_png(icon);
-            DestroyIcon(icon);
-            result
-        }
-    }
-
-    fn find_exe(name: &str) -> Option<PathBuf> {
-        if let Some(p) = app_paths(name) {
-            return Some(p);
-        }
-        let root = std::env::var("SystemRoot").ok()?;
-        let p = PathBuf::from(&root).join("System32").join(name);
-        p.exists().then_some(p)
-    }
-
-    /// Search App Paths under HKCU then HKLM, and probe both the native and
-    /// the WOW64 registry view on each, so per-user installs (Vivaldi, VS Code)
-    /// and 32-bit apps registered under `Wow6432Node` are found.
-    fn app_paths(name: &str) -> Option<PathBuf> {
-        let subkey = format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{name}\0");
-        let subkey_wide: Vec<u16> = subkey.encode_utf16().collect();
-
-        for &root in &[HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
-            for &extra_flags in &[0u32, KEY_WOW64_32KEY, KEY_WOW64_64KEY] {
-                if let Some(p) = read_app_path(root, &subkey_wide, KEY_READ | extra_flags) {
-                    return Some(p);
-                }
-            }
-        }
-        None
-    }
-
-    fn read_app_path(root: isize, subkey: &[u16], flags: u32) -> Option<PathBuf> {
-        unsafe {
-            let mut hkey = ptr::null_mut();
-            if RegOpenKeyExW(root, subkey.as_ptr(), 0, flags, &mut hkey) != 0 {
-                return None;
-            }
-            let result = read_default_value(hkey);
-            RegCloseKey(hkey);
-            let raw = result?;
-            let expanded = expand_env(&raw);
-            let p = PathBuf::from(expanded.trim_matches('"').trim());
-            p.exists().then_some(p)
-        }
-    }
-
-    /// Read the default value (`lpValueName = NULL`), accepting both `REG_SZ`
-    /// and `REG_EXPAND_SZ`, and dynamically sizing the buffer on
-    /// `ERROR_MORE_DATA`.
-    unsafe fn read_default_value(hkey: *mut c_void) -> Option<String> {
-        let mut size = (MAX_PATH as usize * 2) as u32;
-        let mut buf: Vec<u16> = vec![0; size as usize / 2];
-        let mut kind = 0u32;
-        let mut rc = RegQueryValueExW(
-            hkey,
-            ptr::null(),
-            ptr::null_mut(),
-            &mut kind,
-            buf.as_mut_ptr().cast(),
-            &mut size,
-        );
-        if rc == 234 {
-            // ERROR_MORE_DATA
-            buf.resize(size as usize / 2 + 1, 0);
-            rc = RegQueryValueExW(
-                hkey,
-                ptr::null(),
-                ptr::null_mut(),
-                &mut kind,
-                buf.as_mut_ptr().cast(),
-                &mut size,
-            );
-        }
-        if rc != 0 || !matches!(kind, REG_SZ | REG_EXPAND_SZ) {
-            return None;
-        }
-        let chars = size as usize / 2;
-        let len = if chars > 0 && buf.get(chars - 1) == Some(&0) {
-            chars - 1
-        } else {
-            chars
-        };
-        String::from_utf16(&buf[..len]).ok()
-    }
-
-    fn expand_env(value: &str) -> String {
-        if !value.contains('%') {
-            return value.to_owned();
-        }
-        let wide: Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
-        let needed = unsafe { ExpandEnvironmentStringsW(wide.as_ptr(), ptr::null_mut(), 0) };
-        if needed == 0 {
-            return value.to_owned();
-        }
-        let mut buf = vec![0u16; needed as usize];
-        let written = unsafe { ExpandEnvironmentStringsW(wide.as_ptr(), buf.as_mut_ptr(), needed) };
-        if written == 0 || written > needed {
-            return value.to_owned();
-        }
-        let len = (written as usize).saturating_sub(1);
-        String::from_utf16(&buf[..len]).unwrap_or_else(|_| value.to_owned())
-    }
-
-    unsafe fn hicon_to_png(icon: HIcon) -> Option<UiSourceAppIcon> {
-        let mut info: ICONINFO = mem::zeroed();
-        if GetIconInfo(icon, &mut info) == 0 {
-            return None;
-        }
-
-        // Monochrome icons have hbmColor == NULL and a double-height mask.
-        if info.hbmColor.is_null() {
-            DeleteObject(info.hbmMask as _);
-            return None;
-        }
-
-        let mut bmp: BITMAP = mem::zeroed();
-        let got = GetObjectW(
-            info.hbmColor as _,
-            mem::size_of::<BITMAP>() as i32,
-            (&raw mut bmp).cast(),
-        );
-
-        if got == 0 || bmp.bmWidth <= 0 || bmp.bmHeight <= 0 {
-            DeleteObject(info.hbmColor as _);
-            DeleteObject(info.hbmMask as _);
-            return None;
-        }
-
-        let w = bmp.bmWidth as u32;
-        let h = bmp.bmHeight as u32;
-
-        if w > MAX_ICON_EDGE || h > MAX_ICON_EDGE {
-            DeleteObject(info.hbmColor as _);
-            DeleteObject(info.hbmMask as _);
-            return None;
-        }
-
-        let pixel_count = (w as usize).checked_mul(h as usize)?;
-        let byte_count = pixel_count.checked_mul(4)?;
-
-        let hdc = CreateCompatibleDC(ptr::null_mut());
-        if hdc.is_null() {
-            DeleteObject(info.hbmColor as _);
-            DeleteObject(info.hbmMask as _);
-            return None;
-        }
-
-        let mut bi: BITMAPINFO = mem::zeroed();
-        bi.bmiHeader.biSize = mem::size_of::<BITMAPINFOHEADER>() as u32;
-        bi.bmiHeader.biWidth = w as i32;
-        bi.bmiHeader.biHeight = -(h as i32);
-        bi.bmiHeader.biPlanes = 1;
-        bi.bmiHeader.biBitCount = 32;
-        bi.bmiHeader.biCompression = BI_RGB;
-
-        let mut pixels = vec![0u8; byte_count];
-        let rows = GetDIBits(
-            hdc,
-            info.hbmColor,
-            0,
-            h,
-            pixels.as_mut_ptr().cast(),
-            &mut bi,
-            DIB_RGB_COLORS,
-        );
-
-        DeleteDC(hdc);
-        DeleteObject(info.hbmColor as _);
-        DeleteObject(info.hbmMask as _);
-
-        if rows == 0 {
-            return None;
-        }
-
-        let all_zero_alpha = pixels.chunks_exact(4).all(|px| px[3] == 0);
-        for px in pixels.chunks_exact_mut(4) {
-            px.swap(0, 2);
-            if all_zero_alpha {
-                px[3] = 255;
-            }
-        }
-
-        let img: RgbaImage = ImageBuffer::from_raw(w, h, pixels)?;
-        let mut buf = Vec::new();
-        img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
-            .ok()?;
-        if buf.len() > MAX_ICON_BYTES {
-            return None;
-        }
-        Some(UiSourceAppIcon::from_png(buf, w, h))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,6 +206,7 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    #[ignore = "drives the real Windows shell"]
     fn windows_resolves_a_system_executable_icon() {
         let cache = SourceAppIconCache::default();
         assert!(
