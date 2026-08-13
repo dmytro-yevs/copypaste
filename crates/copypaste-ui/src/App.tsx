@@ -16,12 +16,13 @@ import { usePush } from "@/hooks/usePush";
 import { useTranslation } from "@/i18n";
 import { classifyError } from "@/lib/errors";
 import { hasBridge, setAllowScreenshots } from "@/lib/ipc";
-import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { isAndroidPlatform } from "@/lib/platform";
+import { EVENT_OPEN_SETTINGS } from "@/lib/tauriEvents";
+import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
 import { selectAppearance, usePrefs } from "@/store/prefs";
-import { useShallow } from "zustand/react/shallow";
 import { useUi } from "@/store/ui";
+import { useShallow } from "zustand/react/shallow";
 
 const DevicesView = lazy(async () => ({
   default: (await import("@/components/devices/DevicesView")).DevicesView,
@@ -81,7 +82,7 @@ export default function App() {
     if (!hasBridge()) return;
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    void listen("open-settings", () => useUi.getState().setView("settings")).then((detach) => {
+    void listen(EVENT_OPEN_SETTINGS, () => useUi.getState().setView("settings")).then((detach) => {
       if (cancelled) detach();
       else unlisten = detach;
     });

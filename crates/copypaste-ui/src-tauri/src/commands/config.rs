@@ -27,6 +27,7 @@ use copypaste_ipc::{ConfigApplied, ConfigPatch, PrivateModeData};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
+use crate::events::TauriEventName;
 
 type Result<T> = std::result::Result<T, BackendError>;
 
@@ -56,7 +57,10 @@ pub async fn set_config(
     let private_mode_changed = patch.private_mode.is_some();
     let applied = backend.set_config(patch).await?;
     if private_mode_changed {
-        let _ = app.emit("private-mode-changed", applied.config.private_mode);
+        let _ = app.emit(
+            TauriEventName::PrivateModeChanged.as_str(),
+            applied.config.private_mode,
+        );
     }
     Ok(applied)
 }
@@ -73,7 +77,10 @@ pub async fn set_private_mode(
     enabled: bool,
 ) -> Result<PrivateModeData> {
     let confirmed = backend.set_private_mode(enabled).await?;
-    let _ = app.emit("private-mode-changed", confirmed.private_mode);
+    let _ = app.emit(
+        TauriEventName::PrivateModeChanged.as_str(),
+        confirmed.private_mode,
+    );
     Ok(confirmed)
 }
 

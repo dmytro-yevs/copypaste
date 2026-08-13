@@ -6,7 +6,7 @@
 //! the shared status component renders without a platform branch.
 //!
 //! Every command that changes anything emits
-//! [`crate::capture::intake::EVENT_CAPTURE_STATE`] as well as returning the new
+//! [`crate::events::TauriEventName::CaptureState`] as well as returning the new
 //! snapshot. The return value serves the caller; the event serves the history
 //! screen, which has to show capture state without having asked for it (the
 //! android doc's §5 rule 1).
@@ -14,9 +14,10 @@
 use tauri::{AppHandle, Emitter, State};
 
 use crate::backend::BackendError;
-use crate::capture::intake::{self, EVENT_CAPTURE_STATE};
+use crate::capture::intake;
 use crate::capture::model::{CaptureSnapshot, CaptureSource, TOAST_EXPLANATION};
 use crate::capture::{CaptureControl, SelectedCapture};
+use crate::events::TauriEventName;
 use crate::model::UiItem;
 
 type Result<T> = std::result::Result<T, BackendError>;
@@ -108,7 +109,7 @@ pub fn capture_set_toast_suppressed(
 }
 
 fn emit(app: &AppHandle, snapshot: CaptureSnapshot) -> CaptureSnapshot {
-    let _ = app.emit(EVENT_CAPTURE_STATE, snapshot.clone());
+    let _ = app.emit(TauriEventName::CaptureState.as_str(), snapshot.clone());
     snapshot
 }
 

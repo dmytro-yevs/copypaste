@@ -34,7 +34,7 @@ pub(super) fn force_menu_image_visibility<R: Runtime>(_app: &AppHandle<R>) {}
 use self::menu::TrayMenu;
 use super::{autostart, notify, window};
 use crate::backend::{Backend as _, SelectedBackend};
-use crate::service::push::{EVENT_CHANGED, EVENT_PUSH_STATE};
+use crate::events::TauriEventName;
 
 /// Coalescing window after a change before the menu is re-read.
 ///
@@ -85,7 +85,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // The tray and Settings are independent readers of the same system state.
     let follower = Arc::clone(&tray_menu);
     let handle = app.clone();
-    app.listen(autostart::EVENT_CHANGED, move |_| {
+    app.listen(TauriEventName::AutostartChanged.as_str(), move |_| {
         follower.set_autostart(autostart::is_enabled(&handle));
     });
 
@@ -128,7 +128,7 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
                 };
                 let update = private_mode::toggle_update(previous, applied);
                 if menu.confirm_private_mode(update.value, revision) && update.broadcast {
-                    let _ = app.emit(private_mode::EVENT_CHANGED, update.value);
+                    let _ = app.emit(TauriEventName::PrivateModeChanged.as_str(), update.value);
                 }
             });
         }
@@ -161,7 +161,10 @@ fn spawn_refresh<R: Runtime>(app: AppHandle<R>, tray_menu: Arc<TrayMenu<R>>) {
 
     // `Notify::notify_one` stores at most one permit, so a burst of captures
     // costs one refresh rather than one per event.
-    for event in [EVENT_CHANGED, EVENT_PUSH_STATE] {
+    for event in [
+        TauriEventName::Changed.as_str(),
+        TauriEventName::PushState.as_str(),
+    ] {
         let on_change = Arc::clone(&wake);
         app.listen(event, move |_| on_change.notify_one());
     }

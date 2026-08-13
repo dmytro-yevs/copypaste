@@ -17,6 +17,7 @@ use crate::capture::model::{
 };
 use crate::commands::pairing::{PairedDevice, PairingCeremony};
 use crate::commands::transfer::{ExportReport, ImportPreview};
+use crate::events::TauriEventName;
 use crate::model::{
     UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon, UiSyncResult,
 };
@@ -50,6 +51,7 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<DiagnosticCounters>(&config, &mut output);
     declaration::<DiscoveredDevice>(&config, &mut output);
     declaration::<ErrorCode>(&config, &mut output);
+    declaration::<TauriEventName>(&config, &mut output);
     declaration::<ExportReport>(&config, &mut output);
     declaration::<ImportData>(&config, &mut output);
     declaration::<ImportPreview>(&config, &mut output);
