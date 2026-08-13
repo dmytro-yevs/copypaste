@@ -1187,6 +1187,7 @@ dependencies = [
  "dispatch2",
  "futures-util",
  "image",
+ "interprocess",
  "jni 0.21.1",
  "ndk-context",
  "objc2 0.5.2",
@@ -1217,6 +1218,7 @@ dependencies = [
  "ts-rs",
  "url",
  "uuid",
+ "win32job",
  "windows-sys 0.61.2",
  "winsafe",
  "zeroize",
@@ -7076,6 +7078,16 @@ checksum = "bc1e2d6b36beb4c927888fc722eee760cc296c604381fd9d4f83da0cc8a8c7aa"
 dependencies = [
  "arrayvec",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "win32job"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c6a6724ccfbf34154a8691bd868b0fcd2be2ca3f7b47b32614654f1a01b191c"
+dependencies = [
+ "thiserror 1.0.69",
+ "windows",
 ]
 
 [[package]]

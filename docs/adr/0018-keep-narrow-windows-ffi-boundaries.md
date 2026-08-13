@@ -13,6 +13,12 @@ descriptor ownership and account-SID lookup are instead delegated to
 [`interprocess` 2.4](https://crates.io/crates/interprocess/2.4.3) and
 [`win-security-identifier` 0.2](https://crates.io/crates/win-security-identifier/0.2.0).
 
+Binding the daemon's lifetime to the app is delegated the same way, to
+[`win32job` 2](https://crates.io/crates/win32job): it wraps
+`CreateJobObject`/`SetInformationJobObject`/`AssignProcessToJobObject`, which is
+the whole of the behaviour, so the exemption below does not apply.
+`CREATE_NO_WINDOW` stays a named `windows-sys` constant rather than a literal.
+
 ## DPAPI — rule 1 exemption 1
 
 No maintained wrapper provides all four required behaviours: current-user
