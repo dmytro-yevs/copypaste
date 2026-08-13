@@ -408,6 +408,7 @@ mod tests {
                 skipped_duplicate: 1,
                 skipped_empty: 2,
                 skipped_too_large: 3,
+                pins_failed: 1,
             }),
         );
         let json = serde_json::to_value(response).unwrap();
@@ -417,5 +418,6 @@ mod tests {
         assert_eq!(json["data"]["import"]["skipped_duplicate"], 1);
         assert_eq!(json["data"]["import"]["skipped_empty"], 2);
         assert_eq!(json["data"]["import"]["skipped_too_large"], 3);
+        assert_eq!(json["data"]["import"]["pins_failed"], 1);
     }
 }

@@ -102,6 +102,14 @@ pub struct ImportData {
     /// Items larger than the user's configured per-item size limit.
     #[serde(default)]
     pub skipped_too_large: u32,
+    /// Items that landed but whose pinned state could not be written.
+    ///
+    /// Reported rather than logged: an import that answered success with a pin
+    /// missing lost user state silently (DMY-156). Non-zero means the rows are
+    /// there and unpinned; re-running the same import is the repair, because a
+    /// duplicate still carries the pin the file named.
+    #[serde(default)]
+    pub pins_failed: u32,
 }
 
 /// A completed backup. No path: the client supplied it and already knows it,

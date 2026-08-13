@@ -129,22 +129,20 @@ pub fn ingest_into(
 /// that a prior detector found a secret; a newer detector failing to recognise
 /// it must not re-index it.
 ///
-/// The [`RetentionBatch`] is a token, not a parameter: holding one is the proof
-/// that the sweep this call skips is already owed by the caller's batch.
-#[allow(clippy::too_many_arguments)]
+/// The store and settings come from the [`RetentionBatch`], so the sweep this
+/// call defers is necessarily owed on the store it just wrote to. Passing them
+/// separately made the token a flag that proved nothing.
 pub(crate) fn ingest_into_batched(
-    store: &Store,
+    batch: &RetentionBatch<'_>,
     detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     created_at: i64,
     sensitive_floor: bool,
-    settings: &copypaste_ipc::ConfigData,
-    _batch: &RetentionBatch<'_>,
 ) -> Result<Ingested, IngestError> {
     ingest_text(
-        store,
+        batch.store(),
         detector,
         keyring,
         content,
@@ -153,7 +151,7 @@ pub(crate) fn ingest_into_batched(
         sensitive_floor,
         None,
         None,
-        settings,
+        batch.settings(),
         Sweep::Deferred,
     )
 }

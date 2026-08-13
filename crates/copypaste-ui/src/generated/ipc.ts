@@ -38,7 +38,7 @@ export type TauriEventName = "copypaste://changed" | "copypaste://push-state" | 
 
 export type ExportReport = { exported: number, skipped_sensitive: number, skipped_non_text: number, skipped_undecryptable: number, };
 
-export type ImportData = { inserted: number, skipped: number, skipped_duplicate: number, skipped_empty: number, skipped_too_large: number, };
+export type ImportData = { inserted: number, skipped: number, skipped_duplicate: number, skipped_empty: number, skipped_too_large: number, pins_failed: number, };
 
 export type ImportPreview = { token: string, item_count: number, };
 
