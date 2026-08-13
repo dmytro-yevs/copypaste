@@ -6,15 +6,17 @@
  * every other harness module reaches `adb.ts`, which shells out at import time.
  */
 
-/** Tauri serves the frontend from its own protocol; nothing else in the app has a page target. */
-export const APP_ORIGIN = "tauri.localhost";
+/** Where Tauri serves the frontend on Android; nothing else in the app has a page target. */
+export const APP_ORIGIN = "http://tauri.localhost";
 
-/** The host, not a substring: `tauri.localhost.example.test` contains the
- *  origin and is a different site, and a WebView that loaded one would have
- *  been attached to and driven as if it were the app. */
+/** The whole origin, not the host and not a substring. `tauri.localhost.example.test`
+ *  merely contains the name; `https://tauri.localhost/` and `http://tauri.localhost:444/`
+ *  are the same name under a scheme and a port the app never serves, and each is a
+ *  separate document a WebView could hold. Attaching to one drives it as the app.
+ *  `URL.origin` normalises the default port, so `:80` is still the app. */
 export function isAppTarget(url: string): boolean {
   try {
-    return new URL(url).hostname === APP_ORIGIN;
+    return new URL(url).origin === APP_ORIGIN;
   } catch {
     return false;
   }
