@@ -15,6 +15,10 @@ test-endpoints = []
 [dependencies]
 copypaste-clock = { path = "../copypaste-clock" }
 copypaste-core = { path = "../copypaste-core" }
+# The content-type predicates that decide text from binary. One vocabulary for
+# the wire and for the store; a second copy here is how "is this text" comes to
+# mean two things on the two sides of the encryption boundary.
+copypaste-ipc = { path = "../copypaste-ipc" }
 reqwest.workspace = true
 tokio-tungstenite.workspace = true
 tokio.workspace = true

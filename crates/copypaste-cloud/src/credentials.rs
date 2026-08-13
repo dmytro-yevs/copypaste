@@ -21,6 +21,7 @@ pub enum CloudStateKey {
     WatermarkItemId,
     UploadFloorMs,
     UploadFloorItemId,
+    UnreadableUploads,
 }
 
 impl CloudStateKey {
@@ -40,6 +41,7 @@ impl CloudStateKey {
             Self::WatermarkItemId => "cloud_watermark_item_id",
             Self::UploadFloorMs => "cloud_upload_floor_ms",
             Self::UploadFloorItemId => "cloud_upload_floor_item_id",
+            Self::UnreadableUploads => "cloud_unreadable_uploads",
         }
     }
 }
@@ -65,6 +67,10 @@ pub const SIGN_OUT_KEYS: &[CloudStateKey] = &[
     CloudStateKey::SessionUserId,
     CloudStateKey::SyncKeyUserId,
     CloudStateKey::LastSyncMs,
+    // The unreadable-upload list is only meaningful while an account is
+    // waiting for those rows; leaving it behind would show a signed-out device
+    // a count it can do nothing about.
+    CloudStateKey::UnreadableUploads,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -53,7 +53,9 @@ pub mod pull;
 pub mod push;
 pub mod retry;
 pub mod source;
+pub mod store;
 pub mod transport;
+pub mod unreadable;
 
 #[cfg(test)]
 mod fakes;
@@ -66,7 +68,9 @@ pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;
 pub use push::{MAX_BINARY_BYTES, MAX_TEXT_BYTES};
 pub use source::{Applied, CloudSource, LocalItem, SensitiveGuard};
+pub use store::{floor_after_round, Offer, Scan, StoreView, UPLOAD_SCAN_LIMIT};
 pub use transport::{AuthApi, AuthFault, RestApi, TransportFault};
+pub use unreadable::{Sweep, UnreadableUploads, UploadFloor};
 
 #[cfg(test)]
 mod tests {
