@@ -266,9 +266,27 @@ sign_out_scenario() {
     capture_state signed-out-again
 }
 
+# Waiting for `Sign out` to appear spends the whole timeout whenever the answer
+# is that it never will: the offline probe had already ended the session, and
+# every release run paid 45 s to rediscover that. Only `blocked` — the card is
+# there and the control is disabled mid-mutation — is worth another sample.
+settle_sign_out_card() { # <artifact> [timeout] [dump fn] [scroll fn]
+    local artifact="$1" timeout="${2:-$WAIT_SECS}"
+    local dump="${3:-dump_hierarchy}" scroll="${4:-scroll_content}" started="$SECONDS"
+    while (( SECONDS - started < timeout )); do
+        if "$dump" "$artifact"; then
+            [[ "$(sign_out_precondition "$artifact")" != blocked ]] && return 0
+            dismiss_covering_feedback "$artifact" "Sign out" action && continue
+        fi
+        "$scroll" up
+        sleep 1
+    done
+    return 1
+}
+
 sign_out_lifecycle() {
     local pre="$OUT/sign-out.xml"
-    wait_selector_scrolling "Sign out" "$pre" up "$WAIT_SECS" action
+    settle_sign_out_card "$pre"
     if [[ "$(sign_out_precondition "$pre")" == restore ]]; then
         if restore_session "$OUT/restore-connected.xml"; then
             ok "a signed-in account is restored for the sign-out assertion"
@@ -277,7 +295,7 @@ sign_out_lifecycle() {
                 "$(cloud_card_state "$pre")"
             return
         fi
-        wait_selector_scrolling "Sign out" "$pre" up "$WAIT_SECS" action
+        settle_sign_out_card "$pre"
     fi
     if [[ "$(sign_out_precondition "$pre")" != ready ]]; then
         bad "the native sign-out action is reachable" "$(cloud_card_state "$pre")"
@@ -399,6 +417,31 @@ sign_out_self_test() { # <temp>
         && ok "a refused sign-out names the card it read" \
         || bad "a refused sign-out names the card it read" \
                "$(cloud_card_state "$temp/signed-out.xml")"
+
+    # The 45 s every release run spent rediscovering a session that had already
+    # ended. One dump answers it, and the sample count is the assertion.
+    ui_fixtures "$temp/signed-out.xml"
+    settle_sign_out_card "$temp/observed.xml" 30 ui_fixture_dump ui_fixture_scroll \
+        && [[ "$UI_FIXTURE_INDEX" == 1 && "$UI_FIXTURE_SCROLLS" == 0 ]] \
+        && ok "an ended session settles on its first sample" \
+        || bad "an ended session settles on its first sample" \
+               "$UI_FIXTURE_INDEX samples, $UI_FIXTURE_SCROLLS scrolls"
+    ui_fixtures "$temp/connected.xml"
+    settle_sign_out_card "$temp/observed.xml" 30 ui_fixture_dump ui_fixture_scroll \
+        && [[ "$UI_FIXTURE_INDEX" == 1 ]] \
+        && ok "an actionable sign-out settles on its first sample" \
+        || bad "an actionable sign-out settles on its first sample" "$UI_FIXTURE_INDEX samples"
+    # Disabled mid-mutation is the one state worth another sample, so this one
+    # does wait — and then reports rather than claiming the card was ready.
+    ui_fixtures "$temp/busy.xml" "$temp/busy.xml" "$temp/connected.xml"
+    settle_sign_out_card "$temp/observed.xml" 30 ui_fixture_dump ui_fixture_scroll \
+        && [[ "$UI_FIXTURE_INDEX" == 3 ]] \
+        && ok "a card still mutating is sampled again" \
+        || bad "a card still mutating is sampled again" "$UI_FIXTURE_INDEX samples"
+    ui_fixtures "$temp/busy.xml" "$temp/busy.xml"
+    settle_sign_out_card "$temp/observed.xml" 2 ui_fixture_dump ui_fixture_scroll \
+        && bad "a card that never settles times out" \
+        || ok "a card that never settles times out"
 }
 
 if [[ "$MODE" == "--self-test" ]]; then
