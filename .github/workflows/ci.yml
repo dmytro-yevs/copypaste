@@ -139,38 +139,10 @@ jobs:
       # and AGENTS.md rule 5 already answers it: a file that is one indivisible
       # responsibility is exempt, provided its module header names what was
       # considered for extraction and why doing it would make the code worse.
-      # EXEMPT is where that claim is registered, in the same commit as the
-      # header line. Nothing else about rule 5 is enforced anywhere.
-      - name: check-file-size.sh
-        run: |
-          set -uo pipefail
-
-          # Paths relative to crates/, one per line. Empty on purpose.
-          EXEMPT=""
-
-          out="$(./scripts/check-file-size.sh 500 || true)"
-          printf '%s\n' "$out"
-
-          {
-            echo '## File-size budget (CLAUDE.md rule 5)'
-            echo
-            echo '```'
-            printf '%s\n' "$out"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          fail=0
-          while read -r file lines; do
-            [ -n "$file" ] || continue
-            if printf '%s\n' "$EXEMPT" | grep -qxF "$file"; then
-              echo "::notice file=crates/${file}::${lines} source lines, exempt (rule 5)"
-              continue
-            fi
-            echo "::error file=crates/${file}::${lines} source lines, over the 500-line budget (CLAUDE.md rule 5). Split it, or claim the indivisible-responsibility exemption in the module header and add it to EXEMPT in .github/workflows/ci.yml."
-            fail=1
-          done < <(printf '%s\n' "$out" | awk '/^[^ ]+\.rs[[:space:]]+[0-9]+$/ { print $1, $2 }')
-
-          exit "$fail"
+      # The gate script holds EXEMPT, the parsing and its self-test, so that the
+      # decision is testable rather than inline YAML nothing can execute.
+      - name: check-file-size-gate.sh
+        run: ./scripts/check-file-size-gate.sh
 
   release-pipeline:
     name: release pipeline
@@ -197,9 +169,32 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint"
 
+      # check.sh lints every release script and parses the cask and the formula.
+      # Both tools are pinned rather than taken from the runner image: check.sh
+      # now fails when either is missing, so an image that drops one has to fail
+      # loudly here instead of silently linting nothing.
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.3"
+
+      - name: ShellCheck
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/shellcheck.tar.xz"
+          curl -fsSLo "$archive" \
+            https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
+          echo "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87  $archive" \
+            | sha256sum --check
+          tar -xJf "$archive" -C "$RUNNER_TEMP" shellcheck-v0.10.0/shellcheck
+          mkdir -p "${RUNNER_TEMP}/bin"
+          install -m 0755 "${RUNNER_TEMP}/shellcheck-v0.10.0/shellcheck" "${RUNNER_TEMP}/bin/shellcheck"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+
       - name: scripts/release/check.sh
         run: |
           set -euo pipefail
+          shellcheck --version
+          ruby --version
           python3 -m pip install --requirement requirements-ci.txt
           ./scripts/release/check.sh
 
