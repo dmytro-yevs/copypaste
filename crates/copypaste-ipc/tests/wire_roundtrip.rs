@@ -188,6 +188,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             last_sync_ms: Some(1),
             last_error: None,
             poll_interval_secs: 30,
+            unreadable_uploads: 2,
         }),
         ResponseData::CloudSync(CloudSyncData {
             uploaded: 1,

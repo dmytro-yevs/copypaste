@@ -1,55 +1,54 @@
-use std::sync::{Arc, Mutex, Weak};
+//! The app's history, as a cloud round sees it.
+//!
+//! Everything about *rows* is [`copypaste_cloud::sync::StoreView`], shared with
+//! the daemon. What is here is what only the app knows: that a round belongs to
+//! one account **and** to one cancellation token, and where device state lives.
 
-use copypaste_cloud::sync::{Applied, CloudSource, LocalItem, SyncError};
-use copypaste_core::RemoteVersion;
+use std::sync::{Arc, Weak};
+
+use copypaste_cloud::sync::{
+    floor_after_round, Applied, CloudSource, LocalItem, StoreView, SyncError, UnreadableUploads,
+};
 
 use super::cursor::UploadFloor;
-use super::{Driver, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM};
+use super::{
+    Driver, KEY_UNREADABLE_UPLOADS, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK,
+    KEY_WATERMARK_ITEM,
+};
 use crate::backend::embedded::open::Inner;
-
-const UPLOAD_SCAN_LIMIT: i64 = 500;
 
 struct Round {
     driver: Weak<Driver>,
     cancel: tokio_util::sync::CancellationToken,
 }
 
-#[derive(Clone, Default)]
-struct Offer {
-    truncated: bool,
-    last: UploadFloor,
-    started: UploadFloor,
-    started_epoch: u64,
-}
-
 pub(super) struct StoreSource {
     inner: Arc<Inner>,
-    shared: copypaste_core::StoreSource,
-    last_offer: Mutex<Offer>,
+    view: StoreView,
     round: Option<Round>,
 }
 
 impl StoreSource {
     pub(super) fn new(inner: &Arc<Inner>) -> Self {
-        Self {
-            shared: copypaste_core::StoreSource::new(
-                inner.state.store.clone(),
-                Arc::clone(&inner.state.keyring),
-                Arc::clone(&inner.state.detector),
-                inner.state.device_id.clone(),
-                inner.state.device_name(),
-                inner.settings(),
-            )
-            .on_applied({
-                let inner = Arc::downgrade(inner);
-                move |created_at| {
-                    if let Some(inner) = inner.upgrade() {
-                        inner.note_cloud_version_applied(created_at);
-                    }
+        let shared = copypaste_core::StoreSource::new(
+            inner.state.store.clone(),
+            Arc::clone(&inner.state.keyring),
+            Arc::clone(&inner.state.detector),
+            inner.state.device_id.clone(),
+            inner.state.device_name(),
+            inner.settings(),
+        )
+        .on_applied({
+            let inner = Arc::downgrade(inner);
+            move |created_at| {
+                if let Some(inner) = inner.upgrade() {
+                    inner.note_cloud_version_applied(created_at);
                 }
-            }),
+            }
+        });
+        Self {
+            view: StoreView::new(shared, inner.state.device_id.clone()),
             inner: Arc::clone(inner),
-            last_offer: Mutex::new(Offer::default()),
             round: None,
         }
     }
@@ -81,23 +80,23 @@ impl StoreSource {
     }
 
     pub(super) fn commit_upload_floor(&self, started_ms: i64) -> Result<(), SyncError> {
-        let offer = self
-            .last_offer
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone();
-        let candidate = if offer.truncated && offer.last.created_at <= started_ms {
-            offer.last
-        } else {
-            UploadFloor {
-                created_at: started_ms,
-                item_id: None,
-            }
-        };
+        let offer = self.view.offer();
+        let candidate = floor_after_round(&offer, started_ms);
         self.while_active(|| {
             self.inner
                 .cloud
-                .commit_upload_floor(&self.inner, &offer.started, offer.started_epoch, &candidate)
+                .commit_upload_floor(
+                    &self.inner,
+                    &UploadFloor {
+                        created_at: offer.started.created_at,
+                        item_id: offer.started.item_id.clone(),
+                    },
+                    offer.started_epoch,
+                    &UploadFloor {
+                        created_at: candidate.created_at,
+                        item_id: candidate.item_id.clone(),
+                    },
+                )
                 .map_err(source_error)
         })
     }
@@ -105,7 +104,7 @@ impl StoreSource {
 
 impl CloudSource for StoreSource {
     fn device_id(&self) -> String {
-        self.inner.state.device_id.clone()
+        self.view.device_id().to_string()
     }
 
     fn local_changes_since(&self, since_ms: i64) -> Result<Vec<LocalItem>, SyncError> {
@@ -117,11 +116,49 @@ impl CloudSource for StoreSource {
         since_ms: i64,
         after_item_id: Option<&str>,
     ) -> Result<Vec<LocalItem>, SyncError> {
-        self.while_active(|| self.local_changes_after_active(since_ms, after_item_id))
+        self.while_active(|| {
+            let started_epoch = self.inner.cloud.upload_floor_epoch();
+            let previous = UnreadableUploads::decode(
+                self.inner
+                    .state
+                    .store
+                    .state(KEY_UNREADABLE_UPLOADS)
+                    .map_err(source_error)?
+                    .as_deref(),
+            );
+            if previous.reset_floor {
+                self.inner.note_version_written(0);
+            }
+            let scan = self.view.scan(
+                &self.inner.state.store,
+                since_ms,
+                after_item_id,
+                started_epoch,
+                &previous,
+            )?;
+            if scan.unreadable != previous {
+                self.inner
+                    .state
+                    .store
+                    .set_state(KEY_UNREADABLE_UPLOADS, &scan.unreadable.encode())
+                    .map_err(source_error)?;
+            }
+            self.inner
+                .cloud
+                .note_unreadable_uploads(scan.unreadable.total);
+            Ok(scan.items)
+        })
     }
 
     fn apply_remote(&self, item: LocalItem) -> Result<Applied, SyncError> {
-        self.while_active(|| self.apply_remote_active(item))
+        self.apply_remote_batch(vec![item])?
+            .pop()
+            .ok_or(SyncError::Source(copypaste_core::sync::MSG_STORE))
+    }
+
+    /// One page, one round check, one write transaction.
+    fn apply_remote_batch(&self, items: Vec<LocalItem>) -> Result<Vec<Applied>, SyncError> {
+        self.while_active(|| self.view.apply_page(items))
     }
 
     fn watermark(&self) -> Result<i64, SyncError> {
@@ -188,117 +225,7 @@ impl CloudSource for StoreSource {
     }
 
     fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
-        self.while_active(|| self.requeue_local_winner_active(incoming))
-    }
-}
-
-impl StoreSource {
-    fn local_changes_after_active(
-        &self,
-        since_ms: i64,
-        after_item_id: Option<&str>,
-    ) -> Result<Vec<LocalItem>, SyncError> {
-        let started_epoch = self.inner.cloud.upload_floor_epoch();
-        let rows = self
-            .inner
-            .state
-            .store
-            .versions_after(since_ms, after_item_id, UPLOAD_SCAN_LIMIT)
-            .map_err(source_error)?;
-        *self
-            .last_offer
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Offer {
-            truncated: rows.len() as i64 >= UPLOAD_SCAN_LIMIT,
-            last: rows.last().map_or_else(
-                || UploadFloor {
-                    created_at: since_ms,
-                    item_id: after_item_id.map(str::to_owned),
-                },
-                |row| UploadFloor {
-                    created_at: row.created_at,
-                    item_id: Some(row.id.clone()),
-                },
-            ),
-            started: UploadFloor {
-                created_at: since_ms,
-                item_id: after_item_id.map(str::to_owned),
-            },
-            started_epoch,
-        };
-        let mut items = Vec::with_capacity(rows.len());
-        for row in rows {
-            let content = if row.deleted {
-                Vec::new()
-            } else if let Ok(bytes) = self.shared.open_bytes(&row) {
-                bytes
-            } else {
-                continue;
-            };
-            items.push(LocalItem {
-                origin_device_id: copypaste_core::origin_or(
-                    &row.origin_device_id,
-                    &self.inner.state.device_id,
-                )
-                .to_string(),
-                item_id: row.id,
-                content,
-                content_type: row.content_type,
-                payload_metadata: row.payload_metadata,
-                created_at: row.created_at,
-                deleted: row.deleted,
-            });
-        }
-        Ok(items)
-    }
-
-    fn apply_remote_active(&self, item: LocalItem) -> Result<Applied, SyncError> {
-        let text = copypaste_ipc::content_type::is_text(&item.content_type)
-            .then(|| String::from_utf8_lossy(&item.content));
-        let applied = self
-            .shared
-            .apply_version(&RemoteVersion {
-                item_id: &item.item_id,
-                content: text.as_deref().unwrap_or(""),
-                binary_content: (!item.deleted
-                    && !copypaste_ipc::content_type::is_text(&item.content_type))
-                .then_some(item.content.as_slice()),
-                payload_metadata: item.payload_metadata.as_deref(),
-                content_type: &item.content_type,
-                created_at: item.created_at,
-                deleted: item.deleted,
-                content_hash: None,
-                origin_device_id: &item.origin_device_id,
-            })
-            .map_err(|_| SyncError::Source(copypaste_core::sync::MSG_STORE))?;
-        Ok(if applied {
-            Applied::Merged
-        } else {
-            Applied::Declined(item)
-        })
-    }
-
-    fn requeue_local_winner_active(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
-        let text = copypaste_ipc::content_type::is_text(&incoming.content_type)
-            .then(|| String::from_utf8_lossy(&incoming.content));
-        let stamp = copypaste_core::local_winner_stamp(
-            &self.inner.state.store,
-            &self.inner.state.device_id,
-            &RemoteVersion {
-                item_id: &incoming.item_id,
-                content: text.as_deref().unwrap_or(""),
-                binary_content: (!incoming.deleted
-                    && !copypaste_ipc::content_type::is_text(&incoming.content_type))
-                .then_some(incoming.content.as_slice()),
-                payload_metadata: incoming.payload_metadata.as_deref(),
-                content_type: &incoming.content_type,
-                created_at: incoming.created_at,
-                deleted: incoming.deleted,
-                content_hash: None,
-                origin_device_id: &incoming.origin_device_id,
-            },
-        )
-        .map_err(|_| SyncError::Source(copypaste_core::sync::MSG_STORE))?;
+        let stamp = self.while_active(|| self.view.requeue_stamp(incoming))?;
         if let Some(stamp) = stamp {
             self.inner.note_version_written(stamp);
             return Ok(true);

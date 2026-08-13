@@ -166,6 +166,13 @@ export const settings = {
       loading: "Checking account…",
       retry: "Try again",
       lastError: "The last cloud sync failed. Try again or sign in again.",
+      // Not an error: the rest of sync is working. It is the only thing that
+      // separates "everything is uploaded" from "everything but these", and
+      // the row's content and identity deliberately never reach the client.
+      unreadableUploads_one:
+        "1 item on this device could not be prepared for cloud sync and is being retried.",
+      unreadableUploads_other:
+        "{{count}} items on this device could not be prepared for cloud sync and are being retried.",
       formLabel: "Cloud account sign in",
       email: "Email",
       password: "Password",

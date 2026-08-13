@@ -47,6 +47,7 @@ function cloudStatus(overrides: Partial<CloudStatusData> = {}): CloudStatusData 
     last_sync_ms: null,
     last_error: null,
     poll_interval_secs: 60,
+    unreadable_uploads: 0,
     ...overrides,
   };
 }

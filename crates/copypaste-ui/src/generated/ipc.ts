@@ -2,7 +2,7 @@
 
 export type ConfigApplied = { config: ConfigData, restart_required: Array<string>, };
 
-export type CloudStatusData = { configured: boolean, signed_in: boolean, key_ready: boolean, email: string | null, last_sync_ms: number | null, last_error: string | null, poll_interval_secs: number, };
+export type CloudStatusData = { configured: boolean, signed_in: boolean, key_ready: boolean, email: string | null, last_sync_ms: number | null, last_error: string | null, poll_interval_secs: number, unreadable_uploads: number, };
 
 export type CloudSyncData = { uploaded: number, tombstoned: number, downloaded: number, applied: number, skipped_sensitive: number, skipped_undecryptable: number, skipped_forged: number, skipped_future: number, skipped_too_large: number, };
 

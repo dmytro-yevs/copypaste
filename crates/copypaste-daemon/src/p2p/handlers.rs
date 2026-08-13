@@ -237,6 +237,11 @@ pub async fn sync_now(state: &Arc<AppState>, id: u64, pairing_id: Option<&str>) 
         None => state.p2p.peers().list(),
     };
 
+    // Queued behind any pass the poll loop is running rather than dialling the
+    // same peers beside it: two sessions to one peer make the far side's
+    // session limit refuse the second, and the user asked after the running
+    // pass had already read its summaries.
+    let _permit = state.p2p.begin_round().await;
     let mut results = Vec::with_capacity(targets.len());
     for peer in &targets {
         results.push(sync_one(state, peer).await);
@@ -634,6 +639,31 @@ mod tests {
         let (state, _dir) = test_state("alpha");
         let response = sync_now(&state, 1, Some("0123456789abcdef")).await;
         assert_eq!(response.error_code, Some(ErrorCode::PeerNotFound));
+    }
+
+    /// `copypaste sync` used to dial every peer while the poll loop was doing
+    /// the same. Two sessions to one peer are not two syncs: the far side's
+    /// session limit refuses the second, so the run reports a failure for a
+    /// peer that is in fact reachable and syncing.
+    #[tokio::test]
+    async fn an_explicit_sync_waits_for_a_running_pass_rather_than_dialling_beside_it() {
+        let (state, _dir) = test_state("alpha");
+        let held = state.p2p.begin_round().await;
+        assert!(state.p2p.round_in_flight());
+
+        let queued = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { sync_now(&state, 1, None).await.ok }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !queued.is_finished(),
+            "an explicit sync dialled beside a running pass"
+        );
+
+        drop(held);
+        assert!(queued.await.unwrap());
+        assert!(state.p2p.try_begin_round().is_some(), "the permit leaked");
     }
 
     #[tokio::test]

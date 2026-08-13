@@ -1,8 +1,10 @@
 //! The daemon's history, as a cloud round sees it.
 //!
-//! Reads and writes go through the same [`copypaste_core::StoreSource`] the
-//! peer transport uses, so the `is_sensitive = 0` filter and the comparator
-//! behind it are shared rather than reimplemented (INV-C2).
+//! Everything about *rows* is [`copypaste_cloud::sync::StoreView`], shared with
+//! the Tauri app so the upload scan, the truncation bookkeeping and the page
+//! merge cannot come to mean two things. What is here is what only the daemon
+//! knows: that a round belongs to one account, where device state lives, and
+//! that every one of those calls is SQLite on a reactor thread.
 //!
 //! # The two cursors
 //!
@@ -14,28 +16,21 @@
 //! A version can also appear *below* the floor — a peer applies rows carrying
 //! the sender's stamp, and `Store::delete` tombstones without restamping. Both
 //! call [`crate::cloud::note_version_written`] to pull the floor back; without
-//! it, peer items and deletes of old items never reach the account. The cleaner
-//! fix for the delete half is for `copypaste-core::Store::delete` to restamp on
-//! mutation, which is what `CloudItem::created_at` asks of writers anyway.
+//! it, peer items and deletes of old items never reach the account.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use copypaste_cloud::sync::{Applied, CloudSource, LocalItem, SyncError};
+use copypaste_cloud::sync::{
+    floor_after_round, Applied, CloudSource, LocalItem, StoreView, SyncError, UnreadableUploads,
+};
 use copypaste_core::sync::blocking;
-use copypaste_core::RemoteVersion;
 use tracing::warn;
 
 use crate::cloud::{
-    Driver, UploadFloor, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM,
+    Driver, UploadFloor, KEY_UNREADABLE_UPLOADS, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM,
+    KEY_WATERMARK, KEY_WATERMARK_ITEM,
 };
 use crate::AppState;
-
-/// Local versions offered to one push.
-///
-/// A bound on the query and on the memory one round holds, not on what
-/// eventually uploads: the floor does not advance until a round completes, so a
-/// larger backlog simply takes several rounds to drain.
-const UPLOAD_SCAN_LIMIT: i64 = 500;
 
 pub struct StoreSource {
     state: Arc<AppState>,
@@ -43,33 +38,16 @@ pub struct StoreSource {
     /// The shared sync view. Held rather than rebuilt per call so one round
     /// opens and merges through one source, and so this file cannot grow a
     /// second answer to "what does this device hold".
-    shared: copypaste_core::StoreSource,
-    last_offer: Mutex<Offer>,
-}
-
-/// What the last push was actually shown.
-#[derive(Default, Clone)]
-struct Offer {
-    /// The scan hit [`UPLOAD_SCAN_LIMIT`], so there is more behind it.
-    truncated: bool,
-    /// The last offered row's full keyset — the furthest the floor may move
-    /// when the scan was truncated.
-    last: UploadFloor,
-    /// The cursor this scan started from. It lets completion detect a peer
-    /// write that lowered the floor while the round was in flight.
-    started: UploadFloor,
-    /// Detects a write that landed at the same keyset boundary, where comparing
-    /// only the floor pair cannot prove the scan saw it.
-    started_epoch: u64,
+    view: StoreView,
 }
 
 impl StoreSource {
     pub fn new(state: Arc<AppState>) -> Self {
+        let device_id = state.meta.device_id().to_string();
         Self {
-            shared: crate::sync::store_source(&state),
+            view: StoreView::new(crate::sync::store_source(&state), device_id),
             state,
             expected: None,
-            last_offer: Mutex::new(Offer::default()),
         }
     }
 
@@ -89,32 +67,33 @@ impl StoreSource {
         }
     }
 
-    /// Where the upload floor may move now that a round has completed.
+    /// One account check and one blocking scope, whatever the call reads.
     ///
-    /// Normally the instant the round began — everything older was offered. But
-    /// when the scan was truncated, only the batch that was *shown* has been
-    /// offered, so the floor may move no further than its newest stamp;
-    /// jumping to the round's start would silently drop every row the limit cut
-    /// off, which is exactly how a large backlog would lose all but its first
-    /// page.
+    /// Both were per row before, and a 500-row page took 500 of each — nested,
+    /// because the batch wrapped its own `blocking` around the per-row ones.
+    fn read<T>(&self, action: impl FnOnce() -> Result<T, SyncError>) -> Result<T, SyncError> {
+        self.with_account(|| blocking(action))
+    }
+
+    /// Where the upload floor may move now that a round has completed.
     pub fn commit_upload_floor(&self, round_started_ms: i64) -> Result<(), SyncError> {
-        let offer = self
-            .last_offer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let next = if offer.truncated && offer.last.created_at <= round_started_ms {
-            offer.last
-        } else {
-            UploadFloor {
-                created_at: round_started_ms,
-                item_id: None,
-            }
-        };
-        self.with_account(|| {
+        let offer = self.view.offer();
+        let next = floor_after_round(&offer, round_started_ms);
+        self.read(|| {
             self.state
                 .cloud
-                .commit_upload_floor(&self.state.meta, &offer.started, offer.started_epoch, &next)
+                .commit_upload_floor(
+                    &self.state.meta,
+                    &UploadFloor {
+                        created_at: offer.started.created_at,
+                        item_id: offer.started.item_id.clone(),
+                    },
+                    offer.started_epoch,
+                    &UploadFloor {
+                        created_at: next.created_at,
+                        item_id: next.item_id.clone(),
+                    },
+                )
                 .map_err(source_error)
         })
     }
@@ -122,7 +101,7 @@ impl StoreSource {
 
 impl CloudSource for StoreSource {
     fn device_id(&self) -> String {
-        self.state.meta.device_id().to_string()
+        self.view.device_id().to_string()
     }
 
     fn local_changes_since(&self, since_ms: i64) -> Result<Vec<LocalItem>, SyncError> {
@@ -134,176 +113,93 @@ impl CloudSource for StoreSource {
         since_ms: i64,
         after_item_id: Option<&str>,
     ) -> Result<Vec<LocalItem>, SyncError> {
-        self.with_account(|| {
+        self.read(|| {
             let started_epoch = self.state.cloud.upload_floor_epoch();
-            blocking(|| {
-                let rows = self
-                    .state
-                    .store
-                    .versions_after(since_ms, after_item_id, UPLOAD_SCAN_LIMIT)
+            let previous = UnreadableUploads::decode(
+                self.state
+                    .meta
+                    .state(KEY_UNREADABLE_UPLOADS)
+                    .map_err(source_error)?
+                    .as_deref(),
+            );
+            if previous.reset_floor {
+                crate::cloud::note_version_written(&self.state, 0);
+            }
+            let scan = self.view.scan(
+                &self.state.store,
+                since_ms,
+                after_item_id,
+                started_epoch,
+                &previous,
+            )?;
+            if scan.unreadable != previous {
+                self.state
+                    .meta
+                    .set_state(KEY_UNREADABLE_UPLOADS, &scan.unreadable.encode())
                     .map_err(source_error)?;
-
-                *self.last_offer.lock().unwrap_or_else(|e| e.into_inner()) = Offer {
-                    truncated: rows.len() as i64 >= UPLOAD_SCAN_LIMIT,
-                    last: rows.last().map_or_else(
-                        || UploadFloor {
-                            created_at: since_ms,
-                            item_id: after_item_id.map(str::to_owned),
-                        },
-                        |row| UploadFloor {
-                            created_at: row.created_at,
-                            item_id: Some(row.id.clone()),
-                        },
-                    ),
-                    started: UploadFloor {
-                        created_at: since_ms,
-                        item_id: after_item_id.map(str::to_owned),
-                    },
-                    started_epoch,
-                };
-
-                let mut items = Vec::with_capacity(rows.len());
-                for row in rows {
-                    // A tombstone has no payload to open, and carries none on the
-                    // wire either (manifest 05 T-4).
-                    let content = if row.deleted {
-                        Vec::new()
-                    } else {
-                        match self.shared.open_bytes(&row) {
-                            Ok(content) => content,
-                            Err(_) => continue,
-                        }
-                    };
-                    items.push(LocalItem {
-                        origin_device_id: copypaste_core::origin_or(
-                            &row.origin_device_id,
-                            self.state.meta.device_id(),
-                        )
-                        .to_string(),
-                        item_id: row.id,
-                        content,
-                        content_type: row.content_type,
-                        payload_metadata: row.payload_metadata,
-                        created_at: row.created_at,
-                        deleted: row.deleted,
-                    });
-                }
-                Ok(items)
-            })
+            }
+            self.state
+                .cloud
+                .note_unreadable_uploads(scan.unreadable.total);
+            Ok(scan.items)
         })
     }
 
     fn apply_remote(&self, item: LocalItem) -> Result<Applied, SyncError> {
-        self.with_account(|| {
-            blocking(|| {
-                let text = copypaste_ipc::content_type::is_text(&item.content_type)
-                    .then(|| String::from_utf8_lossy(&item.content));
-                let applied = self
-                    .shared
-                    .apply_version(&RemoteVersion {
-                        item_id: &item.item_id,
-                        content: text.as_deref().unwrap_or(""),
-                        binary_content: (!item.deleted
-                            && !copypaste_ipc::content_type::is_text(&item.content_type))
-                        .then_some(item.content.as_slice()),
-                        payload_metadata: item.payload_metadata.as_deref(),
-                        content_type: &item.content_type,
-                        created_at: item.created_at,
-                        deleted: item.deleted,
-                        // The cloud row carries no hash — see `RemoteVersion`.
-                        content_hash: None,
-                        origin_device_id: &item.origin_device_id,
-                    })
-                    .map_err(|e| SyncError::Source(e.message()))?;
-
-                if applied {
-                    self.state
-                        .p2p
-                        .node()
-                        .cursors()
-                        .note_applied("", item.created_at);
-                }
-                Ok(if applied {
-                    Applied::Merged
-                } else {
-                    Applied::Declined(item)
-                })
-            })
-        })
+        self.apply_remote_batch(vec![item])?
+            .pop()
+            .ok_or(SyncError::Source(copypaste_core::sync::MSG_STORE))
     }
 
+    /// One page, one account check, one blocking scope, one write transaction.
     fn apply_remote_batch(&self, items: Vec<LocalItem>) -> Result<Vec<Applied>, SyncError> {
-        blocking(|| {
-            items
-                .into_iter()
-                .map(|item| self.apply_remote(item))
-                .collect()
-        })
+        let floor = items.iter().map(|item| item.created_at).min();
+        let outcomes = self.read(|| self.view.apply_page(items))?;
+        // The peer cursors are lowered once for the page rather than once per
+        // row: the call is a `min`, so the oldest stamp is the only one that
+        // moves it.
+        if let Some(floor) = floor {
+            if outcomes.iter().any(|o| matches!(o, Applied::Merged)) {
+                self.state.p2p.node().cursors().note_applied("", floor);
+            }
+        }
+        Ok(outcomes)
     }
 
     fn watermark(&self) -> Result<i64, SyncError> {
-        self.with_account(|| {
-            blocking(|| {
-                self.state
-                    .meta
-                    .state_ms(KEY_WATERMARK)
-                    .map_err(source_error)
-            })
+        self.read(|| {
+            self.state
+                .meta
+                .state_ms(KEY_WATERMARK)
+                .map_err(source_error)
         })
     }
 
     fn upload_floor(&self) -> Result<i64, SyncError> {
-        self.with_account(|| {
-            blocking(|| {
-                self.state
-                    .meta
-                    .state_ms(KEY_UPLOAD_FLOOR)
-                    .map_err(source_error)
-            })
+        self.read(|| {
+            self.state
+                .meta
+                .state_ms(KEY_UPLOAD_FLOOR)
+                .map_err(source_error)
         })
     }
 
     fn upload_floor_item_id(&self) -> Result<Option<String>, SyncError> {
-        self.with_account(|| {
-            blocking(|| {
-                self.state
-                    .meta
-                    .state(KEY_UPLOAD_FLOOR_ITEM)
-                    .map_err(source_error)
-            })
+        self.read(|| {
+            self.state
+                .meta
+                .state(KEY_UPLOAD_FLOOR_ITEM)
+                .map_err(source_error)
         })
     }
 
     fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
-        self.with_account(|| {
-            blocking(|| {
-                let text = copypaste_ipc::content_type::is_text(&incoming.content_type)
-                    .then(|| String::from_utf8_lossy(&incoming.content));
-                let stamp = copypaste_core::local_winner_stamp(
-                    self.shared.store(),
-                    self.state.meta.device_id(),
-                    &RemoteVersion {
-                        item_id: &incoming.item_id,
-                        content: text.as_deref().unwrap_or(""),
-                        binary_content: (!incoming.deleted
-                            && !copypaste_ipc::content_type::is_text(&incoming.content_type))
-                        .then_some(incoming.content.as_slice()),
-                        payload_metadata: incoming.payload_metadata.as_deref(),
-                        content_type: &incoming.content_type,
-                        created_at: incoming.created_at,
-                        deleted: incoming.deleted,
-                        content_hash: None,
-                        origin_device_id: &incoming.origin_device_id,
-                    },
-                )
-                .map_err(|error| SyncError::Source(error.message()))?;
-                if let Some(stamp) = stamp {
-                    crate::cloud::note_version_written(&self.state, stamp);
-                    return Ok(true);
-                }
-                Ok(false)
-            })
-        })
+        let stamp = self.read(|| self.view.requeue_stamp(incoming))?;
+        if let Some(stamp) = stamp {
+            crate::cloud::note_version_written(&self.state, stamp);
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// The tie-break half of the download cursor.
@@ -316,13 +212,11 @@ impl CloudSource for StoreSource {
     /// because a bound over a non-unique key cannot be paged past (INV-N1,
     /// AT-24). Two columns of work, as the trait's own doc says.
     fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
-        self.with_account(|| {
-            blocking(|| {
-                self.state
-                    .meta
-                    .state(KEY_WATERMARK_ITEM)
-                    .map_err(source_error)
-            })
+        self.read(|| {
+            self.state
+                .meta
+                .state(KEY_WATERMARK_ITEM)
+                .map_err(source_error)
         })
     }
 
@@ -333,16 +227,14 @@ impl CloudSource for StoreSource {
     /// round's id beside a newer millisecond would make the pull query skip
     /// every row at that millisecond sorting below it.
     fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
-        self.with_account(|| {
-            blocking(|| {
-                self.state
-                    .meta
-                    .set_state_all(&[
-                        (KEY_WATERMARK, &ms.max(0).to_string()),
-                        (KEY_WATERMARK_ITEM, ""),
-                    ])
-                    .map_err(source_error)
-            })
+        self.read(|| {
+            self.state
+                .meta
+                .set_state_all(&[
+                    (KEY_WATERMARK, &ms.max(0).to_string()),
+                    (KEY_WATERMARK_ITEM, ""),
+                ])
+                .map_err(source_error)
         })
     }
 
@@ -357,16 +249,14 @@ impl CloudSource for StoreSource {
         if item_id.is_empty() {
             return self.set_watermark(ms);
         }
-        self.with_account(|| {
-            blocking(|| {
-                self.state
-                    .meta
-                    .set_state_all(&[
-                        (KEY_WATERMARK, &ms.max(0).to_string()),
-                        (KEY_WATERMARK_ITEM, item_id),
-                    ])
-                    .map_err(source_error)
-            })
+        self.read(|| {
+            self.state
+                .meta
+                .set_state_all(&[
+                    (KEY_WATERMARK, &ms.max(0).to_string()),
+                    (KEY_WATERMARK_ITEM, item_id),
+                ])
+                .map_err(source_error)
         })
     }
 }
@@ -505,7 +395,7 @@ mod tests {
     fn upload_keyset_drains_a_full_round_started_boundary_without_replaying_it() {
         let (source, _state, _dir) = source("alpha");
         let stamp = 1_700_000_000_000;
-        for n in 0..=UPLOAD_SCAN_LIMIT {
+        for n in 0..=copypaste_cloud::sync::UPLOAD_SCAN_LIMIT {
             source
                 .apply_remote(LocalItem {
                     item_id: format!("boundary-{n:04}"),
@@ -520,7 +410,7 @@ mod tests {
         }
 
         let first = source.local_changes_after(0, None).unwrap();
-        assert_eq!(first.len() as i64, UPLOAD_SCAN_LIMIT);
+        assert_eq!(first.len() as i64, copypaste_cloud::sync::UPLOAD_SCAN_LIMIT);
         let last = first.last().unwrap().item_id.clone();
         source.commit_upload_floor(stamp).unwrap();
 
@@ -763,6 +653,220 @@ mod tests {
             source.upload_floor().unwrap(),
             passed_floor,
             "a normal self echo scheduled a duplicate upload"
+        );
+    }
+}
+
+/// The failures DMY-155 found in the upload scan and the page merge, and the
+/// measurements that say the fixes hold.
+#[cfg(test)]
+mod round_tests {
+    use super::*;
+    use crate::testutil::{add, test_state};
+    use copypaste_core::NewItem;
+
+    fn source(name: &str) -> (StoreSource, Arc<AppState>, tempfile::TempDir) {
+        let (state, dir) = test_state(name);
+        (StoreSource::new(Arc::clone(&state)), state, dir)
+    }
+
+    /// A row this device's own key will not open. Sealed under a second
+    /// keyring, which is what a corrupted payload or a rotated device key
+    /// looks like from the merge's side.
+    fn add_unreadable(state: &Arc<AppState>, id: &str, created_at: i64) {
+        let stranger = copypaste_core::Keyring::from_secret(&[0xAB; 32]);
+        let (nonce, ciphertext) =
+            copypaste_core::encrypt(b"sealed elsewhere", &stranger.item_key(), id).unwrap();
+        state
+            .store
+            .insert(NewItem {
+                id: id.to_string(),
+                content_ciphertext: ciphertext,
+                nonce,
+                content_type: "text".into(),
+                content_hash: copypaste_core::compute_content_hash(b"sealed elsewhere"),
+                is_sensitive: false,
+                search_text: None,
+                created_at,
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+    }
+
+    /// The upload half of INV-N3. A row that will not open cannot be uploaded,
+    /// and the scan used to drop it on the floor: the round then advanced the
+    /// upload floor past it, so it was never offered again and nothing
+    /// anywhere said so.
+    ///
+    /// What must hold now: the readable rows still upload, the floor still
+    /// advances (an unreadable row must not stall every row behind it), the
+    /// row stays on a retry list, and the count reaches the status a client
+    /// reads.
+    #[tokio::test]
+    async fn a_row_that_will_not_open_is_counted_and_kept_rather_than_dropped() {
+        let (source, state, _dir) = source("alpha");
+        add_unreadable(&state, "unreadable", 1_000);
+        let readable = add(&state, "an ordinary snippet");
+
+        let offered = source.local_changes_after(0, None).unwrap();
+        assert_eq!(
+            offered
+                .iter()
+                .map(|i| i.item_id.as_str())
+                .collect::<Vec<_>>(),
+            [readable.as_str()],
+            "an unopenable row reached the upload path"
+        );
+        assert_eq!(
+            state.cloud.status().unreadable_uploads,
+            1,
+            "the row was skipped without saying so"
+        );
+
+        // The floor advances — the row will never start opening, and holding
+        // the floor below it would stall every later row for good.
+        let started = copypaste_core::now_ms() + 1;
+        source.commit_upload_floor(started).unwrap();
+        assert!(source.upload_floor().unwrap() >= started);
+
+        // And it is still retried, from above the floor, so a device whose key
+        // situation is repaired offers the row rather than having lost it.
+        let after = source.local_changes_after(started, None).unwrap();
+        assert!(
+            after.is_empty(),
+            "an unreadable row was offered as if it had opened"
+        );
+        assert_eq!(state.cloud.status().unreadable_uploads, 1);
+    }
+
+    /// The retry half. Once the row can be read, the next scan offers it even
+    /// though the floor has long since passed its stamp.
+    #[tokio::test]
+    async fn a_row_that_becomes_readable_is_offered_again_from_the_retry_list() {
+        let (source, state, _dir) = source("alpha");
+        add_unreadable(&state, "unreadable", 1_000);
+        source.local_changes_after(0, None).unwrap();
+        let started = copypaste_core::now_ms() + 1;
+        source.commit_upload_floor(started).unwrap();
+        assert_eq!(state.cloud.status().unreadable_uploads, 1);
+
+        // Repaired: the same id, now sealed under this device's key.
+        let key = state.keyring.item_key();
+        let (nonce, ciphertext) =
+            copypaste_core::encrypt(b"readable now", &key, "unreadable").unwrap();
+        state
+            .store
+            .upsert(&copypaste_core::IncomingItem {
+                id: "unreadable",
+                content_ciphertext: Some(&ciphertext),
+                nonce: Some(&nonce),
+                content_type: "text",
+                content_hash: &copypaste_core::compute_content_hash(b"readable now"),
+                created_at: 1_000,
+                deleted: false,
+                is_sensitive: false,
+                origin_device_id: "",
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
+                search_text: Some("readable now"),
+                payload_metadata: None,
+            })
+            .unwrap();
+
+        let offered = source.local_changes_after(started, None).unwrap();
+        assert!(
+            offered.iter().any(|item| item.item_id == "unreadable"),
+            "a repaired row below the floor was lost"
+        );
+        assert_eq!(
+            state.cloud.status().unreadable_uploads,
+            0,
+            "the count did not clear once the row could be read"
+        );
+    }
+
+    /// Nothing about the row reaches a client: not the id, not the content,
+    /// not a path (`AGENTS.md` rule 4).
+    #[tokio::test]
+    async fn the_unreadable_record_never_carries_a_row_identity_to_a_client() {
+        let (source, state, _dir) = source("alpha");
+        add_unreadable(&state, "a-very-distinctive-id", 1_000);
+        source.local_changes_after(0, None).unwrap();
+
+        let status = state.cloud.status();
+        let frame = serde_json::to_string(&status).unwrap();
+        assert!(!frame.contains("a-very-distinctive-id"), "{frame}");
+        assert!(!frame.contains("sealed elsewhere"), "{frame}");
+        assert_eq!(status.unreadable_uploads, 1);
+    }
+
+    /// A 500-row page, driven the way `CloudSync::pull` drives it.
+    ///
+    /// Before: `apply_remote_batch` wrapped its own `blocking` around 500
+    /// per-row calls, each of which took the account guard, its own `blocking`
+    /// scope, one pooled connection to read the local version and a second to
+    /// write it under its own IMMEDIATE transaction — about 1,000 checkouts and
+    /// 500 commits for one page, on a pool four deep.
+    ///
+    /// After: one account guard, one blocking scope, one read of every local
+    /// version and one write transaction. What is asserted here is the
+    /// behaviour that must survive the change; the counts are in the commit's
+    /// evidence.
+    #[tokio::test]
+    async fn a_five_hundred_row_page_merges_through_one_batch_with_every_row_answered() {
+        let (source, state, _dir) = source("alpha");
+        let page: Vec<LocalItem> = (0..500)
+            .map(|n| LocalItem {
+                item_id: format!("page-{n:04}"),
+                content: format!("row {n}").into_bytes(),
+                content_type: "text".into(),
+                payload_metadata: None,
+                created_at: 1_700_000_000_000 + i64::from(n),
+                deleted: false,
+                origin_device_id: "device-b".into(),
+            })
+            .collect();
+
+        let outcomes = source.apply_remote_batch(page.clone()).unwrap();
+        assert_eq!(outcomes.len(), 500, "the page was not answered for in full");
+        assert!(outcomes.iter().all(|o| *o == Applied::Merged));
+        assert_eq!(state.store.count().unwrap(), 500);
+
+        // Replaying the page changes nothing: the comparator, not the batching,
+        // is what makes that true (INV-I1).
+        let replayed = source.apply_remote_batch(page).unwrap();
+        assert_eq!(replayed.len(), 500);
+        assert!(replayed.iter().all(|o| matches!(o, Applied::Declined(_))));
+        assert_eq!(state.store.count().unwrap(), 500);
+    }
+
+    /// Two versions of one id inside a page must be decided against each
+    /// other, not both against the row on disk — the write has not happened
+    /// yet when the second one is prepared.
+    #[tokio::test]
+    async fn two_versions_of_one_item_in_a_page_keep_the_newer() {
+        let (source, state, _dir) = source("alpha");
+        let version = |created_at: i64, body: &str| LocalItem {
+            item_id: "same-id".into(),
+            content: body.as_bytes().to_vec(),
+            content_type: "text".into(),
+            payload_metadata: None,
+            created_at,
+            deleted: false,
+            origin_device_id: "device-b".into(),
+        };
+
+        let outcomes = source
+            .apply_remote_batch(vec![version(2_000, "newer"), version(1_000, "older")])
+            .unwrap();
+        assert_eq!(outcomes[0], Applied::Merged);
+        assert!(matches!(outcomes[1], Applied::Declined(_)));
+        assert_eq!(
+            state.store.version("same-id").unwrap().unwrap().created_at,
+            2_000
         );
     }
 }

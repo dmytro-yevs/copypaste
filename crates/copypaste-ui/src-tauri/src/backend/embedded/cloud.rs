@@ -3,7 +3,7 @@ mod cursor;
 mod schedule;
 mod source;
 
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use copypaste_cloud::auth::{AuthError, Session, SupabaseAuth};
@@ -14,6 +14,7 @@ use copypaste_cloud::crypto::derive_sync_key;
 use copypaste_cloud::rest::SupabaseRest;
 use copypaste_cloud::sync::{CloudSync, SensitiveGuard, SyncError};
 use copypaste_cloud::{CloudConfig, SyncKey};
+use copypaste_core::sync::RoundGate;
 use copypaste_ipc::{CloudStatusData, CloudSyncData, ErrorCode};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -34,6 +35,7 @@ pub(super) const KEY_WATERMARK: &str = CloudStateKey::WatermarkMs.as_str();
 pub(super) const KEY_WATERMARK_ITEM: &str = CloudStateKey::WatermarkItemId.as_str();
 pub(super) const KEY_UPLOAD_FLOOR: &str = CloudStateKey::UploadFloorMs.as_str();
 pub(super) const KEY_UPLOAD_FLOOR_ITEM: &str = CloudStateKey::UploadFloorItemId.as_str();
+pub(super) const KEY_UNREADABLE_UPLOADS: &str = CloudStateKey::UnreadableUploads.as_str();
 const MSG_NOT_CONFIGURED: &str = "Cloud sync is not configured in this build.";
 const MSG_SIGNED_OUT: &str = "Sign in before syncing.";
 const MSG_REJECTED: &str = "The email address or password was not accepted.";
@@ -52,6 +54,11 @@ pub(super) struct EmbeddedCloud {
     wake: Notify,
     poller_started: AtomicBool,
     shutdown: CancellationToken,
+    /// One round at a time. The poller and the `cloud_sync` command both start
+    /// rounds, and two of them race to commit the same upload floor.
+    rounds: RoundGate,
+    /// How many local rows the last upload scan could not open, for `status`.
+    unreadable_uploads: AtomicU32,
 }
 
 impl EmbeddedCloud {
@@ -67,6 +74,8 @@ impl EmbeddedCloud {
             wake: Notify::new(),
             poller_started: AtomicBool::new(false),
             shutdown: CancellationToken::new(),
+            rounds: RoundGate::new(),
+            unreadable_uploads: AtomicU32::new(0),
         };
         cloud.restore(state);
         Ok(cloud)
@@ -82,6 +91,7 @@ impl EmbeddedCloud {
             email: account.as_ref().map(|value| value.email.clone()),
             last_sync_ms: (last_sync > 0).then_some(last_sync),
             last_error: self.error().map(str::to_string),
+            unreadable_uploads: self.unreadable_uploads.load(Ordering::Acquire),
             poll_interval_secs: account
                 .as_ref()
                 .map_or(60, |value| value.driver.poll_interval().as_secs()),
@@ -163,7 +173,24 @@ impl EmbeddedCloud {
         self.wake.notify_one();
     }
 
+    /// One round now, queued behind any round already in flight.
+    ///
+    /// The user asked after the running round began its scan, so answering
+    /// with that round's result would answer for a history older than the
+    /// request. The poller uses [`EmbeddedCloud::poll_round`] instead, which
+    /// skips rather than queues.
     pub(super) async fn sync_now(&self, inner: &Arc<Inner>) -> Result<CloudSyncData> {
+        let _permit = self.rounds.enter().await;
+        self.run_round(inner).await
+    }
+
+    /// One round for the poller, or `None` when one is already running.
+    pub(super) async fn poll_round(&self, inner: &Arc<Inner>) -> Option<Result<CloudSyncData>> {
+        let _permit = self.rounds.try_enter()?;
+        Some(self.run_round(inner).await)
+    }
+
+    async fn run_round(&self, inner: &Arc<Inner>) -> Result<CloudSyncData> {
         if !inner.settings().sync_enabled {
             return Err(BackendError::NotReady);
         }
@@ -215,6 +242,12 @@ impl EmbeddedCloud {
                 ))
             }
         }
+    }
+
+    /// Record how many local rows an upload scan could not open. A count,
+    /// never an id — see `CloudStatusData::unreadable_uploads`.
+    pub(super) fn note_unreadable_uploads(&self, total: u32) {
+        self.unreadable_uploads.store(total, Ordering::Release);
     }
 
     pub(super) fn note_version_written(&self, inner: &Inner, created_at: i64) {
@@ -376,6 +409,8 @@ mod tests {
             wake: Notify::new(),
             poller_started: AtomicBool::new(false),
             shutdown: CancellationToken::new(),
+            rounds: RoundGate::new(),
+            unreadable_uploads: AtomicU32::new(0),
         }
     }
 

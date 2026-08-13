@@ -25,6 +25,31 @@ use crate::AppState;
 /// interval at which the loop re-checks a state it expects not to have changed.
 pub const SIGNED_OUT_INTERVAL: Duration = Duration::from_secs(60);
 
+/// A round abandoned because the daemon is stopping.
+///
+/// Not a failure the user should be told to act on, and it is deliberately not
+/// `MSG_ACCOUNT_CHANGED`: the account is fine, the process is leaving.
+pub(crate) const MSG_SHUTTING_DOWN: &str = "the daemon is shutting down";
+
+/// Resolves when shutdown has been asked for, and never when there is nothing
+/// watching it — a `None` receiver is a caller with no teardown to observe,
+/// such as a unit test driving one round.
+async fn shutdown_requested(shutdown: Option<watch::Receiver<bool>>) {
+    let Some(mut shutdown) = shutdown else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    if *shutdown.borrow() {
+        return;
+    }
+    while shutdown.changed().await.is_ok() {
+        if *shutdown.borrow() {
+            return;
+        }
+    }
+    std::future::pending::<()>().await;
+}
+
 /// Run cloud rounds until shutdown.
 pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
     if !state.cloud.is_configured() {
@@ -49,7 +74,14 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
         if *shutdown.borrow() {
             break;
         }
-        sync_round(&state).await;
+        // A tick that collides with a round already in flight has nothing to
+        // add: it would push the same window and pull behind the same cursor,
+        // and the two completions would race to commit the upload floor.
+        let Some(permit) = state.cloud.try_begin_round() else {
+            debug!("a cloud round is already running; skipping this tick");
+            continue;
+        };
+        round_with_permit(&state, permit, Some(shutdown.clone())).await;
     }
 
     debug!("cloud sync loop stopped");
@@ -61,6 +93,21 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 /// swallowed: a backend that is down must not stop the daemon, and the next
 /// tick will try again.
 pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, SyncError>> {
+    // The explicit request waits for a running round rather than duplicating
+    // it: the user asked after that round began its scan, so its result would
+    // answer for a history older than the request.
+    let permit = state.cloud.begin_round().await;
+    round_with_permit(state, permit, Some(state.shutdown_rx())).await
+}
+
+async fn round_with_permit(
+    state: &Arc<AppState>,
+    permit: copypaste_core::sync::RoundGuard,
+    shutdown: Option<watch::Receiver<bool>>,
+) -> Option<Result<CloudSyncData, SyncError>> {
+    // Held for the whole round, released when it returns, whichever arm of the
+    // select below finishes first.
+    let _permit = permit;
     if !state.settings.get().sync_enabled {
         return None;
     }
@@ -75,6 +122,10 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
     let outcome = tokio::select! {
         biased;
         _ = account.cancel.cancelled() => Err(SyncError::Source(MSG_ACCOUNT_CHANGED)),
+        // Teardown does not wait out a round's network time. Abandoning one
+        // costs nothing: the floor is only committed on success below, so the
+        // next start re-derives exactly the same work from local state.
+        () = shutdown_requested(shutdown) => Err(SyncError::Source(MSG_SHUTTING_DOWN)),
         outcome = driver.sync(&source) => outcome,
     };
 
@@ -101,6 +152,12 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
                     "cloud sync round"
                 );
             }
+        }
+        // Abandoned rather than failed: recording it would leave "sync is
+        // broken" on the status a restarted daemon reads back, for a round
+        // that was cut short on purpose.
+        Err(SyncError::Source(MSG_SHUTTING_DOWN)) => {
+            debug!("a cloud round was abandoned for shutdown");
         }
         Err(e) => {
             // `SyncError`'s payloads are `&'static str`, so this cannot carry a
@@ -132,6 +189,7 @@ fn record_failure(state: &AppState, driver: &Arc<Driver>, error: &SyncError) {
 /// with no `_` arm means a new variant has to be given a sentence here.
 pub fn describe(error: &SyncError) -> &'static str {
     match error {
+        SyncError::Source(MSG_SHUTTING_DOWN) => MSG_SHUTTING_DOWN,
         SyncError::Source(_) => "the local history could not be read",
         SyncError::Encrypt => "an item could not be encrypted for upload",
         SyncError::Unauthorized => "the backend rejected this session even after a refresh",
@@ -164,6 +222,99 @@ mod tests {
     use super::*;
     use crate::cloud::{KEY_REFRESH, KEY_SYNC_KEY, KEY_UPLOAD_FLOOR};
     use crate::testutil::{test_state, test_state_with_cloud};
+
+    /// `cloud sync` used to call [`sync_round`] straight through while the poll
+    /// loop was inside one of its own. Two rounds then pushed the same window,
+    /// pulled behind the same cursor, and raced to commit the upload floor —
+    /// and `commit_upload_floor` compares against the floor *its own* scan
+    /// started from, so the loser silently discards its own progress.
+    #[tokio::test]
+    async fn a_second_round_cannot_run_beside_one_already_in_flight() {
+        let (state, _dir) = test_state("alpha");
+        let held = state.cloud.begin_round().await;
+        assert!(state.cloud.round_in_flight());
+        assert!(
+            state.cloud.try_begin_round().is_none(),
+            "the poll loop started a round beside a running one"
+        );
+        drop(held);
+        assert!(state.cloud.try_begin_round().is_some());
+    }
+
+    /// The two callers want different things from a busy gate: a tick skips,
+    /// an explicit request queues. A queued request must actually run — a
+    /// `sync` that silently did nothing because a poll happened to be in
+    /// flight is the same failure seen from the other side.
+    #[tokio::test]
+    async fn an_explicit_round_queues_behind_a_running_one_rather_than_duplicating_it() {
+        let (state, _dir) = test_state("alpha");
+        let held = state.cloud.begin_round().await;
+        let queued = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move {
+                // Signed out, so this is the gate and nothing else.
+                sync_round(&state).await.is_none()
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(!queued.is_finished(), "the request did not wait its turn");
+        drop(held);
+        assert!(queued.await.unwrap());
+    }
+
+    /// A round in flight when the daemon is asked to stop must not hold
+    /// teardown for the length of its network time. Abandoning it costs
+    /// nothing: the upload floor is only committed on success, so the next
+    /// start re-derives the same work from local state (AT-33).
+    #[tokio::test]
+    async fn a_round_abandoned_for_shutdown_is_not_recorded_as_a_failure() {
+        use copypaste_cloud::crypto::derive_sync_key;
+        use copypaste_cloud::CloudConfig;
+
+        // A URL that resolves nowhere, so the round is inside its transport
+        // when shutdown arrives.
+        let config = CloudConfig::new_loopback("http://127.0.0.1:1", "anon").unwrap();
+        let (state, _dir) = crate::testutil::test_state_with_cloud(
+            "alpha",
+            crate::cloud::Cloud::new(Some(config.clone())),
+        );
+        state.cloud.install(
+            &state,
+            config,
+            "a@example.com".into(),
+            "user-1".into(),
+            derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+            copypaste_cloud::auth::Session {
+                access_token: "access-1".into(),
+                refresh_token: "refresh-1".into(),
+                user_id: "user-1".into(),
+                expires_at_ms: i64::MAX,
+            },
+        );
+        crate::testutil::add(&state, "captured before the daemon was stopped");
+        let floor = state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap();
+
+        // Subscribed first, as `main` does: `watch::Sender::send` reports
+        // an error and leaves the value alone when nothing is listening.
+        let _watching = state.shutdown_rx();
+        state.request_shutdown();
+        let outcome = sync_round(&state).await;
+
+        assert!(
+            matches!(outcome, Some(Err(SyncError::Source(MSG_SHUTTING_DOWN)))),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap(),
+            floor,
+            "an abandoned round moved the upload floor"
+        );
+        assert_eq!(
+            state.cloud.status().last_error,
+            None,
+            "stopping the daemon was recorded as sync being broken"
+        );
+    }
 
     #[tokio::test]
     async fn a_round_with_nobody_signed_in_does_nothing() {

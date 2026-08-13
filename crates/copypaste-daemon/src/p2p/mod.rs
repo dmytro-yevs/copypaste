@@ -29,6 +29,8 @@ use tokio::net::TcpListener;
 use tokio::sync::{watch, Notify};
 use tracing::warn;
 
+use copypaste_core::sync::{RoundGate, RoundGuard};
+
 use crate::cadence::Idle;
 use crate::sync::peer_source;
 use crate::AppState;
@@ -43,6 +45,10 @@ pub struct P2p {
     wake: Notify,
     /// The idle cadence [`poll::run`] waits on.
     idle: Idle,
+    /// One outbound pass over the peers at a time. Two passes dial the same
+    /// peers at once, and the second one is refused by the far side's session
+    /// limit rather than doing anything useful.
+    rounds: RoundGate,
 }
 
 impl std::fmt::Debug for P2p {
@@ -62,6 +68,7 @@ impl P2p {
             node: Arc::new(Node::new(peers, discovery, port, lan_visible)),
             wake: Notify::new(),
             idle: Idle::default(),
+            rounds: RoundGate::new(),
         }
     }
 
@@ -102,6 +109,21 @@ impl P2p {
 
     pub fn idle(&self) -> &Idle {
         &self.idle
+    }
+
+    /// The permit for one outbound pass, or `None` when one is running.
+    pub(crate) fn try_begin_round(&self) -> Option<RoundGuard> {
+        self.rounds.try_enter()
+    }
+
+    /// The permit for one outbound pass, waiting for any running pass first.
+    pub(crate) async fn begin_round(&self) -> RoundGuard {
+        self.rounds.enter().await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn round_in_flight(&self) -> bool {
+        self.rounds.is_running()
     }
 
     /// Ask the peer sync loop to run now.

@@ -149,6 +149,10 @@ impl EmbeddedCloud {
         });
         if switched {
             self.last_sync_ms.store(0, Ordering::Release);
+            // The count belongs to the history *this account* has scanned, and
+            // the new one has scanned none of it. Leaving it would show the
+            // previous account's figure until the first round finishes.
+            self.unreadable_uploads.store(0, Ordering::Release);
         }
         *self.error() = None;
         Ok(switched)
@@ -206,6 +210,16 @@ impl EmbeddedCloud {
         if let Ok(ms) = store.state_ms(CloudStateKey::LastSyncMs.as_str()) {
             self.last_sync_ms.store(ms, Ordering::Release);
         }
+        self.note_unreadable_uploads(
+            copypaste_cloud::sync::UnreadableUploads::decode(
+                store
+                    .state(CloudStateKey::UnreadableUploads.as_str())
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+            )
+            .total,
+        );
     }
 
     pub(super) fn round(&self) -> Option<AccountRound> {
@@ -236,6 +250,7 @@ impl EmbeddedCloud {
         }
         let _ = store.clear_cloud_credentials();
         self.last_sync_ms.store(0, Ordering::Release);
+        self.unreadable_uploads.store(0, Ordering::Release);
         *self.error() = None;
         previous.map(|account| account.driver)
     }
@@ -377,6 +392,8 @@ mod tests {
             wake: Notify::new(),
             poller_started: std::sync::atomic::AtomicBool::new(false),
             shutdown: CancellationToken::new(),
+            rounds: copypaste_core::sync::RoundGate::new(),
+            unreadable_uploads: std::sync::atomic::AtomicU32::new(0),
         })
     }
 
@@ -437,5 +454,44 @@ mod tests {
         for key in SIGN_OUT_KEYS {
             assert_eq!(state.store.state(key.as_str()).unwrap(), None);
         }
+    }
+
+    /// N1, the embedded half. The count is what *this account's* scan of the
+    /// history found; a second account has scanned none of it, so carrying the
+    /// number over shows the previous account's figure until a round finishes.
+    /// Re-activating the same account — a token refresh runs this path — is not
+    /// a switch and must keep it.
+    #[test]
+    fn switching_accounts_clears_the_unreadable_upload_count() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state =
+            Arc::new(crate::backend::embedded::state::BackendState::open(dir.path()).unwrap());
+        let cloud = configured();
+
+        let sign_in = |user: &str| {
+            let attempt = cloud.begin_sign_in();
+            cloud
+                .activate(
+                    &state.store,
+                    attempt,
+                    format!("{user}@example.com"),
+                    user.to_string(),
+                    driver(&cloud, &state, user),
+                    &[7; 32],
+                )
+                .expect("activation")
+        };
+
+        assert!(sign_in("user-1"));
+        cloud.note_unreadable_uploads(7);
+        assert!(!sign_in("user-1"), "the same account is not a switch");
+        assert_eq!(cloud.status().unreadable_uploads, 7);
+
+        assert!(sign_in("user-2"));
+        assert_eq!(
+            cloud.status().unreadable_uploads,
+            0,
+            "the new account inherited the old one's count"
+        );
     }
 }

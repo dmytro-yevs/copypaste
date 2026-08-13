@@ -135,6 +135,31 @@ chunking, UI. (Those live in sibling manifests.)
   sync MUST abort rather than silently downgrading to a lower-privilege
   (anonymous) scope — a downgrade masks credential rotation, misconfiguration, or
   an active attack (`crates/copypaste-daemon/src/cloud/auth.rs:42-53`).
+- **INV-N7 (an unreadable local row is refused, never forgotten).** The *upload*
+  floor is the mirror of INV-I4 and it needs the opposite treatment on one case.
+  A local row whose payload will not open under this device's own key cannot be
+  uploaded and will not start opening, so holding the floor below it stalls every
+  later row for good — but advancing past it silently is data loss: the row is
+  never offered again and nothing says so. The rule is therefore: **advance the
+  floor, record the row's id, retry it at the head of every later scan, and
+  surface a count.** The count is a client-visible number and nothing else — the
+  id, the path and the content never leave the daemon (`AGENTS.md` rule 4).
+  New in v2; v1 had no upload floor to get this wrong.
+- **INV-N7a (the id list is bounded, the guarantee is not).** Retrying by id
+  needs a bound, or one broken keystore puts the whole history in a query and in
+  the persisted record. Past that bound a *durable keyset walk* carries the same
+  promise: the position of the oldest row left untracked is persisted, one page
+  of that region is re-read per round, and the cursor wraps to the start when it
+  reaches the floor. So every unreadable row is revisited within one cycle
+  whatever the backlog and however often the device restarts, while the floor
+  still advances and later clips still upload. A bounded id list *without* the
+  walk is the defect this rule exists for: rows past the bound sat behind an
+  advanced floor and repairing one did not bring it back.
+- **INV-N7b (the count is a lower bound, never an over-count).** While a walk
+  cycle is still in progress the figure is what the id list holds plus what the
+  last completed cycle counted, so it does not dip when one page happens to hold
+  only readable rows. It is exact whenever the backlog fits the id list, and
+  exact again at the end of every cycle.
 
 ---
 
@@ -794,6 +819,16 @@ running as the backstop; only its *interval* changes.
   backend right after recovery (`poll/loop_task.rs:60-65`).
 - Changing the interval recreates the ticker and **consumes the immediate first
   tick**, so a period change does not cause a double poll (`loop_task.rs:115-121`).
+- **v2 addition: rounds are single-flight per transport, and skip and queue mean
+  different things.** "Skip rather than burst" covers a slow round overlapping
+  its own next tick; it does not cover the *other* caller. `cloud sync`,
+  `copypaste sync` and a Realtime wake all start rounds beside the poll loop's,
+  and two rounds over one history push the same window, pull behind the same
+  cursor, and race to commit the upload floor — which each of them compares
+  against the floor *its own* scan started from, so the loser discards its own
+  progress. A poll tick that finds a round in flight **skips**; an explicit
+  request **queues** behind it, because the user asked after the running round
+  had read its scan and joining that result would answer for an older history.
 
 ### 4.9 Upload queue behaviour
 
