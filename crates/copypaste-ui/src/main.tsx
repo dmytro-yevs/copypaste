@@ -1,4 +1,10 @@
 /** INV-22 — the external bootstrap applies appearance before this module. */
+// First, and a side effect: `@dnd-kit/dom` calls `replaceChildren` on the drag
+// placeholder, and the Chromium 74 WebView baseline (vite.config.ts) predates
+// it by twelve releases. Lowering syntax cannot add a method, so the pinned
+// `lib` cannot see this one either — it is a DOM API, and `DOM` is one lib.
+import "@ungap/replace-children";
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
