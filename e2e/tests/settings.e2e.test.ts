@@ -57,6 +57,16 @@ async function openTab(label: string): Promise<void> {
     async () => (await trigger.getAttribute("aria-selected")) === "true",
     { timeout: 10_000, timeoutMsg: `the ${label} tab never became selected` },
   );
+  // DMY-138: the pane is selected but its content may still be loading
+  // asynchronously. Wait for aria-busy to clear so assertions see real content.
+  await app.browser.waitUntil(
+    async () =>
+      (await app.browser.execute(function () {
+        const p = document.querySelector('[role="tabpanel"]:not([hidden])');
+        return p !== null && p.querySelector("[aria-busy]") === null;
+      })) === true,
+    { timeout: 30_000, timeoutMsg: `the ${label} pane never finished loading` },
+  );
 }
 
 /**
