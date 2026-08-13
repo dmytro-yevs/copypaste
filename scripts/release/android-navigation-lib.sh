@@ -17,19 +17,12 @@ app_navigation_holds() { # <artifact>
     done
 }
 
-# actionable / disabled / absent, per tab. "Disabled" is an app that is still
-# starting, "absent" is one whose shell never rendered, and the two need
-# different next steps.
+# Per tab: disabled is an app that is still starting, absent is one whose shell
+# never rendered.
 navigation_state() { # <artifact>
     local tab report=""
     for tab in "${NAVIGATION_TABS[@]}"; do
-        if [[ -n "$(action_center "$1" "$tab")" ]]; then
-            report+="$tab=actionable "
-        elif [[ -n "$(node_center_rendered "$1" "$tab")" ]]; then
-            report+="$tab=disabled "
-        else
-            report+="$tab=absent "
-        fi
+        report+="$tab=$(control_state "$1" "$tab") "
     done
     printf '%s' "${report% }"
 }
