@@ -113,6 +113,8 @@ documentation = ci_jobs.get("documentation") or {}
 documentation_body = "\n".join(step.get("run") or "" for step in steps(documentation))
 rec("check-docs.py" in documentation_body,
     "ci.yml gates documentation links and unfinished-work markers")
+rec("check-docs.test.py" in documentation_body,
+    "ci.yml runs the protocol-version guard self-test")
 
 
 # --- artifacts: names match, and the consumer depends on the producer --------
