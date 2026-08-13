@@ -188,6 +188,15 @@ export function RuntimeLogViewer() {
         </Button>
       </div>
 
+      {logs.overrun && (
+        <div
+          role="alert"
+          className="rounded-lg border border-divider bg-panel px-s-3 py-s-2 text-sm text-warn-strong"
+        >
+          {t("runtimeLog.overrun")}
+        </div>
+      )}
+
       {logs.followFailed && (
         <div
           role="alert"

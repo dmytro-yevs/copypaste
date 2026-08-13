@@ -43,6 +43,9 @@ export const runtimeLog = {
   /** Said of the live tail only: the loaded rows are still on screen, and they
    *  have stopped being current. */
   followFailed: "Live updates stopped. These events may be out of date.",
+  /** The live tail hit its page ceiling without reaching what was held. Events
+   *  in the gap are missing; a manual refetch recovers them. */
+  overrun: "Events arrived faster than the live tail could follow. Some entries may be missing — refresh to recover.",
   noMatch: "No runtime events match these filters.",
 
   toast: {
