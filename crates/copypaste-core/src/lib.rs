@@ -12,6 +12,7 @@ pub mod binary;
 pub mod crypto;
 pub mod image_preview;
 pub mod ingest;
+pub mod retention;
 pub mod sensitive;
 pub mod storage;
 pub mod sync;

@@ -13,11 +13,15 @@
 //! exposes no probe-only error that ingest could safely fail open from without
 //! maintaining a second implementation.
 
-use tracing::warn;
-
+use crate::retention::RetentionBatch;
 use crate::sensitive::Detector;
 use crate::storage::{Ingest, NewItem, Store, StoreError, StoredItem};
 use crate::{now_ms, CryptoError, Keyring};
+
+/// The retention bound every write here is subject to. Re-exported because
+/// `ingest::enforce_retention` is the name the daemon and the sync source
+/// already call; [`crate::retention`] owns when it runs.
+pub use crate::retention::enforce_retention;
 
 /// What a successful ingest did.
 #[derive(Debug)]
@@ -107,7 +111,7 @@ pub fn ingest_into(
     created_at: i64,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
-    ingest_into_with_sensitivity_floor(
+    ingest_into_with_capture_context(
         store,
         detector,
         keyring,
@@ -115,15 +119,20 @@ pub fn ingest_into(
         content_type,
         created_at,
         false,
+        None,
         settings,
     )
 }
 
-/// [`ingest_into`] with a persisted sensitive classification that may only
-/// make the result stricter. Backups are evidence that a prior detector found
-/// a secret; a newer detector failing to recognise it must not re-index it.
+/// [`ingest_into`] for one item of a batch, with a persisted sensitive
+/// classification that may only make the result stricter. Backups are evidence
+/// that a prior detector found a secret; a newer detector failing to recognise
+/// it must not re-index it.
+///
+/// The [`RetentionBatch`] is a token, not a parameter: holding one is the proof
+/// that the sweep this call skips is already owed by the caller's batch.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn ingest_into_with_sensitivity_floor(
+pub(crate) fn ingest_into_batched(
     store: &Store,
     detector: &Detector,
     keyring: &Keyring,
@@ -132,8 +141,9 @@ pub(crate) fn ingest_into_with_sensitivity_floor(
     created_at: i64,
     sensitive_floor: bool,
     settings: &copypaste_ipc::ConfigData,
+    _batch: &RetentionBatch<'_>,
 ) -> Result<Ingested, IngestError> {
-    ingest_into_with_capture_context(
+    ingest_text(
         store,
         detector,
         keyring,
@@ -142,7 +152,9 @@ pub(crate) fn ingest_into_with_sensitivity_floor(
         created_at,
         sensitive_floor,
         None,
+        None,
         settings,
+        Sweep::Deferred,
     )
 }
 
@@ -192,6 +204,41 @@ pub fn ingest_into_with_capture_source(
     app_name: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
+    ingest_text(
+        store,
+        detector,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        sensitive_floor,
+        app_bundle_id,
+        app_name,
+        settings,
+        Sweep::Now,
+    )
+}
+
+/// Whether this write pays for its own retention sweep.
+enum Sweep {
+    Now,
+    Deferred,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ingest_text(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    settings: &copypaste_ipc::ConfigData,
+    sweep: Sweep,
+) -> Result<Ingested, IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
     }
@@ -238,40 +285,11 @@ pub fn ingest_into_with_capture_source(
         },
     )?;
 
-    enforce_retention(store, settings);
+    if matches!(sweep, Sweep::Now) {
+        enforce_retention(store, settings);
+    }
 
     Ok(ingested.into())
-}
-
-/// Apply every local retention limit after a write, regardless of whether it
-/// arrived from capture, import, cloud, or a paired device.
-///
-/// This is best-effort after accepting a version: failing a cleanup must not
-/// turn a successfully stored capture or remote merge into data loss.
-pub fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
-    // Best-effort after accepting a capture: a failed sweep must never turn a
-    // stored capture into a lost one.
-    if let Err(e) = store.evict_over_cap(u64::from(settings.history_limit)) {
-        warn!(error = ?e, "history cap eviction failed");
-    }
-    if let Err(e) = store.evict_over_byte_cap(settings.storage_quota_bytes) {
-        warn!(error = ?e, "storage quota eviction failed");
-    }
-    // Age-based retention, disabled by the `0` sentinel. Best-effort for the
-    // same reason as the cap sweep.
-    //
-    // Measured from the wall clock, never from `created_at`. `created_at` is
-    // caller-supplied and, on the import path, comes straight out of a user's
-    // JSON file: one row stamped a year ahead put the cutoff a year ahead too
-    // and hard-deleted every unpinned item in the history. Both sync
-    // transports already refuse an implausibly-future stamp; import is the
-    // third writer and inherits neither guard, so this is where it holds.
-    if settings.retention_days > 0 {
-        let cutoff = crate::now_ms() - i64::from(settings.retention_days) * 86_400_000;
-        if let Err(e) = store.evict_older_than(cutoff) {
-            warn!(error = ?e, "age-based retention failed");
-        }
-    }
 }
 
 /// Store a raw image or file payload.  Binary values have no string

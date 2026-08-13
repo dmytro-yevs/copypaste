@@ -1,10 +1,10 @@
 use copypaste_ipc::{ConfigData, ExportItem, ImportData};
 use tracing::{info, warn};
 
+use crate::retention::RetentionBatch;
 use crate::storage::{Store, StoreError};
 use crate::{
-    ingest::ingest_into_with_sensitivity_floor, now_ms, CryptoError, Detector, IngestError,
-    Ingested, Keyring,
+    ingest::ingest_into_batched, now_ms, CryptoError, Detector, IngestError, Ingested, Keyring,
 };
 
 /// Ceiling on one import batch. The IPC frame cap bounds the bytes; this bounds
@@ -63,6 +63,12 @@ pub fn import(
     };
     let mut pin: Vec<String> = Vec::new();
 
+    // One sweep for the whole file. Per item, a 10 000-entry import ran 30 000
+    // retention transactions to reach the history one sweep leaves; the batch is
+    // dropped before the pins are restored, so the limits are enforced before
+    // this returns either way.
+    let batch = RetentionBatch::new(store, settings);
+
     for item in items {
         // `ingest_into` recomputes sensitivity from the plaintext and takes the
         // item's own `created_at`, so a restored history keeps its order and a
@@ -70,7 +76,7 @@ pub fn import(
         let created_at = item
             .created_at
             .min(now_ms().saturating_add(MAX_IMPORT_FUTURE_SKEW_MS));
-        match ingest_into_with_sensitivity_floor(
+        match ingest_into_batched(
             store,
             detector,
             keyring,
@@ -79,6 +85,7 @@ pub fn import(
             created_at,
             item.is_sensitive,
             settings,
+            &batch,
         ) {
             Ok(Ingested::Stored(stored)) => {
                 result.inserted += 1;
@@ -111,11 +118,18 @@ pub fn import(
     // Pins are applied after the fact rather than inside the ingest: the store
     // has one pin path (`set_pinned`, which also assigns `pin_order`) and a
     // second one here would be a second definition of what a pin is.
+    //
+    // Before the sweep, which per-item retention could not manage: a file whose
+    // pinned entry sorts old had that entry evicted by the cap two items later
+    // and was then pinned by nobody. Pinned items are never evicted (manifest 03
+    // I9), so restoring the pins first is what makes that rule true of an import.
     for item_id in &pin {
         if let Err(e) = store.set_pinned(item_id, true) {
             warn!(error = ?e, "could not restore a pin on an imported item");
         }
     }
+
+    batch.finish();
 
     info!(
         inserted = result.inserted,
@@ -325,6 +339,84 @@ mod tests {
 
         import_into(&f, vec![item("c")]).unwrap();
         assert_eq!(f.store.count().unwrap(), 3, "the cap is the only evictor");
+    }
+
+    /// The amplification this seam exists for: retention is a bound on the
+    /// history, and running it per item made a 200-entry file run 200 sweeps —
+    /// 600 write transactions — to reach the history one sweep leaves.
+    #[test]
+    fn a_file_is_swept_once_however_many_entries_it_has() {
+        let f = fixture();
+        let batch: Vec<ExportItem> = (0..200).map(|n| item(&format!("entry {n}"))).collect();
+
+        crate::retention::sweeps::take();
+        import_into(&f, batch).unwrap();
+        assert_eq!(crate::retention::sweeps::take(), 1);
+    }
+
+    /// The bound has to end up in the same place, or the seam has traded
+    /// correctness for speed. Same items, same cap: one file through the batch
+    /// path against the same items ingested one at a time.
+    #[test]
+    fn a_batch_import_leaves_the_history_a_per_item_ingest_would() {
+        // Distinct stamps, or the cap tie-breaks on a random uuid and the two
+        // sides keep an arbitrary seven each.
+        let entries: Vec<(String, i64)> = (0..40)
+            .map(|n| (format!("entry {n}"), 1_700_000_000_000 + n * 60_000))
+            .collect();
+
+        let mut batched = fixture();
+        batched.settings.history_limit = 7;
+        let items: Vec<ExportItem> = entries
+            .iter()
+            .map(|(content, created_at)| ExportItem {
+                created_at: *created_at,
+                ..item(content)
+            })
+            .collect();
+        import_into(&batched, items).unwrap();
+
+        let mut per_item = fixture();
+        per_item.settings.history_limit = 7;
+        for (content, created_at) in &entries {
+            crate::ingest::ingest_into(
+                &per_item.store,
+                &per_item.detector,
+                &per_item.keyring,
+                content,
+                copypaste_ipc::content_type::TEXT,
+                *created_at,
+                &per_item.settings,
+            )
+            .unwrap();
+        }
+
+        assert_eq!(batched.store.count().unwrap(), 7);
+        assert_eq!(batched.contents(), per_item.contents());
+    }
+
+    /// A pin named by the file must survive the sweep the same import runs.
+    #[test]
+    fn a_restored_pin_outlives_the_batch_sweep() {
+        let mut f = fixture();
+        f.settings.history_limit = 2;
+
+        let mut oldest = item("pin me");
+        oldest.pinned = true;
+        oldest.created_at = 1_700_000_000_000;
+        let mut newer = item("ordinary");
+        newer.created_at = 1_700_000_600_000;
+        let mut newest = item("newest");
+        newest.created_at = 1_700_001_200_000;
+
+        import_into(&f, vec![oldest, newer, newest]).unwrap();
+
+        let rows = f.store.list(10, 0).unwrap();
+        assert!(
+            rows.iter().any(|row| row.pinned),
+            "the pin was lost to the sweep: {:?}",
+            f.contents()
+        );
     }
 
     #[test]
