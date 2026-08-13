@@ -59,6 +59,12 @@ use crate::storage::{
 /// handful of statements, small enough that no page is a meaningful allocation.
 const PAGE_ROWS: u32 = 512;
 
+/// Bytes per read page, and the bound that actually holds. Rows alone do not
+/// bound anything: an item may be 4 MiB, so 512 of them is 2 GiB held to look at
+/// one row at a time. A history of small notes still pages by rows; one of large
+/// pastes pages by this.
+const PAGE_BYTES: usize = 1024 * 1024;
+
 /// What one pass did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PurgeReport {
@@ -110,7 +116,12 @@ trait PurgeIndex {
     type Error;
 
     fn purge_unsearchable(&self) -> Result<u64, Self::Error>;
-    fn indexed_texts(&self, after: i64, limit: u32) -> Result<Vec<IndexedText>, Self::Error>;
+    fn indexed_texts(
+        &self,
+        after: i64,
+        max_rows: u32,
+        max_bytes: usize,
+    ) -> Result<Vec<IndexedText>, Self::Error>;
     fn purge_rowids(&self, rowids: &[i64]) -> Result<u64, Self::Error>;
 }
 
@@ -121,8 +132,13 @@ impl PurgeIndex for Store {
         self.purge_index_of_unsearchable()
     }
 
-    fn indexed_texts(&self, after: i64, limit: u32) -> Result<Vec<IndexedText>, Self::Error> {
-        Store::indexed_texts(self, after, limit)
+    fn indexed_texts(
+        &self,
+        after: i64,
+        max_rows: u32,
+        max_bytes: usize,
+    ) -> Result<Vec<IndexedText>, Self::Error> {
+        Store::indexed_texts(self, after, max_rows, max_bytes)
     }
 
     fn purge_rowids(&self, rowids: &[i64]) -> Result<u64, Self::Error> {
@@ -137,8 +153,13 @@ impl PurgeIndex for Transaction<'_> {
         purge_index_of_unsearchable_in(self)
     }
 
-    fn indexed_texts(&self, after: i64, limit: u32) -> Result<Vec<IndexedText>, Self::Error> {
-        indexed_texts_in(self, after, limit)
+    fn indexed_texts(
+        &self,
+        after: i64,
+        max_rows: u32,
+        max_bytes: usize,
+    ) -> Result<Vec<IndexedText>, Self::Error> {
+        indexed_texts_in(self, after, max_rows, max_bytes)
     }
 
     fn purge_rowids(&self, rowids: &[i64]) -> Result<u64, Self::Error> {
@@ -152,7 +173,7 @@ fn purge_index<I: PurgeIndex>(index: &I, detector: &Detector) -> Result<PurgeRep
 
     let mut after = 0i64;
     loop {
-        let page = index.indexed_texts(after, PAGE_ROWS)?;
+        let page = index.indexed_texts(after, PAGE_ROWS, PAGE_BYTES)?;
         if page.is_empty() {
             break;
         }
@@ -180,12 +201,30 @@ fn purge_index<I: PurgeIndex>(index: &I, detector: &Detector) -> Result<PurgeRep
 mod tests {
     use super::*;
     use crate::storage::test_support::{
-        fts_row_count, item, plant_fts_row, raw_row_count, store, T0,
+        fts_row_count, item, plant_fts_bytes, plant_fts_row, raw_row_count, store, T0,
     };
     use crate::storage::NewItem;
 
     fn detector() -> Detector {
         Detector::new().expect("ruleset compiles")
+    }
+
+    /// A distinct credential payload per row. Distinct because these fixtures
+    /// are index rows the pass must each recognise, and random-looking because
+    /// every rule above the floor now gates on its value's entropy (§5.6) — a
+    /// repeated-character payload is a placeholder and is meant to be rejected.
+    fn token_payload(seed: i64, len: usize) -> String {
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        let mut state =
+            0x9e37_79b9_7f4a_7c15_u64 ^ (seed as u64).wrapping_mul(0x2545_f491_4f6c_dd1d);
+        (0..len)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                char::from(ALPHABET[(state % ALPHABET.len() as u64) as usize])
+            })
+            .collect()
     }
 
     /// A row indexed before its rule existed. Simulated the only way that is
@@ -298,7 +337,7 @@ mod tests {
             if n % 3 == 0 {
                 leaked.push(missed_at_capture(
                     &s,
-                    &format!("token ghp_{}{:028}", "A".repeat(8), n),
+                    &format!("token ghp_{}", token_payload(n, 36)),
                     created_at,
                 ));
             } else {
@@ -313,6 +352,114 @@ mod tests {
             assert_eq!(fts_row_count(&s, id), 0, "{id} survived the sweep");
         }
         assert_eq!(s.count().unwrap(), rows as u64, "no item was deleted");
+    }
+
+    /// A row whose stored text is not valid UTF-8 must not end the pass.
+    ///
+    /// Typed as `String`, one such row made the page read fail — and because the
+    /// pages are ordered by `rowid`, every *later* page failed with it, so a
+    /// genuine secret sitting behind it stayed indexed for as long as the bad row
+    /// did. It is now decoded lossily: the pass continues, and a credential
+    /// inside the undecodable row is itself still found, because a replacement
+    /// character cannot split an ASCII token.
+    #[test]
+    fn an_undecodable_row_neither_stops_the_pass_nor_hides_behind_it() {
+        let s = store();
+        let holder = s
+            .insert(NewItem {
+                is_sensitive: false,
+                search_text: None,
+                ..item("holder", T0)
+            })
+            .unwrap();
+        let mut bytes = b"caption ".to_vec();
+        bytes.extend_from_slice(&[0xff, 0xfe]);
+        bytes.extend_from_slice(b" AKIAIOSFODNN7EXAMPLE tail");
+        plant_fts_bytes(&s, &holder.id, &bytes);
+        let behind = missed_at_capture(&s, &format!("ghp_{}", token_payload(1, 36)), T0 + 60_000);
+        let ordinary = missed_at_capture(&s, "the release checklist", T0 + 120_000);
+        assert_eq!(fts_row_count(&s, &holder.id), 1);
+
+        let report = purge_indexed_secrets(&s, &detector()).unwrap();
+        assert_eq!(report.scanned, 3, "the pass stopped at the undecodable row");
+        assert_eq!(report.purged, 2);
+
+        assert_eq!(fts_row_count(&s, &holder.id), 0, "the bad row kept its key");
+        assert_eq!(fts_row_count(&s, &behind), 0, "a secret hid behind it");
+        assert_eq!(fts_row_count(&s, &ordinary), 1);
+        assert!(s.get(&holder.id).unwrap().is_some(), "no item was deleted");
+    }
+
+    /// Rows alone do not bound a page: the item cap is 4 MiB, so `PAGE_ROWS` of
+    /// them is 2 GiB held to look at one row at a time. The byte budget is what
+    /// makes peak memory a number, and a row larger than the whole budget must
+    /// still make progress or the cursor never advances.
+    #[test]
+    fn a_page_is_bounded_by_bytes_as_well_as_rows() {
+        let s = store();
+        let big = PAGE_BYTES / 4;
+        for n in 0..12i64 {
+            missed_at_capture(&s, &format!("{n:04} {}", "n".repeat(big)), T0 + n * 60_000);
+        }
+        let oversized = PAGE_BYTES * 2;
+        missed_at_capture(&s, &"z".repeat(oversized), T0 + 12 * 60_000);
+
+        let mut after = 0i64;
+        let mut pages = 0;
+        let mut rows = 0;
+        loop {
+            let page = s.indexed_texts(after, PAGE_ROWS, PAGE_BYTES).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            let bytes: usize = page.iter().map(|row| row.text.len()).sum();
+            assert!(
+                bytes <= PAGE_BYTES || page.len() == 1,
+                "page of {} rows held {bytes} bytes",
+                page.len()
+            );
+            after = page[page.len() - 1].rowid;
+            rows += page.len();
+            pages += 1;
+            assert!(pages <= 16, "the cursor is not advancing");
+        }
+        assert_eq!(rows, 13);
+        assert!(pages > 1, "the byte budget never split a page");
+
+        // The whole pass still walks every row, oversized one included.
+        assert_eq!(purge_indexed_secrets(&s, &detector()).unwrap().scanned, 13);
+    }
+
+    /// A history past the 1 000-row mark is the shape DMY-162 asks about: the
+    /// pass must walk all of it, take every secret in it, and leave every
+    /// ordinary row searchable — with the page bounds holding throughout.
+    #[test]
+    fn a_history_beyond_a_thousand_rows_is_walked_whole() {
+        let s = store();
+        let rows = 1_200i64;
+        let mut leaked = Vec::new();
+        for n in 0..rows {
+            let created_at = T0 + n * 60_000;
+            if n % 7 == 0 {
+                leaked.push(missed_at_capture(
+                    &s,
+                    &format!("AccountKey={}==", token_payload(n, 86)),
+                    created_at,
+                ));
+            } else {
+                missed_at_capture(&s, &format!("meeting note {n}"), created_at);
+            }
+        }
+
+        let report = purge_indexed_secrets(&s, &detector()).unwrap();
+        assert_eq!(report.scanned, rows as u64);
+        assert_eq!(report.purged, leaked.len() as u64);
+        for id in &leaked {
+            assert_eq!(fts_row_count(&s, id), 0, "{id} stayed indexed");
+        }
+        assert_eq!(s.count().unwrap(), rows as u64, "no item was deleted");
+        assert_eq!(s.search("meeting", 5).unwrap().len(), 5);
+        assert_eq!(purge_indexed_secrets(&s, &detector()).unwrap().purged, 0);
     }
 
     /// Manifest 03 S4, v1's migration v13: an index row planted against an
