@@ -144,10 +144,17 @@ pub(crate) mod test_support {
     /// An index row written straight past every write-time guard — the state a
     /// database from before a guard existed is actually in.
     pub(crate) fn plant_fts_row(store: &Store, id: &str, text: &str) {
+        plant_fts_bytes(store, id, text.as_bytes());
+    }
+
+    /// The same, for bytes that are not valid UTF-8. `content_text` is a `TEXT`
+    /// column in a file this process does not exclusively own, and a `String`
+    /// read of one undecodable row used to abort the whole rescan.
+    pub(crate) fn plant_fts_bytes(store: &Store, id: &str, bytes: &[u8]) {
         let conn = store.conn().unwrap();
         conn.execute(
-            "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, ?2)",
-            rusqlite::params![id, text],
+            "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, CAST(?2 AS TEXT))",
+            rusqlite::params![id, bytes],
         )
         .unwrap();
     }
