@@ -264,16 +264,35 @@ deleted wherever auto-wipe was on. v2 changes both halves:
   after it, and `41111111 11111111` and `4111 111111111111` are both accepted.
   A validator cannot recover the boundary the pattern has already dissolved.
 - The digit run must be a card: issuer range and per-brand length, from the
-  maintained `card-validate` crate, on top of the `13 ≤ len ≤ 19` clamp, which
-  stays because it is load-bearing independently of any brand table.
+  `card-validate` crate, on top of the `13 ≤ len ≤ 19` clamp, which stays
+  because it is load-bearing independently of any brand table.
 - **Order the validator cheapest-first.** Every digit run in ordinary text is a
-  candidate, and `Validate::from` walks twelve brand regexes. Running it before
-  the clamp and Luhn made a 16-digit hex id cost 33 % of a 64-byte scan.
+  candidate, and `Validate::from` walks twelve brand regexes where the clamp is
+  a length test.
 
 The same corpus now yields **0 %**, and every §9.1 card fixture, plus the Amex,
 Diners, Discover, Mastercard and JCB grouped forms, is still detected. The
 narrowing is one-directional by choice: a 19-digit Visa is now a false negative,
 which is the direction I1 requires.
+
+**v2 amendment — a validated card is classified, never deleted (DMY-162).**
+Narrowing the candidate is not enough, and the amendment above overstated what
+it bought. Issuer range, brand length and Luhn are everything the digits carry,
+and an ordinary order id can satisfy all three: a mutation cycling plausible
+16-digit order ids through prefixes `4`, `51`, `35` and `60` still auto-wiped
+**71 of 600**, close to the expected Luhn pass rate. That is not a tuning
+problem. Nothing in a bare digit run separates the user's own card from an
+identifier they will need tomorrow, so 0.99 cannot mean *deletable* here.
+
+The card rule therefore sits in a band of its own — §4.2's **restricted** band.
+The item is classified sensitive with everything that follows from it: never
+full-text indexed (I4), never synced as plaintext, preview masked. It is never
+auto-deleted. I1 makes that ranking for us: an unsearchable card is a cost the
+user can see and work around, and an erased order id is not recoverable at all.
+This is the same reasoning that demoted `iban` under **P2 fb3e** — user-owned
+financial data the user *meant* to copy — carried to its conclusion rather than
+expressed as a confidence number, because the confidence in "this is a valid
+card number" is genuinely high and it is the *consequence* that is wrong.
 
 **Bug history — Audit MED #6:** the original gate was
 `normalised.len() <= 25 && luhn_valid(normalised)`, i.e. cards were only
@@ -311,7 +330,19 @@ example `pattern_name` (`ffi_sensitive.rs:73`) — that name does not exist.
 | **0.90 – 0.99** | Prefixed/structural tokens with a unique literal or a mandatory context anchor | "Cannot plausibly be anything else." Safe to auto-delete. |
 | **0.75 – 0.80** | `generic_password_kv` (0.75), `dotenv_secret` (0.80) | Keyword-driven. 0.75 is gated by a value-strength validator; **0.80 is not** (§7.1). |
 | **≥ 0.70 floor** | — | Auto-wipe boundary. Nothing may sit *exactly* on it: `ip_with_port` did, and it caused data loss (`CopyPaste-8ys1`). Treat 0.70 as exclusive-in-spirit. |
-| **0.55 – 0.65 — INERT** | `phone_us`, `passport`, `email`, `iban`, `ssn_us`, `discord_bot_token`, `twilio_signing_key_sid`, `generic_bearer`, `ip_with_port` | Detected, labelled, masked, redacted in logs — **never deleted**. |
+| **0.55 – 0.65 — INERT** | `phone_us`, `passport`, `email`, `iban`, `ssn_us`, `discord_bot_token`, `twilio_signing_key_sid`, `generic_bearer`, `http_basic_auth`, `ip_with_port` | Detected, labelled, masked, redacted in logs — **never deleted**, and still searchable. |
+| **RESTRICTED** | `credit_card` | Above the floor *and* opted out of deletion. Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. |
+
+**v2 amendment — the restricted band (DMY-162).** v1 had two bands and one
+question, so "how sure is this a card?" and "may this be erased?" shared a
+number. They are different questions, and §3.3 records the case where the
+answers diverge: the classification is certain and the deletion is unjustified.
+Confidence keeps its meaning, and a separate per-rule `never_auto_delete` says
+what a correct match licenses. It is opt-in and never derived, so a new rule
+above the floor is deletable unless someone writes down why it must not be —
+the direction that keeps a rule from dropping out of the gate by being
+forgotten. The engine's two whole-item predicates differ by exactly this band:
+`is_sensitive` withholds, `may_auto_wipe` deletes.
 
 The inert band exists for two distinct reasons, both worth preserving in v2:
 
@@ -960,9 +991,9 @@ and `crates/copypaste-core/tests/false_positive_corpus.rs`.
 | `atlasv1.` + 64×`A` | detected; auto-wipes |
 | `{"private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEo..."}` | detected; auto-wipes |
 | `AccountKey=` + 86×`A` + `==` | detected; auto-wipes |
-| `4111111111111111` | `CreditCard`; auto-wipes |
-| `Customer card: 4111 1111 1111 1111 — expires 12/26` | `CreditCard` (Audit MED #6) |
-| `please charge 4111-1111-1111-1111 today` | `CreditCard` |
+| `4111111111111111` | `CreditCard`; classified, **never auto-wipes** (§3.3, DMY-162) |
+| `Customer card: 4111 1111 1111 1111 — expires 12/26` | `CreditCard` (Audit MED #6); classified, never auto-wipes |
+| `please charge 4111-1111-1111-1111 today` | `CreditCard`; classified, never auto-wipes |
 | `378282246310005` / `3782 822463 10005` (Amex 4-6-5) | `CreditCard`; the bare and grouped spellings must agree |
 | `30569309025904` / `3056 930902 5904` (Diners 4-6-4) | `CreditCard` |
 | `5555555555554444`, `6011111111111117`, `3530111333300000` | `CreditCard`, bare and in 4-4-4-4 groups |
@@ -992,9 +1023,11 @@ and `crates/copypaste-core/tests/false_positive_corpus.rs`.
 | `ref=4242424242421 EOT` | Luhn-invalid 13-digit run must NOT classify as `CreditCard` |
 | `4111\n1111\n1111\n1111`, `4111\t1111\t1111\t1111` | a column is not a card: the separator may not be a newline or a tab (§3.3, DMY-162) |
 | `4111 1111-1111 1111`, `4111  1111  1111  1111` | mixed or repeated separators are not a card spelling |
+| `41111111 11111111`, `4111 111111111111` | the leading group is four digits, so 8+8 and 4+12 are not card spellings (§3.3, DMY-162) |
 | `1234567890123452` | Luhn-valid, no issuer range — an order id, not a card |
 | `9780132350883` | Luhn-valid ISBN-13 prefix — not an issuer range |
 | `ISBN 978-012-13-234567 qty 12` | ISBN plus quantity must produce no card candidate |
+| `order <Luhn-valid 16 digits beginning 4, 51, 35 or 60>` | indistinguishable from a card, so it *is* classified — and must never be **deleted** (§3.3, DMY-162) |
 | `AccountKey=your` + 82×`A` + `==` | placeholder value, context anchor present (§5.6) |
 | `CLOUDFLARE_API_TOKEN=your` + 36×`b` | placeholder value, and `dotenv_secret` must not classify it either |
 | `aws_secret_access_key = your` + 36×`c` | placeholder value |

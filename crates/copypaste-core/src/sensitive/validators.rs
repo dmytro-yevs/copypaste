@@ -267,6 +267,11 @@ mod tests {
     /// Every brand the manifest's card contract has to keep, in the bare and the
     /// grouped spelling. Separators are stripped before the brand and length
     /// rules run, so the two spellings must agree.
+    ///
+    /// The positive control for the restricted band: a real card is still
+    /// detected, still classified, still kept out of the index and previews —
+    /// and still never deleted. `may_auto_wipe` is asserted false here for the
+    /// same fixtures, so a change that quietly restores deletion fails.
     #[test]
     fn real_cards_are_detected_bare_and_grouped() {
         let det = detector();
@@ -281,9 +286,110 @@ mod tests {
             for form in [bare, grouped] {
                 assert!(card_number_valid(form), "card rejected: {form}");
                 assert!(fired(&det, form, "credit_card"), "rule missed {form}");
-                assert!(det.may_auto_wipe(form), "{form}");
+                assert!(det.is_sensitive(form), "{form} was not withheld");
+                assert!(!det.may_auto_wipe(form), "{form} became deletable");
+                assert_eq!(det.scan(form).unwrap().severity, Severity::Restricted);
             }
         }
+        // Embedded in ordinary text, which is Audit MED #6's case and the one
+        // that decides whether the *item* is withheld.
+        let embedded = "Customer card: 4111 1111 1111 1111 — expires 12/26";
+        assert!(fired(&det, embedded, "credit_card"));
+        assert!(det.is_sensitive(embedded));
+        assert!(!det.may_auto_wipe(embedded));
+    }
+
+    /// Ordinary 16-digit order ids that happen to start inside an issuer range
+    /// and happen to pass Luhn — the mutation that rejected the first attempt at
+    /// this fix, where 71 of 600 were hard-deleted.
+    ///
+    /// Deliberately *not* tautological: every prefix here is one the brand table
+    /// accepts, every id is generated to be Luhn-valid, and each is therefore
+    /// indistinguishable from a card by anything the digits carry. The test is
+    /// that none of them can be deleted — not that none of them is detected,
+    /// which no implementation could honestly claim.
+    fn issuer_prefixed_order_ids() -> Vec<String> {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next_digit = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            char::from(b'0' + (state % 10) as u8)
+        };
+        let mut ids = Vec::new();
+        for prefix in ["4", "51", "35", "60", "37"] {
+            for _ in 0..120 {
+                let mut id = String::from(prefix);
+                while id.len() < 15 {
+                    id.push(next_digit());
+                }
+                id.push(luhn_check_digit(&id));
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
+    /// The digit that makes `body` Luhn-valid. A negative fixture that fails the
+    /// checksum would prove nothing (§5.4's vacuously-passing `4242424242422`).
+    fn luhn_check_digit(body: &str) -> char {
+        let sum: u32 = body
+            .bytes()
+            .rev()
+            .enumerate()
+            .map(|(index, byte)| {
+                let digit = u32::from(byte - b'0');
+                if index % 2 == 0 {
+                    let doubled = digit * 2;
+                    if doubled > 9 {
+                        doubled - 9
+                    } else {
+                        doubled
+                    }
+                } else {
+                    digit
+                }
+            })
+            .sum();
+        char::from(b'0' + ((10 - sum % 10) % 10) as u8)
+    }
+
+    #[test]
+    fn issuer_prefixed_order_ids_are_never_deletable() {
+        let det = detector();
+        let ids = issuer_prefixed_order_ids();
+        assert_eq!(ids.len(), 600, "the mutation must stay large enough");
+        assert!(
+            ids.iter()
+                .filter(|id| card_validate::Validate::is_luhn_valid(id))
+                .count()
+                == ids.len(),
+            "every mutation entry must be Luhn-valid, or it proves nothing"
+        );
+        let accepted = ids.iter().filter(|id| card_number_valid(id)).count();
+        // The number the old policy would have deleted: every id the validator
+        // accepts was `HighConfidence` at 0.99 before the restricted band.
+        eprintln!("{accepted} of {} order ids classify as cards", ids.len());
+        assert!(
+            accepted > 100,
+            "only {accepted} of {} entries reach the card validator; the mutation \
+             stopped exercising the classifier",
+            ids.len()
+        );
+
+        let deletable: Vec<_> = ids
+            .iter()
+            .filter(|id| det.may_auto_wipe(&format!("order {id}")))
+            .take(5)
+            .collect();
+        assert!(
+            deletable.is_empty(),
+            "{} of {} issuer-prefixed order ids would be deleted, e.g. {deletable:#?}",
+            ids.iter()
+                .filter(|id| det.may_auto_wipe(&format!("order {id}")))
+                .count(),
+            ids.len()
+        );
     }
 
     /// Deterministic stand-in for the numeric data people copy all day: a column

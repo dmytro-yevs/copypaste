@@ -369,6 +369,8 @@ confidence = 0.99
 # it, and newline, tab, mixed and repeated separators cannot match at all.
 pattern = '''\b(?:\d{4}(?: \d{2,6}){2,4}|\d{4}(?:-\d{2,6}){2,4}|\d{13,19})\b'''
 validator = "card_number"
+never_auto_delete = true
+never_auto_delete_decision = "Issuer range, brand length and Luhn are everything the digits carry, and a Luhn-valid order id inside an issuer range satisfies all three: a mutation over prefixes 4, 51, 35 and 60 auto-wiped 71 of 600 ordinary 16-digit order ids. Manifest I1 ranks that irreversible loss above leaving the user's own card unsearchable, so a validated card is withheld from the index, sync and previews and never deleted."
 
 [[overlay]]
 name = "iban"

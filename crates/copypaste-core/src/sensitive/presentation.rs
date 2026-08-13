@@ -16,10 +16,10 @@ impl Detector {
     pub fn inert_finding_metadata(&self, text: &str) -> Option<SensitiveFinding> {
         let normalised = normalise(text);
         let findings = self.scan_all_normalised(&normalised);
-        if findings
-            .iter()
-            .any(|finding| finding.severity == Severity::HighConfidence)
-        {
+        // Anything the whole-item gate would withhold takes the whole result
+        // with it, deletable or not: partial metadata about a withheld item is
+        // still a description of it.
+        if findings.iter().any(|f| f.severity > Severity::Flag) {
             return None;
         }
         let label = findings

@@ -84,6 +84,11 @@ fn render_rule(out: &mut String, rule: &Rule) -> Result<()> {
         validator(rule.validator)
     )?;
     writeln!(out, "        secret_group: {},", rule.secret_group)?;
+    writeln!(
+        out,
+        "        never_auto_delete: {},",
+        rule.never_auto_delete
+    )?;
     match rule.entropy {
         Some(entropy) => writeln!(out, "        entropy: Some({entropy:?}),")?,
         None => writeln!(out, "        entropy: None,")?,

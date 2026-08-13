@@ -58,6 +58,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(?:A3T[0-9A-Z]|AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(3.0),
         keywords: &[
             "a3t",
@@ -79,6 +80,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "github_pat_\\w{82}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "github_pat_",
@@ -96,6 +98,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "ghp_[0-9a-zA-Z]{36}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "ghp_",
@@ -113,6 +116,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?:ghu|ghs)_[0-9a-zA-Z]{36}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(3.0),
         keywords: &[
             "ghu_",
@@ -131,6 +135,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "gho_[0-9a-zA-Z]{36}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(3.0),
         keywords: &[
             "gho_",
@@ -148,6 +153,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "ghr_[0-9a-zA-Z]{36}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(3.0),
         keywords: &[
             "ghr_",
@@ -165,6 +171,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})\\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(3.0),
         keywords: &[
             "t3blbkfj",
@@ -183,6 +190,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\bsk-ant-(?:api|admin)\\d{2}-[A-Za-z0-9_-]{80,}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "sk-ant-api03",
@@ -201,6 +209,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(?:sk|rk)_(?:live|prod)_[0-9A-Za-z]{10,99}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "sk_test",
@@ -223,6 +232,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)\\b(npm_[a-z0-9]{36})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "npm_",
@@ -240,6 +250,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,1000}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(3.0),
         keywords: &[
             "pypi-ageichlwas5vcmc",
@@ -257,6 +268,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(3.0),
         keywords: &[
             "xoxb",
@@ -274,6 +286,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?:https?://)?hooks.slack.com/(?:services|workflows|triggers)/[A-Za-z0-9+/]{43,56}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "hooks.slack.com",
@@ -291,6 +304,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)[\\w.-]{0,50}?(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "discord",
@@ -308,6 +322,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\bSK[a-f0-9]{32}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "sk",
@@ -325,6 +340,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(SG\\.(?i)[a-z0-9=_\\-\\.]{66})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "sg.",
@@ -342,6 +358,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\batlasv1\\.[A-Za-z0-9_-]{64,}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "atlasv1",
@@ -359,6 +376,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(AIza[A-Za-z0-9_-]{35})",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(4.0),
         keywords: &[
             "aiza",
@@ -399,6 +417,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)[\\w.-]{0,50}?(?:heroku)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "heroku",
@@ -417,6 +436,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(?:hv[sb]\\.[A-Za-z0-9_-]{32,}|s\\.[A-Za-z0-9]{24})\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "hvs.",
@@ -444,6 +464,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)\\b(?:CLOUDFLARE_API_(?:TOKEN|KEY)|CF_API_TOKEN)\\s*=\\s*([A-Za-z0-9_-]{40})\\b",
         validator: Validator::None,
         secret_group: 1,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "cloudflare_api_",
@@ -481,6 +502,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "-----begin",
@@ -498,6 +520,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)[A-Za-z0-9_.-]{0,50}?(?:access|auth|(?-i:[Aa]pi|API)|credential|creds|key|passw(?:or)?d|secret|token)(?:[ \\tA-Za-z0-9_.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9_.=-]{10,150}|[a-z0-9][a-z0-9+/]{11,}={0,3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
         validator: Validator::None,
         secret_group: 1,
+        never_auto_delete: false,
         entropy: Some(3.5),
         keywords: &[
             "access",
@@ -1996,6 +2019,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(ey[a-zA-Z0-9]{17,}\\.ey[a-zA-Z0-9\\/\\\\_-]{17,}\\.(?:[a-zA-Z0-9\\/\\\\_-]{10,}={0,2})?)(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: Some(3.0),
         keywords: &[
             "ey",
@@ -2013,6 +2037,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\bglpat-[0-9a-zA-Z_-]{20}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[
             "glpat-",
@@ -2028,6 +2053,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\barn:aws:[a-z][a-z0-9\\-]*:[a-z0-9\\-]*:[0-9]{12}:[^\\s]+",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2041,6 +2067,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "sk-proj-[A-Za-z0-9]{48}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2054,6 +2081,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\bsk-[A-Za-z0-9]{48}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2067,6 +2095,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "whsec_[a-zA-Z0-9]{32,64}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2080,6 +2109,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b[MN][a-zA-Z\\d]{23,25}\\.[\\w-]{6}\\.[\\w-]{27,38}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2093,6 +2123,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\bGOCSPX-[A-Za-z0-9_-]{28}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2106,6 +2137,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?m)\"private_key\"\\s*:\\s*\"-----BEGIN RSA PRIVATE KEY-----",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2119,6 +2151,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "AccountKey=([A-Za-z0-9+/]{86})==",
         validator: Validator::None,
         secret_group: 1,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2151,6 +2184,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)(?:\\bsv=\\d{4}-\\d{2}-\\d{2}\\b[^\\s#]*&(?:amp;)?sig=[A-Za-z0-9%+/]{40,}|\\bsig=[A-Za-z0-9%+/]{40,}[^\\s#]*&(?:amp;)?sv=\\d{4}-\\d{2}-\\d{2}\\b)",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2164,6 +2198,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?m)^PuTTY-User-Key-File-[0-9]+:",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2177,6 +2212,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)\\bBearer\\s+[A-Za-z0-9\\-._~+/]{20,}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2190,6 +2226,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)(?:password|passwd|secret|api[-_. ]key|apikey|auth[-_. ]token|access[-_. ]token|client_secret|refresh[-_. ]token|db_password)[\"']?\\s*[:=]\\s*(\\S{6,})",
         validator: Validator::ValueStrength,
         secret_group: 1,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2203,6 +2240,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)aws_secret_access_key[\"']?\\s*[:=]\\s*[\"']?([A-Za-z0-9/+=]{40})",
         validator: Validator::None,
         secret_group: 1,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2233,6 +2271,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)\\bAuthorization:\\s*Basic\\s+[A-Za-z0-9+/]{16,}={0,2}",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2246,6 +2285,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?m)^(?:export\\s+)?[A-Z][A-Z0-9_]{2,}(?:_KEY|_SECRET|_TOKEN|_PASSWORD|_PASS|_PWD|_CREDENTIALS?)\\s*=\\s*(\\S+)",
         validator: Validator::ValueStrength,
         secret_group: 1,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2278,6 +2318,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)(?:postgresql|postgres|mysql|mongodb|redis|amqp|mssql)://[^@\\s]*:[^@\\s]*@\\S+",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2291,6 +2332,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?):\\d{2,5}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2304,6 +2346,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b(?:\\d{4}(?: \\d{2,6}){2,4}|\\d{4}(?:-\\d{2,6}){2,4}|\\d{13,19})\\b",
         validator: Validator::CardNumber,
         secret_group: 0,
+        never_auto_delete: true,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2317,6 +2360,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?-u:\\b[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}\\b)",
         validator: Validator::Iban,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2330,6 +2374,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b\\d{3}[-\\s]\\d{2}[-\\s]\\d{4}\\b",
         validator: Validator::SsnStructure,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2343,6 +2388,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2356,6 +2402,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?:\\+1[-.\\s]?)?\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}\\b",
         validator: Validator::PhoneShape,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
@@ -2369,6 +2416,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "\\b[A-Z]{1,2}[0-9]{9}\\b",
         validator: Validator::None,
         secret_group: 0,
+        never_auto_delete: false,
         entropy: None,
         keywords: &[],
         allowlists: &[
