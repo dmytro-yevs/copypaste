@@ -63,8 +63,13 @@ pub(crate) mod format;
 /// The Windows opt-out vocabulary, and which application a change belongs to.
 /// Built everywhere, like `change`, because the decisions they encode are the
 /// ones that must not regress unnoticed.
+///
+/// `windows_attribution` is crate-visible because the capture path's
+/// end-to-end test drives it: what the attribution decides and what reaches
+/// the search index are in different files, and the regression DMY-158 records
+/// only exists between them.
 #[cfg(any(target_os = "windows", test))]
-mod windows_attribution;
+pub(crate) mod windows_attribution;
 #[cfg(any(target_os = "windows", test))]
 mod windows_optout;
 
