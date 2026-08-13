@@ -2,14 +2,13 @@
 
 /// Windows process image names that no substring below would recognise.
 ///
-/// Each was taken from the vendor's own Windows packaging or from the process
-/// as it is installed, not inferred from the product name:
+/// Each verified from the vendor's own deployment documentation:
 ///
-/// * `nordpass.exe` — NordPass desktop, `support.nordpass.com` installation guide.
-/// * `enpass.exe` — Enpass for Windows, `help.enpass.io` Intune packaging guide.
-/// * `keeperpasswordmanager.exe` — Keeper desktop, `docs.keeper.io` deployment guide.
-/// * `robotaskbaricon.exe`, `robotaskbaricon-x64.exe` — RoboForm's tray process,
-///   which is the one that owns the clipboard on a copy.
+/// * `nordpass.exe` — support.nordpass.com/hc/en-us/articles/360004799257
+/// * `enpass.exe` — help.enpass.io/business/latest/microsoft-365/packaging-enpass-for-windows-via-microsoft-intune
+/// * `keeperpasswordmanager.exe` — docs.keeper.io/enterprise-guide/deploying-keeper-to-end-users/desktop-application
+/// * `robotaskbaricon.exe` / `robotaskbaricon-x64.exe` — RoboForm's tray
+///   process, which owns the clipboard on a copy.
 const WINDOWS_CREDENTIAL_STORES: [&str; 5] = [
     "nordpass.exe",
     "enpass.exe",
