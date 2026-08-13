@@ -9,8 +9,6 @@
 //! The state machine is [`super::change`], covered on every host. The ignored
 //! tests below drive the real Windows clipboard and are release-gate tests.
 
-use std::time::Instant;
-
 use clipboard_win::{raw, Clipboard};
 use tracing::{debug, warn};
 
@@ -19,9 +17,9 @@ mod read;
 mod transcode;
 
 use super::change::{Change, ChangeTracker};
+use super::windows_attribution::{is_excluded, Attribution};
 use super::windows_optout as optout;
 use super::{Capture, CapturePolicy, ClipboardSource};
-use attribution::SourceApp;
 use read::{Reading, Representation};
 
 /// `OpenClipboard` fails while another process holds the clipboard open, which
@@ -79,8 +77,7 @@ pub struct WindowsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
     opt_out: OptOutFormats,
-    source_cache: Option<(Instant, Option<SourceApp>)>,
-    attribution_available: Option<bool>,
+    attribution: Attribution,
     sequence_unavailable_logged: bool,
 }
 
@@ -90,8 +87,7 @@ impl WindowsClipboard {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
             opt_out: OptOutFormats::register(),
-            source_cache: None,
-            attribution_available: None,
+            attribution: Attribution::default(),
             sequence_unavailable_logged: false,
         })
     }
@@ -273,22 +269,18 @@ impl ClipboardSource for WindowsClipboard {
             return None;
         }
 
-        let source_app = self.source_app();
-        self.note_attribution(source_app.as_ref());
+        // §3.9(a): resolved on every change, whether or not the exclusion list
+        // is empty, because its second consumer is the credential-store
+        // sensitivity floor (CopyPaste-44rq.43).
+        let source_app = self.source_app(count);
+        self.attribution.note(source_app.as_ref());
         let app_bundle_id = source_app.as_ref().map(|app| app.id.clone());
         let app_name = source_app.map(|app| app.name);
-        // A non-empty exclusion list fails closed when the source cannot be
-        // resolved; with an empty list the same `None` is safe because content
-        // detection remains active.
-        if !policy.settings.excluded_app_bundle_ids.is_empty()
-            && app_bundle_id.as_ref().is_none_or(|id| {
-                policy
-                    .settings
-                    .excluded_app_bundle_ids
-                    .iter()
-                    .any(|excluded| excluded == id)
-            })
-        {
+        if is_excluded(
+            &policy.settings.excluded_app_bundle_ids,
+            app_bundle_id.as_deref(),
+        ) {
+            self.attribution.note_excluded(app_bundle_id.is_some());
             return None;
         }
 
@@ -717,6 +709,80 @@ mod tests {
         assert!(
             !id.contains('\\') && !id.contains('/'),
             "I-9: the source identifier must not carry a path"
+        );
+    }
+
+    /// DMY-158, against the real sequence number: two copies inside one 750 ms
+    /// window are two changes, and each is attributed to whoever wrote it. A
+    /// process cannot make another process own the clipboard, so what is
+    /// asserted here is the property that made the misattribution possible —
+    /// that the second change resolves its writer instead of inheriting the
+    /// first one's. `windows_attribution` asserts the consequence.
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn each_change_inside_one_poll_period_resolves_its_own_writer() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        write_text("the first copy");
+        let first = clipboard.poll().expect("the first write must be captured");
+        write_text("the second copy, a third of a second later");
+        let second = clipboard.poll().expect("the second write must be captured");
+
+        assert_eq!(
+            clipboard.attribution.resolutions(),
+            2,
+            "the second change reused the first change's identity"
+        );
+        assert_eq!(clipboard.attribution.unattributed_count(), 0);
+        assert!(first.app_bundle_id.is_some() && second.app_bundle_id.is_some());
+    }
+
+    /// What resolving per change costs, since that is what the fix spends.
+    ///
+    /// Attribution runs once per clipboard change rather than once per 750 ms,
+    /// so the only way the fix can cost anything is a burst: several changes
+    /// inside one window that the TTL used to answer from the cache. This
+    /// prints what one resolution costs so that arithmetic is measured rather
+    /// than assumed; the ceiling is deliberately loose, because it is a
+    /// regression alarm and not a benchmark.
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn resolving_a_writer_costs_a_bounded_number_of_microseconds() {
+        const ROUNDS: usize = 200;
+
+        let _lock = serialised();
+        write_text("something to attribute");
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        let _ = clipboard.poll();
+
+        let mut resolved = Vec::with_capacity(ROUNDS);
+        let mut cached = Vec::with_capacity(ROUNDS);
+        for round in 0..ROUNDS {
+            let started = std::time::Instant::now();
+            let app = clipboard.source_app(round as i64);
+            resolved.push(started.elapsed().as_micros());
+            assert!(
+                app.is_some(),
+                "no source application on an interactive desktop"
+            );
+
+            let started = std::time::Instant::now();
+            let _ = clipboard.source_app(round as i64);
+            cached.push(started.elapsed().as_micros());
+        }
+        resolved.sort_unstable();
+        cached.sort_unstable();
+        let p95 = |samples: &[u128]| samples[samples.len() * 95 / 100];
+        println!(
+            "attribution p50={}us p95={}us; same-change p95={}us",
+            resolved[resolved.len() / 2],
+            p95(&resolved),
+            p95(&cached)
+        );
+        assert!(
+            p95(&resolved) < 20_000,
+            "one attribution took {}us; a 500 ms poll cannot carry that",
+            p95(&resolved)
         );
     }
 }

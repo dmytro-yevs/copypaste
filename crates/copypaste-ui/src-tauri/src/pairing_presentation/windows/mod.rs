@@ -170,8 +170,27 @@ mod tests {
         }
         assert!(entry.contains("co::ES::PASSWORD"));
         assert!(entry.contains("co::DLGID::CANCEL"));
-        for protected in [entry, confirm, production(include_str!("invite.rs"))] {
-            assert!(protected.contains("WDA::EXCLUDEFROMCAPTURE"));
+    }
+
+    /// INV-35. Every window that shows or takes pairing material asks for
+    /// screenshot protection and closes when it is refused; a window that
+    /// carried on would be claiming a protection the OS declined.
+    #[test]
+    fn a_refused_screenshot_exclusion_closes_the_pairing_window() {
+        assert!(production(include_str!("common.rs")).contains("WDA::EXCLUDEFROMCAPTURE"));
+        for protected in [
+            production(include_str!("entry.rs")),
+            production(include_str!("confirm.rs")),
+            production(include_str!("invite.rs")),
+        ] {
+            let refused = protected
+                .split_once("if !common::protect_from_capture(wnd.hwnd())")
+                .expect("the window must ask before it is shown")
+                .1;
+            let (refused, _) = refused
+                .split_once("return Ok(0);")
+                .expect("an early return");
+            assert!(refused.contains("wnd.close()"), "{refused}");
         }
     }
 }

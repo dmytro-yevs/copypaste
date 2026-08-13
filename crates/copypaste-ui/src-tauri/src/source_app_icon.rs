@@ -116,6 +116,14 @@ fn resolve_desktop(bundle_id: &str) -> Option<UiSourceAppIcon> {
     })
 }
 
+/// Windows has no source-application icon, deliberately (ADR-0013, DMY-158).
+///
+/// A Windows item carries a process image name — `chrome.exe` — and no path:
+/// the path names the local user (I-9) and is dropped where attribution is
+/// resolved. Every Win32 route from a name to an icon resolves a path first,
+/// and the one that does not, `SHGFI_USEFILEATTRIBUTES`, returns the same
+/// generic executable icon for every application. Rows keep their semantic
+/// icon rather than being given a wrong one.
 #[cfg(not(target_os = "macos"))]
 fn resolve_desktop(_bundle_id: &str) -> Option<UiSourceAppIcon> {
     None
@@ -132,6 +140,18 @@ mod tests {
         assert!(!valid_package_id("/Applications/Writer.app"));
         assert!(!valid_package_id("file:///tmp/icon.png"));
         assert!(!valid_package_id("writer"));
+    }
+
+    /// The refusal is the decision, not an unfinished branch: a later "fix"
+    /// that answers with the generic executable icon would put one icon on
+    /// every Windows row and call it attribution.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_has_no_source_app_icon_and_says_so_by_answering_nothing() {
+        let cache = SourceAppIconCache::default();
+        for image_name in ["chrome.exe", "1password.exe", "com.example.writer"] {
+            assert!(cache.resolve_desktop(image_name).is_none(), "{image_name}");
+        }
     }
 
     #[test]
