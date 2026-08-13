@@ -359,11 +359,15 @@ category = "financial"
 confidence = 0.99
 # Manifest 07 §3.3's scanner accepted any single [\s-] between digits, so a
 # column of amounts one per line, or an ISBN with a quantity after it, became
-# one candidate and passed Luhn about one time in ten. A separator is now one
-# space or one hyphen between groups, never a newline or a tab, and the leading
-# group is four digits. The validator rejects a mixture of separators and adds
-# the issuer-range and length gate.
-pattern = '''\b\d{4}(?:[ -]?\d{2,6}){2,4}\b'''
+# one candidate and passed Luhn about one time in ten.
+#
+# One alternative per spelling, because that is what makes the group boundary
+# structural: with an optional separator, `\d{4}(?:[ -]?\d{2,6}){2,4}` accepts
+# `41111111 11111111` and `4111 111111111111`, so the leading group is only
+# four digits when the writer happened to put a separator after it. Spelled
+# apart, a separator is mandatory within each grouped form and uniform across
+# it, and newline, tab, mixed and repeated separators cannot match at all.
+pattern = '''\b(?:\d{4}(?: \d{2,6}){2,4}|\d{4}(?:-\d{2,6}){2,4}|\d{13,19})\b'''
 validator = "card_number"
 
 [[overlay]]
