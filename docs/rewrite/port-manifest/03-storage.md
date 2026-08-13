@@ -858,6 +858,24 @@ origin_device_id ASC, id ASC` with the same expansion (7 OR-branches).
 `None` = first page. `id ASC` is the final deterministic tiebreak the cursor
 variants add (the offset variants have none).
 
+**v2 amendment (DMY-156): one predicate per run, not one over both.** The
+single predicate above is not sargable — the leading has-cursor flag alone
+defeats it — so every page scanned the history index from the newest row and
+filtered. Measured depth-linear at 10 000 rows. v2 keeps the ordering and the
+cursor unchanged and splits the *query* along the boundary the order already
+has: `pinned` selects the run, the boolean-OR expansion is kept for the pinned
+run under a constant `pinned = 1`, and the unpinned run seeks a `created_at`
+range on `idx_items_evictable`, whose partial predicate is `deleted = 0 AND
+pinned = 0` verbatim. A page anchored in the pinned run tops up from the head
+of the unpinned one.
+
+Consequence worth recording: the unpinned seek keys on `pinned` alone and not
+on `pin_order IS NULL`. Adding that column would make the seek narrower but
+assumes an invariant a merge can break, and an unpinned row carrying a
+`pin_order` would then be dropped from the list entirely. Keyed on `pinned`, it
+is still listed exactly once — but a seek page sorts it by recency where
+`get_page_pinned_first` sorts a non-NULL `pin_order` last.
+
 **Other reads:**
 * `count_items` → `SELECT COUNT(*) … WHERE deleted = 0`
 * `get_item_by_id` → by row PK, no `deleted` filter; re-maps
@@ -1331,7 +1349,8 @@ Listed explicitly so a reviewer does not "simplify" them away:
 
 1. The **boolean-OR keyset expansion** in the pinned-first seek queries. It is
    verbose because SQLite row-value comparison cannot express a mixed ASC/DESC
-   composite key. §3.12.
+   composite key. §3.12. In v2 it is kept for the pinned run only; the unpinned
+   run seeks a `created_at` range instead, per the §3.12 amendment.
 2. The **NULL-safe `pin_order IS ?` / `IS NOT ?` plus `OR ?4 IS NULL`** guards in
    the same predicates.
 3. The **`(wall_time / 60)` expression** in `idx_dedup_hash_minute` — even though

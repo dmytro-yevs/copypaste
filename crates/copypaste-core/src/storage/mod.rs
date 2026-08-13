@@ -145,6 +145,25 @@ pub(crate) mod test_support {
         .unwrap()
     }
 
+    /// `EXPLAIN QUERY PLAN` for a statement, one string per step.
+    ///
+    /// Parameters are bound to NULL: the plan is chosen from the statement, not
+    /// from the values. `search` and `versions` each still carry their own copy
+    /// of this.
+    pub(crate) fn plan_of(store: &Store, sql: &str) -> Vec<String> {
+        let conn = store.conn().unwrap();
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let bound: Vec<rusqlite::types::Null> = (0..stmt.parameter_count())
+            .map(|_| rusqlite::types::Null)
+            .collect();
+        stmt.query_map(rusqlite::params_from_iter(bound), |row| {
+            row.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+    }
+
     pub(super) fn fts_dump(store: &Store) -> String {
         let conn = store.conn().unwrap();
         let mut stmt = conn

@@ -255,12 +255,69 @@ fn payloads(c: &mut Criterion) {
     }
 }
 
+/// The calls an accepted capture makes after the write, at the depth
+/// `ConfigData::history_limit` actually allows.
+///
+/// All three sweeps are measured with nothing to delete, because that is what
+/// they do on almost every capture and on all 10 000 items of an import. The
+/// pin reorder is here rather than under a UI bench for the same reason: it is
+/// a write-path call whose cost is set by how many items are pinned.
+fn hot_paths(c: &mut Criterion) {
+    const DEPTH: usize = 10_000;
+    let keyring = keyring();
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = primed(dir.path(), DEPTH);
+
+    let mut group = c.benchmark_group("storage/hotpath");
+    group.sample_size(50);
+
+    group.bench_function("cap_nothing_to_do", |b| {
+        b.iter(|| store.evict_over_cap(black_box(DEPTH as u64)));
+    });
+    group.bench_function("byte_cap_nothing_to_do", |b| {
+        b.iter(|| store.evict_over_byte_cap(black_box(u64::MAX)));
+    });
+    group.bench_function("age_nothing_to_do", |b| {
+        b.iter(|| store.evict_older_than(black_box(T0 - 1)));
+    });
+    group.finish();
+
+    // Its own store: every row pinned is the shape the reorder is paid for.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pinned = support::store_in(dir.path());
+    support::fill(&pinned, &keyring, DEPTH, ROW_BYTES);
+    let ids: Vec<String> = pinned
+        .list(DEPTH as u32, 0)
+        .expect("list")
+        .into_iter()
+        .map(|row| {
+            pinned.set_pinned(&row.id, true).expect("pin");
+            row.id
+        })
+        .collect();
+    let reversed: Vec<String> = ids.iter().rev().cloned().collect();
+
+    let mut group = c.benchmark_group("storage/hotpath");
+    group.sample_size(10);
+    group.throughput(Throughput::Elements(DEPTH as u64));
+    group.bench_function("reorder_pinned", |b| {
+        b.iter(|| {
+            pinned
+                .reorder_pinned(black_box(&reversed))
+                .expect("reorder")
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     summaries,
     insert_or_bump,
     upsert,
     retention,
+    hot_paths,
     payloads
 );
 criterion_main!(benches);

@@ -48,6 +48,102 @@ const BYTE_CAP_TOTAL_SQL: &str =
     FROM clipboard_items INDEXED BY idx_items_unpinned_bytes \
     WHERE deleted = 0 AND pinned = 0";
 
+// `INDEXED BY idx_items_evictable` throughout: nothing writes `sqlite_stat1`
+// (`connection::OptimizeOnRelease`), so the planner guesses `idx_items_history`
+// and sorts — 1.147 ms against 0.003 ms forced at 10 000 rows.
+//
+// Each also gates on its own connection before promoting it to an IMMEDIATE
+// transaction and re-checks inside, so what gets deleted is unchanged and a
+// no-op sweep stops taking the write lock — three per imported item. Sweeping
+// one capture later can only delete less, later.
+
+/// The newest unpinned live row — the one [`Store::evict_over_cap`] documents as
+/// never evictable. Empty-string sentinel, so `id <> ?1` matches every real row.
+fn keep_newest(conn: &Connection) -> rusqlite::Result<String> {
+    Ok(conn
+        .query_row(KEEP_NEWEST_SQL, [], |r| r.get::<_, String>(0))
+        .optional()?
+        .unwrap_or_default())
+}
+
+const KEEP_NEWEST_SQL: &str = concat!(
+    "SELECT id FROM ",
+    "clipboard_items INDEXED BY idx_items_evictable",
+    " WHERE deleted = 0 AND pinned = 0 ORDER BY created_at DESC, id DESC LIMIT 1"
+);
+
+/// Is there a second unpinned live row behind the protected newest one? Without
+/// one the quota is unreachable and the victim scan can only come back empty —
+/// so an item larger than the quota re-ranked the history on every capture.
+fn has_byte_victim(conn: &Connection) -> rusqlite::Result<bool> {
+    let found: i64 = conn.query_row(BYTE_CAP_HAS_VICTIM_SQL, [], |r| r.get(0))?;
+    Ok(found >= 2)
+}
+
+fn has_expired(conn: &Connection, cutoff_ms: i64) -> rusqlite::Result<bool> {
+    conn.query_row(AGE_GATE_SQL, [cutoff_ms], |r| r.get(0))
+}
+
+const BYTE_CAP_HAS_VICTIM_SQL: &str = concat!(
+    "SELECT COUNT(*) FROM (SELECT 1 FROM ",
+    "clipboard_items INDEXED BY idx_items_evictable",
+    " WHERE deleted = 0 AND pinned = 0 LIMIT 2)"
+);
+
+const CAP_VICTIMS_SQL: &str = concat!(
+    "SELECT id FROM ",
+    "clipboard_items INDEXED BY idx_items_evictable",
+    " WHERE deleted = 0 AND pinned = 0 AND id <> ?1 \
+      ORDER BY created_at ASC, id ASC LIMIT ?2"
+);
+
+/// Ranking runs in index order, so the window needs no sort. Row lengths still
+/// come from the table: index-only needs a stored byte column, which `dbfile`'s
+/// `INSERT ... SELECT *` restore cannot carry.
+const BYTE_VICTIMS_SQL: &str = concat!(
+    "WITH ranked AS ( \
+        SELECT id, \
+               LENGTH(COALESCE(content_ciphertext, X'')) AS row_bytes, \
+               SUM(LENGTH(COALESCE(content_ciphertext, X''))) OVER ( \
+                   ORDER BY created_at ASC, id ASC ROWS UNBOUNDED PRECEDING \
+               ) AS cumulative_bytes \
+          FROM ",
+    "clipboard_items INDEXED BY idx_items_evictable",
+    " WHERE deleted = 0 AND pinned = 0 AND id <> ?1 \
+     ) \
+     SELECT id FROM ranked WHERE cumulative_bytes - row_bytes < ?2"
+);
+
+const AGE_GATE_SQL: &str = concat!(
+    "SELECT EXISTS(SELECT 1 FROM ",
+    "clipboard_items INDEXED BY idx_items_evictable",
+    " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1)"
+);
+
+const AGE_VICTIMS_SQL: &str = concat!(
+    "SELECT id FROM ",
+    "clipboard_items INDEXED BY idx_items_evictable",
+    " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1"
+);
+
+/// `idx_items_sensitive_wipe`'s partial predicate is these two WHERE clauses, so
+/// both cost what the sensitive set costs and it is empty where no secret was
+/// ever copied — which is what makes the `CopyPaste-98ja` probe free. Written
+/// differently SQLite declines it (`CopyPaste-crh3.3`); `INDEXED BY` errors.
+const SENSITIVE_EXISTS_SQL: &str = concat!(
+    "SELECT EXISTS(SELECT 1 FROM ",
+    "clipboard_items INDEXED BY idx_items_sensitive_wipe",
+    " WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0)"
+);
+
+const EXPIRED_SENSITIVE_SQL: &str = concat!(
+    "SELECT ",
+    item_columns!(),
+    " FROM clipboard_items INDEXED BY idx_items_sensitive_wipe \
+      WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0 AND created_at < ?1 \
+      ORDER BY created_at ASC, id ASC"
+);
+
 impl Store {
     /// Most recent live item with this content hash at or after `since_ms`.
     ///
@@ -77,6 +173,9 @@ impl Store {
     /// a user-visible delete event to propagate.
     pub fn evict_over_cap(&self, max_items: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
+        if live_count(&conn)? <= max_items {
+            return Ok(0);
+        }
         let tx = write_tx(&mut conn)?;
         let live = live_count(&tx)?;
         if live <= max_items {
@@ -84,23 +183,9 @@ impl Store {
         }
         let excess = live - max_items;
 
-        // Empty-string sentinel: `id <> ''` matches every real row.
-        let keep_id: String = tx
-            .query_row(
-                "SELECT id FROM clipboard_items WHERE deleted = 0 AND pinned = 0 \
-                  ORDER BY created_at DESC, id DESC LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?
-            .unwrap_or_default();
-
+        let keep_id = keep_newest(&tx)?;
         let victims: Vec<String> = {
-            let mut stmt = tx.prepare(
-                "SELECT id FROM clipboard_items \
-                  WHERE deleted = 0 AND pinned = 0 AND id <> ?1 \
-                  ORDER BY created_at ASC, id ASC LIMIT ?2",
-            )?;
+            let mut stmt = tx.prepare_cached(CAP_VICTIMS_SQL)?;
             let rows = stmt.query_map(params![keep_id, excess as i64], |r| r.get(0))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
@@ -118,37 +203,20 @@ impl Store {
     /// deliberately retained for sync.
     pub fn evict_over_byte_cap(&self, max_bytes: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
+        if !has_byte_victim(&conn)? || unpinned_bytes(&conn)? <= max_bytes {
+            return Ok(0);
+        }
         let tx = write_tx(&mut conn)?;
         let total = unpinned_bytes(&tx)?;
         if total <= max_bytes {
             return Ok(0);
         }
 
-        let keep_id: String = tx
-            .query_row(
-                "SELECT id FROM clipboard_items WHERE deleted = 0 AND pinned = 0 \
-                  ORDER BY created_at DESC, id DESC LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?
-            .unwrap_or_default();
-
+        let keep_id = keep_newest(&tx)?;
         let excess =
             i64::try_from(total).unwrap_or(i64::MAX) - i64::try_from(max_bytes).unwrap_or(i64::MAX);
         let victims: Vec<String> = {
-            let mut stmt = tx.prepare(
-                "WITH ranked AS ( \
-                    SELECT id, \
-                           LENGTH(COALESCE(content_ciphertext, X'')) AS row_bytes, \
-                           SUM(LENGTH(COALESCE(content_ciphertext, X''))) OVER ( \
-                               ORDER BY created_at ASC, id ASC ROWS UNBOUNDED PRECEDING \
-                           ) AS cumulative_bytes \
-                      FROM clipboard_items \
-                     WHERE deleted = 0 AND pinned = 0 AND id <> ?1 \
-                 ) \
-                 SELECT id FROM ranked WHERE cumulative_bytes - row_bytes < ?2",
-            )?;
+            let mut stmt = tx.prepare_cached(BYTE_VICTIMS_SQL)?;
             let rows = stmt.query_map(params![keep_id, excess], |r| r.get(0))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
@@ -164,12 +232,12 @@ impl Store {
     /// Pinned items are never TTL-deleted (I9).
     pub fn evict_older_than(&self, cutoff_ms: i64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
+        if !has_expired(&conn, cutoff_ms)? {
+            return Ok(0);
+        }
         let tx = write_tx(&mut conn)?;
         let victims: Vec<String> = {
-            let mut stmt = tx.prepare(
-                "SELECT id FROM clipboard_items \
-                  WHERE deleted = 0 AND pinned = 0 AND created_at < ?1",
-            )?;
+            let mut stmt = tx.prepare_cached(AGE_VICTIMS_SQL)?;
             let rows = stmt.query_map([cutoff_ms], |r| r.get(0))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
@@ -190,13 +258,8 @@ impl Store {
         let Ok(conn) = self.conn() else {
             return true;
         };
-        conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM clipboard_items \
-                            WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0)",
-            [],
-            |r| r.get::<_, bool>(0),
-        )
-        .unwrap_or(true)
+        conn.query_row(SENSITIVE_EXISTS_SQL, [], |r| r.get::<_, bool>(0))
+            .unwrap_or(true)
     }
 
     /// Sensitive, unpinned, live rows whose capture is older than `cutoff_ms`.
@@ -208,13 +271,7 @@ impl Store {
     /// (manifest 03 I9).
     pub(crate) fn expired_sensitive(&self, cutoff_ms: i64) -> Result<Vec<StoredItem>, StoreError> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(concat!(
-            "SELECT ",
-            item_columns!(),
-            " FROM clipboard_items \
-              WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0 AND created_at < ?1 \
-              ORDER BY created_at ASC, id ASC"
-        ))?;
+        let mut stmt = conn.prepare_cached(EXPIRED_SENSITIVE_SQL)?;
         let columns = ItemColumns::resolve(&stmt)?;
         let rows = stmt.query_map([cutoff_ms], |row| row_to_item(row, &columns))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -344,8 +401,107 @@ pub use copypaste_p2p::protocol::plaintext_content_hash as compute_content_hash;
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{fts_row_count, hash_of, item, store, T0};
+    use super::super::test_support::{fts_row_count, hash_of, item, plan_of, store, T0};
     use super::*;
+
+    /// Every sweep query must reach its index. `INDEXED BY` makes a mismatched
+    /// partial predicate an error rather than a silent scan, so these assert the
+    /// half `INDEXED BY` cannot: that the index supplies the order too, and that
+    /// the byte scan never leaves the index to weigh a payload.
+    #[test]
+    fn every_eviction_query_seeks_its_index_and_needs_no_sort() {
+        let s = store();
+        s.insert(item("payload", T0)).unwrap();
+
+        for (label, sql) in [
+            ("keep newest", KEEP_NEWEST_SQL),
+            ("cap victims", CAP_VICTIMS_SQL),
+            ("byte victims", BYTE_VICTIMS_SQL),
+            ("age gate", AGE_GATE_SQL),
+            ("age victims", AGE_VICTIMS_SQL),
+            ("byte victim probe", BYTE_CAP_HAS_VICTIM_SQL),
+        ] {
+            let plan = plan_of(&s, sql);
+            assert!(
+                plan.iter().any(|d| d.contains("idx_items_evictable")),
+                "{label} must use idx_items_evictable, got {plan:?}"
+            );
+            assert!(
+                !plan.iter().any(|d| d.contains("TEMP B-TREE")),
+                "{label} must take its order from the index, got {plan:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_sensitive_queries_use_the_partial_wipe_index() {
+        let s = store();
+        s.insert(item("payload", T0)).unwrap();
+        for (label, sql) in [
+            ("probe", SENSITIVE_EXISTS_SQL),
+            ("sweep", EXPIRED_SENSITIVE_SQL),
+        ] {
+            let plan = plan_of(&s, sql);
+            assert!(
+                plan.iter().any(|d| d.contains("idx_items_sensitive_wipe")),
+                "the sensitive {label} must use its partial index, got {plan:?}"
+            );
+            assert!(
+                !plan.iter().any(|d| d.contains("TEMP B-TREE")),
+                "the sensitive {label} must not sort, got {plan:?}"
+            );
+        }
+    }
+
+    /// One item bigger than the whole quota is permanently over it, and it is
+    /// also the protected newest row, so nothing may be deleted. That state used
+    /// to re-rank the entire history on every capture, for ever.
+    #[test]
+    fn a_lone_oversized_item_is_kept_and_stops_the_rescan() {
+        let s = store();
+        let only = s.insert(item(&"a".repeat(100), T0)).unwrap();
+
+        for _ in 0..3 {
+            assert_eq!(s.evict_over_byte_cap(10).unwrap(), 0);
+        }
+        assert!(s.get(&only.id).unwrap().is_some(), "the sole row is kept");
+
+        // A second row makes the first evictable again, and the sweep resumes.
+        s.insert(item(&"b".repeat(100), T0 + 60_000)).unwrap();
+        assert_eq!(s.evict_over_byte_cap(10).unwrap(), 1);
+        assert!(s.get(&only.id).unwrap().is_none());
+    }
+
+    /// A sweep with nothing to do must not take the write lock. Held open by
+    /// another connection, an IMMEDIATE transaction it does not need is the
+    /// difference between returning and waiting out `busy_timeout` — and an
+    /// import ran three of them per item.
+    ///
+    /// On a file store, so the WAL writer lock is the real one — a shared-cache
+    /// in-memory database locks per table and would prove something else.
+    #[test]
+    fn a_sweep_with_nothing_to_do_never_takes_the_write_lock() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let s = Store::open(
+            &dir.path().join("copypaste-v2.db"),
+            &super::super::test_support::KEY,
+        )
+        .unwrap();
+        s.insert(item("only", T0)).unwrap();
+
+        let mut blocker = s.conn().unwrap();
+        let held = super::write_tx(&mut blocker).unwrap();
+        held.execute("UPDATE clipboard_live_count SET live = live", [])
+            .unwrap();
+
+        // Each of these would otherwise open its own IMMEDIATE transaction,
+        // wait out `busy_timeout`, and fail.
+        assert_eq!(s.evict_over_cap(1_000).unwrap(), 0);
+        assert_eq!(s.evict_over_byte_cap(u64::MAX).unwrap(), 0);
+        assert_eq!(s.evict_older_than(T0 - 1).unwrap(), 0);
+
+        held.rollback().unwrap();
+    }
 
     #[test]
     fn dedup_window_hit_and_miss() {

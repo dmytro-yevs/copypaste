@@ -9,7 +9,7 @@
 //! case for an item that arrived through a cloud account from a third device
 //! that was never paired directly.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -107,23 +107,30 @@ impl Store {
     /// One query for a whole page rather than one per row: a page is up to
     /// 1 000 items and this is on the path of every `list` and every `search`.
     /// An id with no row is absent from the map rather than guessed at.
+    ///
+    /// Callers pass one id per *row*, and a page is overwhelmingly rows from one
+    /// or two devices, so the ids are deduplicated before the statement is
+    /// built. The result is keyed by device id and cannot see the difference; a
+    /// 1 000-row page was otherwise a 1 000-placeholder `IN` list, prepared
+    /// afresh because its text changes with the count.
     pub fn device_names(
         &self,
         device_ids: &[String],
     ) -> Result<HashMap<String, String>, StoreError> {
-        let mut found = HashMap::with_capacity(device_ids.len());
-        if device_ids.is_empty() {
+        let unique: BTreeSet<&str> = device_ids.iter().map(String::as_str).collect();
+        let mut found = HashMap::with_capacity(unique.len());
+        if unique.is_empty() {
             return Ok(found);
         }
         let conn = self.conn()?;
-        let placeholders = std::iter::repeat_n("?", device_ids.len())
+        let placeholders = std::iter::repeat_n("?", unique.len())
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
             "SELECT device_id, name FROM sync_device_name WHERE device_id IN ({placeholders})"
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(device_ids.iter()), |row| {
+        let rows = stmt.query_map(rusqlite::params_from_iter(unique.iter()), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
         for row in rows {
@@ -225,6 +232,38 @@ mod tests {
             .device_names(&["device-b".to_string(), String::new()])
             .unwrap()
             .is_empty());
+    }
+
+    /// A page is one id per row and almost always one or two distinct devices.
+    /// Repeats must collapse before the `IN` list is built, and must not change
+    /// what comes back.
+    #[test]
+    fn repeated_ids_are_asked_for_once_and_answered_the_same() {
+        let s = store();
+        s.record_device_name("device-a", "Alpha").unwrap();
+        s.record_device_name("device-b", "Beta").unwrap();
+
+        let mut page: Vec<String> = Vec::new();
+        for _ in 0..1_000 {
+            page.push("device-a".to_string());
+            page.push("device-b".to_string());
+            page.push("never-seen".to_string());
+        }
+
+        let names = s.device_names(&page).unwrap();
+        assert_eq!(names.len(), 2);
+        assert_eq!(names["device-a"], "Alpha");
+        assert_eq!(names["device-b"], "Beta");
+
+        // Same answer as the one-of-each call it collapses to.
+        let distinct = s
+            .device_names(&[
+                "device-a".to_string(),
+                "device-b".to_string(),
+                "never-seen".to_string(),
+            ])
+            .unwrap();
+        assert_eq!(names, distinct);
     }
 
     #[test]
