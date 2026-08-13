@@ -50,6 +50,12 @@ export const settingsService = {
     noMatches: "No matching app was seen.",
     invalid: "Enter a bundle or package ID, such as com.example.app.",
     exists: "That app is already excluded.",
+    windowsInputLabel: "Program name",
+    windowsPlaceholder: "chrome.exe",
+    windowsDescription: "Type the program name as Task Manager shows it. A full path works too.",
+    windowsInvalid: "Enter a program name, such as chrome.exe.",
+    windowsExists: "That program is already excluded as {{id}}.",
+    normalized: "Added as {{id}}.",
   },
   historyLimit: {
     title: "Keep at most",
