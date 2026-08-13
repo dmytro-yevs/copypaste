@@ -29,7 +29,7 @@ impl Category {
 pub(super) enum Validator {
     /// The regex is the whole decision.
     None,
-    /// Capture group 1 must survive [`super::validators::value_is_strong`].
+    /// The captured value must survive [`super::validators::value_is_strong`].
     ValueStrength,
     /// Issuer range, per-brand length and Luhn over the digit run (§5.4).
     CardNumber,
