@@ -31,25 +31,6 @@ pub const SIGNED_OUT_INTERVAL: Duration = Duration::from_secs(60);
 /// `MSG_ACCOUNT_CHANGED`: the account is fine, the process is leaving.
 pub(crate) const MSG_SHUTTING_DOWN: &str = "the daemon is shutting down";
 
-/// Resolves when shutdown has been asked for, and never when there is nothing
-/// watching it — a `None` receiver is a caller with no teardown to observe,
-/// such as a unit test driving one round.
-async fn shutdown_requested(shutdown: Option<watch::Receiver<bool>>) {
-    let Some(mut shutdown) = shutdown else {
-        std::future::pending::<()>().await;
-        return;
-    };
-    if *shutdown.borrow() {
-        return;
-    }
-    while shutdown.changed().await.is_ok() {
-        if *shutdown.borrow() {
-            return;
-        }
-    }
-    std::future::pending::<()>().await;
-}
-
 /// Run cloud rounds until shutdown.
 pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
     if !state.cloud.is_configured() {
@@ -125,7 +106,7 @@ async fn round_with_permit(
         // Teardown does not wait out a round's network time. Abandoning one
         // costs nothing: the floor is only committed on success below, so the
         // next start re-derives exactly the same work from local state.
-        () = shutdown_requested(shutdown) => Err(SyncError::Source(MSG_SHUTTING_DOWN)),
+        () = crate::shutdown::requested(shutdown) => Err(SyncError::Source(MSG_SHUTTING_DOWN)),
         outcome = driver.sync(&source) => outcome,
     };
 
