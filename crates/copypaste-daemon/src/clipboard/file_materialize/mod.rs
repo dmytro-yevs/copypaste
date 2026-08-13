@@ -1,6 +1,8 @@
 //! Private, time-bounded staging for native file paste-back.
 
 mod sweep;
+#[cfg(test)]
+mod testutil;
 
 use std::fs::File;
 use std::io::{self, Write};
@@ -22,16 +24,26 @@ const MAX_AGE: Duration = Duration::from_secs(10 * 60);
 /// sampling it more often than it can expire is a resident timer for nothing.
 const CLEANUP_INTERVAL: Duration = MAX_AGE;
 
+/// Whether a staging attempt left decrypted bytes on disk. It is plaintext, not
+/// a successful paste-back, that obliges the sweeper: a write that failed after
+/// the temporary file was created leaves exactly the same bytes behind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Plaintext {
+    None,
+    OnDisk,
+}
+
 pub(super) struct StagingArea {
     root: PathBuf,
     /// Opened once. Re-`open`ing and re-`fchmod`ing per paste-back put six
     /// syscalls on the interactive path to reassert a mode nothing changes.
     root_fd: std::os::fd::OwnedFd,
     access: Arc<Mutex<()>>,
-    /// Started on the first successful `materialize`, or at construction when
-    /// the start-time sweep could not finish. On a machine that never pastes a
-    /// file back and has nothing left over, the sweeper has nothing to sweep and
-    /// was costing a resident OS thread for the life of the daemon.
+    /// Started on the first `materialize` that put plaintext on disk, or at
+    /// construction when the start-time sweep could not finish. On a machine
+    /// that never pastes a file back and has nothing left over, the sweeper has
+    /// nothing to sweep and was costing a resident OS thread for the life of
+    /// the daemon.
     cleanup: OnceLock<CleanupWorker>,
     max_age: Duration,
     interval: Duration,
@@ -71,9 +83,12 @@ impl StagingArea {
     pub(super) fn materialize(&self, bytes: &[u8], metadata: &FileMetadata) -> io::Result<PathBuf> {
         let filename = safe_filename(metadata)?;
         let _access = self.access.lock().unwrap_or_else(|held| held.into_inner());
-        let path = self.stage(bytes, filename)?;
-        self.start_cleanup();
-        Ok(path)
+        let mut plaintext = Plaintext::None;
+        let staged = self.stage(bytes, filename, &mut plaintext);
+        if staged.is_ok() || plaintext == Plaintext::OnDisk {
+            self.start_cleanup();
+        }
+        staged
     }
 
     /// The TTL sweeper exists because this directory holds *decrypted* payloads.
@@ -98,12 +113,18 @@ impl StagingArea {
         }
     }
 
-    fn stage(&self, bytes: &[u8], filename: &str) -> io::Result<PathBuf> {
+    fn stage(
+        &self,
+        bytes: &[u8],
+        filename: &str,
+        plaintext: &mut Plaintext,
+    ) -> io::Result<PathBuf> {
         let content_id = copypaste_core::binary_item_id(bytes);
         let content_fd = open_or_create_content_dir(&self.root_fd, &content_id)?;
 
         match open_regular_at(&content_fd, filename) {
             Ok(file) => {
+                *plaintext = Plaintext::OnDisk;
                 renew(&file)?;
                 return Ok(self.root.join(content_id).join(filename));
             }
@@ -118,16 +139,20 @@ impl StagingArea {
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             FILE_MODE,
         )?;
+        *plaintext = Plaintext::OnDisk;
         let mut temporary = File::from(temporary_fd);
         let write_result = (|| {
             temporary.write_all(bytes)?;
-            // `flush`, never `sync_all`: `write -> publish -> read` crosses a
-            // process boundary, so the bytes must be visible before the
-            // `linkat`, but they need never reach stable storage. A staging file
-            // lost to a crash is re-derived from the encrypted row on the next
-            // paste, and the fsync was tens of milliseconds of interactive
-            // latency for a file `MAX_AGE` deletes within ten minutes anyway.
-            temporary.flush()?;
+            if let Some(injected) = injected_failure() {
+                return Err(injected);
+            }
+            // No `sync_all`: `write -> publish -> read` crosses a process
+            // boundary, so the bytes must be visible to another process, which
+            // `write(2)` alone makes them. They need never reach stable
+            // storage — a staging file lost to a crash is re-derived from the
+            // encrypted row on the next paste, and the fsync was tens of
+            // milliseconds of interactive latency for a file `MAX_AGE` deletes
+            // within ten minutes anyway.
             rustix::fs::linkat(
                 &content_fd,
                 temporary_name.as_str(),
@@ -138,25 +163,85 @@ impl StagingArea {
             .map_err(io::Error::from)
         })();
         drop(temporary);
-        let unlink_result =
-            rustix::fs::unlinkat(&content_fd, temporary_name.as_str(), AtFlags::empty());
+        let rollback = rollback_temporary(&content_fd, &temporary_name);
 
         match write_result {
             Ok(()) => {
-                unlink_result?;
+                rollback?;
                 Ok(self.root.join(content_id).join(filename))
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                unlink_result?;
+                rollback?;
                 let file = open_regular_at(&content_fd, filename)?;
                 renew(&file)?;
                 Ok(self.root.join(content_id).join(filename))
             }
-            Err(error) => {
-                let _ = unlink_result;
-                Err(error)
+            // The write failure is the more informative of the two, and the
+            // rollback failure has already been reported.
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// Removing the temporary is the only thing that unmakes the decrypted bytes
+/// the caller just wrote. A silent failure here was how a partial or complete
+/// plaintext payload could outlive a staging error unreported.
+fn rollback_temporary(content_fd: &std::os::fd::OwnedFd, name: &str) -> io::Result<()> {
+    let removed = match injected_failure() {
+        Some(injected) => Err(injected),
+        None => match rustix::fs::unlinkat(content_fd, name, AtFlags::empty()) {
+            // Already gone is the outcome the rollback wanted.
+            Ok(()) | Err(Errno::NOENT) => Ok(()),
+            Err(error) => Err(io::Error::from(error)),
+        },
+    };
+    if let Err(error) = &removed {
+        warn!(
+            error_kind = ?error.kind(),
+            "could not remove the temporary paste-file; the decrypted bytes stay until the staging sweeper takes them"
+        );
+    }
+    removed
+}
+
+#[cfg(not(test))]
+fn injected_failure() -> Option<io::Error> {
+    None
+}
+
+#[cfg(test)]
+use fault::injected as injected_failure;
+
+/// Failure injection for the window between creating the decrypted temporary
+/// file and publishing it. Neither `linkat` nor `unlinkat` can be made to fail
+/// on demand from a test — the staging directory is re-`fchmod`ed on every open
+/// and the temporary name is a fresh uuid — and the branch they select decides
+/// whether plaintext is left on disk with nothing to remove it.
+#[cfg(test)]
+mod fault {
+    use std::cell::Cell;
+    use std::io;
+
+    thread_local! {
+        static PUBLISH_FAILS: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) fn with_publish_failure<T>(body: impl FnOnce() -> T) -> T {
+        struct Disarm;
+        impl Drop for Disarm {
+            fn drop(&mut self) {
+                PUBLISH_FAILS.with(|armed| armed.set(false));
             }
         }
+        PUBLISH_FAILS.with(|armed| armed.set(true));
+        let _disarm = Disarm;
+        body()
+    }
+
+    pub(super) fn injected() -> Option<io::Error> {
+        PUBLISH_FAILS
+            .with(Cell::get)
+            .then(|| io::Error::from(io::ErrorKind::StorageFull))
     }
 }
 
@@ -227,6 +312,7 @@ fn renew(file: &File) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::testutil::CapturedLog;
     use super::*;
 
     fn metadata(filename: impl Into<String>) -> FileMetadata {
@@ -240,6 +326,13 @@ mod tests {
         let file = File::options().write(true).open(path).unwrap();
         file.set_times(std::fs::FileTimes::new().set_modified(modified))
             .unwrap();
+    }
+
+    fn wait_until_gone(path: &Path, within: Duration) {
+        let deadline = SystemTime::now() + within;
+        while path.exists() && SystemTime::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -319,6 +412,79 @@ mod tests {
         assert!(
             staging.cleanup.get().is_some(),
             "staged plaintext must be under the TTL sweeper"
+        );
+    }
+
+    #[test]
+    fn a_paste_back_that_never_wrote_plaintext_starts_no_sweeper() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::new(data_dir.path()).unwrap();
+
+        staging
+            .materialize(b"bytes", &metadata("../outside"))
+            .unwrap_err();
+
+        assert!(
+            staging.cleanup.get().is_none(),
+            "a refused filename put nothing on disk and must not cost a thread"
+        );
+    }
+
+    /// The failure this guards is silent by construction: a staging error after
+    /// the temporary file exists returns `Err`, so the caller reports a failed
+    /// paste — while the decrypted bytes stay on disk with no owner.
+    #[test]
+    fn a_publish_failure_reports_its_rollback_and_leaves_the_plaintext_owned() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::with_timing(
+            data_dir.path(),
+            Duration::from_millis(1),
+            Duration::from_millis(400),
+        )
+        .unwrap();
+        let capture = CapturedLog::default();
+
+        let logged = capture.record(|| {
+            let error = fault::with_publish_failure(|| {
+                staging.materialize(b"payload", &metadata("statement.pdf"))
+            })
+            .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::StorageFull);
+        });
+
+        let content_dir = staging
+            .root()
+            .join(copypaste_core::binary_item_id(b"payload"));
+        let leaked: Vec<PathBuf> = std::fs::read_dir(&content_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(
+            leaked.len(),
+            1,
+            "setup: a temporary must be left: {leaked:?}"
+        );
+        assert!(
+            logged.contains("could not remove the temporary paste-file"),
+            "a failed rollback was not reported: {logged}"
+        );
+        assert!(logged.contains("StorageFull"), "{logged}");
+        for secret in [
+            "statement",
+            ".pdf",
+            "payload",
+            content_dir.to_str().unwrap(),
+        ] {
+            assert!(!logged.contains(secret), "the report disclosed {secret}");
+        }
+        assert!(
+            staging.cleanup.get().is_some(),
+            "decrypted plaintext was left on disk with no sweeper"
+        );
+        wait_until_gone(&leaked[0], Duration::from_secs(5));
+        assert!(
+            !leaked[0].exists(),
+            "the sweeper never removed the plaintext a failed publish left"
         );
     }
 
