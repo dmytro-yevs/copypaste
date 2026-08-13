@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { ChoiceRow } from "@/components/settings/ChoiceRow";
 import { Row } from "@/components/settings/Row";
 import { Section } from "@/components/settings/Section";
+import { SettingsHealthNotice } from "@/components/settings/SettingsHealthNotice";
 import { SourceExclusions } from "@/components/settings/SourceExclusions";
 import { SwitchRow } from "@/components/settings/SwitchRow";
 import {
@@ -110,6 +111,9 @@ export function ServiceTab() {
 
   return (
     <div className="flex flex-col gap-s-4">
+      {/* Above the controls: it explains why the values below are not the
+          ones the user last chose. */}
+      <SettingsHealthNotice />
       {pending && (
         <div
           role="status"
