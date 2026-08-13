@@ -84,6 +84,9 @@ pub struct OverlayRule {
     pub secret_group: usize,
     #[serde(default)]
     pub placeholder_stopwords: Vec<String>,
+    #[serde(default)]
+    pub never_auto_delete: bool,
+    pub never_auto_delete_decision: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -173,6 +176,7 @@ pub struct Rule {
     pub pattern: String,
     pub validator: Validator,
     pub secret_group: usize,
+    pub never_auto_delete: bool,
     pub entropy: Option<f64>,
     pub keywords: Vec<String>,
     pub allowlists: Vec<Allowlist>,
@@ -329,6 +333,10 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             pattern,
             validator: selected.validator,
             secret_group,
+            // Upstream Gitleaks rules are credential rules; the band that
+            // classifies without deleting exists for the local overlay's
+            // user-owned financial and personal data.
+            never_auto_delete: false,
             entropy,
             keywords,
             allowlists,
@@ -341,6 +349,14 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             overlay.confidence,
             &overlay.pattern,
             overlay.secret_group,
+        )?;
+        // Refusing deletion for a rule above the floor is a product decision
+        // about a whole class of user data, so it is not spellable without one.
+        require_decision(
+            &overlay.name,
+            "never_auto_delete",
+            overlay.never_auto_delete,
+            &overlay.never_auto_delete_decision,
         )?;
         insert_name(&mut names, &overlay.name)?;
         let mut allowlists = Vec::new();
@@ -358,6 +374,7 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             pattern: overlay.pattern.clone(),
             validator: overlay.validator,
             secret_group: overlay.secret_group,
+            never_auto_delete: overlay.never_auto_delete,
             entropy: None,
             keywords: Vec::new(),
             allowlists,
