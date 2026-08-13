@@ -20,6 +20,9 @@ describe("a Windows exclusion entry", () => {
     String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`,
     String.raw`"C:\Program Files\Google\Chrome\Application\chrome.exe"`,
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    // `C:` is a drive prefix, not a separator between two names.
+    "C:chrome.exe",
+    String.raw`C:\chrome.exe`,
   ])("names one program however it is written: %s", (entry) => {
     expect(exclusionKey(entry, true)).toBe("chrome");
     expect(canonicalExclusion(entry, true)).toBe("chrome.exe");
