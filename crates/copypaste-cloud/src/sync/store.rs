@@ -233,10 +233,7 @@ impl StoreView {
             }
             match self.to_local(row) {
                 Some(item) => items.push(item),
-                None => {
-                    sweep.seen = sweep.seen.saturating_add(1);
-                    found.track(&row.id);
-                }
+                None => found.record_walked(&row.id, &mut sweep),
             }
         }
         if !cycled {
@@ -555,6 +552,78 @@ mod tests {
             total = UnreadableUploads::decode(persisted.as_deref()).total;
         }
         assert_eq!(total, 600);
+    }
+
+    /// 300 rows this device cannot open, settled: 256 the id list tracks and
+    /// 44 the walk carries. Two rounds are what it takes to count both halves.
+    fn a_backlog_just_past_the_bound() -> (Device, UploadFloor, Option<String>) {
+        let device = device();
+        for n in 1..=300 {
+            device.put(&format!("row-{n:04}"), n, false);
+        }
+
+        let mut floor = UploadFloor::default();
+        let mut persisted = None;
+        for _ in 0..2 {
+            device.round(&mut floor, &mut persisted);
+        }
+        let record = UnreadableUploads::decode(persisted.as_deref());
+        assert_eq!((record.total, record.ids.len()), (300, 256));
+        (device, floor, persisted)
+    }
+
+    /// INV-N7b, the over-count. A row the walk finds belongs either to the id
+    /// list or to the cycle's count, and repairing tracked rows is what makes
+    /// room for it to be taken by both: the round after the repair reported
+    /// 244 items for the 200 that were really unreadable.
+    #[test]
+    fn the_count_never_exceeds_the_rows_that_are_really_unreadable() {
+        let (device, mut floor, mut persisted) = a_backlog_just_past_the_bound();
+        for n in 1..=100 {
+            device.put(&format!("row-{n:04}"), n, true);
+        }
+
+        let mut reported = Vec::new();
+        for _ in 0..4 {
+            device.round(&mut floor, &mut persisted);
+            reported.push(UnreadableUploads::decode(persisted.as_deref()).total);
+        }
+        assert!(
+            reported.iter().all(|total| *total <= 200),
+            "more items reported than are unreadable: {reported:?}"
+        );
+        assert_eq!(reported.last(), Some(&200), "{reported:?}");
+    }
+
+    /// A cycle that counts nothing retires the walk, and once a repair frees
+    /// room that is because the id list took the swept rows over rather than
+    /// because they are gone. Retiring must not strand them: the id list is
+    /// retried by direct lookup, so one repaired afterwards is still offered.
+    #[test]
+    fn a_swept_row_the_id_list_took_over_is_still_offered_when_repaired() {
+        let (device, mut floor, mut persisted) = a_backlog_just_past_the_bound();
+        for n in 1..=100 {
+            device.put(&format!("row-{n:04}"), n, true);
+        }
+        for _ in 0..2 {
+            device.round(&mut floor, &mut persisted);
+        }
+        let record = UnreadableUploads::decode(persisted.as_deref());
+        assert_eq!(
+            record.sweep, None,
+            "the walk had nothing left to come back for"
+        );
+        assert!(
+            record.ids.contains("row-0300"),
+            "the swept rows were dropped"
+        );
+
+        device.put("row-0300", 300, true);
+        let offered = device.round(&mut floor, &mut persisted);
+        assert!(
+            offered.iter().any(|id| id == "row-0300"),
+            "a row handed to the id list was stranded when the walk retired: {offered:?}"
+        );
     }
 
     /// A restart carries nothing but the persisted record, so the walk's
