@@ -41,6 +41,7 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-store": "^2.4.4",
+    "@ungap/replace-children": "^0.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "fuzzysort": "^3.1.0",
