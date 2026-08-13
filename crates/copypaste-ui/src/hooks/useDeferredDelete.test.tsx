@@ -1,18 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
-import { item, testClient } from "@/test/harness";
+import { useHistory } from "@/hooks/useHistory";
+import { HISTORY_COALESCE_MS, PAGE_SIZE } from "@/lib/layout";
+import { item, items, page, testClient } from "@/test/harness";
 
 const toast = vi.fn();
 const deleteItem = vi.fn();
+const listItems = vi.fn();
 
 vi.mock("sonner", () => ({ toast: (...args: unknown[]) => toast(...args) }));
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
-  return { ...actual, deleteItem: (...args: unknown[]) => deleteItem(...args) };
+  return {
+    ...actual,
+    deleteItem: (...args: unknown[]) => deleteItem(...args),
+    listItems: (...args: unknown[]) => listItems(...args),
+  };
 });
 
 function wrapper() {
@@ -25,6 +32,7 @@ function wrapper() {
 beforeEach(() => {
   toast.mockReset();
   deleteItem.mockReset().mockResolvedValue(undefined);
+  listItems.mockReset();
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -47,4 +55,56 @@ describe("single-item delete feedback", () => {
 
     act(() => options.action.onClick());
   });
+});
+
+/**
+ * §3.1.8 commits the previous row as soon as the next one is deleted, so a user
+ * clearing a handful of rows produces a run of one-id commits a few hundred
+ * milliseconds apart. Each of them re-walked every loaded page on its own.
+ */
+describe("what clearing a run of rows costs the loaded pages", () => {
+  const deepReads = () =>
+    listItems.mock.calls.filter(([, cursor]) => cursor !== null).length;
+
+  it("re-walks once for the whole run, not once per row", async () => {
+    const rows = items(PAGE_SIZE * 3).map((entry, index) => ({
+      ...entry,
+      id: `row-${index}`,
+    }));
+    listItems.mockImplementation(async (limit: number, cursor: string | null) => {
+      const start = cursor === null ? 0 : rows.findIndex((e) => e.id === cursor) + 1;
+      const slice = rows.slice(start, start + limit);
+      const last = slice.at(-1);
+      const more = last !== undefined && rows.indexOf(last) < rows.length - 1;
+      return page(slice, 0, more ? (last?.id ?? null) : null, rows.length);
+    });
+
+    const Wrapper = wrapper();
+    const { result } = renderHook(
+      () => ({ history: useHistory(""), deletes: useDeferredDelete() }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(result.current.history.data?.items).toHaveLength(PAGE_SIZE));
+    while (result.current.history.hasNextPage) {
+      await act(async () => {
+        await result.current.history.fetchNextPage();
+      });
+    }
+    await waitFor(() => expect(result.current.history.data?.items).toHaveLength(PAGE_SIZE * 3));
+
+    listItems.mockClear();
+    await act(async () => {
+      for (const row of rows.slice(0, 5)) {
+        result.current.deletes.remove(row);
+        await new Promise((tick) => setTimeout(tick, 20));
+      }
+    });
+
+    // Four of the five commit at once (the fifth waits out its undo window),
+    // and the two cursor pages are read once between them rather than four
+    // times each.
+    await waitFor(() => expect(deleteItem).toHaveBeenCalledTimes(4));
+    await new Promise((settle) => setTimeout(settle, HISTORY_COALESCE_MS * 3));
+    expect(deepReads()).toBe(2);
+  }, 20_000);
 });

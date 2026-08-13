@@ -40,6 +40,9 @@ export const runtimeLog = {
   loading: "Loading runtime events…",
   loadingOlder: "Loading older events…",
   loadFailed: "Runtime events couldn’t be loaded.",
+  /** Said of the live tail only: the loaded rows are still on screen, and they
+   *  have stopped being current. */
+  followFailed: "Live updates stopped. These events may be out of date.",
   noMatch: "No runtime events match these filters.",
 
   toast: {

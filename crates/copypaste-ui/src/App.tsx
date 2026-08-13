@@ -11,7 +11,7 @@ import { Boundary } from "@/components/shell/Boundary";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { HistoryView } from "@/components/history/HistoryView";
 import { useCaptureState, useCaptureSync } from "@/hooks/useCapture";
-import { statusReachable, useStatus } from "@/hooks/useHistory";
+import { statusReachable, useStatus } from "@/hooks/useStatus";
 import { usePush } from "@/hooks/usePush";
 import { useTranslation } from "@/i18n";
 import { classifyError } from "@/lib/errors";

@@ -104,11 +104,18 @@ export const POLL_PUSH_BACKSTOP_MS = 30_000;
   *  had died (CopyPaste-f701). */
 export const STATUS_POLL_MS = 2000;
 
-/** Trailing edge for re-walking the loaded history pages after a change the
- *  user did not make. Long enough to collapse a burst of captures into one
- *  walk, short enough that a remote delete three pages down is visible without
- *  a scroll or a refocus (manifest 05 §5.4). */
-export const HISTORY_DEEP_REFRESH_MS = 200;
+/**
+ * Trailing window for re-walking the loaded history pages after a change the
+ * user did not make. Long enough to collapse a burst of captures into one
+ * walk, short enough that a remote delete three pages down is visible without
+ * a scroll or a refocus (manifest 06 §3.1.1).
+ *
+ * The ceiling is what bounds a stream that never pauses: a trailing edge alone
+ * never fires while events keep arriving, and one that fires per event costs
+ * one IPC and one page decrypt per loaded page, per event.
+ */
+export const HISTORY_COALESCE_MS = 200;
+export const HISTORY_COALESCE_MAX_MS = 2000;
 /** Decoupled from the 2s status poll, which used to drag `peers` along at
  *  30 calls/min (CopyPaste-crh3.48). */
 export const PEERS_POLL_MS = 10_000;

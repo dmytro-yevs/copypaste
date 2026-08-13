@@ -12,7 +12,7 @@ import { ExternalLink, RotateCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { statusService, useStatus } from "@/hooks/useHistory";
+import { statusService, useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
 import { classifyError, friendlyError } from "@/lib/errors";
 import { CURRENT_PROTOCOL_VERSION, hasBridge } from "@/lib/ipc";

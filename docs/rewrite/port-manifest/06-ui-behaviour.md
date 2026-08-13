@@ -96,6 +96,10 @@ window degenerates to the last row or two and the list looks broken.
 With virtualization the active row may be outside the rendered window. The active
 pointer MUST be cleared when its target is not rendered. *Old: CopyPaste-5917.33.*
 
+`aria-controls` on a collapsed disclosure is the same rule: keep the controlled
+region mounted and `hidden`, and unmount only what has a cost to running —
+a panel whose editor owns a poll unmounts the editor, not the region.
+
 ### INV-8 — Rows carry interactive children, so they MUST NOT be `role="option"`
 `role="option"` is `childrenPresentational`, which flattens the per-row
 Pin/Preview/Delete buttons and the multi-select checkbox → axe
@@ -598,6 +602,9 @@ presence entries reset to offline immediately rather than waiting for TTL.
   stale closure).
 - Per-row transient state (`pending` / `error` / `revokedAt`) survives reloads
   but is discarded for fingerprints no longer present.
+- **A peer read that failed renders unknown, never a count.** Every failing
+  code, not only `unavailable`: a count read off absent data is zero, which is
+  the same badge as "you have paired nothing" and the same disabled Sync Now.
 
 #### 3.2.5 Device states & copy
 
@@ -879,6 +886,16 @@ Live tail refresh every **3000 ms**. Toolbar wraps rather than pushing
 Refresh/Export off-screen; the level badge has a fixed width so message text
 aligns (CopyPaste-g27b.31).
 
+- The tick reads **one head window**, not every page the user has scrolled
+  back through.
+- **The tail may not lose an event.** The window is merged into a held cache as
+  a multiset union — two identical lines in one millisecond stay two rows — and
+  a poll pages back until its window overlaps the newest row already held. A
+  burst larger than one window, and a burst sharing one millisecond, must both
+  survive; a filter on the window's oldest timestamp drops them permanently.
+- A tail that has stopped **says so**. Rows read before it died stay on screen
+  and are labelled as possibly out of date, never presented as current.
+
 ---
 
 ### 3.5 Quick-Paste popup
@@ -1136,6 +1153,8 @@ wraps per its own overflow rule — never rely on a fixed English string width.
 | History backoff poll | **5000 ms** | `useHistoryData` | Used for `offline`/`error`/`not_ready` — don't hammer a dead or initialising daemon. |
 | Popup poll | **3000 ms** | `usePopupHistory` | Matches history; visibility-gated. |
 | Logs live tail | **3000 ms** | `LogView` | |
+| Deep-page coalescing window | **200 ms** trailing | `historyRefresh` | A capture invalidates the head at once; re-walking the *loaded pages* waits for the burst to stop. Trailing, not leading — a leading edge walks on the first event of every burst. |
+| Deep-page coalescing ceiling | **2000 ms** | `historyRefresh` | A trailing edge alone never fires under a stream that never pauses. One walk in flight at a time; a second is deferred, not started alongside. |
 | Peer presence (active) | **5000 ms** | `peerPresence` | Backed down from 1 s. Peers reconnect fast enough at 5 s. (s7ia B3) |
 | Peer presence (idle) | **30 000 ms** | `peerPresence` | When no peers are known, 1 s fired 60 IPC calls/min for nothing. |
 | Peer presence TTL | **15 000 ms** | `peerPresence` | 3× the active interval — one missed tick must not flip the dot, but a daemon restart flips within ~15 s. |

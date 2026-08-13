@@ -7,22 +7,36 @@
  * Default exclusions are DMY-170's; this file only covers what a typed entry
  * becomes and what the user is told about it.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
 
 import { SourceExclusions } from "@/components/settings/SourceExclusions";
+import { en } from "@/i18n";
 import * as platform from "@/lib/platform";
-import { withUser } from "@/test/harness";
+import { items, page, withUser } from "@/test/harness";
+
+const listItems = vi.fn();
+const listInstalledSourceApps = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
   return {
     ...actual,
-    listItems: () =>
-      Promise.resolve({ items: [], total: 0, skipped_undecryptable: 0, next_cursor: null }),
+    listItems: (...args: unknown[]) => listItems(...args),
     getStatus: () => Promise.resolve(null),
-    listInstalledSourceApps: () => Promise.resolve([]),
+    listInstalledSourceApps: () => listInstalledSourceApps(),
   };
+});
+
+beforeEach(() => {
+  listItems.mockReset().mockResolvedValue(
+    page(items(3, { source_app_bundle_id: "com.example.editor" })),
+  );
+  listInstalledSourceApps.mockReset().mockResolvedValue([]);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function onWindows() {
@@ -40,9 +54,8 @@ function exclusions(ids: readonly string[] = []) {
   return { onChange, ...withUser(<SourceExclusions ids={ids} onChange={onChange} />) };
 }
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+const disclosure = () =>
+  screen.getByRole("button", { name: en.settings.service.exclusions.title });
 
 describe("on Windows", () => {
   it("speaks about programs, not bundle identifiers", () => {
@@ -145,5 +158,68 @@ describe("everywhere else", () => {
     await user.keyboard("{Enter}");
     expect(onChange).toHaveBeenCalledWith(["com.apple.Passwords"]);
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("the collapsed panel", () => {
+  /** INV-7: an accessibility pointer may only name a node that is mounted. The
+   *  region stays and is hidden; only the editor that owns the history query is
+   *  unmounted. */
+  it("controls a region that exists while it is collapsed", () => {
+    withUser(<SourceExclusions ids={[]} collapsible onChange={() => {}} />);
+
+    const button = disclosure();
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    const controls = button.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+
+    const region = document.getElementById(controls!);
+    expect(region).not.toBeNull();
+    expect(region).toHaveProperty("hidden", true);
+    expect(
+      screen.queryByLabelText(en.settings.service.exclusions.inputLabel),
+    ).toBeNull();
+  });
+
+  it("reads no clipboard history until it is opened", async () => {
+    const { user } = withUser(<SourceExclusions ids={[]} collapsible onChange={() => {}} />);
+
+    await new Promise((settle) => setTimeout(settle, 50));
+    expect(listItems).toHaveBeenCalledTimes(0);
+
+    await user.click(disclosure());
+    await waitFor(() => expect(listItems).toHaveBeenCalled());
+
+    const region = document.getElementById(disclosure().getAttribute("aria-controls")!);
+    expect(region).toHaveProperty("hidden", false);
+    expect(disclosure().getAttribute("aria-expanded")).toBe("true");
+    expect(
+      await screen.findByLabelText(en.settings.service.exclusions.inputLabel),
+    ).not.toBeNull();
+  });
+
+  it("stops reading again once it is closed", async () => {
+    const { user } = withUser(<SourceExclusions ids={[]} collapsible onChange={() => {}} />);
+    await user.click(disclosure());
+    await waitFor(() => expect(listItems).toHaveBeenCalled());
+
+    await user.click(disclosure());
+    listItems.mockClear();
+    await new Promise((settle) => setTimeout(settle, 50));
+
+    expect(listItems).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("the panel that is not collapsible", () => {
+  it("is open, and needs no disclosure button", async () => {
+    withUser(<SourceExclusions ids={[]} onChange={() => {}} />);
+
+    expect(
+      screen.queryByRole("button", { name: en.settings.service.exclusions.title }),
+    ).toBeNull();
+    expect(
+      await screen.findByLabelText(en.settings.service.exclusions.inputLabel),
+    ).not.toBeNull();
   });
 });

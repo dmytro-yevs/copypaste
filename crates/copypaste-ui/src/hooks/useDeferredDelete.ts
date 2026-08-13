@@ -12,7 +12,11 @@ import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import { UNDO_WINDOW_MS } from "@/lib/layout";
 import { type Item, deleteItem } from "@/lib/ipc";
-import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/useHistory";
+import {
+  STATUS_KEY,
+  coalesceHistoryInvalidation,
+  invalidateHistoryQueries,
+} from "@/hooks/historyRefresh";
 import { imagePreviewKey } from "@/hooks/useHistoryMedia";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
@@ -40,9 +44,13 @@ export function useDeferredDelete() {
     }
   }, []);
 
-  /** One invalidation for the whole batch. Deleting a burst of rows used to
-   *  re-walk every loaded page once per row, because each commit invalidated
-   *  on its own. */
+  /**
+   * §3.1.8 commits the previous row's delete as soon as the next one is
+   * deleted, so clearing a handful of rows is a run of one-id commits a few
+   * hundred milliseconds apart — not one batch. Batching the *ids* therefore
+   * coalesces nothing; batching the invalidation is what stops each of them
+   * re-walking every loaded page on its own.
+   */
   const commit = useCallback(
     async (ids: readonly string[]) => {
       if (ids.length === 0) return;
@@ -63,7 +71,7 @@ export function useDeferredDelete() {
         if (deleted) {
           // INV-3: the write invalidates, and we only stop hiding the rows once
           // the refetch has settled — otherwise they flash back into the list.
-          await invalidateHistoryQueries(qc);
+          await coalesceHistoryInvalidation(qc);
           void qc.invalidateQueries({ queryKey: STATUS_KEY });
         }
       } finally {

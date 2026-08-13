@@ -16,7 +16,7 @@ import {
   syncNow,
   unpair,
 } from "@/lib/ipc";
-import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/useHistory";
+import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/historyRefresh";
 
 export const PEERS_KEY = ["peers"] as const;
 export const DISCOVERED_KEY = ["discovered"] as const;

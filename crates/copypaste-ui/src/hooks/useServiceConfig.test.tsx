@@ -8,7 +8,7 @@ import {
   PRIVATE_MODE_KEY,
   useSetPrivateMode,
 } from "@/hooks/useServiceConfig";
-import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
+import { HISTORY_KEY, STATUS_KEY } from "@/hooks/historyRefresh";
 import type { PrivateModeData } from "@/lib/ipc";
 import { testClient } from "@/test/harness";
 

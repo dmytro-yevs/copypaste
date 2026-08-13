@@ -98,11 +98,20 @@ describe("SyncTab", () => {
     ).toHaveProperty("disabled", true);
   });
 
-  it("reports a peer list the service could not answer for", async () => {
-    listPeers.mockRejectedValue(new IpcFailure("unavailable", false));
+  /** Not only `unavailable`: any code leaves `peers.data` undefined, and a
+   *  count of zero read off it rendered the confident "None" badge over a read
+   *  that never happened. */
+  it.each([
+    ["a build with no peer routing", new IpcFailure("unavailable", false)],
+    ["a backend failure", new IpcFailure("internal", true)],
+    ["a service that is not up yet", new IpcFailure("not_ready", true)],
+    ["a rejection the bridge could not classify", { nonsense: true }],
+  ])("reports a peer list the service could not answer for: %s", async (_case, failure) => {
+    listPeers.mockRejectedValue(failure);
     withUser(<SyncTab />);
 
     expect(await screen.findByText(en.settings.sync.paired.unavailable)).not.toBeNull();
+    expect(screen.queryByText(en.settings.sync.paired.none)).toBeNull();
     expect(
       screen.getByRole("button", { name: en.settings.sync.now.action }),
     ).toHaveProperty("disabled", true);

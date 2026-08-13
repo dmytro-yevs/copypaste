@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-import { useBulkDelete, useBulkPin } from "@/hooks/useHistory";
+import { useBulkDelete, useBulkPin } from "@/hooks/useHistoryMutations";
 import { type Selection, useSelection } from "@/hooks/useSelection";
 import type { Item } from "@/lib/ipc";
 

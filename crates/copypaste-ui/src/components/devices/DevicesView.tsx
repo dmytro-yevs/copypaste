@@ -40,7 +40,7 @@ import {
   useSyncNow,
   useUnpair,
 } from "@/hooks/useDevices";
-import { statusOwnDevice, useStatus } from "@/hooks/useHistory";
+import { statusOwnDevice, useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";

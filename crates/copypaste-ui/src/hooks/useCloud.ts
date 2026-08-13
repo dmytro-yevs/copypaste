@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { invalidateHistoryQueries } from "@/hooks/useHistory";
+import { invalidateHistoryQueries } from "@/hooks/historyRefresh";
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import {
