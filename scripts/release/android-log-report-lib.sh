@@ -43,7 +43,7 @@ log_blocks() {
                         (source_pid != "" && source_pid == expected_pid)
                 stop = start + 14
                 if (stop > total) stop = total
-                if (!owned && source_pid != "") {
+                if (!owned && source_pid != "" && expected_pid == "") {
                     for (line = start + 1; line <= stop; line++) {
                         if (pids[line] == source_pid && owns(lines[line])) {
                             owned = 1
@@ -113,6 +113,24 @@ android_log_report_self_test() { # <temporary directory>
         && ok "an interleaved app focus event does not own another process's crash" \
         || bad "an interleaved app focus event does not own another process's crash" \
                "$(crash_report "$t/interleaved-foreign.log" 3832)"
+
+    printf '%s\n' \
+        '08-10 04:27:24.376   482   591 W NativeCrashHandlerImpl: java.lang.UnsatisfiedLinkError: dlopen failed: library "libnative_crash_handler_jni.so" not found' \
+        '08-10 04:27:24.383   482   591 I input_focus: [Focus entering cf2e353 com.copypaste.app/com.copypaste.app.MainActivity (server)]' \
+        > "$t/same-pid-foreign-crash.log"
+    [[ -z "$(crash_report "$t/same-pid-foreign-crash.log" 5357)" ]] \
+        && ok "a same-PID system_server focus does not own a foreign crash" \
+        || bad "a same-PID system_server focus does not own a foreign crash" \
+               "$(crash_report "$t/same-pid-foreign-crash.log" 5357)"
+
+    printf '%s\n' \
+        '08-10 04:27:24.376   482   591 W UnsafeUtil: java.lang.NoSuchMethodException: sun.misc.Unsafe.compareAndSwapObject' \
+        '08-10 04:27:24.383   482   591 I input_focus: [Focus entering cf2e353 com.copypaste.app/com.copypaste.app.MainActivity (server)]' \
+        > "$t/same-pid-foreign-r8.log"
+    [[ -z "$(r8_report "$t/same-pid-foreign-r8.log" 5357)" ]] \
+        && ok "a same-PID system_server focus does not own a foreign R8 error" \
+        || bad "a same-PID system_server focus does not own a foreign R8 error" \
+               "$(r8_report "$t/same-pid-foreign-r8.log" 5357)"
 
     group "self-test: a stripped symbol"
 
