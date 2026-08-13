@@ -79,7 +79,9 @@ async function boot(): Promise<void> {
   );
 
   await atStartup("render", () =>
-    createRoot(root).render(
+    createRoot(root, {
+      onUncaughtError: () => reportStartupFailure(root, { startupStage: "render" }),
+    }).render(
       <StrictMode>
         <QueryClientProvider client={queryClient}>
           {isQuickPaste ? <QuickPasteApp /> : <App />}

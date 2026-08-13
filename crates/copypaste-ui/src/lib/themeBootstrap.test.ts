@@ -91,7 +91,7 @@ describe("first-frame ordering (INV-22 / AT-49)", () => {
     expect(INDEX_HTML.indexOf(bootstrapTag)).toBeGreaterThan(-1);
     expect(INDEX_HTML.indexOf(bootstrapTag)).toBeLessThan(INDEX_HTML.indexOf(moduleTag));
     expect(MAIN_SOURCE.indexOf("themeBootstrapped")).toBeLessThan(
-      MAIN_SOURCE.indexOf("createRoot(root).render"),
+      MAIN_SOURCE.indexOf("createRoot(root,"),
     );
 
     setMatchMedia(false);
