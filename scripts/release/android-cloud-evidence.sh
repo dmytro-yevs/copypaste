@@ -95,9 +95,9 @@ fill_field() { # <label> <value> <artifact>
     sh_ input keyevent KEYCODE_BACK >/dev/null
 }
 
-start_stub() {
+start_stub() { # [rows] [log]
     python3 scripts/cloud-stub.py --port "$STUB_PORT" --password stub-password \
-        --dump "$OUT/stub-rows.json" > "$OUT/stub.log" 2>&1 &
+        --dump "${1:-$OUT/stub-rows.json}" > "${2:-$OUT/stub.log}" 2>&1 &
     STUB_PID=$!
     for _ in $(seq 1 50); do
         curl -fsS -o /dev/null -X POST "http://127.0.0.1:$STUB_PORT/auth/v1/logout" && return 0
@@ -215,9 +215,86 @@ configured_scenario() {
         || bad "offline cloud error meets its latency budget" "${elapsed}ms"
     capture_state offline-error
 
-    tap_selector_scrolling "Sign out" "$OUT/sign-out.xml" up || bad "the native sign-out action is reachable"
-    expect_label "Signed out" "$OUT/signed-out-again.xml"
+    sign_out_scenario
+}
+
+# What the card allows a sign-out assertion to claim.
+#
+# `Sign out` is disabled for as long as a cloud mutation is in flight
+# (`SyncTab.tsx`), and the offline probe above ends the session on its own: a
+# sync against a dead backend comes back unauthorised and the card falls back to
+# its sign-in form. Run 31671766432's release leg then spent 45 s looking for a
+# control that was gone, called it unreachable, and read the badge it had never
+# left as proof that signing out worked. A badge that was already showing proves
+# nothing, so the pre-state decides what may be asserted.
+sign_out_precondition() { # <artifact>
+    case "$(control_state "$1" "Sign out")" in
+        actionable) printf ready ;;
+        # Exact: the sign-out toast reads "Signed out of cloud sync", and a
+        # partial match on it would call a signed-in card signed out.
+        *) [[ -n "$(node_center_exact "$1" "Signed out")" ]] && printf restore || printf blocked ;;
+    esac
+}
+
+cloud_card_state() { # <artifact>
+    local badge=absent state
+    for state in Connected "Signed out" "Not configured" Unavailable; do
+        if [[ -n "$(node_center_exact "$1" "$state")" ]]; then
+            badge="$state"
+            break
+        fi
+    done
+    printf 'the cloud card reads %s and Sign out is %s' \
+        "$badge" "$(control_state "$1" "Sign out")"
+}
+
+restore_session() { # <artifact>
+    start_stub "$OUT/restore-rows.json" "$OUT/restore-stub.log" || return 1
+    fill_field "Email" "native@example.test" "$OUT/restore-email.xml" || return 1
+    fill_field "Password" "stub-password" "$OUT/restore-password.xml" || return 1
+    fill_field "Sync passphrase" "native-evidence" "$OUT/restore-passphrase.xml" || return 1
+    tap_selector_scrolling "Sign in" "$OUT/restore-sign-in.xml" up || return 1
+    # Exact: the service status line reads "Background service connected", and
+    # it is on every screen this scenario ever dumps.
+    wait_selector_scrolling "Connected" "$1" up "$WAIT_SECS" exact
+}
+
+# The card at the end of the leg, whatever it turned out to be: the state this
+# publishes is the one a failed sign-out is read from.
+sign_out_scenario() {
+    sign_out_lifecycle
     capture_state signed-out-again
+}
+
+sign_out_lifecycle() {
+    local pre="$OUT/sign-out.xml"
+    wait_selector_scrolling "Sign out" "$pre" up "$WAIT_SECS" action
+    if [[ "$(sign_out_precondition "$pre")" == restore ]]; then
+        if restore_session "$OUT/restore-connected.xml"; then
+            ok "a signed-in account is restored for the sign-out assertion"
+        else
+            bad "a signed-in account is restored for the sign-out assertion" \
+                "$(cloud_card_state "$pre")"
+            return
+        fi
+        wait_selector_scrolling "Sign out" "$pre" up "$WAIT_SECS" action
+    fi
+    if [[ "$(sign_out_precondition "$pre")" != ready ]]; then
+        bad "the native sign-out action is reachable" "$(cloud_card_state "$pre")"
+        return
+    fi
+    ok "the native sign-out action is reachable"
+
+    # The same dump the tap is aimed from, so the state before it is the state
+    # the assertion below is measured against.
+    tap_found_action "Sign out" "$pre" || {
+        bad "the native sign-out tap reaches the app"
+        return
+    }
+    wait_selector_scrolling "Signed out" "$OUT/signed-out-again.xml" up "$WAIT_SECS" exact \
+        && ok "signing out returns the account to Signed out" \
+        || bad "signing out returns the account to Signed out" \
+               "$(cloud_card_state "$OUT/signed-out-again.xml")"
 }
 
 # Asserting a fail-closed helper means running it and reading the verdict it
@@ -273,10 +350,62 @@ unconfigured_evidence_self_test() { # <temp>
         || bad "a refused write leaves no structured latency evidence behind"
 }
 
+# Cards taken from run 31671766432's published dumps: the release leg signed in,
+# lost the session to the offline probe, and then asserted a sign-out against
+# the sign-in form that came back.
+sign_out_self_test() { # <temp>
+    local temp="$1" primary card badge form toast
+    primary='<node text="Primary" bounds="[0,570][320,640]"><node text="History" bounds="[17,583][113,635]" enabled="true" clickable="true"/></node>'
+    card='<node text="Cloud sync" bounds="[24,411][93,427]"/><node text="native@example.test" bounds="[184,479][296,493]"/>'
+    form='<node text="Cloud account sign in" bounds="[24,346][296,546]"/><node text="Sign in" bounds="[24,502][296,546]" enabled="false" clickable="true"/>'
+    badge='<node text="Connected" bounds="[109,412][168,426]"/>'
+    toast='<node text="Signed out of cloud sync" bounds="[49,543][263,563]"/>'
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card$badge<node text=\"Sign out\" bounds=\"[200,502][296,546]\" enabled=\"true\" clickable=\"true\"/></node></hierarchy>" > "$temp/connected.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card$badge<node text=\"Sign out\" bounds=\"[200,538][296,582]\" enabled=\"false\" clickable=\"true\"/><node text=\"The last cloud sync failed. Try again or sign in again.\" bounds=\"[24,470][296,502]\"/></node></hierarchy>" > "$temp/busy.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card<node text=\"Signed out\" bounds=\"[109,280][168,294]\"/>$form</node></hierarchy>" > "$temp/signed-out.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card$badge<node text=\"Sign out\" bounds=\"[200,502][296,546]\" enabled=\"true\" clickable=\"true\"/>$toast</node></hierarchy>" > "$temp/toasted.xml"
+
+    [[ "$(control_state "$temp/connected.xml" "Sign out")" == actionable ]] \
+        && ok "a signed-in card exposes an actionable sign-out" \
+        || bad "a signed-in card exposes an actionable sign-out" \
+               "$(control_state "$temp/connected.xml" "Sign out")"
+    # Disabled and absent were one verdict, and the leg that reported "Sign out
+    # unreachable" could not say which one it had seen.
+    [[ "$(control_state "$temp/busy.xml" "Sign out")" == disabled ]] \
+        && ok "a card with a sync in flight reports sign-out disabled, not missing" \
+        || bad "a card with a sync in flight reports sign-out disabled, not missing" \
+               "$(control_state "$temp/busy.xml" "Sign out")"
+
+    [[ "$(sign_out_precondition "$temp/connected.xml")" == ready ]] \
+        && ok "a signed-in card may be signed out" \
+        || bad "a signed-in card may be signed out" \
+               "$(sign_out_precondition "$temp/connected.xml")"
+    [[ "$(sign_out_precondition "$temp/busy.xml")" == blocked ]] \
+        && ok "a busy card is not a session that ended by itself" \
+        || bad "a busy card is not a session that ended by itself" \
+               "$(sign_out_precondition "$temp/busy.xml")"
+    [[ "$(sign_out_precondition "$temp/signed-out.xml")" == restore ]] \
+        && ok "a session the offline probe ended is restored, not asserted against" \
+        || bad "a session the offline probe ended is restored, not asserted against" \
+               "$(sign_out_precondition "$temp/signed-out.xml")"
+    # The false pass this scenario shipped: the badge was read from a partial
+    # match, and the toast carries the words.
+    [[ "$(sign_out_precondition "$temp/toasted.xml")" == ready ]] \
+        && ok "the sign-out toast is not read as the signed-out badge" \
+        || bad "the sign-out toast is not read as the signed-out badge" \
+               "$(sign_out_precondition "$temp/toasted.xml")"
+
+    [[ "$(cloud_card_state "$temp/signed-out.xml")" == "the cloud card reads Signed out and Sign out is absent" ]] \
+        && ok "a refused sign-out names the card it read" \
+        || bad "a refused sign-out names the card it read" \
+               "$(cloud_card_state "$temp/signed-out.xml")"
+}
+
 if [[ "$MODE" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
     android_ui_self_test
+    sign_out_self_test "$SELF_TEST_TMP"
     cloud_evidence_self_test "$SELF_TEST_TMP"
     unconfigured_evidence_self_test "$SELF_TEST_TMP/unconfigured-leg"
     cloud_evidence_summary Android
