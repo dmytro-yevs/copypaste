@@ -126,11 +126,15 @@ impl Store {
         };
 
         let insert = tx.execute(
+            // `content_bytes` is computed in this statement rather than by a
+            // trigger, which would have to UPDATE the row and write the whole
+            // payload to the WAL a second time.
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
                   is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata, \
-                  fts_rowid) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9, ?10, ?11)",
+                  fts_rowid, content_bytes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9, ?10, ?11, \
+                     LENGTH(COALESCE(?2, X'')))",
             params![
                 &id,
                 &content_ciphertext,
@@ -272,7 +276,7 @@ impl Store {
         delete_fts_row_in_tx(&tx, id)?;
         let changed = tx.execute(
             "UPDATE clipboard_items \
-                SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
+                SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
                     content_hash = CASE WHEN is_sensitive = 1 THEN '' ELSE content_hash END, \
                     created_at = CASE \
                         WHEN created_at = 9223372036854775807 THEN created_at \
@@ -310,7 +314,7 @@ impl Store {
             .flatten();
         let changed = tx.execute(
             "UPDATE clipboard_items \
-                SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
+                SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
                     content_hash = '', pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, \
                     payload_metadata = NULL, fts_rowid = NULL, \
                     created_at = CASE \
@@ -338,7 +342,7 @@ impl Store {
         // thing that discards it.
         let changed = tx.execute(
             "UPDATE clipboard_items \
-                SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
+                SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
                     content_hash = CASE WHEN is_sensitive = 1 THEN '' ELSE content_hash END, \
                     created_at = CASE \
                         WHEN created_at = 9223372036854775807 THEN created_at \
