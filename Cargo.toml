@@ -98,9 +98,16 @@ regex = "1.10"
 unicode-normalization = "0.1"
 iban_validate = "=5.0.1"
 # Card brand ranges + per-brand length + Luhn. A Luhn-valid 13-19 digit run is
-# not a card: an ISBN, an order id and a column of amounts all pass the
-# checksum about one time in ten, and the card rule auto-wipes at 0.99
-# (DMY-162). The brand table is the part nobody should maintain by hand.
+# not a card: an ISBN, an order id and a column of amounts all pass the checksum
+# about one time in ten (DMY-162). The brand table is the part nobody should
+# maintain by hand.
+#
+# Low-churn, not actively maintained: 2.4.0 is from 2024-03-30 and the newest
+# commit as of 2026-08-14 is a 2025-01-06 CI bump. Kept anyway — issuer ranges
+# change on the scale of years, the alternative is the hand-rolled brand table
+# rule 1 exists to prevent, and it is pure Rust, MIT, no platform code, adding
+# only `lazy_static` and `regex`. A stale range now costs searchability rather
+# than data: a validated card is classified, never wiped (manifest 07 §3.3).
 card-validate = "2.4"
 directories = "5"
 # Scope guards. `guard_on_success` is the unwind policy the retention batch
