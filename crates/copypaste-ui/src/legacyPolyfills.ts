@@ -1,17 +1,13 @@
 /**
- * Reached only from the nomodule build, which only an engine without ES modules
- * loads — API 24's Chromium 53. `@vitejs/plugin-legacy` decides the ECMAScript
- * builtins from the target and core-js supplies them, so nothing here restates
- * one. What is left is DOM and Intl, which core-js does not carry.
+ * Reached only from the nomodule build — API 24's Chromium 53. core-js carries
+ * the builtins @vitejs/plugin-legacy derives from the target, so what is left
+ * is the DOM and Intl it does not.
  *
- * An ordinary app module on purpose: the plugin lowers these, and the polyfill
- * chunk it builds from `additionalLegacyPolyfills` it does not — `@formatjs`
- * ships optional chaining, which would have made the chunk that exists to
- * rescue Chromium 53 the one thing on the page it could not parse.
+ * An app module on purpose: the plugin lowers these and not the chunk
+ * `additionalLegacyPolyfills` builds, and `@formatjs` ships optional chaining —
+ * which made the rescue for Chromium 53 the one thing it could not parse.
  *
- * `BigInt` is deliberately absent. It cannot be polyfilled, and zod's only use
- * of it sits behind `typeof value === "bigint"`, which no engine lacking it
- * can enter.
+ * `BigInt` is absent: unpolyfillable, and zod's only use is `typeof`-guarded.
  */
 import "abortcontroller-polyfill/dist/polyfill-patch-fetch";
 import "@formatjs/intl-relativetimeformat/polyfill.js";
