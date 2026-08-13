@@ -21,7 +21,6 @@
 //! That keeps `crate::commands` free of `cfg`, which is what ADR-0002 asks for.
 
 use std::path::Path;
-use std::process::Child;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -32,11 +31,13 @@ use tokio::time::timeout;
 
 use crate::backend::{Backend, BackendError, Result};
 
+mod child;
 pub mod diagnostics;
 pub mod locate;
 pub mod push;
 mod spawn;
 
+use child::{end_child, ChildProcess, FORCED_STOP_BUDGET};
 use spawn::spawn_process;
 
 /// The version this app expects the daemon to report. Both come from the
@@ -66,14 +67,6 @@ const READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// recoverable, and a user waiting on a window that will not close does not
 /// know that anything is being waited for.
 const SHUTDOWN_BUDGET: Duration = Duration::from_secs(15);
-
-/// The slice of [`SHUTDOWN_BUDGET`] held back for ending the child outright.
-///
-/// `kill` can fail and `reap` is a blocking wait with no timeout of its own. If
-/// the graceful attempt were allowed to spend the whole budget, the fallback
-/// would begin already out of time and quit would hang on the very step that
-/// exists to stop it hanging.
-const FORCED_STOP_BUDGET: Duration = Duration::from_secs(3);
 
 /// What the background service is doing, as the UI needs to see it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -432,43 +425,6 @@ impl Supervisor {
     async fn shutdown_injected<B: ServiceBackend>(&self, backend: &B) {
         let _lifecycle = self.lifecycle.lock().await;
         self.shutdown_locked(backend).await;
-    }
-}
-
-/// Kill the child and reap it, giving up on the reap at the budget.
-///
-/// Reaped rather than left a zombie: the app may run for days after. But a
-/// `wait` that never returns is worse than a zombie, so it runs on a thread of
-/// its own and this call stops waiting.
-fn end_child(mut child: Box<dyn ChildProcess>) {
-    let _ = child.kill();
-    let (done, reaped) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = child.reap();
-        let _ = done.send(());
-    });
-    if reaped.recv_timeout(FORCED_STOP_BUDGET).is_err() {
-        tracing::warn!("the background service could not be reaped");
-    }
-}
-
-trait ChildProcess: Send {
-    fn reap_if_exited(&mut self) -> std::io::Result<bool>;
-    fn kill(&mut self) -> std::io::Result<()>;
-    fn reap(&mut self) -> std::io::Result<()>;
-}
-
-impl ChildProcess for Child {
-    fn reap_if_exited(&mut self) -> std::io::Result<bool> {
-        self.try_wait().map(|status| status.is_some())
-    }
-
-    fn kill(&mut self) -> std::io::Result<()> {
-        Child::kill(self)
-    }
-
-    fn reap(&mut self) -> std::io::Result<()> {
-        self.wait().map(|_| ())
     }
 }
 
