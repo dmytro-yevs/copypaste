@@ -113,7 +113,12 @@ impl Attribution {
 
     pub(super) fn note_excluded(&mut self, attributed: bool) {
         self.excluded += 1;
-        if !attributed {
+        if attributed {
+            info!(
+                dropped = self.excluded_count(),
+                "a clipboard change was dropped by the exclusion list"
+            );
+        } else {
             warn!(
                 dropped = self.excluded_count(),
                 unattributed = self.unattributed_count(),
