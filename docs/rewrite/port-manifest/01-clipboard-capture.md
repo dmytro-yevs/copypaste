@@ -665,6 +665,8 @@ Three separate hard-won rules, all on the same subsystem:
 | Storage quota (floor) | **50 MiB** | A past bug set this to 200 bytes; the byte-cap prune then evicted nearly every unpinned row after **every insert**, producing self-clearing history and dropped images. `config/defaults.rs:34-40` |
 | Broadcast channel capacity | **256** | 64 dropped items on bursts (§3.22). `daemon/mod.rs:372` |
 | Paste-file staging max age | **10 min** | Files are not deleted immediately after paste because the receiving app may read the URL asynchronously. `ipc/pasteboard.rs:311` |
+| Paste-file sweep budget | **4096 entries** | The sweep holds the staging lock, so an unbounded walk parks the interactive paste-back path behind whatever is in the directory. A sweep that hits the bound reports itself unfinished and is resumed, never skipped. v2 `clipboard/file_materialize/sweep.rs` |
+| Paste-file sweep retry floor | **30 s** | A sweep that could not delete expired plaintext must not then wait the ordinary interval, which is the whole 10 min — a second full lifetime of exposure. The ladder doubles back up to 10 min, so a file nothing can ever delete costs a short burst of wake-ups rather than a permanent 30 s timer. v2 `clipboard/file_materialize/sweep.rs` |
 | Self-write sentinel "none" | **-1** | Must be outside the valid `changeCount` domain (non-negative). `monitor.rs:104` |
 | Change-count cursor initial | **-1** | Same reason; also suppresses the first-poll burst signal. `monitor.rs:100`, `:433` |
 | Expected self-write delta | v1: **+2**; measured on macOS 14.8.7: **+1** | v1's value, from `handlers_items_paste.rs:212`, is contradicted by the first run that ever measured it (§3.3). Wrong in either direction it breaks self-write suppression *and* eats a later genuine copy |
@@ -937,6 +939,21 @@ keep both properties).
   Guards **CopyPaste-at2m**.
 - **T-78 — size caps hot-reload.** Raising the image cap at runtime immediately
   allows a previously-rejected image.
+- **T-85 — an expired paste-file that cannot be deleted is reported, not
+  discarded.** Given a staged decrypted payload past the max age that the sweep
+  cannot unlink, then the sweep counts it as retained, names only the error kind
+  — no path, no filename, no content id — continues to the remaining entries,
+  and schedules its next pass at the retry floor rather than the full interval.
+- **T-86 — nothing escapes the max age through its metadata.** A staging
+  directory whose name is not a content id, and a payload whose mtime is stamped
+  further ahead than the max age, are both swept. Neither may buy an unbounded
+  lifetime for decrypted bytes.
+- **T-87 — sweep work does not grow with history.** After every staged payload
+  has expired and been removed, the next sweep examines zero entries: emptied
+  content directories are removed rather than re-walked for ever.
+- **T-88 — a restart is a sweep.** Startup sweeps before the first paste-back,
+  and if that pass leaves work behind it starts the sweeper immediately rather
+  than waiting for a paste-back that may never come.
 
 ### 5.14 Resource & platform
 
