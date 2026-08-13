@@ -47,8 +47,13 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("what an idle status poll re-renders", () => {
-  it("renders once across ten polls when the selected fields do not move", async () => {
-    getStatus.mockImplementation(async () => ticking()());
+  it("renders once across ten polls when an unselected field actually changes", async () => {
+    // B6: one shared closure — each call increments uptime, so the full
+    // StatusData object is different every poll. The assertion proves that
+    // a *changing* unselected field (uptime_secs) does not re-render a
+    // consumer that selects only item_count.
+    const ticker = ticking();
+    getStatus.mockImplementation(async () => ticker());
     const { client, Wrapper } = wrapper();
     let renders = 0;
     const { result } = renderHook(
@@ -68,11 +73,13 @@ describe("what an idle status poll re-renders", () => {
     }
 
     expect(getStatus).toHaveBeenCalledTimes(11);
+    // uptime_secs went 61→71 across those 10 polls, but item_count stayed 3.
     expect(renders).toBe(settled);
   });
 
   it("holds the same object for a selector naming several fields", async () => {
-    getStatus.mockImplementation(async () => ticking()());
+    const ticker = ticking();
+    getStatus.mockImplementation(async () => ticker());
     const { client, Wrapper } = wrapper();
     const { result } = renderHook(() => useStatus(statusOwnDevice), {
       wrapper: Wrapper,

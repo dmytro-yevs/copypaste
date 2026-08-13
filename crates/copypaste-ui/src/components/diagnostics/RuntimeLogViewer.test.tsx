@@ -147,7 +147,7 @@ describe("following a log that outruns one window", () => {
   const pollHead = (client: ReturnType<typeof testClient>) =>
     act(async () => {
       await client.refetchQueries({
-        predicate: (query) => query.queryKey.at(-1) === "head",
+        predicate: (query) => query.queryKey[query.queryKey.length - 1] === "head",
       });
     });
 
@@ -224,5 +224,41 @@ describe("following a log that outruns one window", () => {
     );
     // The rows that were read before the tail died are still there.
     expect(screen.getByText("event 49")).not.toBeNull();
+  });
+
+  it("shows an overrun alert when the burst exceeds the page ceiling", async () => {
+    const log = service(FOLLOW_PAGE_SIZE);
+    getRuntimeLogEvents.mockImplementation(log.read);
+    const client = testClient();
+    withUser(<RuntimeLogViewer />, client);
+    await screen.findByText("event 49");
+
+    // Add far more events than FOLLOW_CATCHUP_PAGES × FOLLOW_PAGE_SIZE can
+    // cover, so the held timestamp is never reached.
+    log.append(FOLLOW_PAGE_SIZE * 10);
+    await pollHead(client);
+
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      en.runtimeLog.overrun,
+    );
+  });
+
+  it("clears the overrun alert on manual refetch", async () => {
+    const log = service(FOLLOW_PAGE_SIZE);
+    getRuntimeLogEvents.mockImplementation(log.read);
+    const client = testClient();
+    const { user } = withUser(<RuntimeLogViewer />, client);
+    await screen.findByText("event 49");
+
+    log.append(FOLLOW_PAGE_SIZE * 10);
+    await pollHead(client);
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      en.runtimeLog.overrun,
+    );
+
+    await user.click(screen.getByRole("button", { name: en.runtimeLog.refresh }));
+    await waitFor(() => expect(screen.queryByText(en.runtimeLog.overrun)).toBeNull());
   });
 });
