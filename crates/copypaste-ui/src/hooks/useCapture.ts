@@ -14,7 +14,7 @@ import { toast } from "sonner";
 
 import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/useHistory";
 import { t } from "@/i18n";
-import { toFriendly } from "@/lib/errors";
+import { isRetryable, toFriendly } from "@/lib/errors";
 import {
   type CaptureSnapshot,
   type CaptureSource,
@@ -35,14 +35,29 @@ export const EVENT_CAPTURE_STATE = "copypaste://capture-state";
 /** Must match `capture::intake::EVENT_CAPTURED`. */
 export const EVENT_CAPTURED = "copypaste://captured";
 
+/** Matches the Tauri bridge's own `DEFAULT_READ_TIMEOUT` (port manifest
+ *  §3.4): `capture_state` is not on the long-read allowlist, so the frontend
+ *  should not wait any longer than the backend already bounds it to. Left
+ *  unbounded, a startup query that never answers held Android's navigation
+ *  disabled for the JS-side `DEFAULT_TIMEOUT_MS` default of five minutes
+ *  (DMY-136) — well past the release gate's 240 s observation window. */
+const CAPTURE_STATE_STARTUP_TIMEOUT_MS = 10_000;
+const CAPTURE_STATE_STARTUP_MAX_RETRIES = 5;
+
 /** Not polled: every change to capture state is pushed — arming, binder death,
  *  a background read landing. `useCaptureSync` re-reads on resume, the one
- *  moment a push can have been missed. */
+ *  moment a push can have been missed.
+ *
+ *  A failed read still gets a bounded, causal retry: `retryable` distinguishes
+ *  a transient failure (timeout, offline, `not_ready`) worth another attempt
+ *  from a permanent one (auth, protocol) that must surface immediately rather
+ *  than leave Android's startup navigation disabled. */
 export function useCaptureState() {
   return useQuery<CaptureSnapshot>({
     queryKey: CAPTURE_KEY,
-    queryFn: captureState,
-    retry: false,
+    queryFn: () => captureState({ timeoutMs: CAPTURE_STATE_STARTUP_TIMEOUT_MS }),
+    retry: (failureCount, error) =>
+      isRetryable(error) && failureCount < CAPTURE_STATE_STARTUP_MAX_RETRIES,
   });
 }
 

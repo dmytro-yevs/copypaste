@@ -3,6 +3,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 
 import App from "@/App";
 import { CAPTURE_KEY } from "@/hooks/useCapture";
+import { IpcFailure } from "@/lib/errors";
 import * as platform from "@/lib/platform";
 import { useUi } from "@/store/ui";
 import { captureSnapshot, testClient, withUser } from "@/test/harness";
@@ -20,6 +21,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -125,9 +127,11 @@ describe("Android startup navigation", () => {
     ).toBeNull();
   });
 
-  it("enables navigation after a capture query error without hiding it", async () => {
+  it("enables navigation after a permanent capture query error without hiding it", async () => {
     vi.spyOn(platform, "isAndroidPlatform").mockReturnValue(true);
-    captureState.mockRejectedValue(new Error("capture bridge unavailable"));
+    // Permanent failures (auth, protocol) must surface immediately rather
+    // than being retried — the fail-closed half of DMY-136.
+    captureState.mockRejectedValue(new IpcFailure("auth_failed", false));
     useUi.setState({ view: "capture" });
     const { container, user } = withUser(<App />);
 
@@ -141,8 +145,29 @@ describe("Android startup navigation", () => {
     expect(container.firstElementChild?.getAttribute("data-navigation-ready")).toBe(
       "true",
     );
+    expect(captureState).toHaveBeenCalledTimes(1);
 
     await user.click(settings);
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("retries a transient startup failure and recovers navigation from it", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(platform, "isAndroidPlatform").mockReturnValue(true);
+    captureState
+      .mockRejectedValueOnce(new IpcFailure("offline", true))
+      .mockRejectedValueOnce(new IpcFailure("offline", true))
+      .mockResolvedValue(captureSnapshot({ health: { state: "working" } }));
+    const { container } = withUser(<App />);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(container.firstElementChild?.getAttribute("data-navigation-ready")).toBe(
+      "true",
+    );
+    expect(captureState.mock.calls.length).toBeGreaterThanOrEqual(3);
+    const settings = screen.getByRole("button", { name: "Settings" });
+    expect((settings as HTMLButtonElement).disabled).toBe(false);
+    vi.useRealTimers();
   });
 });

@@ -11,7 +11,7 @@ import type {
 } from "@/generated/ipc";
 import type { ReadonlyDeep } from "type-fest";
 import type { Item } from "./ipc";
-import { call } from "./ipcCall";
+import { call, type IpcCallOptions } from "./ipcCall";
 
 export type CapturedPayload = ReadonlyDeep<GeneratedCapturedPayload>;
 export type CaptureHealth = ReadonlyDeep<GeneratedCaptureHealth>;
@@ -23,8 +23,8 @@ export type NotGrantedReason = GeneratedNotGrantedReason;
 export type NotWorkingReason = GeneratedNotWorkingReason;
 export type ShizukuProbe = ReadonlyDeep<GeneratedShizukuProbe>;
 
-export function captureState(): Promise<CaptureSnapshot> {
-  return call<CaptureSnapshot>("capture_state");
+export function captureState(options?: IpcCallOptions): Promise<CaptureSnapshot> {
+  return call<CaptureSnapshot>("capture_state", undefined, options);
 }
 
 /** Called on every resume, not only at startup: a grant can lapse while the app
