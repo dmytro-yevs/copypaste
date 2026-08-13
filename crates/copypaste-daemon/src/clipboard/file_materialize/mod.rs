@@ -1,15 +1,17 @@
 //! Private, time-bounded staging for native file paste-back.
 
+mod cadence;
 mod failure;
 mod report;
 mod sweep;
 #[cfg(test)]
 mod testutil;
+mod worker;
 
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
 use copypaste_core::FileMetadata;
@@ -18,7 +20,8 @@ use rustix::io::Errno;
 use tracing::warn;
 
 use report::SweepReport;
-use sweep::{CleanupWorker, Sweeper};
+use sweep::Sweeper;
+use worker::CleanupWorker;
 
 const DIRECTORY_MODE: Mode = Mode::RWXU;
 const FILE_MODE: Mode = Mode::RUSR.union(Mode::WUSR);
@@ -27,15 +30,6 @@ const MAX_AGE: Duration = Duration::from_secs(10 * 60);
 /// sampling it more often than it can expire is a resident timer for nothing.
 /// A sweep that leaves work behind is retried far sooner — see `sweep::RETRY_MIN`.
 const CLEANUP_INTERVAL: Duration = MAX_AGE;
-
-/// Whether a staging attempt left decrypted bytes on disk. It is plaintext, not
-/// a successful paste-back, that obliges the sweeper: a write that failed after
-/// the temporary file was created leaves exactly the same bytes behind.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Plaintext {
-    None,
-    OnDisk,
-}
 
 pub(super) struct StagingArea {
     root: PathBuf,
@@ -50,9 +44,14 @@ pub(super) struct StagingArea {
     /// that never pastes a file back and has nothing left over, the sweeper has
     /// nothing to sweep and was costing a resident OS thread for the life of
     /// the daemon.
-    cleanup: OnceLock<CleanupWorker>,
+    ///
+    /// Replaceable, not write-once: a worker whose thread has died owns nothing,
+    /// and the next paste-back has to be able to install a live one.
+    cleanup: Mutex<Option<CleanupWorker>>,
     max_age: Duration,
     interval: Duration,
+    #[cfg(test)]
+    worker_starts: std::sync::atomic::AtomicU32,
 }
 
 impl StagingArea {
@@ -74,12 +73,18 @@ impl StagingArea {
             root,
             root_fd,
             access: Arc::new(Mutex::new(())),
-            cleanup: OnceLock::new(),
+            cleanup: Mutex::new(None),
             max_age,
             interval,
+            #[cfg(test)]
+            worker_starts: std::sync::atomic::AtomicU32::new(0),
         };
         if startup.unfinished() {
-            area.start_cleanup_with(sweeper, startup);
+            // The plaintext this pass could not remove is already decrypted and
+            // already past its deadline. Nothing but the worker will ever take
+            // it, so failing here is better than handing back a staging area
+            // that only looks supervised.
+            area.install_worker(sweeper, startup)?;
         }
         Ok(area)
     }
@@ -97,64 +102,68 @@ impl StagingArea {
     pub(super) fn materialize(&self, bytes: &[u8], metadata: &FileMetadata) -> io::Result<PathBuf> {
         let filename = safe_filename(metadata)?;
         let _access = self.access.lock().unwrap_or_else(|held| held.into_inner());
-        let mut plaintext = Plaintext::None;
-        let staged = self.stage(bytes, filename, &mut plaintext);
-        if staged.is_ok() || plaintext == Plaintext::OnDisk {
-            self.start_cleanup();
-        }
-        staged
+        self.ensure_cleanup()?;
+        self.stage(bytes, filename)
     }
 
-    /// The TTL sweeper exists because this directory holds *decrypted* payloads.
-    /// Retried on the next paste-back if the thread could not be spawned.
-    fn start_cleanup(&self) {
-        if self.cleanup.get().is_some() {
-            return;
+    /// A *running* cleanup worker must exist before any plaintext is created,
+    /// and a worker that has died is not one. A descriptor-clone or
+    /// thread-spawn failure here prevents staging so that decrypted bytes are
+    /// never left with no timed cleanup owner.
+    fn ensure_cleanup(&self) -> io::Result<()> {
+        if is_running(&self.worker()) {
+            return Ok(());
         }
-        match self.root_fd.try_clone() {
-            Ok(root_fd) => {
-                self.start_cleanup_with(Sweeper::new(root_fd), SweepReport::default());
-            }
-            Err(error) => warn!(
-                error_kind = ?error.kind(),
-                "could not start the paste-file staging sweeper"
-            ),
-        }
+        let sweeper = Sweeper::new(self.clone_root_fd()?);
+        self.install_worker(sweeper, SweepReport::default())
     }
 
-    fn start_cleanup_with(&self, sweeper: Sweeper, startup: SweepReport) {
-        if self.cleanup.get().is_some() {
-            return;
+    fn worker(&self) -> MutexGuard<'_, Option<CleanupWorker>> {
+        self.cleanup.lock().unwrap_or_else(|held| held.into_inner())
+    }
+
+    fn clone_root_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
+        #[cfg(test)]
+        if let Some(error) = cleanup_fault::injected_clone_failure() {
+            return Err(error);
         }
-        match CleanupWorker::start(
+        self.root_fd.try_clone()
+    }
+
+    /// Installs a worker unless a running one is already in the slot. A failure
+    /// leaves whatever was there, so the caller stays refused rather than
+    /// proceeding under a worker that does not exist.
+    fn install_worker(&self, sweeper: Sweeper, startup: SweepReport) -> io::Result<()> {
+        let mut slot = self.worker();
+        if is_running(&slot) {
+            return Ok(());
+        }
+        #[cfg(test)]
+        if let Some(error) = cleanup_fault::injected_spawn_failure() {
+            return Err(error);
+        }
+        let worker = CleanupWorker::start(
             sweeper,
             Arc::clone(&self.access),
             self.max_age,
             self.interval,
             startup,
-        ) {
-            Ok(worker) => {
-                let _ = self.cleanup.set(worker);
-            }
-            Err(error) => warn!(
-                error_kind = ?error.kind(),
-                "could not start the paste-file staging sweeper"
-            ),
-        }
+        )?;
+        // Assigning drops a worker whose thread has already finished, so the
+        // join in its `Drop` returns at once.
+        *slot = Some(worker);
+        #[cfg(test)]
+        self.worker_starts
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
-    fn stage(
-        &self,
-        bytes: &[u8],
-        filename: &str,
-        plaintext: &mut Plaintext,
-    ) -> io::Result<PathBuf> {
+    fn stage(&self, bytes: &[u8], filename: &str) -> io::Result<PathBuf> {
         let content_id = copypaste_core::binary_item_id(bytes);
         let content_fd = open_or_create_content_dir(&self.root_fd, &content_id)?;
 
         match open_regular_at(&content_fd, filename) {
             Ok(file) => {
-                *plaintext = Plaintext::OnDisk;
                 renew(&file)?;
                 return Ok(self.root.join(content_id).join(filename));
             }
@@ -169,7 +178,6 @@ impl StagingArea {
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             FILE_MODE,
         )?;
-        *plaintext = Plaintext::OnDisk;
         let mut temporary = File::from(temporary_fd);
         let write_result = (|| {
             temporary.write_all(bytes)?;
@@ -213,6 +221,10 @@ impl StagingArea {
     }
 }
 
+fn is_running(slot: &Option<CleanupWorker>) -> bool {
+    slot.as_ref().is_some_and(CleanupWorker::is_running)
+}
+
 /// Removing the temporary is the only thing that unmakes the decrypted bytes
 /// this function's caller just wrote. A silent failure here was how a partial
 /// or complete plaintext payload could outlive a staging error unreported.
@@ -252,26 +264,94 @@ mod fault {
     use std::cell::Cell;
     use std::io;
 
+    #[derive(Clone, Copy)]
+    enum Mode {
+        Error,
+        Panic,
+    }
+
     thread_local! {
-        static PUBLISH_FAILS: Cell<bool> = const { Cell::new(false) };
+        static PUBLISH_FAILS: Cell<Option<Mode>> = const { Cell::new(None) };
     }
 
     pub(super) fn with_publish_failure<T>(body: impl FnOnce() -> T) -> T {
+        armed(Mode::Error, body)
+    }
+
+    /// An unwind out of `stage` leaves the temporary behind with none of the
+    /// rollback an `Err` return would have run.
+    pub(super) fn with_publish_panic<T>(body: impl FnOnce() -> T) -> T {
+        armed(Mode::Panic, body)
+    }
+
+    fn armed<T>(mode: Mode, body: impl FnOnce() -> T) -> T {
         struct Disarm;
         impl Drop for Disarm {
             fn drop(&mut self) {
-                PUBLISH_FAILS.with(|armed| armed.set(false));
+                PUBLISH_FAILS.with(|armed| armed.set(None));
             }
         }
-        PUBLISH_FAILS.with(|armed| armed.set(true));
+        PUBLISH_FAILS.with(|armed| armed.set(Some(mode)));
         let _disarm = Disarm;
         body()
     }
 
     pub(super) fn injected() -> Option<io::Error> {
-        PUBLISH_FAILS
+        match PUBLISH_FAILS.with(Cell::get) {
+            None => None,
+            Some(Mode::Error) => Some(io::Error::from(io::ErrorKind::StorageFull)),
+            Some(Mode::Panic) => panic!("injected paste-file staging panic"),
+        }
+    }
+}
+
+/// Failure injection for the cleanup-worker startup path: descriptor clone
+/// and thread spawn. These are the two operations between `ensure_cleanup`
+/// deciding to start and the `CleanupWorker` existing.
+#[cfg(test)]
+mod cleanup_fault {
+    use std::cell::Cell;
+    use std::io;
+
+    thread_local! {
+        static CLONE_FAILS: Cell<bool> = const { Cell::new(false) };
+        static SPAWN_FAILS: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) fn with_clone_failure<T>(body: impl FnOnce() -> T) -> T {
+        struct Disarm;
+        impl Drop for Disarm {
+            fn drop(&mut self) {
+                CLONE_FAILS.with(|armed| armed.set(false));
+            }
+        }
+        CLONE_FAILS.with(|armed| armed.set(true));
+        let _disarm = Disarm;
+        body()
+    }
+
+    pub(super) fn with_spawn_failure<T>(body: impl FnOnce() -> T) -> T {
+        struct Disarm;
+        impl Drop for Disarm {
+            fn drop(&mut self) {
+                SPAWN_FAILS.with(|armed| armed.set(false));
+            }
+        }
+        SPAWN_FAILS.with(|armed| armed.set(true));
+        let _disarm = Disarm;
+        body()
+    }
+
+    pub(super) fn injected_clone_failure() -> Option<io::Error> {
+        CLONE_FAILS
             .with(Cell::get)
-            .then(|| io::Error::from(io::ErrorKind::StorageFull))
+            .then(|| io::Error::other("injected fd-clone failure"))
+    }
+
+    pub(super) fn injected_spawn_failure() -> Option<io::Error> {
+        SPAWN_FAILS
+            .with(Cell::get)
+            .then(|| io::Error::other("injected thread-spawn failure"))
     }
 }
 
@@ -343,7 +423,31 @@ fn renew(file: &File) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::testutil::CapturedLog;
+    use super::worker::Doom;
     use super::*;
+
+    impl StagingArea {
+        fn has_live_cleanup(&self) -> bool {
+            is_running(&self.worker())
+        }
+
+        fn has_cleanup(&self) -> bool {
+            self.worker().is_some()
+        }
+
+        fn worker_starts(&self) -> u32 {
+            self.worker_starts
+                .load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        /// Puts a worker in the slot that reaches its loop and then dies, which
+        /// is the state `ensure_cleanup` has to detect and replace.
+        fn install_doomed_worker(&self, doom: Doom) {
+            let worker = CleanupWorker::doomed(doom).unwrap();
+            worker.wait_until_dead(Duration::from_secs(5));
+            *self.worker() = Some(worker);
+        }
+    }
 
     fn metadata(filename: impl Into<String>) -> FileMetadata {
         FileMetadata {
@@ -434,15 +538,16 @@ mod tests {
         let data_dir = tempfile::tempdir().unwrap();
         let staging = StagingArea::new(data_dir.path()).unwrap();
         assert!(
-            staging.cleanup.get().is_none(),
+            !staging.has_cleanup(),
             "a daemon that never pasted a file back must not carry a sweeper thread"
         );
 
         staging.materialize(b"bytes", &metadata("a.txt")).unwrap();
         assert!(
-            staging.cleanup.get().is_some(),
-            "staged plaintext must be under the TTL sweeper"
+            staging.has_live_cleanup(),
+            "staged plaintext must be under a running TTL sweeper"
         );
+        assert_eq!(staging.worker_starts(), 1);
     }
 
     #[test]
@@ -455,7 +560,7 @@ mod tests {
             .unwrap_err();
 
         assert!(
-            staging.cleanup.get().is_none(),
+            !staging.has_cleanup(),
             "a refused filename put nothing on disk and must not cost a thread"
         );
     }
@@ -508,7 +613,7 @@ mod tests {
             assert!(!logged.contains(secret), "the report disclosed {secret}");
         }
         assert!(
-            staging.cleanup.get().is_some(),
+            staging.has_live_cleanup(),
             "decrypted plaintext was left on disk with no sweeper"
         );
         wait_until_gone(&leaked[0], Duration::from_secs(5));
@@ -541,7 +646,7 @@ mod tests {
         let staging =
             StagingArea::with_timing(data_dir.path(), Duration::from_secs(60), interval).unwrap();
         assert!(
-            staging.cleanup.get().is_some(),
+            staging.has_live_cleanup(),
             "plaintext the startup sweep could not remove must stay under a sweeper"
         );
 
@@ -573,5 +678,237 @@ mod tests {
         assert_eq!(reused, file);
         assert!(reused.exists());
         assert_eq!(report.removed, 0, "{report:?}");
+    }
+
+    fn staged_content_dirs(staging: &StagingArea) -> Vec<PathBuf> {
+        std::fs::read_dir(staging.root())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect()
+    }
+
+    fn assert_refused_with_nothing_staged(staging: &StagingArea, error: io::Error) {
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(!staging.has_live_cleanup());
+        let staged = staged_content_dirs(staging);
+        assert!(
+            staged.is_empty(),
+            "no content directory may exist when cleanup could not start: {staged:?}"
+        );
+    }
+
+    /// B3: a descriptor-clone failure in `ensure_cleanup` must prevent any
+    /// plaintext from being created, not just log and proceed.
+    #[test]
+    fn a_clone_failure_prevents_plaintext_creation() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::new(data_dir.path()).unwrap();
+
+        let error = cleanup_fault::with_clone_failure(|| {
+            staging.materialize(b"secret", &metadata("secret.txt"))
+        })
+        .unwrap_err();
+
+        assert_refused_with_nothing_staged(&staging, error);
+    }
+
+    /// B3: a thread-spawn failure in `ensure_cleanup` must prevent any
+    /// plaintext from being created, not just log and proceed.
+    #[test]
+    fn a_spawn_failure_prevents_plaintext_creation() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::new(data_dir.path()).unwrap();
+
+        let error = cleanup_fault::with_spawn_failure(|| {
+            staging.materialize(b"secret", &metadata("secret.txt"))
+        })
+        .unwrap_err();
+
+        assert_refused_with_nothing_staged(&staging, error);
+    }
+
+    /// B3: once the cleanup worker is running, a subsequent clone or spawn
+    /// failure is harmless — `ensure_cleanup` short-circuits and staging
+    /// proceeds because the worker already owns the directory.
+    #[test]
+    fn cleanup_failure_after_worker_exists_does_not_block_staging() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::new(data_dir.path()).unwrap();
+
+        staging
+            .materialize(b"first", &metadata("first.txt"))
+            .unwrap();
+        assert!(staging.has_live_cleanup());
+
+        let path = cleanup_fault::with_clone_failure(|| {
+            cleanup_fault::with_spawn_failure(|| {
+                staging.materialize(b"second", &metadata("second.txt"))
+            })
+        })
+        .unwrap();
+        assert!(path.exists());
+        assert_eq!(staging.worker_starts(), 1, "the worker was restarted");
+    }
+
+    /// B3: a worker that has exited or panicked owns nothing. Occupying the
+    /// slot must not be mistaken for that — the defect was a `OnceLock` whose
+    /// occupancy was read as liveness.
+    #[test]
+    fn a_dead_worker_is_replaced_before_the_next_plaintext() {
+        for doom in [Doom::Return, Doom::Panic] {
+            let data_dir = tempfile::tempdir().unwrap();
+            let staging = StagingArea::with_timing(
+                data_dir.path(),
+                Duration::from_millis(1),
+                Duration::from_millis(50),
+            )
+            .unwrap();
+            staging.install_doomed_worker(doom);
+            assert!(!staging.has_live_cleanup(), "setup: the worker had to die");
+
+            let path = staging
+                .materialize(b"after the death", &metadata("after.txt"))
+                .unwrap();
+
+            assert!(
+                staging.has_live_cleanup(),
+                "a dead worker was left in place"
+            );
+            assert_eq!(staging.worker_starts(), 1);
+            wait_until_gone(&path, Duration::from_secs(5));
+            assert!(
+                !path.exists(),
+                "the replacement worker never removed the plaintext"
+            );
+        }
+    }
+
+    /// B3: and when the replacement cannot be started, the staging that would
+    /// have created plaintext under the dead worker is refused.
+    #[test]
+    fn a_dead_worker_that_cannot_be_replaced_prevents_plaintext_creation() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::new(data_dir.path()).unwrap();
+        staging.install_doomed_worker(Doom::Panic);
+
+        let error = cleanup_fault::with_spawn_failure(|| {
+            staging.materialize(b"secret", &metadata("secret.txt"))
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(!staging.has_live_cleanup());
+        let staged = staged_content_dirs(&staging);
+        assert!(staged.is_empty(), "{staged:?}");
+    }
+
+    /// B3: startup is where plaintext already exists. If the sweep could not
+    /// take it and no worker can be started, construction fails rather than
+    /// returning a staging area with unowned decrypted bytes under it.
+    #[cfg(unix)]
+    #[test]
+    fn a_startup_sweep_that_left_plaintext_with_no_worker_fails_closed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let data_dir = tempfile::tempdir().unwrap();
+        let root = data_dir.path().join("paste-files");
+        std::fs::create_dir(&root).unwrap();
+        let left_behind = root.join("11111111-1111-1111-1111-111111111111");
+        std::fs::create_dir(&left_behind).unwrap();
+        let stale = left_behind.join("from-the-last-run.bin");
+        std::fs::write(&stale, b"decrypted").unwrap();
+        set_modified(&stale, SystemTime::now() - Duration::from_secs(3600));
+        std::fs::set_permissions(&left_behind, std::fs::Permissions::from_mode(0o500)).unwrap();
+        // Root ignores the mode bits, so the fault cannot be injected there.
+        if std::fs::write(left_behind.join(".probe"), b"").is_ok() {
+            return;
+        }
+
+        let refused = cleanup_fault::with_spawn_failure(|| {
+            StagingArea::with_timing(
+                data_dir.path(),
+                Duration::from_secs(60),
+                Duration::from_secs(2),
+            )
+            .map(|_| PathBuf::new())
+        });
+
+        std::fs::set_permissions(&left_behind, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(refused.unwrap_err().kind(), io::ErrorKind::Other);
+    }
+
+    /// B3: the first `materialize` calls are serialized by `access`, so the
+    /// race that would start two workers — or stage plaintext under neither —
+    /// must not exist.
+    #[test]
+    fn concurrent_first_paste_backs_start_exactly_one_worker() {
+        const WRITERS: usize = 8;
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::with_timing(
+            data_dir.path(),
+            Duration::from_secs(60),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+
+        std::thread::scope(|scope| {
+            for index in 0..WRITERS {
+                let staging = &staging;
+                scope.spawn(move || {
+                    let payload = format!("payload-{index}");
+                    staging
+                        .materialize(payload.as_bytes(), &metadata(format!("{index}.txt")))
+                        .unwrap()
+                });
+            }
+        });
+
+        assert_eq!(staging.worker_starts(), 1);
+        assert!(staging.has_live_cleanup());
+        assert_eq!(staged_content_dirs(&staging).len(), WRITERS);
+    }
+
+    /// B3: a panic after the temporary exists is the one path that leaves
+    /// plaintext without running the rollback. It happens after
+    /// `ensure_cleanup`, so the bytes are already under a live worker — and the
+    /// staging lock it poisons must not take the next paste-back down with it.
+    #[test]
+    fn a_panic_after_the_temporary_exists_leaves_it_under_a_live_worker() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::with_timing(
+            data_dir.path(),
+            Duration::from_millis(1),
+            Duration::from_millis(50),
+        )
+        .unwrap();
+
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fault::with_publish_panic(|| {
+                staging.materialize(b"payload", &metadata("statement.pdf"))
+            })
+        }));
+
+        assert!(unwound.is_err(), "setup: the staging panic must escape");
+        assert!(
+            staging.has_live_cleanup(),
+            "the panicking paste-back left plaintext with no owner"
+        );
+        let content_dir = staging
+            .root()
+            .join(copypaste_core::binary_item_id(b"payload"));
+        let deadline = SystemTime::now() + Duration::from_secs(5);
+        while content_dir.exists() && SystemTime::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !content_dir.exists(),
+            "the sweeper never removed the plaintext a panic left"
+        );
+        assert!(
+            staging
+                .materialize(b"after", &metadata("after.txt"))
+                .is_ok(),
+            "the poisoned staging lock refused the next paste-back"
+        );
     }
 }
