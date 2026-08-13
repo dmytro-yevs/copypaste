@@ -65,6 +65,13 @@ jobs:
           python3 scripts/check-feature-ledger.py --self-test
           python3 scripts/check-feature-ledger.py
 
+  android-manifest:
+    name: Android manifest guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: ./scripts/check-android-manifest.sh
+
   commit-messages:
     name: commit messages
     runs-on: ubuntu-latest
