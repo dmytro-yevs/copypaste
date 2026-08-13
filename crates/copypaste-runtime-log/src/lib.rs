@@ -2,8 +2,7 @@
 
 use std::{
     fmt::{self},
-    fs,
-    io::{self, Read as _, Seek as _, SeekFrom},
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -24,10 +23,12 @@ use tracing_subscriber::{
 const MAX_LOG_FILES: usize = 7;
 const BUFFERED_LINES: usize = 1_024;
 const EXPORT_BYTES: usize = 1_000_000;
-const VIEW_BYTES: usize = 1_000_000;
-const VIEW_EVENTS: usize = 2_000;
 pub const MAX_PAGE_SIZE: usize = 100;
-const MAX_QUERY_LENGTH: usize = 160;
+
+mod query;
+mod reader;
+
+pub use query::list;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -73,8 +74,12 @@ impl LogLevel {
     }
 }
 
-/// The UI may ask for a short page only. `cursor` is an opaque filtered-row
-/// offset, deliberately not a filesystem position or filename.
+/// The UI may ask for a short page only.
+///
+/// `cursor` is opaque. Join a fresh head read to a paged one *through it* and
+/// never by comparing timestamps: a page boundary may fall inside a
+/// millisecond, so "older than the oldest row on screen" discards rows that
+/// were never shown.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeLogQuery {
@@ -101,7 +106,7 @@ pub struct RuntimeLogPage {
 }
 
 impl Process {
-    fn prefix(self) -> &'static str {
+    pub(crate) fn prefix(self) -> &'static str {
         match self {
             Self::App => "app",
             Self::Daemon => "daemon",
@@ -179,111 +184,7 @@ pub fn export(log_dir: &Path, process: Process) -> io::Result<String> {
     Ok(out)
 }
 
-/// Read a bounded page of the same redacted events included in support
-/// bundles. The reader never returns a log filename, absolute path, tracing
-/// field or unbounded file content.
-pub fn list(
-    log_dir: &Path,
-    query: &RuntimeLogQuery,
-    include_daemon: bool,
-) -> io::Result<RuntimeLogPage> {
-    let limit = query.limit.clamp(1, MAX_PAGE_SIZE);
-    let offset = query
-        .cursor
-        .as_deref()
-        .and_then(|cursor| cursor.parse::<usize>().ok())
-        .unwrap_or_default();
-    let needle = query
-        .query
-        .as_deref()
-        .unwrap_or_default()
-        .chars()
-        .take(MAX_QUERY_LENGTH)
-        .collect::<String>()
-        .to_lowercase();
-
-    let mut events = Vec::new();
-    for process in [Process::App, Process::Daemon] {
-        if process == Process::Daemon && !include_daemon {
-            continue;
-        }
-        if query.process.is_some_and(|wanted| wanted != process) {
-            continue;
-        }
-        events.extend(read_process_events(log_dir, process)?);
-    }
-    events.sort_by_key(|event| std::cmp::Reverse(event.timestamp_ms));
-    events.retain(|event| {
-        query.level.is_none_or(|level| event.level == level)
-            && (needle.is_empty()
-                || event.target.to_lowercase().contains(&needle)
-                || event.message.to_lowercase().contains(&needle))
-    });
-
-    let end = offset.saturating_add(limit).min(events.len());
-    let page = events.get(offset..end).unwrap_or_default().to_vec();
-    Ok(RuntimeLogPage {
-        events: page,
-        next_cursor: (end < events.len()).then(|| end.to_string()),
-    })
-}
-
-fn read_process_events(log_dir: &Path, process: Process) -> io::Result<Vec<RuntimeEvent>> {
-    let prefix = format!("{}.", process.prefix());
-    let entries = match fs::read_dir(log_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut files: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".log"))
-        })
-        .collect();
-    files.sort();
-
-    let mut remaining = VIEW_BYTES;
-    let mut events = Vec::new();
-    for file in files.into_iter().rev() {
-        if remaining == 0 || events.len() >= VIEW_EVENTS {
-            break;
-        }
-        let (bytes, starts_mid_line) = read_tail(&file, remaining)?;
-        remaining = remaining.saturating_sub(bytes.len());
-        let text = String::from_utf8_lossy(&bytes);
-        // A tail can start mid-line. Dropping that one fragment stops a
-        // malformed partial event from being presented as a real record.
-        let mut lines = text.lines();
-        if starts_mid_line {
-            lines.next();
-        }
-        for line in lines.rev() {
-            if let Some(event) = parse_event(line, process) {
-                events.push(event);
-                if events.len() >= VIEW_EVENTS {
-                    break;
-                }
-            }
-        }
-    }
-    Ok(events)
-}
-
-fn read_tail(path: &Path, remaining: usize) -> io::Result<(Vec<u8>, bool)> {
-    let mut file = fs::File::open(path)?;
-    let length = file.metadata()?.len();
-    let take = length.min(remaining as u64) as usize;
-    file.seek(SeekFrom::Start(length.saturating_sub(take as u64)))?;
-    let mut bytes = Vec::with_capacity(take);
-    file.take(take as u64).read_to_end(&mut bytes)?;
-    Ok((bytes, (take as u64) < length))
-}
-
-fn parse_event(line: &str, process: Process) -> Option<RuntimeEvent> {
+pub(crate) fn parse_event(line: &str, process: Process) -> Option<RuntimeEvent> {
     let mut pieces = line.splitn(4, ' ');
     let timestamp_ms = pieces.next()?.parse().ok()?;
     let level = LogLevel::parse(pieces.next()?)?;
@@ -394,63 +295,5 @@ mod tests {
 
         let json = serde_json::to_value(event).unwrap();
         assert_eq!(json["timestamp_ms"], serde_json::json!(i64::MAX));
-    }
-
-    #[test]
-    fn list_pages_only_fixed_format_redacted_events() {
-        let directory = tempfile::tempdir().unwrap();
-        fs::write(
-            directory.path().join("daemon.2026-08-01.log"),
-            "100 INFO copypaste::capture: capture started\n200 WARN copypaste::storage: opened /Users/alice/private.db\nnot an event\n",
-        )
-        .unwrap();
-        let query = RuntimeLogQuery {
-            cursor: None,
-            level: None,
-            process: Some(Process::Daemon),
-            query: None,
-            limit: 1,
-        };
-
-        let first = list(directory.path(), &query, true).unwrap();
-        assert_eq!(first.events.len(), 1);
-        assert_eq!(first.events[0].timestamp_ms, 200);
-        assert!(first.events[0].message.contains("<path>"));
-        assert!(!first.events[0].message.contains("alice"));
-        assert_eq!(first.next_cursor.as_deref(), Some("1"));
-
-        let next = list(
-            directory.path(),
-            &RuntimeLogQuery {
-                cursor: first.next_cursor,
-                ..query
-            },
-            true,
-        )
-        .unwrap();
-        assert_eq!(next.events[0].timestamp_ms, 100);
-    }
-
-    #[test]
-    fn list_never_invents_a_daemon_on_android() {
-        let directory = tempfile::tempdir().unwrap();
-        fs::write(
-            directory.path().join("daemon.2026-08-01.log"),
-            "100 INFO copypaste::capture: capture started\n",
-        )
-        .unwrap();
-        let page = list(
-            directory.path(),
-            &RuntimeLogQuery {
-                cursor: None,
-                level: None,
-                process: None,
-                query: None,
-                limit: 50,
-            },
-            false,
-        )
-        .unwrap();
-        assert!(page.events.is_empty());
     }
 }
