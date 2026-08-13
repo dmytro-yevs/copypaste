@@ -9,9 +9,6 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import App from "@/App";
-import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
-import { AppToaster } from "@/components/shell/AppToaster";
 import { IpcFailure } from "@/lib/errors";
 import { isQuickPasteSurface } from "@/surface";
 import "@/index.css";
@@ -48,16 +45,41 @@ const queryClient = new QueryClient({
   },
 });
 
-const root = document.getElementById("root");
-if (!root) throw new Error("missing #root");
+const container = document.getElementById("root");
+if (!container) throw new Error("missing #root");
+// Rebound because the render below runs inside a closure, where the check
+// above no longer narrows the type away from null.
+const root: HTMLElement = container;
 
 const isQuickPaste = isQuickPasteSurface(window.location.search);
 
-createRoot(root).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      {isQuickPaste ? <QuickPasteApp /> : <App />}
-      <AppToaster />
-    </QueryClientProvider>
-  </StrictMode>,
-);
+/**
+ * The screens are imported here rather than above so that nothing they reach
+ * is evaluated before the legacy polyfills are installed. `lib/format.ts`
+ * constructs an `Intl.RelativeTimeFormat` while its module body runs, and on
+ * API 24's Chromium 53 that throws before a component ever renders — a static
+ * import would put it ahead of the only code that can supply it.
+ *
+ * `import.meta.env.LEGACY` is false in the module build, so the branch and the
+ * chunk behind it are dropped and modern engines pay nothing for either.
+ */
+async function boot(): Promise<void> {
+  if (import.meta.env.LEGACY) await import("@/legacyPolyfills");
+
+  const [{ default: App }, { QuickPasteApp }, { AppToaster }] = await Promise.all([
+    import("@/App"),
+    import("@/components/quick-paste/QuickPasteApp"),
+    import("@/components/shell/AppToaster"),
+  ]);
+
+  createRoot(root).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        {isQuickPaste ? <QuickPasteApp /> : <App />}
+        <AppToaster />
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+void boot();

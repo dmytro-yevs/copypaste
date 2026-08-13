@@ -115,4 +115,3 @@ crates/copypaste-ui/src-tauri/src/service/push.rs
 crates/copypaste-ui/src-tauri/src/shell/hotkey.rs
 crates/copypaste-ui/src/components/devices/RevokeDialog.tsx
 crates/copypaste-ui/src/components/settings/serviceChoices.ts
-crates/copypaste-ui/src/vite-env.d.ts

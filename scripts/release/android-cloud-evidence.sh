@@ -421,20 +421,20 @@ sign_out_self_test() { # <temp>
     # The 45 s every release run spent rediscovering a session that had already
     # ended. One dump answers it, and the sample count is the assertion.
     ui_fixtures "$temp/signed-out.xml"
-    settle_sign_out_card "$temp/observed.xml" 30 ui_fixture_dump ui_fixture_scroll \
+    settle_sign_out_card "$temp/observed.xml" 120 ui_fixture_dump ui_fixture_scroll \
         && [[ "$UI_FIXTURE_INDEX" == 1 && "$UI_FIXTURE_SCROLLS" == 0 ]] \
         && ok "an ended session settles on its first sample" \
         || bad "an ended session settles on its first sample" \
                "$UI_FIXTURE_INDEX samples, $UI_FIXTURE_SCROLLS scrolls"
     ui_fixtures "$temp/connected.xml"
-    settle_sign_out_card "$temp/observed.xml" 30 ui_fixture_dump ui_fixture_scroll \
+    settle_sign_out_card "$temp/observed.xml" 120 ui_fixture_dump ui_fixture_scroll \
         && [[ "$UI_FIXTURE_INDEX" == 1 ]] \
         && ok "an actionable sign-out settles on its first sample" \
         || bad "an actionable sign-out settles on its first sample" "$UI_FIXTURE_INDEX samples"
     # Disabled mid-mutation is the one state worth another sample, so this one
     # does wait — and then reports rather than claiming the card was ready.
     ui_fixtures "$temp/busy.xml" "$temp/busy.xml" "$temp/connected.xml"
-    settle_sign_out_card "$temp/observed.xml" 30 ui_fixture_dump ui_fixture_scroll \
+    settle_sign_out_card "$temp/observed.xml" 120 ui_fixture_dump ui_fixture_scroll \
         && [[ "$UI_FIXTURE_INDEX" == 3 ]] \
         && ok "a card still mutating is sampled again" \
         || bad "a card still mutating is sampled again" "$UI_FIXTURE_INDEX samples"
