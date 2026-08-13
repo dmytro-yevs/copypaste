@@ -192,14 +192,22 @@ export function useImportHistory() {
   const apply = useMutation<ImportReport, unknown, string>({
     mutationFn: (token) => applyImportHistory(token),
     onSuccess: (report) => {
-      toast.success(
-        summarise([
-          t("settings.transfer.import.done", { count: report.inserted }),
-          report.skipped > 0
-            ? t("settings.transfer.import.alreadyHere", { count: report.skipped })
-            : null,
-        ]),
-      );
+      const message = summarise([
+        t("settings.transfer.import.done", { count: report.inserted }),
+        report.skipped > 0
+          ? t("settings.transfer.import.alreadyHere", { count: report.skipped })
+          : null,
+        report.pins_failed > 0
+          ? t("settings.transfer.import.pinsFailed", { count: report.pins_failed })
+          : null,
+      ]);
+      // The items landed, so this is not a failure — but a pin the file named
+      // is missing, and a success toast would let the user believe otherwise.
+      if (report.pins_failed > 0) {
+        toast.warning(message);
+      } else {
+        toast.success(message);
+      }
       void invalidateHistoryQueries(qc);
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
     },

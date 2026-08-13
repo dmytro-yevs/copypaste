@@ -2,13 +2,14 @@
 //!
 //! The limits live in `storage::retention`. This module owns the schedule:
 //! [`RetentionGate`] debounces bursts, [`RetentionBatch`] defers to one
-//! end-of-batch sweep. Sweeping later deletes *less, later* (safe direction);
-//! skipping is not, so both guarantee a sweep runs.
+//! end-of-batch sweep. Sweeping later deletes *less, later* (safe direction),
+//! so a batch that ends any other way still sweeps.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use scopeguard::{guard_on_success, OnSuccess, ScopeGuard};
 use tracing::warn;
 
 use crate::storage::Store;
@@ -63,62 +64,54 @@ impl RetentionGate {
     }
 }
 
-/// One sweep for a whole batch of writes, run when the batch ends.
+/// The store and settings one batch will sweep.
 ///
-/// The token proves a sweep is owed; `Drop` pays it. Callers may [`disarm`]
-/// when no rows were written or pin restoration failed (ADR-0023).
-pub struct RetentionBatch<'a> {
+/// Reached only through the batch that owns it, so a caller cannot sweep a
+/// store it did not write to (ADR-0023).
+pub struct BatchScope<'a> {
     store: &'a Store,
     settings: &'a copypaste_ipc::ConfigData,
-    swept: bool,
 }
 
-impl<'a> RetentionBatch<'a> {
-    #[must_use]
-    pub fn new(store: &'a Store, settings: &'a copypaste_ipc::ConfigData) -> Self {
-        Self {
-            store,
-            settings,
-            swept: false,
-        }
-    }
-
-    pub fn store(&self) -> &Store {
+impl<'a> BatchScope<'a> {
+    pub fn store(&self) -> &'a Store {
         self.store
     }
 
-    pub fn settings(&self) -> &copypaste_ipc::ConfigData {
+    pub fn settings(&self) -> &'a copypaste_ipc::ConfigData {
         self.settings
-    }
-
-    /// DMY-156: prevent the sweep when no rows were written or pins failed.
-    pub fn disarm(&mut self) {
-        self.swept = true;
-    }
-
-    /// Sweep now rather than on drop, for a caller that wants the limits
-    /// enforced before it reports success.
-    pub fn finish(mut self) {
-        self.sweep();
-    }
-
-    fn sweep(&mut self) {
-        if std::mem::replace(&mut self.swept, true) {
-            return;
-        }
-        enforce_retention(self.store, self.settings);
     }
 }
 
-impl Drop for RetentionBatch<'_> {
-    fn drop(&mut self) {
-        // DMY-156 B2: DB work in a destructor during unwinding can
-        // double-panic and abort the process.
-        if std::thread::panicking() {
-            return;
-        }
-        self.sweep();
-    }
+/// One sweep for a whole batch of writes, run when the batch ends.
+///
+/// `OnSuccess`, not `Always`: a sweep reached by unwinding would run database
+/// work in a destructor, which can double-panic into an abort, and the caller's
+/// pin restoration has not run either (DMY-156).
+pub type RetentionBatch<'a> = ScopeGuard<BatchScope<'a>, fn(BatchScope<'a>), OnSuccess>;
+
+/// Opens a batch. The sweep runs when it drops, unless [`finish`] or
+/// [`disarm`] resolves it first.
+#[must_use]
+pub fn batch<'a>(store: &'a Store, settings: &'a copypaste_ipc::ConfigData) -> RetentionBatch<'a> {
+    guard_on_success(BatchScope { store, settings }, sweep as fn(BatchScope<'a>))
+}
+
+fn sweep(scope: BatchScope<'_>) {
+    enforce_retention(scope.store, scope.settings);
+}
+
+/// Sweep now rather than on drop, for a caller that wants the limits enforced
+/// before it reports success.
+pub fn finish(batch: RetentionBatch<'_>) {
+    sweep(ScopeGuard::into_inner(batch));
+}
+
+/// Retire a batch without sweeping, for a caller that has established no sweep
+/// is owed. Getting this wrong deletes history the user still has
+/// (DMY-156), so the predicate belongs at the call site, not here.
+pub fn disarm(batch: RetentionBatch<'_>) {
+    let _ = ScopeGuard::into_inner(batch);
 }
 
 /// Counts the sweeps run on this thread, so a test can prove a batch sweeps
@@ -163,7 +156,7 @@ mod tests {
 
         sweeps::take();
         {
-            let _batch = RetentionBatch::new(&s, &settings);
+            let _batch = batch(&s, &settings);
             for n in 0..50 {
                 s.insert(item(&format!("item-{n}"), T0 + n * 60_000))
                     .unwrap();
@@ -181,7 +174,7 @@ mod tests {
         let settings = settings();
 
         sweeps::take();
-        RetentionBatch::new(&s, &settings).finish();
+        finish(batch(&s, &settings));
         assert_eq!(sweeps::take(), 1);
     }
 
@@ -194,7 +187,7 @@ mod tests {
 
         sweeps::take();
         let bail = |store: &Store| -> Result<(), ()> {
-            let _batch = RetentionBatch::new(store, &settings);
+            let _batch = batch(store, &settings);
             store.insert(item("only", T0)).unwrap();
             Err(())
         };
@@ -202,24 +195,22 @@ mod tests {
         assert_eq!(sweeps::take(), 1);
     }
 
-    /// DMY-156 B1: a batch that never received a write can be disarmed, and
-    /// its sweep never runs — so a zero-write import cannot evict existing
-    /// history under a lowered cap.
+    /// DMY-156: a batch that owes no sweep can be disarmed, and then nothing
+    /// runs one — so an import that wrote no rows cannot evict existing history
+    /// under a lowered cap.
     #[test]
     fn a_disarmed_batch_never_sweeps() {
         let s = store();
         let settings = settings();
 
         sweeps::take();
-        let mut batch = RetentionBatch::new(&s, &settings);
-        batch.disarm();
-        batch.finish();
+        disarm(batch(&s, &settings));
         assert_eq!(sweeps::take(), 0, "a disarmed batch must not sweep");
     }
 
-    /// DMY-156 B2: a panic during the batch must not run the sweep, because
-    /// pin restoration has not happened. DB work in a destructor during
-    /// unwind can double-panic and abort the process.
+    /// DMY-156: a panic during the batch must not run the sweep. The caller's
+    /// pin restoration has not happened, and database work in a destructor
+    /// during unwind can double-panic and abort the process.
     #[test]
     fn a_panic_during_a_batch_does_not_sweep() {
         let s = store();
@@ -227,7 +218,7 @@ mod tests {
 
         sweeps::take();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _batch = RetentionBatch::new(&s, &settings);
+            let _batch = batch(&s, &settings);
             s.insert(item("before the panic", T0)).unwrap();
             panic!("simulated failure");
         }));
@@ -237,6 +228,20 @@ mod tests {
             0,
             "a panic must not trigger a sweep in the destructor"
         );
+    }
+
+    /// The batch must sweep the store it was opened on, not one a caller passed
+    /// separately — that is what makes the token a proof rather than a flag.
+    #[test]
+    fn a_batch_sweeps_the_store_it_was_opened_on() {
+        let s = store();
+        let settings = settings();
+
+        let open = batch(&s, &settings);
+        s.insert(item("only", T0)).unwrap();
+        assert_eq!(open.store().count().unwrap(), 1);
+        assert_eq!(open.settings().history_limit, settings.history_limit);
+        finish(open);
     }
 
     #[test]
