@@ -8,7 +8,7 @@
  *   AT-10           arrow keys clamp at both ends and do not wrap
  *   A11Y-14         the announcer is not inside role="list"
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 
@@ -17,6 +17,11 @@ import { quickSlot } from "@/components/history/historyKeyboard";
 import { items, withClient } from "@/test/harness";
 import type { Selection } from "@/hooks/useSelection";
 import type { Item } from "@/lib/ipc";
+
+// DMY-137: virtual-core's scroll debounce is not cancelled on observer
+// teardown; the orphaned timer hits the unmounted virtualizer.
+beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+afterEach(() => vi.useRealTimers());
 
 /** A selection that records what was asked of it, so a test can assert on the
  *  gesture rather than on the hook's internals. */
