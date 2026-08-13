@@ -422,6 +422,10 @@ jobs:
         working-directory: e2e-android
         run: npm ci
 
+      - name: Audit harness dependencies
+        working-directory: e2e-android
+        run: npm audit --audit-level=high
+
       - name: Resolve the debug application identity
         run: |
           set -euo pipefail
