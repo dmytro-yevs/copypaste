@@ -23,7 +23,7 @@ mod tests {
     use crate::sensitive::rules_generated::{
         GITLEAKS_COMMIT, GITLEAKS_VERSION, SELECTED_GITLEAKS_RULE_IDS, VENDORED_CONFIG_SHA256,
     };
-    use crate::sensitive::spec::{AllowlistTarget, Category};
+    use crate::sensitive::spec::{AllowlistTarget, Category, Validator};
 
     #[test]
     fn generated_source_and_rule_id_parity_are_pinned() {
@@ -130,25 +130,52 @@ mod tests {
     }
 
     /// A context anchor proves which field matched, never that the value is a
-    /// credential. These three are above the floor on the strength of the anchor
-    /// alone, so each must capture its value and gate it against the placeholder
-    /// stopwords — otherwise the stopwords would be tested against the anchor,
-    /// and `AWS_SECRET_ACCESS_KEY=` contains `secret`.
+    /// credential. These are above the floor on the strength of the anchor
+    /// alone, so each must capture its value and gate that value on both its
+    /// strength and its randomness — never on the whole match, which carries the
+    /// anchor, and `AWS_SECRET_ACCESS_KEY=` contains `secret`.
     #[test]
     fn context_anchored_rules_gate_their_captured_value() {
         for name in [
             "azure_storage_key",
             "cloudflare_api_token",
             "aws_secret_access_key",
+            "dotenv_secret",
         ] {
             let rule = rule(name);
             assert!(rule.secret_group > 0, "{name} does not capture its value");
+            assert_eq!(rule.validator, Validator::ValueStrength, "{name}");
+            // The number differs per rule — upstream owns it where there is an
+            // upstream rule — but every one of these must have one, because it
+            // is the only thing separating a README example from a credential.
             assert!(
-                rule.allowlists
-                    .iter()
-                    .any(|allowlist| !allowlist.stopwords.is_empty()),
-                "{name} has no placeholder stopwords"
+                rule.entropy.is_some_and(|minimum| minimum >= 2.0),
+                "{name} has no entropy threshold to separate a README example"
             );
+        }
+    }
+
+    /// No rule may separate a placeholder from a credential by matching words
+    /// against the value. Both spellings of that — a `contains` stopword list
+    /// and a `starts_with` prefix list — suppress the rule outright, and a
+    /// suppressed 0.90-0.99 rule is a credential that is neither flagged, masked
+    /// nor kept out of the index. That is the failure §5.6's fail-closed
+    /// amendment exists for, and randomness answers the question instead.
+    /// Upstream rules keep their own vendored stopwords; these four are ours.
+    #[test]
+    fn context_anchored_rules_carry_no_word_list_over_their_value() {
+        for name in [
+            "azure_storage_key",
+            "cloudflare_api_token",
+            "aws_secret_access_key",
+            "dotenv_secret",
+        ] {
+            for allowlist in rule(name).allowlists {
+                assert!(
+                    allowlist.target != AllowlistTarget::Secret || allowlist.stopwords.is_empty(),
+                    "{name} suppresses its value by word match"
+                );
+            }
         }
     }
 
