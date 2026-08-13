@@ -25,6 +25,9 @@ export const nav = {
  *  authored message per kind and nothing to double-wrap. */
 export const errors = {
   offline: "The clipboard service is not running.",
+  /** Distinct from `offline` on purpose: the service answered the socket, so
+   *  "start it" is the one remedy that cannot help. */
+  timeout: "The clipboard service isn't responding. It's running, so give it a moment and try again.",
   not_ready:
     "The clipboard service is initializing. This will only take a moment.",
   protocol_mismatch:

@@ -10,6 +10,14 @@ interface StateNoticeProps {
   body?: string;
   tone?: StateNoticeTone;
   busy?: boolean;
+  /**
+   * Announce this notice to a screen reader regardless of tone.
+   *
+   * Tone is a visual choice and announcement is an accessibility one. Tying
+   * them together meant only a red notice could be announced, so anything
+   * worth interrupting for had to be red to be heard at all.
+   */
+  alert?: boolean;
   action?: {
     label: string;
     onClick: () => void;
@@ -24,6 +32,7 @@ export function StateNotice({
   body,
   tone = "neutral",
   busy = false,
+  alert = false,
   action,
 }: StateNoticeProps) {
   const ActionIcon = action?.icon;
@@ -37,7 +46,7 @@ export function StateNotice({
   return (
     <section
       data-slot="state-notice"
-      role={tone === "danger" ? "alert" : busy ? "status" : undefined}
+      role={alert || tone === "danger" ? "alert" : busy ? "status" : undefined}
       aria-busy={busy || undefined}
       className="flex w-full flex-wrap items-center gap-s-3 rounded-xl border border-border bg-card p-s-3 shadow-sm"
     >

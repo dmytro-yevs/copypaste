@@ -383,6 +383,91 @@ describe("the sensitive-content sweep", () => {
   });
 });
 
+/**
+ * The privacy fallback is invisible without this. Private mode back on, sync
+ * and network visibility back off and an empty exclusion list all look like
+ * settings a user chose, so the screen has to say they were not.
+ */
+describe("settings the service could not read", () => {
+  it("says nothing at all when the record was whole", async () => {
+    withUser(<ServiceTab />);
+    await screen.findByRole("combobox", { name: "Check the clipboard every" });
+    expect(screen.queryByText(/couldn't be read/i)).toBeNull();
+  });
+
+  it("announces a corrupt field and names the setting it protected", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        settings_health: {
+          record_unreadable: false,
+          unreadable_fields: ["excluded_app_bundle_ids"],
+        },
+      }),
+    );
+    withUser(<ServiceTab />);
+
+    // `role="alert"` rather than plain text: a fallback a screen-reader user
+    // is never told about is the same failure as no message at all.
+    const notice = await screen.findByRole("alert");
+    expect(notice.textContent).toMatch(/couldn't be read/i);
+    expect(notice.textContent).toMatch(/Exclude apps from capture/i);
+  });
+
+  it("names every privacy setting when the whole record was unreadable", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        settings_health: { record_unreadable: true, unreadable_fields: [] },
+      }),
+    );
+    withUser(<ServiceTab />);
+
+    const notice = await screen.findByRole("alert");
+    for (const label of [
+      "Private mode",
+      "Exclude apps from capture",
+      "Visible on this network",
+      "Sync with paired devices",
+    ]) {
+      expect(notice.textContent).toContain(label);
+    }
+  });
+
+  /** A field with no privacy weight still fell back, and the user is still
+   *  told — counted rather than named, because the list would be noise. */
+  it("counts the ordinary settings that went back to their defaults", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        settings_health: {
+          record_unreadable: false,
+          unreadable_fields: ["poll_interval_ms", "history_limit"],
+        },
+      }),
+    );
+    withUser(<ServiceTab />);
+
+    const notice = await screen.findByRole("alert");
+    expect(notice.textContent).toMatch(/2 other settings/i);
+  });
+
+  /** The failing value is the one most likely to be clipboard text or a path,
+   *  so the notice carries field names and nothing else (INV-12). */
+  it("shows no value and no path", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        settings_health: {
+          record_unreadable: false,
+          unreadable_fields: ["private_mode"],
+        },
+      }),
+    );
+    withUser(<ServiceTab />);
+
+    const notice = await screen.findByRole("alert");
+    expect(notice.textContent).not.toMatch(/\/Users\/|\/home\/|~\/|\.sock/);
+    expect(notice.textContent).not.toMatch(/private_mode/);
+  });
+});
+
 it("names no path anywhere (INV-12)", async () => {
   const { container } = withUser(<ServiceTab />);
   await screen.findByRole("combobox", { name: "Check the clipboard every" });
