@@ -166,7 +166,7 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
     }
 }
 
-fn ingest_capture(
+pub(crate) fn ingest_capture(
     state: &AppState,
     capture: crate::clipboard::Capture,
     created_at: i64,
