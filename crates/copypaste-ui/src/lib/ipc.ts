@@ -93,8 +93,12 @@ export function copyItemAsPlainText(id: string): Promise<Item> {
   return call<Item>("copy_item_as_plain_text", { id });
 }
 
-export function copyItems(ids: readonly string[]): Promise<boolean> {
-  return call<boolean>("copy_items", { ids });
+/** One clipboard write for the whole selection, and the count that actually
+ *  reached it — sensitive and binary rows are excluded by the backend, so a
+ *  result below `ids.length` is a partial the caller must report rather than
+ *  round up to "Copied". Rejects, writing nothing, if a row has gone. */
+export function copyItems(ids: readonly string[]): Promise<number> {
+  return call<number>("copy_items", { ids });
 }
 
 export function addItem(content: string): Promise<Item> {

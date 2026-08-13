@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { CaptureStatus } from "@/components/capture/CaptureStatus";
 import { BulkBar } from "@/components/history/BulkBar";
@@ -14,6 +15,8 @@ import type { StatusData } from "@/lib/ipc";
 import { useHistoryController } from "@/hooks/useHistoryController";
 import { useHistorySelection } from "@/hooks/useHistorySelection";
 import { useReveal } from "@/hooks/useReveal";
+import { t } from "@/i18n";
+import { toFriendly } from "@/lib/errors";
 import { copyItems, hideWindow } from "@/lib/ipc";
 import type { Item } from "@/lib/ipc";
 import { useDetailBody } from "@/hooks/useDetailBody";
@@ -128,32 +131,57 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
     [copy],
   );
 
+  /**
+   * One command for the whole selection (§3.1.9). v1 copied the first item via
+   * the daemon and *then* wrote the joined text, so the toast fired on the
+   * first item's success while the write that produced the clipboard's actual
+   * contents was still in flight — and its failure was swallowed. A user who
+   * saw "Copied" and pressed ⌘V got one item, or the item before it.
+   */
   const copySelected = useCallback(() => {
     const selected = selection.items;
     const first = selected[0];
     if (!first || bulkCopying) return;
 
-    setBulkCopying(true);
-    copy.mutate(first, {
-      onSuccess: () => {
-        const finish = () => {
+    // A single row still goes through the daemon: it puts the item on the
+    // pasteboard as itself, so an image stays an image rather than becoming its
+    // text placeholder.
+    if (selected.length < 2) {
+      setBulkCopying(true);
+      copy.mutate(first, {
+        onSuccess: () => {
           selection.end();
           setBulkCopying(false);
-        };
+        },
+        onError: () => setBulkCopying(false),
+      });
+      return;
+    }
 
-        if (selected.length < 2) {
-          finish();
+    setBulkCopying(true);
+    void copyItems(selected.map((item) => item.id))
+      .then((copied) => {
+        if (copied === 0) {
+          // The selection stands: the user has to change it for anything to
+          // reach the clipboard.
+          toast.error(t("history.toast.bulkCopyNothing"));
           return;
         }
-
-        void copyItems(selected.map((item) => item.id))
-          .catch(() => {
-            // Best effort: the daemon copy has already succeeded (§3.1.9).
-          })
-          .finally(finish);
-      },
-      onError: () => setBulkCopying(false),
-    });
+        if (copied < selected.length) {
+          toast.warning(
+            t("history.toast.bulkCopiedPartial", {
+              done: copied,
+              total: selected.length,
+              skipped: selected.length - copied,
+            }),
+          );
+        } else {
+          toast.success(t("history.toast.bulkCopied", { count: copied }));
+        }
+        selection.end();
+      })
+      .catch((raw) => toast.error(toFriendly(raw)))
+      .finally(() => setBulkCopying(false));
   }, [bulkCopying, copy, selection]);
 
   return (
@@ -241,7 +269,8 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       <HistoryDetail
         item={detail?.item ?? null}
         origin={detail?.origin ?? null}
-        fullContent={detailBody}
+        fullContent={detailBody.text}
+        fullContentFailed={detailBody.failed}
         revealedContent={
           detail && reveal.revealedId === detail.item.id
             ? reveal.revealedContent
