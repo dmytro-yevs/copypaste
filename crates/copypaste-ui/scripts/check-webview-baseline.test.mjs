@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test, { describe } from "node:test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   loweredFor,
@@ -110,6 +113,23 @@ describe("which engine a chunk is measured against", () => {
     assert.equal(targetOf("index-Ck5oJl_4.js"), MODERN_TARGET);
     assert.equal(targetOf("index-legacy-DS5HWSd_.js"), LEGACY_TARGET);
     assert.equal(targetOf("polyfills-legacy-xDQuuDc8.js"), LEGACY_TARGET);
+  });
+
+  // `public/` is copied, not built, so both engines load whatever is in it and
+  // the plugin never lowered a line of it.
+  test("a script copied from public is measured against the older engine", () => {
+    assert.equal(targetOf("theme-bootstrap.js", true), LEGACY_TARGET);
+    assert.equal(targetOf("theme-bootstrap.js"), MODERN_TARGET);
+  });
+
+  // Object spread reached the appearance bootstrap through
+  // `parseAppearanceFields.toString()`, and Chromium 53 cannot parse it: API 24
+  // lost the theme, the accent and the translucency variables before first paint.
+  test("the appearance bootstrap parses on the engine API 24 ships", () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const source = readFileSync(path.join(root, "public", "theme-bootstrap.js"), "utf8");
+
+    assert.deepEqual(postBaselineSyntax(source, LEGACY_TARGET, "theme-bootstrap.js"), []);
   });
 
   test("the config has to take its engines from the shared module", () => {

@@ -14,49 +14,51 @@
     : raw;
 };
   var parseAppearanceFields = function parseAppearanceFields(raw, contract, onInvalid) {
-  const appearance = { ...contract.defaults };
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    const appearance = Object.assign({}, contract.defaults);
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      return appearance;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(raw, "theme")) {
+      const theme = Reflect.get(raw, "theme");
+      if (contract.themes.some((candidate) => candidate === theme)) {
+        Reflect.set(appearance, "theme", theme);
+      } else {
+        onInvalid("theme");
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(raw, "accent")) {
+      const accent = Reflect.get(raw, "accent");
+      if (contract.accents.some((candidate) => candidate === accent)) {
+        Reflect.set(appearance, "accent", accent);
+      } else {
+        onInvalid("accent");
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(raw, "translucency")) {
+      const translucency = Reflect.get(raw, "translucency");
+      if (
+        typeof translucency === "number" &&
+        Number.isInteger(translucency) &&
+        translucency >= 0 &&
+        translucency <= 100
+      ) {
+        appearance.translucency = translucency;
+      } else if (typeof translucency === "boolean") {
+        // v2 alpha stored this as a switch. Keep an existing user's enabled
+        // frost at the former visual strength when the control becomes a range.
+        appearance.translucency = translucency ? 100 : 0;
+      } else {
+        onInvalid("translucency");
+      }
+    }
+
     return appearance;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(raw, "theme")) {
-    const theme = Reflect.get(raw, "theme");
-    if (contract.themes.some((candidate) => candidate === theme)) {
-      Reflect.set(appearance, "theme", theme);
-    } else {
-      onInvalid("theme");
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(raw, "accent")) {
-    const accent = Reflect.get(raw, "accent");
-    if (contract.accents.some((candidate) => candidate === accent)) {
-      Reflect.set(appearance, "accent", accent);
-    } else {
-      onInvalid("accent");
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(raw, "translucency")) {
-    const translucency = Reflect.get(raw, "translucency");
-    if (
-      typeof translucency === "number" &&
-      Number.isInteger(translucency) &&
-      translucency >= 0 &&
-      translucency <= 100
-    ) {
-      appearance.translucency = translucency;
-    } else if (typeof translucency === "boolean") {
-      appearance.translucency = translucency ? 100 : 0;
-    } else {
-      onInvalid("translucency");
-    }
-  }
-
-  return appearance;
-};
+  };
   var translucencyAttribute = function translucencyAttribute(value) {
-  return value > 0 ? "on" : "off";
-};
-  var translucencyStyle = function translucencyStyle(value) {
+    return value > 0 ? "on" : "off";
+  };
+  var translucencyStyle = function translucencyStyle(value              )                         {
   const level = Math.min(100, Math.max(0, value));
   return {
     "--translucency-chrome-opacity": `${100 - level * 0.28}%`,
@@ -65,7 +67,7 @@
     "--translucency-saturation": `${100 + Math.round(level * 0.8)}%`,
   };
 };
-  var appearance = { ...contract.defaults };
+  var appearance = Object.assign({}, contract.defaults);
 
   try {
     var stored = localStorage.getItem(contract.storageKey);
