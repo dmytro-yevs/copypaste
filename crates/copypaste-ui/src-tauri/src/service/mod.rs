@@ -21,19 +21,23 @@
 //! That keeps `crate::commands` free of `cfg`, which is what ADR-0002 asks for.
 
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use backon::{ExponentialBuilder, Retryable};
 use serde::Serialize;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::time::timeout;
 
 use crate::backend::{Backend, BackendError, Result};
 
 pub mod diagnostics;
 pub mod locate;
 pub mod push;
+mod spawn;
+
+use spawn::spawn_process;
 
 /// The version this app expects the daemon to report. Both come from the
 /// workspace version, so a mismatch means two different installs, not a
@@ -51,6 +55,25 @@ const MSG_NEVER_READY: &str = "The background service started but didn't finish 
 /// short enough that a daemon which is never going to answer is reported rather
 /// than waited on.
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The whole of a graceful quit, from asking the daemon to stop to seeing it
+/// gone.
+///
+/// The two steps inside it are bounded individually, but quit is the caller and
+/// the number it needs is how long the *app* can take to close — two bounded
+/// steps in series is still their sum. Past this the child is stopped outright,
+/// which is the bounded fallback ADR-0004 accepts: WAL makes a killed daemon
+/// recoverable, and a user waiting on a window that will not close does not
+/// know that anything is being waited for.
+const SHUTDOWN_BUDGET: Duration = Duration::from_secs(15);
+
+/// The slice of [`SHUTDOWN_BUDGET`] held back for ending the child outright.
+///
+/// `kill` can fail and `reap` is a blocking wait with no timeout of its own. If
+/// the graceful attempt were allowed to spend the whole budget, the fallback
+/// would begin already out of time and quit would hang on the very step that
+/// exists to stop it hanging.
+const FORCED_STOP_BUDGET: Duration = Duration::from_secs(3);
 
 /// What the background service is doing, as the UI needs to see it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -221,11 +244,37 @@ impl Supervisor {
         if !self.holds_child() {
             return;
         }
-        if backend.stop_service().await.is_ok() && self.await_stopped(backend).await.is_ok() {
+        let graceful = async {
+            backend.stop_service().await.is_ok() && self.await_stopped(backend).await.is_ok()
+        };
+        if matches!(
+            timeout(SHUTDOWN_BUDGET - FORCED_STOP_BUDGET, graceful).await,
+            Ok(true)
+        ) {
             self.reap_child().await;
             return;
         }
-        self.stop();
+        self.stop_within_budget().await;
+    }
+
+    /// Kill and reap the child on a worker, and stop waiting at the budget.
+    ///
+    /// Both calls are the OS's business and neither has a timeout of its own,
+    /// so neither may be the last thing between a user and a window that
+    /// closes. Giving up leaves at worst a zombie — one slot in the process
+    /// table — and on Windows the job handle went with `kill`, so the kernel
+    /// ends the child regardless.
+    async fn stop_within_budget(&self) {
+        let Some(mut child) = self.take_child() else {
+            return;
+        };
+        let ended = tokio::task::spawn_blocking(move || {
+            let _ = child.kill();
+            let _ = child.reap();
+        });
+        if timeout(FORCED_STOP_BUDGET, ended).await.is_err() {
+            tracing::warn!("the background service did not stop within the quit budget");
+        }
     }
 
     /// Stop the daemon this process started. Safe to call when there is none.
@@ -234,12 +283,9 @@ impl Supervisor {
     /// makes that recoverable and the daemon clears its own stale socket on the
     /// next bind; ADR-0004 records it as a cost rather than a preference.
     fn stop(&self) {
-        let Some(mut child) = self.take_child() else {
-            return;
-        };
-        let _ = child.kill();
-        // Reaped rather than left a zombie: the app may run for days after.
-        let _ = child.reap();
+        if let Some(child) = self.take_child() {
+            end_child(child);
+        }
     }
 
     fn spawn<S>(&self, binary: &Path, spawn: &S) -> Result<()>
@@ -247,9 +293,8 @@ impl Supervisor {
         S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
     {
         let child = spawn(binary)?;
-        if let Some(mut previous) = self.child_slot().replace(child) {
-            let _ = previous.kill();
-            let _ = previous.reap();
+        if let Some(previous) = self.child_slot().replace(child) {
+            end_child(previous);
         }
         Ok(())
     }
@@ -329,8 +374,15 @@ impl Supervisor {
     }
 
     async fn reap_child(&self) {
-        if let Some(mut child) = self.take_child() {
-            let _ = tokio::task::spawn_blocking(move || child.reap()).await;
+        let Some(mut child) = self.take_child() else {
+            return;
+        };
+        let reaped = tokio::task::spawn_blocking(move || child.reap());
+        // Bounded even here. A daemon that answered "stopping" and then never
+        // exited would otherwise hold the quit open on the one path that
+        // believed it had gone quietly.
+        if timeout(FORCED_STOP_BUDGET, reaped).await.is_err() {
+            tracing::warn!("the background service did not finish exiting");
         }
     }
 
@@ -383,6 +435,23 @@ impl Supervisor {
     }
 }
 
+/// Kill the child and reap it, giving up on the reap at the budget.
+///
+/// Reaped rather than left a zombie: the app may run for days after. But a
+/// `wait` that never returns is worse than a zombie, so it runs on a thread of
+/// its own and this call stops waiting.
+fn end_child(mut child: Box<dyn ChildProcess>) {
+    let _ = child.kill();
+    let (done, reaped) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = child.reap();
+        let _ = done.send(());
+    });
+    if reaped.recv_timeout(FORCED_STOP_BUDGET).is_err() {
+        tracing::warn!("the background service could not be reaped");
+    }
+}
+
 trait ChildProcess: Send {
     fn reap_if_exited(&mut self) -> std::io::Result<bool>;
     fn kill(&mut self) -> std::io::Result<()>;
@@ -401,19 +470,6 @@ impl ChildProcess for Child {
     fn reap(&mut self) -> std::io::Result<()> {
         self.wait().map(|_| ())
     }
-}
-
-fn spawn_process(binary: &Path) -> Result<Box<dyn ChildProcess>> {
-    Command::new(binary)
-        .arg("--foreground")
-        // A child holding the app's descriptors keeps them open past a crash.
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|child| Box::new(child) as Box<dyn ChildProcess>)
-        // The OS error can contain the binary path and local username.
-        .map_err(|_| BackendError::Internal(MSG_START_FAILED.into()))
 }
 
 #[allow(async_fn_in_trait)]
@@ -564,6 +620,31 @@ mod tests {
 
         fn reap(&mut self) -> std::io::Result<()> {
             assert_eq!(self.probe.reaps.fetch_add(1, Ordering::SeqCst), 0);
+            Ok(())
+        }
+    }
+
+    /// A child that refuses to be terminated and then blocks in `wait`, which
+    /// is what an unkillable process looks like from this side.
+    struct StuckChild {
+        probe: Arc<ChildProbe>,
+        release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    }
+
+    impl ChildProcess for StuckChild {
+        fn reap_if_exited(&mut self) -> std::io::Result<bool> {
+            Ok(false)
+        }
+
+        fn kill(&mut self) -> std::io::Result<()> {
+            self.probe.kills.fetch_add(1, Ordering::SeqCst);
+            Err(std::io::Error::other("terminate refused"))
+        }
+
+        fn reap(&mut self) -> std::io::Result<()> {
+            let blocked = self.release.lock().unwrap().take().expect("one reap");
+            let _ = blocked.recv();
+            self.probe.reaps.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
@@ -782,11 +863,91 @@ mod tests {
         }
     }
 
-    #[test]
-    fn spawn_errors_do_not_expose_the_binary_path() {
-        let path = Path::new("C:/Users/a-person/private/copypaste-daemon");
-        let error = spawn_process(path).err().expect("the path must not exist");
-        assert_eq!(error.to_string(), MSG_START_FAILED);
-        assert!(!error.to_string().contains("a-person"));
+    /// Quit must end, whatever the daemon is doing.
+    ///
+    /// The gate here holds `stop_service` open forever, which is what a daemon
+    /// wedged mid-shutdown looks like from this side. Before the budget the
+    /// app's `RunEvent::Exit` hook waited on it and the window never closed;
+    /// now the wait ends and the child is stopped outright.
+    #[tokio::test(start_paused = true)]
+    async fn a_daemon_that_will_not_stop_still_lets_the_app_quit() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        let child = Arc::new(ChildProbe::default());
+        *sup.child_slot() = Some(Box::new(FakeChild {
+            probe: Arc::clone(&child),
+        }));
+        // Armed and never resumed: the handler is entered and does not return.
+        backend.shutdown_gate.arm();
+
+        sup.shutdown_injected(&backend).await;
+
+        assert_eq!(
+            child.kills.load(Ordering::SeqCst),
+            1,
+            "quit waited on the daemon instead of falling back"
+        );
+        assert_eq!(child.reaps.load(Ordering::SeqCst), 1);
+        assert!(sup.take_child().is_none());
+    }
+
+    /// The kill/reap fallback is inside the budget, not after it.
+    ///
+    /// The gate holds `stop_service` open forever and the child refuses both
+    /// `kill` and a prompt `reap`, which is the shape of a wedged daemon on a
+    /// loaded machine. Before this, `stop()` ran outside the timeout: quit
+    /// spent the whole budget being polite and then blocked in `wait` with no
+    /// bound at all, so the window never closed.
+    #[tokio::test(start_paused = true)]
+    async fn a_child_that_will_not_die_still_ends_the_quit_inside_the_budget() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        let child = Arc::new(ChildProbe::default());
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        // Released from outside the runtime, so the blocked reap ends whatever
+        // this test does — a `wait` left blocked forever would hang the
+        // runtime's own shutdown rather than reporting a failure.
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let _ = release.send(());
+        });
+        *sup.child_slot() = Some(Box::new(StuckChild {
+            probe: Arc::clone(&child),
+            release: Mutex::new(Some(blocked)),
+        }));
+        backend.shutdown_gate.arm();
+
+        let started = tokio::time::Instant::now();
+        sup.shutdown_injected(&backend).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(
+            child.kills.load(Ordering::SeqCst),
+            1,
+            "kill was never tried"
+        );
+        assert!(
+            elapsed <= SHUTDOWN_BUDGET,
+            "quit took {elapsed:?}, over its {SHUTDOWN_BUDGET:?} budget"
+        );
+        assert!(sup.take_child().is_none(), "the child was handed back");
+    }
+
+    /// The fallback is a fallback, not the path. A daemon that stops when asked
+    /// is never killed, because a killed daemon costs a WAL recovery on the
+    /// next start.
+    #[tokio::test(start_paused = true)]
+    async fn a_daemon_that_stops_when_asked_is_not_killed() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        let child = Arc::new(ChildProbe::default());
+        *sup.child_slot() = Some(Box::new(FakeChild {
+            probe: Arc::clone(&child),
+        }));
+
+        sup.shutdown_injected(&backend).await;
+
+        assert_eq!(child.kills.load(Ordering::SeqCst), 0);
+        assert_eq!(child.reaps.load(Ordering::SeqCst), 1);
     }
 }
