@@ -61,7 +61,7 @@ Two consequences worth stating:
 - `LinesCodec` replaced ~150 lines of framing, but the two-tier, method-aware
   size cap survives as a custom `Decoder` — it fixed a real RAM-amplification
   bug.
-- `PROTOCOL_VERSION` is `1`, and changing it is a decision rather than a breach.
+- `PROTOCOL_VERSION` is `2`, and changing it is a decision rather than a breach.
   Nothing has to interoperate with a v0.4.x client; the field stays because a
   local socket needs a handshake that fails loudly when a stale binary is left
   behind.

@@ -1188,7 +1188,7 @@ wraps per its own overflow rule — never rely on a fixed English string width.
 | Peer stall threshold | **30 min** | Much longer than the 5 min global badge threshold — brief blips must not spam a warning. A non-zero `rekey_failures` flags immediately regardless. |
 | Tray Recent | 10 items, 40-char labels | |
 | QR TTL / refresh margin | **120 s / 15 s** | Daemon `PAKE_SESSION_TTL`. |
-| Protocol version | `CURRENT_PROTOCOL_VERSION = 1` | Any differing daemon `protocol_version` fires the mismatch handler. |
+| Protocol version | `CURRENT_PROTOCOL_VERSION = 2` | Any differing daemon `protocol_version` fires the mismatch handler. |
 
 ### 5.5 Token-burn rationale (why these numbers, not "just poll fast")
 
