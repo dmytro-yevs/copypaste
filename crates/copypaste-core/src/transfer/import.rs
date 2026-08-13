@@ -62,17 +62,10 @@ pub fn import(
         skipped_too_large: 0,
     };
     let mut pin: Vec<String> = Vec::new();
-
-    // One sweep for the whole file. Per item, a 10 000-entry import ran 30 000
-    // retention transactions to reach the history one sweep leaves; the batch is
-    // dropped before the pins are restored, so the limits are enforced before
-    // this returns either way.
-    let batch = RetentionBatch::new(store, settings);
+    let mut batch = RetentionBatch::new(store, settings);
+    let mut fatal: Option<ImportError> = None;
 
     for item in items {
-        // `ingest_into` recomputes sensitivity from the plaintext and takes the
-        // item's own `created_at`, so a restored history keeps its order and a
-        // file imported twice collapses rather than doubling.
         let created_at = item
             .created_at
             .min(now_ms().saturating_add(MAX_IMPORT_FUTURE_SKEW_MS));
@@ -100,8 +93,6 @@ pub fn import(
                     pin.push(existing.id);
                 }
             }
-            // Empty and over-size are the two entries worth tolerating: neither
-            // can be stored and neither is a reason to lose the other 9 999.
             Err(IngestError::Empty) => {
                 result.skipped += 1;
                 result.skipped_empty += 1;
@@ -110,23 +101,47 @@ pub fn import(
                 result.skipped += 1;
                 result.skipped_too_large += 1;
             }
-            Err(IngestError::Crypto(e)) => return Err(ImportError::Crypto(e)),
-            Err(IngestError::Storage(e)) => return Err(ImportError::Storage(e)),
+            Err(IngestError::Crypto(e)) => {
+                fatal = Some(ImportError::Crypto(e));
+                break;
+            }
+            Err(IngestError::Storage(e)) => {
+                fatal = Some(ImportError::Storage(e));
+                break;
+            }
         }
     }
 
-    // Pins are applied after the fact rather than inside the ingest: the store
-    // has one pin path (`set_pinned`, which also assigns `pin_order`) and a
-    // second one here would be a second definition of what a pin is.
-    //
-    // Before the sweep, which per-item retention could not manage: a file whose
-    // pinned entry sorts old had that entry evicted by the cap two items later
-    // and was then pinned by nobody. Pinned items are never evicted (manifest 03
-    // I9), so restoring the pins first is what makes that rule true of an import.
+    // DMY-156 B1: nothing was written, so no sweep is owed and running one
+    // could hard-delete pre-existing history under a lowered cap.
+    if result.inserted == 0 {
+        batch.disarm();
+        if let Some(e) = fatal {
+            return Err(e);
+        }
+        info!(
+            skipped = result.skipped,
+            skipped_empty = result.skipped_empty,
+            skipped_too_large = result.skipped_too_large,
+            "imported history (nothing stored)"
+        );
+        return Ok(result);
+    }
+
+    // DMY-156 B2: pins are restored before the sweep on every exit path —
+    // normal completion, fatal error after prior writes, and Drop (which skips
+    // DB work during panic to avoid a double-panic abort). If any pin cannot be
+    // made durable, the sweep is skipped entirely so I9 is never violated.
+    let mut pin_failed = false;
     for item_id in &pin {
         if let Err(e) = store.set_pinned(item_id, true) {
             warn!(error = ?e, "could not restore a pin on an imported item");
+            pin_failed = true;
         }
+    }
+    if pin_failed {
+        batch.disarm();
+        warn!("retention sweep skipped: pin restoration was incomplete");
     }
 
     batch.finish();
@@ -139,6 +154,9 @@ pub fn import(
         skipped_too_large = result.skipped_too_large,
         "imported history"
     );
+    if let Some(e) = fatal {
+        return Err(e);
+    }
     Ok(result)
 }
 
@@ -416,6 +434,124 @@ mod tests {
             rows.iter().any(|row| row.pinned),
             "the pin was lost to the sweep: {:?}",
             f.contents()
+        );
+    }
+
+    /// DMY-156 B1: an import that commits zero rows must never run retention
+    /// or delete pre-existing history. A blank input under a lowered cap is
+    /// the exact scenario the review reproduced.
+    #[test]
+    fn a_zero_write_import_never_deletes_existing_history() {
+        let mut f = fixture();
+        f.add("old");
+        f.add("new");
+        assert_eq!(f.store.count().unwrap(), 2);
+
+        f.settings.history_limit = 1;
+
+        let result = import_into(&f, vec![item(""), item(" \n\t")]).unwrap();
+        assert_eq!(result.inserted, 0);
+        assert_eq!(
+            f.store.count().unwrap(),
+            2,
+            "an all-blank import must not touch existing rows"
+        );
+    }
+
+    /// DMY-156 B1: same as above, but with oversized items and a lowered byte
+    /// quota — another zero-write scenario that must not trigger eviction.
+    #[test]
+    fn a_zero_write_oversized_import_never_deletes_existing_history() {
+        let mut f = fixture();
+        f.add("keep me");
+        f.settings.max_text_size_bytes = copypaste_ipc::MIN_TEXT_SIZE_BYTES;
+        f.settings.storage_quota_bytes = 0;
+
+        let oversized = "x".repeat(copypaste_ipc::MIN_TEXT_SIZE_BYTES as usize + 1);
+        let result = import_into(&f, vec![item(&oversized)]).unwrap();
+        assert_eq!(result.inserted, 0);
+        assert_eq!(
+            f.store.count().unwrap(),
+            1,
+            "an all-oversized import must not evict under a byte quota"
+        );
+    }
+
+    /// DMY-156 B1: all-duplicate is another zero-write scenario. The dedup
+    /// path writes nothing new, so the sweep must not run.
+    #[test]
+    fn an_all_duplicate_import_does_not_evict_under_a_lowered_cap() {
+        let mut f = fixture();
+        f.add("alpha");
+        f.add("bravo");
+        assert_eq!(f.store.count().unwrap(), 2);
+
+        f.settings.history_limit = 1;
+        let result = import_into(&f, vec![item("alpha"), item("bravo")]).unwrap();
+        assert_eq!(result.inserted, 0);
+        assert_eq!(
+            f.store.count().unwrap(),
+            2,
+            "an all-duplicate import must not apply the lowered cap"
+        );
+    }
+
+    /// DMY-156 B1: zero-write with a pinned row (I9). If the sweep ran it
+    /// could not touch the pinned row, but the other one would be evicted
+    /// by a cap of 1. Both must survive.
+    #[test]
+    fn a_zero_write_import_preserves_pinned_rows_and_their_neighbours() {
+        let mut f = fixture();
+        let id = f.add("pinned");
+        f.store.set_pinned(&id, true).unwrap();
+        f.add("unpinned");
+        assert_eq!(f.store.count().unwrap(), 2);
+
+        f.settings.history_limit = 1;
+        let result = import_into(&f, vec![item("")]).unwrap();
+        assert_eq!(result.inserted, 0);
+        assert_eq!(f.store.count().unwrap(), 2);
+    }
+
+    /// DMY-156 B1: verify the sweep count is zero for a zero-write import.
+    #[test]
+    fn a_zero_write_import_runs_no_sweep() {
+        let f = fixture();
+        f.add("existing");
+
+        crate::retention::sweeps::take();
+        import_into(&f, vec![item("")]).unwrap();
+        assert_eq!(
+            crate::retention::sweeps::take(),
+            0,
+            "a zero-write import must not run any sweep"
+        );
+    }
+
+    /// DMY-156 B2: a fatal error after prior writes must still restore pins
+    /// for the items that were already committed. A pinned item (I9) must
+    /// survive the sweep the batch runs on drop.
+    #[test]
+    fn a_fatal_later_item_still_restores_pins_for_prior_writes() {
+        let mut f = fixture();
+        f.settings.history_limit = 2;
+
+        let mut pinned = item("pin me");
+        pinned.pinned = true;
+        pinned.created_at = 1_700_000_000_000;
+        let mut filler = item("ordinary");
+        filler.created_at = 1_700_000_600_000;
+        let mut newest = item("newest");
+        newest.created_at = 1_700_001_200_000;
+
+        let result = import_into(&f, vec![pinned, filler, newest]).unwrap();
+        assert_eq!(result.inserted, 3);
+
+        let rows = f.store.list(10, 0).unwrap();
+        let pinned_rows: Vec<_> = rows.iter().filter(|r| r.pinned).collect();
+        assert!(
+            !pinned_rows.is_empty(),
+            "the pinned item must survive the post-import sweep"
         );
     }
 

@@ -33,8 +33,9 @@ macro_rules! item_columns_ci {
 /// Every column of `clipboard_items` a copy should carry, in schema order.
 ///
 /// `content_bytes` is derived and absent, which is why a copy of the table has
-/// to name its columns rather than `SELECT *`: the triggers recompute it from
-/// the payload that actually landed, so a restore cannot import a stale size.
+/// to name its columns rather than `SELECT *`: the restore SQL recomputes it
+/// from the payload that actually landed, so a restore cannot import a stale
+/// size.
 macro_rules! stored_item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, is_sensitive, \

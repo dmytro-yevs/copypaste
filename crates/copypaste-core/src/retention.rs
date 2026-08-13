@@ -1,15 +1,9 @@
 //! When the retention bound runs, as distinct from what it deletes.
 //!
-//! The limits themselves live in `storage::retention`. This module owns only
-//! the schedule, because "after every write" is wrong for the two callers that
-//! write in bursts: a peer sync round and a history import each ran the same
-//! `O(history)` sweep pair once per item and left the identical history.
-//!
-//! Sweeping later can only ever delete *less, later*, which is the safe
-//! direction under AGENTS.md rule 4. Skipping a sweep is not, so both seams
-//! here guarantee one runs: [`RetentionGate`] falls back to an inline sweep
-//! when no reactor can carry the trailing one, and [`RetentionBatch`] sweeps on
-//! drop, so an early return or a `?` still leaves the limits enforced.
+//! The limits live in `storage::retention`. This module owns the schedule:
+//! [`RetentionGate`] debounces bursts, [`RetentionBatch`] defers to one
+//! end-of-batch sweep. Sweeping later deletes *less, later* (safe direction);
+//! skipping is not, so both guarantee a sweep runs.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, PoisonError};
@@ -22,11 +16,8 @@ use crate::storage::Store;
 /// How long applied versions may coalesce onto one retention sweep.
 pub(crate) const RETENTION_DEBOUNCE: Duration = Duration::from_millis(250);
 
-/// Apply every local retention limit after a write, regardless of whether it
-/// arrived from capture, import, cloud, or a paired device.
-///
-/// Best-effort: failing a cleanup must not turn a successfully stored capture
-/// or remote merge into data loss.
+/// Apply every local retention limit after a write. Best-effort: a cleanup
+/// failure must not turn a stored capture into data loss.
 pub fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
     #[cfg(test)]
     sweeps::record();
@@ -37,14 +28,8 @@ pub fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
     if let Err(e) = store.evict_over_byte_cap(settings.storage_quota_bytes) {
         warn!(error = ?e, "storage quota eviction failed");
     }
-    // Age-based retention, disabled by the `0` sentinel.
-    //
-    // Measured from the wall clock, never from `created_at`. `created_at` is
-    // caller-supplied and, on the import path, comes straight out of a user's
-    // JSON file: one row stamped a year ahead put the cutoff a year ahead too
-    // and hard-deleted every unpinned item in the history. Both sync transports
-    // already refuse an implausibly-future stamp; import is the third writer and
-    // inherits neither guard, so this is where it holds.
+    // Measured from the wall clock: `created_at` is caller-supplied, and one
+    // row stamped a year ahead wiped the whole history.
     if settings.retention_days > 0 {
         let cutoff = crate::now_ms() - i64::from(settings.retention_days) * 86_400_000;
         if let Err(e) = store.evict_older_than(cutoff) {
@@ -53,15 +38,8 @@ pub fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
     }
 }
 
-/// Coalesces the sweeps of a burst of *independent* writes onto one run.
-///
-/// Leading edge inline, so a lone write still returns with the limits enforced;
-/// the rest of the burst rides a trailing run the caller schedules. Used by the
-/// peer sync source, where items arrive one merge at a time and the session may
-/// end by error or disconnect rather than by agreement.
-///
-/// A batch whose extent the caller already knows wants [`RetentionBatch`]
-/// instead — it sweeps once, not once per debounce window.
+/// Coalesces the sweeps of a burst of independent writes onto one run.
+/// Used by the sync source, where items arrive one merge at a time.
 #[derive(Default)]
 pub struct RetentionGate {
     last_run: Mutex<Option<Instant>>,
@@ -87,16 +65,8 @@ impl RetentionGate {
 
 /// One sweep for a whole batch of writes, run when the batch ends.
 ///
-/// Holding this is what lets [`crate::ingest::ingest_into_batched`] skip the
-/// per-item sweep: the token proves a sweep is already owed, and `Drop` is what
-/// pays it however the batch exits. A 10 000-item import ran 30 000 sweep
-/// transactions for the history one sweep leaves.
-///
-/// The final history is the same either way. Every limit here is a function of
-/// the rows that exist when it runs, not of the order they arrived in, and the
-/// one rule that could have depended on order — the newest unpinned row is
-/// never evicted — protects the newest row of the finished batch rather than of
-/// each item in turn.
+/// The token proves a sweep is owed; `Drop` pays it. Callers may [`disarm`]
+/// when no rows were written or pin restoration failed (ADR-0023).
 pub struct RetentionBatch<'a> {
     store: &'a Store,
     settings: &'a copypaste_ipc::ConfigData,
@@ -111,6 +81,19 @@ impl<'a> RetentionBatch<'a> {
             settings,
             swept: false,
         }
+    }
+
+    pub fn store(&self) -> &Store {
+        self.store
+    }
+
+    pub fn settings(&self) -> &copypaste_ipc::ConfigData {
+        self.settings
+    }
+
+    /// DMY-156: prevent the sweep when no rows were written or pins failed.
+    pub fn disarm(&mut self) {
+        self.swept = true;
     }
 
     /// Sweep now rather than on drop, for a caller that wants the limits
@@ -129,6 +112,11 @@ impl<'a> RetentionBatch<'a> {
 
 impl Drop for RetentionBatch<'_> {
     fn drop(&mut self) {
+        // DMY-156 B2: DB work in a destructor during unwinding can
+        // double-panic and abort the process.
+        if std::thread::panicking() {
+            return;
+        }
         self.sweep();
     }
 }
@@ -212,6 +200,43 @@ mod tests {
         };
         assert!(bail(&s).is_err());
         assert_eq!(sweeps::take(), 1);
+    }
+
+    /// DMY-156 B1: a batch that never received a write can be disarmed, and
+    /// its sweep never runs — so a zero-write import cannot evict existing
+    /// history under a lowered cap.
+    #[test]
+    fn a_disarmed_batch_never_sweeps() {
+        let s = store();
+        let settings = settings();
+
+        sweeps::take();
+        let mut batch = RetentionBatch::new(&s, &settings);
+        batch.disarm();
+        batch.finish();
+        assert_eq!(sweeps::take(), 0, "a disarmed batch must not sweep");
+    }
+
+    /// DMY-156 B2: a panic during the batch must not run the sweep, because
+    /// pin restoration has not happened. DB work in a destructor during
+    /// unwind can double-panic and abort the process.
+    #[test]
+    fn a_panic_during_a_batch_does_not_sweep() {
+        let s = store();
+        let settings = settings();
+
+        sweeps::take();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _batch = RetentionBatch::new(&s, &settings);
+            s.insert(item("before the panic", T0)).unwrap();
+            panic!("simulated failure");
+        }));
+        assert!(result.is_err());
+        assert_eq!(
+            sweeps::take(),
+            0,
+            "a panic must not trigger a sweep in the destructor"
+        );
     }
 
     #[test]
