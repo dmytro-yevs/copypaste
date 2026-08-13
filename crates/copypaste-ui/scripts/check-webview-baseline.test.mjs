@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { describe } from "node:test";
 
-import { BASELINE, configuredTarget, postBaselineSyntax } from "./check-webview-baseline.mjs";
+import {
+  BASELINE,
+  configuredTarget,
+  postBaselineRuntime,
+  postBaselineSyntax,
+} from "./check-webview-baseline.mjs";
 
 /** The construct that actually shipped: Chromium 74 reads `a ||= b` as `a ||`
  *  followed by `=`, which is the `Unexpected token =` run 31671766432 died on. */
@@ -52,4 +57,43 @@ test("syntax the baseline engine already has is not flagged", () => {
 
 test("the declared target is the one the bundle is checked against", () => {
   assert.equal(configuredTarget(), BASELINE);
+});
+
+// Syntax lowering cannot add a method, and the pinned `lib` cannot see a
+// dependency's call, so this half is the only thing standing between the two.
+describe("runtime APIs the baseline engine does not have", () => {
+  const CALL = "placeholder.replaceChildren(...element.cloneNode(true).childNodes)";
+  const POLYFILL = "Node.prototype.replaceChildren = function () {}";
+
+  test("an unpolyfilled call is reported as uncovered", () => {
+    const found = postBaselineRuntime(CALL);
+
+    assert.equal(found.length, 1);
+    assert.equal(found[0].api, "ParentNode.replaceChildren");
+    assert.equal(found[0].covered, false);
+  });
+
+  test("the same call is covered once the polyfill is in the bundle", () => {
+    const found = postBaselineRuntime(`${POLYFILL}\n${CALL}`);
+
+    assert.equal(found.length, 1);
+    assert.equal(found[0].covered, true);
+    assert.equal(found[0].polyfill, "@ungap/replace-children");
+  });
+
+  // A polyfill nothing calls is not a finding, and a bundle that reaches none
+  // of these must not be reported as covered-by-luck.
+  test("a bundle that never calls one reports nothing", () => {
+    assert.deepEqual(postBaselineRuntime("const x = 1;"), []);
+    assert.deepEqual(postBaselineRuntime(POLYFILL), []);
+  });
+
+  // The false positive that made this list short: `@dnd-kit`'s own collection
+  // class defines `at` and `toSorted`, and matching those by name reported a
+  // library's methods as missing browser APIs.
+  test("method names a library defines itself are not matched", () => {
+    const dndKit = "toSorted(t){let n=[...this.entries()].sort(t)}at(r){return this.get(r)}";
+
+    assert.deepEqual(postBaselineRuntime(dndKit), []);
+  });
 });

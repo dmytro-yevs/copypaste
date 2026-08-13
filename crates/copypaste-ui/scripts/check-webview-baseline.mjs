@@ -81,6 +81,39 @@ export function postBaselineSyntax(code, filename = "<input>") {
   return found;
 }
 
+/**
+ * Lowering syntax cannot add a method the engine never had, and the pinned
+ * `lib` in tsconfig.json only sees our own source — a dependency's call is
+ * invisible to both. These are the post-baseline runtime APIs the bundle
+ * actually reaches, each with the Chromium that introduced it and what covers
+ * it here. An entry with no `polyfill` is a gap, not an exemption: the check
+ * fails on it.
+ *
+ * Names are matched literally, so only ones no library plausibly defines
+ * itself belong here. `at` and `toSorted` are the counter-example and the
+ * reason this list is short: `@dnd-kit`'s collection class defines both, and
+ * matching them by name reported its own methods as missing browser APIs.
+ */
+const RUNTIME_APIS = [
+  {
+    used: ".replaceChildren(",
+    api: "ParentNode.replaceChildren",
+    since: "Chromium 86",
+    by: "@dnd-kit/dom, on the drag placeholder",
+    polyfill: "@ungap/replace-children",
+    // The polyfill's own body, so the check reads the emitted bundle rather
+    // than trusting that an import statement survived tree-shaking.
+    proof: "Node.prototype.replaceChildren",
+  },
+];
+
+export function postBaselineRuntime(code) {
+  return RUNTIME_APIS.filter((entry) => code.includes(entry.used)).map((entry) => ({
+    ...entry,
+    covered: entry.polyfill !== undefined && code.includes(entry.proof),
+  }));
+}
+
 /** The config is the only thing that makes the emitted bundle baseline-clean,
  *  so it is read rather than trusted. */
 export function configuredTarget() {
@@ -114,9 +147,30 @@ function main() {
     return 1;
   }
 
-  const found = files.flatMap((file) =>
-    postBaselineSyntax(readFileSync(file, "utf8"), path.basename(file)),
-  );
+  const sources = files.map((file) => ({
+    name: path.basename(file),
+    code: readFileSync(file, "utf8"),
+  }));
+
+  // Whole-bundle, not per chunk: a polyfill is a side effect the entry runs
+  // once, so it covers a call that code-splitting put in another chunk.
+  let uncovered = 0;
+  for (const entry of postBaselineRuntime(sources.map(({ code }) => code).join("\n"))) {
+    const where = sources.filter(({ code }) => code.includes(entry.used)).map(({ name }) => name);
+    if (entry.covered) {
+      console.log(`ok   ${entry.api} (${entry.since}) is behind ${entry.polyfill}`);
+      continue;
+    }
+    uncovered += 1;
+    console.error(
+      `FAIL ${where.join(", ")} calls ${entry.api}, which the ${BASELINE} baseline predates ` +
+        `(${entry.since}; reached by ${entry.by})` +
+        (entry.polyfill ? `; ${entry.polyfill} is not in the bundle` : "; nothing polyfills it"),
+    );
+  }
+  if (uncovered) return 1;
+
+  const found = sources.flatMap(({ name, code }) => postBaselineSyntax(code, name));
   for (const { file, line, what } of found.slice(0, 20)) {
     console.error(`FAIL ${file}:${line} uses ${what}`);
   }
