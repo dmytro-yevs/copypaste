@@ -1,19 +1,12 @@
-/**
- * What a typed exclusion entry means, in the two vocabularies the product has.
- *
- * macOS and Android identify an application by a reverse-DNS bundle or package
- * id. Windows has no such thing: an item carries the process image name, so the
- * user types what Task Manager shows them — `chrome.exe`, or `chrome`, or a
- * path pasted from Explorer. All three name one process, and an entry that
- * silently matches nothing is an exclusion the user believes is protecting
- * them (DMY-158).
- *
- * The Windows rules mirror `exclusion_key` in
- * `crates/copypaste-daemon/src/clipboard/windows_attribution.rs`, which is what
- * the daemon compares against at capture time. Keep the two together: a
- * canonical form this file produces and that one does not recognise is an
- * exclusion that reads as saved and never fires.
- */
+// Windows exclusion rules mirror `exclusion_key` in
+// `crates/copypaste-daemon/src/clipboard/windows_attribution.rs`.
+// Keep the two together: a canonical form this file produces and that one
+// does not recognise is an exclusion that reads as saved and never fires
+// (DMY-158).
+//
+// macOS/Android use reverse-DNS bundle ids. Windows uses the process image
+// name from Task Manager — `chrome.exe`, `chrome`, or a pasted path all
+// name one process.
 
 const BUNDLE_ID = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/;
 
