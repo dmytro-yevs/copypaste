@@ -15,7 +15,7 @@
 //! the index through [`Store::indexed_texts`] and drops what the current ruleset
 //! calls a secret, whatever the row was flagged as when it arrived.
 
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection};
 
 use super::connection::write_tx;
 use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, StoredItem};
@@ -158,7 +158,7 @@ pub(crate) fn purge_from_index_in(conn: &Connection, rowids: &[i64]) -> rusqlite
 ///
 /// The caller must clear `fts_rowid` in the same transaction — normally by
 /// folding it into the row update it is already making.
-pub(super) fn delete_fts_row_in_tx(tx: &Transaction<'_>, id: &str) -> rusqlite::Result<()> {
+pub(super) fn delete_fts_row_in_tx(tx: &Connection, id: &str) -> rusqlite::Result<()> {
     tx.execute(
         "DELETE FROM clipboard_fts \
           WHERE rowid = (SELECT fts_rowid FROM clipboard_items WHERE id = ?1)",
@@ -168,7 +168,7 @@ pub(super) fn delete_fts_row_in_tx(tx: &Transaction<'_>, id: &str) -> rusqlite::
 }
 
 pub(super) fn insert_fts_in_tx(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     id: &str,
     text: &str,
     is_sensitive: bool,
