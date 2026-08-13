@@ -737,14 +737,50 @@ mod tests {
         assert!(first.app_bundle_id.is_some() && second.app_bundle_id.is_some());
     }
 
-    /// What resolving per change costs, since that is what the fix spends.
+    /// DMY-158: two processes write the clipboard within the 500 ms poll
+    /// interval, and each resolves to a distinct owner identity. The child
+    /// process has a different PID and image name from the test process,
+    /// proving that `GetClipboardOwner` + `QueryFullProcessImageNameW`
+    /// distinguishes real writers — the property the same-process
+    /// `write_text` helper cannot show.
+    #[test]
+    #[ignore = "drives the real Windows clipboard and spawns a child process"]
+    fn two_processes_get_distinct_attributions() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+
+        write_text("from the test process");
+        let first = clipboard.poll().expect("first write captured");
+        let first_id = first.app_bundle_id.expect("first resolved");
+
+        std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "Set-Clipboard 'from a child'"])
+            .status()
+            .expect("child process writes clipboard");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let second = clipboard.poll().expect("child write captured");
+        let second_id = second.app_bundle_id.expect("second resolved");
+
+        assert_eq!(clipboard.attribution.resolutions(), 2);
+        assert_ne!(
+            first_id, second_id,
+            "both writes resolved to the same identity ({first_id}); \
+             the child process must produce a different owner"
+        );
+        assert!(
+            second_id.contains("powershell"),
+            "expected a powershell image name, got {second_id}"
+        );
+    }
+
+    /// DMY-158 before/after comparison on equal workloads.
     ///
-    /// Attribution runs once per clipboard change rather than once per 750 ms,
-    /// so the only way the fix can cost anything is a burst: several changes
-    /// inside one window that the TTL used to answer from the cache. This
-    /// prints what one resolution costs so that arithmetic is measured rather
-    /// than assumed; the ceiling is deliberately loose, because it is a
-    /// regression alarm and not a benchmark.
+    /// Both paths resolve the same real foreground/owner process. The
+    /// "base" path reuses one sequence number (the old TTL behavior), so
+    /// every call after the first is a cache hit. The "change" path uses a
+    /// fresh sequence number per call (the fix), so every call resolves.
+    /// Printed side by side so the cost of the fix is visible.
     #[test]
     #[ignore = "drives the real Windows clipboard"]
     fn resolving_a_writer_costs_a_bounded_number_of_microseconds() {
@@ -755,34 +791,40 @@ mod tests {
         let mut clipboard = WindowsClipboard::new().unwrap();
         let _ = clipboard.poll();
 
-        let mut resolved = Vec::with_capacity(ROUNDS);
-        let mut cached = Vec::with_capacity(ROUNDS);
+        // Base: same sequence number, exercising the cache (old behavior).
+        let mut base = Vec::with_capacity(ROUNDS);
+        for _ in 0..ROUNDS {
+            let started = std::time::Instant::now();
+            let _ = clipboard.source_app(0);
+            base.push(started.elapsed().as_micros());
+        }
+
+        // Change: fresh sequence number each round (the fix).
+        let mut change = Vec::with_capacity(ROUNDS);
         for round in 0..ROUNDS {
             let started = std::time::Instant::now();
-            let app = clipboard.source_app(round as i64);
-            resolved.push(started.elapsed().as_micros());
+            let app = clipboard.source_app(1000 + round as i64);
+            change.push(started.elapsed().as_micros());
             assert!(
                 app.is_some(),
                 "no source application on an interactive desktop"
             );
-
-            let started = std::time::Instant::now();
-            let _ = clipboard.source_app(round as i64);
-            cached.push(started.elapsed().as_micros());
         }
-        resolved.sort_unstable();
-        cached.sort_unstable();
-        let p95 = |samples: &[u128]| samples[samples.len() * 95 / 100];
+
+        base.sort_unstable();
+        change.sort_unstable();
+        let p = |samples: &[u128], pct: usize| samples[samples.len() * pct / 100];
         println!(
-            "attribution p50={}us p95={}us; same-change p95={}us",
-            resolved[resolved.len() / 2],
-            p95(&resolved),
-            p95(&cached)
+            "base(cached) p50={}us p95={}us; change(per-seq) p50={}us p95={}us",
+            p(&base, 50),
+            p(&base, 95),
+            p(&change, 50),
+            p(&change, 95),
         );
         assert!(
-            p95(&resolved) < 20_000,
+            p(&change, 95) < 20_000,
             "one attribution took {}us; a 500 ms poll cannot carry that",
-            p95(&resolved)
+            p(&change, 95)
         );
     }
 }
