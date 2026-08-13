@@ -539,10 +539,13 @@ mod tests {
 
     /// Re-activating the *same* account is not a switch — a token refresh runs
     /// this path — and must not throw away a count the running rounds produced.
+    /// The count has to be noted *before* the second activation: noting it
+    /// after each one passes even when the activation clears it, which is the
+    /// whole regression.
     #[test]
     fn re_activating_the_same_account_keeps_the_unreadable_upload_count() {
         let (state, _dir) = test_state_with_cloud("alpha", Cloud::new(Some(config())));
-        for _ in 0..2 {
+        let activate = || {
             state.cloud.install(
                 &state,
                 config(),
@@ -551,8 +554,12 @@ mod tests {
                 derive_sync_key("correct horse battery staple", "user-1").unwrap(),
                 session(),
             );
-            state.cloud.note_unreadable_uploads(3);
-        }
+        };
+
+        activate();
+        state.cloud.note_unreadable_uploads(3);
+        activate();
+
         assert_eq!(state.cloud.status().unreadable_uploads, 3);
     }
 
