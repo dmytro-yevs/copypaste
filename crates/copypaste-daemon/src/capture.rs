@@ -237,7 +237,93 @@ pub fn ingest_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clipboard::windows_attribution::{Attribution, SourceApp};
     use crate::testutil::test_state;
+
+    fn captured(content: &str, app: Option<SourceApp>) -> crate::clipboard::Capture {
+        crate::clipboard::Capture {
+            content: content.to_string(),
+            binary_content: None,
+            file_path: None,
+            file_metadata: None,
+            content_type: copypaste_ipc::content_type::TEXT.to_string(),
+            app_bundle_id: app.as_ref().map(|app| app.id.clone()),
+            app_name: app.map(|app| app.name),
+        }
+    }
+
+    /// DMY-158, the whole path and not one predicate of it.
+    ///
+    /// Two clipboard changes a third of a second apart, the second written by a
+    /// credential store. The attribution decision, the sensitivity floor, the
+    /// search index and the set a sync session advertises live in four files;
+    /// this is the test that runs them as one. Before the fix the second change
+    /// inherited the first application's identity, so the floor never applied
+    /// and the password was both searchable and syncable — no assertion on
+    /// `is_password_manager_app` alone can see that.
+    #[test]
+    fn a_rapid_second_capture_from_a_credential_store_reaches_neither_search_nor_sync() {
+        let (state, _dir) = test_state("credential-store-burst");
+        let mut attribution = Attribution::default();
+
+        // Resolved exactly as the Windows backend resolves them: once per
+        // clipboard change, inside what used to be one 750 ms cache window.
+        let ordinary =
+            attribution.for_change(41, || SourceApp::from_image_path(r"C:\Windows\notepad.exe"));
+        let credential = attribution.for_change(42, || {
+            SourceApp::from_image_path(r"C:\Users\ann\AppData\Local\1Password\app\8\1Password.exe")
+        });
+        let now = copypaste_core::now_ms();
+        let notes = ingest_capture(&state, captured("thursday agenda notes", ordinary), now)
+            .expect("the ordinary capture is stored")
+            .into_item();
+        let secret = ingest_capture(
+            &state,
+            captured("correct horse battery staple", credential),
+            now + 1,
+        )
+        .expect("the credential capture is stored")
+        .into_item();
+
+        assert!(
+            secret.is_sensitive,
+            "a credential store's copy was stored as ordinary text"
+        );
+
+        // The index answers for the ordinary row, so an empty result for the
+        // secret is the gate and not a broken query.
+        let found: Vec<String> = state
+            .store
+            .search("thursday", 10)
+            .expect("search")
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(found, vec![notes.id.clone()]);
+        assert!(
+            state
+                .store
+                .search("battery", 10)
+                .expect("search")
+                .is_empty(),
+            "the password reached full-text search"
+        );
+
+        // What a sync session advertises: sensitive rows are not in it, and a
+        // peer cannot ask for what was never offered.
+        let advertised: Vec<String> = state
+            .store
+            .summaries_since(0, None, 100)
+            .expect("summaries")
+            .into_iter()
+            .map(|version| version.id)
+            .collect();
+        assert!(advertised.contains(&notes.id));
+        assert!(
+            !advertised.contains(&secret.id),
+            "the password was offered to a sync session"
+        );
+    }
 
     #[test]
     fn non_text_capture_values_are_not_ingested() {

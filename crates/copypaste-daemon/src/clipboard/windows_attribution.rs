@@ -9,22 +9,22 @@ use tracing::{info, warn};
 
 /// The process that wrote the clipboard, as an item carries it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SourceApp {
+pub(crate) struct SourceApp {
     /// The process image file name, lowercased: `1password.exe`.
     ///
     /// Windows has no bundle identifier. The file name is the only stable
     /// identity a process reliably has, and lowercasing it is what makes it
     /// comparable — `copypaste_core::sensitive::is_password_manager_app`
     /// lowercases before matching, and [`is_excluded`] compares canonical keys.
-    pub(super) id: String,
+    pub(crate) id: String,
     /// The same name without its extension, for display.
-    pub(super) name: String,
+    pub(crate) name: String,
 }
 
 impl SourceApp {
     /// The *path* is dropped here rather than later: it contains the local user
     /// name (I-9), and this value is about to be stored on an item.
-    pub(super) fn from_image_path(path: &str) -> Option<Self> {
+    pub(crate) fn from_image_path(path: &str) -> Option<Self> {
         let file_name = file_name(path)?;
         let name = file_name
             .rsplit_once('.')
@@ -48,7 +48,7 @@ fn file_name(path: &str) -> Option<&str> {
 
 /// The source application of the clipboard change now being polled.
 #[derive(Default)]
-pub(super) struct Attribution {
+pub(crate) struct Attribution {
     resolved: Option<(i64, Option<SourceApp>)>,
     available: Option<bool>,
     resolutions: u64,
@@ -66,7 +66,7 @@ impl Attribution {
     /// followed by a password manager's copy inherited the first app — past
     /// both the exclusion list and the credential-store sensitivity floor
     /// (DMY-158, the shape of CopyPaste-8ebg.57).
-    pub(super) fn for_change(
+    pub(crate) fn for_change(
         &mut self,
         change: i64,
         resolve: impl FnOnce() -> Option<SourceApp>,
