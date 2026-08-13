@@ -12,7 +12,7 @@
 //!   `created_at`, which is what lets a delete tie the row it deletes on merge
 //!   keys 1 and 2 and win on key 3.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, OptionalExtension};
 
@@ -85,6 +85,10 @@ pub fn origin_or<'a>(stored: &'a str, here: &'a str) -> &'a str {
     }
 }
 
+/// Ids per `IN (...)` read. Comfortably under SQLite's default 999-parameter
+/// ceiling, which a page-sized merge would otherwise reach as a runtime error.
+const SUMMARY_CHUNK: usize = 500;
+
 /// The projection behind [`Version`], in the order [`row_to_version`] reads and
 /// in the order `idx_items_syncable` carries, so the covering read and the
 /// index stay recognisably one thing.
@@ -107,6 +111,33 @@ fn row_to_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
         pin_updated_at: row.get(7)?,
         is_sensitive: row.get(8)?,
     })
+}
+
+pub(super) fn version_summaries_on(
+    conn: &rusqlite::Connection,
+    ids: &[&str],
+) -> Result<HashMap<String, Version>, StoreError> {
+    let unique: Vec<&str> = {
+        let mut seen = HashSet::with_capacity(ids.len());
+        ids.iter().copied().filter(|id| seen.insert(*id)).collect()
+    };
+    let mut found = HashMap::with_capacity(unique.len());
+    for chunk in unique.chunks(SUMMARY_CHUNK) {
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT {} FROM clipboard_items WHERE id IN ({placeholders})",
+            version_columns!()
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk), row_to_version)?;
+        for row in rows {
+            let row = row?;
+            found.insert(row.id.clone(), row);
+        }
+    }
+    Ok(found)
 }
 
 impl Store {
@@ -197,6 +228,20 @@ impl Store {
             " FROM clipboard_items WHERE id = ?1"
         ))?;
         Ok(stmt.query_row([id], row_to_version).optional()?)
+    }
+
+    /// [`Store::version_summary`] for a whole page, in one connection checkout.
+    ///
+    /// A cloud pull hands the merge up to `PULL_PAGE_LIMIT` rows at once and a
+    /// peer session up to `MAX_ITEMS_PER_MESSAGE`. Reading them one id at a
+    /// time takes one pooled connection per row, and the pool is four deep, so
+    /// a page-sized merge spends most of its time queueing behind itself.
+    pub fn version_summaries(&self, ids: &[&str]) -> Result<HashMap<String, Version>, StoreError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let conn = self.conn()?;
+        version_summaries_on(&conn, ids)
     }
 
     /// One row as the merge sees it — live, tombstoned, or sensitive.
@@ -322,30 +367,80 @@ impl Store {
     pub fn upsert(&self, incoming: &IncomingItem<'_>) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
-        // Before the write below clears `fts_rowid`, and rolled back with it if
-        // the dedup index refuses the version.
-        delete_fts_row_in_tx(&tx, incoming.id)?;
-        let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
-            (false, None, 0)
-        } else {
-            (incoming.pinned, incoming.pin_order, incoming.pin_updated_at)
-        };
+        // A refusal must leave nothing behind, and the `fts` delete has already
+        // run by then: dropping the transaction unwritten is the rollback.
+        if !upsert_in_tx(&tx, incoming)? {
+            return Ok(false);
+        }
+        tx.commit()?;
+        Ok(true)
+    }
 
-        let indexable = incoming
-            .search_text
-            .filter(|t| !incoming.deleted && !t.trim().is_empty());
-        let fts_rowid = match indexable {
-            Some(text) => insert_fts_in_tx(
-                &tx,
-                incoming.id,
-                text,
-                incoming.is_sensitive,
-                incoming.content_type,
-            )?,
-            None => None,
-        };
+    /// [`Store::upsert`] for a whole page, under one write transaction.
+    ///
+    /// Answers positionally, one `bool` per input, so a caller can pair the
+    /// outcomes back onto the versions it offered.
+    ///
+    /// One IMMEDIATE transaction rather than one per row: a 500-row cloud page
+    /// otherwise takes 500 write locks and 500 commits, and each commit is an
+    /// fsync the next row immediately waits on. Each row still gets its own
+    /// SAVEPOINT, because a version that collides with the dedup index under
+    /// another id is refused *individually* — rolling the page back around it
+    /// would let one such row discard 499 good merges.
+    pub fn upsert_all(&self, incoming: &[IncomingItem<'_>]) -> Result<Vec<bool>, StoreError> {
+        if incoming.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut conn = self.conn()?;
+        let mut tx = write_tx(&mut conn)?;
+        let mut stored = Vec::with_capacity(incoming.len());
+        for item in incoming {
+            let mut savepoint = tx.savepoint()?;
+            let written = upsert_in_tx(&savepoint, item)?;
+            if written {
+                savepoint.commit()?;
+            } else {
+                savepoint.rollback()?;
+            }
+            stored.push(written);
+        }
+        tx.commit()?;
+        Ok(stored)
+    }
+}
 
-        let written = tx.execute(
+/// The body of one upsert, inside a caller-owned transaction or savepoint.
+///
+/// `Ok(false)` is the dedup-index refusal, and the caller must discard this
+/// row's writes: the `fts` delete has already run by then.
+pub(super) fn upsert_in_tx(
+    tx: &rusqlite::Connection,
+    incoming: &IncomingItem<'_>,
+) -> Result<bool, StoreError> {
+    // Before the write below clears `fts_rowid`, and rolled back with it if
+    // the dedup index refuses the version.
+    delete_fts_row_in_tx(tx, incoming.id)?;
+    let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
+        (false, None, 0)
+    } else {
+        (incoming.pinned, incoming.pin_order, incoming.pin_updated_at)
+    };
+
+    let indexable = incoming
+        .search_text
+        .filter(|t| !incoming.deleted && !t.trim().is_empty());
+    let fts_rowid = match indexable {
+        Some(text) => insert_fts_in_tx(
+            tx,
+            incoming.id,
+            text,
+            incoming.is_sensitive,
+            incoming.content_type,
+        )?,
+        None => None,
+    };
+
+    let written = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
                   is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, payload_metadata, \
@@ -386,19 +481,15 @@ impl Store {
             ],
         );
 
-        match written {
-            Ok(_) => {}
-            Err(e) if is_constraint_violation(&e) => {
-                tracing::warn!(
-                    "an incoming item collides with the dedup index under another id; skipping it"
-                );
-                return Ok(false);
-            }
-            Err(e) => return Err(e.into()),
+    match written {
+        Ok(_) => Ok(true),
+        Err(e) if is_constraint_violation(&e) => {
+            tracing::warn!(
+                "an incoming item collides with the dedup index under another id; skipping it"
+            );
+            Ok(false)
         }
-
-        tx.commit()?;
-        Ok(true)
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -841,5 +932,100 @@ mod tests {
         assert_eq!(tombstone.pin_updated_at, full.pin_updated_at);
 
         assert!(s.version_summary("never-existed").unwrap().is_none());
+    }
+
+    /// One write transaction for the page, and a per-row savepoint inside it.
+    ///
+    /// The savepoint is what makes the two properties hold together: a version
+    /// the dedup index refuses is reported `false` and leaves nothing behind,
+    /// and it does not take the rest of the page down with it. Rolling the
+    /// whole page back around one such row would let a single collision
+    /// discard every other merge in a 500-row cloud page.
+    #[test]
+    fn a_refused_row_in_a_page_leaves_the_rest_of_the_page_stored() {
+        let s = store();
+        // `idx_items_dedup` is (content_hash, minute, origin): a second id
+        // carrying the same hash from the same origin in the same bucket is
+        // the refusal being exercised.
+        assert!(s.upsert(&incoming("original", "shared-hash", T0)).unwrap());
+
+        let written = s
+            .upsert_all(&[
+                incoming("first", "hash-a", T0),
+                incoming("collides", "shared-hash", T0),
+                incoming("last", "hash-b", T0),
+            ])
+            .expect("a refused row must not fail the page");
+
+        assert_eq!(written, vec![true, false, true]);
+        assert!(s.get("first").unwrap().is_some());
+        assert!(s.get("last").unwrap().is_some());
+        assert!(
+            s.get("collides").unwrap().is_none(),
+            "a refused row was stored anyway"
+        );
+        // The refused row's `fts` delete is rolled back with it, so the row it
+        // collided with keeps its index entry.
+        assert_eq!(fts_row_count(&s, "original"), 1);
+    }
+
+    #[test]
+    fn a_page_answers_positionally_and_an_empty_page_writes_nothing() {
+        let s = store();
+        assert_eq!(s.upsert_all(&[]).unwrap(), Vec::<bool>::new());
+
+        let written = s
+            .upsert_all(&[incoming("a", "hash-a", T0), incoming("b", "hash-b", T0 + 1)])
+            .unwrap();
+        assert_eq!(written, vec![true, true]);
+        assert_eq!(s.count().unwrap(), 2);
+        assert_eq!(fts_row_count(&s, "a"), 1);
+        assert_eq!(fts_row_count(&s, "b"), 1);
+    }
+
+    /// The read half. A page-sized merge used to ask for every local version
+    /// one id at a time, taking one pooled connection each on a pool four deep.
+    #[test]
+    fn local_versions_for_a_page_are_read_in_one_go_and_ignore_duplicates() {
+        let s = store();
+        s.upsert(&incoming("a", "hash-a", T0)).unwrap();
+        s.upsert(&incoming("b", "hash-b", T0 + 1)).unwrap();
+
+        let found = s.version_summaries(&["a", "b", "a", "missing"]).unwrap();
+        assert_eq!(found.len(), 2);
+        assert_eq!(found["a"].content_hash, "hash-a");
+        assert_eq!(found["b"].created_at, T0 + 1);
+        assert!(!found.contains_key("missing"));
+        assert!(s.version_summaries(&[]).unwrap().is_empty());
+    }
+
+    /// The page read must answer exactly as the one-at-a-time read does, for
+    /// every row it is given — including the tombstones and sensitive rows the
+    /// merge has to compare against.
+    #[test]
+    fn a_page_read_agrees_with_reading_the_same_rows_one_at_a_time() {
+        let s = store();
+        s.upsert(&incoming("live", "hash-a", T0)).unwrap();
+        s.upsert(&IncomingItem {
+            is_sensitive: true,
+            search_text: None,
+            ..incoming("secret", "hash-b", T0)
+        })
+        .unwrap();
+        s.upsert(&IncomingItem {
+            deleted: true,
+            ..incoming("gone", "hash-c", T0)
+        })
+        .unwrap();
+
+        let ids = ["live", "secret", "gone"];
+        let page = s.version_summaries(&ids).unwrap();
+        for id in ids {
+            assert_eq!(
+                page.get(id),
+                s.version_summary(id).unwrap().as_ref(),
+                "the page read disagreed about {id}"
+            );
+        }
     }
 }

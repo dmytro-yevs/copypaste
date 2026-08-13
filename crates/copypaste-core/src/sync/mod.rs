@@ -13,16 +13,21 @@
 //! was two transports comparing with two different comparators (manifest 05
 //! INV-C2).
 
+mod batch;
 mod merge;
+mod prepare;
+mod round;
 mod source;
 
 #[cfg(test)]
 mod testkit;
 
+pub use batch::apply_remote_versions;
 pub use merge::{
     apply_remote_version, local_winner_stamp, open_version, open_version_bytes, MergeError,
     OpenVersionError, RemoteVersion,
 };
+pub use round::{RoundGate, RoundGuard};
 pub use source::StoreSource;
 
 /// Fixed, pathless sentences: these reach a peer's log and a user's screen

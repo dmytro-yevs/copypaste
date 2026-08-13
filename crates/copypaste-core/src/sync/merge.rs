@@ -10,9 +10,10 @@ use copypaste_p2p::protocol::ItemSummary;
 use copypaste_p2p::sync::{merge_decision, pin_state_wins, MergeDecision};
 use tracing::{debug, warn};
 
+use super::prepare::prepare_remote_version;
 use super::{MSG_ENCRYPT, MSG_STORE};
 use crate::sensitive::Detector;
-use crate::storage::{origin_or, IncomingItem, Store, StoredItem, Version};
+use crate::storage::{origin_or, Store, StoredItem, Version};
 use crate::Keyring;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,7 +190,7 @@ fn local_version(store: &Store, item_id: &str) -> Result<Option<Version>, MergeE
     })
 }
 
-fn stored_summary(local: &Version, here: &str) -> ItemSummary {
+pub(super) fn stored_summary(local: &Version, here: &str) -> ItemSummary {
     ItemSummary {
         item_id: local.id.clone(),
         created_at: local.created_at,
@@ -202,7 +203,7 @@ fn stored_summary(local: &Version, here: &str) -> ItemSummary {
     }
 }
 
-fn remote_summary(
+pub(super) fn remote_summary(
     incoming: &RemoteVersion<'_>,
     content_hash: String,
     pin_state: Option<(bool, Option<f64>, i64)>,
@@ -264,7 +265,7 @@ pub fn local_winner_stamp(
 
 /// Shapes that are never stored, whichever transport carried them. Checked by
 /// the entry points so the local row is read exactly once per incoming item.
-fn payload_is_refused(incoming: &RemoteVersion<'_>) -> bool {
+pub(super) fn payload_is_refused(incoming: &RemoteVersion<'_>) -> bool {
     if !incoming.deleted
         && copypaste_ipc::content_type::is_binary(incoming.content_type)
         && incoming.binary_content.is_none()
@@ -362,136 +363,15 @@ fn apply_remote_version_with_pin_state(
     pin_state: Option<(bool, Option<f64>, i64, bool)>,
     local: Option<&Version>,
 ) -> Result<bool, MergeError> {
-    let content = incoming
-        .binary_content
-        .unwrap_or(incoming.content.as_bytes());
-    // One digest for a binary payload: the same bytes are both merge key 2 and
-    // the envelope header the seal below writes.
-    let digest = (!incoming.deleted
-        && copypaste_ipc::content_type::is_binary(incoming.content_type))
-    .then(|| crate::binary::content_digest(content));
-
-    // A tombstone with no hash of its own inherits the one it is deleting: the
-    // store keeps `content_hash` on a tombstone deliberately, so inheriting it
-    // makes the delete tie its own live version on keys 1 and 2 and win on key
-    // 3 (`deleted`). Inventing a different hash there would decide the delete
-    // on the wrong key.
-    //
-    // A live version's hash is never taken from the sender (B-2 / security
-    // review F-3): it is merge key 2 and it is the dedup key, and the content
-    // that would prove it is right here. See `RemoteVersion::content_hash`.
-    let computed;
-    let content_hash: &str = match incoming.content_hash {
-        Some(hash) if incoming.deleted => hash,
-        None if incoming.deleted => local.map_or("", |l| l.content_hash.as_str()),
-        _ => {
-            computed = match &digest {
-                Some(digest) => crate::binary::content_hash(digest),
-                None => crate::storage::compute_content_hash(content),
-            };
-            &computed
-        }
+    let Some(prepared) =
+        prepare_remote_version(keyring, detector, here, incoming, pin_state, local)?
+    else {
+        return Ok(false);
     };
-
-    let remote = remote_summary(
-        incoming,
-        content_hash.to_string(),
-        pin_state.map(|state| (state.0, state.1, state.2)),
-    );
-
-    if let Some(local) = local {
-        let mine = stored_summary(local, here);
-        if merge_decision(
-            &mine,
-            origin_or(&local.origin_device_id, here),
-            &remote,
-            incoming.origin_device_id,
-        ) == MergeDecision::KeepLocal
-        {
-            debug!(id = %incoming.item_id, "local version wins; not applying");
-            return Ok(false);
-        }
-    }
-
-    let is_sensitive = if incoming.deleted {
-        local.is_some_and(|l| l.is_sensitive)
-    } else {
-        copypaste_ipc::content_type::is_text(incoming.content_type)
-            && detector.is_sensitive(incoming.content)
-    };
-
-    let sealed = if incoming.deleted {
-        None
-    } else {
-        let key = keyring.item_key();
-        if let Some(digest) = &digest {
-            let ciphertext =
-                crate::binary::seal_with_digest(content, digest, &key, incoming.item_id).map_err(
-                    |e| {
-                        warn!(error = ?e, "could not seal incoming binary item");
-                        MergeError::Encrypt
-                    },
-                )?;
-            Some((Vec::new(), ciphertext))
-        } else {
-            Some(
-                crate::encrypt(content, &key, incoming.item_id).map_err(|e| {
-                    warn!(error = ?e, "could not seal an incoming item");
-                    MergeError::Encrypt
-                })?,
-            )
-        }
-    };
-    let (nonce, ciphertext) = match &sealed {
-        Some((nonce, ciphertext)) => (Some(nonce.as_slice()), Some(ciphertext.as_slice())),
-        None => (None, None),
-    };
-    // The P2P wire always supplies both fields. Cloud deliberately does not
-    // carry pin state, so its `None` preserves the receiver's local choice.
-    let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
-        (false, None, 0)
-    } else {
-        match pin_state {
-            Some((pinned, pin_order, pin_updated_at, true)) => (pinned, pin_order, pin_updated_at),
-            Some((_, _, _, false)) | None => local.map_or((false, None, 0), |item| {
-                (item.pinned, item.pin_order, item.pin_updated_at)
-            }),
-        }
-    };
-
-    let stored = store
-        .upsert(&IncomingItem {
-            id: incoming.item_id,
-            content_ciphertext: ciphertext,
-            nonce,
-            content_type: incoming.content_type,
-            content_hash,
-            created_at: incoming.created_at,
-            deleted: incoming.deleted,
-            is_sensitive,
-            origin_device_id: incoming.origin_device_id,
-            pinned,
-            pin_order,
-            pin_updated_at,
-            search_text: if is_sensitive
-                || incoming.deleted
-                || copypaste_ipc::content_type::is_binary(incoming.content_type)
-            {
-                None
-            } else {
-                Some(incoming.content)
-            },
-            payload_metadata: if incoming.deleted {
-                None
-            } else {
-                incoming.payload_metadata
-            },
-        })
-        .map_err(|e| {
-            warn!(error = ?e, "could not store an incoming item");
-            MergeError::Store
-        })?;
-
+    let stored = store.upsert(&prepared.as_incoming()).map_err(|e| {
+        warn!(error = ?e, "could not store an incoming item");
+        MergeError::Store
+    })?;
     if stored {
         debug!(id = %incoming.item_id, deleted = incoming.deleted, "applied a remote version");
     }
