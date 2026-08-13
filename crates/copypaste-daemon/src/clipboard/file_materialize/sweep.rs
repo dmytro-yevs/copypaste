@@ -444,6 +444,7 @@ impl Drop for CleanupWorker {
 
 #[cfg(test)]
 mod tests {
+    use super::super::failure::FailureKind;
     use super::super::testutil::CapturedLog;
     use super::super::StagingArea;
     use super::*;
@@ -537,7 +538,7 @@ mod tests {
         assert!(locked.join("a.txt").exists(), "setup: must be undeletable");
         assert_eq!(report.retained, 1, "{report:?}");
         assert_eq!(
-            report.failures.count(io::ErrorKind::PermissionDenied),
+            report.failures.count(FailureKind::PermissionDenied),
             1,
             "{report:?}"
         );
