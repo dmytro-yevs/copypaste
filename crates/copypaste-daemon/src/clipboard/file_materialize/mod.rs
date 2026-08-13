@@ -1,5 +1,6 @@
 //! Private, time-bounded staging for native file paste-back.
 
+mod report;
 mod sweep;
 #[cfg(test)]
 mod testutil;
