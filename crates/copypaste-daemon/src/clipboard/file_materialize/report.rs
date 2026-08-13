@@ -7,6 +7,9 @@ use super::failure::FailureCounts;
 #[must_use]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct SweepReport {
+    /// Directory reads charged to the budget, including `.`, `..` and the read
+    /// that reported end-of-directory. This is what the budget bounds.
+    pub(super) operations: u32,
     pub(super) examined: u32,
     pub(super) removed: u32,
     pub(super) directories_removed: u32,
