@@ -42,7 +42,13 @@ beforeEach(() => {
 });
 
 describe("search orchestration", () => {
-  it("loads every client page while a search is active", async () => {
+  /**
+   * v1 drove load-more until the whole history was resident, because its FTS
+   * searched only the loaded page (CopyPaste-crh3.106). v2's `search` is a
+   * whole-database query, so the walk is pure cost — on a 10,000-row history,
+   * fifty reads and fifty page decrypts for one keystroke.
+   */
+  it("does not walk the pages while a search is active", async () => {
     listItems.mockImplementation(
       async (_limit: number, cursor: string | null) =>
         cursor === null
@@ -55,11 +61,34 @@ describe("search orchestration", () => {
       wrapper: wrapper(),
     });
 
-    await waitFor(() => expect(result.current.items).toHaveLength(2));
-    // Two cursor pages plus the head poll that replaced the infinite query's
-    // `refetchInterval` (F-UI-1).
-    expect(listItems).toHaveBeenCalledTimes(3);
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    // The first page, and the head poll that replaced the infinite query's
+    // `refetchInterval` (F-UI-1). The cursor page is never asked for, however
+    // deep the history goes.
+    expect(listItems).toHaveBeenCalledTimes(2);
+    expect(listItems).not.toHaveBeenCalledWith(expect.anything(), "next");
     expect(result.current.hasMore).toBe(false);
+  });
+
+  /** AT-73, without the walk: the match past the first page still arrives,
+   *  because the daemon searched the database rather than the loaded slice. */
+  it("still surfaces a whole-database FTS hit from beyond the loaded pages", async () => {
+    listItems.mockResolvedValue(
+      page([item({ id: "loaded", content: "needle first" })], 0, "next"),
+    );
+    searchItems.mockResolvedValue(
+      page([item({ id: "deep", content: "needle at row 9000" })]),
+    );
+    useUi.setState({ query: "needle" });
+
+    const { result } = renderHook(() => useHistoryController(false), {
+      wrapper: wrapper(),
+    });
+
+    await waitFor(() =>
+      expect(result.current.items.map((entry) => entry.id)).toContain("deep"),
+    );
+    expect(listItems).not.toHaveBeenCalledWith(expect.anything(), "next");
   });
 
   it("ignores a stale debounced service result for a newer raw query", async () => {

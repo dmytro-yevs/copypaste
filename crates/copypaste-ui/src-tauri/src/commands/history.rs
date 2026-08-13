@@ -111,24 +111,35 @@ pub async fn reveal_item(backend: State<'_, SelectedBackend>, id: String) -> Res
     Ok(backend.get(&id).await?.content)
 }
 
+/// One clipboard write for the whole selection.
+///
+/// Answers how many items actually reached the clipboard, which is not
+/// `ids.len()`: a sensitive or binary item is deliberately left out, because
+/// assembling a secret into a text blob is the one thing the id-only path
+/// exists to prevent. The count is what lets the caller say so instead of
+/// reporting a plain success over content the user cannot see.
+///
+/// A row that vanished between the selection and this call fails the whole
+/// command and writes nothing. The clipboard is one slot: partial content under
+/// a success message is pasted in full confidence.
 #[tauri::command]
 pub async fn copy_items<R: Runtime>(
     app: AppHandle<R>,
     backend: State<'_, SelectedBackend>,
     ids: Vec<String>,
-) -> Result<bool> {
-    let text = joined_text(&*backend, &ids).await?;
-    if text.is_empty() {
-        return Ok(false);
+) -> Result<u32> {
+    let (text, copied) = joined_text(&*backend, &ids).await?;
+    if copied == 0 {
+        return Ok(0);
     }
     app.clipboard().write_text(text).map_err(|e| {
         tracing::warn!(error = %e, "a bulk clipboard write failed");
         BackendError::Internal(MSG_BULK_COPY_FAILED.to_string())
     })?;
-    Ok(true)
+    Ok(copied)
 }
 
-async fn joined_text(backend: &impl Backend, ids: &[String]) -> Result<String> {
+async fn joined_text(backend: &impl Backend, ids: &[String]) -> Result<(String, u32)> {
     let mut parts: Vec<String> = Vec::with_capacity(ids.len());
     for id in ids {
         let item = backend.get(id).await?;
@@ -137,7 +148,8 @@ async fn joined_text(backend: &impl Backend, ids: &[String]) -> Result<String> {
         }
         parts.push(item.content);
     }
-    Ok(parts.join("\n"))
+    let copied = u32::try_from(parts.len()).unwrap_or(u32::MAX);
+    Ok((parts.join("\n"), copied))
 }
 
 /// A lazy thumbnail for an image row. This cannot return a sensitive image:
@@ -301,10 +313,11 @@ mod tests {
             ..Page::default()
         });
 
-        let text = joined_text(&backend, &["a".to_string(), "b".to_string()])
+        let (text, copied) = joined_text(&backend, &["a".to_string(), "b".to_string()])
             .await
             .unwrap();
         assert_eq!(text, format!("{long}\nsecond"));
+        assert_eq!(copied, 2);
     }
 
     #[tokio::test]
@@ -318,13 +331,16 @@ mod tests {
             ..Page::default()
         });
 
-        let text = joined_text(
+        let (text, copied) = joined_text(
             &backend,
             &["a".to_string(), "b".to_string(), "c".to_string()],
         )
         .await
         .unwrap();
         assert_eq!(text, "kept");
+        // Three selected, one copied. The caller needs the difference to avoid
+        // reporting a plain success over a clipboard holding a third of it.
+        assert_eq!(copied, 1);
     }
 
     #[tokio::test]

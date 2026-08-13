@@ -29,6 +29,22 @@ const copyItem = vi.fn();
 const copyItems = vi.fn();
 const setPinned = vi.fn();
 const deleteItem = vi.fn();
+const toastSuccess = vi.fn();
+const toastWarning = vi.fn();
+const toastError = vi.fn();
+
+vi.mock("sonner", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("sonner")>();
+  return {
+    ...actual,
+    toast: Object.assign((...a: unknown[]) => toastSuccess(...a), {
+      success: (...a: unknown[]) => toastSuccess(...a),
+      warning: (...a: unknown[]) => toastWarning(...a),
+      error: (...a: unknown[]) => toastError(...a),
+      info: (...a: unknown[]) => toastSuccess(...a),
+    }),
+  };
+});
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -49,9 +65,14 @@ beforeEach(() => {
   searchItems.mockReset().mockResolvedValue(page([]));
   getStatus.mockReset().mockResolvedValue(status());
   copyItem.mockReset().mockResolvedValue(item());
-  copyItems.mockReset().mockResolvedValue(true);
+  // Answers the copied count, which is the selection size unless the backend
+  // left sensitive or binary rows out.
+  copyItems.mockReset().mockImplementation(async (ids: string[]) => ids.length);
   setPinned.mockReset().mockResolvedValue(item());
   deleteItem.mockReset().mockResolvedValue(true);
+  toastSuccess.mockReset();
+  toastWarning.mockReset();
+  toastError.mockReset();
   useUi.setState({ query: "", activeId: null });
 });
 
@@ -115,34 +136,41 @@ describe("selection mode", () => {
 });
 
 describe("bulk copy", () => {
-  it("hands the selection to the backend by id and assembles no text itself", async () => {
-    listItems.mockResolvedValue(
-      page([
-        item({ id: "first", content: "first prev", truncated: true }),
-        item({ id: "secret", is_sensitive: true }),
-        item({ id: "image", content: "image preview", content_type: "image/png" }),
-        item({ id: "last", content: "last prev", truncated: true }),
-      ]),
-    );
+  const mixed = () =>
+    page([
+      item({ id: "first", content: "first prev", truncated: true }),
+      item({ id: "secret", is_sensitive: true }),
+      item({ id: "image", content: "image preview", content_type: "image/png" }),
+      item({ id: "last", content: "last prev", truncated: true }),
+    ]);
+
+  async function copySelection(count: number) {
     const { user } = withUser(<HistoryView />);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    await selectRows(user, count);
+    const bar = screen.getByRole("region", { name: /selection actions/i });
+    const copy = within(bar).getByRole("button", { name: /^copy$/i });
+    await user.click(copy);
+    return { copy };
+  }
+
+  /** §3.1.9. v1 copied the first item through the daemon and *then* wrote the
+   *  joined text, so two writes raced for one clipboard slot and the toast
+   *  fired on the first of them. One command, one write, one report. */
+  it("hands the whole selection to one command and does not copy the first row twice", async () => {
+    listItems.mockResolvedValue(mixed());
     const writeText = vi
       .spyOn(navigator.clipboard, "writeText")
       .mockResolvedValue(undefined);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
-    await selectRows(user, 4);
 
-    const bar = screen.getByRole("region", { name: /selection actions/i });
-    await user.click(within(bar).getByRole("button", { name: /^copy$/i }));
+    await copySelection(4);
 
-    await waitFor(() => expect(copyItem).toHaveBeenCalledWith("first"));
     await waitFor(() =>
-      expect(copyItems).toHaveBeenCalledWith([
-        "first",
-        "secret",
-        "image",
-        "last",
-      ]),
+      expect(copyItems).toHaveBeenCalledWith(["first", "secret", "image", "last"]),
     );
+    expect(copyItems).toHaveBeenCalledTimes(1);
+    // The 1+N path: a whole extra daemon copy and clipboard write per bulk copy.
+    expect(copyItem).not.toHaveBeenCalled();
     expect(writeText).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(
@@ -163,19 +191,52 @@ describe("bulk copy", () => {
     expect(copyItems).not.toHaveBeenCalled();
   });
 
-  it("stops on daemon failure and leaves the selection available", async () => {
-    copyItem.mockRejectedValueOnce(new Error("copy failed"));
-    const { user } = withUser(<HistoryView />);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
-    await selectRows(user, 2);
+  /** The race the whole change exists for: a row committed by the deferred
+   *  delete between the selection and the copy. The backend writes nothing, so
+   *  the view must not claim it copied anything. */
+  it("says nothing was copied when a selected row has gone", async () => {
+    listItems.mockResolvedValue(mixed());
+    copyItems.mockRejectedValueOnce(new Error("no such item"));
 
-    const bar = screen.getByRole("region", { name: /selection actions/i });
-    const copy = within(bar).getByRole("button", { name: /^copy$/i });
-    await user.click(copy);
+    const { copy } = await copySelection(2);
 
-    await waitFor(() => expect(copyItem).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(copyItems).toHaveBeenCalledTimes(1));
     await waitFor(() => expect((copy as HTMLButtonElement).disabled).toBe(false));
-    expect(copyItems).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalled();
+    // Still selectable, so the user can retry against what is actually there.
+    expect(
+      screen.getByRole("region", { name: /selection actions/i }),
+    ).toBeTruthy();
+  });
+
+  it("reports a partial rather than a plain success when rows were left out", async () => {
+    listItems.mockResolvedValue(mixed());
+    // Two of the four are sensitive or an image, so the backend copies two.
+    copyItems.mockResolvedValueOnce(2);
+
+    await copySelection(4);
+
+    await waitFor(() =>
+      expect(toastWarning).toHaveBeenCalledWith(
+        expect.stringContaining("Copied 2 of 4"),
+      ),
+    );
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not report a copy when every selected row was withheld", async () => {
+    listItems.mockResolvedValue(mixed());
+    copyItems.mockResolvedValueOnce(0);
+
+    await copySelection(2);
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        expect.stringContaining("Nothing was copied"),
+      ),
+    );
+    expect(toastSuccess).not.toHaveBeenCalled();
     expect(
       screen.getByRole("region", { name: /selection actions/i }),
     ).toBeTruthy();

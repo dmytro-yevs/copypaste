@@ -109,6 +109,8 @@ export const history = {
     imageLoading: "Loading image preview",
     imageUnavailable: "Image preview unavailable",
     empty: "This item has no text.",
+    bodyUnavailable:
+      "The rest of this item could not be read — what is shown is the shortened preview.",
     hide: "Hide again",
     copy: "Copy",
     copyImage: "Copy image",
@@ -206,5 +208,12 @@ export const history = {
     pinnedPartial: "Pinned {{done}} of {{total}} — {{failed}} failed",
     unpinnedPartial: "Unpinned {{done}} of {{total}} — {{failed}} failed",
     bulkDeletedPartial: "Deleted {{done}} of {{total}} — {{failed}} failed",
+    bulkCopied_one: "Copied {{count}} item — press ⌘V to paste",
+    bulkCopied_other: "Copied {{count}} items — press ⌘V to paste",
+    // Named rather than counted: the skipped rows are protected content, and
+    // "Copied 8 items" over a selection of ten reads as a success.
+    bulkCopiedPartial:
+      "Copied {{done}} of {{total}} — {{skipped}} left out as sensitive or an image",
+    bulkCopyNothing: "Nothing was copied — every selected item is sensitive or an image",
   },
 } as const;

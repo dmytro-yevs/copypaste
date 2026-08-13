@@ -356,9 +356,12 @@ plus re-fetch on window focus/visibility. Whoever toggles it, everyone agrees.
   event retries).
 - **Load-more is disabled while a search query is active** — the filtered view
   operates over the already-loaded set, so "near bottom" doesn't mean "more data".
-- **But**: when a search *is* active and `loaded < total`, an effect repeatedly
-  drives load-more until everything is loaded, so FTS hits beyond the first page
-  are not silently missing (CopyPaste-crh3.106).
+- v1 additionally drove load-more until the *whole* history was resident
+  whenever a search was active, because its FTS only searched the loaded page
+  (CopyPaste-crh3.106). **Not binding in v2.** `search` is a whole-database FTS
+  query of its own (limit 500, §3.1.7), so a hit at row 9,000 is returned
+  directly. Reinstating the walk would decrypt the entire history on one
+  keystroke; the daemon-side query is what keeps AT-73 true.
 
 #### 3.1.3 Virtualization
 
@@ -494,10 +497,20 @@ plus re-fetch on window focus/visibility. Whoever toggles it, everyone agrees.
   item is deselected (via an effect on set size — a microtask hack raced with
   concurrent selection).
 - Bulk delete requires an explicit confirm modal (no undo for bulk).
-- Bulk copy: copies the **first** selected item via the daemon (that's what lands
-  on the pasteboard), then best-effort writes the newline-joined previews of all
-  selected non-sensitive, non-image items to the browser clipboard. Selection
-  order follows the on-screen (filtered) order.
+- Bulk copy is **one** command over the whole selection (`copy_items`), which
+  joins the whole bodies of the selected non-sensitive, non-image items and
+  writes them natively, once. Selection order follows the on-screen (filtered)
+  order. A single selected row still goes through the daemon's `copy_item`, so
+  an image lands on the pasteboard as an image.
+  - **Not binding in v2:** v1's "copy the first item, then best-effort write the
+    joined previews to the browser clipboard". Two writes race for one
+    clipboard slot, and the success toast fired on the first item while the
+    write that decided the actual contents was still in flight.
+  - No success message before the whole operation resolves. A row that vanished
+    mid-copy fails it and writes nothing; sensitive and image rows are excluded
+    by the backend, and the returned copied-count is below the selection size,
+    which is reported as a partial rather than as "Copied".
+  - Nothing is invalidated: `copy_items` only reads, so no row is re-sorted.
 - Partial failures report `Deleted 3/5 (2 failed)` style messaging.
 - Busy flag always released (INV-30).
 
@@ -1517,7 +1530,9 @@ throw; the bulk bar is still interactive.
 
 **AT-73 — FTS beyond page 1.**
 *Given* 1000 items with a match only at index 800, *when* the user searches for
-it, *then* it appears (the view auto-loads all pages while searching).
+it, *then* it appears — from the daemon's whole-database `search`, with only the
+first page of history loaded. Loading the intervening pages is a defect, not the
+mechanism (§3.1.2).
 
 ---
 

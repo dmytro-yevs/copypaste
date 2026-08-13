@@ -47,18 +47,24 @@ describe("RuntimeLogViewer", () => {
   });
 
   it("loads older events automatically when the list reaches its end", async () => {
-    getRuntimeLogEvents
-      .mockResolvedValueOnce({
-        events: [{
-          timestamp_ms: 1_700_000_000_000,
-          level: "info",
-          process: "app",
-          target: "copypaste::app",
-          message: "started",
-        }],
-        next_cursor: "50",
-      })
-      .mockResolvedValueOnce({ events: [], next_cursor: null });
+    // Keyed on the cursor, not on call order: the head query polls the newest
+    // window alongside the paged reads, so a fixed sequence would hand the
+    // wrong page to whichever call happened to land second.
+    getRuntimeLogEvents.mockImplementation(
+      async ({ cursor }: { cursor: string | null }) =>
+        cursor === null
+          ? {
+              events: [{
+                timestamp_ms: 1_700_000_000_000,
+                level: "info",
+                process: "app",
+                target: "copypaste::app",
+                message: "started",
+              }],
+              next_cursor: "50",
+            }
+          : { events: [], next_cursor: null },
+    );
     withUser(<RuntimeLogViewer />);
     const list = await screen.findByRole("log", { name: "Runtime event list" });
     Object.defineProperties(list, {

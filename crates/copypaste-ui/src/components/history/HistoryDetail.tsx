@@ -32,6 +32,10 @@ interface HistoryDetailProps {
   item: Item | null;
   origin: string | null;
   fullContent: string | null;
+  /** The whole-body read failed, so what is rendered is the row's truncated
+   *  preview and the view must say so rather than pass a fragment off as the
+   *  clipping. */
+  fullContentFailed?: boolean;
   revealedContent: string | null;
   revealPending: boolean;
   onReveal: (item: Item) => void;
@@ -48,6 +52,7 @@ export function HistoryDetail({
   item,
   origin,
   fullContent,
+  fullContentFailed,
   revealedContent,
   revealPending,
   onReveal,
@@ -74,6 +79,10 @@ export function HistoryDetail({
       : revealed
         ? revealedContent
         : (fullContent ?? item?.content ?? null);
+  // Only while the fallback is actually a fragment: a failed read of an item
+  // that was never truncated has nothing to warn about.
+  const bodyIncomplete =
+    fullContentFailed === true && item?.truncated === true && !revealed;
   const kind = item ? kindOf(item) : "text";
   const isImage = kind === "image";
 
@@ -118,6 +127,16 @@ export function HistoryDetail({
           >
             <ShieldAlert size={12} aria-hidden="true" className="mt-px shrink-0" />
             {t("history.row.potentialSensitiveWarning")}
+          </p>
+        )}
+
+        {bodyIncomplete && (
+          <p
+            role="status"
+            className="flex items-start gap-s-1 text-xs text-warn-strong"
+          >
+            <ShieldAlert size={12} aria-hidden="true" className="mt-px shrink-0" />
+            {t("history.detail.bodyUnavailable")}
           </p>
         )}
 

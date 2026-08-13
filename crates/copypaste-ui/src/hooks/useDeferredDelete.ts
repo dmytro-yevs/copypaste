@@ -17,10 +17,13 @@ import { imagePreviewKey } from "@/hooks/useHistoryMedia";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
 
-function without(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
-  if (!set.has(id)) return set;
+function without(
+  set: ReadonlySet<string>,
+  ids: readonly string[],
+): ReadonlySet<string> {
+  if (!ids.some((id) => set.has(id))) return set;
   const next = new Set(set);
-  next.delete(id);
+  for (const id of ids) next.delete(id);
   return next.size === 0 ? NO_PENDING : next;
 }
 
@@ -37,35 +40,48 @@ export function useDeferredDelete() {
     }
   }, []);
 
+  /** One invalidation for the whole batch. Deleting a burst of rows used to
+   *  re-walk every loaded page once per row, because each commit invalidated
+   *  on its own. */
   const commit = useCallback(
-    async (id: string) => {
-      clearTimer(id);
+    async (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      for (const id of ids) clearTimer(id);
       try {
-        await deleteItem(id);
-        // INV-3: the write invalidates, and we only stop hiding the row once
-        // the refetch has settled — otherwise it flashes back into the list.
-        await invalidateHistoryQueries(qc);
-        void qc.invalidateQueries({ queryKey: STATUS_KEY });
-        // A cached thumbnail must not outlive the clipping it was made from.
-        qc.removeQueries({ queryKey: imagePreviewKey(id) });
-      } catch (raw) {
-        toast.error(toFriendly(raw));
+        let deleted = false;
+        for (const id of ids) {
+          try {
+            await deleteItem(id);
+            // A cached thumbnail must not outlive the clipping it was made
+            // from.
+            qc.removeQueries({ queryKey: imagePreviewKey(id) });
+            deleted = true;
+          } catch (raw) {
+            toast.error(toFriendly(raw));
+          }
+        }
+        if (deleted) {
+          // INV-3: the write invalidates, and we only stop hiding the rows once
+          // the refetch has settled — otherwise they flash back into the list.
+          await invalidateHistoryQueries(qc);
+          void qc.invalidateQueries({ queryKey: STATUS_KEY });
+        }
       } finally {
         // INV-30: released whatever happened above.
-        setPending((prev) => without(prev, id));
+        setPending((prev) => without(prev, ids));
       }
     },
     [clearTimer, qc],
   );
 
   const flush = useCallback(() => {
-    for (const id of [...timers.current.keys()]) void commit(id);
+    void commit([...timers.current.keys()]);
   }, [commit]);
 
   const undo = useCallback(
     (id: string) => {
       clearTimer(id);
-      setPending((prev) => without(prev, id));
+      setPending((prev) => without(prev, [id]));
       void invalidateHistoryQueries(qc);
     },
     [clearTimer, qc],
@@ -77,7 +93,7 @@ export function useDeferredDelete() {
       setPending((prev) => new Set(prev).add(item.id));
       timers.current.set(
         item.id,
-        setTimeout(() => void commit(item.id), UNDO_WINDOW_MS),
+        setTimeout(() => void commit([item.id]), UNDO_WINDOW_MS),
       );
       toast(t("history.toast.deleted"), {
         duration: UNDO_WINDOW_MS,

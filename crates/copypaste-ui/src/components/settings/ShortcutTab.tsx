@@ -218,7 +218,11 @@ function StartupSection() {
   const openAtLogin = useOpenAtLogin();
   const save = useSetOpenAtLogin();
 
+  // A read that failed is not a setting that is off. Rendering `?? false` as an
+  // ordinary unchecked switch invited the user to "turn on" something that may
+  // already be on, and hid that the system never answered.
   const enabled = openAtLogin.data ?? false;
+  const unknown = openAtLogin.isError;
   // The write succeeded and the system still disagrees — on Windows, a Startup
   // apps override. Silence here would leave a switch that flicks back with no
   // explanation.
@@ -232,9 +236,13 @@ function StartupSection() {
         description={t("settings.startup.openAtLogin.description")}
         id="open-at-login"
         checked={enabled}
-        disabled={openAtLogin.isPending || save.isPending}
+        disabled={openAtLogin.isPending || unknown || save.isPending}
         note={
-          blocked ? (
+          unknown ? (
+            <span role="alert" className="text-xs text-err-strong">
+              {t("settings.startup.unknown")}
+            </span>
+          ) : blocked ? (
             <span role="status" className="text-xs text-warn-strong">
               {t("settings.startup.blocked")}
             </span>

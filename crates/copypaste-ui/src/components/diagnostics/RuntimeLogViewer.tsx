@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ClipboardCopy, LoaderCircle, Pause, Radio, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -58,31 +58,68 @@ export function RuntimeLogViewer() {
   const loadingOlderRef = useRef(false);
   const deferredQuery = useDeferredValue(query);
   const queryKey = ["runtime-log-events", deferredQuery, level, process] as const;
+  const filters = {
+    limit: PAGE_SIZE,
+    level: level === "all" ? null : level,
+    process: process === "all" ? null : process,
+    query: deferredQuery || null,
+  };
   const logs = useInfiniteQuery({
     queryKey,
     initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) =>
-      getRuntimeLogEvents({
-        cursor: pageParam,
-        limit: PAGE_SIZE,
-        level: level === "all" ? null : level,
-        process: process === "all" ? null : process,
-        query: deferredQuery || null,
-      }),
+    queryFn: ({ pageParam }) => getRuntimeLogEvents({ ...filters, cursor: pageParam }),
     getNextPageParam: (page) => page.next_cursor,
+    // Following polls the head query below. A periodic refetch here re-reads
+    // every page the user has scrolled back through, so following a busy log
+    // twenty pages deep cost twenty reads every three seconds.
+    refetchInterval: false,
+    retry: false,
+  });
+  const head = useQuery({
+    queryKey: [...queryKey, "head"],
+    queryFn: () => getRuntimeLogEvents({ ...filters, cursor: null }),
+    enabled: follow,
     refetchInterval: follow ? 3_000 : false,
     refetchIntervalInBackground: false,
     retry: false,
   });
-  const events = useMemo(
-    () => logs.data?.pages.flatMap((page) => page.events) ?? [],
-    [logs.data],
-  );
+
+  /**
+   * The head is the authority for its own window: every cached event at or
+   * after the head's oldest timestamp is inside it. Older pages are appended
+   * untouched, because a cursor page cannot gain rows.
+   *
+   * Keys are content-derived and carry an occurrence number, so two identical
+   * lines logged in the same millisecond stay two rows. Keying by list index
+   * remounted every row each time an event arrived at the head.
+   */
+  const rows = useMemo(() => {
+    const paged = logs.data?.pages.flatMap((page) => page.events) ?? [];
+    const fresh = head.data?.events ?? [];
+    const oldest = fresh[fresh.length - 1]?.timestamp_ms;
+    // Strictly older: an event sharing the boundary millisecond is one the head
+    // already returned, or one it truncated at its limit and the next poll
+    // brings back.
+    const merged =
+      oldest === undefined
+        ? paged
+        : [...fresh, ...paged.filter((event) => event.timestamp_ms < oldest)];
+
+    const seen = new Map<string, number>();
+    return merged.map((event) => {
+      const base = `${event.process}:${event.timestamp_ms}:${event.level}:${event.target}:${event.message}`;
+      const repeat = seen.get(base) ?? 0;
+      seen.set(base, repeat + 1);
+      return { event, key: repeat === 0 ? base : `${base}#${repeat}` };
+    });
+  }, [head.data, logs.data]);
+
+  const events = useMemo(() => rows.map((row) => row.event), [rows]);
   const virtualizer = useVirtualizer({
-    count: events.length,
+    count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 68,
-    getItemKey: (index) => `${events[index]?.process}:${events[index]?.timestamp_ms}:${index}`,
+    getItemKey: (index) => rows[index]?.key ?? index,
     overscan: 8,
     useFlushSync: false,
   });
@@ -186,7 +223,10 @@ export function RuntimeLogViewer() {
         <Button
           size="icon-sm"
           variant="ghost"
-          onClick={() => void logs.refetch()}
+          onClick={() => {
+            void logs.refetch();
+            void head.refetch();
+          }}
           aria-label={t("runtimeLog.refresh")}
           title={t("runtimeLog.refresh")}
         >

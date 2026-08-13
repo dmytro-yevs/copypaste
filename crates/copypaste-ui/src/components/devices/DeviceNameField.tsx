@@ -4,16 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRenameDevice } from "@/hooks/useDevices";
-import { useStatus } from "@/hooks/useHistory";
+import { statusDeviceName, useStatus } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 
 export function DeviceNameField() {
   const { t } = useTranslation();
   const inputId = useId();
-  const status = useStatus();
+  const status = useStatus(statusDeviceName);
   const rename = useRenameDevice();
   const [name, setName] = useState("");
-  const current = status.data?.device_name ?? "";
+  const current = status.data ?? "";
   const next = name.trim();
 
   useEffect(() => {

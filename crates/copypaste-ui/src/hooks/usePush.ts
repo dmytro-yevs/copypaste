@@ -9,7 +9,11 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 
-import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/useHistory";
+import {
+  invalidateHistoryHead,
+  invalidateHistoryQueries,
+  STATUS_KEY,
+} from "@/hooks/useHistory";
 import { PEERS_KEY } from "@/hooks/useDevices";
 import { CONFIG_KEY, PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import { OPEN_AT_LOGIN_KEY } from "@/hooks/useOpenAtLogin";
@@ -68,7 +72,7 @@ export function usePush(): boolean {
         void qc.invalidateQueries({ queryKey: PEERS_KEY });
         return;
       }
-      void invalidateHistoryQueries(qc);
+      void invalidateHistoryHead(qc);
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
     }).then(keep);
 
@@ -76,7 +80,7 @@ export function usePush(): boolean {
       setLive(event.payload.live);
       // A stream that just came back may have missed changes while it was
       // down, so its return is itself a reason to re-read.
-      if (event.payload.live) void invalidateHistoryQueries(qc);
+      if (event.payload.live) void invalidateHistoryHead(qc);
     }).then(keep);
 
     void listen<boolean>(EVENT_PRIVATE_MODE_CHANGED, (event) => {

@@ -103,6 +103,12 @@ export const POLL_PUSH_BACKSTOP_MS = 30_000;
 /** Faster than the list: a 10s poll left the chip green long after the service
   *  had died (CopyPaste-f701). */
 export const STATUS_POLL_MS = 2000;
+
+/** Trailing edge for re-walking the loaded history pages after a change the
+ *  user did not make. Long enough to collapse a burst of captures into one
+ *  walk, short enough that a remote delete three pages down is visible without
+ *  a scroll or a refocus (manifest 05 §5.4). */
+export const HISTORY_DEEP_REFRESH_MS = 200;
 /** Decoupled from the 2s status poll, which used to drag `peers` along at
  *  30 calls/min (CopyPaste-crh3.48). */
 export const PEERS_POLL_MS = 10_000;

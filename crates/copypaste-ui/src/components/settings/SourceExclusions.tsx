@@ -10,7 +10,7 @@ import { useHistory } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 import { canonicalExclusion, findExclusion } from "@/lib/exclusions";
 import { isAndroidPlatform, isWindowsPlatform } from "@/lib/platform";
-import { listInstalledSourceApps, type InstalledSourceApp } from "@/lib/ipc";
+import { listInstalledSourceApps, type InstalledSourceApp, type Item } from "@/lib/ipc";
 
 interface SourceExclusionsProps {
   ids: readonly string[];
@@ -28,74 +28,10 @@ export function SourceExclusions({
   onChange,
 }: SourceExclusionsProps) {
   const { t } = useTranslation();
-  const history = useHistory("");
-  const [query, setQuery] = useState("");
-  const [validation, setValidation] = useState<string | null>(null);
-  const [normalizedNotice, setNormalizedNotice] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(!collapsible);
   const controlsId = useId();
-  const validationId = useId();
-  const noticeId = useId();
   const android = isAndroidPlatform();
   const windows = isWindowsPlatform();
-  const installedApps = useQuery({
-    queryKey: ["installed-source-apps"],
-    queryFn: listInstalledSourceApps,
-    enabled: android,
-    staleTime: 5 * 60 * 1000,
-  });
-  const knownIds = useMemo(
-    () =>
-      [...new Set(
-        history.data?.items
-          .map((item) => item.source_app_bundle_id)
-          .filter((id): id is string => id !== null) ?? [],
-      )].sort((a, b) => a.localeCompare(b)),
-    [history.data?.items],
-  );
-  const normalized = query.trim();
-  const visibleKnownIds = knownIds.filter((id) =>
-    id.toLocaleLowerCase().includes(normalized.toLocaleLowerCase()),
-  );
-  const visibleInstalledApps = useMemo(() => {
-    const needle = normalized.toLocaleLowerCase();
-    return (installedApps.data ?? []).filter((app) =>
-      !needle || app.label.toLocaleLowerCase().includes(needle) || app.package_id.toLocaleLowerCase().includes(needle),
-    );
-  }, [installedApps.data, normalized]);
-  const installedById = useMemo(
-    () => new Map((installedApps.data ?? []).map((app) => [app.package_id, app])),
-    [installedApps.data],
-  );
-
-  /** The entry the user typed, in the identity the daemon will compare. On
-   *  Windows `Chrome.exe`, `chrome` and a pasted path are one program, so the
-   *  duplicate check is on that identity and not on the typed string. */
-  const add = (id: string) => {
-    setNormalizedNotice(null);
-    const next = canonicalExclusion(id, windows);
-    if (next === null) {
-      setValidation(t(windows
-        ? "settings.service.exclusions.windowsInvalid"
-        : "settings.service.exclusions.invalid"));
-      return;
-    }
-    const existing = findExclusion(ids, next, windows);
-    if (existing !== undefined) {
-      setValidation(windows
-        ? t("settings.service.exclusions.windowsExists", { id: existing })
-        : t("settings.service.exclusions.exists"));
-      return;
-    }
-    setValidation(null);
-    setQuery("");
-    // Said, not silent: an entry that comes back spelled differently from what
-    // was typed is the moment a user decides whether it worked.
-    if (next !== id.trim()) {
-      setNormalizedNotice(t("settings.service.exclusions.normalized", { id: next }));
-    }
-    onChange([...ids, next]);
-  };
 
   const heading = (
     <div className="flex flex-col gap-s-1">
@@ -128,29 +64,123 @@ export function SourceExclusions({
     </div>
   );
 
-  if (!expanded) {
-    return (
-      <section
-        data-settings-search-target={`section:${t("settings.service.exclusions.title")}`}
-        className="flex flex-col gap-s-2 rounded-lg border border-divider bg-card p-s-3"
-      >
-        {heading}
-      </section>
-    );
-  }
-
+  // The region the button controls stays mounted and is hidden, because INV-7
+  // forbids an accessibility pointer to a node that is not there. The *editor*
+  // is unmounted: it owns the history query, and mounting it starts a 3s poll
+  // that decrypts a page of clipboard history for a panel nobody has opened.
   return (
     <section
       data-settings-search-target={`section:${t("settings.service.exclusions.title")}`}
       className="flex flex-col gap-s-2 rounded-lg border border-divider bg-card p-s-3"
     >
       {heading}
+      <div id={controlsId} hidden={!expanded} className="flex flex-col gap-s-2">
+        {expanded && (
+          <ExclusionsEditor
+            ids={ids}
+            disabled={disabled}
+            android={android}
+            windows={windows}
+            onChange={onChange}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
 
+interface ExclusionsEditorProps {
+  ids: readonly string[];
+  disabled: boolean;
+  android: boolean;
+  windows: boolean;
+  onChange: (ids: string[]) => void;
+}
+
+function ExclusionsEditor({
+  ids,
+  disabled,
+  android,
+  windows,
+  onChange,
+}: ExclusionsEditorProps) {
+  const { t } = useTranslation();
+  const history = useHistory("");
+  const [query, setQuery] = useState("");
+  const [validation, setValidation] = useState<string | null>(null);
+  const [normalizedNotice, setNormalizedNotice] = useState<string | null>(null);
+  const validationId = useId();
+  const noticeId = useId();
+  const installedApps = useQuery({
+    queryKey: ["installed-source-apps"],
+    queryFn: listInstalledSourceApps,
+    enabled: android,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  /** One pass over the history, not one per proposed id: the `find` this
+   *  replaces ran inside the render loop, so a 10,000-row history times the
+   *  distinct apps in it was scanned on every keystroke. */
+  const firstByApp = useMemo(() => {
+    const first = new Map<string, Item>();
+    for (const item of history.data?.items ?? []) {
+      const app = item.source_app_bundle_id;
+      if (app !== null && !first.has(app)) first.set(app, item);
+    }
+    return first;
+  }, [history.data?.items]);
+
+  const knownIds = useMemo(
+    () => [...firstByApp.keys()].sort((a, b) => a.localeCompare(b)),
+    [firstByApp],
+  );
+  const selectedIds = useMemo(() => new Set(ids), [ids]);
+  const normalized = query.trim();
+  const visibleKnownIds = knownIds.filter((id) =>
+    id.toLocaleLowerCase().includes(normalized.toLocaleLowerCase()),
+  );
+  const visibleInstalledApps = useMemo(() => {
+    const needle = normalized.toLocaleLowerCase();
+    return (installedApps.data ?? []).filter((app) =>
+      !needle || app.label.toLocaleLowerCase().includes(needle) || app.package_id.toLocaleLowerCase().includes(needle),
+    );
+  }, [installedApps.data, normalized]);
+  const installedById = useMemo(
+    () => new Map((installedApps.data ?? []).map((app) => [app.package_id, app])),
+    [installedApps.data],
+  );
+
+  /** Windows: Chrome.exe, chrome, and a pasted path are one program. */
+  const add = (id: string) => {
+    setNormalizedNotice(null);
+    const next = canonicalExclusion(id, windows);
+    if (next === null) {
+      setValidation(t(windows
+        ? "settings.service.exclusions.windowsInvalid"
+        : "settings.service.exclusions.invalid"));
+      return;
+    }
+    const existing = findExclusion(ids, next, windows);
+    if (existing !== undefined) {
+      setValidation(windows
+        ? t("settings.service.exclusions.windowsExists", { id: existing })
+        : t("settings.service.exclusions.exists"));
+      return;
+    }
+    setValidation(null);
+    setQuery("");
+    if (next !== id.trim()) {
+      setNormalizedNotice(t("settings.service.exclusions.normalized", { id: next }));
+    }
+    onChange([...ids, next]);
+  };
+
+  return (
+    <>
       {android ? (
         <AndroidExclusionPicker
-          id={collapsible ? controlsId : undefined}
           apps={visibleInstalledApps}
-          selectedIds={ids}
+          selectedIds={selectedIds}
           query={query}
           disabled={disabled}
           loading={installedApps.isLoading}
@@ -216,14 +246,14 @@ export function SourceExclusions({
                   </p>
                 ) : (
                   visibleKnownIds.map((id) => {
-                    const item = history.data?.items.find((candidate) => candidate.source_app_bundle_id === id);
+                    const item = firstByApp.get(id);
                     if (!item) return null;
                     const source = clipSourceMetadata(item);
                     return (
                       <button
                         key={id}
                         type="button"
-                        disabled={disabled || ids.includes(id)}
+                        disabled={disabled || selectedIds.has(id)}
                         className="flex min-h-9 items-center gap-s-2 px-s-2 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => add(id)}
                       >
@@ -272,14 +302,13 @@ export function SourceExclusions({
           })}
         </ul>
       )}
-    </section>
+    </>
   );
 }
 
 interface AndroidExclusionPickerProps {
-  id?: string;
   apps: readonly InstalledSourceApp[];
-  selectedIds: readonly string[];
+  selectedIds: ReadonlySet<string>;
   query: string;
   disabled: boolean;
   loading: boolean;
@@ -289,12 +318,12 @@ interface AndroidExclusionPickerProps {
 }
 
 function AndroidExclusionPicker({
-  id, apps, selectedIds, query, disabled, loading, failed, onQueryChange, onAdd,
+  apps, selectedIds, query, disabled, loading, failed, onQueryChange, onAdd,
 }: AndroidExclusionPickerProps) {
   const { t } = useTranslation();
   const searchLabel = t("settings.service.exclusions.searchInstalled");
   return (
-    <div id={id} className="flex flex-col gap-s-2">
+    <div className="flex flex-col gap-s-2">
       <label htmlFor="android-exclusion-search" className="sr-only">
         {searchLabel}
       </label>
@@ -322,7 +351,7 @@ function AndroidExclusionPicker({
             <button
               key={app.package_id}
               type="button"
-              disabled={disabled || selectedIds.includes(app.package_id)}
+              disabled={disabled || selectedIds.has(app.package_id)}
               className="flex min-h-11 items-center gap-s-2 px-s-2 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => onAdd(app.package_id)}
             >
