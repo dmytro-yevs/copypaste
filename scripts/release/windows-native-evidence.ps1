@@ -158,6 +158,8 @@ $dataRoot = Join-Path $runRoot "data"
 New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
 $daemon = $null
 $app = $null
+$daemonOut = Join-Path $runRoot "daemon.stdout.log"
+$daemonErr = Join-Path $runRoot "daemon.stderr.log"
 $oldDataDir = $env:COPYPASTE_DATA_DIR
 $oldSocket = $env:COPYPASTE_SOCKET
 $logPath = $null
@@ -177,8 +179,6 @@ try {
     $daemonExe = Join-Path $installDir "copypaste-daemon.exe"
     $env:COPYPASTE_DATA_DIR = $dataRoot
     $env:COPYPASTE_SOCKET = Join-Path $dataRoot "daemon.sock"
-    $daemonOut = Join-Path $runRoot "daemon.stdout.log"
-    $daemonErr = Join-Path $runRoot "daemon.stderr.log"
     $daemon = Start-Process -FilePath $daemonExe -ArgumentList "--foreground", "--data-dir", $dataRoot, "--port", "48654", "--device-name", "Windows-CI" -WindowStyle Hidden -RedirectStandardOutput $daemonOut -RedirectStandardError $daemonErr -PassThru
     $status = Wait-Readiness "explicit daemon IPC readiness" {
         if ($daemon.HasExited) { return New-ProbeInvariant "the daemon exited with code $($daemon.ExitCode)" }
@@ -323,6 +323,18 @@ try {
     }
 
     Write-Output "PASS: $ExpectedSignature current-user install, integrity, installed sidecar, in-place update, update feed contract and uninstall"
+} catch {
+    # `finally` deletes $runRoot, so without this the daemon's stderr and the
+    # app's runtime log are gone before anyone reads the failure. Only the three
+    # `Wait-Observed` probes attached them; run 31825408629 failed at a bare CLI
+    # call and reported one line, "cannot reach the CopyPaste daemon".
+    $failure = $_
+    $detail = try {
+        (Get-InstalledDiagnostics $app $dataRoot $daemonErr) -join "`n"
+    } catch {
+        $_.Exception.Message
+    }
+    throw "$($failure.Exception.Message)`nDiagnostics:`n$detail"
 } finally {
     if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }
