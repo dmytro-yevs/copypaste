@@ -497,6 +497,7 @@ pub(super) mod test_support {
     pub(in crate::sensitive) const BASE64: &str =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     pub(in crate::sensitive) const HEX: &str = "0123456789abcdef";
+    pub(in crate::sensitive) const DIGITS: &str = "0123456789";
     /// The alphabet the vendored `^[a-zA-Z_.-]+$` secret guard admits, so
     /// `noise` over it is the highest-variety value that guard still rejects.
     pub(in crate::sensitive) const LETTERS: &str =
@@ -525,6 +526,19 @@ pub(super) mod test_support {
                 chars[(state % chars.len() as u64) as usize]
             })
             .collect()
+    }
+
+    /// `xoxb-` + two 11-digit ids + 24 [`ALNUM`] characters — §9.1's shape,
+    /// built rather than spelled.
+    ///
+    /// A Slack bot token carries no checksum, so a scanner has only the shape
+    /// to go on and must treat any literal of it as live. Spelling one out
+    /// puts a value in the tree that `.gitleaks.toml` and GitHub push
+    /// protection each have to be told to ignore; the fixture never needed
+    /// more than the shape.
+    pub(in crate::sensitive) fn slack_bot_token() -> String {
+        let ids = noise(22, DIGITS);
+        format!("xoxb-{}-{}-{}", &ids[..11], &ids[11..], noise(24, ALNUM))
     }
 
     /// `n` distinct [`ALNUM`] characters, rotated by `line`.
@@ -591,7 +605,8 @@ pub(super) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{
-        all_rules, detector, fired, noise, rotation, ALNUM, BASE64, BENIGN_CORPUS, HEX, LETTERS,
+        all_rules, detector, fired, noise, rotation, slack_bot_token, ALNUM, BASE64, BENIGN_CORPUS,
+        HEX, LETTERS,
     };
     use super::*;
     use crate::sensitive::finding::{Severity, AUTOWIPE_CONFIDENCE_FLOOR};
@@ -605,6 +620,7 @@ mod tests {
     fn manifest_true_positives_are_detected() {
         let det = detector();
         let ghp = format!("ghp_{}", noise(36, ALNUM));
+        let ghs = format!("ghs_{}", noise(36, ALNUM));
         let fine = format!("github_pat_{}_{}", noise(22, ALNUM), noise(59, ALNUM));
         let openai_new = format!("sk-proj-{}", noise(48, ALNUM));
         let openai_legacy = format!("sk-{}", noise(48, ALNUM));
@@ -619,6 +635,7 @@ mod tests {
         let sendgrid = format!("SG.{}.{}", noise(22, ALNUM), noise(43, ALNUM));
         let terraform = format!("atlasv1.{}", noise(64, ALNUM));
         let azure = format!("AccountKey={}==", noise(86, BASE64));
+        let slack = slack_bot_token();
 
         let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.\
                    SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
@@ -636,10 +653,7 @@ mod tests {
             ("ASIAIOSFODNN7EXAMPLE1234", Some("aws_access_key")),
             (&ghp, Some("github_classic_pat")),
             (&fine, Some("github_fine_grained")),
-            (
-                "ghs_16C7e42F292c6912E7710c838347Ae178B4a",
-                Some("github_app_token"),
-            ),
+            (&ghs, Some("github_app_token")),
             (&openai_new, Some("openai_new")),
             (&openai_legacy, Some("openai_legacy")),
             (&anthropic, Some("anthropic")),
@@ -649,10 +663,7 @@ mod tests {
                 Some("stripe_webhook"),
             ),
             (&npm, Some("npm_token")),
-            (
-                "xoxb-17653285717-17653285718-AbCdEfGhIjKlMnOpQrStUvWx",
-                Some("slack_token"),
-            ),
+            (&slack, Some("slack_token")),
             (&slack_hook, Some("slack_webhook")),
             (
                 "AIzaSyD-9tSrke72EmVt4TenJheB96ABCDE12345",
@@ -1222,10 +1233,7 @@ mod tests {
                 "hashicorp_vault",
             ),
             (format!("AUTH_TOKEN={jwt}"), "jwt"),
-            (
-                "SLACK_TOKEN=xoxb-17653285717-17653285718-AbCdEfGhIjKlMnOpQrStUvWx".to_string(),
-                "slack_token",
-            ),
+            (format!("SLACK_TOKEN={}", slack_bot_token()), "slack_token"),
             (
                 format!("api_key: ghp_{}", noise(36, ALNUM)),
                 "github_classic_pat",

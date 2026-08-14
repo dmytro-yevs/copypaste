@@ -1180,6 +1180,11 @@ repeated-character fixture is a placeholder by construction and is rejected on
 purpose; spelling these as repeats is what forced ten `entropy_override = 0.0`
 entries and left the gate off. The lengths and the structure are what bind.
 
+For the same reason the Slack and GitHub App rows no longer spell one out. A
+literal of a checksum-free provider shape is one every credential scanner must
+treat as live, so each is a value the repository scan and GitHub push
+protection have to be told separately to ignore.
+
 | Input | Expected |
 |---|---|
 | `AKIAIOSFODNN7EXAMPLE` | detected; `AwsKey`; **auto-wipes** |
@@ -1187,14 +1192,14 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `ASIAIOSFODNN7EXAMPLE1234` | detected (trailing digits must not break it) |
 | `ghp_` + 36×`A` | detected |
 | `github_pat_` + 22×`A` + `_` + 59×`B` | detected |
-| `ghs_16C7e42F292c6912E7710c838347Ae178B4a` | detected |
+| `ghs_` + 36×`A` | detected |
 | `sk-proj-` + 48×`A` | detected; **`openai_legacy` must NOT also fire** |
 | `sk-` + 48×`A` | detected; auto-wipes |
 | `sk-ant-api03-` + 80×`A` | detected |
 | `sk_live_` + 24×`A` | detected |
 | `whsec_aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStT` | detected |
 | `npm_` + 36×`A` | detected |
-| `xoxb-17653285717-17653285718-AbCdEfGhIjKlMnOpQrStUvWx` | detected |
+| `xoxb-` + 11 digits + `-` + 11 digits + `-` + 24×`A` | detected |
 | `https://hooks.slack.com/services/T00000000/B00000000/` + 24×`X` | detected |
 | `AIzaSyD-9tSrke72EmVt4TenJheB96ABCDE12345` | detected |
 | `hvs.` + 32×`A` | detected; **auto-wipes** |
