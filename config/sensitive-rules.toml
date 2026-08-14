@@ -174,6 +174,10 @@ entropy_override = 4.3
 entropy_decision = "Upstream's 2.0 is a repository scanner's number and it deleted CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_<24 X> at 2.233 (DMY-162). The pattern fixes the value at 40 characters over 64 symbols, so the two populations are measurable: 80,000 single-case word templates at that length top out at 4.225, and 4.3 rejects 3.4 of every 10,000 random 40-character tokens."
 keywords_override = ["cloudflare_api_", "cf_api_token"]
 keywords_decision = "The local CF_API_TOKEN alias is absent from the upstream keyword list."
+secret_shape_allowlist_from = "generic-api-key"
+secret_shape_allowlist_decision = "Gitleaks' own secret allowlist for generic-api-key: a value spelled only from letters, underscore, dot and hyphen is a template whatever it says, which is the question entropy cannot answer (DMY-162). The cost is a real token drawn without a digit, about 1 in 900 at 40 characters over 64 symbols."
+never_auto_delete = true
+never_auto_delete_decision = "CLOUDFLARE_API_TOKEN= proves which field matched and nothing about the value. The template and credential entropy populations overlap in the tail, so an unforeseen template can still clear 4.3, and manifest I1 ranks that irreversible deletion above leaving a real token unsearchable."
 
 [[rules]]
 upstream_ids = ["private-key"]
@@ -262,6 +266,10 @@ secret_group = 1
 validator = "value_strength"
 entropy = 4.8
 entropy_decision = "The AccountKey= anchor proves the field and says nothing about the value, so the value's own randomness is the only thing separating a real 86-character key from a README placeholder. 86 characters leave the widest gap of the four: 500,000 random keys all measure above 4.92 while word templates at that length top out at 4.27, so 4.8 rejects none of the first and all of the second."
+secret_shape_allowlist_from = "generic-api-key"
+secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist the other three take. At 86 characters over 64 symbols a real key drawn from letters alone is about 1 in 57 million, so the shape guard costs almost nothing here and still closes the all-letter template."
+never_auto_delete = true
+never_auto_delete_decision = "AccountKey= proves which field matched and nothing about the value; 86 characters widen the gap between the two populations without closing it, and manifest I1 ranks an irreversible deletion above an unsearchable key."
 
 [[overlay]]
 name = "azure_sas_token"
@@ -306,6 +314,10 @@ secret_group = 1
 validator = "value_strength"
 entropy = 4.3
 entropy_decision = "Same reasoning and the same value shape as cloudflare_api_token — 40 characters over 64 symbols — so the same number. 3.0 deleted aws_secret_access_key = REPLACE/WITH/YOUR/AWS/SECRET/ACCESS/KEYX at 3.759 (DMY-162). AWS's own published EXAMPLEKEY secret measures 4.663 and is still detected."
+secret_shape_allowlist_from = "generic-api-key"
+secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist. AWS's own EXAMPLEKEY secret carries a slash and is untouched by it; the cost is a real 40-character key drawn from letters alone, about 1 in 7,500."
+never_auto_delete = true
+never_auto_delete_decision = "The same anchor argument at the same 40-character shape as cloudflare_api_token: the field is proven and the value is not."
 
 [[overlay]]
 name = "http_basic_auth"
@@ -325,6 +337,10 @@ validator = "value_strength"
 secret_group = 1
 entropy = 4.4
 entropy_decision = "The variable name is the only evidence, so the value's randomness is what separates MY_API_TOKEN=<real> from the identical line in a README. Alone of the four this rule fixes neither a length nor an alphabet, so its number must clear the word-template ceiling at every length its (\\S+) admits — measured 4.27 at 86 characters — rather than at one. 3.5 deleted MY_API_TOKEN=REPLACE_ME_WITH_THE_REAL_VALUE_PLEASE_OK at 3.631 (DMY-162). The cost is stated in manifest 5.6: a hex-alphabet value can never reach 4.4, so those fall to generic_api_key at 0.75."
+secret_shape_allowlist_from = "generic-api-key"
+secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist, and the reason MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx no longer classifies: its characters are nearly all distinct, so it measures 4.515 and no threshold separates it, but it is spelled without a digit or a symbol. The cost is a real all-letter value, about 1 in 280 for a 32-character alphanumeric token."
+never_auto_delete = true
+never_auto_delete_decision = "The variable name is the only evidence and (\\S+) fixes neither a length nor an alphabet, so this rule overlaps ordinary templates more widely than the other three and may never be a reason to delete."
 
 [[overlay]]
 name = "db_conn_string"

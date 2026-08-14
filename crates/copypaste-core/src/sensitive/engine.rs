@@ -434,6 +434,19 @@ pub(super) mod test_support {
         all_rules(det, text).contains(&rule)
     }
 
+    /// What one named rule's own match permits, which is not what the text
+    /// permits: another rule may reach a different band on the same input.
+    pub(in crate::sensitive) fn rule_severity(
+        det: &Detector,
+        text: &str,
+        rule: &str,
+    ) -> Option<super::Severity> {
+        det.scan_all(text)
+            .into_iter()
+            .find(|finding| finding.rule == rule)
+            .map(|finding| finding.severity)
+    }
+
     pub(in crate::sensitive) fn rep(c: char, n: usize) -> String {
         std::iter::repeat_n(c, n).collect()
     }
@@ -443,6 +456,10 @@ pub(super) mod test_support {
     pub(in crate::sensitive) const BASE64: &str =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     pub(in crate::sensitive) const HEX: &str = "0123456789abcdef";
+    /// The alphabet the vendored `^[a-zA-Z_.-]+$` secret guard admits, so
+    /// `noise` over it is the highest-variety value that guard still rejects.
+    pub(in crate::sensitive) const LETTERS: &str =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
     /// A deterministic pseudo-random fixture of `n` characters over `alphabet`.
     ///
@@ -696,7 +713,6 @@ mod tests {
             format!("hvs.{}", noise(32, ALNUM)),
             format!("SG.{}.{}", noise(22, ALNUM), noise(43, ALNUM)),
             format!("atlasv1.{}", noise(64, ALNUM)),
-            format!("AccountKey={}==", noise(86, BASE64)),
             "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA".to_string(),
             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
                 .to_string(),
@@ -707,11 +723,17 @@ mod tests {
             assert_eq!(f.severity, Severity::HighConfidence, "{input:?} -> {f:?}");
             assert!(f.confidence >= AUTOWIPE_CONFIDENCE_FLOOR);
         }
-        // The card fixture used to be in that list. It is still above the floor
-        // and still classified; §3.3 takes away only the deletion.
-        let card = det.scan("4111111111111111").unwrap();
-        assert!(card.confidence >= AUTOWIPE_CONFIDENCE_FLOOR);
-        assert_eq!(card.severity, Severity::Restricted);
+        // The card fixture used to be in that list, and the Azure one followed
+        // it out: both are above the floor and still classified, and §3.3 and
+        // §5.6 take away only the deletion.
+        for restricted in [
+            "4111111111111111".to_string(),
+            format!("AccountKey={}==", noise(86, BASE64)),
+        ] {
+            let f = det.scan(&restricted).unwrap();
+            assert!(f.confidence >= AUTOWIPE_CONFIDENCE_FLOOR);
+            assert_eq!(f.severity, Severity::Restricted, "{restricted}");
+        }
     }
 
     /// The `sk-proj-` exclusion is structural, not a lookahead (P2 `r6cw`).
@@ -969,17 +991,33 @@ mod tests {
     /// disagreement is the whole point: a validated card is withheld from the
     /// index and never deleted. Derived from the table so the pin cannot go
     /// stale against a rule that changes bands.
+    ///
+    /// The four context-anchored rules join it for the same reason at one
+    /// remove: the anchor proves the *field*, and no gate over a human-readable
+    /// value proves the value is a credential (§5.6, DMY-162). Pinned as a set
+    /// so the band can neither spread to a rule that has a distinctive token of
+    /// its own nor quietly lose one of these four.
     #[test]
     fn withholding_and_deleting_are_the_same_gate_except_for_the_restricted_band() {
         let det = detector();
-        let restricted: Vec<_> = det
+        let mut restricted: Vec<_> = det
             .rules
             .iter()
             .zip(&det.severities)
             .filter(|(_, severity)| **severity == Severity::Restricted)
             .map(|(rule, _)| rule.spec.name)
             .collect();
-        assert_eq!(restricted, ["credit_card"]);
+        restricted.sort_unstable();
+        assert_eq!(
+            restricted,
+            [
+                "aws_secret_access_key",
+                "azure_storage_key",
+                "cloudflare_api_token",
+                "credit_card",
+                "dotenv_secret",
+            ]
+        );
     }
 
     /// I8: no silent drops. Name, category and confidence travel *with* the

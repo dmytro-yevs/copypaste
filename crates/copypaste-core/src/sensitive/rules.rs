@@ -23,7 +23,7 @@ mod tests {
     use crate::sensitive::rules_generated::{
         GITLEAKS_COMMIT, GITLEAKS_VERSION, SELECTED_GITLEAKS_RULE_IDS, VENDORED_CONFIG_SHA256,
     };
-    use crate::sensitive::spec::{AllowlistTarget, Category, Validator};
+    use crate::sensitive::spec::{AllowlistTarget, Category, RuleSpec, Validator};
 
     #[test]
     fn generated_source_and_rule_id_parity_are_pinned() {
@@ -176,6 +176,36 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The one question randomness cannot answer: a value whose characters are
+    /// nearly all distinct measures like a credential because by that gate it
+    /// *is* one. `MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx` measures 4.515
+    /// and was deleted (DMY-162), while `stripe_live` refuses the same `sk_test_`
+    /// prefix on purpose. Gitleaks answers it with a shape rather than a word
+    /// list, and this asserts the literal is *its* one — borrowed from the
+    /// vendored config, not a second copy that can drift from it.
+    #[test]
+    fn context_anchored_rules_carry_the_vendored_secret_shape_guard() {
+        let vendored = secret_shape(rule("generic_api_key")).expect("upstream keeps it");
+        assert_eq!(vendored, ["^[a-zA-Z_.-]+$"]);
+        for name in [
+            "azure_storage_key",
+            "cloudflare_api_token",
+            "aws_secret_access_key",
+            "dotenv_secret",
+        ] {
+            assert_eq!(secret_shape(rule(name)), Some(vendored), "{name}");
+        }
+    }
+
+    fn secret_shape(spec: &'static RuleSpec) -> Option<&'static [&'static str]> {
+        spec.allowlists
+            .iter()
+            .find(|allowlist| {
+                allowlist.target == AllowlistTarget::Secret && allowlist.stopwords.is_empty()
+            })
+            .map(|allowlist| allowlist.regexes)
     }
 
     #[test]

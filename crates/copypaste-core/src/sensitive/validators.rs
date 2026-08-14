@@ -164,7 +164,7 @@ pub(super) fn phone_is_formatted(matched: &str) -> bool {
 mod tests {
     use super::*;
     use crate::sensitive::engine::test_support::{
-        all_rules, detector, fired, noise, rep, ALNUM, BASE64,
+        all_rules, detector, fired, noise, rep, rule_severity, ALNUM, BASE64, LETTERS,
     };
     use crate::sensitive::Severity;
 
@@ -234,8 +234,8 @@ mod tests {
         let strong = format!("export DATADOG_API_KEY={}", noise(40, ALNUM));
         assert!(fired(&det, &strong, "dotenv_secret"));
         assert_eq!(
-            det.scan(&strong).unwrap().severity,
-            Severity::HighConfidence
+            rule_severity(&det, &strong, "dotenv_secret"),
+            Some(Severity::Restricted)
         );
         // The cost of 4.4, stated as a test rather than left to be discovered:
         // a 16-symbol alphabet cannot exceed 4 bits, so no hex value reaches
@@ -667,7 +667,7 @@ mod tests {
         let det = detector();
         let line = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         assert!(fired(&det, line, "aws_secret_access_key"));
-        assert_eq!(det.scan(line).unwrap().severity, Severity::HighConfidence);
+        assert_eq!(det.scan(line).unwrap().severity, Severity::Restricted);
         // Quoted and JSON forms of the same thing.
         assert!(det.is_sensitive(
             r#""aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY""#
@@ -731,6 +731,42 @@ mod tests {
         ] {
             add("dotenv_secret", format!("MY_API_TOKEN={value}"), value);
         }
+        // The shape guard rather than the threshold. Every value below measures
+        // *above* its rule's number — the pangram at 4.753 against 4.3 and 4.4 —
+        // and is rejected for carrying no digit and no symbol, which is the
+        // question entropy cannot answer (§5.6). `sk_test_…` is DMY-162's last
+        // named false positive at 4.515: a credential's variety by every
+        // threshold, while the neighbouring `stripe_live` refuses that prefix on
+        // purpose because test keys occur in public examples. `noise` over
+        // letters alone is the highest-variety value the guard admits.
+        for value in [
+            "TheQuickBrownFoxJumpsOverTheLazyDogAbcde".to_string(),
+            "Deploy-Your-Own-Cloudflare-Token-Here-Ab".to_string(),
+            noise(40, LETTERS),
+        ] {
+            add(
+                "cloudflare_api_token",
+                format!("CLOUDFLARE_API_TOKEN={value}"),
+                &value,
+            );
+        }
+        for value in [
+            "ReplaceWithYourAwsSecretAccessKeyPleaseX".to_string(),
+            noise(40, LETTERS),
+        ] {
+            add(
+                "aws_secret_access_key",
+                format!("aws_secret_access_key = {value}"),
+                &value,
+            );
+        }
+        for value in [
+            "sk_test_abcdefghijklmnopqrstuvwx".to_string(),
+            "TheQuickBrownFoxJumpsOverTheLazyDogAbcde".to_string(),
+            noise(40, LETTERS),
+        ] {
+            add("dotenv_secret", format!("MY_API_TOKEN={value}"), &value);
+        }
         // No word at all. A repetitive value is a placeholder whatever it
         // spells, which is what dropping the word list bought.
         add(
@@ -771,9 +807,10 @@ mod tests {
     /// matched and says nothing about the *value*, so a README example
     /// classified at 0.90-0.99 and was deleted.
     ///
-    /// The gate is the value's **randomness**, not a list of words. Every
-    /// placeholder below is repetitive or a template — which is what a
-    /// placeholder is — and none of them names a word the code knows.
+    /// Two gates answer that, both taken from what the value *is* rather than
+    /// what it spells: its randomness, and gitleaks' own secret shape. Every
+    /// placeholder below is repetitive, a template, or spelled without a digit
+    /// or a symbol, and none of them names a word the code knows.
     #[test]
     fn context_anchored_placeholders_are_not_credentials() {
         let det = detector();
@@ -795,15 +832,80 @@ mod tests {
                 all_rules(&det, &placeholder)
             );
         }
-        // …while values with a credential's randomness still auto-wipe.
-        for real in [
-            format!("AccountKey={}==", noise(86, BASE64)),
-            format!("CLOUDFLARE_API_TOKEN={}", noise(40, ALNUM)),
-            format!("MY_API_TOKEN={}", noise(40, ALNUM)),
-            "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+        // `azure_storage_key`'s guard is load-bearing above its own 4.8: 86
+        // random letters measure 5.002 and the rule still refuses them.
+        // `generic_api_key` takes the trailing `==` into its captured value, so
+        // the shape no longer matches there and that rule keeps its own
+        // decision — which is why the restricted band, not the guard, is what
+        // makes these four safe.
+        let all_letters = format!("AccountKey={}==", noise(86, LETTERS));
+        assert!(!fired(&det, &all_letters, "azure_storage_key"));
+        // …while values with a credential's randomness are still classified and
+        // still withheld. The band takes the deletion, not the detection.
+        for (real, rule) in [
+            (
+                format!("AccountKey={}==", noise(86, BASE64)),
+                "azure_storage_key",
+            ),
+            (
+                format!("CLOUDFLARE_API_TOKEN={}", noise(40, ALNUM)),
+                "cloudflare_api_token",
+            ),
+            (
+                format!("MY_API_TOKEN={}", noise(40, ALNUM)),
+                "dotenv_secret",
+            ),
+            (
+                "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                "aws_secret_access_key",
+            ),
         ] {
-            assert!(det.may_auto_wipe(&real), "{real}");
+            assert!(det.is_sensitive(&real), "{real}");
+            assert_eq!(
+                rule_severity(&det, &real, rule),
+                Some(Severity::Restricted),
+                "{real}"
+            );
         }
+    }
+
+    /// The guarantee the restricted band buys, on inputs where one of these
+    /// four is the only rule that fires: a correct match on a real credential
+    /// is kept out of the index, out of sync and out of previews, and still
+    /// cannot delete the item. Nothing in a human-readable value proves it is a
+    /// credential, so an unforeseen template clearing the threshold must cost
+    /// searchability rather than the data (I1, §5.6, DMY-162).
+    #[test]
+    fn a_context_anchored_credential_is_withheld_and_never_deleted() {
+        let det = detector();
+        let key = noise(86, BASE64);
+        for (text, rule) in [
+            (
+                "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                "aws_secret_access_key",
+            ),
+            (
+                format!("aws_secret_access_key = sample{}", noise(34, ALNUM)),
+                "aws_secret_access_key",
+            ),
+            (
+                format!("AccountKey={}todo{}==", &key[..41], &key[45..]),
+                "azure_storage_key",
+            ),
+            (format!("SERVICE_PWD={}", noise(40, ALNUM)), "dotenv_secret"),
+        ] {
+            assert_eq!(all_rules(&det, &text), [rule], "{text}");
+            assert!(det.is_sensitive(&text), "{text}");
+            assert!(!det.may_auto_wipe(&text), "{text}");
+        }
+        // Both rules a Cloudflare line fires are in the band, so the same holds.
+        let cloudflare = format!("CLOUDFLARE_API_TOKEN=todo{}", noise(36, ALNUM));
+        assert_eq!(
+            all_rules(&det, &cloudflare),
+            ["cloudflare_api_token", "dotenv_secret"]
+        );
+        assert!(det.is_sensitive(&cloudflare));
+        assert!(!det.may_auto_wipe(&cloudflare));
     }
 
     /// The control that rejected both spellings of a word list. A real
@@ -858,7 +960,11 @@ mod tests {
                 all_rules(&det, &text)
             );
             assert!(det.is_sensitive(&text), "{text} would reach the index");
-            assert_eq!(det.scan(&text).unwrap().severity, Severity::HighConfidence);
+            assert_eq!(
+                rule_severity(&det, &text, rule),
+                Some(Severity::Restricted),
+                "{text}"
+            );
         }
     }
 

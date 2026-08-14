@@ -464,13 +464,21 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)\\b(?:CLOUDFLARE_API_(?:TOKEN|KEY)|CF_API_TOKEN)\\s*=\\s*([A-Za-z0-9_-]{40})\\b",
         validator: Validator::ValueStrength,
         secret_group: 1,
-        never_auto_delete: false,
+        never_auto_delete: true,
         entropy: Some(4.3),
         keywords: &[
             "cloudflare_api_",
             "cf_api_token",
         ],
         allowlists: &[
+            AllowlistSpec {
+                condition: AllowlistCondition::Any,
+                target: AllowlistTarget::Secret,
+                regexes: &[
+                    "^[a-zA-Z_.-]+$",
+                ],
+                stopwords: &[],
+            },
         ],
     },
     RuleSpec {
@@ -2132,10 +2140,18 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "AccountKey=([A-Za-z0-9+/]{86})==",
         validator: Validator::ValueStrength,
         secret_group: 1,
-        never_auto_delete: false,
+        never_auto_delete: true,
         entropy: Some(4.8),
         keywords: &[],
         allowlists: &[
+            AllowlistSpec {
+                condition: AllowlistCondition::Any,
+                target: AllowlistTarget::Secret,
+                regexes: &[
+                    "^[a-zA-Z_.-]+$",
+                ],
+                stopwords: &[],
+            },
         ],
     },
     RuleSpec {
@@ -2202,10 +2218,18 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)aws_secret_access_key[\"']?\\s*[:=]\\s*[\"']?([A-Za-z0-9/+=]{40})",
         validator: Validator::ValueStrength,
         secret_group: 1,
-        never_auto_delete: false,
+        never_auto_delete: true,
         entropy: Some(4.3),
         keywords: &[],
         allowlists: &[
+            AllowlistSpec {
+                condition: AllowlistCondition::Any,
+                target: AllowlistTarget::Secret,
+                regexes: &[
+                    "^[a-zA-Z_.-]+$",
+                ],
+                stopwords: &[],
+            },
         ],
     },
     RuleSpec {
@@ -2230,10 +2254,18 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?m)^(?:export\\s+)?[A-Z][A-Z0-9_]{2,}(?:_KEY|_SECRET|_TOKEN|_PASSWORD|_PASS|_PWD|_CREDENTIALS?)\\s*=\\s*(\\S+)",
         validator: Validator::ValueStrength,
         secret_group: 1,
-        never_auto_delete: false,
+        never_auto_delete: true,
         entropy: Some(4.4),
         keywords: &[],
         allowlists: &[
+            AllowlistSpec {
+                condition: AllowlistCondition::Any,
+                target: AllowlistTarget::Secret,
+                regexes: &[
+                    "^[a-zA-Z_.-]+$",
+                ],
+                stopwords: &[],
+            },
         ],
     },
     RuleSpec {
