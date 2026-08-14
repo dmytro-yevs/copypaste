@@ -499,6 +499,14 @@ mod tests {
             .send(&PairingMessage::Decision { accept: true })
             .await
             .unwrap();
+        loop {
+            match session.recv::<PairingMessage>().await {
+                Ok(Some(PairingMessage::Stored { .. })) => break,
+                Ok(Some(PairingMessage::Decision { accept: true })) => {}
+                other => panic!("the responder never reached the commit exchange: {other:?}"),
+            }
+        }
+        tokio::time::pause();
     }
 
     /// The whole of the defect. A peer that accepts and then stops writing had
@@ -506,7 +514,7 @@ mod tests {
     /// forever, holding the commit lock (so `pair_cancel` refused), the
     /// ceremony slot (so no new invitation could be minted) and the inbound
     /// session permit. The device could not pair again without a restart.
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn a_peer_that_stops_answering_after_accepting_releases_the_ceremony() {
         let dir = tempfile::tempdir().unwrap();
         let responder = node(&dir, "responder");
@@ -540,7 +548,7 @@ mod tests {
     /// concurrent sessions is the whole budget, so one stuck ceremony that
     /// never returns is a quarter of the device's ability to serve peers, for
     /// good.
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn a_stalled_ceremony_gives_its_inbound_session_permit_back() {
         let dir = tempfile::tempdir().unwrap();
         let responder = node(&dir, "responder");
@@ -553,11 +561,13 @@ mod tests {
         wait_for(&responder, PairingPhase::TimedOut).await;
 
         let permits = Arc::clone(&responder.sessions);
-        assert_eq!(
-            permits.available_permits(),
-            crate::node::MAX_CONCURRENT_PEER_SESSIONS,
-            "a stalled ceremony kept its inbound session permit"
-        );
+        tokio::time::timeout(PAIRING_CONFIRM_TIMEOUT, async {
+            while permits.available_permits() < crate::node::MAX_CONCURRENT_PEER_SESSIONS {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a stalled ceremony kept its inbound session permit");
 
         drop(peer);
         let _ = shutdown.send(true);
@@ -587,7 +597,7 @@ mod tests {
     /// listener's candidates immediately — that is what fail-closed means here
     /// — but reporting the peer's timeout would leave the user with nothing to
     /// act on while a live credential sat on disk.
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn a_rollback_that_cannot_be_written_fails_the_pairing_rather_than_timing_out() {
         let dir = tempfile::tempdir().unwrap();
         let responder = node(&dir, "responder");
@@ -620,7 +630,7 @@ mod tests {
     /// pairing outright — the working device, its key and all — which is the
     /// data-loss outcome rule 4 rules out. The pre-ceremony record must come
     /// back, and the tentative key must not.
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn a_failed_re_pair_restores_the_device_that_was_already_paired() {
         let dir = tempfile::tempdir().unwrap();
         let responder = node(&dir, "responder");
