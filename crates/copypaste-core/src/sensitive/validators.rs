@@ -164,7 +164,7 @@ pub(super) fn phone_is_formatted(matched: &str) -> bool {
 mod tests {
     use super::*;
     use crate::sensitive::engine::test_support::{
-        all_rules, detector, fired, noise, rep, ALNUM, BASE64, HEX,
+        all_rules, detector, fired, noise, rep, ALNUM, BASE64,
     };
     use crate::sensitive::Severity;
 
@@ -231,9 +231,20 @@ mod tests {
                 all_rules(&det, weak)
             );
         }
-        let strong = "export DATADOG_API_KEY=8f14e45fceea167a5a36dedd4bea2543";
-        assert!(fired(&det, strong, "dotenv_secret"));
-        assert_eq!(det.scan(strong).unwrap().severity, Severity::HighConfidence);
+        let strong = format!("export DATADOG_API_KEY={}", noise(40, ALNUM));
+        assert!(fired(&det, &strong, "dotenv_secret"));
+        assert_eq!(
+            det.scan(&strong).unwrap().severity,
+            Severity::HighConfidence
+        );
+        // The cost of 4.4, stated as a test rather than left to be discovered:
+        // a 16-symbol alphabet cannot exceed 4 bits, so no hex value reaches
+        // this rule any more. It is still detected, and still withheld, by
+        // `generic_api_key` at 0.75 (§5.6).
+        let hex = "export DATADOG_API_KEY=8f14e45fceea167a5a36dedd4bea2543";
+        assert!(!fired(&det, hex, "dotenv_secret"));
+        assert!(fired(&det, hex, "generic_api_key"));
+        assert!(det.is_sensitive(hex));
     }
 
     /// §5.4's test-fixture bug: the original negative fixture `4242424242422`
@@ -669,6 +680,92 @@ mod tests {
         ));
     }
 
+    /// Ordinary values from a README or an `.env.example`, each written at the
+    /// length and over the alphabet its rule's pattern demands, paired with the
+    /// value the rule must capture.
+    fn context_anchored_placeholders() -> Vec<(&'static str, String, String)> {
+        let mut cases = Vec::new();
+        let mut add = |rule: &'static str, text: String, value: &str| {
+            cases.push((rule, text, value.to_string()));
+        };
+        for value in [
+            // The exact template DMY-162 reproduced, at 40. It measures 2.233
+            // and inherited upstream's 2.0, so it was deleted.
+            "YOUR_TOKEN_HERE_XXXXXXXXXXXXXXXXXXXXXXXX",
+            "REPLACE_WITH_YOUR_CLOUDFLARE_API_TOKEN_X",
+            "YOUR_CLOUDFLARE_API_TOKEN_GOES_HERE_HERE",
+            "your-cloudflare-api-token-goes-right-her",
+            "TODO_SET_THIS_BEFORE_DEPLOY_TODO_SET_THI",
+            "CHANGEME_CHANGEME_CHANGEME_CHANGEME_CHAN",
+        ] {
+            add(
+                "cloudflare_api_token",
+                format!("CLOUDFLARE_API_TOKEN={value}"),
+                value,
+            );
+        }
+        for value in [
+            "REPLACE/WITH/YOUR/AWS/SECRET/ACCESS/KEYX",
+            "EXAMPLE/SECRET/KEY/VALUE/PLEASE/CHANGE/M",
+            "your+aws+secret+access+key+goes+right+he",
+            "abcdefghijabcdefghijabcdefghijabcdefghij",
+        ] {
+            add(
+                "aws_secret_access_key",
+                format!("aws_secret_access_key = {value}"),
+                value,
+            );
+        }
+        for value in [
+            "PutYourOwnAzureStorageAccountKeyHereBeforeDeployPutYourOwnAzureStorageAccountKeyHereOk",
+            "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345",
+        ] {
+            add("azure_storage_key", format!("AccountKey={value}=="), value);
+        }
+        for value in [
+            "REPLACE_ME_WITH_THE_REAL_VALUE_PLEASE_OK",
+            "changeme-please-before-you-deploy",
+            "put-the-real-value-in-your-env-file",
+            "YOUR_API_TOKEN_HERE",
+            "TODO_before_release",
+        ] {
+            add("dotenv_secret", format!("MY_API_TOKEN={value}"), value);
+        }
+        // No word at all. A repetitive value is a placeholder whatever it
+        // spells, which is what dropping the word list bought.
+        add(
+            "azure_storage_key",
+            format!("AccountKey={}==", rep('A', 86)),
+            &rep('A', 86),
+        );
+        add(
+            "cloudflare_api_token",
+            format!("CLOUDFLARE_API_TOKEN={}", rep('b', 40)),
+            &rep('b', 40),
+        );
+        cases
+    }
+
+    /// §5.4's lesson, applied to these rules: **assert your negative fixtures
+    /// are actually negative.** §9.2's Cloudflare row was written with a
+    /// 38-character value where the pattern requires exactly 40, so it could
+    /// never fire the rule it was meant to constrain, and the test that quoted
+    /// it passed on the length. Every placeholder must reach its rule and be
+    /// rejected by the value gate, not by the shape.
+    #[test]
+    fn context_anchored_negatives_reach_their_rule_before_the_value_gate() {
+        for (name, text, value) in context_anchored_placeholders() {
+            let spec = crate::sensitive::rules::rule(name);
+            let pattern = regex::Regex::new(spec.pattern).expect("rule pattern compiles");
+            let captured = pattern
+                .captures(&text)
+                .unwrap_or_else(|| panic!("{name} never matches {text}"))
+                .get(spec.secret_group)
+                .map(|group| group.as_str().to_string());
+            assert_eq!(captured, Some(value), "{name} captured something else");
+        }
+    }
+
     /// The rules that earn their place above the floor with a context anchor
     /// rather than a distinctive token. The anchor proves which *field* was
     /// matched and says nothing about the *value*, so a README example
@@ -680,19 +777,18 @@ mod tests {
     #[test]
     fn context_anchored_placeholders_are_not_credentials() {
         let det = detector();
-        for placeholder in [
+        let mut texts: Vec<String> = context_anchored_placeholders()
+            .into_iter()
+            .map(|(_, text, _)| text)
+            .collect();
+        texts.extend([
             format!("AccountKey=your{}==", rep('A', 82)),
             format!("CLOUDFLARE_API_TOKEN=your{}", rep('b', 36)),
             format!("aws_secret_access_key = your{}", rep('c', 36)),
             format!("AccountKey=fake{}==", rep('A', 82)),
             format!("CLOUDFLARE_API_TOKEN=sample{}", rep('b', 34)),
-            "MY_API_TOKEN=TODO_before_release".to_string(),
-            "CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_XXXXXXXXXXXXXXXXXXXXXX".to_string(),
-            // No word at all — the point of dropping the list. A repetitive
-            // value is a placeholder whatever it spells.
-            format!("AccountKey={}==", rep('A', 86)),
-            format!("CLOUDFLARE_API_TOKEN={}", rep('b', 40)),
-        ] {
+        ]);
+        for placeholder in texts {
             assert!(
                 det.scan_all(&placeholder).is_empty(),
                 "placeholder classified: {placeholder} -> {:?}",
@@ -703,6 +799,7 @@ mod tests {
         for real in [
             format!("AccountKey={}==", noise(86, BASE64)),
             format!("CLOUDFLARE_API_TOKEN={}", noise(40, ALNUM)),
+            format!("MY_API_TOKEN={}", noise(40, ALNUM)),
             "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         ] {
             assert!(det.may_auto_wipe(&real), "{real}");
@@ -723,6 +820,13 @@ mod tests {
     #[test]
     fn real_credentials_carrying_a_placeholder_word_are_still_detected() {
         let det = detector();
+        // Spliced from one block, not concatenated from two `noise` calls:
+        // `noise` is seeded per call, so two calls return the *same* string and
+        // the doubled value measures 4.590 where a real 86-character key
+        // measures above 4.9. A positive fixture has to be shaped like the
+        // thing it stands for.
+        let key = noise(86, BASE64);
+        let azure_word_inside = format!("AccountKey={}todo{}==", &key[..41], &key[45..]);
         for (text, rule) in [
             (
                 format!("AccountKey=your{}==", noise(82, BASE64)),
@@ -737,21 +841,10 @@ mod tests {
                 "aws_secret_access_key",
             ),
             (
-                format!(
-                    "DATADOG_API_TOKEN=x{}dummy{}",
-                    noise(12, HEX),
-                    noise(12, HEX)
-                ),
+                format!("DATADOG_API_TOKEN=dummy{}", noise(32, ALNUM)),
                 "dotenv_secret",
             ),
-            (
-                format!(
-                    "AccountKey={}todo{}==",
-                    noise(41, BASE64),
-                    noise(41, BASE64)
-                ),
-                "azure_storage_key",
-            ),
+            (azure_word_inside, "azure_storage_key"),
             (
                 // AWS's own published secret key, which ends EXAMPLEKEY and
                 // which §9.1 binds. Nothing carves `example` out any more.

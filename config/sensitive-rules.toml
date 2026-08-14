@@ -170,6 +170,8 @@ pattern_override = '''(?i)\b(?:CLOUDFLARE_API_(?:TOKEN|KEY)|CF_API_TOKEN)\s*=\s*
 pattern_decision = "The env-var context anchor is the reason a bare 40-character blob cannot auto-wipe; the value is captured so the value validator sees the token rather than the variable name, which contains the keyword."
 secret_group = 1
 validator = "value_strength"
+entropy_override = 4.3
+entropy_decision = "Upstream's 2.0 is a repository scanner's number and it deleted CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_<24 X> at 2.233 (DMY-162). The pattern fixes the value at 40 characters over 64 symbols, so the two populations are measurable: 80,000 single-case word templates at that length top out at 4.225, and 4.3 rejects 3.4 of every 10,000 random 40-character tokens."
 keywords_override = ["cloudflare_api_", "cf_api_token"]
 keywords_decision = "The local CF_API_TOKEN alias is absent from the upstream keyword list."
 
@@ -258,8 +260,8 @@ confidence = 0.90
 pattern = '''AccountKey=([A-Za-z0-9+/]{86})=='''
 secret_group = 1
 validator = "value_strength"
-entropy = 3.0
-entropy_decision = "The AccountKey= anchor proves the field and says nothing about the value, so the value's own randomness is the only thing separating a real 86-character key from a README placeholder. 3.0 matches the upstream threshold for context-anchored credential rules; a real base64 key measures above 5."
+entropy = 4.8
+entropy_decision = "The AccountKey= anchor proves the field and says nothing about the value, so the value's own randomness is the only thing separating a real 86-character key from a README placeholder. 86 characters leave the widest gap of the four: 500,000 random keys all measure above 4.92 while word templates at that length top out at 4.27, so 4.8 rejects none of the first and all of the second."
 
 [[overlay]]
 name = "azure_sas_token"
@@ -302,8 +304,8 @@ confidence = 0.99
 pattern = '''(?i)aws_secret_access_key["']?\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})'''
 secret_group = 1
 validator = "value_strength"
-entropy = 3.0
-entropy_decision = "Same reasoning as azure_storage_key: the keyword anchor proves the field, not the value. AWS's own published EXAMPLEKEY secret measures above 4."
+entropy = 4.3
+entropy_decision = "Same reasoning and the same value shape as cloudflare_api_token — 40 characters over 64 symbols — so the same number. 3.0 deleted aws_secret_access_key = REPLACE/WITH/YOUR/AWS/SECRET/ACCESS/KEYX at 3.759 (DMY-162). AWS's own published EXAMPLEKEY secret measures 4.663 and is still detected."
 
 [[overlay]]
 name = "http_basic_auth"
@@ -321,8 +323,8 @@ pattern = '''(?m)^(?:export\s+)?[A-Z][A-Z0-9_]{2,}(?:_KEY|_SECRET|_TOKEN|_PASSWO
 # one. Value strength cannot separate them on its own: a placeholder is long.
 validator = "value_strength"
 secret_group = 1
-entropy = 3.5
-entropy_decision = "The variable name is the only evidence, so the value's randomness is what separates MY_API_TOKEN=<real> from the identical line in a README. 3.5 is upstream's own generic-api-key number and is the tightest of the four context rules because this one has the weakest anchor and still auto-wipes at 0.80: a mixed-case template like TODO_before_release measures 3.3, and a real 32-hex token measures above 3.8."
+entropy = 4.4
+entropy_decision = "The variable name is the only evidence, so the value's randomness is what separates MY_API_TOKEN=<real> from the identical line in a README. Alone of the four this rule fixes neither a length nor an alphabet, so its number must clear the word-template ceiling at every length its (\\S+) admits — measured 4.27 at 86 characters — rather than at one. 3.5 deleted MY_API_TOKEN=REPLACE_ME_WITH_THE_REAL_VALUE_PLEASE_OK at 3.631 (DMY-162). The cost is stated in manifest 5.6: a hex-alphabet value can never reach 4.4, so those fall to generic_api_key at 0.75."
 
 [[overlay]]
 name = "db_conn_string"
