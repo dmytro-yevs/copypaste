@@ -14,7 +14,13 @@ SELF_TEST = "--self-test" in sys.argv
 WF = pathlib.Path(".github/workflows")
 
 
+SELF_TEST_FAILURES = 0
+
+
 def emit(cond, desc, detail=""):
+    global SELF_TEST_FAILURES
+    if not cond:
+        SELF_TEST_FAILURES += 1
     print("{}|{}|{}".format("PASS" if cond else "FAIL", desc, "" if cond else detail))
 
 
@@ -897,4 +903,8 @@ targeted_adb "$serial" shell dumpsys power
          bool(adb_guard_violations(guarded + "targeted_adb -s shell id\n", 1))),
     ):
         emit(held, "self-test: {}".format(desc), "the adb structure detector did not reject the fixture")
-sys.exit(0)
+
+# The plain run stays exit 0 so check.sh can enumerate every PASS|FAIL line.
+# --self-test emits only its own verdicts, and a self-test that cannot fail its
+# own process is the defect scripts/mutation-gate exists to catch.
+sys.exit(1 if SELF_TEST and SELF_TEST_FAILURES else 0)
