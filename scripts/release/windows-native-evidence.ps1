@@ -77,6 +77,16 @@ function Assert-PackageIntegrity([string]$Directory, [string]$InstallerPath, [st
     }
 }
 
+# A CLI that cannot reach a daemon still binding its endpoint is the expected
+# state on the way to ready. Anything else is reported on the probe that saw it
+# rather than only in the final timeout line.
+function Get-CliProbeOutcome([string]$Failure) {
+    if ($Failure -match "not_ready|offline|refused|No connection could be made|cannot find the file") {
+        return New-ProbeNotReady "the CLI has not reached the daemon yet: $Failure"
+    }
+    return New-ProbeTransient "the CLI failed: $Failure"
+}
+
 function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, [string]$DaemonError) {
     $parts = @()
     if ($App) {
@@ -168,21 +178,24 @@ try {
     $daemonOut = Join-Path $runRoot "daemon.stdout.log"
     $daemonErr = Join-Path $runRoot "daemon.stderr.log"
     $daemon = Start-Process -FilePath $daemonExe -ArgumentList "--foreground", "--data-dir", $dataRoot, "--port", "48654", "--device-name", "Windows-CI" -WindowStyle Hidden -RedirectStandardOutput $daemonOut -RedirectStandardError $daemonErr -PassThru
-    $status = Wait-Observed "explicit daemon IPC readiness" {
-        if ($daemon.HasExited) { throw "daemon exited with code $($daemon.ExitCode)" }
-        Invoke-Json $cli @("status")
-    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr }
+    $status = Wait-Readiness "explicit daemon IPC readiness" {
+        if ($daemon.HasExited) { return New-ProbeInvariant "the daemon exited with code $($daemon.ExitCode)" }
+        try { return New-ProbeReady (Invoke-Json $cli @("status")) }
+        catch { return Get-CliProbeOutcome $_.Exception.Message }
+    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr } 15000 20 1
     Assert-True ($status.data.status.clipboard_backend -eq "windows-system-clipboard") "fake clipboard backend"
     Invoke-Json $cli @("add", "named-pipe evidence") | Out-Null
     $search = Invoke-Json $cli @("search", "named-pipe evidence")
     Assert-True ($search.data.page.items.Count -eq 1) "named-pipe add/search did not round-trip"
 
     Set-Clipboard -Value "native clipboard evidence"
-    $captured = Wait-Observed "native clipboard capture" {
-        $reply = Invoke-Json $cli @("search", "native clipboard evidence")
-        if ($reply.data.page.items.Count -ge 1) { return $reply }
-        return $null
-    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr }
+    $captured = Wait-Readiness "native clipboard capture" {
+        if ($daemon.HasExited) { return New-ProbeInvariant "the daemon exited with code $($daemon.ExitCode)" }
+        try { $reply = Invoke-Json $cli @("search", "native clipboard evidence") }
+        catch { return Get-CliProbeOutcome $_.Exception.Message }
+        if ($reply.data.page.items.Count -ge 1) { return New-ProbeReady $reply }
+        return New-ProbeNotReady "the clipboard text has not reached the store"
+    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr } 15000 20 1
 
     $transfer = Join-Path $runRoot "transfer.json"
     Invoke-Json $cli @("export", "--output", $transfer) | Out-Null
@@ -199,14 +212,17 @@ try {
     Remove-Item Env:COPYPASTE_DAEMON_BIN -ErrorAction SilentlyContinue
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $app = Start-Process -FilePath $ui -PassThru
-    Wait-Observed "installed app, native window, and installed sidecar readiness" {
+    Wait-Readiness "installed app, native window, and installed sidecar readiness" {
+        $app.Refresh()
+        if ($app.HasExited) { return New-ProbeInvariant "the installed app exited with code $($app.ExitCode)" }
         $root = Get-AppAutomationRoot $app
-        if ($null -eq $root) { return $null }
+        if ($null -eq $root) { return New-ProbeNotReady "the app has published no native window handle" }
         $sidecars = @(Get-Process -Name "copypaste-daemon" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $daemonExe })
-        if ($sidecars.Count -ne 1) { return $null }
-        Invoke-Json $cli @("status") | Out-Null
-        return $root
-    } { Get-InstalledDiagnostics $app $dataRoot $daemonErr } 30000 | Out-Null
+        if ($sidecars.Count -ne 1) { return New-ProbeNotReady "the installed sidecar count is $($sidecars.Count), not 1" }
+        try { Invoke-Json $cli @("status") | Out-Null }
+        catch { return Get-CliProbeOutcome $_.Exception.Message }
+        return New-ProbeReady $root
+    } { Get-InstalledDiagnostics $app $dataRoot $daemonErr } 30000 24 1 | Out-Null
     $preserved = Invoke-Json $cli @("search", "named-pipe evidence")
     Assert-True ($preserved.data.page.items.Count -eq 1) "in-place update lost clipboard history"
     $timer.Stop()
@@ -240,11 +256,11 @@ try {
     # A killed app must take the sidecar it started with it (ADR-0018's job
     # object). Asking the CLI to shut the daemon down here instead would pass
     # whether or not an orphan was left holding the pipe.
-    Wait-Observed "installed process shutdown" {
+    Wait-Readiness "installed process shutdown" {
         $installedProcesses = @(Get-Process -Name "copypaste-ui", "copypaste", "copypaste-daemon" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$installDir*" })
-        if ($installedProcesses.Count -eq 0) { return $true }
-        return $null
-    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr } | Out-Null
+        if ($installedProcesses.Count -eq 0) { return New-ProbeReady $true }
+        return New-ProbeNotReady "$($installedProcesses.Count) installed process(es) are still running"
+    } { Get-InstalledDiagnostics $null $dataRoot $daemonErr } 15000 | Out-Null
     Assert-Unreachable $cli
 
     $uninstaller = Join-Path $installDir "uninstall.exe"
