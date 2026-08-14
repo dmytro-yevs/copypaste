@@ -312,16 +312,19 @@ confidence = 0.75
 # `access_token` to `access`, and every rule in the set pays for that.
 # `db password` and `client secret` need no branch of their own; the bare
 # `password` and `secret` keywords already match inside them. The `api_key`
-# family is `api_key_kv` below, which is this rule plus a word list.
+# family is `api_key_kv` below.
+#
+# No `secret_shape_allowlist_from` here or on that rule: both are
+# `never_auto_delete`, so the shape guard could prevent no deletion, and its
+# only reachable effect was to send an all-letter password or key to
+# `clipboard_fts` (DMY-162). The four rules with machine-issued values keep it.
 pattern = '''(?i)(?:password|passwd|secret|auth[-_. ]token|access[-_. ]token|client_secret|refresh[-_. ]token|db_password)["']?\s*[:=]\s*(\S{6,})'''
 validator = "value_strength"
 secret_group = 1
 entropy = 2.0
 entropy_decision = "Measured, and it answers only the repetitive half of the placeholder pair in manifest 5.6. This rule's own 9.1 fixtures fix the ceiling: password=hunter2 and secret = !abcdef measure 2.807, so any threshold that reached a word-spelled template would take a real short password with it — 2.5 rejects 19% of six-character values and 2.8 rejects passw0rd at 2.750. At 2.0 the rule rejects a value spelled from four or fewer effective symbols, and costs 1,145 real values in 100,000 at the six characters the pattern admits, 29 at eight and none at ten or more. The word-spelled templates belong to the shape guard, not to this number."
-secret_shape_allowlist_from = "generic-api-key"
-secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist the four context-anchored rules take, and the half of 5.6's pair no threshold here can reach: a value written out of words measures far above 2.807 whatever it says. The cost is larger than for the other five and is not their 1-in-900: this rule's values include human-chosen passwords, for which no digit and no symbol is common rather than rare, so a bare all-letter password is no longer detected here at all. A quoted one still is, because the capture keeps its quotes, and 9.1's password: abcdefghij moves to 9.2 with this."
 never_auto_delete = true
-never_auto_delete_decision = "password= and client_secret= prove which field matched and nothing about the value, which is 4.2's argument for the four context-anchored rules at the same keyword-anchor strength. A template written in words and digits together clears both gates — no threshold below hunter2's 2.807 will ever reach one — and manifest I1 ranks deleting it above leaving a real password unsearchable."
+never_auto_delete_decision = "password= and client_secret= prove which field matched and nothing about the value, which is 4.2's argument for the four context-anchored rules at the same keyword-anchor strength. A template written in words and digits together clears every gate this rule carries, and manifest I1 ranks deleting it above leaving a real password unsearchable."
 
 [[overlay]]
 name = "api_key_kv"
@@ -337,8 +340,6 @@ validator = "value_strength"
 secret_group = 1
 entropy = 2.0
 entropy_decision = "The number is generic_password_kv's, unchanged, because the value population is the same one: what a person or a README writes after a keyword. It answers the repetitive half of 5.6's placeholder pair — TWILIO_API_KEY=ACxxxx... at 0.382 and MAILGUN_API_KEY=key-0000... at 0.741 — and nothing above 9.1's password=hunter2 ceiling of 2.807 may be asked of it."
-secret_shape_allowlist_from = "generic-api-key"
-secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist the five rules beside it take: no digit and no symbol is a template whatever it says, which closes DATADOG_API_KEY=replace-with-your-datadog-api-key and the seven README lines spelled like it."
 never_auto_delete = true
 never_auto_delete_decision = "api_key= proves which field matched and nothing about the value, exactly as password= does for the rule it was split from. A real key still reaches this rule and is still withheld; only the deletion is refused (I1)."
 

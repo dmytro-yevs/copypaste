@@ -649,21 +649,28 @@ gate it *is* one: `MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx` measures 4.515
 and was deleted, while the neighbouring `stripe_live` refuses that same prefix on
 purpose (§3.2, rule 7). Two things close it, and neither is a word list.
 
-**Gitleaks' own `^[a-zA-Z_.-]+$` secret allowlist** guards all five, borrowed
-from the vendored config rather than restated so the pinned checksum governs it:
-a value carrying no digit and no symbol is a template whatever it spells. The
-cost is a real value drawn without one — about 1 in 900 at Cloudflare's 40
-characters, 1 in 7,500 at AWS's, 1 in 57 million at Azure's 86, and 1 in 280 for
-a 32-character alphanumeric `.env` value.
+**Gitleaks' own `^[a-zA-Z_.-]+$` secret allowlist** guards the four rules whose
+values are machine-issued, borrowed from the vendored config rather than
+restated so the pinned checksum governs it: a value carrying no digit and no
+symbol is a template whatever it spells. The cost is a real value drawn without
+one — about 1 in 900 at Cloudflare's 40 characters, 1 in 7,500 at AWS's, 1 in 57
+million at Azure's 86, and 1 in 280 for a 32-character alphanumeric `.env`
+value.
 
-**The cost is different in kind for `generic_password_kv`, and larger.** Those
-odds are for values drawn at random by a machine. A password is chosen by a
-person, for whom "no digit and no symbol" is common rather than rare, so a bare
-all-letter password is no longer detected by this rule at all — a *quoted* one
-still is, because the capture keeps its quotes. That is why §9.1's
-`password: abcdefghij` moves to §9.2 and the 10-character criterion is pinned by
-the CJK pair instead. It is the one place in §5.6 where the guard is paid for in
-missed detections rather than in arithmetic.
+**v2 amendment — the guard is wrong on the two keyword-KV rules, and was removed
+(DMY-162).** Those odds are for values drawn at random by a machine.
+`password:` and `api_key:` admit what a person or a deployment tool typed, for
+whom "no digit and no symbol" is common rather than rare, so the guard's cost
+there is paid in missed detections rather than in arithmetic:
+`password: correcthorsebatterystaple` and `api_key: correcthorsebatterystaple`
+reached **no rule at all**. And it bought nothing in exchange. Both rules are
+`never_auto_delete`, so the guard could not prevent a single deletion; its only
+reachable effect was to move a value from *classified and withheld* to *not
+detected* — neither flagged, nor masked, nor kept out of `clipboard_fts`, which
+is the direction this section's fail-closed amendment forbids and what I4
+prohibits outright. `password: abcdefghij` returns to §9.1 as classified and
+never auto-wiped, and the §9.2 rows the guard closed are `Restricted` instead.
+The four machine-issued rules keep it.
 
 **v2 amendment — a third gate, counted, for one rule only (DMY-162).** A
 template written in words *and* digits reaches neither of the two above: it
@@ -1234,6 +1241,7 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `my_api_key = "correcthorsebatterystaple"`, `export MY_API_KEY="S3cr3tValue123"` | detected — a quoted value keeps its quotes in the capture, and one placeholder marker is not enough to suppress it |
 | `api_key: my-production-service-account-key-2024`, `api_key = prod-datadog-agent-key-1a2b3c4d5e6f`, `apikey=github-actions-deploy-token-2026` | detected; classified, never auto-wipes — a deployment tool's key is hyphenated and word-shaped, and a counted vendored word list took all three (§5.6, DMY-162) |
 | `client secret = Sup3rS3cr3tV@lue!`, `db-password: S3cur3Pass!word` | detected via the bare `secret` / `password` keyword, with no branch of their own |
+| `password: abcdefghij`, `password: correcthorsebatterystaple`, `api_key: correcthorsebatterystaple` | detected; classified, never auto-wipes — an all-letter value is ordinary for what a person types, and the `^[a-zA-Z_.-]+$` guard that closed these sent them to `clipboard_fts` instead (§5.6, I4, DMY-162) |
 | `\u{FF21}\u{FF2B}\u{FF29}\u{FF21}IOSFODNN7EXAMPLE` (full-width AKIA) | detected as AWS key **after NFKC** |
 | 9 CJK chars, e.g. `私的秘密言葉確認鍵` as a KV value | value-strength = **weak** (char gate) |
 | 10 CJK chars `私的秘密言葉確認鍵値` as a KV value | value-strength = **strong** |
@@ -1276,9 +1284,8 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `CLOUDFLARE_API_TOKEN=TheQuickBrownFoxJumpsOverTheLazyDogAbcde`, `=Deploy-Your-Own-Cloudflare-Token-Here-Ab` | 4.753 and 4.106 — over and under 4.3, and the shape guard rejects both |
 | `aws_secret_access_key = ReplaceWithYourAwsSecretAccessKeyPleaseX` | 4.072, and no digit |
 | an Azure, Cloudflare, AWS or dotenv value of 40 or 86 **random letters** | above every threshold these four carry, and still a template by shape: the guard has to hold where entropy cannot. `generic_api_key` had to be read against its own capture before this was true of the Azure spelling (§5.6) |
-| `password: abcdefghij` | 10 letters, no digit and no symbol — the same shape as `MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx`, and §5.3's 10-character criterion is pinned by the CJK pair in §9.1 instead (§5.6, DMY-162) |
 | `TWILIO_API_KEY=ACxxxx…` (0.382), `MAILGUN_API_KEY=key-0000…` (0.741) | repetitive, under `generic_password_kv`'s 2.0 |
-| `export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE`, `=replace-with-your-datadog-api-key`, `STRIPE_API_KEY=sk_test_replace_me_before_you_deploy`, `SLACK_API_KEY=xoxb-put-your-own-workspace-token-here`, `OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY` | ordinary README / `.env` lines, no digit and no symbol |
+| `export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE`, `=replace-with-your-datadog-api-key`, `STRIPE_API_KEY=sk_test_replace_me_before_you_deploy`, `SLACK_API_KEY=xoxb-put-your-own-workspace-token-here`, `OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY` | ordinary README / `.env` lines, no digit and no symbol. **Amended (DMY-162):** `Restricted` — classified, withheld, never auto-wiped — not "no detection at all". The shape guard that closed them took real all-letter passwords and keys with it (§5.6) |
 | `api_key: PUT_YOUR_KEY_HERE_2024`, `=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234`, `=paste_the_token_from_settings_here_2024ab`, `=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024`, `= "CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT"` | words *and* digits, so neither the 2.0 nor the shape guard reaches them: 3.516 – 4.063, all above the 2.807 ceiling §5.6 measures. **Amended (DMY-162):** these are `Restricted` — classified, withheld, never auto-wiped — not "no detection at all". `api_key_kv`'s counted list closed them and took real word-shaped values with it (§5.6) |
 | `CLOUDFLARE_API_KEY=Replace_With_Your_Real_Token_Value123456` | 4.354 at exactly the 40 characters the rule requires, so it clears 4.3 and falsifies §5.6's 4.225 ceiling for mixed case with digits. 4 markers, and `cloudflare_api_token`'s minimum of 3 is what closes it — **not** a higher threshold, which would create deletions (§4.2) |
 | the 20 README / `.env` rows above | asserted as **one** corpus against all three public predicates, each row carrying its own verdict — `Restricted` where a gate was removed, no detection otherwise, and `!may_auto_wipe` for every one. Splitting the corpus into two tests left a row in neither half and untested (DMY-162) |
@@ -1345,7 +1352,7 @@ The api_key returns 401, please investigate
 | `\b` anchor pin | `sendgrid_api_key`, `terraform_cloud_token`, `cloudflare_api_token`, `twilio_signing_key_sid`, `discord_bot_token` contain `\b` |
 | Context-anchor pin | `azure_storage_key` and `cloudflare_api_token` must NOT match without their anchors |
 | Restricted-band pin | the rules that classify without deleting are exactly `credit_card` and the seven keyword/context-anchored rules — asserted as a set, so the band can neither spread nor lose one |
-| Secret-shape pin | those six carry gitleaks' `^[a-zA-Z_.-]+$` secret allowlist, borrowed from the vendored config rather than restated; `generic_api_key`'s own copy admits base64 padding, because its capture swallows it (§5.6) |
+| Secret-shape pin | the four machine-issued rules carry gitleaks' `^[a-zA-Z_.-]+$` secret allowlist, borrowed from the vendored config rather than restated, and the two keyword-KV rules carry none; `generic_api_key`'s own copy admits base64 padding, because its capture swallows it (§5.6) |
 | Anchor-only pin | the rules a restricted match may overrule are exactly `generic_api_key` — asserted as a set, derived from the rule table the way the band is, and refused on a rule that is itself restricted. `heroku_api_key` is restricted instead, because standing alone it had no neighbour to be overruled by (§4.2) |
 | Counted-word-list pin | `cloudflare_api_token` is the only rule carrying a word list over its value; it is the vendored 1 446-entry list rather than a copy, and its minimum is above one (§5.6) |
 | Fail-open pin | a word-shaped `api_key=` value a deployment tool would write is `is_sensitive` and not `may_auto_wipe`. Nothing pinned this while `api_key_kv` carried the counted list, and three such values reached no rule (§5.6, DMY-162) |

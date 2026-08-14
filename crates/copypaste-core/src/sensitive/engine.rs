@@ -1281,25 +1281,28 @@ mod tests {
                 "MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx".to_string(),
                 true,
             ),
+            // All-letter values. The shape guard closed these and sent a real
+            // all-letter password or key to `clipboard_fts` with them, so both
+            // keyword-KV rules gave it up and these are `Restricted` (§5.6).
             (
                 "export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE".to_string(),
-                true,
+                false,
             ),
             (
                 "DATADOG_API_KEY=replace-with-your-datadog-api-key".to_string(),
-                true,
+                false,
             ),
             (
                 "STRIPE_API_KEY=sk_test_replace_me_before_you_deploy".to_string(),
-                true,
+                false,
             ),
             (
                 "# set OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY".to_string(),
-                true,
+                false,
             ),
             (
                 "SLACK_API_KEY=xoxb-put-your-own-workspace-token-here".to_string(),
-                true,
+                false,
             ),
             (
                 "TWILIO_API_KEY=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string(),
@@ -1310,7 +1313,7 @@ mod tests {
                 true,
             ),
             ("SENTRY_API_KEY=<your key here>".to_string(), true),
-            ("password: abcdefghij".to_string(), true),
+            ("password: abcdefghij".to_string(), false),
             (format!("AccountKey={}==", noise(86, LETTERS)), true),
             (format!("CLOUDFLARE_API_TOKEN={}", noise(40, LETTERS)), true),
             (
@@ -1357,6 +1360,35 @@ mod tests {
                 !det.may_auto_wipe(&text),
                 "{text} -> {:?}",
                 all_rules(&det, &text)
+            );
+        }
+    }
+
+    /// What the shape guard cost. `^[a-zA-Z_.-]+$` reads "no digit and no
+    /// symbol, so it is a template", which holds for a machine-issued token and
+    /// not for what a person types after `password:`. Both rules are
+    /// `never_auto_delete`, so the guard prevented no deletion here — its only
+    /// reachable effect was to leave a real password or key neither flagged nor
+    /// masked, with the plaintext in `clipboard_fts` (§5.6, I4, DMY-162).
+    #[test]
+    fn an_all_letter_password_or_key_is_still_withheld() {
+        let det = detector();
+        for (text, rule) in [
+            ("password: correcthorsebatterystaple", "generic_password_kv"),
+            ("password: abcdefghij", "generic_password_kv"),
+            (
+                "client_secret = tribbleflagondovecote",
+                "generic_password_kv",
+            ),
+            ("api_key: correcthorsebatterystaple", "api_key_kv"),
+            ("apikey=paperclipwindowlatch", "api_key_kv"),
+        ] {
+            assert!(fired(&det, text, rule), "{text} reached no rule");
+            assert!(det.is_sensitive(text), "{text}");
+            assert!(
+                !det.may_auto_wipe(text),
+                "{text} -> {:?}",
+                all_rules(&det, text)
             );
         }
     }

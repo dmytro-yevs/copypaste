@@ -272,6 +272,13 @@ mod tests {
     /// prefix on purpose. Gitleaks answers it with a shape rather than a word
     /// list, and this asserts the literal is *its* one — borrowed from the
     /// vendored config, not a second copy that can drift from it.
+    ///
+    /// The four are the rules whose values are machine-issued, where a value
+    /// drawn without a digit or a symbol is 1 in 280 to 1 in 57 million. The two
+    /// keyword-KV rules are excluded: their values are what a person typed, for
+    /// which all-letter is ordinary, and both are `never_auto_delete`, so the
+    /// guard prevented no deletion and only sent a real password or key to
+    /// `clipboard_fts` (§5.6, I4).
     #[test]
     fn context_anchored_rules_carry_the_vendored_secret_shape_guard() {
         for name in [
@@ -279,14 +286,15 @@ mod tests {
             "cloudflare_api_token",
             "aws_secret_access_key",
             "dotenv_secret",
-            "generic_password_kv",
-            "api_key_kv",
         ] {
             assert_eq!(
                 secret_shape(rule(name)),
                 Some(&["^[a-zA-Z_.-]+$"][..]),
                 "{name}"
             );
+        }
+        for name in ["generic_password_kv", "api_key_kv"] {
+            assert_eq!(secret_shape(rule(name)), None, "{name}");
         }
         // Upstream's own capture group admits `=`, so this rule sees
         // `<86 letters>==` where the allowlist was written for the value alone
