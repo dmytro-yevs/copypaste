@@ -109,7 +109,7 @@ if [[ "$pid_now" == "$pid1" ]]; then
     ok "the process survived ${SETTLE_SECS}s (setup did not abort)"
 else
     bad "the process survived ${SETTLE_SECS}s (setup did not abort)" \
-        "pid was $pid1, is now '${pid_now:-gone}'"
+        "pid was $pid1, is now '${pid_now:-gone}' — $(process_gone_cause "$OUT/launch1.log" "$pid1")"
 fi
 
 crashes="$(crash_report "$OUT/launch1.log" "$pid1")"
@@ -241,12 +241,32 @@ else
     bad "force-stop ended the first process" "pid $(app_pid) is still running"
 fi
 
-adb logcat -c || true
-start2="$(sh_ am start -W -n "$MAIN")"
-wait_for 60 has_pid || true
-pid2="$(app_pid)"
-sleep "$SETTLE_SECS"
-dump_logcat launch2
+second_launch() {
+    adb logcat -c || true
+    start2="$(sh_ am start -W -n "$MAIN")"
+    wait_for 60 has_pid || true
+    pid2="$(app_pid)"
+    sleep "$SETTLE_SECS"
+    dump_logcat launch2
+}
+
+# Only a process that is gone *and* was taken away by something outside this
+# package. Anything else stays the caller's problem to assert on.
+second_launch_foreign_kill() {
+    [[ -z "$(app_pid)" ]] || return 0
+    foreign_dependency_kill "$OUT/launch2.log" "$pid2" || true
+}
+
+second_launch
+foreign_kill="$(second_launch_foreign_kill)"
+if [[ -n "$foreign_kill" ]]; then
+    # GMS restarts on its own on a google_apis emulator and the platform kills
+    # every client of its providers; the retry is what keeps the round-trip an
+    # assertion instead of an excuse.
+    probe "the platform killed the second launch once" "$foreign_kill"
+    second_launch
+    foreign_kill="$(second_launch_foreign_kill)"
+fi
 
 if [[ -n "$pid2" && "$pid2" != "$pid1" ]]; then
     ok "the second launch is a new process (pid $pid2)"
@@ -254,11 +274,16 @@ else
     bad "the second launch is a new process" "pid1=$pid1 pid2=${pid2:-gone}; $start2"
 fi
 
+survived=no
 if [[ -n "$(app_pid)" ]]; then
+    survived=yes
     ok "the second process survived ${SETTLE_SECS}s"
+elif [[ -n "$foreign_kill" ]]; then
+    note "that the second process survived ${SETTLE_SECS}s" \
+         "the platform killed it twice, both times because a process outside this package died: $foreign_kill. ApplicationExitInfo records that as REASON_DEPENDENCY_DIED, so it is the emulator image and not the artefact under test"
 else
     bad "the second process survived ${SETTLE_SECS}s" \
-        "a re-minted device secret cannot open the existing database, and that is fatal to setup"
+        "$(process_gone_cause "$OUT/launch2.log" "$pid2")"
 fi
 
 crashes2="$(crash_report "$OUT/launch2.log" "$pid2")"
@@ -274,7 +299,15 @@ keystore2="$(keystore_report "$OUT/launch2.log")"
 # The proof ADR-0003 asks for. A second launch that minted a fresh secret would
 # either fail to open this file or replace it; an unchanged page-1 salt says
 # the same database was reopened with a key that still works.
-if [[ -n "$DB_REL" && -n "$salt1" ]]; then
+if [[ -z "$DB_REL" || -z "$salt1" ]]; then
+    note "the keystore round-trip" "there was no first-launch database to compare against"
+elif [[ "$survived" == no ]]; then
+    # An unchanged salt on a launch that was killed before it opened anything
+    # is a file nobody touched, not a key that still works.
+    db_fingerprint launch2 | sed 's/^/        /'
+    note "the keystore round-trip" \
+         "the second process did not live long enough to reopen the database"
+else
     db_fingerprint launch2 | sed 's/^/        /'
     salt2="$(salt_of "$OUT/launch2-copypaste-v2.db" 2>/dev/null || true)"
     if [[ -n "$salt2" && "$salt2" == "$salt1" ]]; then
@@ -283,8 +316,6 @@ if [[ -n "$DB_REL" && -n "$salt1" ]]; then
         bad "the second launch reopened the same database (salt unchanged)" \
             "salt was $salt1, is now ${salt2:-<database gone>} — the device secret did not survive"
     fi
-else
-    note "the keystore round-trip" "there was no first-launch database to compare against"
 fi
 
 if [[ -n "$prefs_hash_1" ]]; then

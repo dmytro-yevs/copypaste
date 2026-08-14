@@ -7,6 +7,32 @@ R8_PATTERNS="ClassNotFoundException|NoSuchMethodException|NoSuchMethodError|NoSu
 crash_report() { log_blocks "$1" "$CRASH_PATTERNS" "${2:-}"; }
 r8_report()    { log_blocks "$1" "$R8_PATTERNS" "${2:-}"; }
 
+# The platform's own reason for killing a pid, quoted rather than guessed.
+# `ProcessRecord.killLocked` writes `ActivityManager: Killing <pid>:<proc>/<uid>
+# (adj N): <reason>`, so a process that is simply gone and one the system took
+# away are distinguishable and must not be reported as the same failure.
+platform_kill_reason() { # <log> <pid>
+    [[ -n "${2:-}" ]] || return 0
+    sed -n "s/.*ActivityManager: Killing $2:[^ ]* (adj [^)]*): //p" "$1" | head -n 1
+}
+
+# A kill nothing in this artefact caused. `ContentProviderHelper
+# .removeDyingProviderLocked` kills every client of a provider whose host is
+# dying, with reason `depends on provider <authority> in dying proc <process>
+# (adj N)` and `ApplicationExitInfo.REASON_DEPENDENCY_DIED`. On a google_apis
+# emulator that host is GMS, which restarts on its own; the named process is
+# what says whether the death started inside this package or outside it.
+foreign_dependency_kill() { # <log> <pid>
+    local reason dying
+    reason="$(platform_kill_reason "$@")"
+    [[ "$reason" == "depends on provider "* ]] || return 1
+    dying="$(sed -n 's/.* in dying proc \(..*\) (adj [^)]*)$/\1/p' <<<"$reason")"
+    # `??` is the platform failing to name the host: unattributable, so not a
+    # licence to stop asserting.
+    [[ "$dying" == *.* && "$dying" != "$PKG" && "$dying" != "$PKG:"* ]] || return 1
+    printf '%s' "$reason"
+}
+
 log_blocks() {
     awk -v pat="$2" -v app="$PKG" -v expected_pid="$3" '
         function log_pid(line, fields, count, copy) {
@@ -157,4 +183,53 @@ android_log_report_self_test() { # <temporary directory>
     [[ -z "$(r8_report "$t/r8-clean.log")" ]] \
         && ok "an ordinary log holds no stripped symbol" \
         || bad "an ordinary log holds no stripped symbol"
+
+    group "self-test: who killed the process"
+
+    # Verbatim from an API 34 google_apis run: GMS restarts, and the platform
+    # takes every client of its providers with it.
+    printf '%s\n' \
+        '08-10 04:27:24.300   482   591 I ActivityManager: Killing 4242:com.copypaste.app/u0a158 (adj 0): depends on provider com.google.android.gms.fonts/com.google.android.gms.fonts.provider.FontsProvider in dying proc com.google.android.gms.persistent (adj 0)' \
+        > "$t/dependency-died.log"
+    [[ "$(platform_kill_reason "$t/dependency-died.log" 4242)" == "depends on provider com.google.android.gms.fonts/"* ]] \
+        && ok "the platform's own kill reason is read back verbatim" \
+        || bad "the platform's own kill reason is read back verbatim" \
+               "$(platform_kill_reason "$t/dependency-died.log" 4242)"
+    [[ -n "$(foreign_dependency_kill "$t/dependency-died.log" 4242)" ]] \
+        && ok "a provider host outside the package is a foreign kill" \
+        || bad "a provider host outside the package is a foreign kill"
+    [[ -z "$(platform_kill_reason "$t/dependency-died.log" 9999)" ]] \
+        && ok "another process's kill is not this pid's" \
+        || bad "another process's kill is not this pid's"
+
+    # Our own provider host dying is our defect, and reads identically until
+    # the dying process is compared against the package.
+    printf '%s\n' \
+        "08-10 04:27:24.300   482   591 I ActivityManager: Killing 4242:$PKG/u0a158 (adj 0): depends on provider $PKG/.HistoryProvider in dying proc $PKG:worker (adj 0)" \
+        > "$t/our-provider-died.log"
+    foreign_dependency_kill "$t/our-provider-died.log" 4242 >/dev/null \
+        && bad "a provider host inside the package is not a foreign kill" \
+        || ok "a provider host inside the package is not a foreign kill"
+
+    printf '%s\n' \
+        '08-10 04:27:24.300   482   591 I ActivityManager: Killing 4242:com.copypaste.app/u0a158 (adj 900): empty #17' \
+        > "$t/lmk.log"
+    foreign_dependency_kill "$t/lmk.log" 4242 >/dev/null \
+        && bad "a kill that is not a dependency death is not one" \
+        || ok "a kill that is not a dependency death is not one"
+    [[ "$(platform_kill_reason "$t/lmk.log" 4242)" == "empty #17" ]] \
+        && ok "a non-dependency kill still names its reason" \
+        || bad "a non-dependency kill still names its reason" \
+               "$(platform_kill_reason "$t/lmk.log" 4242)"
+
+    printf '%s\n' \
+        '08-10 04:27:24.300   482   591 I ActivityManager: Killing 4242:com.copypaste.app/u0a158 (adj 0): depends on provider com.example.thing/.P in dying proc ?? (adj 0)' \
+        > "$t/unnamed-host.log"
+    foreign_dependency_kill "$t/unnamed-host.log" 4242 >/dev/null \
+        && bad "an unnamed dying host is not attributed away from the build" \
+        || ok "an unnamed dying host is not attributed away from the build"
+
+    [[ -z "$(platform_kill_reason "$t/clean.log" 1234)" ]] \
+        && ok "a log with no kill record reports no reason" \
+        || bad "a log with no kill record reports no reason"
 }
