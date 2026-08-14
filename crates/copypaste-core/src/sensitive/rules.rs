@@ -234,6 +234,12 @@ mod tests {
     /// no shape is one judgement read twice; a unique literal is separate
     /// evidence and still deletes over the same bytes (§4.2, DMY-162). Pinned as
     /// a set, because the failure was a veto written over every rule at once.
+    ///
+    /// `heroku_api_key` is the shape this band cannot protect: `anchor_only`
+    /// withholds only where a restricted match covers the same bytes, and a bare
+    /// `heroku …: <UUID>` has no neighbour, so the rule deleted it. The band is
+    /// for a rule that must still delete *somewhere*; a rule whose value proves
+    /// nothing anywhere belongs in the restricted band instead (DMY-162).
     #[test]
     fn the_anchor_only_band_is_exactly_the_rules_with_no_shape_of_their_own() {
         let mut anchor_only: Vec<_> = RULES
@@ -242,7 +248,8 @@ mod tests {
             .map(|rule| rule.name)
             .collect();
         anchor_only.sort_unstable();
-        assert_eq!(anchor_only, ["generic_api_key", "heroku_api_key"]);
+        assert_eq!(anchor_only, ["generic_api_key"]);
+        assert!(rule("heroku_api_key").never_auto_delete);
         for name in [
             "github_classic_pat",
             "hashicorp_vault",
