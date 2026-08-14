@@ -1885,8 +1885,8 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)[\\w.-]{0,50}?(?:heroku)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
         validator: Validator::None,
         secret_group: 0,
-        never_auto_delete: false,
-        anchor_only: true,
+        never_auto_delete: true,
+        anchor_only: false,
         entropy: None,
         keywords: &[
             "heroku",
