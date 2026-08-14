@@ -146,11 +146,18 @@ mod tests {
             ("cloudflare_api_token", 4.3),
             ("aws_secret_access_key", 4.3),
             ("dotenv_secret", 4.4),
+            // `password=` and `api_key=` are the same evidence at the same
+            // strength, and this rule stated no threshold at all. Its number is
+            // an order lower because its values include human-chosen passwords:
+            // §9.1's `password=hunter2` measures 2.807 and fixes the ceiling, so
+            // 2.0 reaches the repetitive templates and no further (§5.6).
+            ("generic_password_kv", 2.0),
         ] {
             let rule = rule(name);
             assert!(rule.secret_group > 0, "{name} does not capture its value");
             assert_eq!(rule.validator, Validator::ValueStrength, "{name}");
             assert_eq!(rule.entropy, Some(entropy), "{name}");
+            assert!(rule.never_auto_delete, "{name} may still delete");
         }
     }
 
@@ -168,6 +175,7 @@ mod tests {
             "cloudflare_api_token",
             "aws_secret_access_key",
             "dotenv_secret",
+            "generic_password_kv",
         ] {
             for allowlist in rule(name).allowlists {
                 assert!(
@@ -187,16 +195,27 @@ mod tests {
     /// vendored config, not a second copy that can drift from it.
     #[test]
     fn context_anchored_rules_carry_the_vendored_secret_shape_guard() {
-        let vendored = secret_shape(rule("generic_api_key")).expect("upstream keeps it");
-        assert_eq!(vendored, ["^[a-zA-Z_.-]+$"]);
         for name in [
             "azure_storage_key",
             "cloudflare_api_token",
             "aws_secret_access_key",
             "dotenv_secret",
+            "generic_password_kv",
         ] {
-            assert_eq!(secret_shape(rule(name)), Some(vendored), "{name}");
+            assert_eq!(
+                secret_shape(rule(name)),
+                Some(&["^[a-zA-Z_.-]+$"][..]),
+                "{name}"
+            );
         }
+        // Upstream's own capture group admits `=`, so this rule sees
+        // `<86 letters>==` where the allowlist was written for the value alone
+        // and matched nothing — the one spelling the other five reject and this
+        // rule deleted (DMY-162). Widened here and nowhere else.
+        assert_eq!(
+            secret_shape(rule("generic_api_key")),
+            Some(&["^[a-zA-Z_.-]+={0,3}$"][..])
+        );
     }
 
     fn secret_shape(spec: &'static RuleSpec) -> Option<&'static [&'static str]> {

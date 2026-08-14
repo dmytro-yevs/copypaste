@@ -72,9 +72,20 @@ pub struct Detector {
 enum ScanMode {
     /// Every validated match, ranked.
     AllSpans,
+    /// Every validated match this severe or worse.
+    AllAtLeast(Severity),
     /// The first validated match this severe or worse. Rules that cannot reach
     /// it cannot change the answer, so they are not run at all.
     FirstAtLeast(Severity),
+}
+
+impl ScanMode {
+    fn least(self) -> Option<Severity> {
+        match self {
+            ScanMode::AllSpans => None,
+            ScanMode::AllAtLeast(least) | ScanMode::FirstAtLeast(least) => Some(least),
+        }
+    }
 }
 
 impl Detector {
@@ -150,10 +161,11 @@ impl Detector {
             // email address, any `host:port` in a config paste. Running their
             // `captures_iter` and their checksum validators to build findings
             // the caller throws away is the whole of F-CORE-4.
-            if let ScanMode::FirstAtLeast(least) = mode {
-                if self.severities[idx] < least {
-                    continue;
-                }
+            if mode
+                .least()
+                .is_some_and(|least| self.severities[idx] < least)
+            {
+                continue;
             }
             let rule = &self.rules[idx];
             if !rule.keyword_matches(&lowered) {
@@ -183,8 +195,19 @@ impl Detector {
     /// `PG-3`) and destroyed unrecoverable user data each time; manifest I2
     /// keeps them apart, and [`Severity::Restricted`] is the band where they
     /// disagree.
+    ///
+    /// A high-confidence match licenses deletion only where no restricted match
+    /// covers the same bytes. As a plain disjunction the band was inert:
+    /// `generic_api_key` judged the *same value* through the *same* anchor on
+    /// weaker gates and reinstated every deletion it had refused (DMY-162).
     pub fn may_auto_wipe(&self, text: &str) -> bool {
-        self.reaches(text, Severity::HighConfidence)
+        let normalised = normalise(text);
+        let findings =
+            self.scan_normalised(&normalised, ScanMode::AllAtLeast(Severity::Restricted));
+        findings
+            .iter()
+            .filter(|finding| finding.severity >= Severity::HighConfidence)
+            .any(|high| !findings.iter().any(|other| withholds(other, high)))
     }
 
     /// True when this text must be **withheld**: kept out of the search index,
@@ -217,6 +240,18 @@ impl Detector {
             redact_findings(&normalised, &findings)
         }
     }
+}
+
+/// Whether `restricted` refuses deletion of what `high` matched. Two rules over
+/// one span are one judgement and I1 takes the recoverable outcome; on disjoint
+/// spans they are independent evidence and the item still deletes.
+///
+/// Overlap, not containment: `generic_api_key` consumes the trailing newline its
+/// neighbour stops before, so the two spans differ by a byte on the same value.
+fn withholds(restricted: &SpannedFinding, high: &SpannedFinding) -> bool {
+    restricted.severity == Severity::Restricted
+        && restricted.start < high.end
+        && high.start < restricted.end
 }
 
 pub(super) fn compare_rank(a: &SpannedFinding, b: &SpannedFinding) -> std::cmp::Ordering {
@@ -532,7 +567,7 @@ pub(super) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{
-        all_rules, detector, fired, noise, ALNUM, BASE64, BENIGN_CORPUS, HEX,
+        all_rules, detector, fired, noise, ALNUM, BASE64, BENIGN_CORPUS, HEX, LETTERS,
     };
     use super::*;
     use crate::sensitive::finding::{Severity, AUTOWIPE_CONFIDENCE_FLOOR};
@@ -669,7 +704,14 @@ mod tests {
             ("db_password=S3cur3Pass!word", Some("generic_password_kv")),
             ("password=hunter2", Some("generic_password_kv")),
             ("secret = !abcdef", Some("generic_password_kv")),
-            ("password: abcdefghij", Some("generic_password_kv")),
+            // `password: abcdefghij` used to sit here for §5.3's 10-character
+            // criterion. It is spelled with no digit and no symbol, which §5.6's
+            // shape guard now reads as a template; the CJK pair below pins the
+            // same criterion and carries the bytes-versus-chars defect too.
+            (
+                "password: 私的秘密言葉確認鍵値",
+                Some("generic_password_kv"),
+            ),
             (&sendgrid, Some("sendgrid_api_key")),
             (&terraform, Some("terraform_cloud_token")),
             (
@@ -904,16 +946,23 @@ mod tests {
         corpus.push(twilio);
         corpus.push(format!("notes\n{}\nmore notes", "AKIAIOSFODNN7EXAMPLE"));
 
+        corpus.push(format!("CLOUDFLARE_API_TOKEN={}", noise(40, ALNUM)));
+        corpus.push(format!(
+            "CLOUDFLARE_API_TOKEN={}\nghp_{}",
+            noise(40, ALNUM),
+            noise(36, ALNUM)
+        ));
+
         for text in &corpus {
-            let reaches = |least| det.scan_all(text).iter().any(|f| f.severity >= least);
-            assert_eq!(
-                det.may_auto_wipe(text),
-                reaches(Severity::HighConfidence),
-                "{text:?}"
-            );
+            let all = det.scan_all(text);
+            let deletes = all
+                .iter()
+                .filter(|high| high.severity >= Severity::HighConfidence)
+                .any(|high| !all.iter().any(|other| withholds(other, high)));
+            assert_eq!(det.may_auto_wipe(text), deletes, "{text:?}");
             assert_eq!(
                 det.is_sensitive(text),
-                reaches(Severity::Restricted),
+                all.iter().any(|f| f.severity >= Severity::Restricted),
                 "{text:?}"
             );
         }
@@ -1016,8 +1065,171 @@ mod tests {
                 "cloudflare_api_token",
                 "credit_card",
                 "dotenv_secret",
+                "generic_password_kv",
             ]
         );
+    }
+
+    /// What the band is *worth*, which is not what any one rule declares.
+    ///
+    /// Every input here is a real credential that a restricted rule matches and
+    /// a generic rule matches again over the same bytes, on weaker gates. Read
+    /// as a disjunction the generic rule reinstated the deletion, so all ten
+    /// were still destroyed after the band was introduced (DMY-162). The
+    /// per-rule assertion this replaces could not see that.
+    #[test]
+    fn a_restricted_match_withholds_deletion_from_a_generic_rule_over_the_same_bytes() {
+        let det = detector();
+        let key = noise(86, BASE64);
+        let cases = [
+            format!("CLOUDFLARE_API_TOKEN={}", noise(40, ALNUM)),
+            format!("CLOUDFLARE_API_TOKEN=your{}", noise(36, ALNUM)),
+            format!("CLOUDFLARE_API_TOKEN=dummy{}", noise(35, ALNUM)),
+            format!("aws_secret_access_key = {}", noise(40, BASE64)),
+            format!("AccountKey={key}=="),
+            format!("AccountKey=your{}==", noise(82, BASE64)),
+            format!(
+                "DefaultEndpointsProtocol=https;AccountName=dev;AccountKey={key}==;\
+                 EndpointSuffix=core.windows.net"
+            ),
+            format!("MY_API_TOKEN={}", noise(40, ALNUM)),
+            format!("MY_API_TOKEN=dummy{}", noise(35, ALNUM)),
+            format!("export SERVICE_SECRET={}", noise(40, ALNUM)),
+        ];
+        for text in &cases {
+            let findings = det.scan_all(text);
+            assert!(det.is_sensitive(text), "{text}");
+            assert!(
+                !det.may_auto_wipe(text),
+                "{text} -> {:?}",
+                all_rules(&det, text)
+            );
+            // The overlap has to be present, or the assertion above would pass
+            // on a fixture that never reached the generic rule at all.
+            let high = findings
+                .iter()
+                .find(|finding| finding.severity == Severity::HighConfidence)
+                .unwrap_or_else(|| panic!("no generic rule fired on {text}"));
+            assert!(
+                findings.iter().any(|other| withholds(other, high)),
+                "{text}"
+            );
+        }
+    }
+
+    /// Ordinary README and `.env` lines, through the public API rather than one
+    /// rule at a time. Every value is spelled out of words or repeated
+    /// characters, and most were `may_auto_wipe = true` mid-branch: the
+    /// `API_KEY=` lines through `generic_password_kv`, which carried neither a
+    /// threshold nor a shape guard, and `AccountKey=<86 letters>==` through
+    /// `generic_api_key`, whose capture takes the base64 padding so its own
+    /// guard missed the value it was written for.
+    #[test]
+    fn readme_and_dotenv_templates_reach_no_rule() {
+        let det = detector();
+        for text in [
+            // DMY-162's last named residue.
+            "MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx".to_string(),
+            "export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE".to_string(),
+            "DATADOG_API_KEY=replace-with-your-datadog-api-key".to_string(),
+            "STRIPE_API_KEY=sk_test_replace_me_before_you_deploy".to_string(),
+            "# set OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY".to_string(),
+            "SLACK_API_KEY=xoxb-put-your-own-workspace-token-here".to_string(),
+            "TWILIO_API_KEY=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string(),
+            "MAILGUN_API_KEY=key-0000000000000000000000000000000".to_string(),
+            "SENTRY_API_KEY=<your key here>".to_string(),
+            "password: abcdefghij".to_string(),
+            format!("AccountKey={}==", noise(86, LETTERS)),
+            format!("CLOUDFLARE_API_TOKEN={}", noise(40, LETTERS)),
+            format!("aws_secret_access_key = {}", noise(40, LETTERS)),
+            format!("MY_API_TOKEN={}", noise(40, LETTERS)),
+        ] {
+            assert!(
+                det.scan_all(&text).is_empty(),
+                "{text} -> {:?}",
+                all_rules(&det, &text)
+            );
+            assert!(!det.is_sensitive(&text), "{text}");
+            assert!(!det.may_auto_wipe(&text), "{text}");
+        }
+    }
+
+    /// The templates neither gate reaches: written in words *and* digits, so the
+    /// shape guard does not apply, and above every threshold `generic_password_kv`
+    /// may carry — its own §9.1 fixture `password=hunter2` measures 2.807 and
+    /// fixes the ceiling. They are withheld and never deleted, which is what the
+    /// band is for (I1).
+    #[test]
+    fn a_template_no_gate_reaches_is_withheld_and_never_deleted() {
+        let det = detector();
+        for text in [
+            "api_key: PUT_YOUR_KEY_HERE_2024",
+            "CLOUDFLARE_API_KEY=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234",
+            "GITHUB_API_KEY=paste_the_token_from_settings_here_2024ab",
+            "AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024",
+            "my_api_key = \"CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT\"",
+        ] {
+            assert!(det.is_sensitive(text), "{text}");
+            assert!(
+                !det.may_auto_wipe(text),
+                "{text} -> {:?}",
+                all_rules(&det, text)
+            );
+        }
+    }
+
+    /// The other half, or the fix would be a blanket veto: a secret with a
+    /// distinctive literal of its own sits on a *disjoint* span, is independent
+    /// evidence, and still deletes the item.
+    #[test]
+    fn a_disjoint_secret_beside_a_restricted_match_still_deletes() {
+        let det = detector();
+        let cloudflare = format!("CLOUDFLARE_API_TOKEN={}", noise(40, ALNUM));
+        for text in [
+            format!("card 4111 1111 1111 1111\nghp_{}", noise(36, ALNUM)),
+            format!("{cloudflare}\nghp_{}", noise(36, ALNUM)),
+            format!("{cloudflare}\nAKIAIOSFODNN7EXAMPLE"),
+            format!(
+                "AccountKey={}==\n-----BEGIN RSA PRIVATE KEY-----",
+                noise(86, BASE64)
+            ),
+        ] {
+            assert!(det.is_sensitive(&text), "{text}");
+            assert!(
+                det.may_auto_wipe(&text),
+                "{text} -> {:?}",
+                all_rules(&det, &text)
+            );
+        }
+    }
+
+    /// Overlap, not containment, and not adjacency. `generic_api_key` consumes
+    /// the trailing newline `cloudflare_api_token` stops before, so the two
+    /// spans over one value differ by a byte; a containment test would miss it
+    /// and delete. Two matches that merely touch are separate values.
+    #[test]
+    fn withholding_takes_any_shared_byte_and_no_fewer() {
+        let restricted = |start, end| SpannedFinding {
+            rule: "credit_card",
+            category: "financial",
+            confidence: 0.99,
+            severity: Severity::Restricted,
+            start,
+            end,
+        };
+        let high = |start, end| SpannedFinding {
+            severity: Severity::HighConfidence,
+            ..restricted(start, end)
+        };
+        assert!(withholds(&restricted(0, 61), &high(0, 61)));
+        assert!(withholds(&restricted(0, 61), &high(0, 62)));
+        assert!(withholds(&restricted(48, 147), &high(48, 148)));
+        assert!(withholds(&restricted(10, 20), &high(0, 61)));
+        assert!(!withholds(&restricted(0, 61), &high(61, 100)));
+        assert!(!withholds(&restricted(61, 100), &high(0, 61)));
+        // Only the restricted band withholds; two deletable rules over one span
+        // are still deletable.
+        assert!(!withholds(&high(0, 61), &high(0, 61)));
     }
 
     /// I8: no silent drops. Name, category and confidence travel *with* the
@@ -1200,7 +1412,7 @@ mod tests {
     #[test]
     fn scan_all_iterates_past_invalid_candidates_for_the_same_rule() {
         let det = detector();
-        let text = "password=short password=hunter2 password=abcdefghij";
+        let text = "password=short password=hunter2 password=abcdefgh1j";
         let findings: Vec<_> = det
             .scan_all(text)
             .into_iter()
@@ -1209,7 +1421,7 @@ mod tests {
 
         assert_eq!(findings.len(), 2);
         assert_eq!(&text[findings[0].byte_range()], "password=hunter2");
-        assert_eq!(&text[findings[1].byte_range()], "password=abcdefghij");
+        assert_eq!(&text[findings[1].byte_range()], "password=abcdefgh1j");
     }
 
     #[test]
