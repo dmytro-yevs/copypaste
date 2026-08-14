@@ -939,13 +939,11 @@ mod tests {
 
     /// Every §9.1 keyword-KV positive in one list, with the rule that owns it.
     ///
-    /// The `api_key` family carries the vendored placeholder vocabulary and the
-    /// rest do not, which is the whole of the split. Borrowing that list onto the
-    /// undivided rule suppresses eight of these outright — `value`, `acces` and
-    /// `word` are all stopwords — and a suppressed 0.75 rule is a credential
-    /// that is neither flagged, nor masked, nor kept out of `clipboard_fts`
-    /// (§5.6 fail-closed). Those eight are what a later "one rule would do"
-    /// takes out, so they are pinned here with the rest.
+    /// The vendored placeholder vocabulary suppresses eight of these outright —
+    /// `value`, `acces` and `word` are all stopwords — and a suppressed 0.75 rule
+    /// is a credential that is neither flagged, nor masked, nor kept out of
+    /// `clipboard_fts` (§5.6 fail-closed). That is why neither rule carries it;
+    /// the eight are pinned here so a rule that takes it back is caught.
     #[test]
     fn every_binding_keyword_kv_positive_is_still_detected() {
         let det = detector();
@@ -982,8 +980,8 @@ mod tests {
             ("api.key = abc123XYZlong", "api_key_kv"),
             ("api key: abc123XYZlong", "api_key_kv"),
             ("my_api_key = \"correcthorsebatterystaple\"", "api_key_kv"),
-            // One marker, and the reason the count starts at two: `value` is a
-            // stopword, and §9.1 binds the quoted `.env` form as detected.
+            // `value` is a stopword, so a counted list at any minimum this rule
+            // could carry takes a real credential §9.1 binds as detected.
             ("export MY_API_KEY=\"S3cr3tValue123\"", "api_key_kv"),
         ] {
             assert!(
@@ -1016,11 +1014,13 @@ mod tests {
         let det = detector();
         let template = "CLOUDFLARE_API_KEY=Replace_With_Your_Real_Token_Value123456";
         assert!(
-            det.scan_all(template).is_empty(),
+            !fired(&det, template, "cloudflare_api_token"),
             "{template} -> {:?}",
             all_rules(&det, template)
         );
-        assert!(!det.is_sensitive(template));
+        // `API_KEY=` makes this an `api_key_kv` line too, and that rule carries
+        // no word list any more, so the item is withheld rather than undetected.
+        assert!(det.is_sensitive(template));
         assert!(!det.may_auto_wipe(template));
         for marker in ["your", "todo", "dummy", "sample"] {
             let text = format!(
