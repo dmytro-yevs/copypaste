@@ -709,14 +709,15 @@ fn borrowed_placeholder_stopwords(
             found.len()
         );
     }
-    let mut stopwords = found[0].stopwords.clone();
-    stopwords.sort();
-    stopwords.dedup();
+    // Verbatim, in upstream's order. The engine lowercases and deduplicates at
+    // construction, so distinctness is owned there; reordering here would make
+    // the borrow a *copy* that no longer matches the rule it was taken from, and
+    // the generated table would carry it twice.
     Ok(Allowlist {
         condition: Condition::Any,
         target: Target::Secret,
         regexes: Vec::new(),
-        stopwords,
+        stopwords: found[0].stopwords.clone(),
         stopword_minimum: minimum,
     })
 }

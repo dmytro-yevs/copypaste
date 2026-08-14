@@ -40,21 +40,63 @@ pub fn render(inputs: &Inputs) -> Result<String> {
     }
     writeln!(out, "];")?;
     writeln!(out)?;
+    // After `SELECTED_GITLEAKS_RULE_IDS`, not before it: check-file-size.sh
+    // measures this file up to its first `#[cfg(test)]` module, and a
+    // 1,446-entry table above that line would read as 1,446 source lines.
+    let shared = shared_stopwords(inputs);
+    for (index, words) in shared.iter().enumerate() {
+        writeln!(out, "static {}: &[&str] = &[", shared_name(index))?;
+        for word in words {
+            writeln!(out, "    {},", rust_string(word))?;
+        }
+        writeln!(out, "];")?;
+        writeln!(out)?;
+    }
     writeln!(
         out,
         "pub(super) static GLOBAL_ALLOWLISTS: &[AllowlistSpec] = &["
     )?;
     for allowlist in &inputs.global_allowlists {
-        render_allowlist(&mut out, allowlist, 1)?;
+        render_allowlist(&mut out, allowlist, 1, &shared)?;
     }
     writeln!(out, "];")?;
     writeln!(out)?;
     writeln!(out, "pub(super) static RULES: &[RuleSpec] = &[")?;
     for rule in &inputs.rules {
-        render_rule(&mut out, rule)?;
+        render_rule(&mut out, rule, &shared)?;
     }
     writeln!(out, "];")?;
     Ok(out)
+}
+
+/// Stopword lists carried by more than one allowlist, in first-appearance order.
+///
+/// Three rules borrow gitleaks' 1,446-entry placeholder vocabulary. Spelled out
+/// at each site the generated table triples, so it is emitted once and
+/// referenced by name.
+fn shared_stopwords(inputs: &Inputs) -> Vec<Vec<String>> {
+    let all = inputs
+        .global_allowlists
+        .iter()
+        .chain(inputs.rules.iter().flat_map(|rule| rule.allowlists.iter()))
+        .map(|allowlist| &allowlist.stopwords)
+        .filter(|words| !words.is_empty());
+    let mut seen: Vec<&Vec<String>> = Vec::new();
+    let mut shared: Vec<Vec<String>> = Vec::new();
+    for words in all {
+        if seen.contains(&words) {
+            if !shared.contains(words) {
+                shared.push(words.clone());
+            }
+        } else {
+            seen.push(words);
+        }
+    }
+    shared
+}
+
+fn shared_name(index: usize) -> String {
+    format!("SHARED_STOPWORDS_{index}")
 }
 
 fn constant(out: &mut String, name: &str, value: &str) -> Result<()> {
@@ -67,7 +109,7 @@ fn constant(out: &mut String, name: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn render_rule(out: &mut String, rule: &Rule) -> Result<()> {
+fn render_rule(out: &mut String, rule: &Rule, shared: &[Vec<String>]) -> Result<()> {
     writeln!(out, "    RuleSpec {{")?;
     string_slice(out, "upstream_ids", &rule.upstream_ids, 2)?;
     writeln!(out, "        name: {},", rust_string(&rule.name))?;
@@ -97,14 +139,19 @@ fn render_rule(out: &mut String, rule: &Rule) -> Result<()> {
     string_slice(out, "keywords", &rule.keywords, 2)?;
     writeln!(out, "        allowlists: &[")?;
     for allowlist in &rule.allowlists {
-        render_allowlist(out, allowlist, 3)?;
+        render_allowlist(out, allowlist, 3, shared)?;
     }
     writeln!(out, "        ],")?;
     writeln!(out, "    }},")?;
     Ok(())
 }
 
-fn render_allowlist(out: &mut String, allowlist: &Allowlist, indent: usize) -> Result<()> {
+fn render_allowlist(
+    out: &mut String,
+    allowlist: &Allowlist,
+    indent: usize,
+    shared: &[Vec<String>],
+) -> Result<()> {
     let pad = "    ".repeat(indent);
     writeln!(out, "{pad}AllowlistSpec {{")?;
     writeln!(
@@ -125,7 +172,13 @@ fn render_allowlist(out: &mut String, allowlist: &Allowlist, indent: usize) -> R
         }
     )?;
     string_slice(out, "regexes", &allowlist.regexes, indent + 1)?;
-    string_slice(out, "stopwords", &allowlist.stopwords, indent + 1)?;
+    match shared
+        .iter()
+        .position(|words| *words == allowlist.stopwords)
+    {
+        Some(index) => writeln!(out, "{pad}    stopwords: {},", shared_name(index))?,
+        None => string_slice(out, "stopwords", &allowlist.stopwords, indent + 1)?,
+    }
     writeln!(
         out,
         "{pad}    stopword_minimum: {},",
