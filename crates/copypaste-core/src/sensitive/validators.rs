@@ -833,13 +833,15 @@ mod tests {
             );
         }
         // `azure_storage_key`'s guard is load-bearing above its own 4.8: 86
-        // random letters measure 5.002 and the rule still refuses them.
-        // `generic_api_key` takes the trailing `==` into its captured value, so
-        // the shape no longer matches there and that rule keeps its own
-        // decision — which is why the restricted band, not the guard, is what
-        // makes these four safe.
+        // random letters measure 5.002 and the rule still refuses them. So does
+        // `generic_api_key` now, whose capture takes the trailing `==` and left
+        // the same template deletable through the one rule that missed it.
         let all_letters = format!("AccountKey={}==", noise(86, LETTERS));
-        assert!(!fired(&det, &all_letters, "azure_storage_key"));
+        assert!(
+            det.scan_all(&all_letters).is_empty(),
+            "{all_letters} -> {:?}",
+            all_rules(&det, &all_letters)
+        );
         // …while values with a credential's randomness are still classified and
         // still withheld. The band takes the deletion, not the detection.
         for (real, rule) in [
@@ -861,12 +863,99 @@ mod tests {
             ),
         ] {
             assert!(det.is_sensitive(&real), "{real}");
+            assert!(!det.may_auto_wipe(&real), "{real}");
             assert_eq!(
                 rule_severity(&det, &real, rule),
                 Some(Severity::Restricted),
                 "{real}"
             );
         }
+    }
+
+    /// The two gates `generic_password_kv` gained, and what they cost.
+    ///
+    /// Neither is a word list: a value spelled from four or fewer effective
+    /// symbols is repetitive, and one spelled with no digit and no symbol is a
+    /// template whatever it says (§5.6). The second is the more expensive of the
+    /// two here, because this rule's values include human-chosen passwords —
+    /// stated in the config decision and pinned by the quoted case below, which
+    /// keeps its quotes in the capture and is still detected.
+    #[test]
+    fn the_password_rule_rejects_repetitive_and_shapeless_values() {
+        let det = detector();
+        for template in [
+            "TWILIO_API_KEY=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "MAILGUN_API_KEY=key-0000000000000000000000000000000",
+            "api_key: xxxxxxxxxxxxxxxxxxxx",
+            "password: abcdefghij",
+            "api_key = your-own-key-goes-here",
+        ] {
+            assert!(
+                !fired(&det, template, "generic_password_kv"),
+                "{template} -> {:?}",
+                all_rules(&det, template)
+            );
+        }
+        // §9.1's own fixtures, which fix the threshold's ceiling at 2.807, and
+        // the 10-character boundary that `password: abcdefghij` used to pin —
+        // now pinned by the CJK pair, which is the fixture carrying the
+        // bytes-versus-chars defect anyway.
+        for credential in [
+            "password=hunter2",
+            "secret = !abcdef",
+            "db_password=S3cur3Pass!word",
+            "password: 私的秘密言葉確認鍵値",
+            "my_api_key = \"correcthorsebatterystaple\"",
+        ] {
+            assert!(
+                fired(&det, credential, "generic_password_kv"),
+                "{credential} -> {:?}",
+                all_rules(&det, credential)
+            );
+            assert!(det.is_sensitive(credential), "{credential}");
+        }
+        assert!(!det.is_sensitive("password: 私的秘密言葉確認鍵"));
+    }
+
+    /// A real credential this rule is the only one to see. It is withheld from
+    /// the index, from sync and from previews, and it is never deleted: the
+    /// keyword proves the field and nothing here proves the value, which is
+    /// §4.2's rule and the reason the four beside it are restricted too.
+    #[test]
+    fn a_real_password_value_is_withheld_and_never_deleted() {
+        let det = detector();
+        for text in [
+            format!("password={}", noise(40, ALNUM)),
+            format!("db_password={}", noise(32, BASE64)),
+            format!("client_secret={}", noise(32, ALNUM)),
+        ] {
+            assert!(fired(&det, &text, "generic_password_kv"), "{text}");
+            assert!(det.is_sensitive(&text), "{text}");
+            assert!(!det.may_auto_wipe(&text), "{text}");
+        }
+    }
+
+    /// `generic_api_key` keeps its own band, its own 3.5 and its own detection.
+    /// Only the padding its capture swallows moved, so a value the vendored
+    /// shape guard was written to reject no longer escapes it.
+    #[test]
+    fn the_upstream_generic_rule_still_detects_and_still_deletes() {
+        let det = detector();
+        for text in [
+            "credential = aB3dE5gH7jK9".to_string(),
+            format!("token: {}", noise(32, ALNUM)),
+            format!("credential={}", noise(40, BASE64)),
+        ] {
+            assert!(fired(&det, &text, "generic_api_key"), "{text}");
+            assert_eq!(
+                rule_severity(&det, &text, "generic_api_key"),
+                Some(Severity::HighConfidence),
+                "{text}"
+            );
+            assert!(det.may_auto_wipe(&text), "{text}");
+        }
+        assert!(!fired(&det, "credential = aaaaaaaaaaaa", "generic_api_key"));
+        assert!(!fired(&det, "credential = AbCdEfGhIjKl", "generic_api_key"));
     }
 
     /// The guarantee the restricted band buys, on inputs where one of these
