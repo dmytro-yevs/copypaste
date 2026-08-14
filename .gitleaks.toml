@@ -22,15 +22,11 @@ useDefault = true
 [[allowlists]]
 description = "Sensitive-detector test corpus and the manifest specifying it. Every site is inside a #[cfg(test)] module or a spec table whose subject is the pattern itself. The private-key form is a bare header with at most 12 bytes of body and no key material."
 targetRules = [
-    "slack-bot-token",
-    "github-app-token",
     "jwt",
     "generic-api-key",
     "private-key",
 ]
 regexes = [
-    '''xoxb-17653285717-17653285718-AbCdEfGhIjKlMnOpQrStUvWx''',
-    '''ghs_16C7e42F292c6912E7710c838347Ae178B4a''',
     '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ1c2VyIn0\.''',
     '''rt_PROD_abc123XYZlongval''',
     '''8f14e45fceea167a5a36dedd4bea2543''',
