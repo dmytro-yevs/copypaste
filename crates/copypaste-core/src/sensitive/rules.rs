@@ -177,6 +177,7 @@ mod tests {
             "aws_secret_access_key",
             "dotenv_secret",
             "generic_password_kv",
+            "api_key_kv",
         ] {
             for allowlist in rule(name).allowlists {
                 assert!(
@@ -187,15 +188,17 @@ mod tests {
         }
     }
 
-    /// The two exceptions, and what makes them safe: the list is gitleaks' own,
+    /// The one exception, and what makes it safe: the list is gitleaks' own,
     /// governed by `VENDORED_CONFIG_SHA256` rather than restated here, and it
     /// suppresses only on a *count* of distinct markers. One marker is what
     /// §9.1 binds as still detected — a real token containing or beginning with
-    /// `todo`, `your`, `dummy` or `sample`, and `MY_API_KEY="S3cr3tValue123"`.
-    /// Each minimum is measured against its own value population (§5.6).
+    /// `todo`, `your`, `dummy` or `sample`. The minimum is measured against this
+    /// rule's own value population, which is machine-issued and fixed at 40
+    /// characters; `api_key_kv`'s was not, and the list took real values with it
+    /// (§5.6, DMY-162).
     #[test]
-    fn the_two_counted_word_lists_are_vendored_and_above_one() {
-        for (name, minimum) in [("api_key_kv", 2), ("cloudflare_api_token", 3)] {
+    fn the_counted_word_list_is_vendored_and_above_one() {
+        for (name, minimum) in [("cloudflare_api_token", 3)] {
             let counted: Vec<_> = rule(name)
                 .allowlists
                 .iter()
@@ -220,14 +223,12 @@ mod tests {
             .iter()
             .find(|allowlist| !allowlist.stopwords.is_empty())
             .expect("generic_api_key keeps its vendored stopwords");
-        for name in ["api_key_kv", "cloudflare_api_token"] {
-            let borrowed = rule(name)
-                .allowlists
-                .iter()
-                .find(|allowlist| !allowlist.stopwords.is_empty())
-                .unwrap();
-            assert_eq!(borrowed.stopwords, upstream.stopwords, "{name}");
-        }
+        let borrowed = rule("cloudflare_api_token")
+            .allowlists
+            .iter()
+            .find(|allowlist| !allowlist.stopwords.is_empty())
+            .unwrap();
+        assert_eq!(borrowed.stopwords, upstream.stopwords);
     }
 
     /// Which rules a restricted neighbour may overrule. A keyword and a value of
