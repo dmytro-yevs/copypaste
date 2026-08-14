@@ -1359,6 +1359,7 @@ The api_key returns 401, please investigate
 | Aggregate-verdict pin | a real credential of each of the four classes is `is_sensitive` and **not** `may_auto_wipe` even where a generic rule matches the same bytes — and a disjoint secret beside one still deletes. The per-rule assertion this replaces could not see the defect (§4.2, DMY-162) |
 | Unique-literal pin | a `ghp_`, `hvs.`, JWT, Slack or OpenAI secret inside a `.env` or `api_key:` wrapper **does** auto-wipe, and the overlapping restricted match is asserted to exist, so the test cannot pass on a fixture that never reached the outer rule |
 | Overlap-shape pin | `withholds` takes any shared byte and no fewer: identical, nested and off-by-one spans withhold, touching spans do not — and overlap alone is not sufficient, because the match must also be anchor-only |
+| Aggregate-verdict cost | the ordered lookup answers what the nested scan answers, over thousands of `.env` lines where every high match is vetoed and neither loop can leave early. Asking the question by re-scanning the findings is quadratic in them: 4 MiB of `CLOUDFLARE_API_TOKEN=` cost 6.0 s against `scan_all`'s 1.3 s, and `sweep_sensitive` pays it once per expired row on every pass (DMY-162). Deterministic, not wall-clock |
 | Category/confidence pin | each P2-ozzt rule is category 0 with confidence ≥ 0.90 |
 | Idempotence | `nfkc_normalize` is the identity on ASCII |
 | Perf | `detect()` over 10 MB of text completes well under the budget (v1: < 500 ms, release only) — pins that no rule is catastrophically backtracking |

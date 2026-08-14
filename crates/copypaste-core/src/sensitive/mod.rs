@@ -28,6 +28,7 @@ mod rules;
 mod rules_generated;
 mod spec;
 mod validators;
+mod verdict;
 mod wipe;
 
 pub use engine::{Detector, DetectorError};
