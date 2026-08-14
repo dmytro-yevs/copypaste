@@ -13,6 +13,11 @@
 # added after `lib/ipc.ts` at 499 lines read as within budget while 154 were
 # comment — the rule had never been measured outside Rust.
 #
+# `tools/` is walked as well as `crates/`, and paths are reported relative to the
+# repository root: `tools/sensitive-rules/src/model.rs` reached 811 lines while
+# this check passed, because rule 5 is about production modules and the walk knew
+# only one directory (DMY-162).
+#
 # Advisory, not a gate. `--porcelain` emits tab-delimited records (header,
 # over*, count, end) for check-file-size-gate.sh.
 set -euo pipefail
@@ -45,13 +50,13 @@ while read -r f; do
     ' "$f")
     if [ "$src" -gt "$TARGET" ]; then
         if [ "$PORCELAIN" -eq 1 ]; then
-            printf 'over\t%s\t%s\n' "$src" "${f#crates/}"
+            printf 'over\t%s\t%s\n' "$src" "$f"
         else
-            printf '%-52s %7s\n' "${f#crates/}" "$src"
+            printf '%-52s %7s\n' "$f" "$src"
         fi
         over=$((over + 1))
     fi
-done < <(find crates \( -name '*.rs' -o -name '*.ts' -o -name '*.tsx' \) \
+done < <(find crates tools \( -name '*.rs' -o -name '*.ts' -o -name '*.tsx' \) \
              -not -path '*/target/*' \
              -not -path '*/node_modules/*' \
              -not -path '*/gen/*' \

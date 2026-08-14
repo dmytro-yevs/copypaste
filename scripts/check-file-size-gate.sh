@@ -24,7 +24,7 @@ TARGET=500
 REPORT_VERSION=1
 CHECKER="$SELF_DIR/check-file-size.sh"
 
-# Paths relative to crates/, one per line. A file belongs here only once its
+# Repository-relative paths, one per line. A file belongs here only once its
 # module header names what was considered for extraction and why splitting it
 # would make the code worse (AGENTS.md rule 5). Empty on purpose.
 EXEMPT=""
@@ -156,7 +156,7 @@ gate() {
     for (( i = 0; i < OVER_COUNT; i++ )); do
         path="${OVER_PATHS[$i]}"
         lines="${OVER_LINES[$i]}"
-        escaped="$(escape_property "crates/$path")"
+        escaped="$(escape_property "$path")"
         if printf '%s\n' "$EXEMPT" | grep -qxF "$path"; then
             printf '::notice file=%s::%s source lines, exempt (rule 5)\n' "$escaped" "$lines"
             continue
@@ -230,7 +230,7 @@ EOF
     assert "a report that stops after its header fails the gate" 2 "stopped before its end record"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\nover\t812\tdaemon/src/huge.rs\n'
+printf 'file-size\t1\t500\nover\t812\tcrates/daemon/src/huge.rs\n'
 EOF
     assert "a report truncated mid-overage fails the gate" 2 "stopped before its end record"
 
@@ -239,8 +239,8 @@ printf 'file-size\t1\t500\ncount\t0\nend\n'
 EOF
     assert "a clean report passes" 0 "All files within"
 
-    for fixture in "rs:daemon/src/huge.rs" "ts:copypaste-ui/src/lib/ipc.ts" \
-                   "tsx:copypaste-ui/src/routes/History.tsx" "spaced:daemon/src/has space.rs"; do
+    for fixture in "rs:crates/daemon/src/huge.rs" "ts:crates/copypaste-ui/src/lib/ipc.ts" \
+                   "tsx:crates/copypaste-ui/src/routes/History.tsx" "spaced:crates/daemon/src/has space.rs"; do
         checker <<EOF
 printf 'file-size\t1\t500\nover\t812\t${fixture#*:}\ncount\t1\nend\n'
 EOF
@@ -253,12 +253,12 @@ EOF
     assert "a declared overage with no row fails the gate" 2 "declared 1 overage(s) and emitted 0"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\nover\t812\tdaemon/src/huge.rs\ncount\t2\nend\n'
+printf 'file-size\t1\t500\nover\t812\tcrates/daemon/src/huge.rs\ncount\t2\nend\n'
 EOF
     assert "a count that overstates the rows fails the gate" 2 "declared 2 overage(s) and emitted 1"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\nover\tmany\tdaemon/src/huge.rs\ncount\t1\nend\n'
+printf 'file-size\t1\t500\nover\tmany\tcrates/daemon/src/huge.rs\ncount\t1\nend\n'
 EOF
     assert "an overage without a line count fails the gate" 2 "unreadable overage record"
 
@@ -273,7 +273,7 @@ EOF
     assert "a report measured against another budget fails the gate" 2 "report header is not version"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\nover\t812\tdaemon/src/huge.rs\ncount\t1\n'
+printf 'file-size\t1\t500\nover\t812\tcrates/daemon/src/huge.rs\ncount\t1\n'
 EOF
     assert "a report missing only its end record fails" 2 "stopped before its end record"
 
@@ -289,36 +289,36 @@ EOF
     assert "an overflowing count fails the gate" 2 "unreadable count"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\ncount\t1\nover\t812\tdaemon/src/huge.rs\nend\n'
+printf 'file-size\t1\t500\ncount\t1\nover\t812\tcrates/daemon/src/huge.rs\nend\n'
 EOF
     assert "an overage after the count fails the gate" 2 "out of sequence"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\nover\t1\tdaemon/src/huge.rs\ncount\t1\nend\n'
+printf 'file-size\t1\t500\nover\t1\tcrates/daemon/src/huge.rs\ncount\t1\nend\n'
 EOF
     assert "an overage not over the budget fails the gate" 2 "not over"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\nover\t812\tui/src/has,comma.ts\ncount\t1\nend\n'
+printf 'file-size\t1\t500\nover\t812\tcrates/ui/src/has,comma.ts\ncount\t1\nend\n'
 EOF
     assert "a comma in a path is escaped in annotations" 1 "%2C"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\nover\t812\tdaemon/src/huge.rs\ncount\t1\nend\n'
+printf 'file-size\t1\t500\nover\t812\tcrates/daemon/src/huge.rs\ncount\t1\nend\n'
 EOF
-    if ! install_gate "daemon/src/huge.rs"; then
+    if ! install_gate "crates/daemon/src/huge.rs"; then
         printf '  FAIL  the self-test could not register an exemption\n'
         bad=$((bad + 1))
     fi
     assert "a registered exemption passes" 0 "exempt (rule 5)"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\ncount\t1\nover\t812\tdaemon/src/huge.rs\nend\n'
+printf 'file-size\t1\t500\ncount\t1\nover\t812\tcrates/daemon/src/huge.rs\nend\n'
 EOF
     assert "an exempt overage after the count still fails" 2 "out of sequence"
 
     checker <<'EOF'
-printf 'file-size\t1\t500\nover\t1\tdaemon/src/huge.rs\ncount\t1\nend\n'
+printf 'file-size\t1\t500\nover\t1\tcrates/daemon/src/huge.rs\ncount\t1\nend\n'
 EOF
     assert "an exempt under-budget overage still fails" 2 "not over"
 
