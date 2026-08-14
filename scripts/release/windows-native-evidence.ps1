@@ -81,7 +81,9 @@ function Assert-PackageIntegrity([string]$Directory, [string]$InstallerPath, [st
 # state on the way to ready. Anything else is reported on the probe that saw it
 # rather than only in the final timeout line.
 function Get-CliProbeOutcome([string]$Failure) {
-    if ($Failure -match "not_ready|offline|refused|No connection could be made|cannot find the file") {
+    # `cannot reach the CopyPaste daemon` is CliError::DaemonUnreachable's exact
+    # user_message; `not_ready` is ErrorCode::NotReady on the --json envelope.
+    if ($Failure -match "cannot reach the CopyPaste daemon|not_ready|offline|refused|No connection could be made|cannot find the file") {
         return New-ProbeNotReady "the CLI has not reached the daemon yet: $Failure"
     }
     return New-ProbeTransient "the CLI failed: $Failure"

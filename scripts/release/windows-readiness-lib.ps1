@@ -101,7 +101,9 @@ function Wait-Readiness {
             "transient" {
                 $transients++
                 $last = "transient: $why"
-                Write-Output "  readiness: $Description saw a transient failure on probe ${attempt}: $why"
+                # Write-Host, not Write-Output: the success stream is this
+                # function's return value.
+                Write-Host "  readiness: $Description saw a transient failure on probe ${attempt}: $why"
             }
             "not-ready" { $last = "not ready: $why" }
             default { throw "$Description probe returned an unknown outcome kind '$kind'" }
@@ -182,6 +184,18 @@ function Test-WindowsReadinessHelpers {
     }
     Assert-True $rejected "an exhausted process budget did not name itself, the last outcome and the diagnostics"
     Assert-True ($seen.probes -eq 3) "a 6-process budget at 2 processes per probe ran $($seen.probes) probes, not 3"
+
+    # Narration must not travel on the return channel. It did, and a caller that
+    # saw one transient got @(progress line, reply) instead of the reply, so
+    # `$status.data` threw PropertyNotFoundException under Set-StrictMode.
+    $seen.probes = 0
+    $observed = Wait-Readiness "a fixture that recovers from a transient" {
+        $seen.probes++
+        if ($seen.probes -eq 1) { return New-ProbeTransient "the CLI refused" }
+        return New-ProbeReady ([pscustomobject]@{ data = "observed" })
+    } { "fixture diagnostics" } 30000 40 1 250 2000 $noSleep
+    Assert-True (@($observed).Count -eq 1) "a transient put $(@($observed).Count) values on the ready return"
+    Assert-True ($observed.data -eq "observed") "a wait that saw a transient did not return its observation"
 
     $rejected = $false
     try {
