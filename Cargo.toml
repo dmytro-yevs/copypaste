@@ -134,6 +134,9 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 
+[profile.release.build-override]
+strip = false
+
 [profile.dev]
 # `target/debug` reached 22 GB and filled the disk twice in one session. Full
 # debug info is most of that, and cargo never collects stale artifacts, so a
