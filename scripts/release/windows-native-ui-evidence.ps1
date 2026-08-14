@@ -5,6 +5,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 . (Join-Path $PSScriptRoot "windows-readiness-lib.ps1")
+. (Join-Path $PSScriptRoot "windows-uia-snapshot-lib.ps1")
 . (Join-Path $PSScriptRoot "windows-native-window-evidence.ps1")
 
 function Get-AppAutomationRoot([Diagnostics.Process]$App) {
@@ -14,37 +15,41 @@ function Get-AppAutomationRoot([Diagnostics.Process]$App) {
     return [Windows.Automation.AutomationElement]::FromHandle($App.MainWindowHandle)
 }
 
-function Get-UiaNodes([Windows.Automation.AutomationElement]$Root) {
+function Read-UiaNode([Windows.Automation.AutomationElement]$Element) {
+    $bounds = $Element.Current.BoundingRectangle
+    $coordinates = @($bounds.X, $bounds.Y, $bounds.Width, $bounds.Height)
+    $serializedBounds = if (@($coordinates | Where-Object { [double]::IsNaN($_) -or [double]::IsInfinity($_) }).Count -eq 0) {
+        [ordered]@{ x = $bounds.X; y = $bounds.Y; width = $bounds.Width; height = $bounds.Height }
+    } else {
+        $null
+    }
+    return [ordered]@{
+        name = $Element.Current.Name
+        control_type = $Element.Current.ControlType.ProgrammaticName
+        automation_id = $Element.Current.AutomationId
+        enabled = $Element.Current.IsEnabled
+        offscreen = $Element.Current.IsOffscreen
+        bounds = $serializedBounds
+    }
+}
+
+function Get-UiaSnapshot([Windows.Automation.AutomationElement]$Root) {
     $elements = @($Root) + @($Root.FindAll(
         [Windows.Automation.TreeScope]::Descendants,
         [Windows.Automation.Condition]::TrueCondition
     ))
-    return @($elements | ForEach-Object {
-        try {
-            $bounds = $_.Current.BoundingRectangle
-            $coordinates = @($bounds.X, $bounds.Y, $bounds.Width, $bounds.Height)
-            $serializedBounds = if (@($coordinates | Where-Object { [double]::IsNaN($_) -or [double]::IsInfinity($_) }).Count -eq 0) {
-                [ordered]@{ x = $bounds.X; y = $bounds.Y; width = $bounds.Width; height = $bounds.Height }
-            } else {
-                $null
-            }
-            [ordered]@{
-                name = $_.Current.Name
-                control_type = $_.Current.ControlType.ProgrammaticName
-                automation_id = $_.Current.AutomationId
-                enabled = $_.Current.IsEnabled
-                offscreen = $_.Current.IsOffscreen
-                bounds = $serializedBounds
-            }
-        } catch {}
-    })
+    return Read-UiaSnapshot $elements { param($element) Read-UiaNode $element }
 }
 
+# Diagnostics, so a partial read is described rather than rejected: this runs
+# while some other wait has already failed and is the only account of what the
+# app was showing.
 function Get-UiaSummary([Diagnostics.Process]$App) {
     $root = Get-AppAutomationRoot $App
     if ($null -eq $root) { return "native window handle is not ready" }
-    $names = @(Get-UiaNodes $root | Where-Object { $_.name } | Select-Object -First 40 -ExpandProperty name)
-    return "UIA names: $($names -join ' | ')"
+    $snapshot = Get-UiaSnapshot $root
+    $names = @($snapshot.nodes | Where-Object { $_.name } | Select-Object -First 40 -ExpandProperty name)
+    return "UIA names: $($names -join ' | ') [$(Get-UiaSnapshotReport $snapshot)]"
 }
 
 function Wait-UiaName([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
@@ -150,7 +155,9 @@ function Save-WindowsFeatureState(
 ) {
     Wait-UiaName $App $ExpectedName | Out-Null
     $root = Get-AppAutomationRoot $App
-    $nodes = Get-UiaNodes $root
+    $snapshot = Get-UiaSnapshot $root
+    Assert-UiaSnapshotComplete $snapshot "$Feature/$State evidence"
+    $nodes = $snapshot.nodes
     $markers = @($nodes | Where-Object {
         $_.name -eq $ExpectedName -and $_.enabled -and -not $_.offscreen -and
         $_.bounds.width -gt 0 -and $_.bounds.height -gt 0
@@ -163,11 +170,16 @@ function Save-WindowsFeatureState(
     $accessibility = Join-Path $relativeDirectory "accessibility.json"
     $window = Save-WindowImage $App (Join-Path $EvidenceRoot $screenshot)
     [ordered]@{
-        schema_version = 1
+        schema_version = 2
         feature = $Feature
         state = $State
         expected_name = $ExpectedName
         window = $window
+        node_read = [ordered]@{
+            complete = $true
+            read = @($nodes).Count
+            retried = @($snapshot.retried)
+        }
         nodes = $nodes
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceRoot $accessibility) -Encoding utf8
     return [ordered]@{
@@ -187,6 +199,7 @@ function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) 
 
 function Test-WindowsUiEvidenceHelpers {
     Test-WindowsReadinessHelpers
+    Test-UiaSnapshotHelpers
     $occluded = [ordered]@{ foreground = $false; visible = $true; minimized = $false; capture_allowed = $true }
     Assert-True (-not (Test-WindowCaptureReady $occluded)) "an occluded window was accepted for capture"
     $protected = [ordered]@{ foreground = $true; visible = $true; minimized = $false; capture_allowed = $false }
