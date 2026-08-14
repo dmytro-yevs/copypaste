@@ -257,10 +257,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: linux-1.96
-          # The demo job builds the same crates in release profile; sharing the
-          # key would make the two jobs fight over one cache entry.
-          key: dev-profile
+          # The profile belongs in `shared-key`, not in `key`. rust-cache's
+          # config.ts takes `shared-key` *or* `key`-plus-job-id, never both, so
+          # a `key:` alongside a `shared-key:` is silently dead and every job
+          # naming the same `shared-key` collides on one cache entry.
+          shared-key: linux-1.96-dev
 
       - name: System dependencies
         # `crates/copypaste-ui/src-tauri` is a workspace member, so
@@ -341,8 +342,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: linux-1.96
-          key: release-profile
+          shared-key: linux-1.96-release
 
       - name: System dependencies
         run: |
@@ -590,9 +590,10 @@ jobs:
   # "Build the complete current-user installer" alone takes ~22 minutes, all
   # ahead of the evidence step that actually failed in both. One serial job
   # put ~33 minutes in front of that assertion; two parallel jobs put at most
-  # the package job's own length in front of it. Distinct rust-cache `key:`
-  # values, same reason the `rust`/`demo` split above gives them one each: a
-  # shared key across two profiles fights over one cache entry.
+  # the package job's own length in front of it. Distinct rust-cache
+  # `shared-key` values, same reason the `rust`/`demo` split above gives them
+  # one each: one entry shared across two profiles is an exact-key hit, so
+  # rust-cache never saves and the entry freezes with the wrong profile in it.
 
   windows-test:
     name: Windows workspace tests (x64)
@@ -613,8 +614,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: windows-2022-1.96
-          key: test-profile
+          shared-key: windows-2022-1.96-test
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -707,8 +707,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: windows-2022-1.96
-          key: package-profile
+          shared-key: windows-2022-1.96-package
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
