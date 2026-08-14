@@ -170,8 +170,7 @@ jobs:
           toolchain: "1.96"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: linux-1.96
-          key: pairing-e2e-release
+          shared-key: linux-1.96-pairing-e2e-release
       - name: Install tauri-driver
         run: cargo install tauri-driver --version 2.0.6 --locked
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
