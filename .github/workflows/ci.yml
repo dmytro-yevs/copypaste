@@ -615,6 +615,11 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: windows-2022-1.96-test
+          # A red run here still paid ~13 minutes to compile the dependency
+          # graph, and the default drops it. Only dependent crates are cached
+          # (`cache-workspace-crates` defaults to false), so a failing test
+          # cannot poison what is stored.
+          cache-on-failure: true
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -708,6 +713,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: windows-2022-1.96-package
+          cache-on-failure: true
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
