@@ -17,7 +17,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
-import { addItems, deleteItems, storedItems } from "../src/harness/bridge.js";
+import { addItems, cleanUpItems, storedItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { rowBoxes } from "../src/harness/list.js";
 import {
@@ -62,7 +62,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await leaveSelectionMode().catch(() => undefined);
-  await deleteItems(app, seeded).catch(() => undefined);
+  await cleanUpItems(app, seeded);
   await app?.detach();
 });
 
