@@ -214,6 +214,26 @@ impl PeerStore {
         }
     }
 
+    /// [`Self::upsert`] for observations about a pairing that is already
+    /// stored — name, address and last-seen off a finished session. Returns
+    /// whether the slot was still there to write to.
+    ///
+    /// A session outlives the click that ends it, and `upsert` bars only
+    /// *revoked* ids: a pass that read its `Peer` before an unpair wrote that
+    /// record back and re-enrolled the pairing, key and all. The presence test
+    /// shares the write lock, so no caller can check first and lose the race.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::upsert`]; an absent pairing is `Ok(false)`.
+    pub fn touch(&self, peer: Peer) -> Result<bool, PeerStoreError> {
+        let mut guard = self.state.write().map_err(|_| PeerStoreError::Poisoned)?;
+        if !guard.peers.contains_key(&peer.pairing_id) {
+            return Ok(false);
+        }
+        self.upsert_locked(&mut guard, peer).map(|()| true)
+    }
+
     /// Forget a peer. Returns whether one was there to forget.
     ///
     /// Local and reversible: the pairing id may be used again by a fresh
@@ -587,6 +607,38 @@ mod tests {
         assert!(store.remove(&id).expect("remove"));
         assert!(!store.remove(&id).expect("second remove"), "already gone");
         assert!(store.is_empty());
+        assert!(PeerStore::open(&path).expect("reopen").is_empty());
+    }
+
+    /// `touch` records, it never enrols: the record a finished session carries
+    /// was read before the unpair, and writing it back would hand the pairing —
+    /// and its key — straight back to a device the user had just cut off.
+    #[test]
+    fn touching_a_pairing_that_is_gone_writes_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+        let laptop = peer("Laptop");
+        let id = laptop.pairing_id.clone();
+        store.upsert(laptop.clone()).expect("upsert");
+
+        assert!(store
+            .touch(redeemed(&laptop, 1_754_000_000_000))
+            .expect("touch"));
+        assert_eq!(
+            store.get(&id).expect("present").last_seen_ms,
+            1_754_000_000_000
+        );
+
+        assert!(store.remove(&id).expect("remove"));
+        assert!(
+            !store
+                .touch(redeemed(&laptop, 1_754_000_000_001))
+                .expect("touch"),
+            "the session put the pairing back"
+        );
+        assert!(store.get(&id).is_none());
+        assert!(store.psks().is_empty());
         assert!(PeerStore::open(&path).expect("reopen").is_empty());
     }
 

@@ -330,8 +330,13 @@ impl Node {
             last_addr: addr.or(peer.last_addr),
             last_seen_ms: crate::now_ms(),
         };
-        if let Err(e) = self.peers.upsert(updated) {
-            warn!(error = %e, "could not record a successful peer session");
+        match self.peers.touch(updated) {
+            Ok(true) => {}
+            Ok(false) => debug!(
+                pairing_id = %peer.pairing_id,
+                "a session outlived its pairing; not recording it"
+            ),
+            Err(e) => warn!(error = %e, "could not record a successful peer session"),
         }
     }
 }
