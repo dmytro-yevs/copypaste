@@ -872,16 +872,15 @@ mod tests {
         }
     }
 
-    /// The two gates `generic_password_kv` gained, and what they cost.
+    /// The one gate `generic_password_kv` gained, and where it stops.
     ///
-    /// Neither is a word list: a value spelled from four or fewer effective
-    /// symbols is repetitive, and one spelled with no digit and no symbol is a
-    /// template whatever it says (§5.6). The second is the more expensive of the
-    /// two here, because this rule's values include human-chosen passwords —
-    /// stated in the config decision and pinned by the quoted case below, which
-    /// keeps its quotes in the capture and is still detected.
+    /// Not a word list: a value spelled from four or fewer effective symbols is
+    /// repetitive (§5.6). It is the only gate over the value — the
+    /// `^[a-zA-Z_.-]+$` shape guard was the second and it took real all-letter
+    /// passwords with it (DMY-162) — so a template above 2.0 is now withheld
+    /// rather than undetected, which is the direction I1 and I4 require.
     #[test]
-    fn the_password_rule_rejects_repetitive_and_shapeless_values() {
+    fn the_password_rule_rejects_repetitive_values() {
         let det = detector();
         // No rule at all, not merely not this one: a template that slips the
         // split into the sibling rule is still a false positive.
@@ -889,8 +888,6 @@ mod tests {
             "TWILIO_API_KEY=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
             "MAILGUN_API_KEY=key-0000000000000000000000000000000",
             "api_key: xxxxxxxxxxxxxxxxxxxx",
-            "password: abcdefghij",
-            "api_key = your-own-key-goes-here",
         ] {
             assert!(
                 det.scan_all(template).is_empty(),
@@ -898,10 +895,17 @@ mod tests {
                 all_rules(&det, template)
             );
         }
-        // §9.1's own fixtures, which fix the threshold's ceiling at 2.807, and
-        // the 10-character boundary that `password: abcdefghij` used to pin —
-        // now pinned by the CJK pair, which is the fixture carrying the
-        // bytes-versus-chars defect anyway.
+        for withheld in ["password: abcdefghij", "api_key = your-own-key-goes-here"] {
+            assert!(det.is_sensitive(withheld), "{withheld}");
+            assert!(
+                !det.may_auto_wipe(withheld),
+                "{withheld} -> {:?}",
+                all_rules(&det, withheld)
+            );
+        }
+        // §9.1's own fixtures, which fix the threshold's ceiling at 2.807. The
+        // CJK pair carries the 10-character criterion, because it is the fixture
+        // with the bytes-versus-chars defect in it.
         for (credential, rule) in [
             ("password=hunter2", "generic_password_kv"),
             ("secret = !abcdef", "generic_password_kv"),
