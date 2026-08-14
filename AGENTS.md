@@ -379,6 +379,38 @@ and release evidence. A missing platform means removing the capability from
 the product and marking it `removed`, not leaving a TODO, waiver, placeholder,
 or skipped green check. See `docs/development.md` for the maintained commands.
 
+## 13. Read the primary source before you conclude
+
+**Read the documentation, the header, the specification or the upstream source
+before you diagnose, and before you write up a conclusion.** Not a summary, not
+a previous agent's report, not memory.
+
+This binds hardest on a **negative** — "the platform does not support this",
+"this cannot be done", "the API refuses". A wrong negative is the most
+expensive thing you can put in a report, because it stops everyone who reads it
+from trying again. Earn it from the primary source or do not state it.
+
+- **An error code is looked up, never inferred.** Quote the definition from the
+  actual header or reference.
+- **Somebody else has hit this.** Search the trackers of projects with the same
+  shape before declaring a platform limit; the cause is frequently in the host
+  application, not the platform.
+- **A handoff, report or comment is a lead, not evidence.** Reproduce it. If it
+  will not reproduce, that is the finding.
+- **Cite what you read.** A conclusion with no reference is an opinion.
+
+The defect: a worker concluded authored macOS accessibility labels were
+unreachable in our Tauri/WKWebView app and that the release gate could never
+pass. It rested on `-25205` and `-25202` read as platform refusals. `AXError.h`
+defines them as `kAXErrorAttributeUnsupported` and `kAXErrorInvalidUIElement` —
+one says the element asked does not carry the attribute, the other says the
+call targeted the wrong element. Electron issue #37465 is the identical
+symptom, and its cause was the host app handling
+`accessibilitySetValue:forAttribute:` without advertising the attribute through
+`accessibilityAttributeNames` (fixed in PR #38102). Reading the header and one
+tracker turned "impossible on this platform" into "our process never declared
+the attribute".
+
 ## Linear is the development source of truth
 
 Linear owns the persistent backlog for work managed through Orca. Orca
