@@ -207,7 +207,7 @@ impl Detector {
     /// keeps them apart, and [`Severity::Restricted`] is the band where they
     /// disagree.
     ///
-    /// The aggregate rule over the matches is [`super::verdict::deletes`].
+    /// The aggregate rule over the matches is `verdict::deletes`.
     pub fn may_auto_wipe(&self, text: &str) -> bool {
         let normalised = normalise(text);
         let findings =

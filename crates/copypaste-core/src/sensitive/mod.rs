@@ -12,8 +12,9 @@
 //! low-confidence PII, with byte offsets into the NFKC-normalised string.
 //! [`Detector::scan`] preserves the deterministic highest-confidence label.
 //!
-//! [`Detector::may_auto_wipe`] and its compatibility predicate
-//! [`Detector::is_sensitive`] share the only content-based whole-item gate.
+//! [`Detector::is_sensitive`] is the whole-item withholding gate the index,
+//! sync and previews read; [`Detector::may_auto_wipe`] is the deletion gate.
+//! They disagree by exactly the restricted band, which is the point (§4.2).
 //! Everything below the 0.70 floor remains detectable and redactable but
 //! inert. Password-manager provenance is an independent capture-time floor.
 

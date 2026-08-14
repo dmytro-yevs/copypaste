@@ -1,14 +1,17 @@
 //! Auto-wipe: removing a detected secret from history once its TTL has elapsed.
 //!
-//! This is the only destructive consumer of [`Severity`], and it is the only
-//! place the confidence floor turns into permission to delete user data
+//! This is the only destructive consumer of the severity bands, and it is the
+//! only place the confidence floor turns into permission to delete user data
 //! (manifest I2, manifest 01 §3.17-§3.19, manifest 07 §6.2).
 //!
 //! # Two gates, and both must agree
 //!
 //! A row is deleted only if it was classified **at capture** (`is_sensitive =
-//! 1`) **and** its plaintext scans as [`Severity::HighConfidence`] **now**. The
-//! second gate reads the row rather than a stamped flag on purpose:
+//! 1`) **and** [`Detector::may_auto_wipe`] agrees on its plaintext **now**. That
+//! is stronger than "a high-confidence match exists": a match resting on a
+//! context anchor alone licenses nothing where a restricted match covers the
+//! same bytes (§4.2). The second gate reads the row rather than a stamped flag
+//! on purpose:
 //! `AGENTS.md` rule 4 puts
 //! data loss above everything, and a persisted "may be deleted" bit written by a
 //! ruleset that has since changed is a decision nobody can review before it
