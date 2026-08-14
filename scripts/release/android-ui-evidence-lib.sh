@@ -43,12 +43,34 @@ def covered(x, y):
     return any(left <= x <= right and top <= y <= bottom
                for left, top, right, bottom in feedback_rects)
 
+# `field:<form label>:<ordinal>` addresses a text field by its position inside
+# a labelled form instead of by its own label. Chromium puts a WebView field's
+# accessible name — `aria-label` and `placeholder` alike — in `hintText` and
+# nowhere else, and `uiautomator dump` emits `hint` only from API 36. Below
+# that the label is not in the dump at all, so a name selector there is not
+# flaky, it cannot match.
+field = re.fullmatch(r"field:(.+):(\d+)", sys.argv[2])
+field_nodes = set()
+if field:
+    form_label = field.group(1).casefold()
+    ordinal = int(field.group(2))
+    for node in root.iter("node"):
+        if any((node.get(name) or "").casefold() == form_label for name in ("text", "content-desc")):
+            fields = [item for item in node.iter("node")
+                      if (item.get("class") or "").endswith("EditText")]
+            if ordinal < len(fields):
+                field_nodes.add(id(fields[ordinal]))
+            break
+
 candidates = []
 for node in root.iter("node"):
     attrs = [node.get(name, "") for name in ("text", "content-desc", "resource-id", "hint")]
     values = [value.casefold() for value in attrs if value]
-    exact = any(selector == value or value.endswith("/" + selector) for selector in selectors for value in values)
-    partial = any(selector in value for selector in selectors for value in values)
+    if field:
+        exact = partial = id(node) in field_nodes
+    else:
+        exact = any(selector == value or value.endswith("/" + selector) for selector in selectors for value in values)
+        partial = any(selector in value for selector in selectors for value in values)
     bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
     clickable = node.get("clickable", "false") == "true"
     documents_label = "documentsui" in node.get("package", "").casefold() and exact
@@ -66,6 +88,43 @@ for node in root.iter("node"):
 if candidates:
     _, _, (left, top, right, bottom), _ = min(candidates)
     print((left + right) // 2, (top + bottom) // 2)
+PY
+}
+
+# Whether this device's `uiautomator dump` carries the `hint` attribute at all.
+#
+# AOSP's AccessibilityNodeInfoDumper gained `serializer.attribute("", "hint",
+# ...)` in android-16.0.0_r1; android-14.0.0_r1 and android-15.0.0_r1 write
+# neither it nor `drawing-order`. Measured on google_apis emulator images: API
+# 36 carries `hint` on every node of a dump, API 24, 29, 31, 33 and 34 on none.
+# A gate that reads an authored WebView field label below API 36 therefore
+# cannot pass, and must say so rather than spend its timeout finding out.
+dump_exposes_hint() { # <artifact>
+    grep -q ' hint="' "$1"
+}
+
+# How many text fields a named form exposes, and how many of them are secret.
+# What a level-independent assertion can say about a sign-in form whose field
+# labels reach the dump on one API level out of six.
+form_field_shape() { # <xml> <form label> -> "<fields> <secret>"
+    python3 - "$1" "$2" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    print(0, 0)
+    raise SystemExit
+label = sys.argv[2].casefold()
+for node in root.iter("node"):
+    if any((node.get(name) or "").casefold() == label for name in ("text", "content-desc")):
+        fields = [item for item in node.iter("node")
+                  if (item.get("class") or "").endswith("EditText")]
+        print(len(fields), sum(1 for item in fields if item.get("password") == "true"))
+        break
+else:
+    print(0, 0)
 PY
 }
 
@@ -465,6 +524,74 @@ android_ui_dismissal_scroll_self_test() { # <temp>
         || bad "a second toast over the action is dismissed without a swipe" "$observed"
 }
 
+# The same cloud sign-in form as two `uiautomator dump` runs recorded it:
+# `form-api36.xml`, where every node carries `hint`, and `form-api34.xml`,
+# where no node does and the field labels are absent from the tree entirely.
+android_ui_form_fixtures() { # <dir>
+    local nav='<node text="Primary" bounds="[0,1500][1080,1600]"/>' api36='' api34='' i
+    local -a rid=(email password passphrase) secret=(false true true) label=(Email Password "Sync passphrase")
+    for i in 0 1 2; do
+        api36+="<node class=\"android.widget.EditText\" text=\"\" content-desc=\"\" hint=\"${label[$i]}\" resource-id=\"${rid[$i]}\" password=\"${secret[$i]}\" bounds=\"[42,$((330 + i * 140))][963,$((453 + i * 140))]\" enabled=\"true\" clickable=\"true\"/>"
+        api34+="<node class=\"android.widget.EditText\" text=\"\" content-desc=\"\" resource-id=\"${rid[$i]}\" password=\"${secret[$i]}\" bounds=\"[42,$((330 + i * 140))][963,$((453 + i * 140))]\" enabled=\"true\" clickable=\"true\"/>"
+    done
+    local submit='<node class="android.widget.Button" text="Sign in" bounds="[42,760][228,821]" enabled="true" clickable="true"/>'
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node hint=\"\">$nav<node class=\"android.view.View\" text=\"Cloud account sign in\" hint=\"\" bounds=\"[42,320][1042,830]\">$api36$submit</node></node></hierarchy>" > "$1/form-api36.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav<node class=\"android.view.View\" text=\"Cloud account sign in\" bounds=\"[42,320][1042,830]\">$api34$submit</node></node></hierarchy>" > "$1/form-api34.xml"
+}
+
+android_ui_form_field_self_test() { # <temp>
+    local temp="$1" point i
+    android_ui_form_fixtures "$temp"
+
+    dump_exposes_hint "$temp/form-api36.xml" \
+        && ok "an API 36 dump is recognised as carrying hint" \
+        || bad "an API 36 dump is recognised as carrying hint"
+    dump_exposes_hint "$temp/form-api34.xml" \
+        && bad "an API 34 dump is not claimed to carry hint" \
+        || ok "an API 34 dump is not claimed to carry hint"
+
+    # The failure this addresses: below API 36 the authored label is in no
+    # attribute of any node, so the old selector could only time out.
+    [[ -z "$(node_center "$temp/form-api34.xml" "Sync passphrase")" ]] \
+        && ok "an authored field label is absent from an API 34 dump" \
+        || bad "an authored field label is absent from an API 34 dump"
+    [[ -n "$(node_center "$temp/form-api36.xml" "Sync passphrase")" ]] \
+        && ok "the same label is present in an API 36 dump" \
+        || bad "the same label is present in an API 36 dump"
+
+    for i in 0 1 2; do
+        point="$(action_center "$temp/form-api34.xml" "field:Cloud account sign in:$i")"
+        [[ "$point" == "502 $((391 + i * 140))" ]] \
+            && ok "field $i of the form is tappable without hint" \
+            || bad "field $i of the form is tappable without hint" "$point"
+        [[ "$(action_center "$temp/form-api36.xml" "field:Cloud account sign in:$i")" == "$point" ]] \
+            && ok "field $i resolves to the same point on both API levels" \
+            || bad "field $i resolves to the same point on both API levels"
+    done
+    [[ -z "$(action_center "$temp/form-api34.xml" "field:Cloud account sign in:3")" ]] \
+        && ok "a field the form does not have is not resolved" \
+        || bad "a field the form does not have is not resolved"
+    [[ -z "$(action_center "$temp/form-api34.xml" "field:Cloud account sign up:0")" ]] \
+        && ok "another form's fields are not this form's" \
+        || bad "another form's fields are not this form's"
+    # Submit is a Button, not a field: a positional selector that counted it
+    # would type the passphrase into the wrong control.
+    [[ "$(form_field_shape "$temp/form-api34.xml" "Cloud account sign in")" == "3 2" ]] \
+        && ok "the form's shape is three fields, two of them secret" \
+        || bad "the form's shape is three fields, two of them secret" \
+               "$(form_field_shape "$temp/form-api34.xml" "Cloud account sign in")"
+    [[ "$(form_field_shape "$temp/form-api36.xml" "Cloud account sign in")" == "3 2" ]] \
+        && ok "the same shape is read from an API 36 dump" \
+        || bad "the same shape is read from an API 36 dump"
+    [[ "$(form_field_shape "$temp/form-api34.xml" "Cloud account sign up")" == "0 0" ]] \
+        && ok "a form that is not on screen has no fields" \
+        || bad "a form that is not on screen has no fields"
+    printf 'not xml at all\n' > "$temp/form-broken.xml"
+    [[ "$(form_field_shape "$temp/form-broken.xml" "Cloud account sign in")" == "0 0" ]] \
+        && ok "an unparsable dump exposes no form fields" \
+        || bad "an unparsable dump exposes no form fields"
+}
+
 android_ui_self_test() {
     local temp point
     temp="$(mktemp -d)"
@@ -492,6 +619,7 @@ android_ui_self_test() {
     [[ "$point" == "230 140" ]] && ok "an exact DocumentsUI row label resolves its action" || bad "an exact DocumentsUI row label resolves its action" "$point"
     [[ -z "$(node_center "$temp/ui.xml" "Import history")" ]] && ok "a missing selector is not reported as present" || bad "a missing selector is not reported as present"
     android_ui_scroll_self_test "$temp"
+    android_ui_form_field_self_test "$temp"
     android_ui_feedback_self_test "$temp"
     android_ui_dismissal_scroll_self_test "$temp"
     android_screencap_self_test "$temp"
