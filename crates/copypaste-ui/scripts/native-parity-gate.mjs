@@ -173,8 +173,13 @@ async function verifyArtifacts(receiptPath, receipt, label) {
     const resolvedKey = process.platform === "win32" ? resolved.toLowerCase() : resolved;
     if (resolvedPaths.has(resolvedKey)) throw new Error(`${label} aliases one artifact file`);
     resolvedPaths.add(resolvedKey);
-    const identity = `${metadata.dev}:${metadata.ino}`;
-    if ((metadata.dev !== 0 || metadata.ino !== 0) && fileIdentities.has(identity)) {
+    // BigInt, because `Stats.ino` is a double and an NTFS file index does not
+    // fit in one. This volume reports 18577348463957901, twice
+    // Number.MAX_SAFE_INTEGER, so consecutive MFT records round to the same
+    // value and two distinct evidence files read as one hard link.
+    const exact = await lstat(resolved, { bigint: true });
+    const identity = `${exact.dev}:${exact.ino}`;
+    if ((exact.dev !== 0n || exact.ino !== 0n) && fileIdentities.has(identity)) {
       throw new Error(`${label} aliases one artifact file`);
     }
     fileIdentities.add(identity);
