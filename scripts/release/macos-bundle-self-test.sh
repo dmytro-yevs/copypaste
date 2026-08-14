@@ -85,8 +85,12 @@ expect_rejection "rejects missing CFBundleExecutable metadata" \
     "$(fixture missing-metadata '' executable)"
 expect_rejection "rejects ambiguous multi-line executable metadata" \
     "$(fixture ambiguous $'BundleRunner\nOther' executable)"
-expect_rejection "rejects an executable name that escapes Contents/MacOS" \
-    "$(fixture traversal ../BundleRunner executable)"
+TRAVERSAL_APP="$(fixture traversal ../BundleRunner executable)"
+# The escape target has to exist and be runnable, or the refusal proves only
+# that Contents/BundleRunner is missing.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TRAVERSAL_APP/Contents/BundleRunner"
+chmod +x "$TRAVERSAL_APP/Contents/BundleRunner"
+expect_rejection "rejects an executable name that escapes Contents/MacOS" "$TRAVERSAL_APP"
 expect_rejection "rejects a missing declared executable" \
     "$(fixture missing-executable BundleRunner missing)"
 expect_rejection "rejects a declared file without execute permission" \
