@@ -1,0 +1,609 @@
+{
+  "not_covered": [
+    {
+      "command": "scripts/release/android-smoke-release.sh --self-test",
+      "why": "runs android-smoke-lib.sh's detectors, which android-smoke covers; only the entry point differs"
+    },
+    {
+      "command": "scripts/release/android-log-report-lib.sh (via android-smoke.sh --self-test)",
+      "why": "no entry point of its own; its verdicts run inside android-smoke, which is covered"
+    },
+    {
+      "command": "scripts/release/android-cloud-evidence.sh --self-test",
+      "why": "80 assertions over a 24s baseline; not yet given mutations"
+    },
+    {
+      "command": "scripts/release/android-storage-transfer.sh --self-test",
+      "why": "88 assertions over a 47s baseline; not yet given mutations"
+    },
+    {
+      "command": "scripts/release/android-artifact-check.sh --self-test",
+      "why": "android-metadata.mjs needs jsonc-parser, so it needs npm ci in crates/copypaste-ui first"
+    },
+    {
+      "command": "crates/copypaste-ui/scripts/check-webview-baseline.mjs --self-test",
+      "why": "needs @babel/parser from crates/copypaste-ui/node_modules"
+    },
+    {
+      "command": "e2e/scripts/verify-dmy-45-tests.self-test.mjs",
+      "why": "needs yaml from e2e/node_modules"
+    },
+    {
+      "command": "scripts/check-secret-scan.sh --self-test",
+      "why": "needs the pinned gitleaks binary the secret-scan workflow installs"
+    },
+    {
+      "command": "scripts/check-macos-types.sh --self-test",
+      "why": "compiles a generated crate; a cargo build per mutation does not belong in this job"
+    },
+    {
+      "command": "crates/copypaste-ui/scripts/generate-ipc-bindings.sh --self-test",
+      "why": "59s cargo baseline; a build per mutation does not belong in this job"
+    },
+    {
+      "command": "scripts/check-docs.py --self-test",
+      "why": "not a self-test: check-docs.py has no --self-test and silently ignores the flag; its detectors are covered by scripts/check-docs.test.py"
+    },
+    {
+      "command": "crates/copypaste-p2p/src/node/pairing_ceremony.rs pairing tests",
+      "why": "a cargo test, not a self-test; nothing here can mutate a #[tokio::test] attribute and get a deterministic verdict, because the defect was a race"
+    }
+  ],
+  "self_tests": [
+    {
+      "id": "macos-native-evidence",
+      "verifies": "the macOS accessibility surface check and the AppleScript dispatcher's bash half",
+      "command": ["bash", "scripts/release/macos-native-evidence.sh", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3", "bash"],
+      "mutations": [
+        {
+          "name": "menu-bar-not-required",
+          "file": "scripts/release/macos-native-evidence.sh",
+          "find": "if \"AXMenuBar\" not in roles:",
+          "replace": "if False:",
+          "expect": "self-test failed: surface without a menu bar passed"
+        },
+        {
+          "name": "named-elements-not-required",
+          "file": "scripts/release/macos-native-evidence.sh",
+          "find": "if not named:",
+          "replace": "if False:",
+          "expect": "self-test failed: surface without a name passed"
+        },
+        {
+          "name": "launched-pid-never-reported",
+          "file": "scripts/release/macos-ui-evidence-lib.sh",
+          "find": "            printf '%s\\n' \"$pids\"",
+          "replace": "            printf '\\n'",
+          "expect": "self-test failed: bundle executable name selects the launched process"
+        },
+        {
+          "name": "label-lookup-matches-anything",
+          "file": "scripts/release/macos-ui-evidence-lib.sh",
+          "find": "    grep -Fq \"$2\" \"$1\"",
+          "replace": "    grep -Fq \"\" \"$1\"",
+          "expect": "self-test failed: window scans exclude unrelated process chrome"
+        },
+        {
+          "name": "label-probe-discards-its-evidence",
+          "file": "scripts/release/macos-ui-evidence-lib.sh",
+          "find": "        mac_ax find \"$label\" > \"$dump\" 2>/dev/null && return 0",
+          "replace": "        mac_ax find \"$label\" > /dev/null 2>/dev/null && return 0",
+          "expect": "self-test failed: label probes retain the matched accessibility row"
+        },
+        {
+          "name": "field-input-never-focuses",
+          "file": "scripts/release/macos-ui-evidence-lib.sh",
+          "find": "\n                                set focused of elementRef to true\n",
+          "replace": "\n",
+          "expect": "self-test failed: field input dispatches keyboard events"
+        },
+        {
+          "name": "field-input-types-nothing",
+          "file": "scripts/release/macos-ui-evidence-lib.sh",
+          "find": "\n                                keystroke inputValue\n",
+          "replace": "\n",
+          "expect": "self-test failed: field input dispatches keyboard events"
+        }
+      ]
+    },
+    {
+      "id": "macos-cloud-evidence",
+      "verifies": "the native cloud latency budget and the latency evidence it writes",
+      "command": ["bash", "scripts/release/macos-cloud-evidence.sh", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3", "bash"],
+      "mutations": [
+        {
+          "name": "latency-budget-not-enforced",
+          "file": "scripts/release/native-cloud-evidence-lib.sh",
+          "find": "    (( $3 <= $4 ))",
+          "replace": "    (( 1 ))",
+          "expect": "FAIL  a latency over budget fails"
+        },
+        {
+          "name": "measurements-never-recorded",
+          "file": "scripts/release/native-cloud-evidence-lib.sh",
+          "find": "    printf '%s\\t%s\\t%s\\n' \"$2\" \"$3\" \"$4\" >> \"$1\"",
+          "replace": "    : \"$2$3$4\" \"$1\"",
+          "expect": "FAIL  latency evidence is structured and complete"
+        },
+        {
+          "name": "latency-json-loses-the-scenario",
+          "file": "scripts/release/native-cloud-evidence-lib.sh",
+          "find": "rows.append({\"scenario\": scenario,",
+          "replace": "rows.append({\"scenario\": \"unknown\",",
+          "expect": "FAIL  latency evidence is structured and complete"
+        }
+      ]
+    },
+    {
+      "id": "macos-bundle",
+      "verifies": "CFBundleExecutable resolution, its refusals, and that none of them print a path",
+      "command": ["bash", "scripts/release/macos-bundle-self-test.sh"],
+      "platforms": ["linux", "macos"],
+      "requires": ["bash"],
+      "mutations": [
+        {
+          "name": "traversal-in-bundle-metadata-accepted",
+          "file": "scripts/release/macos-bundle-lib.sh",
+          "find": "        \"\"|.|..|*/*|*$'\\n'*|*$'\\r'*)",
+          "replace": "        \"\")",
+          "expect": "FAIL    rejects an executable name that escapes Contents/MacOS"
+        },
+        {
+          "name": "missing-executable-accepted",
+          "file": "scripts/release/macos-bundle-lib.sh",
+          "find": "    if [[ ! -f \"$path\" || ! -x \"$path\" ]]; then",
+          "replace": "    if false; then",
+          "expect": "FAIL    rejects a missing declared executable"
+        },
+        {
+          "name": "refusal-discloses-the-bundle-path",
+          "file": "scripts/release/macos-bundle-lib.sh",
+          "find": "        echo \"ERROR: the bundle executable is missing or not executable.\" >&2",
+          "replace": "        echo \"ERROR: $path is missing or not executable.\" >&2",
+          "expect": "rejects a missing declared executable (error exposed a path)"
+        }
+      ]
+    },
+    {
+      "id": "android-native-accessibility",
+      "verifies": "the uiautomator tree check that every interactive CopyPaste node is named",
+      "command": ["bash", "scripts/release/android-native-accessibility.sh", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3", "node", "bash"],
+      "mutations": [
+        {
+          "name": "unnamed-interactive-nodes-accepted",
+          "file": "scripts/release/android-native-accessibility.sh",
+          "find": "if unnamed:",
+          "replace": "if False:",
+          "expect": "self-test failed: invalid fixture passed"
+        },
+        {
+          "name": "webview-surface-not-required",
+          "file": "scripts/release/android-native-accessibility.sh",
+          "find": "if not any(\"WebView\" in name for name in classes):",
+          "replace": "if False:",
+          "expect": "self-test failed: invalid fixture passed"
+        },
+        {
+          "name": "named-node-floor-removed",
+          "file": "scripts/release/android-native-accessibility.sh",
+          "find": "if len(named) < 3:",
+          "replace": "if len(named) < 0:",
+          "expect": "self-test failed: invalid fixture passed"
+        },
+        {
+          "name": "interactive-nodes-never-detected",
+          "file": "scripts/release/android-native-accessibility.sh",
+          "find": "    if any(node.get(attribute) == \"true\" for attribute in (\"clickable\", \"long-clickable\", \"checkable\")):\n        return True\n",
+          "replace": "",
+          "expect": "self-test failed: invalid fixture passed"
+        }
+      ]
+    },
+    {
+      "id": "check-file-size-gate",
+      "verifies": "the file-size gate's porcelain parse: a dead, truncated or inconsistent report must fail",
+      "command": ["bash", "scripts/check-file-size-gate.sh", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["bash", "awk"],
+      "mutations": [
+        {
+          "name": "dead-checker-passes",
+          "file": "scripts/check-file-size-gate.sh",
+          "find": "    if [[ \"$status\" -ne 0 ]]; then",
+          "replace": "    if false; then",
+          "expect": "FAIL  a checker that exits 37 fails the gate"
+        },
+        {
+          "name": "truncated-report-passes",
+          "file": "scripts/check-file-size-gate.sh",
+          "find": "    [[ \"$state\" == \"ended\" ]] ||",
+          "replace": "    [[ -n \"$state\" ]] ||",
+          "expect": "FAIL  a report that stops after its header fails the gate"
+        },
+        {
+          "name": "count-mismatch-passes",
+          "file": "scripts/check-file-size-gate.sh",
+          "find": "    [[ \"$declared\" -eq \"$seen\" ]] ||",
+          "replace": "    [[ -n \"$declared\" ]] ||",
+          "expect": "FAIL  a declared overage with no row fails the gate"
+        },
+        {
+          "name": "annotation-property-not-escaped",
+          "file": "scripts/check-file-size-gate.sh",
+          "find": "    v=\"${v//,/%2C}\"",
+          "replace": "    v=\"${v//,/,}\"",
+          "expect": "FAIL  a comma in a path is escaped in annotations"
+        }
+      ]
+    },
+    {
+      "id": "png-evidence",
+      "verifies": "the release screenshot validator: a blank or contentless PNG is not evidence",
+      "command": ["python3", "scripts/release/png_evidence.py", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3"],
+      "mutations": [
+        {
+          "name": "uniform-frames-accepted",
+          "file": "scripts/release/png_evidence.py",
+          "find": "            if all(low == high for low, high in extrema):",
+          "replace": "            if False:",
+          "expect": "PNG self-test returned"
+        },
+        {
+          "name": "blank-frames-accepted",
+          "file": "scripts/release/png_evidence.py",
+          "find": "            if visible_pixels <= required_pixels or coherent_pixels <= required_pixels:",
+          "replace": "            if False:",
+          "expect": "PNG self-test was accepted"
+        }
+      ]
+    },
+    {
+      "id": "write-native-evidence",
+      "verifies": "the native evidence writer refuses to emit a receipt for an unusable screenshot",
+      "command": ["python3", "scripts/release/write-native-evidence.py", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3"],
+      "mutations": [
+        {
+          "name": "screenshots-not-validated",
+          "file": "scripts/release/write-native-evidence.py",
+          "find": "    if kind == \"screenshot\":\n        validate_png(file)",
+          "replace": "    if False:\n        validate_png(file)",
+          "expect": "produced a native evidence receipt"
+        }
+      ]
+    },
+    {
+      "id": "android-smoke",
+      "verifies": "the on-device smoke detectors: our native code, the devtools socket, and the wry JNI scan",
+      "command": ["bash", "scripts/release/android-smoke.sh", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["bash", "python3", "node", "awk"],
+      "mutations": [
+        {
+          "name": "ahead-of-time-dex-counted-as-native-code",
+          "file": "scripts/release/android-smoke-lib.sh",
+          "find": "        path ~ /\\.(odex|vdex|art|dm)$/ || path ~ /\\/oat\\// { next }",
+          "replace": "        0 { next }",
+          "expect": "FAIL  ahead-of-time dex is not native code"
+        },
+        {
+          "name": "another-packages-native-code-counted-as-ours",
+          "file": "scripts/release/android-smoke-lib.sh",
+          "find": "        index(path, pkg) || index(path, \"libcopypaste\") { print $2 \"  \" path }",
+          "replace": "        1 { print $2 \"  \" path }",
+          "expect": "FAIL  another package's native code is not ours"
+        },
+        {
+          "name": "devtools-socket-matches-a-pid-prefix",
+          "file": "scripts/release/android-smoke-lib.sh",
+          "find": "    grep -oE \"@webview_devtools_remote_$2\\$\" <<<\"$1\"",
+          "replace": "    grep -oE \"@webview_devtools_remote_$2\" <<<\"$1\"",
+          "expect": "FAIL  a pid that is a prefix of another's socket does not match it"
+        },
+        {
+          "name": "wry-neighbour-methods-not-counted",
+          "file": "scripts/release/android-smoke-lib.sh",
+          "find": "    for name in setWebContentsDebuggingEnabled setWebViewClient setWebChromeClient; do",
+          "replace": "    for name in setWebContentsDebuggingEnabled; do",
+          "expect": "FAIL  a release library reports no devtools call and both neighbours"
+        }
+      ]
+    },
+    {
+      "id": "android-rungs",
+      "verifies": "the binder parcel reader that tells an empty clipboard from a refused call",
+      "command": ["bash", "scripts/release/android-rungs.sh", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["bash", "python3", "node", "awk"],
+      "mutations": [
+        {
+          "name": "inline-parcel-status-unreadable",
+          "file": "scripts/release/android-rungs-lib.sh",
+          "find": "    sed -e 's/^Result: Parcel(//' -e 's/^0x00000000: //'",
+          "replace": "    sed -e 's/^0x00000000: //'",
+          "expect": "FAIL  a reply printed inline has its exception code read"
+        },
+        {
+          "name": "refusal-detection-inverted",
+          "file": "scripts/release/android-rungs-lib.sh",
+          "find": "parcel_refused() { [[ \"$(parcel_status \"$1\")\" != \"00000000\" ]]; }",
+          "replace": "parcel_refused() { [[ \"$(parcel_status \"$1\")\" == \"00000000\" ]]; }",
+          "expect": "FAIL  a thrown reply is a refusal"
+        },
+        {
+          "name": "canary-lookup-matches-anything",
+          "file": "scripts/release/android-rungs-lib.sh",
+          "find": "    grep -qF \"$2\" <<<\"$text\" || grep -qF \"$2\" <<<\"${text//./}\"",
+          "replace": "    grep -qF \"\" <<<\"$text\"",
+          "expect": "FAIL  a canary absent from the reply is not found"
+        },
+        {
+          "name": "utf16-exception-message-never-decoded",
+          "file": "scripts/release/android-rungs-lib.sh",
+          "find": "parcel_message() { parcel_text \"$1\" | tr -d '.'; }",
+          "replace": "parcel_message() { parcel_text \"$1\"; }",
+          "expect": "FAIL  a UTF-16 exception message reads back once the dots go"
+        }
+      ]
+    },
+    {
+      "id": "check-wiring",
+      "verifies": "the CI runner-image detector: an unknown label or a mixed image family must be rejected",
+      "command": ["python3", "scripts/release/check-wiring.py", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3"],
+      "mutations": [
+        {
+          "name": "unknown-runner-label-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "            yield (family is not None,",
+          "replace": "            yield (True,",
+          "expect": "FAIL|self-test: a mistyped label is not|"
+        },
+        {
+          "name": "mixed-runner-images-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        yield (len(images) <= 1,",
+          "replace": "        yield (True,",
+          "expect": "FAIL|self-test: two macOS images in one tree are mixed|"
+        },
+        {
+          "name": "matrix-runner-labels-unvalidated",
+          "file": "scripts/release/check-wiring.py",
+          "find": "                yield (bool(runners) and set(runners) <= known,",
+          "replace": "                yield (True,",
+          "expect": "FAIL|self-test: a mistyped label in a matrix is not|"
+        }
+      ]
+    },
+    {
+      "id": "check-feature-ledger",
+      "verifies": "the ledger schema: every shipped Tauri command is classified and every platform recorded",
+      "command": ["python3", "scripts/check-feature-ledger.py", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3"],
+      "mutations": [
+        {
+          "name": "sibling-module-commands-missed",
+          "file": "scripts/check-feature-ledger.py",
+          "find": "    return set(re.findall(r\"^\\s*(?:[a-z_]+::)+([a-z_]+),\", block, re.MULTILINE))",
+          "replace": "    return set(re.findall(r\"^\\s*([a-z_]+),\", block, re.MULTILINE))",
+          "expect": "FAIL|self-test: sibling-module Tauri commands are extracted|"
+        },
+        {
+          "name": "unclassified-command-not-reported",
+          "file": "scripts/check-feature-ledger.py",
+          "find": "    missing = sorted(shipped - set(classified))",
+          "replace": "    missing = []",
+          "expect": "FAIL|self-test: an omitted sibling-module command fails|"
+        }
+      ]
+    },
+    {
+      "id": "check-native-parity-wiring",
+      "verifies": "the release wiring that keeps Windows in the native-parity gate and its signing inputs scoped",
+      "command": ["python3", "scripts/release/check-native-parity-wiring.py", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3"],
+      "mutations": [
+        {
+          "name": "parity-gate-need-not-wait-for-windows",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "    if not {\"macos\", \"android-hardware\", \"windows\"} <= set(gate.get(\"needs\") or []):",
+          "replace": "    if False:",
+          "expect": "FAIL|missing Windows platform dependency fails|"
+        },
+        {
+          "name": "windows-receipt-need-not-be-downloaded",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "    if not required_receipts <= downloads(gate):",
+          "replace": "    if False:",
+          "expect": "FAIL|missing Windows evidence download fails|"
+        },
+        {
+          "name": "job-wide-signing-key-accepted",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "        private_signing_env & set(windows_env)\n",
+          "replace": "        False\n",
+          "expect": "FAIL|job-wide Tauri private signing input fails|"
+        }
+      ]
+    },
+    {
+      "id": "android-smoke-levels",
+      "verifies": "the API-level selector and the all-legs-passed verdict the level sweep reports",
+      "command": ["bash", "scripts/release/android-smoke-levels.sh", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["bash"],
+      "mutations": [
+        {
+          "name": "default-api-levels-changed",
+          "file": "scripts/release/android-smoke-levels.sh",
+          "find": "DEFAULT_LEVELS=(29 33 34 36)",
+          "replace": "DEFAULT_LEVELS=(29 33)",
+          "expect": "FAIL android-smoke-levels self-test"
+        },
+        {
+          "name": "non-numeric-api-level-accepted",
+          "file": "scripts/release/android-smoke-levels.sh",
+          "find": "        [[ \"$level\" =~ ^[0-9]+$ ]] || return 1",
+          "replace": "        [[ -n \"$level\" ]] || return 1",
+          "expect": "FAIL android-smoke-levels self-test"
+        },
+        {
+          "name": "a-failed-leg-reported-as-passed",
+          "file": "scripts/release/android-smoke-levels.sh",
+          "find": "        [[ -n \"$level\" && \"$verdict\" == \"PASS\" ]] || return 1",
+          "replace": "        [[ -n \"$level\" ]] || return 1",
+          "expect": "FAIL android-smoke-levels self-test"
+        },
+        {
+          "name": "no-legs-at-all-reported-as-passed",
+          "file": "scripts/release/android-smoke-levels.sh",
+          "find": "    [[ $# -gt 0 ]] || return 1\n    for result in \"$@\"; do",
+          "replace": "    [[ $# -ge 0 ]] || return 1\n    for result in \"$@\"; do",
+          "expect": "FAIL android-smoke-levels self-test"
+        }
+      ]
+    },
+    {
+      "id": "mutation-gate",
+      "verifies": "this gate reports a surviving mutation instead of a pass",
+      "command": ["python3", "scripts/mutation-gate/run.py", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3"],
+      "mutations": [
+        {
+          "name": "a-green-self-test-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "            if code == 0:\n                report.survived(entry, mutation, \"the self-test still passed\")",
+          "replace": "            if False:\n                report.survived(entry, mutation, \"the self-test still passed\")",
+          "expect": "FAIL  a mutation that leaves the self-test green is reported as survived"
+        },
+        {
+          "name": "a-failure-that-names-nothing-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "            elif mutation[\"expect\"] not in output:",
+          "replace": "            elif False:",
+          "expect": "FAIL  a self-test that fails without naming the assertion is reported as survived"
+        },
+        {
+          "name": "a-stale-mutation-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "    if occurrences != expected:",
+          "replace": "    if False:",
+          "expect": "FAIL  a mutation whose find no longer matches is reported as stale"
+        },
+        {
+          "name": "a-red-baseline-mutated-anyway",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "    if code != 0:\n        report.baseline_failed(entry, code, output)\n        return",
+          "replace": "    if False:\n        report.baseline_failed(entry, code, output)\n        return",
+          "expect": "FAIL  a self-test that is already red is reported instead of mutated"
+        },
+        {
+          "name": "mutations-not-restored-between-runs",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "        scratch.restore(mutation[\"file\"])",
+          "replace": "        pass",
+          "expect": "FAIL  every mutation is restored before the next one"
+        }
+      ]
+    },
+    {
+      "id": "windows-native-evidence",
+      "verifies": "bounded Windows readiness, its typed probe outcomes, and complete UIA snapshots",
+      "command": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/release/windows-native-evidence.ps1", "-SelfTest"],
+      "platforms": ["windows"],
+      "requires": ["powershell"],
+      "mutations": [
+        {
+          "name": "narration-on-the-return-channel",
+          "file": "scripts/release/windows-readiness-lib.ps1",
+          "find": "                Write-Host \"  readiness: $Description saw a transient failure on probe ${attempt}: $why\"",
+          "replace": "                Write-Output \"  readiness: $Description saw a transient failure on probe ${attempt}: $why\"",
+          "expect": "values on the ready return"
+        },
+        {
+          "name": "invariant-retried-to-a-timeout",
+          "file": "scripts/release/windows-readiness-lib.ps1",
+          "find": "                throw \"$Description cannot become ready: $why. Observed after $attempt probe(s) and $($timer.ElapsedMilliseconds) ms.\"",
+          "replace": "                $last = \"not ready: $why\"",
+          "expect": "an invariant failure was retried instead of propagating"
+        },
+        {
+          "name": "bare-probe-value-accepted",
+          "file": "scripts/release/windows-readiness-lib.ps1",
+          "find": "        if (-not $kind) {",
+          "replace": "        if ($false) {",
+          "expect": "a probe that returned a bare value was accepted as ready"
+        },
+        {
+          "name": "process-budget-not-enforced",
+          "file": "scripts/release/windows-readiness-lib.ps1",
+          "find": "        if ($maxAttempts -gt 0 -and ($delays.Count + 1) -ge $maxAttempts) { break }",
+          "replace": "        if ($false) { break }",
+          "expect": "did not bound the schedule to 4 probes"
+        },
+        {
+          "name": "unpayable-budget-accepted",
+          "file": "scripts/release/windows-readiness-lib.ps1",
+          "find": "        if ($ProcessBudget -lt $ProcessesPerProbe) {",
+          "replace": "        if ($false) {",
+          "expect": "a budget that cannot pay for a single probe was accepted"
+        },
+        {
+          "name": "unreadable-node-dropped-silently",
+          "file": "scripts/release/windows-uia-snapshot-lib.ps1",
+          "find": "            $unreadable += [ordered]@{ index = $index; attempts = $used; reason = $failure }",
+          "replace": "            $index = $index",
+          "expect": "an unreadable node was dropped silently"
+        },
+        {
+          "name": "partial-snapshot-accepted-as-evidence",
+          "file": "scripts/release/windows-uia-snapshot-lib.ps1",
+          "find": "    if ($missing -gt 0) {",
+          "replace": "    if ($false) {",
+          "expect": "a partial accessibility snapshot was accepted as evidence"
+        },
+        {
+          "name": "empty-snapshot-accepted-as-evidence",
+          "file": "scripts/release/windows-uia-snapshot-lib.ps1",
+          "find": "    if (@($Snapshot.nodes).Count -eq 0) {",
+          "replace": "    if ($false) {",
+          "expect": "an empty accessibility snapshot was accepted as evidence"
+        },
+        {
+          "name": "transient-node-read-not-retried",
+          "file": "scripts/release/windows-uia-snapshot-lib.ps1",
+          "find": "$UIA_NODE_READ_ATTEMPTS = 3",
+          "replace": "$UIA_NODE_READ_ATTEMPTS = 1",
+          "expect": "a transient node read was not retried"
+        },
+        {
+          "name": "installed-sidecar-not-required",
+          "file": "scripts/release/windows-native-evidence.ps1",
+          "find": "\"copypaste-daemon.exe\", ",
+          "replace": "",
+          "expect": "a package without the installed sidecar did not fail"
+        },
+        {
+          "name": "orphaned-sidecar-accepted",
+          "file": "scripts/release/windows-native-evidence.ps1",
+          "find": "    Assert-True ($LASTEXITCODE -eq 1) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"",
+          "replace": "    Assert-True ($LASTEXITCODE -ge 0) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"",
+          "expect": "a sidecar still answering was accepted as a stopped one"
+        }
+      ]
+    }
+  ]
+}
