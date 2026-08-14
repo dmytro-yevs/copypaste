@@ -198,37 +198,23 @@ mod tests {
     /// (§5.6, DMY-162).
     #[test]
     fn the_counted_word_list_is_vendored_and_above_one() {
-        for (name, minimum) in [("cloudflare_api_token", 3)] {
-            let counted: Vec<_> = rule(name)
-                .allowlists
-                .iter()
-                .filter(|allowlist| !allowlist.stopwords.is_empty())
-                .collect();
-            assert_eq!(counted.len(), 1, "{name}");
-            assert_eq!(counted[0].target, AllowlistTarget::Secret, "{name}");
-            assert_eq!(counted[0].stopword_minimum, minimum, "{name}");
-            assert_eq!(
-                counted[0].stopwords.len(),
-                1_446,
-                "{name} restates the list"
-            );
-            assert!(
-                counted[0].regexes.is_empty(),
-                "{name} borrowed a second gate"
-            );
-        }
+        let counted: Vec<_> = rule("cloudflare_api_token")
+            .allowlists
+            .iter()
+            .filter(|allowlist| !allowlist.stopwords.is_empty())
+            .collect();
+        assert_eq!(counted.len(), 1);
+        assert_eq!(counted[0].target, AllowlistTarget::Secret);
+        assert_eq!(counted[0].stopword_minimum, 3);
+        assert_eq!(counted[0].stopwords.len(), 1_446, "the list is restated");
+        assert!(counted[0].regexes.is_empty(), "a second gate was borrowed");
         // Borrowed, not copied: the same words upstream applies to these lines.
         let upstream = rule("generic_api_key")
             .allowlists
             .iter()
             .find(|allowlist| !allowlist.stopwords.is_empty())
             .expect("generic_api_key keeps its vendored stopwords");
-        let borrowed = rule("cloudflare_api_token")
-            .allowlists
-            .iter()
-            .find(|allowlist| !allowlist.stopwords.is_empty())
-            .unwrap();
-        assert_eq!(borrowed.stopwords, upstream.stopwords);
+        assert_eq!(counted[0].stopwords, upstream.stopwords);
     }
 
     /// Which rules a restricted neighbour may overrule. A keyword and a value of
