@@ -2,6 +2,8 @@ import { execa } from "execa";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { adbFailureText, isEmptyDeviceAnswer, type CommandFailure } from "./adb-failure.js";
+
 const metadataTool = fileURLToPath(new URL("../../../scripts/release/android-metadata.mjs", import.meta.url));
 const APP_NAMESPACE = execFileSync(
   process.execPath,
@@ -50,6 +52,27 @@ export async function shell(...args: string[]): Promise<string> {
   return adb("shell", ...args);
 }
 
+export type Attempt<T> = { ok: true; value: T } | { ok: false; failure: CommandFailure };
+
+/** adb's own exit code, stdout and stderr, so a caller can tell a transport that
+ *  is not answering from a device that answered "no". */
+export async function tryShell(...args: string[]): Promise<Attempt<string>> {
+  try {
+    return { ok: true, value: await shell(...args) };
+  } catch (error) {
+    const failure = error as CommandFailure & { exitCode?: number };
+    return {
+      ok: false,
+      failure: {
+        exitCode: failure.exitCode,
+        stderr: String(failure.stderr ?? "").replace(/\r\n/g, "\n"),
+        stdout: String(failure.stdout ?? "").replace(/\r\n/g, "\n"),
+        message: failure.message,
+      },
+    };
+  }
+}
+
 /**
  * The app's own process, not a WebView renderer.
  *
@@ -59,11 +82,24 @@ export async function shell(...args: string[]): Promise<string> {
  * which process the next read describes. An exact name match is not.
  */
 export async function appPid(): Promise<number | undefined> {
-  const exact = (await shell("ps", "-A", "-o", "PID,NAME").catch(() => ""))
+  const listed = await tryShell("ps", "-A", "-o", "PID,NAME");
+  // `ps` is on every image this runs against, so its failure is the transport's
+  // and `undefined` here would name the app for it.
+  if (!listed.ok) throw new Error(`the process list could not be read: ${adbFailureText(listed.failure)}`);
+  const exact = listed.value
     .split("\n")
     .map((line) => line.trim().split(/\s+/))
     .find(([, name]) => name === PACKAGE);
-  const pid = Number(exact?.[0] ?? (await shell("pidof", PACKAGE).catch(() => "")).trim().split(/\s+/)[0]);
+  if (exact?.[0] !== undefined) {
+    const pid = Number(exact[0]);
+    if (Number.isInteger(pid) && pid > 0) return pid;
+  }
+  const matched = await tryShell("pidof", PACKAGE);
+  if (!matched.ok) {
+    if (isEmptyDeviceAnswer(matched.failure)) return undefined;
+    throw new Error(`the app's pid could not be read: ${adbFailureText(matched.failure)}`);
+  }
+  const pid = Number(matched.value.trim().split(/\s+/)[0]);
   return Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
