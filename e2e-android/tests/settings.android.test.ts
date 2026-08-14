@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { accessibleSurface, expectNoFilesystemPath } from "../src/harness/leaks.js";
 import { rowBoxes } from "../src/harness/list.js";
-import { addItems, deleteItems } from "../src/harness/bridge.js";
+import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import {
   SEARCH,
@@ -88,7 +88,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await gotoView(app, "History").catch(() => undefined);
   await resetHistoryFilters(app).catch(() => undefined);
-  await deleteItems(app, seeded).catch(() => undefined);
+  await cleanUpItems(app, seeded);
   await app?.detach();
 });
 

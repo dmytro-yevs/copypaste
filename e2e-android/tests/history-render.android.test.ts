@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
-import { addItems, deleteItems } from "../src/harness/bridge.js";
+import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { listSnapshot, rowBoxes, settledList } from "../src/harness/list.js";
 import {
@@ -90,7 +90,7 @@ afterAll(async () => {
   // the next run's list a different shape, and the run after that a different
   // one again.
   await clearField(app, SEARCH).catch(() => undefined);
-  await deleteItems(app, seeded).catch(() => undefined);
+  await cleanUpItems(app, seeded);
   await app?.detach();
 });
 

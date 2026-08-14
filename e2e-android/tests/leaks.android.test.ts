@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, inject, test } from "vitest";
 
 import { PACKAGE } from "../src/harness/adb.js";
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
-import { addItems, deleteItems } from "../src/harness/bridge.js";
+import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { ordinaryFor, secretFor } from "../src/harness/fixtures.js";
 import {
   accessibleSurface,
@@ -41,7 +41,7 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  await deleteItems(app, seeded).catch(() => undefined);
+  await cleanUpItems(app, seeded);
   await app?.detach();
 });
 
