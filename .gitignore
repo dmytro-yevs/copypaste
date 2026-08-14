@@ -115,3 +115,6 @@ design/node_modules/
 /e2e/test-results/
 /e2e-android/node_modules/
 /e2e-android/artifacts/
+
+# scripts/mutation-gate is the only importable Python package in the tree.
+__pycache__/

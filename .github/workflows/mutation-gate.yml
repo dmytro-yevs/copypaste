@@ -1,0 +1,54 @@
+name: Mutation gate
+
+# Every self-test in scripts/mutation-gate/mutations.json is run against a
+# broken copy of the production code it covers, and must exit non-zero naming
+# the assertion that caught it. A self-test that stays green under a mutation
+# asserted nothing, which is what four shipped self-tests were doing.
+#
+# Its own job, not folded into an existing one: a surviving mutation is a
+# distinct verdict from the check it belongs to failing.
+
+on:
+  push:
+    branches: [main, v2-main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: mutation-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: mutation gate (bash and python self-tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Install the PNG decoder the evidence validators need
+        run: python3 -m pip install --requirement requirements-ci.txt
+
+      - name: Prove the gate reports a survivor
+        run: python3 scripts/mutation-gate/run.py --self-test
+
+      - name: Prove no self-test in the manifest is stranded off CI
+        run: python3 scripts/mutation-gate/run.py --platforms-covered linux,windows
+
+      - name: Run every mutation declared for Linux
+        run: python3 scripts/mutation-gate/run.py --platform linux --require-all
+
+  windows:
+    name: mutation gate (PowerShell self-tests)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Run every mutation declared for Windows
+        run: python scripts/mutation-gate/run.py --platform windows --require-all
