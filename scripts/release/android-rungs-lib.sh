@@ -171,6 +171,50 @@ for match in re.finditer(r"<node[^>]*>", xml):
 PY
 }
 
+# The device's API level, or a failure that says what the device actually said.
+#
+# `sh_` folds stderr into stdout, so a probe that failed still produces a value:
+# `sdk="$(sh_ getprop ro.build.version.sdk)"` set sdk to
+# `adb.exe: device 'emulator-5554' not found` and the run carried on and printed
+# `device: API adb.exe: device 'emulator-5554' not found`. Every later decision
+# that reads $sdk — which rungs apply, which IClipboard codes to expect — was
+# then taken against a sentence. A level is a bare integer or it is not a level.
+api_level_from() {   # <probe output> <probe exit status>
+    local said="$1" status="$2"
+    if [[ "$status" != 0 ]]; then
+        printf 'the API probe failed (exit %s): %s\n' "$status" "${said:-adb said nothing}" >&2
+        return 1
+    fi
+    said="$(printf '%s' "$said" | tr -d '\r' | head -n 1)"
+    said="${said#"${said%%[![:space:]]*}"}"
+    said="${said%"${said##*[![:space:]]}"}"
+    if [[ ! "$said" =~ ^[0-9]+$ ]]; then
+        printf 'the API probe returned no level: %s\n' "${said:-nothing at all}" >&2
+        return 1
+    fi
+    printf '%s\n' "$said"
+}
+
+# One receipt per rung, so a rung that never ran is an absence this script can
+# see rather than a summary that counts only what did run. `not-applicable`
+# is a decision with a reason attached; silence is not.
+rung_receipt() {   # <receipt file> <rung> <run|not-applicable> <why>
+    case "$3" in
+        run | not-applicable) ;;
+        *) printf 'a rung receipt is run or not-applicable, not %s\n' "$3" >&2; return 1 ;;
+    esac
+    printf '%s\t%s\t%s\n' "$2" "$3" "$4" >> "$1"
+}
+
+# The declared rungs with no receipt. Empty output is the only pass.
+rungs_without_receipt() {   # <receipt file> <rung>...
+    local file="$1" rung
+    shift
+    for rung in "$@"; do
+        grep -q "^$rung	" "$file" 2>/dev/null || printf '%s\n' "$rung"
+    done
+}
+
 # --self-test
 
 rungs_self_test() {
@@ -355,6 +399,58 @@ EOF
     grep -qF "Capturing from every app." <<<"$strings" \
         && bad "a headline that is not shown is not reported" \
         || ok "a headline that is not shown is not reported"
+
+    group "self-test: the API probe"
+
+    [[ "$(api_level_from "36" 0)" == "36" ]] \
+        && ok "a bare API level is read" \
+        || bad "a bare API level is read" "$(api_level_from "36" 0)"
+    [[ "$(api_level_from "  24  " 0)" == "24" ]] \
+        && ok "a level with surrounding whitespace is read" \
+        || bad "a level with surrounding whitespace is read"
+
+    # The defect: adb's own failure arriving as the value, because `sh_` merges
+    # stderr into stdout and getprop was never asked anything.
+    local said
+    said="$(api_level_from "adb.exe: device 'emulator-5554' not found" 0 2>&1)" \
+        && bad "an adb error is not accepted as an API level" "$said" \
+        || ok "an adb error is not accepted as an API level"
+    grep -qF "device 'emulator-5554' not found" <<<"$said" \
+        && ok "the rejected probe reports what the device said" \
+        || bad "the rejected probe reports what the device said" "$said"
+
+    said="$(api_level_from "" 1 2>&1)" \
+        && bad "a probe that exited non-zero is not accepted" "$said" \
+        || ok "a probe that exited non-zero is not accepted"
+    grep -qF "exit 1" <<<"$said" \
+        && ok "a failed probe reports its exit status" \
+        || bad "a failed probe reports its exit status" "$said"
+
+    said="$(api_level_from "" 0 2>&1)" \
+        && bad "an empty API probe is not accepted" "$said" \
+        || ok "an empty API probe is not accepted"
+
+    group "self-test: rung receipts"
+
+    local receipts="$t/receipts.tsv"
+    : > "$receipts"
+    rung_receipt "$receipts" "rung-2" run "the shell uid read the clipboard"
+    rung_receipt "$receipts" "flag-secure" not-applicable "no window was ever created"
+    [[ "$(rungs_without_receipt "$receipts" rung-2 flag-secure | tr '\n' ' ')" == "" ]] \
+        && ok "every rung with a receipt is accounted for" \
+        || bad "every rung with a receipt is accounted for" \
+               "$(rungs_without_receipt "$receipts" rung-2 flag-secure | tr '\n' ' ')"
+
+    # The failure this exists for: a rung that never ran leaves no trace, and a
+    # summary that counts only what ran calls the run complete.
+    [[ "$(rungs_without_receipt "$receipts" rung-2 tile flag-secure | tr '\n' ' ')" == "tile " ]] \
+        && ok "a rung that never ran is named as missing" \
+        || bad "a rung that never ran is named as missing" \
+               "$(rungs_without_receipt "$receipts" rung-2 tile flag-secure | tr '\n' ' ')"
+
+    rung_receipt "$receipts" "tile" skipped "a status nothing declares" 2>/dev/null \
+        && bad "an undeclared receipt status is refused" \
+        || ok "an undeclared receipt status is refused"
 
     printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
     [[ $FAIL -eq 0 ]]

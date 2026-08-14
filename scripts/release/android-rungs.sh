@@ -47,6 +47,13 @@ if [[ "${1:-}" == "--self-test" ]]; then
 fi
 
 mkdir -p "$OUT"
+
+# The four surfaces this script exists to assert. A rung that produced neither a
+# run nor a not-applicable receipt is a rung nobody watched, and the run fails on
+# the absence rather than reporting the assertions that did happen.
+RUNGS_DECLARED=(rung-2 tile background-capture flag-secure)
+RECEIPTS="$OUT/rung-receipts.tsv"
+
 stamp="$(date +%s)$RANDOM"
 CANARY_SHELL="CopyPasteShellCanary${stamp}"
 CANARY_TILE="CopyPasteTileCanary${stamp}"
@@ -116,8 +123,17 @@ adb wait-for-device
 devices="$(adb devices | grep -cE '\sdevice$')"
 [[ "$devices" == "1" ]] || { echo "  FATAL expected one device, adb reports $devices"; adb devices; exit 1; }
 
-sdk="$(sh_ getprop ro.build.version.sdk)"
+# Every rung below decides from the API level — which clipboard codes to expect,
+# which surfaces the image can show at all — so a level that was not read is not
+# a level to carry on with.
+sdk_said="$(sh_ getprop ro.build.version.sdk)"
+sdk_status=$?
+if ! sdk="$(api_level_from "$sdk_said" "$sdk_status")"; then
+    echo "  FATAL the device's API level could not be read; every rung below is decided from it"
+    exit 1
+fi
 printf '  device: API %s, %s\n' "$sdk" "$(sh_ getprop ro.product.cpu.abi)"
+: > "$RECEIPTS"
 
 if [[ -n "$APK" ]]; then
     [[ -f "$APK" ]] || { echo "  FATAL APK not found at '$APK'"; exit 1; }
@@ -230,6 +246,9 @@ note "the Shizuku transport itself" \
      "ShizukuBinderWrapper, IClipboard\$Stub.asInterface by reflection, the IOnPrimaryClipChangedListener descriptor and whether the listener ever fires (spike items 2, 3, 8) all need Shizuku installed and paired over wireless debugging by hand. What is settled above is the platform's half: the uid, the callingPackage and the argument vector"
 note "the Android 12+ access toast and OEM battery managers" \
      "spike items 6 and 7 need a phone — a toast is not in any dumpsys this image answers, and no emulator reproduces a vendor task killer"
+
+rung_receipt "$RECEIPTS" rung-2 run \
+    "API $sdk; getPrimaryClip as the shell uid answered at code ${found_at:-none}"
 
 group "2. The Quick Settings tile"
 # android-spike.md records this as unproven because `cmd statusbar add-tile`
@@ -346,6 +365,8 @@ else
     bad "no other app can start the tile's clipboard reader" "$reader_start"
 fi
 
+rung_receipt "$RECEIPTS" tile run "API $sdk; the tile was added, bound and clicked"
+
 group "3. The background capture service"
 # The service exists to keep the process alive while rung 2 is armed. With
 # Shizuku absent nothing may arm, and the failure this guards against is a
@@ -435,6 +456,8 @@ sh_ run-as "$PKG" rm -f shared_prefs/capture-service.xml >/dev/null 2>&1
 note "the foreground service surviving an OEM battery manager" \
      "spike item 6 needs a real phone left idle for an hour; the design is weakest here and an emulator cannot reproduce it"
 
+rung_receipt "$RECEIPTS" background-capture run "API $sdk; the service was driven with the armed state seeded"
+
 group "4. FLAG_SECURE (INV-35)"
 # tao's set_content_protection is compiled for macOS and Windows only, so on
 # Android nothing sets this but ScreenProtectionPlugin. Asserted on the window,
@@ -488,6 +511,17 @@ note "that a third-party recorder actually sees nothing" \
      "FLAG_SECURE is enforced against MediaProjection, which needs a second app and a consent dialog; screencap and screenrecord run as shell and capture secure layers by design, so neither can stand in for it"
 note "turning protection back off" \
      "ScreenProtectionPlugin.setProtected(false) is reachable only from the WebView, and the setting that calls it is not driven here"
+
+rung_receipt "$RECEIPTS" flag-secure run "API $sdk; $seen dump(s) of the main window over a minute"
+
+missing="$(rungs_without_receipt "$RECEIPTS" "${RUNGS_DECLARED[@]}" | tr '\n' ' ')"
+if [[ -z "${missing// /}" ]]; then
+    ok "every declared rung recorded a receipt"
+    printf '        %s\n' "$RECEIPTS"
+else
+    bad "every declared rung recorded a receipt" \
+        "no run or not-applicable receipt for: ${missing% }— those rungs were never observed, so this run asserts nothing about them"
+fi
 
 dump_logcat final
 summary
