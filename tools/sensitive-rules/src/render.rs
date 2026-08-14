@@ -89,6 +89,7 @@ fn render_rule(out: &mut String, rule: &Rule) -> Result<()> {
         "        never_auto_delete: {},",
         rule.never_auto_delete
     )?;
+    writeln!(out, "        anchor_only: {},", rule.anchor_only)?;
     match rule.entropy {
         Some(entropy) => writeln!(out, "        entropy: Some({entropy:?}),")?,
         None => writeln!(out, "        entropy: None,")?,
@@ -125,6 +126,11 @@ fn render_allowlist(out: &mut String, allowlist: &Allowlist, indent: usize) -> R
     )?;
     string_slice(out, "regexes", &allowlist.regexes, indent + 1)?;
     string_slice(out, "stopwords", &allowlist.stopwords, indent + 1)?;
+    writeln!(
+        out,
+        "{pad}    stopword_minimum: {},",
+        allowlist.stopword_minimum
+    )?;
     writeln!(out, "{pad}}},")?;
     Ok(())
 }

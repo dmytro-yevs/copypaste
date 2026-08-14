@@ -233,6 +233,13 @@ literal the prefilter can require collapses from `api_key` to `api`, and every
 rule in the set pays for that. The value-strength gate is unchanged, so a wider
 keyword cannot make a weak value wipeable.
 
+**v2 amendment — rule 23 is two rules (DMY-162).** The `api…key` and `apikey`
+alternatives are `api_key_kv`, identical in confidence, threshold, shape guard
+and deletion refusal, and carrying one thing the rest may not: gitleaks' counted
+placeholder vocabulary. That is the only keyword family upstream already judges
+by word list on the same bytes, and §5.6 gives the measurement for why it may
+not be applied to the whole of rule 23.
+
 ### 3.3 Rule 41 — credit card (NOT a regex rule)
 
 Credit cards are **not** in the pattern table. They are a separate,
@@ -328,10 +335,10 @@ example `pattern_name` (`ffi_sensitive.rs:73`) — that name does not exist.
 | Band | Members | Semantics |
 |---|---|---|
 | **0.90 – 0.99** | Prefixed/structural tokens with a unique literal or a mandatory context anchor | "Cannot plausibly be anything else." Safe to auto-delete on a unique literal; a rule resting on a context anchor alone is restricted instead (§5.6). |
-| **0.75 – 0.80** | `generic_password_kv` (0.75), `dotenv_secret` (0.80) | Keyword-driven. Both gate the value on strength and randomness, and both are restricted (§5.6). |
+| **0.75 – 0.80** | `generic_password_kv` (0.75), `api_key_kv` (0.75), `dotenv_secret` (0.80) | Keyword-driven. All gate the value on strength and randomness, and all are restricted (§5.6). |
 | **≥ 0.70 floor** | — | Auto-wipe boundary. Nothing may sit *exactly* on it: `ip_with_port` did, and it caused data loss (`CopyPaste-8ys1`). Treat 0.70 as exclusive-in-spirit. |
 | **0.55 – 0.65 — INERT** | `phone_us`, `passport`, `email`, `iban`, `ssn_us`, `discord_bot_token`, `twilio_signing_key_sid`, `generic_bearer`, `http_basic_auth`, `ip_with_port` | Detected, labelled, masked, redacted in logs — **never deleted**, and still searchable. |
-| **RESTRICTED** | `credit_card`, `cloudflare_api_token`, `azure_storage_key`, `aws_secret_access_key`, `dotenv_secret`, `generic_password_kv` | Above the floor *and* opted out of deletion. Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. |
+| **RESTRICTED** | `credit_card`, `cloudflare_api_token`, `azure_storage_key`, `aws_secret_access_key`, `dotenv_secret`, `generic_password_kv`, `api_key_kv` | Above the floor *and* opted out of deletion. Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. |
 
 **v2 amendment — the restricted band (DMY-162).** v1 had two bands and one
 question, so "how sure is this a card?" and "may this be erased?" shared a
@@ -352,11 +359,34 @@ judging the *same value* through the *same* anchor on weaker gates — reinstate
 every deletion the band had just refused. Eight of eleven real credentials
 across the four context-anchored rules were still destroyed with the band in
 place. **A rule above the floor licenses deletion of the item only where no
-restricted match covers the same bytes.** Overlap, not containment: the generic
-rule's match can run a byte past its neighbour's. Two rules over one span are
-one judgement and I1 takes the recoverable outcome; rules on *disjoint* spans
-are independent evidence and still delete, so a distinct secret pasted beside a
-card or a `.env` line is not protected by it.
+restricted match covers the same bytes *and* the rule rests on a context anchor
+alone.** Overlap, not containment: the generic rule's match can run a byte past
+its neighbour's. Rules on *disjoint* spans are independent evidence and still
+delete, so a distinct secret pasted beside a card or a `.env` line is not
+protected by it.
+
+**v2 amendment — only an anchor-only rule is overruled (DMY-162).** Written over
+*every* match above the floor, the veto took the deletion from a secret with a
+unique literal of its own whenever a weaker rule happened to cover it:
+`GITHUB_TOKEN=ghp_…`, `VAULT_TOKEN=hvs.…`, `AUTH_TOKEN=<JWT>`,
+`SLACK_TOKEN=xoxb-…` and `api_key: ghp_…` all stopped auto-wiping, against a
+band table that calls a unique literal safe to delete and §9.1 rows that bind
+`hvs.`+32 and the JWT as auto-wipes. `.env` is the commonest way a secret is
+pasted, so this was most of the feature. Two rules over one span are one
+judgement only where the second read the *same anchor* on weaker gates;
+`anchor_only` is a per-rule declaration with a written decision, derived into the
+predicate the way the band is, and it holds for exactly `generic_api_key` and
+`heroku_api_key`.
+
+**v2 amendment — a restricted rule is now load-bearing for *not* deleting
+(DMY-162).** Before the aggregate rule, a restricted rule that stopped firing
+cost withholding. It can now cost the item: the anchor-only match it was
+vetoing becomes unvetoed and deletes. **Tightening any restricted rule is
+therefore a potential data-loss change**, which is not what tightening a
+suppressing gate normally means, and it is why raising `cloudflare_api_token`'s
+threshold to reach one template would have been the wrong repair. A regression
+test must pin the **pair** — the restricted match and the deletion it withholds
+— rather than each rule alone, or the overlap can disappear silently.
 
 Read a rule's own row in §9.1/§9.2 as what that rule does. Where a row says an
 item "never auto-wipes", it is this aggregate rule that makes it true.
@@ -565,13 +595,25 @@ Each threshold is now set against two measured populations at the value shape
 its pattern admits: 80 000 word-shaped templates per length, and 500 000 random
 values over the rule's own alphabet.
 
-| Rule | Value shape | Template ceiling | Real values rejected | Threshold |
+| Rule | Value shape | Single-case word ceiling | Real values rejected | Threshold |
 |---|---|---|---|---|
 | `cloudflare_api_token` | 40 chars, 64 symbols | 4.225 | 3.4 in 10 000 | **4.3** |
 | `aws_secret_access_key` | 40 chars, 64 symbols | 4.225 | 3.4 in 10 000 | **4.3** |
 | `azure_storage_key` | 86 chars, 64 symbols | 4.268 | 0 in 500 000 | **4.8** |
 | `dotenv_secret` | `\S+`, any alphabet | 4.268 | below | **4.4** |
-| `generic_password_kv` | `\S{6,}`, any alphabet | *unreachable* | 1 145 in 100 000 at 6 chars, 0 at 10 | **2.0** |
+| `generic_password_kv` / `api_key_kv` | `\S{6,}`, any alphabet | *unreachable* | 1 145 in 100 000 at 6 chars, 0 at 10 | **2.0** |
+
+**v2 amendment — 4.225 is one population's ceiling, not the ceiling (DMY-162).**
+The 80 000 templates were single-case and word-only. Ordinary README spelling is
+mixed case *with digits*, and at the same 40 characters it clears 4.3:
+`Replace_With_Your_Real_Token_Value123456` measures **4.354**,
+`My_Cloudflare_Token_Goes_Right_Here_9876` 4.425 and
+`Copy_Your_API_Token_From_The_Dashboard12` 4.325. Read the column above as the
+ceiling of the population named beside it. Raising the threshold to cover the
+gap is the wrong repair twice: 4.4 rejects 0.305 % of real 40-character tokens
+against 4.3's 0.043 %, and by §4.2's second amendment it would *create*
+deletions, because the restricted match vetoing `generic_api_key` disappears
+with it.
 
 `dotenv_secret` fixes neither a length nor an alphabet, so its number clears the
 ceiling at *every* length `\S+` admits rather than at one. It is therefore the
@@ -587,9 +629,9 @@ chose, so §9.1's own `password=hunter2` and `secret = !abcdef` measure 2.807 an
 fix the ceiling from *below*. 2.5 rejects 19 % of six-character values and 2.8
 rejects `passw0rd` at 2.750, while the word-spelled templates start at 3.516. So
 2.0 answers only the **repetitive** half of the pair — `ACxxxx…` at 0.382,
-`key-0000…` at 0.741 — and the shape guard answers the other. The five templates
-neither reaches are written in words *and* digits; they are restricted, which is
-where §4.2's aggregate rule earns its place.
+`key-0000…` at 0.741 — and the shape guard answers the other. The templates
+neither reaches are written in words *and* digits, and they belong to the third
+gate below rather than to this number.
 
 **Randomness leaves an overlap, so it is not the last gate.** A value whose
 characters are nearly all distinct measures like a credential because by that
@@ -613,6 +655,37 @@ still is, because the capture keeps its quotes. That is why §9.1's
 the CJK pair instead. It is the one place in §5.6 where the guard is paid for in
 missed detections rather than in arithmetic.
 
+**v2 amendment — a third gate, counted, for two rules only (DMY-162).** A
+template written in words *and* digits reaches neither of the two above: it
+carries a digit, so the shape guard leaves it, and it measures 3.5 to 4.4, above
+every ceiling these rules may set. Six ordinary README lines sat there,
+withheld from the index and from sync for nothing. The answer is gitleaks'
+1 446-word placeholder vocabulary — borrowed from the vendored config, governed
+by `config_sha256`, never restated — applied on a **count of distinct markers**
+rather than on one:
+
+| Rule | Minimum | Templates it closes | What one marker would have cost |
+|---|---|---|---|
+| `api_key_kv` | **2** | the five `api_key=` rows in §9.2, at 2–4 markers each | `MY_API_KEY="S3cr3tValue123"`, one marker (`value`) and a real credential |
+| `cloudflare_api_token` | **3** | the six §9.2 Cloudflare rows, at 3–6 markers each | 3 681 in 200 000 real tokens beginning `todo`; at 3 it is 46, and 0 with no marker |
+
+This *is* a word list over the value, which the amendment above rejects for the
+other rules, and it is defensible only here and only counted. For the `api_key`
+family, `generic_api_key` already applies this identical list at a minimum of
+**one** to these identical lines, so the split disagrees with upstream in the
+safe direction and only for values upstream's capture cannot reach. For
+Cloudflare, the alternative was raising a threshold that §4.2 says would create
+deletions. A minimum of one is the `contains` form this section already refused:
+§9.1 binds a value that contains or begins with a single `todo`, `your`, `dummy`
+or `sample`, and a count of one takes every one of them.
+
+**The split is the whole of it.** Borrowing the list onto the undivided
+`generic_password_kv` closes the six and suppresses **eight** §9.1 positives
+outright — `value`, `acces` and `word` are all stopwords — which is the
+fail-open failure this section exists to prevent. Only the `api[-_. ]key|apikey`
+alternative moves, into `api_key_kv`, which is `generic_password_kv` with the
+same 2.0, the same shape guard and the same deletion refusal.
+
 **Upstream's guard also has to be read against upstream's capture.**
 `generic_api_key`'s group admits `=`, so `AccountKey=<86 letters>==` reaches it
 with the base64 padding attached and `^[a-zA-Z_.-]+$` matches nothing — the
@@ -622,15 +695,15 @@ one rule that missed it. Its own copy of the allowlist is widened to
 reason recorded there. The five that borrow the allowlist take the vendored
 literal unchanged.
 
-**All five are `never_auto_delete`.** The anchor proves the *field*, and nothing
+**All six are `never_auto_delete`.** The anchor proves the *field*, and nothing
 available to any gate proves that a human-readable value is a credential, so a
-template that clears both gates must cost searchability rather than the data
+template that clears every gate must cost searchability rather than the data
 (I1). An accepted finding is `Restricted` — withheld from the index, from sync
 and from previews, never a reason to delete. That band is the guarantee **only
 together with §4.2's aggregate rule**; alone it was inert, because a generic
-rule matching the same bytes deleted the item anyway. The two gates decide how
+rule matching the same bytes deleted the item anyway. The gates decide how
 often the band is entered. `generic_api_key` keeps its own 0.75 band and its own
-stopwords, so a value these five refuse may still be classified there.
+stopwords, so a value these six refuse may still be classified there.
 
 The generator refuses a value-gated rule that states no threshold of its own, and
 pairs the shape guard and the deletion refusal each with a written decision, so
@@ -1125,13 +1198,15 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` | detected; classified, never auto-wipes — AWS's published secret carries a `/`, so the shape guard leaves it alone |
 | a real `password=`, `api_key:` or `client_secret=` value | detected; classified, **never auto-wipes** — the keyword proves the field and nothing proves the value (§4.2, §5.6) |
 | a card or a `.env` credential with a **distinct** secret beside it (`ghp_…`, `AKIA…`, a PEM header) | detected; the item **auto-wipes** — a disjoint span is independent evidence, not the same judgement twice (§4.2) |
+| `GITHUB_TOKEN=ghp_…`, `VAULT_TOKEN=hvs.…`, `AUTH_TOKEN=<JWT>`, `SLACK_TOKEN=xoxb-…`, `api_key: ghp_…`, `password=sk-…` | detected; the item **auto-wipes** — a unique literal is independent evidence *over the same bytes*, and a restricted match must be shown to cover it or the test passes on a fixture that never reached the outer rule (§4.2, DMY-162) |
 | `4111111111111111` | `CreditCard`; classified, **never auto-wipes** (§3.3, DMY-162) |
 | `Customer card: 4111 1111 1111 1111 — expires 12/26` | `CreditCard` (Audit MED #6); classified, never auto-wipes |
 | `please charge 4111-1111-1111-1111 today` | `CreditCard`; classified, never auto-wipes |
 | `378282246310005` / `3782 822463 10005` (Amex 4-6-5) | `CreditCard`; the bare and grouped spellings must agree |
 | `30569309025904` / `3056 930902 5904` (Diners 4-6-4) | `CreditCard` |
 | `5555555555554444`, `6011111111111117`, `3530111333300000` | `CreditCard`, bare and in 4-4-4-4 groups |
-| `api-key: abc123XYZlong`, `api key: abc123XYZlong`, `access-token: rt_abc123XYZlong_value`, `auth token = abc123XYZlongvalue99` | detected — the delimiter spellings of rule 23 |
+| `api-key: abc123XYZlong`, `api key: abc123XYZlong`, `access-token: rt_abc123XYZlong_value`, `auth token = abc123XYZlongvalue99` | detected — the delimiter spellings of rule 23; the `api[-_. ]key` half is `api_key_kv` (§5.6) |
+| `my_api_key = "correcthorsebatterystaple"`, `export MY_API_KEY="S3cr3tValue123"` | detected — a quoted value keeps its quotes in the capture, and one placeholder marker is not enough to suppress it |
 | `client secret = Sup3rS3cr3tV@lue!`, `db-password: S3cur3Pass!word` | detected via the bare `secret` / `password` keyword, with no branch of their own |
 | `\u{FF21}\u{FF2B}\u{FF29}\u{FF21}IOSFODNN7EXAMPLE` (full-width AKIA) | detected as AWS key **after NFKC** |
 | 9 CJK chars, e.g. `私的秘密言葉確認鍵` as a KV value | value-strength = **weak** (char gate) |
@@ -1178,7 +1253,9 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `password: abcdefghij` | 10 letters, no digit and no symbol — the same shape as `MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx`, and §5.3's 10-character criterion is pinned by the CJK pair in §9.1 instead (§5.6, DMY-162) |
 | `TWILIO_API_KEY=ACxxxx…` (0.382), `MAILGUN_API_KEY=key-0000…` (0.741) | repetitive, under `generic_password_kv`'s 2.0 |
 | `export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE`, `=replace-with-your-datadog-api-key`, `STRIPE_API_KEY=sk_test_replace_me_before_you_deploy`, `SLACK_API_KEY=xoxb-put-your-own-workspace-token-here`, `OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY` | ordinary README / `.env` lines, no digit and no symbol |
-| `api_key: PUT_YOUR_KEY_HERE_2024`, `=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234`, `=paste_the_token_from_settings_here_2024ab`, `=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024`, `= "CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT"` | words *and* digits, so neither gate reaches them: 3.516 – 4.354, all above the 2.807 ceiling §5.6 measures. They **are** classified, and must never be **deleted** |
+| `api_key: PUT_YOUR_KEY_HERE_2024`, `=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234`, `=paste_the_token_from_settings_here_2024ab`, `=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024`, `= "CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT"` | words *and* digits, so neither the 2.0 nor the shape guard reaches them: 3.516 – 4.063, all above the 2.807 ceiling §5.6 measures. Each carries 2 or 3 distinct vendored placeholder markers, and `api_key_kv`'s counted list is what closes them |
+| `CLOUDFLARE_API_KEY=Replace_With_Your_Real_Token_Value123456` | 4.354 at exactly the 40 characters the rule requires, so it clears 4.3 and falsifies §5.6's 4.225 ceiling for mixed case with digits. 4 markers, and `cloudflare_api_token`'s minimum of 3 is what closes it — **not** a higher threshold, which would create deletions (§4.2) |
+| the 20 README / `.env` rows above | asserted as **one** corpus against all three public predicates — empty `scan_all`, `!is_sensitive`, `!may_auto_wipe`. Splitting it left the row above in neither half and untested (DMY-162) |
 | `api-key: see the wiki`, `client secret: ask ops`, `db-password: ${VAULT_DB}` | the widened rule-23 keyword is still value-gated |
 
 **The 50-entry benign corpus** (`tests/false_positive_corpus.rs:14-73`) must be
@@ -1241,10 +1318,13 @@ The api_key returns 401, please investigate
 | Confidence floor pin | `discord_bot_token`, `twilio_signing_key_sid`, `iban`, `ssn_us`, `generic_bearer`, `ip_with_port` all `< 0.70` |
 | `\b` anchor pin | `sendgrid_api_key`, `terraform_cloud_token`, `cloudflare_api_token`, `twilio_signing_key_sid`, `discord_bot_token` contain `\b` |
 | Context-anchor pin | `azure_storage_key` and `cloudflare_api_token` must NOT match without their anchors |
-| Restricted-band pin | the rules that classify without deleting are exactly `credit_card` and the five keyword/context-anchored rules — asserted as a set, so the band can neither spread nor lose one |
-| Secret-shape pin | those five carry gitleaks' `^[a-zA-Z_.-]+$` secret allowlist, borrowed from the vendored config rather than restated; `generic_api_key`'s own copy admits base64 padding, because its capture swallows it (§5.6) |
+| Restricted-band pin | the rules that classify without deleting are exactly `credit_card` and the six keyword/context-anchored rules — asserted as a set, so the band can neither spread nor lose one |
+| Secret-shape pin | those six carry gitleaks' `^[a-zA-Z_.-]+$` secret allowlist, borrowed from the vendored config rather than restated; `generic_api_key`'s own copy admits base64 padding, because its capture swallows it (§5.6) |
+| Anchor-only pin | the rules a restricted match may overrule are exactly `generic_api_key` and `heroku_api_key` — asserted as a set, derived from the rule table the way the band is, and refused on a rule that is itself restricted |
+| Counted-word-list pin | `api_key_kv` and `cloudflare_api_token` are the only rules carrying a word list over their value; it is the vendored 1 446-entry list rather than a copy, and each minimum is above one (§5.6) |
 | Aggregate-verdict pin | a real credential of each of the four classes is `is_sensitive` and **not** `may_auto_wipe` even where a generic rule matches the same bytes — and a disjoint secret beside one still deletes. The per-rule assertion this replaces could not see the defect (§4.2, DMY-162) |
-| Overlap-shape pin | `withholds` takes any shared byte and no fewer: identical, nested and off-by-one spans withhold, touching spans do not |
+| Unique-literal pin | a `ghp_`, `hvs.`, JWT, Slack or OpenAI secret inside a `.env` or `api_key:` wrapper **does** auto-wipe, and the overlapping restricted match is asserted to exist, so the test cannot pass on a fixture that never reached the outer rule |
+| Overlap-shape pin | `withholds` takes any shared byte and no fewer: identical, nested and off-by-one spans withhold, touching spans do not — and overlap alone is not sufficient, because the match must also be anchor-only |
 | Category/confidence pin | each P2-ozzt rule is category 0 with confidence ≥ 0.90 |
 | Idempotence | `nfkc_normalize` is the identity on ASCII |
 | Perf | `detect()` over 10 MB of text completes well under the budget (v1: < 500 ms, release only) — pins that no rule is catastrophically backtracking |

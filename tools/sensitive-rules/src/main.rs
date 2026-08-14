@@ -123,7 +123,7 @@ mod tests {
         let inputs = load_inputs(&root).unwrap();
         assert!(inputs.global_allowlists.is_empty());
         assert_eq!(inputs.selected_ids.len(), 27);
-        assert_eq!(inputs.rules.len(), 48);
+        assert_eq!(inputs.rules.len(), 49);
     }
 
     #[test]

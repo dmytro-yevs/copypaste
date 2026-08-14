@@ -57,9 +57,15 @@ pub struct SelectedRule {
     pub allowlist_regex_overrides: Vec<RegexOverride>,
     pub secret_shape_allowlist_from: Option<String>,
     pub secret_shape_allowlist_decision: Option<String>,
+    pub placeholder_stopwords_from: Option<String>,
+    pub placeholder_stopwords_minimum: Option<usize>,
+    pub placeholder_stopwords_decision: Option<String>,
     #[serde(default)]
     pub never_auto_delete: bool,
     pub never_auto_delete_decision: Option<String>,
+    #[serde(default)]
+    pub anchor_only: bool,
+    pub anchor_only_decision: Option<String>,
     #[serde(default)]
     pub validator: Validator,
     pub secret_group: Option<usize>,
@@ -87,8 +93,14 @@ pub struct OverlayRule {
     #[serde(default)]
     pub never_auto_delete: bool,
     pub never_auto_delete_decision: Option<String>,
+    #[serde(default)]
+    pub anchor_only: bool,
+    pub anchor_only_decision: Option<String>,
     pub secret_shape_allowlist_from: Option<String>,
     pub secret_shape_allowlist_decision: Option<String>,
+    pub placeholder_stopwords_from: Option<String>,
+    pub placeholder_stopwords_minimum: Option<usize>,
+    pub placeholder_stopwords_decision: Option<String>,
     pub entropy: Option<f64>,
     pub entropy_decision: Option<String>,
 }
@@ -181,6 +193,7 @@ pub struct Rule {
     pub validator: Validator,
     pub secret_group: usize,
     pub never_auto_delete: bool,
+    pub anchor_only: bool,
     pub entropy: Option<f64>,
     pub keywords: Vec<String>,
     pub allowlists: Vec<Allowlist>,
@@ -192,6 +205,7 @@ pub struct Allowlist {
     pub target: Target,
     pub regexes: Vec<String>,
     pub stopwords: Vec<String>,
+    pub stopword_minimum: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -321,6 +335,14 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
         if let Some(from) = &selected.secret_shape_allowlist_from {
             allowlists.push(borrowed_secret_shape(&selected.name, from, &by_id)?);
         }
+        if let Some(from) = &selected.placeholder_stopwords_from {
+            allowlists.push(borrowed_placeholder_stopwords(
+                &selected.name,
+                from,
+                selected.placeholder_stopwords_minimum,
+                &by_id,
+            )?);
+        }
         let secret_group = selected
             .secret_group
             .unwrap_or_else(|| sources.first().map_or(0, |source| source.secret_group));
@@ -335,6 +357,7 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             validator: selected.validator,
             secret_group,
             never_auto_delete: selected.never_auto_delete,
+            anchor_only: selected.anchor_only,
             entropy,
             keywords,
             allowlists,
@@ -381,10 +404,37 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             overlay.secret_shape_allowlist_from.is_some(),
             &overlay.secret_shape_allowlist_decision,
         )?;
-        let allowlists = match &overlay.secret_shape_allowlist_from {
-            Some(from) => vec![borrowed_secret_shape(&overlay.name, from, &by_id)?],
-            None => Vec::new(),
-        };
+        require_decision(
+            &overlay.name,
+            "placeholder_stopwords",
+            overlay.placeholder_stopwords_from.is_some(),
+            &overlay.placeholder_stopwords_decision,
+        )?;
+        require_decision(
+            &overlay.name,
+            "anchor_only",
+            overlay.anchor_only,
+            &overlay.anchor_only_decision,
+        )?;
+        refuse_inert_fields(
+            &overlay.name,
+            overlay.anchor_only,
+            overlay.never_auto_delete,
+            overlay.placeholder_stopwords_from.as_ref(),
+            overlay.placeholder_stopwords_minimum,
+        )?;
+        let mut allowlists = Vec::new();
+        if let Some(from) = &overlay.secret_shape_allowlist_from {
+            allowlists.push(borrowed_secret_shape(&overlay.name, from, &by_id)?);
+        }
+        if let Some(from) = &overlay.placeholder_stopwords_from {
+            allowlists.push(borrowed_placeholder_stopwords(
+                &overlay.name,
+                from,
+                overlay.placeholder_stopwords_minimum,
+                &by_id,
+            )?);
+        }
         insert_name(&mut names, &overlay.name)?;
         rules.push(Rule {
             upstream_ids: Vec::new(),
@@ -395,6 +445,7 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             validator: overlay.validator,
             secret_group: overlay.secret_group,
             never_auto_delete: overlay.never_auto_delete,
+            anchor_only: overlay.anchor_only,
             entropy: overlay.entropy,
             keywords: Vec::new(),
             allowlists,
@@ -436,9 +487,28 @@ fn validate_decisions(rule: &SelectedRule) -> Result<()> {
     )?;
     require_decision(
         &rule.name,
+        "placeholder_stopwords",
+        rule.placeholder_stopwords_from.is_some(),
+        &rule.placeholder_stopwords_decision,
+    )?;
+    require_decision(
+        &rule.name,
         "never_auto_delete",
         rule.never_auto_delete,
         &rule.never_auto_delete_decision,
+    )?;
+    require_decision(
+        &rule.name,
+        "anchor_only",
+        rule.anchor_only,
+        &rule.anchor_only_decision,
+    )?;
+    refuse_inert_fields(
+        &rule.name,
+        rule.anchor_only,
+        rule.never_auto_delete,
+        rule.placeholder_stopwords_from.as_ref(),
+        rule.placeholder_stopwords_minimum,
     )?;
     if !rule.use_rule_allowlists
         && rule
@@ -463,6 +533,27 @@ fn validate_decisions(rule: &SelectedRule) -> Result<()> {
             "{} gates on its captured value and may not inherit an upstream entropy threshold",
             rule.name
         );
+    }
+    Ok(())
+}
+
+/// The two refusals a selected rule and an overlay share.
+///
+/// `anchor_only` asks what a *deletable* match licenses, and a restricted rule
+/// never reaches that side of the gate; spelling both reads as a second refusal
+/// and is none. A minimum with no list to count is a number that does nothing.
+fn refuse_inert_fields(
+    name: &str,
+    anchor_only: bool,
+    never_auto_delete: bool,
+    stopwords_from: Option<&String>,
+    minimum: Option<usize>,
+) -> Result<()> {
+    if anchor_only && never_auto_delete {
+        bail!("{name} is never_auto_delete, so anchor_only decides nothing");
+    }
+    if minimum.is_some() && stopwords_from.is_none() {
+        bail!("{name} sets a placeholder stopword minimum with no list to count");
     }
     Ok(())
 }
@@ -586,6 +677,50 @@ fn borrowed_secret_shape(
     Ok(found.remove(0))
 }
 
+/// The one stopword-carrying allowlist an upstream rule declares, taken from the
+/// vendored config for the reason [`borrowed_secret_shape`] is. Only the words
+/// travel: the sibling regex in that entry suppresses on a different target, and
+/// a second suppressor the borrowing rule has not measured may not come along.
+///
+/// `minimum` is how many distinct words the value must carry. One is upstream's
+/// own reading; above one is what separates a prose template from a credential
+/// that happens to spell a marker, and it needs its own measurement (§5.6).
+fn borrowed_placeholder_stopwords(
+    name: &str,
+    from: &str,
+    minimum: Option<usize>,
+    by_id: &BTreeMap<&str, &RawRule>,
+) -> Result<Allowlist> {
+    let minimum = minimum.unwrap_or(1);
+    if minimum == 0 {
+        bail!("{name} placeholder stopwords must require at least one match");
+    }
+    let source = by_id
+        .get(from)
+        .with_context(|| format!("{name} borrows placeholder stopwords from absent rule {from}"))?;
+    let found: Vec<_> = source
+        .allowlists
+        .iter()
+        .filter(|raw| !raw.stopwords.is_empty() && raw.paths.is_empty() && raw.commits.is_empty())
+        .collect();
+    if found.len() != 1 {
+        bail!(
+            "{name} borrowing from {from} matched {} stopword allowlists",
+            found.len()
+        );
+    }
+    let mut stopwords = found[0].stopwords.clone();
+    stopwords.sort();
+    stopwords.dedup();
+    Ok(Allowlist {
+        condition: Condition::Any,
+        target: Target::Secret,
+        regexes: Vec::new(),
+        stopwords,
+        stopword_minimum: minimum,
+    })
+}
+
 fn resolve_allowlist(raw: &RawAllowlist, overrides: &[RegexOverride]) -> Result<Option<Allowlist>> {
     if !raw.extra.is_empty() {
         bail!("allowlist has unsupported fields: {:?}", raw.extra.keys());
@@ -629,6 +764,7 @@ fn resolve_allowlist(raw: &RawAllowlist, overrides: &[RegexOverride]) -> Result<
         target,
         regexes,
         stopwords: raw.stopwords.clone(),
+        stopword_minimum: 1,
     }))
 }
 

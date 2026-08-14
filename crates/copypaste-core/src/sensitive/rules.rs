@@ -152,6 +152,9 @@ mod tests {
             // §9.1's `password=hunter2` measures 2.807 and fixes the ceiling, so
             // 2.0 reaches the repetitive templates and no further (§5.6).
             ("generic_password_kv", 2.0),
+            // The `api_key` family, split out of the rule above and carrying
+            // its number unchanged: the value population is the same one.
+            ("api_key_kv", 2.0),
         ] {
             let rule = rule(name);
             assert!(rule.secret_group > 0, "{name} does not capture its value");
@@ -161,18 +164,16 @@ mod tests {
         }
     }
 
-    /// No rule may separate a placeholder from a credential by matching words
-    /// against the value. Both spellings of that — a `contains` stopword list
-    /// and a `starts_with` prefix list — suppress the rule outright, and a
+    /// No rule may separate a placeholder from a credential by matching *one*
+    /// word against the value. Both spellings of that — a `contains` stopword
+    /// list and a `starts_with` prefix list — suppress the rule outright, and a
     /// suppressed 0.90-0.99 rule is a credential that is neither flagged, masked
     /// nor kept out of the index. That is the failure §5.6's fail-closed
     /// amendment exists for, and randomness answers the question instead.
-    /// Upstream rules keep their own vendored stopwords; these four are ours.
     #[test]
     fn context_anchored_rules_carry_no_word_list_over_their_value() {
         for name in [
             "azure_storage_key",
-            "cloudflare_api_token",
             "aws_secret_access_key",
             "dotenv_secret",
             "generic_password_kv",
@@ -183,6 +184,76 @@ mod tests {
                     "{name} suppresses its value by word match"
                 );
             }
+        }
+    }
+
+    /// The two exceptions, and what makes them safe: the list is gitleaks' own,
+    /// governed by `VENDORED_CONFIG_SHA256` rather than restated here, and it
+    /// suppresses only on a *count* of distinct markers. One marker is what
+    /// §9.1 binds as still detected — a real token containing or beginning with
+    /// `todo`, `your`, `dummy` or `sample`, and `MY_API_KEY="S3cr3tValue123"`.
+    /// Each minimum is measured against its own value population (§5.6).
+    #[test]
+    fn the_two_counted_word_lists_are_vendored_and_above_one() {
+        for (name, minimum) in [("api_key_kv", 2), ("cloudflare_api_token", 3)] {
+            let counted: Vec<_> = rule(name)
+                .allowlists
+                .iter()
+                .filter(|allowlist| !allowlist.stopwords.is_empty())
+                .collect();
+            assert_eq!(counted.len(), 1, "{name}");
+            assert_eq!(counted[0].target, AllowlistTarget::Secret, "{name}");
+            assert_eq!(counted[0].stopword_minimum, minimum, "{name}");
+            assert_eq!(
+                counted[0].stopwords.len(),
+                1_446,
+                "{name} restates the list"
+            );
+            assert!(
+                counted[0].regexes.is_empty(),
+                "{name} borrowed a second gate"
+            );
+        }
+        // Borrowed, not copied: the same words upstream applies to these lines.
+        let upstream = rule("generic_api_key")
+            .allowlists
+            .iter()
+            .find(|allowlist| !allowlist.stopwords.is_empty())
+            .expect("generic_api_key keeps its vendored stopwords");
+        for name in ["api_key_kv", "cloudflare_api_token"] {
+            let borrowed = rule(name)
+                .allowlists
+                .iter()
+                .find(|allowlist| !allowlist.stopwords.is_empty())
+                .unwrap();
+            assert_eq!(borrowed.stopwords, upstream.stopwords, "{name}");
+        }
+    }
+
+    /// Which rules a restricted neighbour may overrule. A keyword and a value of
+    /// no shape is one judgement read twice; a unique literal is separate
+    /// evidence and still deletes over the same bytes (§4.2, DMY-162). Pinned as
+    /// a set, because the failure was a veto written over every rule at once.
+    #[test]
+    fn the_anchor_only_band_is_exactly_the_rules_with_no_shape_of_their_own() {
+        let mut anchor_only: Vec<_> = RULES
+            .iter()
+            .filter(|rule| rule.anchor_only)
+            .map(|rule| rule.name)
+            .collect();
+        anchor_only.sort_unstable();
+        assert_eq!(anchor_only, ["generic_api_key", "heroku_api_key"]);
+        for name in [
+            "github_classic_pat",
+            "hashicorp_vault",
+            "jwt",
+            "slack_token",
+            "openai_legacy",
+            "aws_access_key",
+            "private_key",
+            "db_conn_string",
+        ] {
+            assert!(!rule(name).anchor_only, "{name} lost its own evidence");
         }
     }
 
@@ -201,6 +272,7 @@ mod tests {
             "aws_secret_access_key",
             "dotenv_secret",
             "generic_password_kv",
+            "api_key_kv",
         ] {
             assert_eq!(
                 secret_shape(rule(name)),

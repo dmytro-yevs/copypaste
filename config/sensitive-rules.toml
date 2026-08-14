@@ -143,6 +143,8 @@ upstream_ids = ["heroku-api-key"]
 name = "heroku_api_key"
 category = "credential"
 confidence = 0.95
+anchor_only = true
+anchor_only_decision = "The word heroku near a delimiter is the whole evidence, and the value is a UUID — the most common identifier shape there is and distinctive to nothing. Where a restricted rule already judged those bytes, this is that judgement again rather than a second one."
 
 [[rules]]
 upstream_ids = ["vault-service-token", "vault-batch-token"]
@@ -171,11 +173,14 @@ pattern_decision = "The env-var context anchor is the reason a bare 40-character
 secret_group = 1
 validator = "value_strength"
 entropy_override = 4.3
-entropy_decision = "Upstream's 2.0 is a repository scanner's number and it deleted CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_<24 X> at 2.233 (DMY-162). The pattern fixes the value at 40 characters over 64 symbols, so the two populations are measurable: 80,000 single-case word templates at that length top out at 4.225, and 4.3 rejects 3.4 of every 10,000 random 40-character tokens."
+entropy_decision = "Upstream's 2.0 is a repository scanner's number and it deleted CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_<24 X> at 2.233 (DMY-162). The pattern fixes the value at 40 characters over 64 symbols, so the populations are measurable: 80,000 single-case word templates at that length top out at 4.225, and 4.3 rejects 3.4 of every 10,000 random 40-character tokens. That 4.225 is that population's ceiling and not the template ceiling — mixed case with digits reaches 4.354 — and the number may not be raised to cover the difference: 4.4 rejects 30.5 in 10,000, and by 4.2 tightening a restricted rule creates deletions rather than preventing them. The placeholder count below answers that overlap instead."
 keywords_override = ["cloudflare_api_", "cf_api_token"]
 keywords_decision = "The local CF_API_TOKEN alias is absent from the upstream keyword list."
 secret_shape_allowlist_from = "generic-api-key"
 secret_shape_allowlist_decision = "Gitleaks' own secret allowlist for generic-api-key: a value spelled only from letters, underscore, dot and hyphen is a template whatever it says, which is the question entropy cannot answer (DMY-162). The cost is a real token drawn without a digit, about 1 in 900 at 40 characters over 64 symbols."
+placeholder_stopwords_from = "generic-api-key"
+placeholder_stopwords_minimum = 3
+placeholder_stopwords_decision = "The one template both other gates miss is prose written in mixed case with digits: Replace_With_Your_Real_Token_Value123456 measures 4.354, above the 4.3 this rule may not raise, and carries a digit so the shape guard leaves it. Counting distinct vendored placeholder words separates it from a credential, but only if the count is above one, because 9.1 binds a real token that contains or begins with a single todo, your, dummy or sample marker as detected. Measured over the vendored 1,446-word list: that template carries 4 markers and every 9.2 Cloudflare template carries 3 to 6, while the four binding one-marker fixtures carry at most 1. At 3 the cost against 200,000 random 40-character tokens is 0, and 46 for one beginning todo, against 3,681 at a minimum of 2."
 never_auto_delete = true
 never_auto_delete_decision = "CLOUDFLARE_API_TOKEN= proves which field matched and nothing about the value. The template and credential entropy populations overlap in the tail, so an unforeseen template can still clear 4.3, and manifest I1 ranks that irreversible deletion above leaving a real token unsearchable."
 
@@ -193,6 +198,8 @@ name = "generic_api_key"
 category = "credential"
 confidence = 0.75
 secret_group = 1
+anchor_only = true
+anchor_only_decision = "A keyword, a delimiter and [A-Za-z0-9_.=-]{10,150} are the whole match, so over bytes a restricted rule already judged this is the same anchor read again on weaker gates rather than separate evidence. Marking it here and not on the rules with a unique literal is what returns auto-wipe to GITHUB_TOKEN=ghp_..., VAULT_TOKEN=hvs.... and AUTH_TOKEN=<JWT>, which 4.2's band table and 9.1 both call deletable (DMY-162)."
 pattern_override = '''(?i)[A-Za-z0-9_.-]{0,50}?(?:access|auth|(?-i:[Aa]pi|API)|credential|creds|key|passw(?:or)?d|secret|token)(?:[ \tA-Za-z0-9_.-]{0,20})[\s'"]{0,3}(?:=|>|:{1,3}=|\|\||:|=>|\?=|,)[\x60'"\s=]{0,5}([A-Za-z0-9_.=-]{10,150}|[a-z0-9][a-z0-9+/]{11,}={0,3})(?:[\x60'"\s;]|\\[nr]|$)'''
 pattern_decision = "Go RE2 word characters are ASCII; explicit ASCII classes preserve the pinned regex semantics without Rust regex's oversized Unicode automata."
 
@@ -298,23 +305,45 @@ pattern = '''(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}'''
 name = "generic_password_kv"
 category = "credential"
 confidence = 0.75
-# Manifest 07 §3.2 rule 23 spelled each compound keyword one way, so `api-key:`
-# and `access.token:` — the ordinary YAML and CLI-flag spellings — reached no
-# rule at all. The delimiter is one character and deliberately not optional:
-# written `api[-_. ]?key` the literal the prefilter can require collapses from
-# `api_key` to `api`, and every rule in the set pays for that. `db password` and
-# `client secret` need no branch of their own; the bare `password` and `secret`
-# keywords already match inside them. The value-strength gate is unchanged, so a
-# wider keyword cannot make a weak value wipeable.
-pattern = '''(?i)(?:password|passwd|secret|api[-_. ]key|apikey|auth[-_. ]token|access[-_. ]token|client_secret|refresh[-_. ]token|db_password)["']?\s*[:=]\s*(\S{6,})'''
+# Manifest 07 §3.2 rule 23 spelled each compound keyword one way, so
+# `access.token:` — the ordinary YAML and CLI-flag spelling — reached no rule at
+# all. The delimiter is one character and deliberately not optional: written
+# `access[-_. ]?token` the literal the prefilter can require collapses from
+# `access_token` to `access`, and every rule in the set pays for that.
+# `db password` and `client secret` need no branch of their own; the bare
+# `password` and `secret` keywords already match inside them. The `api_key`
+# family is `api_key_kv` below, which is this rule plus a word list.
+pattern = '''(?i)(?:password|passwd|secret|auth[-_. ]token|access[-_. ]token|client_secret|refresh[-_. ]token|db_password)["']?\s*[:=]\s*(\S{6,})'''
 validator = "value_strength"
 secret_group = 1
 entropy = 2.0
-entropy_decision = "Measured, and it answers only the repetitive half of the placeholder pair in manifest 5.6. This rule's own 9.1 fixtures fix the ceiling: password=hunter2 and secret = !abcdef measure 2.807, so any threshold that reached a word-spelled template would take a real short password with it — 2.5 rejects 19% of six-character values and 2.8 rejects passw0rd at 2.750. At 2.0 the rule rejects TWILIO_API_KEY=ACxxxx... at 0.382 and MAILGUN_API_KEY=key-0000... at 0.741, and costs 1,145 real values in 100,000 at the six characters the pattern admits, 29 at eight and none at ten or more. The word-spelled templates belong to the shape guard, not to this number."
+entropy_decision = "Measured, and it answers only the repetitive half of the placeholder pair in manifest 5.6. This rule's own 9.1 fixtures fix the ceiling: password=hunter2 and secret = !abcdef measure 2.807, so any threshold that reached a word-spelled template would take a real short password with it — 2.5 rejects 19% of six-character values and 2.8 rejects passw0rd at 2.750. At 2.0 the rule rejects a value spelled from four or fewer effective symbols, and costs 1,145 real values in 100,000 at the six characters the pattern admits, 29 at eight and none at ten or more. The word-spelled templates belong to the shape guard, not to this number."
 secret_shape_allowlist_from = "generic-api-key"
-secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist the four context-anchored rules take, and the half of 5.6's pair no threshold here can reach: YOUR_DATADOG_API_KEY_HERE_PLEASE measures 3.712 and xoxb-put-your-own-workspace-token-here 3.830, both far above 2.807. The cost is larger than for the other five and is not their 1-in-900: this rule's values include human-chosen passwords, for which no digit and no symbol is common rather than rare, so a bare all-letter password is no longer detected here at all. A quoted one still is, because the capture keeps its quotes, and 9.1's password: abcdefghij moves to 9.2 with this."
+secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist the four context-anchored rules take, and the half of 5.6's pair no threshold here can reach: a value written out of words measures far above 2.807 whatever it says. The cost is larger than for the other five and is not their 1-in-900: this rule's values include human-chosen passwords, for which no digit and no symbol is common rather than rare, so a bare all-letter password is no longer detected here at all. A quoted one still is, because the capture keeps its quotes, and 9.1's password: abcdefghij moves to 9.2 with this."
 never_auto_delete = true
-never_auto_delete_decision = "password= and api_key= prove which field matched and nothing about the value, which is 4.2's argument for the four context-anchored rules at the same keyword-anchor strength. Neither gate reaches a template written in words and digits together: api_key: PUT_YOUR_KEY_HERE_2024 at 3.516 and AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024 at 4.018 clear 2.0 and carry a digit, and no threshold below hunter2's 2.807 ever will. Manifest I1 ranks deleting those above leaving a real password unsearchable."
+never_auto_delete_decision = "password= and client_secret= prove which field matched and nothing about the value, which is 4.2's argument for the four context-anchored rules at the same keyword-anchor strength. A template written in words and digits together clears both gates — no threshold below hunter2's 2.807 will ever reach one — and manifest I1 ranks deleting it above leaving a real password unsearchable."
+
+[[overlay]]
+name = "api_key_kv"
+category = "credential"
+confidence = 0.75
+# `generic_password_kv` with one keyword family taken out of it, because that
+# family is the only one gitleaks already judges by word list on the same bytes:
+# `generic-api-key` matches every `api_key=` line here and applies the vendored
+# stopwords to it. The delimiter is one character and not optional, for the
+# reason the sibling rule gives.
+pattern = '''(?i)(?:api[-_. ]key|apikey)["']?\s*[:=]\s*(\S{6,})'''
+validator = "value_strength"
+secret_group = 1
+entropy = 2.0
+entropy_decision = "The number is generic_password_kv's, unchanged, because the value population is the same one: what a person or a README writes after a keyword. It answers the repetitive half of 5.6's placeholder pair — TWILIO_API_KEY=ACxxxx... at 0.382 and MAILGUN_API_KEY=key-0000... at 0.741 — and nothing above 9.1's password=hunter2 ceiling of 2.807 may be asked of it."
+secret_shape_allowlist_from = "generic-api-key"
+secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist the five rules beside it take: no digit and no symbol is a template whatever it says, which closes DATADOG_API_KEY=replace-with-your-datadog-api-key and the seven README lines spelled like it."
+placeholder_stopwords_from = "generic-api-key"
+placeholder_stopwords_minimum = 2
+placeholder_stopwords_decision = "The third gate, and the only one that reaches a template written in words and digits together: api_key: PUT_YOUR_KEY_HERE_2024 measures 3.516 and AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024 4.018, both far above the 2.807 no threshold here may pass. This is a word list over the value, which 5.6 rejects for the other five rules; it is defensible only here, because gitleaks already applies this identical list at a minimum of one to these identical lines through generic_api_key, and the borrow is governed by config_sha256 rather than restated. The minimum is 2 and not upstream's 1: at 1 the list suppresses MY_API_KEY=\"S3cr3tValue123\", a real credential carrying the single marker value, and 9.1 binds the quoted form as detected. Measured over the vendored 1,446-word list, the five api_key templates 9.2 names carry 2, 2, 3, 3 and 2 distinct markers and the sixth carries 4, while every 9.1 api_key value carries 0 or 1."
+never_auto_delete = true
+never_auto_delete_decision = "api_key= proves which field matched and nothing about the value, exactly as password= does for the rule it was split from. A real key still reaches this rule and is still withheld; only the deletion is refused (I1)."
 
 [[overlay]]
 name = "aws_secret_access_key"
