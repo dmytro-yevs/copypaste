@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
-import { addItems, deleteItems, storedItems } from "../src/harness/bridge.js";
+import { addItems, cleanUpItems, deleteItems, storedItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { scrollTo, settledList, type ListSnapshot } from "../src/harness/list.js";
 import {
@@ -94,7 +94,7 @@ afterAll(async () => {
   // hides the next file's freshly seeded rows behind the virtualiser.
   await scrollListToTop(app).catch(() => undefined);
   await resetHistoryFilters(app).catch(() => undefined);
-  await deleteItems(app, seeded).catch(() => undefined);
+  await cleanUpItems(app, seeded);
   await app?.detach();
 });
 
