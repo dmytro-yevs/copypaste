@@ -71,7 +71,7 @@ async function fixture(root, platform, overrides = {}) {
       const accessibilityPath = `${feature}/accessibility.json`;
       const screenshot = Buffer.from(expected.png, "base64");
       const accessibility = `${JSON.stringify({
-        schema_version: 1,
+        schema_version: 2,
         feature,
         state: expected.state,
         expected_name: expected.name,
@@ -84,6 +84,7 @@ async function fixture(root, platform, overrides = {}) {
           display_affinity: 0,
           capture_bounds: { kind: "client", x: 0, y: 0, width: 1, height: 1 },
         },
+        node_read: { complete: true, read: 1, retried: [] },
         nodes: [{ name: expected.name, enabled: true, offscreen: false, bounds: { x: 0, y: 0, width: 1, height: 1 } }],
       }, null, 2)}\n`;
       await writeFile(path.join(directory, screenshotPath), screenshot);
@@ -285,6 +286,63 @@ test("rejects a Windows capture without foreground HWND proof", () => withRoot(a
   index.sha256 = createHash("sha256").update(manifestContents).digest("hex");
   index.bytes = Buffer.byteLength(manifestContents);
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility describes the wrong state/,
+  );
+}));
+
+async function restampAccessibility(receiptPath, mutate) {
+  const directory = path.dirname(receiptPath);
+  const manifestPath = path.join(directory, "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const state = manifest.states[0];
+  const accessibilityPath = path.join(directory, state.accessibility.path);
+  const accessibility = JSON.parse(await readFile(accessibilityPath, "utf8"));
+  mutate(accessibility);
+  const accessibilityContents = `${JSON.stringify(accessibility, null, 2)}\n`;
+  await writeFile(accessibilityPath, accessibilityContents);
+  state.accessibility.sha256 = createHash("sha256").update(accessibilityContents).digest("hex");
+  state.accessibility.bytes = Buffer.byteLength(accessibilityContents);
+  const manifestContents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, manifestContents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  Object.assign(receipt.artifacts.find((artifact) => artifact.path === state.accessibility.path), state.accessibility);
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(manifestContents).digest("hex");
+  index.bytes = Buffer.byteLength(manifestContents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+}
+
+// A node the capture could not read used to be dropped silently, so the file
+// claimed to be the app's accessibility tree while being a subset of it.
+test("rejects a Windows accessibility snapshot that admits it is incomplete", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  await restampAccessibility(receiptPath, (accessibility) => {
+    accessibility.node_read.complete = false;
+  });
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility is a partial snapshot/,
+  );
+}));
+
+test("rejects a Windows snapshot that counted more nodes than it carries", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  await restampAccessibility(receiptPath, (accessibility) => {
+    accessibility.node_read.read = accessibility.nodes.length + 1;
+  });
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility is a partial snapshot/,
+  );
+}));
+
+test("rejects a Windows snapshot that never says whether the read completed", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  await restampAccessibility(receiptPath, (accessibility) => {
+    delete accessibility.node_read;
+  });
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
     /accessibility describes the wrong state/,
