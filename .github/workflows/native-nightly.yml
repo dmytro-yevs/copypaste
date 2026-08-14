@@ -21,7 +21,22 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: python3 scripts/check-feature-ledger.py
 
-  android:
+  # The `github` context inside a called workflow reflects the CALLER's event,
+  # not the call itself — so android-emulator.yml's own `emulator` job matrix
+  # already sees `github.event_name == 'schedule'` here and expands to the full
+  # [24,29,33,34,36] sweep on its own, ignoring whatever `api-level` a matrixed
+  # call passes it. Calling it twice (api-level 34 and 36) ran that five-API
+  # sweep twice a night. Call it once; the sweep is already complete.
+  android-nightly:
+    if: github.event_name == 'schedule'
+    uses: ./.github/workflows/android-emulator.yml
+    with:
+      target: google_apis
+
+  # A manual dispatch of this workflow is not `schedule`, so the callee trusts
+  # `api-level` instead of sweeping — spot-check two levels here.
+  android-dispatch:
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

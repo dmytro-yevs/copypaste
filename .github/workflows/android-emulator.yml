@@ -53,8 +53,10 @@ name: Android emulator
 on:
   workflow_call:
     inputs:
+      # Optional: the nightly schedule sweeps all five API levels internally
+      # (see the emulator job's matrix below) and never has one level to pass.
       api-level:
-        required: true
+        required: false
         type: string
       target:
         required: false
