@@ -883,6 +883,8 @@ mod tests {
     #[test]
     fn the_password_rule_rejects_repetitive_and_shapeless_values() {
         let det = detector();
+        // No rule at all, not merely not this one: a template that slips the
+        // split into the sibling rule is still a false positive.
         for template in [
             "TWILIO_API_KEY=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
             "MAILGUN_API_KEY=key-0000000000000000000000000000000",
@@ -891,7 +893,7 @@ mod tests {
             "api_key = your-own-key-goes-here",
         ] {
             assert!(
-                !fired(&det, template, "generic_password_kv"),
+                det.scan_all(template).is_empty(),
                 "{template} -> {:?}",
                 all_rules(&det, template)
             );
@@ -900,15 +902,15 @@ mod tests {
         // the 10-character boundary that `password: abcdefghij` used to pin —
         // now pinned by the CJK pair, which is the fixture carrying the
         // bytes-versus-chars defect anyway.
-        for credential in [
-            "password=hunter2",
-            "secret = !abcdef",
-            "db_password=S3cur3Pass!word",
-            "password: 私的秘密言葉確認鍵値",
-            "my_api_key = \"correcthorsebatterystaple\"",
+        for (credential, rule) in [
+            ("password=hunter2", "generic_password_kv"),
+            ("secret = !abcdef", "generic_password_kv"),
+            ("db_password=S3cur3Pass!word", "generic_password_kv"),
+            ("password: 私的秘密言葉確認鍵値", "generic_password_kv"),
+            ("my_api_key = \"correcthorsebatterystaple\"", "api_key_kv"),
         ] {
             assert!(
-                fired(&det, credential, "generic_password_kv"),
+                fired(&det, credential, rule),
                 "{credential} -> {:?}",
                 all_rules(&det, credential)
             );
@@ -930,6 +932,106 @@ mod tests {
             format!("client_secret={}", noise(32, ALNUM)),
         ] {
             assert!(fired(&det, &text, "generic_password_kv"), "{text}");
+            assert!(det.is_sensitive(&text), "{text}");
+            assert!(!det.may_auto_wipe(&text), "{text}");
+        }
+    }
+
+    /// Every §9.1 keyword-KV positive in one list, with the rule that owns it.
+    ///
+    /// The `api_key` family carries the vendored placeholder vocabulary and the
+    /// rest do not, which is the whole of the split. Borrowing that list onto the
+    /// undivided rule suppresses eight of these outright — `value`, `acces` and
+    /// `word` are all stopwords — and a suppressed 0.75 rule is a credential
+    /// that is neither flagged, nor masked, nor kept out of `clipboard_fts`
+    /// (§5.6 fail-closed). Those eight are what a later "one rule would do"
+    /// takes out, so they are pinned here with the rest.
+    #[test]
+    fn every_binding_keyword_kv_positive_is_still_detected() {
+        let det = detector();
+        for (text, rule) in [
+            ("access_token=abc123XYZlongvalue99", "generic_password_kv"),
+            ("access_token: gh_access_abc123XYZ", "generic_password_kv"),
+            (
+                "export access_token=abc123XYZlongvalue99",
+                "generic_password_kv",
+            ),
+            ("client_secret=Sup3rS3cr3tV@lue!", "generic_password_kv"),
+            (
+                "refresh_token=rt_abc123XYZlong_value",
+                "generic_password_kv",
+            ),
+            (
+                "refresh_token = rt_PROD_abc123XYZlongval",
+                "generic_password_kv",
+            ),
+            ("db_password=S3cur3Pass!word", "generic_password_kv"),
+            ("password=hunter2", "generic_password_kv"),
+            ("secret = !abcdef", "generic_password_kv"),
+            ("password: 私的秘密言葉確認鍵値", "generic_password_kv"),
+            (
+                "access-token: rt_abc123XYZlong_value",
+                "generic_password_kv",
+            ),
+            ("refresh.token=rt_abc123XYZlongval", "generic_password_kv"),
+            ("auth token = abc123XYZlongvalue99", "generic_password_kv"),
+            ("auth-token = abc123XYZlongvalue99", "generic_password_kv"),
+            ("client secret = Sup3rS3cr3tV@lue!", "generic_password_kv"),
+            ("db-password: S3cur3Pass!word", "generic_password_kv"),
+            ("api-key: abc123XYZlong", "api_key_kv"),
+            ("api.key = abc123XYZlong", "api_key_kv"),
+            ("api key: abc123XYZlong", "api_key_kv"),
+            ("my_api_key = \"correcthorsebatterystaple\"", "api_key_kv"),
+            // One marker, and the reason the count starts at two: `value` is a
+            // stopword, and §9.1 binds the quoted `.env` form as detected.
+            ("export MY_API_KEY=\"S3cr3tValue123\"", "api_key_kv"),
+        ] {
+            assert!(
+                fired(&det, text, rule),
+                "{text} -> {:?}",
+                all_rules(&det, text)
+            );
+            assert!(det.is_sensitive(text), "{text} would reach the index");
+            assert_eq!(
+                rule_severity(&det, text, rule),
+                Some(Severity::Restricted),
+                "{text}"
+            );
+            assert!(!det.may_auto_wipe(text), "{text}");
+        }
+    }
+
+    /// The one template no threshold this rule may carry can reach, and the
+    /// one-marker credentials that is true of.
+    ///
+    /// `Replace_With_Your_Real_Token_Value123456` measures **4.354** against a
+    /// threshold of 4.3, so §5.6's 4.225 template ceiling holds only for the
+    /// single-case word population it was drawn from. Raising the threshold
+    /// instead would *create* deletions: the restricted match that vetoes
+    /// `generic_api_key` disappears with it (§4.2, F1). Counting distinct
+    /// vendored markers separates the two populations — four here, at most one
+    /// in every value §9.1 binds.
+    #[test]
+    fn the_cloudflare_prose_template_is_counted_out_and_a_marked_token_is_not() {
+        let det = detector();
+        let template = "CLOUDFLARE_API_KEY=Replace_With_Your_Real_Token_Value123456";
+        assert!(
+            det.scan_all(template).is_empty(),
+            "{template} -> {:?}",
+            all_rules(&det, template)
+        );
+        assert!(!det.is_sensitive(template));
+        assert!(!det.may_auto_wipe(template));
+        for marker in ["your", "todo", "dummy", "sample"] {
+            let text = format!(
+                "CLOUDFLARE_API_TOKEN={marker}{}",
+                noise(40 - marker.len(), ALNUM)
+            );
+            assert!(
+                fired(&det, &text, "cloudflare_api_token"),
+                "{text} -> {:?}",
+                all_rules(&det, &text)
+            );
             assert!(det.is_sensitive(&text), "{text}");
             assert!(!det.may_auto_wipe(&text), "{text}");
         }
@@ -1066,19 +1168,26 @@ mod tests {
     #[test]
     fn delimiter_spellings_of_the_password_keyword_are_covered() {
         let det = detector();
-        for strong in [
-            "api-key: abc123XYZlong",
-            "api.key = abc123XYZlong",
-            "api key: abc123XYZlong",
-            "access-token: rt_abc123XYZlong_value",
-            "refresh.token=rt_abc123XYZlongval",
-            "auth token = abc123XYZlongvalue99",
-            "auth-token = abc123XYZlongvalue99",
+        for (strong, rule) in [
+            ("api-key: abc123XYZlong", "api_key_kv"),
+            ("api.key = abc123XYZlong", "api_key_kv"),
+            ("api key: abc123XYZlong", "api_key_kv"),
+            (
+                "access-token: rt_abc123XYZlong_value",
+                "generic_password_kv",
+            ),
+            ("refresh.token=rt_abc123XYZlongval", "generic_password_kv"),
+            ("auth token = abc123XYZlongvalue99", "generic_password_kv"),
+            ("auth-token = abc123XYZlongvalue99", "generic_password_kv"),
             // already covered by the bare `secret` and `password` keywords
-            "client secret = Sup3rS3cr3tV@lue!",
-            "db-password: S3cur3Pass!word",
+            ("client secret = Sup3rS3cr3tV@lue!", "generic_password_kv"),
+            ("db-password: S3cur3Pass!word", "generic_password_kv"),
         ] {
-            assert!(fired(&det, strong, "generic_password_kv"), "{strong}");
+            assert!(
+                fired(&det, strong, rule),
+                "{strong} -> {:?}",
+                all_rules(&det, strong)
+            );
             assert!(det.is_sensitive(strong), "{strong}");
         }
         for weak in [
