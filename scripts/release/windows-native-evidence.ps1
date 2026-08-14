@@ -31,6 +31,13 @@ function Invoke-Json([string]$Cli, [string[]]$Arguments) {
     return $reply
 }
 
+# `CliError::DaemonUnreachable` is exit 1; a daemon still holding the pipe
+# answers 0. Nothing else here can tell an orphaned sidecar from a stopped one.
+function Assert-Unreachable([string]$Cli) {
+    & $Cli --json status | Out-Null
+    Assert-True ($LASTEXITCODE -eq 1) "the CLI answered exit $LASTEXITCODE with no sidecar running"
+}
+
 function Assert-PackageIntegrity([string]$Directory, [string]$InstallerPath, [string]$SigningStatus) {
     $checksumsPath = Join-Path $Directory "SHA256SUMS"
     Assert-True (Test-Path -LiteralPath $checksumsPath -PathType Leaf) "Windows package is missing SHA256SUMS"
@@ -96,8 +103,21 @@ function Invoke-SelfTest {
         $rejected = $false
         try { Assert-InstalledLayout $root } catch { $rejected = $_.Exception.Message -match "copypaste-daemon.exe" }
         Assert-True $rejected "a package without the installed sidecar did not fail"
+
+        # A daemon that survived the app answers 0, which is the orphan the
+        # assertion exists to catch; a CLI that cannot be run at all is not.
+        $answering = Join-Path $root "still-answering.cmd"
+        [IO.File]::WriteAllText($answering, "@exit /b 0`r`n")
+        $rejected = $false
+        try { Assert-Unreachable $answering } catch { $rejected = $_.Exception.Message -match "exit 0" }
+        Assert-True $rejected "a sidecar still answering was accepted as a stopped one"
+        $refusing = Join-Path $root "refusing.cmd"
+        [IO.File]::WriteAllText($refusing, "@exit /b 1`r`n")
+        Assert-Unreachable $refusing
+
         Test-WindowsUiEvidenceHelpers
         Write-Output "PASS: a broken installed sidecar package fails closed"
+        Write-Output "PASS: an orphaned sidecar fails the shutdown assertion"
     } finally {
         Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -217,12 +237,15 @@ try {
     Stop-Process -Id $app.Id -Force
     Assert-True ($app.WaitForExit(10000)) "installed Tauri app did not exit"
     $app = $null
-    Invoke-Json $cli @("shutdown") | Out-Null
+    # A killed app must take the sidecar it started with it (ADR-0018's job
+    # object). Asking the CLI to shut the daemon down here instead would pass
+    # whether or not an orphan was left holding the pipe.
     Wait-Observed "installed process shutdown" {
         $installedProcesses = @(Get-Process -Name "copypaste-ui", "copypaste", "copypaste-daemon" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$installDir*" })
         if ($installedProcesses.Count -eq 0) { return $true }
         return $null
     } { Get-InstalledDiagnostics $null $dataRoot $daemonErr } | Out-Null
+    Assert-Unreachable $cli
 
     $uninstaller = Join-Path $installDir "uninstall.exe"
     $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
