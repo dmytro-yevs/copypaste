@@ -56,16 +56,16 @@ function Get-ClientCaptureBounds([IntPtr]$Handle) {
 }
 
 function Wait-ForegroundWindow([Diagnostics.Process]$App) {
-    return Wait-Observed "exact CopyPaste window foreground readiness" {
+    return Wait-Readiness "exact CopyPaste window foreground readiness" {
         $App.Refresh()
-        if ($App.HasExited) { throw "installed app exited with code $($App.ExitCode)" }
+        if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
         $handle = $App.MainWindowHandle
-        if ($handle -eq [IntPtr]::Zero) { return $null }
+        if ($handle -eq [IntPtr]::Zero) { return New-ProbeNotReady "the app has published no native window handle" }
         [CopyPasteNativeWindowEvidence]::ShowWindowAsync($handle, 9) | Out-Null
         [CopyPasteNativeWindowEvidence]::SetForegroundWindow($handle) | Out-Null
         $state = Get-WindowCaptureState $handle
-        if (Test-WindowCaptureReady $state) { return $state }
-        return $null
+        if (Test-WindowCaptureReady $state) { return New-ProbeReady $state }
+        return New-ProbeNotReady "foreground=$($state.foreground) visible=$($state.visible) minimized=$($state.minimized) display affinity=$($state.display_affinity)"
     } {
         $App.Refresh()
         $handle = $App.MainWindowHandle

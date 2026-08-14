@@ -4,30 +4,7 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-function Wait-Observed(
-    [string]$Description,
-    [scriptblock]$Probe,
-    [scriptblock]$Diagnostics,
-    [int]$TimeoutMilliseconds = 15000,
-    [int]$PollMilliseconds = 100
-) {
-    $timer = [Diagnostics.Stopwatch]::StartNew()
-    $lastFailure = "probe returned no ready state"
-    while ($timer.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
-        try {
-            $value = & $Probe
-            if ($null -ne $value -and $value -ne $false) { return $value }
-        } catch {
-            $lastFailure = $_.Exception.Message
-        }
-        $remaining = $TimeoutMilliseconds - $timer.ElapsedMilliseconds
-        if ($remaining -gt 0) {
-            Start-Sleep -Milliseconds ([Math]::Min($PollMilliseconds, $remaining))
-        }
-    }
-    $detail = try { (& $Diagnostics) -join "`n" } catch { $_.Exception.Message }
-    throw "$Description timed out after $TimeoutMilliseconds ms. Last probe: $lastFailure. Diagnostics:`n$detail"
-}
+. (Join-Path $PSScriptRoot "windows-readiness-lib.ps1")
 . (Join-Path $PSScriptRoot "windows-native-window-evidence.ps1")
 
 function Get-AppAutomationRoot([Diagnostics.Process]$App) {
@@ -71,15 +48,22 @@ function Get-UiaSummary([Diagnostics.Process]$App) {
 }
 
 function Wait-UiaName([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
-    return Wait-Observed "UI state '$Name'" {
+    return Wait-Readiness "UI state '$Name'" {
+        $App.Refresh()
+        if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
         $root = Get-AppAutomationRoot $App
-        if ($null -eq $root) { return $null }
+        if ($null -eq $root) { return New-ProbeNotReady "the app has published no native window handle" }
         $condition = [Windows.Automation.PropertyCondition]::new(
             [Windows.Automation.AutomationElement]::NameProperty,
             $Name
         )
-        $matches = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
-        foreach ($match in $matches) {
+        try {
+            $candidates = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+        } catch {
+            return New-ProbeTransient "the accessibility tree could not be searched: $($_.Exception.Message)"
+        }
+        $unread = $null
+        foreach ($match in $candidates) {
             try {
                 $bounds = $match.Current.BoundingRectangle
                 $canAct = -not $Actionable -or $match.Current.IsKeyboardFocusable -or @(
@@ -89,12 +73,15 @@ function Wait-UiaName([Diagnostics.Process]$App, [string]$Name, [bool]$Actionabl
                     }
                 ).Count -gt 0
                 if ($canAct -and $match.Current.IsEnabled -and -not $match.Current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
-                    return $match
+                    return New-ProbeReady $match
                 }
-            } catch {}
+            } catch {
+                $unread = $_.Exception.Message
+            }
         }
-        return $null
-    } { Get-UiaSummary $App }
+        if ($unread) { return New-ProbeTransient "an element named '$Name' could not be read: $unread" }
+        return New-ProbeNotReady "no enabled, on-screen element is named '$Name'"
+    } { Get-UiaSummary $App } 15000
 }
 
 function Invoke-UiaNamedControl([Diagnostics.Process]$App, [string]$Name, [string]$ExpectedName) {
@@ -124,16 +111,24 @@ function Set-UiaScreenshots([Diagnostics.Process]$App, [bool]$Allow) {
     $toggle = [Windows.Automation.TogglePattern]$pattern
     $expected = if ($Allow) { [Windows.Automation.ToggleState]::On } else { [Windows.Automation.ToggleState]::Off }
     if ($toggle.Current.ToggleState -ne $expected) { $toggle.Toggle() }
-    Wait-Observed "Allow screenshots=$Allow native state" {
-        if ($toggle.Current.ToggleState -ne $expected) { return $null }
+    Wait-Readiness "Allow screenshots=$Allow native state" {
         $App.Refresh()
+        if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
+        try {
+            $observed = $toggle.Current.ToggleState
+        } catch {
+            return New-ProbeTransient "the toggle state could not be read: $($_.Exception.Message)"
+        }
+        if ($observed -ne $expected) { return New-ProbeNotReady "the toggle reads $observed" }
         $state = Get-WindowCaptureState $App.MainWindowHandle
-        if (($Allow -and $state.capture_allowed) -or (-not $Allow -and $state.display_affinity -gt 0)) { return $state }
-        return $null
+        if (($Allow -and $state.capture_allowed) -or (-not $Allow -and $state.display_affinity -gt 0)) {
+            return New-ProbeReady $state
+        }
+        return New-ProbeNotReady "display affinity is $($state.display_affinity)"
     } {
         $state = Get-WindowCaptureState $App.MainWindowHandle
         @(Get-UiaSummary $App; "display affinity=$($state.display_affinity)")
-    } | Out-Null
+    } 15000 | Out-Null
 }
 
 function New-EvidenceFileRecord([string]$Root, [string]$RelativePath) {
@@ -191,13 +186,7 @@ function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) 
 }
 
 function Test-WindowsUiEvidenceHelpers {
-    $rejected = $false
-    try {
-        Wait-Observed "fixture readiness" { $null } { "fixture diagnostics" } 20 5 | Out-Null
-    } catch {
-        $rejected = $_.Exception.Message -match "timed out" -and $_.Exception.Message -match "fixture diagnostics"
-    }
-    Assert-True $rejected "readiness timeout omitted its observable diagnostics"
+    Test-WindowsReadinessHelpers
     $occluded = [ordered]@{ foreground = $false; visible = $true; minimized = $false; capture_allowed = $true }
     Assert-True (-not (Test-WindowCaptureReady $occluded)) "an occluded window was accepted for capture"
     $protected = [ordered]@{ foreground = $true; visible = $true; minimized = $false; capture_allowed = $false }
