@@ -590,6 +590,20 @@
           "expect": "a transient node read was not retried"
         },
         {
+          "name": "unnameable-control-type-given-a-name",
+          "file": "scripts/release/windows-native-ui-evidence.ps1",
+          "find": "    if ($null -eq $ControlType) { return $null }",
+          "replace": "    if ($null -eq $ControlType) { return \"ControlType.Custom\" }",
+          "expect": "a control type the client cannot name was given a name anyway"
+        },
+        {
+          "name": "registered-control-type-not-read",
+          "file": "scripts/release/windows-native-ui-evidence.ps1",
+          "find": "    return $ControlType.ProgrammaticName",
+          "replace": "    return $null",
+          "expect": "a registered control type was not read from the element"
+        },
+        {
           "name": "installed-sidecar-not-required",
           "file": "scripts/release/windows-native-evidence.ps1",
           "find": "\"copypaste-daemon.exe\", ",
