@@ -319,6 +319,115 @@ mod tests {
         let _ = shutdown_tx.send(true);
     }
 
+    /// A dialler `b`, a listening `a`, and the pairing they share. `b` holds
+    /// the `Peer` a sync pass would have read before the user touched anything.
+    async fn dialling_pair(
+        a_dir: &tempfile::TempDir,
+        b_dir: &tempfile::TempDir,
+        shutdown: watch::Receiver<bool>,
+    ) -> (Node, Peer) {
+        let a = Arc::new(Node::new(
+            PeerStore::open(&a_dir.path().join("a-peers.json")).unwrap(),
+            None,
+            crate::DEFAULT_PORT,
+            true,
+        ));
+        let b = Node::new(
+            PeerStore::open(&b_dir.path().join("b-peers.json")).unwrap(),
+            None,
+            crate::DEFAULT_PORT,
+            true,
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(listen(
+            Arc::clone(&a),
+            listener,
+            Arc::new(TestSource::new("desktop", Vec::new())),
+            |_: &str, _: &SyncOutcome| {},
+            shutdown,
+        ));
+
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        a.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+            })
+            .unwrap();
+        let b_peer = Peer {
+            pairing_id,
+            name: "desktop".into(),
+            psk: token.psk(),
+            last_addr: Some(addr),
+            last_seen_ms: 0,
+        };
+        b.peers().upsert(b_peer.clone()).unwrap();
+        (b, b_peer)
+    }
+
+    /// A sync pass that started before the user unpaired must not put the
+    /// device back. `sync_one` works from the `Peer` its caller read before the
+    /// click, so the record it writes when the session ends is stale by exactly
+    /// that unpair — and `upsert` bars only *revoked* ids, so the pairing was
+    /// re-enrolled with its key intact and the device reappeared in the list.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_that_outlives_an_unpair_does_not_restore_the_device() {
+        let (a_dir, b_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (b, b_peer) = dialling_pair(&a_dir, &b_dir, shutdown_rx).await;
+        let source = TestSource::new("phone", Vec::new());
+
+        // The click lands while the pass holds `b_peer`.
+        assert!(b.unpair(&b_peer.pairing_id).expect("unpair"));
+
+        b.sync_one(&b_peer, &source)
+            .await
+            .expect("the far side still holds the pairing, so the session runs");
+
+        assert!(
+            b.peers().get(&b_peer.pairing_id).is_none(),
+            "the unpaired device came back"
+        );
+        assert!(b.peers().list().is_empty());
+        assert!(
+            b.peers().psks().is_empty(),
+            "the key must not authenticate here again"
+        );
+
+        let _ = shutdown_tx.send(true);
+    }
+
+    /// The same race against the action that cannot be taken back. Revocation
+    /// was already closed to it — `upsert` refuses a revoked id — and this is
+    /// what says so, because it is the property `PeerStore::touch` must not
+    /// weaken.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_that_outlives_a_revoke_does_not_restore_the_device() {
+        let (a_dir, b_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (b, b_peer) = dialling_pair(&a_dir, &b_dir, shutdown_rx).await;
+        let source = TestSource::new("phone", Vec::new());
+
+        assert!(b
+            .peers()
+            .revoke(&b_peer.pairing_id, crate::now_ms())
+            .expect("revoke"));
+
+        b.sync_one(&b_peer, &source)
+            .await
+            .expect("the far side still holds the pairing, so the session runs");
+
+        assert!(b.peers().get(&b_peer.pairing_id).is_none());
+        assert!(b.peers().psks().is_empty());
+
+        let _ = shutdown_tx.send(true);
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_listener_stops_on_shutdown() {
         let dir = tempfile::tempdir().unwrap();
