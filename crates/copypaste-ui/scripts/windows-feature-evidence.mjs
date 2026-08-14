@@ -12,7 +12,8 @@ const EXPECTED = new Map([
 
 const RECORD_KEYS = ["bytes", "path", "sha256"];
 const STATE_KEYS = ["accessibility", "expected_name", "feature", "screenshot", "state"];
-const ACCESSIBILITY_KEYS = ["expected_name", "feature", "nodes", "schema_version", "state", "window"];
+const ACCESSIBILITY_KEYS = ["expected_name", "feature", "node_read", "nodes", "schema_version", "state", "window"];
+const NODE_READ_KEYS = ["complete", "read", "retried"];
 const WINDOW_KEYS = ["capture_allowed", "capture_bounds", "display_affinity", "foreground", "handle", "minimized", "visible"];
 const BOUNDS_KEYS = ["height", "kind", "width", "x", "y"];
 
@@ -98,7 +99,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) 
     }
     if (
       !exactKeys(accessibility, ACCESSIBILITY_KEYS)
-      || accessibility.schema_version !== 1
+      || accessibility.schema_version !== 2
       || accessibility.feature !== state.feature
       || accessibility.state !== state.state
       || accessibility.expected_name !== state.expected_name
@@ -122,6 +123,21 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) 
       || accessibility.window.capture_bounds.height > 16384
     ) {
       throw new Error(`${label} ${state.feature} accessibility describes the wrong state`);
+    }
+    // A node the capture could not read used to be dropped, so a subset of the
+    // tree arrived here indistinguishable from the whole of it. The count is
+    // checked against the array as well as the flag: a receipt that claims a
+    // complete read and carries fewer nodes than it counted is not evidence.
+    if (
+      !exactKeys(accessibility.node_read, NODE_READ_KEYS)
+      || accessibility.node_read.complete !== true
+      || !Array.isArray(accessibility.node_read.retried)
+      || !Array.isArray(accessibility.nodes)
+      || !Number.isInteger(accessibility.node_read.read)
+      || accessibility.node_read.read < 1
+      || accessibility.node_read.read !== accessibility.nodes.length
+    ) {
+      throw new Error(`${label} ${state.feature} accessibility is a partial snapshot`);
     }
     const marker = Array.isArray(accessibility.nodes)
       ? accessibility.nodes.find((node) => (
