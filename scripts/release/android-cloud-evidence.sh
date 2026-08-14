@@ -18,6 +18,13 @@ STUB_PORT="${CLOUD_STUB_PORT:-47800}"
 LATENCIES="$OUT/latency.tsv"
 STUB_PID=""
 
+# The sign-in fields are addressed by their position in the form, because their
+# authored labels are only in the dump from API 36. See [dump_exposes_hint].
+CLOUD_FORM="Cloud account sign in"
+FIELD_EMAIL="field:$CLOUD_FORM:0"
+FIELD_PASSWORD="field:$CLOUD_FORM:1"
+FIELD_PASSPHRASE="field:$CLOUD_FORM:2"
+
 now_ms() { python3 -c 'import time; print(time.time_ns() // 1000000)'; }
 
 cleanup() {
@@ -74,8 +81,9 @@ capture_state() { # <state>
 # its actions and the status they produce all start below the fold. Every
 # lookup here scrolls towards the end of the pane; a plain wait reported the
 # whole configured account lifecycle as missing while the app rendered it.
-expect_label() { # <selector> <artifact>
-    wait_selector_scrolling "$1" "$2" up "$WAIT_SECS" \
+expect_label() { # <selector> <artifact> [timeout] [dump fn] [scroll fn]
+    wait_selector_scrolling "$1" "$2" up "${3:-$WAIT_SECS}" any \
+        "${4:-dump_hierarchy}" "${5:-scroll_content}" \
         && ok "cloud UI exposes $1" \
         || bad "cloud UI exposes $1" "uiautomator did not find it"
 }
@@ -86,6 +94,35 @@ expect_feedback() { # <selector> <artifact>
     wait_authored_feedback "$1" "$2" "$WAIT_SECS" \
         && ok "cloud UI exposes $1" \
         || bad "cloud UI exposes $1" "uiautomator did not find it"
+}
+
+# What the running image can actually be asked about the sign-in form.
+#
+# Its three fields carry their authored labels in `hintText` and nowhere else,
+# and `uiautomator dump` emits `hint` only from API 36 — so on API 34 the
+# labels are absent from the tree and a gate that waited for them spent 45 s
+# per field to conclude the form was missing while the app was rendering it.
+# The shape is asserted on every level; the labels are asserted where they
+# exist and named as unobservable where they do not.
+expect_form_fields() { # <artifact> [timeout] [dump fn] [scroll fn]
+    local shape
+    wait_selector_scrolling "$FIELD_EMAIL" "$1" up "${2:-$WAIT_SECS}" any \
+        "${3:-dump_hierarchy}" "${4:-scroll_content}" || true
+    shape="$(form_field_shape "$1" "$CLOUD_FORM")"
+    [[ "$shape" == "3 2" ]] \
+        && ok "the cloud sign-in form exposes three fields, two of them secret" \
+        || bad "the cloud sign-in form exposes three fields, two of them secret" \
+               "$(evidence_name "$1") holds '$shape'"
+    if dump_exposes_hint "$1"; then
+        local pair
+        for pair in "Email:email" "Password:password" "Sync passphrase:passphrase"; do
+            expect_label "${pair%:*}" "$OUT/signed-out-${pair##*:}.xml" "${2:-$WAIT_SECS}" \
+                "${3:-dump_hierarchy}" "${4:-scroll_content}"
+        done
+    else
+        note "the authored labels on the cloud sign-in fields" \
+             "this image's uiautomator dump emits no hint attribute, which AOSP added in android-16.0.0_r1; Chromium exposes a WebView field's accessible name nowhere else, so the fields are reached by their position in the form instead"
+    fi
 }
 
 fill_field() { # <label> <value> <artifact>
@@ -174,15 +211,13 @@ configured_scenario() {
     open_cloud || { bad "the configured cloud row is reachable"; return; }
 
     expect_label "Signed out" "$OUT/signed-out-status.xml"
-    expect_label "Cloud account sign in" "$OUT/signed-out-form.xml"
-    expect_label "Email" "$OUT/signed-out-email.xml"
-    expect_label "Password" "$OUT/signed-out-password.xml"
-    expect_label "Sync passphrase" "$OUT/signed-out-passphrase.xml"
+    expect_label "$CLOUD_FORM" "$OUT/signed-out-form.xml"
+    expect_form_fields "$OUT/signed-out-form.xml"
     capture_state signed-out
 
-    fill_field "Email" "native@example.test" "$OUT/email.xml" || bad "email can be entered"
-    fill_field "Password" "stub-password" "$OUT/password.xml" || bad "password can be entered"
-    fill_field "Sync passphrase" "native-evidence" "$OUT/passphrase.xml" || bad "passphrase can be entered"
+    fill_field "$FIELD_EMAIL" "native@example.test" "$OUT/email.xml" || bad "email can be entered"
+    fill_field "$FIELD_PASSWORD" "stub-password" "$OUT/password.xml" || bad "password can be entered"
+    fill_field "$FIELD_PASSPHRASE" "native-evidence" "$OUT/passphrase.xml" || bad "passphrase can be entered"
     started="$(now_ms)"
     tap_selector_scrolling "Sign in" "$OUT/sign-in.xml" up || bad "the native sign-in action is reachable"
     expect_label "Connected" "$OUT/connected.xml"
@@ -250,9 +285,9 @@ cloud_card_state() { # <artifact>
 
 restore_session() { # <artifact>
     start_stub "$OUT/restore-rows.json" "$OUT/restore-stub.log" || return 1
-    fill_field "Email" "native@example.test" "$OUT/restore-email.xml" || return 1
-    fill_field "Password" "stub-password" "$OUT/restore-password.xml" || return 1
-    fill_field "Sync passphrase" "native-evidence" "$OUT/restore-passphrase.xml" || return 1
+    fill_field "$FIELD_EMAIL" "native@example.test" "$OUT/restore-email.xml" || return 1
+    fill_field "$FIELD_PASSWORD" "stub-password" "$OUT/restore-password.xml" || return 1
+    fill_field "$FIELD_PASSPHRASE" "native-evidence" "$OUT/restore-passphrase.xml" || return 1
     tap_selector_scrolling "Sign in" "$OUT/restore-sign-in.xml" up || return 1
     # Exact: the service status line reads "Background service connected", and
     # it is on every screen this scenario ever dumps.
@@ -369,6 +404,47 @@ unconfigured_evidence_self_test() { # <temp>
         || bad "a refused write leaves no structured latency evidence behind"
 }
 
+cloud_form_self_test() { # <temp>
+    local OUT="$1" observed
+    android_ui_form_fixtures "$OUT"
+
+    ui_fixtures "$OUT/form-api34.xml"
+    observed="$(expect_form_fields "$OUT/observed.xml" 5 ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == *"ok    the cloud sign-in form exposes three fields, two of them secret"* \
+       && "$observed" == *"NOT ASSERTED  the authored labels on the cloud sign-in fields"* ]] \
+        && ok "an image without hint asserts the form's shape and names what it cannot read" \
+        || bad "an image without hint asserts the form's shape and names what it cannot read" \
+               "$(tr '\n' ' ' <<<"$observed")"
+
+    # One sample per lookup is the fast path, not the contract: a fixture list
+    # that is exactly long enough turns any extra sample into a missing label.
+    ui_fixtures "$OUT/form-api36.xml" "$OUT/form-api36.xml" "$OUT/form-api36.xml" \
+                "$OUT/form-api36.xml" "$OUT/form-api36.xml" "$OUT/form-api36.xml" \
+                "$OUT/form-api36.xml" "$OUT/form-api36.xml"
+    observed="$(expect_form_fields "$OUT/observed.xml" 5 ui_fixture_dump ui_fixture_scroll)"
+    [[ "$observed" == *"ok    cloud UI exposes Sync passphrase"* \
+       && "$observed" != *"NOT ASSERTED"* ]] \
+        && ok "an image with hint also asserts the authored labels" \
+        || bad "an image with hint also asserts the authored labels" \
+               "$(tr '\n' ' ' <<<"$observed")"
+
+    # The gate this replaces could not fail: it waited for a label no dump
+    # below API 36 carries, so a form that was not there and one the harness
+    # could not read looked identical. A form with a field missing must FAIL on
+    # every level.
+    python3 - "$OUT/form-api34.xml" "$OUT/form-short.xml" <<'PY'
+import sys, xml.etree.ElementTree as ET
+tree = ET.parse(sys.argv[1])
+form = next(n for n in tree.getroot().iter("node") if n.get("text") == "Cloud account sign in")
+form.remove(next(n for n in form if n.get("resource-id") == "passphrase"))
+tree.write(sys.argv[2])
+PY
+    ui_fixtures "$OUT/form-short.xml" "$OUT/form-short.xml" "$OUT/form-short.xml" "$OUT/form-short.xml"
+    requirement_fails expect_form_fields "$OUT/observed.xml" 3 ui_fixture_dump ui_fixture_scroll \
+        && ok "a form missing a field fails without hint to read" \
+        || bad "a form missing a field fails without hint to read"
+}
+
 # Cards taken from run 31671766432's published dumps: the release leg signed in,
 # lost the session to the offline probe, and then asserted a sign-out against
 # the sign-in form that came back.
@@ -460,6 +536,7 @@ if [[ "$MODE" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
     android_ui_self_test
+    cloud_form_self_test "$SELF_TEST_TMP"
     sign_out_self_test "$SELF_TEST_TMP"
     cloud_evidence_self_test "$SELF_TEST_TMP"
     unconfigured_evidence_self_test "$SELF_TEST_TMP/unconfigured-leg"
