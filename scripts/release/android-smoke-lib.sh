@@ -51,6 +51,22 @@ keystore_report() {
     grep -aE "$KEYSTORE_FAILURES" "$1" | head -n 5
 }
 
+# What the log records about a process that is gone, in the order the evidence
+# settles it. The second-launch assertion used to name one cause — a re-minted
+# device secret — for every disappearance, including the ones where the
+# platform had written its own kill reason into the same log, and that sent
+# every reader of a red API 33 or 34 run at the keystore instead of at GMS.
+process_gone_cause() { # <log> <pid>
+    local reason crash keystore
+    reason="$(platform_kill_reason "$1" "$2")"
+    [[ -n "$reason" ]] && { printf 'the platform killed pid %s: %s' "$2" "$reason"; return; }
+    crash="$(crash_report "$1" "$2" | head -n 3 | tr '\n' ' ')"
+    [[ -n "$crash" ]] && { printf 'pid %s crashed: %s' "$2" "$crash"; return; }
+    keystore="$(keystore_report "$1" | tr '\n' ' ')"
+    [[ -n "$keystore" ]] && { printf 'pid %s logged a keystore or history failure: %s' "$2" "$keystore"; return; }
+    printf 'pid %s is gone and logcat records no crash, no keystore failure and no kill for it' "$2"
+}
+
 # A history database that opens without SQLCipher is the failure ADR-0007 is
 # about: it would be readable clipboard plaintext at rest.
 looks_encrypted() {
@@ -699,6 +715,39 @@ self_test() {
     [[ -n "$(keystore_report "$t/ours-keystore.log")" ]] \
         && ok "our own keystore failure is reported" \
         || bad "our own keystore failure is reported"
+
+    group "self-test: why the process is gone"
+
+    printf '%s\n' \
+        "08-10 04:27:24.300   482   591 I ActivityManager: Killing 4242:$PKG/u0a158 (adj 0): depends on provider com.google.android.gms.fonts/com.google.android.gms.fonts.provider.FontsProvider in dying proc com.google.android.gms.persistent (adj 0)" \
+        > "$t/gone-killed.log"
+    [[ "$(process_gone_cause "$t/gone-killed.log" 4242)" == "the platform killed pid 4242: depends on provider com.google.android.gms.fonts/"* ]] \
+        && ok "a process the platform killed is reported as killed" \
+        || bad "a process the platform killed is reported as killed" \
+               "$(process_gone_cause "$t/gone-killed.log" 4242)"
+
+    printf '%s\n' \
+        '08-10 04:27:24.300  4242  4242 E AndroidRuntime: FATAL EXCEPTION: main' \
+        "08-10 04:27:24.301  4242  4242 E AndroidRuntime: Process: $PKG, PID: 4242" \
+        > "$t/gone-crashed.log"
+    [[ "$(process_gone_cause "$t/gone-crashed.log" 4242)" == "pid 4242 crashed: "*"FATAL EXCEPTION"* ]] \
+        && ok "a process that crashed is reported as crashed" \
+        || bad "a process that crashed is reported as crashed" \
+               "$(process_gone_cause "$t/gone-crashed.log" 4242)"
+
+    printf 'E copypaste: could not open history: device secret is unusable\n' > "$t/gone-keystore.log"
+    [[ "$(process_gone_cause "$t/gone-keystore.log" 4242)" == "pid 4242 logged a keystore or history failure: "* ]] \
+        && ok "a keystore failure is only claimed when the log holds one" \
+        || bad "a keystore failure is only claimed when the log holds one" \
+               "$(process_gone_cause "$t/gone-keystore.log" 4242)"
+
+    # The shipped defect: every disappearance named the device secret, so a log
+    # that says nothing must now say nothing.
+    printf 'I copypaste: ordinary startup chatter\n' > "$t/gone-silent.log"
+    [[ "$(process_gone_cause "$t/gone-silent.log" 4242)" == *"records no crash, no keystore failure and no kill"* ]] \
+        && ok "a silent log is not evidence of a re-minted device secret" \
+        || bad "a silent log is not evidence of a re-minted device secret" \
+               "$(process_gone_cause "$t/gone-silent.log" 4242)"
 
     group "self-test: backup exclusions"
 
