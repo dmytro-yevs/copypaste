@@ -45,9 +45,38 @@ targetRules = ["generic-api-key"]
 regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.secret''']
 
 [[allowlists]]
-description = "Export/import e2e fixture. Deliberately not the upstream .+EXAMPLE key: the test asserts a credential smuggled in through an import is re-flagged, so the fixture has to clear the default allowlist."
+description = "Export/import e2e fixture. Deliberately not AKIAIOSFODNN7EXAMPLE, AWS's own published documentation key, which the default .+EXAMPLE allowlist already covers: the test asserts a credential smuggled in through an import is re-flagged, so the fixture has to clear that allowlist."
 targetRules = ["aws-access-token"]
 regexes = ['''AKIAIOSFODNN7SMUGGLE''']
+
+# The three below cannot be reshaped: each rule matches a *shape*, and the shape
+# is what the fixture exists to exercise. Manifest 07 measures these exact bytes,
+# so changing one falsifies the row that quotes its entropy. Anchored, so an
+# entry admits its one reviewed value and not a longer one that contains it.
+
+[[allowlists]]
+description = "DMY-162's named residue. Manifest 07 and `dotenv_secret`'s shape-allowlist decision both quote this value's 4.515, so its bytes are the specification. Test mode, and the body is the alphabet in order."
+targetRules = ["stripe-access-token"]
+regexes = ['''^sk_test_abcdefghijklmnopqrstuvwx$''']
+
+[[allowlists]]
+description = "The README and .env templates manifest 07 pins against cloudflare_api_token's 4.3, each written at the 40 characters the rule requires — at 38 it never reaches the rule and the row constrains nothing (§5.4). Every one spells an instruction to substitute a real token."
+targetRules = ["cloudflare-api-key"]
+regexes = [
+    '''^Replace_With_Your_Real_Token_Value123456$''',
+    '''^0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234$''',
+    '''^REPLACE_WITH_YOUR_CLOUDFLARE_API_TOKEN_X$''',
+    '''^TheQuickBrownFoxJumpsOverTheLazyDogAbcde$''',
+]
+
+[[allowlists]]
+description = "A heroku context word beside a UUID, which is the whole subject of the test: an app, dyno, release and addon id are all UUIDs the CLI prints next to that word, so the rule must classify them without deleting (DMY-162). The first two are the usual documentation UUIDs. Any other UUID beside heroku is still reported."
+targetRules = ["heroku-api-key"]
+regexes = [
+    '''^550e8400-e29b-41d4-a716-446655440000$''',
+    '''^123e4567-e89b-12d3-a456-426614174000$''',
+    '''^9f2c1d4e-8a7b-4c5d-9e3f-2a1b0c9d8e7f$''',
+]
 
 [[allowlists]]
 description = "Release evidence scripts POST to the local cloud stub on 127.0.0.1. The bearer names the scenario; there is no account behind it."
