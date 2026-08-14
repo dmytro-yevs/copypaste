@@ -465,7 +465,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::ValueStrength,
         secret_group: 1,
         never_auto_delete: false,
-        entropy: Some(2.0),
+        entropy: Some(4.3),
         keywords: &[
             "cloudflare_api_",
             "cf_api_token",
@@ -2133,7 +2133,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::ValueStrength,
         secret_group: 1,
         never_auto_delete: false,
-        entropy: Some(3.0),
+        entropy: Some(4.8),
         keywords: &[],
         allowlists: &[
         ],
@@ -2203,7 +2203,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::ValueStrength,
         secret_group: 1,
         never_auto_delete: false,
-        entropy: Some(3.0),
+        entropy: Some(4.3),
         keywords: &[],
         allowlists: &[
         ],
@@ -2231,7 +2231,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::ValueStrength,
         secret_group: 1,
         never_auto_delete: false,
-        entropy: Some(3.5),
+        entropy: Some(4.4),
         keywords: &[],
         allowlists: &[
         ],

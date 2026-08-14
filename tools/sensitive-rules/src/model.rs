@@ -414,6 +414,17 @@ fn validate_decisions(rule: &SelectedRule) -> Result<()> {
             rule.name
         );
     }
+    // Upstream tunes a threshold for a repository scanner, which prefers a false
+    // positive; this detector deletes, so it prefers a false negative (§5.5).
+    // `cloudflare_api_token` inherited 2.0 with no number and no decision
+    // anywhere in this file, and deleted a 40-character README template at 2.233
+    // (DMY-162). A rule whose value is the whole question states its own.
+    if matches!(rule.validator, Validator::ValueStrength) && rule.entropy_override.is_none() {
+        bail!(
+            "{} gates on its captured value and may not inherit an upstream entropy threshold",
+            rule.name
+        );
+    }
     Ok(())
 }
 

@@ -532,11 +532,42 @@ that rarer and no safer: it moved the failure to credentials beginning with a
 listed word, and it still fails **open**, which is the one direction the
 fail-closed amendment above forbids. No finite word list closes either end.
 
-Randomness does. A placeholder is repetitive or a template; a credential is
-neither, and that is a property of the value rather than a guess about its
-spelling. `AccountKey=<86 identical characters>` measures 0.0 and is rejected;
-`AccountKey=your<82 random characters>` measures above 5 and is detected, which
-is the correct answer and the one no word list could give.
+Randomness does. A placeholder is repetitive or written out of words; a
+credential is neither, and that is a property of the value rather than a guess
+about its spelling. `AccountKey=<86 identical characters>` measures 0.0 and is
+rejected; `AccountKey=your<82 random characters>` measures above 5 and is
+detected, which is the correct answer and the one no word list could give.
+
+**The number has to be measured, not inherited (DMY-162).** Upstream's
+thresholds belong to a repository scanner, and §5.5 fixes the asymmetry: it
+prefers a false positive, this detector prefers a false negative. Taking them
+unchanged for four rules that delete at 0.80-0.99 imports the wrong bias, and
+`cloudflare_api_token` had no number of its own at all — it inherited 2.0 and
+deleted `CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_<24 X>`, which measures 2.233.
+Each threshold is now set against two measured populations at the value shape
+its pattern admits: 80 000 word-shaped templates per length, and 500 000 random
+values over the rule's own alphabet.
+
+| Rule | Value shape | Template ceiling | Real values rejected | Threshold |
+|---|---|---|---|---|
+| `cloudflare_api_token` | 40 chars, 64 symbols | 4.225 | 3.4 in 10 000 | **4.3** |
+| `aws_secret_access_key` | 40 chars, 64 symbols | 4.225 | 3.4 in 10 000 | **4.3** |
+| `azure_storage_key` | 86 chars, 64 symbols | 4.268 | 0 in 500 000 | **4.8** |
+| `dotenv_secret` | `\S+`, any alphabet | 4.268 | below | **4.4** |
+
+`dotenv_secret` fixes neither a length nor an alphabet, so its number clears the
+ceiling at *every* length `\S+` admits rather than at one. It is therefore the
+tightest against its own values: a 32-character alphanumeric token clears 4.4
+about 86 % of the time, and **no hex value ever can**, because log2(16) is 4.
+Those fall to `generic_api_key` at 0.75, which still withholds them.
+
+**The overlap is a trade, not a partition.** A value whose characters are nearly
+all distinct measures like a credential because by this gate it *is* one:
+`MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx` measures 4.515 and is still
+deleted. Gitleaks' own `^[a-zA-Z_.-]+$` secret allowlist is a shape test rather
+than a word list and would reject it; adopting it for these four rules is open,
+not decided here. The generator now refuses a value-gated rule that states no
+threshold of its own, so the silent inheritance cannot recur.
 
 **This costs the synthetic fixtures, and that is the trade.** Ten rules carried
 `entropy_override = 0.0` for no reason but to admit a repeated-character
@@ -545,12 +576,9 @@ gone and §9.1's fixtures are now credential-*shaped*: random over the rule's ow
 alphabet. Only `hashicorp_vault` keeps an override, because it merges two
 upstream rules whose thresholds differ and so has none to inherit.
 
-Two consequences worth stating. A carve-out disappears —
-`aws_secret_access_key` needed one for `example`, because AWS's own published
-key *ends* `EXAMPLEKEY`, and nothing tests for that word now. And
-`dotenv_secret` is held to 3.5 rather than 3.0, tighter than the other three,
-because its anchor is only a variable name and it still auto-wipes at 0.80: a
-mixed-case template such as `TODO_before_release` measures 3.3.
+A carve-out also disappears: `aws_secret_access_key` needed one for `example`,
+because AWS's own published key *ends* `EXAMPLEKEY`. It measures 4.663, clears
+4.3, and nothing tests for that word now.
 
 ### 5.7 Defence layers, in order
 
@@ -1067,8 +1095,11 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `CLOUDFLARE_API_TOKEN=your` + 36×`b` | repetitive value, and `dotenv_secret` must not classify it either |
 | `aws_secret_access_key = your` + 36×`c` | repetitive value |
 | `AccountKey=` + 86×`A` + `==`, `CLOUDFLARE_API_TOKEN=` + 40×`b` | **no word at all** — a repetitive value is a placeholder whatever it spells |
-| `CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_XXXXXXXXXXXXXXXXXXXXXX` | a template, by its own low variety |
-| `MY_API_TOKEN=TODO_before_release` | 3.3 — under `dotenv_secret`'s 3.5, which is why that rule is held tighter than the other three |
+| `CLOUDFLARE_API_TOKEN=YOUR_TOKEN_HERE_` + 24×`X` | 2.233, under the rule's 4.3. The value is **40** characters, the length the pattern requires: written 38 it never reaches the rule, so the row constrains nothing and the test quoting it passes on the length (§5.4) |
+| `CLOUDFLARE_API_TOKEN=REPLACE_WITH_YOUR_CLOUDFLARE_API_TOKEN_X`, `=your-cloudflare-api-token-goes-right-her` | 4.009 and 3.984 — ordinary README templates written at the 40 the rule requires |
+| `aws_secret_access_key = REPLACE/WITH/YOUR/AWS/SECRET/ACCESS/KEYX`, `= your+aws+secret+access+key+goes+right+he` | 3.759 and 3.615, under 4.3 |
+| `AccountKey=PutYourOwnAzureStorageAccountKeyHereBeforeDeployPutYourOwnAzureStorageAccountKeyHereOk==` | 4.198, under 4.8 — mixed case, and still a template |
+| `MY_API_TOKEN=REPLACE_ME_WITH_THE_REAL_VALUE_PLEASE_OK`, `=changeme-please-before-you-deploy`, `=TODO_before_release` | 3.631, 3.820 and 3.321 — under `dotenv_secret`'s 4.4 |
 | `api-key: see the wiki`, `client secret: ask ops`, `db-password: ${VAULT_DB}` | the widened rule-23 keyword is still value-gated |
 
 **The 50-entry benign corpus** (`tests/false_positive_corpus.rs:14-73`) must be

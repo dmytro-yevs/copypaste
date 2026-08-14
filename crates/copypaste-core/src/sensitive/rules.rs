@@ -134,24 +134,23 @@ mod tests {
     /// alone, so each must capture its value and gate that value on both its
     /// strength and its randomness — never on the whole match, which carries the
     /// anchor, and `AWS_SECRET_ACCESS_KEY=` contains `secret`.
+    ///
+    /// Each number is pinned to its value, not to a floor. `cloudflare_api_token`
+    /// had no number of its own and inherited upstream's 2.0, which a floor test
+    /// accepted while the rule deleted a 40-character README template at 2.233
+    /// (DMY-162). §5.6 states how each was measured.
     #[test]
     fn context_anchored_rules_gate_their_captured_value() {
-        for name in [
-            "azure_storage_key",
-            "cloudflare_api_token",
-            "aws_secret_access_key",
-            "dotenv_secret",
+        for (name, entropy) in [
+            ("azure_storage_key", 4.8),
+            ("cloudflare_api_token", 4.3),
+            ("aws_secret_access_key", 4.3),
+            ("dotenv_secret", 4.4),
         ] {
             let rule = rule(name);
             assert!(rule.secret_group > 0, "{name} does not capture its value");
             assert_eq!(rule.validator, Validator::ValueStrength, "{name}");
-            // The number differs per rule — upstream owns it where there is an
-            // upstream rule — but every one of these must have one, because it
-            // is the only thing separating a README example from a credential.
-            assert!(
-                rule.entropy.is_some_and(|minimum| minimum >= 2.0),
-                "{name} has no entropy threshold to separate a README example"
-            );
+            assert_eq!(rule.entropy, Some(entropy), "{name}");
         }
     }
 
