@@ -70,6 +70,30 @@ def adb_guard_violations(source, allowed_raw_adb=0):
     return violations
 
 
+def calls_emulator(job, event):
+    return (
+        str(job.get("uses") or "").endswith("android-emulator.yml")
+        and "github.event_name == '{}'".format(event) in str(job.get("if") or "")
+    )
+
+
+def job_matrix(job):
+    return ((job or {}).get("strategy") or {}).get("matrix") or {}
+
+
+def scheduled_sweep_is_single(jobs):
+    job = jobs.get("android-nightly") or {}
+    return calls_emulator(job, "schedule") and not job_matrix(job)
+
+
+def dispatch_spot_check_holds(jobs):
+    job = jobs.get("android-dispatch") or {}
+    return (
+        calls_emulator(job, "workflow_dispatch")
+        and set(job_matrix(job).get("api-level") or []) == {34, 36}
+    )
+
+
 def closure(jobs, name):
     seen, stack = set(), list(as_list(jobs.get(name, {}).get("needs")))
     while stack:
@@ -456,11 +480,20 @@ if emu:
             f"android-emulator.yml {event} filter covers the shared frontend and the wire contract",
             "a path filter that omits them hides cross-platform breakage")
     nightly_jobs = (docs.get("native-nightly.yml") or {}).get("jobs") or {}
-    android_matrix = (nightly_jobs.get("android") or {}).get("strategy", {}).get("matrix", {})
-    rec("workflow_call" in triggers and "workflow_dispatch" in triggers
-        and set(android_matrix.get("api-level") or []) == {34, 36},
-        "Android runs on a nightly API matrix and on demand",
-        "expected reusable workflow plus nightly API 34/36 matrix")
+    rec("workflow_call" in triggers and "workflow_dispatch" in triggers,
+        "android-emulator.yml is reusable and dispatchable",
+        "expected workflow_call and workflow_dispatch triggers: {}".format(sorted(triggers)))
+    rec(dispatch_spot_check_holds(nightly_jobs),
+        "a manual nightly run spot-checks the API 34/36 matrix",
+        "expected a workflow_dispatch-gated call to android-emulator.yml matrixed on api-level [34, 36]")
+    # `github.event_name` inside a called workflow is the CALLER's event, so on
+    # a schedule the emulator job's own matrix expands to [24,29,33,34,36] and
+    # ignores any api-level passed in. A matrix on the scheduled call therefore
+    # repeats the whole sweep once per leg — run 31774201631 ran ten emulator
+    # legs and two APK builds for what is one sweep's worth of coverage.
+    rec(scheduled_sweep_is_single(nightly_jobs),
+        "the scheduled Android call is not matrixed",
+        "the callee already sweeps every API level on a schedule; a matrix here runs that sweep once per leg")
 
     emulator_matrix = ((ejobs.get("emulator") or {}).get("strategy") or {}).get("matrix") or {}
     api_matrix = str(emulator_matrix.get("api-level", ""))
@@ -788,6 +821,41 @@ if SELF_TEST:
     ):
         emit(held, "self-test: {}".format(desc),
              "the toolchain component detector did not behave as stated")
+
+    def nightly_probe(name, gate, matrix=None, uses="./.github/workflows/android-emulator.yml"):
+        job = {"uses": uses}
+        if gate is not None:
+            job["if"] = "github.event_name == '{}'".format(gate)
+        if matrix is not None:
+            job["strategy"] = {"fail-fast": False, "matrix": {"api-level": matrix}}
+        return {name: job}
+
+    def sched(**kw):
+        return scheduled_sweep_is_single(nightly_probe("android-nightly", **kw))
+
+    def disp(**kw):
+        return dispatch_spot_check_holds(nightly_probe("android-dispatch", **kw))
+
+    for desc, held in (
+        ("an unmatrixed scheduled call is accepted", sched(gate="schedule")),
+        ("a matrixed scheduled call is rejected", not sched(gate="schedule", matrix=[34, 36])),
+        ("a scheduled call left on the dispatch gate is rejected", not sched(gate="workflow_dispatch")),
+        ("an ungated scheduled call is rejected", not sched(gate=None)),
+        ("a scheduled call to another workflow is rejected",
+         not sched(gate="schedule", uses="./.github/workflows/ci.yml")),
+        ("a negated scheduled gate is rejected",
+         not scheduled_sweep_is_single(
+             {"android-nightly": {"uses": "./.github/workflows/android-emulator.yml",
+                                  "if": "github.event_name != 'schedule'"}})),
+        ("a renamed scheduled job is rejected", not scheduled_sweep_is_single({})),
+        ("the API 34/36 dispatch matrix is accepted",
+         disp(gate="workflow_dispatch", matrix=[34, 36])),
+        ("a dispatch matrix missing a leg is rejected", not disp(gate="workflow_dispatch", matrix=[34])),
+        ("an unmatrixed dispatch call is rejected", not disp(gate="workflow_dispatch")),
+        ("a renamed dispatch job is rejected", not dispatch_spot_check_holds({})),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the nightly Android call detector did not behave as stated")
 
     fixture = yaml.safe_load(
         "jobs:\n  build: {}\n  smoke:\n    needs: build\n  publish:\n    needs: [smoke]\n"
