@@ -201,6 +201,11 @@ source = '''import[ \t]+{[ \t\w,]+}[ \t]+from[ \t]+['"][^'"]+['"]'''
 replacement = '''import[ \t]+\{[ \t\w,]+\}[ \t]+from[ \t]+['"][^'"]+['"]'''
 decision = "Go RE2 treats braces without a decimal quantifier as literals; Rust regex requires them escaped."
 
+[[rules.allowlist_regex_overrides]]
+source = '''^[a-zA-Z_.-]+$'''
+replacement = '''^[a-zA-Z_.-]+={0,3}$'''
+decision = "Upstream's own capture group admits =, so AccountKey=<86 letters>== is captured with its base64 padding and this allowlist no longer matches the value it was written for. That left the all-letter Azure template deletable through this rule alone while the other five rejected it (DMY-162). The padding is not evidence of a credential: the value still carries no digit and no symbol, which is the whole of what the shape asks. Only this rule's own copy is widened; the four rules that borrow the allowlist take the vendored literal unchanged."
+
 [[rules]]
 upstream_ids = ["jwt"]
 name = "jwt"
@@ -304,6 +309,12 @@ confidence = 0.75
 pattern = '''(?i)(?:password|passwd|secret|api[-_. ]key|apikey|auth[-_. ]token|access[-_. ]token|client_secret|refresh[-_. ]token|db_password)["']?\s*[:=]\s*(\S{6,})'''
 validator = "value_strength"
 secret_group = 1
+entropy = 2.0
+entropy_decision = "Measured, and it answers only the repetitive half of the placeholder pair in manifest 5.6. This rule's own 9.1 fixtures fix the ceiling: password=hunter2 and secret = !abcdef measure 2.807, so any threshold that reached a word-spelled template would take a real short password with it — 2.5 rejects 19% of six-character values and 2.8 rejects passw0rd at 2.750. At 2.0 the rule rejects TWILIO_API_KEY=ACxxxx... at 0.382 and MAILGUN_API_KEY=key-0000... at 0.741, and costs 1,145 real values in 100,000 at the six characters the pattern admits, 29 at eight and none at ten or more. The word-spelled templates belong to the shape guard, not to this number."
+secret_shape_allowlist_from = "generic-api-key"
+secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist the four context-anchored rules take, and the half of 5.6's pair no threshold here can reach: YOUR_DATADOG_API_KEY_HERE_PLEASE measures 3.712 and xoxb-put-your-own-workspace-token-here 3.830, both far above 2.807. The cost is larger than for the other five and is not their 1-in-900: this rule's values include human-chosen passwords, for which no digit and no symbol is common rather than rare, so a bare all-letter password is no longer detected here at all. A quoted one still is, because the capture keeps its quotes, and 9.1's password: abcdefghij moves to 9.2 with this."
+never_auto_delete = true
+never_auto_delete_decision = "password= and api_key= prove which field matched and nothing about the value, which is 4.2's argument for the four context-anchored rules at the same keyword-anchor strength. Neither gate reaches a template written in words and digits together: api_key: PUT_YOUR_KEY_HERE_2024 at 3.516 and AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024 at 4.018 clear 2.0 and carry a digit, and no threshold below hunter2's 2.807 ever will. Manifest I1 ranks deleting those above leaving a real password unsearchable."
 
 [[overlay]]
 name = "aws_secret_access_key"

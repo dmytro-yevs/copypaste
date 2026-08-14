@@ -365,6 +365,16 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             overlay.entropy.is_some(),
             &overlay.entropy_decision,
         )?;
+        // The same refusal `validate_decisions` applies to upstream-sourced
+        // rules. `generic_password_kv` stated no threshold at all and deleted
+        // twelve of twelve ordinary `.env` templates (DMY-162); an overlay is
+        // the spelling that had no guard.
+        if matches!(overlay.validator, Validator::ValueStrength) && overlay.entropy.is_none() {
+            bail!(
+                "{} gates on its captured value and must state an entropy threshold",
+                overlay.name
+            );
+        }
         require_decision(
             &overlay.name,
             "secret_shape_allowlist",

@@ -328,10 +328,10 @@ example `pattern_name` (`ffi_sensitive.rs:73`) — that name does not exist.
 | Band | Members | Semantics |
 |---|---|---|
 | **0.90 – 0.99** | Prefixed/structural tokens with a unique literal or a mandatory context anchor | "Cannot plausibly be anything else." Safe to auto-delete on a unique literal; a rule resting on a context anchor alone is restricted instead (§5.6). |
-| **0.75 – 0.80** | `generic_password_kv` (0.75), `dotenv_secret` (0.80) | Keyword-driven. 0.75 is gated by a value-strength validator; **0.80 is not** (§7.1). |
+| **0.75 – 0.80** | `generic_password_kv` (0.75), `dotenv_secret` (0.80) | Keyword-driven. Both gate the value on strength and randomness, and both are restricted (§5.6). |
 | **≥ 0.70 floor** | — | Auto-wipe boundary. Nothing may sit *exactly* on it: `ip_with_port` did, and it caused data loss (`CopyPaste-8ys1`). Treat 0.70 as exclusive-in-spirit. |
 | **0.55 – 0.65 — INERT** | `phone_us`, `passport`, `email`, `iban`, `ssn_us`, `discord_bot_token`, `twilio_signing_key_sid`, `generic_bearer`, `http_basic_auth`, `ip_with_port` | Detected, labelled, masked, redacted in logs — **never deleted**, and still searchable. |
-| **RESTRICTED** | `credit_card`, `cloudflare_api_token`, `azure_storage_key`, `aws_secret_access_key`, `dotenv_secret` | Above the floor *and* opted out of deletion. Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. |
+| **RESTRICTED** | `credit_card`, `cloudflare_api_token`, `azure_storage_key`, `aws_secret_access_key`, `dotenv_secret`, `generic_password_kv` | Above the floor *and* opted out of deletion. Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. |
 
 **v2 amendment — the restricted band (DMY-162).** v1 had two bands and one
 question, so "how sure is this a card?" and "may this be erased?" shared a
@@ -343,6 +343,23 @@ above the floor is deletable unless someone writes down why it must not be —
 the direction that keeps a rule from dropping out of the gate by being
 forgotten. The engine's two whole-item predicates differ by exactly this band:
 `is_sensitive` withholds, `may_auto_wipe` deletes.
+
+**v2 amendment — the band is per rule, the verdict is per item (DMY-162).**
+`never_auto_delete` says what *one rule's* match licenses, and on its own it
+protects nothing: written as a plain disjunction over findings, `may_auto_wipe`
+took any high-confidence match as permission, so `generic_api_key` at 0.75 —
+judging the *same value* through the *same* anchor on weaker gates — reinstated
+every deletion the band had just refused. Eight of eleven real credentials
+across the four context-anchored rules were still destroyed with the band in
+place. **A rule above the floor licenses deletion of the item only where no
+restricted match covers the same bytes.** Overlap, not containment: the generic
+rule's match can run a byte past its neighbour's. Two rules over one span are
+one judgement and I1 takes the recoverable outcome; rules on *disjoint* spans
+are independent evidence and still delete, so a distinct secret pasted beside a
+card or a `.env` line is not protected by it.
+
+Read a rule's own row in §9.1/§9.2 as what that rule does. Where a row says an
+item "never auto-wipes", it is this aggregate rule that makes it true.
 
 The inert band exists for two distinct reasons, both worth preserving in v2:
 
@@ -554,6 +571,7 @@ values over the rule's own alphabet.
 | `aws_secret_access_key` | 40 chars, 64 symbols | 4.225 | 3.4 in 10 000 | **4.3** |
 | `azure_storage_key` | 86 chars, 64 symbols | 4.268 | 0 in 500 000 | **4.8** |
 | `dotenv_secret` | `\S+`, any alphabet | 4.268 | below | **4.4** |
+| `generic_password_kv` | `\S{6,}`, any alphabet | *unreachable* | 1 145 in 100 000 at 6 chars, 0 at 10 | **2.0** |
 
 `dotenv_secret` fixes neither a length nor an alphabet, so its number clears the
 ceiling at *every* length `\S+` admits rather than at one. It is therefore the
@@ -561,27 +579,58 @@ tightest against its own values: a 32-character alphanumeric token clears 4.4
 about 86 % of the time, and **no hex value ever can**, because log2(16) is 4.
 Those fall to `generic_api_key` at 0.75, which still withholds them.
 
+**`generic_password_kv` is the one rule where the template ceiling is out of
+reach, and pretending otherwise would cost detections (DMY-162).** It carried no
+threshold at all and deleted twelve of twelve plausible README / `.env` lines.
+Its values are not machine-issued tokens: `password=` admits what a person
+chose, so §9.1's own `password=hunter2` and `secret = !abcdef` measure 2.807 and
+fix the ceiling from *below*. 2.5 rejects 19 % of six-character values and 2.8
+rejects `passw0rd` at 2.750, while the word-spelled templates start at 3.516. So
+2.0 answers only the **repetitive** half of the pair — `ACxxxx…` at 0.382,
+`key-0000…` at 0.741 — and the shape guard answers the other. The five templates
+neither reaches are written in words *and* digits; they are restricted, which is
+where §4.2's aggregate rule earns its place.
+
 **Randomness leaves an overlap, so it is not the last gate.** A value whose
 characters are nearly all distinct measures like a credential because by that
 gate it *is* one: `MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx` measures 4.515
 and was deleted, while the neighbouring `stripe_live` refuses that same prefix on
 purpose (§3.2, rule 7). Two things close it, and neither is a word list.
 
-**Gitleaks' own `^[a-zA-Z_.-]+$` secret allowlist** guards all four, borrowed
+**Gitleaks' own `^[a-zA-Z_.-]+$` secret allowlist** guards all five, borrowed
 from the vendored config rather than restated so the pinned checksum governs it:
 a value carrying no digit and no symbol is a template whatever it spells. The
 cost is a real value drawn without one — about 1 in 900 at Cloudflare's 40
 characters, 1 in 7,500 at AWS's, 1 in 57 million at Azure's 86, and 1 in 280 for
 a 32-character alphanumeric `.env` value.
 
-**All four are `never_auto_delete`.** The anchor proves the *field*, and nothing
+**The cost is different in kind for `generic_password_kv`, and larger.** Those
+odds are for values drawn at random by a machine. A password is chosen by a
+person, for whom "no digit and no symbol" is common rather than rare, so a bare
+all-letter password is no longer detected by this rule at all — a *quoted* one
+still is, because the capture keeps its quotes. That is why §9.1's
+`password: abcdefghij` moves to §9.2 and the 10-character criterion is pinned by
+the CJK pair instead. It is the one place in §5.6 where the guard is paid for in
+missed detections rather than in arithmetic.
+
+**Upstream's guard also has to be read against upstream's capture.**
+`generic_api_key`'s group admits `=`, so `AccountKey=<86 letters>==` reaches it
+with the base64 padding attached and `^[a-zA-Z_.-]+$` matches nothing — the
+all-letter Azure template that the other five reject was deletable through the
+one rule that missed it. Its own copy of the allowlist is widened to
+`^[a-zA-Z_.-]+={0,3}$` through the generator's existing regex-override, with the
+reason recorded there. The five that borrow the allowlist take the vendored
+literal unchanged.
+
+**All five are `never_auto_delete`.** The anchor proves the *field*, and nothing
 available to any gate proves that a human-readable value is a credential, so a
 template that clears both gates must cost searchability rather than the data
 (I1). An accepted finding is `Restricted` — withheld from the index, from sync
-and from previews, never a reason to delete. That band is the guarantee; the two
-gates only decide how often it is entered. `generic_api_key` keeps its own 0.75
-band and its own stopwords, so a value these four refuse may still be classified
-there.
+and from previews, never a reason to delete. That band is the guarantee **only
+together with §4.2's aggregate rule**; alone it was inert, because a generic
+rule matching the same bytes deleted the item anyway. The two gates decide how
+often the band is entered. `generic_api_key` keeps its own 0.75 band and its own
+stopwords, so a value these five refuse may still be classified there.
 
 The generator refuses a value-gated rule that states no threshold of its own, and
 pairs the shape guard and the deletion refusal each with a written decision, so
@@ -1066,15 +1115,16 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `refresh_token=rt_abc123XYZlong_value` | detected |
 | `refresh_token = rt_PROD_abc123XYZlongval` | detected (ini spacing) |
 | `db_password=S3cur3Pass!word` | detected |
-| `password=hunter2` | detected (letter+digit) |
+| `password=hunter2` | detected (letter+digit); 2.807, and the ceiling `generic_password_kv`'s threshold is measured against (§5.6) |
 | `secret = !abcdef` | detected (special char) |
-| `password: abcdefghij` | detected (10 chars) |
 | `SG.` + 22×`A` + `.` + 43×`B` | detected; auto-wipes |
 | `atlasv1.` + 64×`A` | detected; auto-wipes |
 | `{"private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEo..."}` | detected; auto-wipes |
-| `AccountKey=` + 86 random base64 chars + `==` | detected; classified, **never auto-wipes** (§5.6, DMY-162) |
-| an Azure, Cloudflare, AWS or dotenv value of a credential's randomness that *contains or begins with* `todo`, `your`, `dummy` or `sample` | detected; classified, never auto-wipes — nothing tests the value for words (§5.6) |
+| `AccountKey=` + 86 random base64 chars + `==` | detected; classified, **never auto-wipes** — including when `generic_api_key` matches the same bytes (§4.2, §5.6, DMY-162) |
+| an Azure, Cloudflare, AWS or dotenv value of a credential's randomness that *contains or begins with* `todo`, `your`, `dummy` or `sample` | detected; classified, never auto-wipes — nothing tests the value for words (§5.6), and the aggregate rule holds whether or not a generic rule also matches (§4.2) |
 | `aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` | detected; classified, never auto-wipes — AWS's published secret carries a `/`, so the shape guard leaves it alone |
+| a real `password=`, `api_key:` or `client_secret=` value | detected; classified, **never auto-wipes** — the keyword proves the field and nothing proves the value (§4.2, §5.6) |
+| a card or a `.env` credential with a **distinct** secret beside it (`ghp_…`, `AKIA…`, a PEM header) | detected; the item **auto-wipes** — a disjoint span is independent evidence, not the same judgement twice (§4.2) |
 | `4111111111111111` | `CreditCard`; classified, **never auto-wipes** (§3.3, DMY-162) |
 | `Customer card: 4111 1111 1111 1111 — expires 12/26` | `CreditCard` (Audit MED #6); classified, never auto-wipes |
 | `please charge 4111-1111-1111-1111 today` | `CreditCard`; classified, never auto-wipes |
@@ -1124,7 +1174,11 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx` | 4.515 — a credential's variety, and above every threshold these four carry. No digit and no symbol, so the `^[a-zA-Z_.-]+$` secret guard rejects it; `stripe_live` refuses the same prefix on purpose (§5.6, DMY-162) |
 | `CLOUDFLARE_API_TOKEN=TheQuickBrownFoxJumpsOverTheLazyDogAbcde`, `=Deploy-Your-Own-Cloudflare-Token-Here-Ab` | 4.753 and 4.106 — over and under 4.3, and the shape guard rejects both |
 | `aws_secret_access_key = ReplaceWithYourAwsSecretAccessKeyPleaseX` | 4.072, and no digit |
-| an Azure, Cloudflare, AWS or dotenv value of 40 or 86 **random letters** | above every threshold these four carry, and still a template by shape: the guard has to hold where entropy cannot |
+| an Azure, Cloudflare, AWS or dotenv value of 40 or 86 **random letters** | above every threshold these four carry, and still a template by shape: the guard has to hold where entropy cannot. `generic_api_key` had to be read against its own capture before this was true of the Azure spelling (§5.6) |
+| `password: abcdefghij` | 10 letters, no digit and no symbol — the same shape as `MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx`, and §5.3's 10-character criterion is pinned by the CJK pair in §9.1 instead (§5.6, DMY-162) |
+| `TWILIO_API_KEY=ACxxxx…` (0.382), `MAILGUN_API_KEY=key-0000…` (0.741) | repetitive, under `generic_password_kv`'s 2.0 |
+| `export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE`, `=replace-with-your-datadog-api-key`, `STRIPE_API_KEY=sk_test_replace_me_before_you_deploy`, `SLACK_API_KEY=xoxb-put-your-own-workspace-token-here`, `OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY` | ordinary README / `.env` lines, no digit and no symbol |
+| `api_key: PUT_YOUR_KEY_HERE_2024`, `=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234`, `=paste_the_token_from_settings_here_2024ab`, `=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024`, `= "CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT"` | words *and* digits, so neither gate reaches them: 3.516 – 4.354, all above the 2.807 ceiling §5.6 measures. They **are** classified, and must never be **deleted** |
 | `api-key: see the wiki`, `client secret: ask ops`, `db-password: ${VAULT_DB}` | the widened rule-23 keyword is still value-gated |
 
 **The 50-entry benign corpus** (`tests/false_positive_corpus.rs:14-73`) must be
@@ -1187,8 +1241,10 @@ The api_key returns 401, please investigate
 | Confidence floor pin | `discord_bot_token`, `twilio_signing_key_sid`, `iban`, `ssn_us`, `generic_bearer`, `ip_with_port` all `< 0.70` |
 | `\b` anchor pin | `sendgrid_api_key`, `terraform_cloud_token`, `cloudflare_api_token`, `twilio_signing_key_sid`, `discord_bot_token` contain `\b` |
 | Context-anchor pin | `azure_storage_key` and `cloudflare_api_token` must NOT match without their anchors |
-| Restricted-band pin | the rules that classify without deleting are exactly `credit_card` and the four context-anchored rules — asserted as a set, so the band can neither spread nor lose one |
-| Secret-shape pin | those four carry gitleaks' `^[a-zA-Z_.-]+$` secret allowlist, and it is the same literal `generic_api_key` carries rather than a second copy |
+| Restricted-band pin | the rules that classify without deleting are exactly `credit_card` and the five keyword/context-anchored rules — asserted as a set, so the band can neither spread nor lose one |
+| Secret-shape pin | those five carry gitleaks' `^[a-zA-Z_.-]+$` secret allowlist, borrowed from the vendored config rather than restated; `generic_api_key`'s own copy admits base64 padding, because its capture swallows it (§5.6) |
+| Aggregate-verdict pin | a real credential of each of the four classes is `is_sensitive` and **not** `may_auto_wipe` even where a generic rule matches the same bytes — and a disjoint secret beside one still deletes. The per-rule assertion this replaces could not see the defect (§4.2, DMY-162) |
+| Overlap-shape pin | `withholds` takes any shared byte and no fewer: identical, nested and off-by-one spans withhold, touching spans do not |
 | Category/confidence pin | each P2-ozzt rule is category 0 with confidence ≥ 0.90 |
 | Idempotence | `nfkc_normalize` is the identity on ASCII |
 | Perf | `detect()` over 10 MB of text completes well under the budget (v1: < 500 ms, release only) — pins that no rule is catastrophically backtracking |

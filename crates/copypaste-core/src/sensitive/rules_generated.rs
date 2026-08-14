@@ -528,7 +528,7 @@ pub(super) static RULES: &[RuleSpec] = &[
                 condition: AllowlistCondition::Any,
                 target: AllowlistTarget::Secret,
                 regexes: &[
-                    "^[a-zA-Z_.-]+$",
+                    "^[a-zA-Z_.-]+={0,3}$",
                 ],
                 stopwords: &[],
             },
@@ -2204,10 +2204,18 @@ pub(super) static RULES: &[RuleSpec] = &[
         pattern: "(?i)(?:password|passwd|secret|api[-_. ]key|apikey|auth[-_. ]token|access[-_. ]token|client_secret|refresh[-_. ]token|db_password)[\"']?\\s*[:=]\\s*(\\S{6,})",
         validator: Validator::ValueStrength,
         secret_group: 1,
-        never_auto_delete: false,
-        entropy: None,
+        never_auto_delete: true,
+        entropy: Some(2.0),
         keywords: &[],
         allowlists: &[
+            AllowlistSpec {
+                condition: AllowlistCondition::Any,
+                target: AllowlistTarget::Secret,
+                regexes: &[
+                    "^[a-zA-Z_.-]+$",
+                ],
+                stopwords: &[],
+            },
         ],
     },
     RuleSpec {
