@@ -2261,15 +2261,6 @@ pub(super) static RULES: &[RuleSpec] = &[
         entropy: Some(2.0),
         keywords: &[],
         allowlists: &[
-            AllowlistSpec {
-                condition: AllowlistCondition::Any,
-                target: AllowlistTarget::Secret,
-                regexes: &[
-                    "^[a-zA-Z_.-]+$",
-                ],
-                stopwords: &[],
-                stopword_minimum: 1,
-            },
         ],
     },
     RuleSpec {
@@ -2285,15 +2276,6 @@ pub(super) static RULES: &[RuleSpec] = &[
         entropy: Some(2.0),
         keywords: &[],
         allowlists: &[
-            AllowlistSpec {
-                condition: AllowlistCondition::Any,
-                target: AllowlistTarget::Secret,
-                regexes: &[
-                    "^[a-zA-Z_.-]+$",
-                ],
-                stopwords: &[],
-                stopword_minimum: 1,
-            },
         ],
     },
     RuleSpec {
