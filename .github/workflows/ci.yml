@@ -584,13 +584,22 @@ jobs:
 
   # Windows owns the DPAPI and named-pipe assertions, then exercises the
   # installed product. Missing evidence or cleanup fails the job.
+  #
+  # Split in two rather than one job: measured incident runs (31838263912,
+  # 31825408629) show clippy+test+frontend finish in ~10-11 minutes while
+  # "Build the complete current-user installer" alone takes ~22 minutes, all
+  # ahead of the evidence step that actually failed in both. One serial job
+  # put ~33 minutes in front of that assertion; two parallel jobs put at most
+  # the package job's own length in front of it. Distinct rust-cache `key:`
+  # values, same reason the `rust`/`demo` split above gives them one each: a
+  # shared key across two profiles fights over one cache entry.
 
-  windows-check:
-    name: Windows workspace + installed product evidence (x64)
+  windows-test:
+    name: Windows workspace tests (x64)
     # Pinned rather than `windows-latest` so the toolchain and SDK under test do
     # not move without a commit, matching the macos-14 pin above.
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
       RUSTUP_TOOLCHAIN: "1.96"
@@ -605,6 +614,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: windows-2022-1.96
+          key: test-profile
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -626,6 +636,9 @@ jobs:
       - name: cargo test (full Windows workspace)
         run: cargo +1.96 test --workspace --locked
 
+      # `npm test` runs native-parity-gate.test.mjs, which shells out to
+      # write-native-evidence.py and validates a real PNG through Pillow. Both
+      # halves of this split need the requirements, not just the package half.
       - name: Install native evidence Python dependencies
         shell: pwsh
         run: python -m pip install --requirement requirements-ci.txt
@@ -677,6 +690,41 @@ jobs:
             exit 1
           }
           Write-Output "no CopyPaste entry in the Credential Manager, as designed"
+
+  windows-package:
+    name: Windows installed product evidence (x64)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96
+          key: package-profile
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - name: Confirm OpenSSL's Perl
+        shell: pwsh
+        run: |
+          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
+          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
+
+      - name: Install native evidence Python dependencies
+        shell: pwsh
+        run: python -m pip install --requirement requirements-ci.txt
 
       - name: Exercise Windows package failure fixtures
         shell: pwsh
