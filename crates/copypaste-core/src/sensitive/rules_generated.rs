@@ -2294,13 +2294,6 @@ pub(super) static RULES: &[RuleSpec] = &[
                 stopwords: &[],
                 stopword_minimum: 1,
             },
-            AllowlistSpec {
-                condition: AllowlistCondition::Any,
-                target: AllowlistTarget::Secret,
-                regexes: &[],
-                stopwords: SHARED_STOPWORDS_0,
-                stopword_minimum: 2,
-            },
         ],
     },
     RuleSpec {

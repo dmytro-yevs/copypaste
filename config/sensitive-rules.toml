@@ -327,11 +327,11 @@ never_auto_delete_decision = "password= and client_secret= prove which field mat
 name = "api_key_kv"
 category = "credential"
 confidence = 0.75
-# `generic_password_kv` with one keyword family taken out of it, because that
-# family is the only one gitleaks already judges by word list on the same bytes:
-# `generic-api-key` matches every `api_key=` line here and applies the vendored
-# stopwords to it. The delimiter is one character and not optional, for the
-# reason the sibling rule gives.
+# `generic_password_kv` with the `api_key` family taken out of it. The counted
+# word list that was the whole reason for the split suppressed real values and
+# is gone (DMY-162), so the two rules now carry the same gates and the split
+# survives as a separate rule name. The delimiter is one character and not
+# optional, for the reason the sibling rule gives.
 pattern = '''(?i)(?:api[-_. ]key|apikey)["']?\s*[:=]\s*(\S{6,})'''
 validator = "value_strength"
 secret_group = 1
@@ -339,9 +339,6 @@ entropy = 2.0
 entropy_decision = "The number is generic_password_kv's, unchanged, because the value population is the same one: what a person or a README writes after a keyword. It answers the repetitive half of 5.6's placeholder pair — TWILIO_API_KEY=ACxxxx... at 0.382 and MAILGUN_API_KEY=key-0000... at 0.741 — and nothing above 9.1's password=hunter2 ceiling of 2.807 may be asked of it."
 secret_shape_allowlist_from = "generic-api-key"
 secret_shape_allowlist_decision = "The same vendored generic-api-key secret allowlist the five rules beside it take: no digit and no symbol is a template whatever it says, which closes DATADOG_API_KEY=replace-with-your-datadog-api-key and the seven README lines spelled like it."
-placeholder_stopwords_from = "generic-api-key"
-placeholder_stopwords_minimum = 2
-placeholder_stopwords_decision = "The third gate, and the only one that reaches a template written in words and digits together: api_key: PUT_YOUR_KEY_HERE_2024 measures 3.516 and AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024 4.018, both far above the 2.807 no threshold here may pass. This is a word list over the value, which 5.6 rejects for the other five rules; it is defensible only here, because gitleaks already applies this identical list at a minimum of one to these identical lines through generic_api_key, and the borrow is governed by config_sha256 rather than restated. The minimum is 2 and not upstream's 1: at 1 the list suppresses MY_API_KEY=\"S3cr3tValue123\", a real credential carrying the single marker value, and 9.1 binds the quoted form as detected. Measured over the vendored 1,446-word list, the five api_key templates 9.2 names carry 2, 2, 3, 3 and 2 distinct markers and the sixth carries 4, while every 9.1 api_key value carries 0 or 1."
 never_auto_delete = true
 never_auto_delete_decision = "api_key= proves which field matched and nothing about the value, exactly as password= does for the rule it was split from. A real key still reaches this rule and is still withheld; only the deletion is refused (I1)."
 

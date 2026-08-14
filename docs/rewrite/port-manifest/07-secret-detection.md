@@ -665,7 +665,7 @@ still is, because the capture keeps its quotes. That is why §9.1's
 the CJK pair instead. It is the one place in §5.6 where the guard is paid for in
 missed detections rather than in arithmetic.
 
-**v2 amendment — a third gate, counted, for two rules only (DMY-162).** A
+**v2 amendment — a third gate, counted, for one rule only (DMY-162).** A
 template written in words *and* digits reaches neither of the two above: it
 carries a digit, so the shape guard leaves it, and it measures 3.5 to 4.4, above
 every ceiling these rules may set. Six ordinary README lines sat there,
@@ -676,25 +676,39 @@ rather than on one:
 
 | Rule | Minimum | Templates it closes | What one marker would have cost |
 |---|---|---|---|
-| `api_key_kv` | **2** | the five `api_key=` rows in §9.2, at 2–4 markers each | `MY_API_KEY="S3cr3tValue123"`, one marker (`value`) and a real credential |
 | `cloudflare_api_token` | **3** | the six §9.2 Cloudflare rows, at 3–6 markers each | 3 681 in 200 000 real tokens beginning `todo`; at 3 it is 46, and 0 with no marker |
 
 This *is* a word list over the value, which the amendment above rejects for the
-other rules, and it is defensible only here and only counted. For the `api_key`
-family, `generic_api_key` already applies this identical list at a minimum of
-**one** to these identical lines, so the split disagrees with upstream in the
-safe direction and only for values upstream's capture cannot reach. For
-Cloudflare, the alternative was raising a threshold that §4.2 says would create
-deletions. A minimum of one is the `contains` form this section already refused:
-§9.1 binds a value that contains or begins with a single `todo`, `your`, `dummy`
-or `sample`, and a count of one takes every one of them.
+other rules, and it is defensible only here and only counted: the value shape is
+fixed at 40 characters over 64 symbols and the population is machine-issued, and
+the alternative was raising a threshold that §4.2 says would create deletions. A
+minimum of one is the `contains` form this section already refused: §9.1 binds a
+value that contains or begins with a single `todo`, `your`, `dummy` or `sample`,
+and a count of one takes every one of them.
 
-**The split is the whole of it.** Borrowing the list onto the undivided
-`generic_password_kv` closes the six and suppresses **eight** §9.1 positives
-outright — `value`, `acces` and `word` are all stopwords — which is the
-fail-open failure this section exists to prevent. Only the `api[-_. ]key|apikey`
-alternative moves, into `api_key_kv`, which is `generic_password_kv` with the
-same 2.0, the same shape guard and the same deletion refusal.
+**v2 amendment — the same list on `api_key_kv` failed open, and was removed
+(DMY-162).** It was taken on the argument that `generic_api_key` already applies
+this identical list at a minimum of one to these identical lines, so the borrow
+only disagreed with upstream in the safe direction. The accounting was against
+the wrong population. `api_key=` values are not random tokens; they are what a
+person or a deployment tool wrote — hyphenated, word-shaped, with a digit — and
+markers are ordinary there. `api_key: my-production-service-account-key-2024`
+carries three (`account`, `product`, `service`),
+`api_key = prod-datadog-agent-key-1a2b3c4d5e6f` two, and both reached **no rule
+at all**: not flagged, not masked, plaintext into `clipboard_fts` and offered to
+sync. Nor did the gate buy anything on the deletion side, because the rule is
+`never_auto_delete` and cannot delete. Its only reachable effect was to move a
+value from *classified and withheld* to *not detected*, trading a reversible cost
+for an irreversible one against I1 and I4. The five §9.2 `api_key=` rows are
+`Restricted` instead.
+
+**The split is now only a name.** Borrowing the list onto the undivided
+`generic_password_kv` would have suppressed **eight** §9.1 positives outright —
+`value`, `acces` and `word` are all stopwords — which is why only the
+`api[-_. ]key|apikey` alternative moved, into `api_key_kv`. With the list gone
+that rule is `generic_password_kv` with a different keyword family and the same
+threshold and deletion refusal; merging them back is a rename with no behaviour
+change and is not part of this repair.
 
 **Upstream's guard also has to be read against upstream's capture.**
 `generic_api_key`'s group admits `=`, so `AccountKey=<86 letters>==` reaches it
@@ -1218,6 +1232,7 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `5555555555554444`, `6011111111111117`, `3530111333300000` | `CreditCard`, bare and in 4-4-4-4 groups |
 | `api-key: abc123XYZlong`, `api key: abc123XYZlong`, `access-token: rt_abc123XYZlong_value`, `auth token = abc123XYZlongvalue99` | detected — the delimiter spellings of rule 23; the `api[-_. ]key` half is `api_key_kv` (§5.6) |
 | `my_api_key = "correcthorsebatterystaple"`, `export MY_API_KEY="S3cr3tValue123"` | detected — a quoted value keeps its quotes in the capture, and one placeholder marker is not enough to suppress it |
+| `api_key: my-production-service-account-key-2024`, `api_key = prod-datadog-agent-key-1a2b3c4d5e6f`, `apikey=github-actions-deploy-token-2026` | detected; classified, never auto-wipes — a deployment tool's key is hyphenated and word-shaped, and a counted vendored word list took all three (§5.6, DMY-162) |
 | `client secret = Sup3rS3cr3tV@lue!`, `db-password: S3cur3Pass!word` | detected via the bare `secret` / `password` keyword, with no branch of their own |
 | `\u{FF21}\u{FF2B}\u{FF29}\u{FF21}IOSFODNN7EXAMPLE` (full-width AKIA) | detected as AWS key **after NFKC** |
 | 9 CJK chars, e.g. `私的秘密言葉確認鍵` as a KV value | value-strength = **weak** (char gate) |
@@ -1264,9 +1279,9 @@ entries and left the gate off. The lengths and the structure are what bind.
 | `password: abcdefghij` | 10 letters, no digit and no symbol — the same shape as `MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx`, and §5.3's 10-character criterion is pinned by the CJK pair in §9.1 instead (§5.6, DMY-162) |
 | `TWILIO_API_KEY=ACxxxx…` (0.382), `MAILGUN_API_KEY=key-0000…` (0.741) | repetitive, under `generic_password_kv`'s 2.0 |
 | `export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE`, `=replace-with-your-datadog-api-key`, `STRIPE_API_KEY=sk_test_replace_me_before_you_deploy`, `SLACK_API_KEY=xoxb-put-your-own-workspace-token-here`, `OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY` | ordinary README / `.env` lines, no digit and no symbol |
-| `api_key: PUT_YOUR_KEY_HERE_2024`, `=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234`, `=paste_the_token_from_settings_here_2024ab`, `=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024`, `= "CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT"` | words *and* digits, so neither the 2.0 nor the shape guard reaches them: 3.516 – 4.063, all above the 2.807 ceiling §5.6 measures. Each carries 2 or 3 distinct vendored placeholder markers, and `api_key_kv`'s counted list is what closes them |
+| `api_key: PUT_YOUR_KEY_HERE_2024`, `=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234`, `=paste_the_token_from_settings_here_2024ab`, `=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024`, `= "CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT"` | words *and* digits, so neither the 2.0 nor the shape guard reaches them: 3.516 – 4.063, all above the 2.807 ceiling §5.6 measures. **Amended (DMY-162):** these are `Restricted` — classified, withheld, never auto-wiped — not "no detection at all". `api_key_kv`'s counted list closed them and took real word-shaped values with it (§5.6) |
 | `CLOUDFLARE_API_KEY=Replace_With_Your_Real_Token_Value123456` | 4.354 at exactly the 40 characters the rule requires, so it clears 4.3 and falsifies §5.6's 4.225 ceiling for mixed case with digits. 4 markers, and `cloudflare_api_token`'s minimum of 3 is what closes it — **not** a higher threshold, which would create deletions (§4.2) |
-| the 20 README / `.env` rows above | asserted as **one** corpus against all three public predicates — empty `scan_all`, `!is_sensitive`, `!may_auto_wipe`. Splitting it left the row above in neither half and untested (DMY-162) |
+| the 20 README / `.env` rows above | asserted as **one** corpus against all three public predicates, each row carrying its own verdict — `Restricted` where a gate was removed, no detection otherwise, and `!may_auto_wipe` for every one. Splitting the corpus into two tests left a row in neither half and untested (DMY-162) |
 | `api-key: see the wiki`, `client secret: ask ops`, `db-password: ${VAULT_DB}` | the widened rule-23 keyword is still value-gated |
 
 **The 50-entry benign corpus** (`tests/false_positive_corpus.rs:14-73`) must be
@@ -1332,7 +1347,8 @@ The api_key returns 401, please investigate
 | Restricted-band pin | the rules that classify without deleting are exactly `credit_card` and the seven keyword/context-anchored rules — asserted as a set, so the band can neither spread nor lose one |
 | Secret-shape pin | those six carry gitleaks' `^[a-zA-Z_.-]+$` secret allowlist, borrowed from the vendored config rather than restated; `generic_api_key`'s own copy admits base64 padding, because its capture swallows it (§5.6) |
 | Anchor-only pin | the rules a restricted match may overrule are exactly `generic_api_key` — asserted as a set, derived from the rule table the way the band is, and refused on a rule that is itself restricted. `heroku_api_key` is restricted instead, because standing alone it had no neighbour to be overruled by (§4.2) |
-| Counted-word-list pin | `api_key_kv` and `cloudflare_api_token` are the only rules carrying a word list over their value; it is the vendored 1 446-entry list rather than a copy, and each minimum is above one (§5.6) |
+| Counted-word-list pin | `cloudflare_api_token` is the only rule carrying a word list over its value; it is the vendored 1 446-entry list rather than a copy, and its minimum is above one (§5.6) |
+| Fail-open pin | a word-shaped `api_key=` value a deployment tool would write is `is_sensitive` and not `may_auto_wipe`. Nothing pinned this while `api_key_kv` carried the counted list, and three such values reached no rule (§5.6, DMY-162) |
 | Aggregate-verdict pin | a real credential of each of the four classes is `is_sensitive` and **not** `may_auto_wipe` even where a generic rule matches the same bytes — and a disjoint secret beside one still deletes. The per-rule assertion this replaces could not see the defect (§4.2, DMY-162) |
 | Unique-literal pin | a `ghp_`, `hvs.`, JWT, Slack or OpenAI secret inside a `.env` or `api_key:` wrapper **does** auto-wipe, and the overlapping restricted match is asserted to exist, so the test cannot pass on a fixture that never reached the outer rule |
 | Overlap-shape pin | `withholds` takes any shared byte and no fewer: identical, nested and off-by-one spans withhold, touching spans do not — and overlap alone is not sufficient, because the match must also be anchor-only |

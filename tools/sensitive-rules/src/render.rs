@@ -71,9 +71,9 @@ pub fn render(inputs: &Inputs) -> Result<String> {
 
 /// Stopword lists carried by more than one allowlist, in first-appearance order.
 ///
-/// Three rules borrow gitleaks' 1,446-entry placeholder vocabulary. Spelled out
-/// at each site the generated table triples, so it is emitted once and
-/// referenced by name.
+/// Two rules carry gitleaks' 1,446-entry placeholder vocabulary. Spelled out at
+/// each site the generated table doubles, so it is emitted once and referenced
+/// by name.
 fn shared_stopwords(inputs: &Inputs) -> Vec<Vec<String>> {
     let all = inputs
         .global_allowlists

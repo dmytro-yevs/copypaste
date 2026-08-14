@@ -1265,45 +1265,123 @@ mod tests {
     /// **One corpus and no exception.** Splitting it into "these reach no rule"
     /// and "these are merely withheld" is how the last six rows stayed outside
     /// the acceptance while every gate passed: the last row reached *neither*
-    /// list and had no test at all (DMY-162). A row that has to be excused
-    /// belongs in §9.2 with its measurement, not in a second test.
+    /// list and had no test at all (DMY-162). Each row carries its own verdict
+    /// instead, so a row that changes band has to be edited rather than dropped.
+    ///
+    /// `true` is the stronger answer and not the required one. §9.2 asks that
+    /// none of these be **deleted**; a gate that stops suppressing a row costs
+    /// the user searchability, and a gate that suppresses a real value costs
+    /// them the secret — the direction §5.6 may never fail in.
     #[test]
-    fn readme_and_dotenv_templates_reach_no_rule() {
+    fn readme_and_dotenv_templates_are_classified_but_never_deleted() {
         let det = detector();
-        for text in [
+        for (text, reaches_no_rule) in [
             // DMY-162's last named residue.
-            "MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx".to_string(),
-            "export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE".to_string(),
-            "DATADOG_API_KEY=replace-with-your-datadog-api-key".to_string(),
-            "STRIPE_API_KEY=sk_test_replace_me_before_you_deploy".to_string(),
-            "# set OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY".to_string(),
-            "SLACK_API_KEY=xoxb-put-your-own-workspace-token-here".to_string(),
-            "TWILIO_API_KEY=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string(),
-            "MAILGUN_API_KEY=key-0000000000000000000000000000000".to_string(),
-            "SENTRY_API_KEY=<your key here>".to_string(),
-            "password: abcdefghij".to_string(),
-            format!("AccountKey={}==", noise(86, LETTERS)),
-            format!("CLOUDFLARE_API_TOKEN={}", noise(40, LETTERS)),
-            format!("aws_secret_access_key = {}", noise(40, LETTERS)),
-            format!("MY_API_TOKEN={}", noise(40, LETTERS)),
+            (
+                "MY_API_TOKEN=sk_test_abcdefghijklmnopqrstuvwx".to_string(),
+                true,
+            ),
+            (
+                "export DATADOG_API_KEY=YOUR_DATADOG_API_KEY_HERE_PLEASE".to_string(),
+                true,
+            ),
+            (
+                "DATADOG_API_KEY=replace-with-your-datadog-api-key".to_string(),
+                true,
+            ),
+            (
+                "STRIPE_API_KEY=sk_test_replace_me_before_you_deploy".to_string(),
+                true,
+            ),
+            (
+                "# set OPENAI_API_KEY=sk-proj-REPLACE-ME-WITH-YOUR-OWN-KEY".to_string(),
+                true,
+            ),
+            (
+                "SLACK_API_KEY=xoxb-put-your-own-workspace-token-here".to_string(),
+                true,
+            ),
+            (
+                "TWILIO_API_KEY=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string(),
+                true,
+            ),
+            (
+                "MAILGUN_API_KEY=key-0000000000000000000000000000000".to_string(),
+                true,
+            ),
+            ("SENTRY_API_KEY=<your key here>".to_string(), true),
+            ("password: abcdefghij".to_string(), true),
+            (format!("AccountKey={}==", noise(86, LETTERS)), true),
+            (format!("CLOUDFLARE_API_TOKEN={}", noise(40, LETTERS)), true),
+            (
+                format!("aws_secret_access_key = {}", noise(40, LETTERS)),
+                true,
+            ),
+            (format!("MY_API_TOKEN={}", noise(40, LETTERS)), true),
             // Written in words *and* digits, so neither the threshold nor the
             // shape guard reaches them: 3.516 to 4.354 against a ceiling
-            // `password=hunter2` fixes at 2.807. The vendored placeholder
-            // vocabulary is the third gate, and it is what these six need.
-            "api_key: PUT_YOUR_KEY_HERE_2024".to_string(),
-            "CLOUDFLARE_API_KEY=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234".to_string(),
-            "GITHUB_API_KEY=paste_the_token_from_settings_here_2024ab".to_string(),
-            "AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024".to_string(),
-            "my_api_key = \"CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT\"".to_string(),
-            "CLOUDFLARE_API_KEY=Replace_With_Your_Real_Token_Value123456".to_string(),
+            // `password=hunter2` fixes at 2.807. `cloudflare_api_token`'s
+            // counted vocabulary still closes the two 40-character rows; the
+            // `api_key` rows are `Restricted` instead, because the same list on
+            // `api_key_kv` also suppressed real values (§5.6, DMY-162).
+            ("api_key: PUT_YOUR_KEY_HERE_2024".to_string(), false),
+            (
+                "CLOUDFLARE_API_KEY=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234".to_string(),
+                false,
+            ),
+            (
+                "GITHUB_API_KEY=paste_the_token_from_settings_here_2024ab".to_string(),
+                false,
+            ),
+            (
+                "AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024".to_string(),
+                false,
+            ),
+            (
+                "my_api_key = \"CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT\"".to_string(),
+                false,
+            ),
+            (
+                "CLOUDFLARE_API_KEY=Replace_With_Your_Real_Token_Value123456".to_string(),
+                false,
+            ),
         ] {
-            assert!(
+            assert_eq!(
                 det.scan_all(&text).is_empty(),
+                reaches_no_rule,
                 "{text} -> {:?}",
                 all_rules(&det, &text)
             );
-            assert!(!det.is_sensitive(&text), "{text}");
-            assert!(!det.may_auto_wipe(&text), "{text}");
+            assert_eq!(det.is_sensitive(&text), !reaches_no_rule, "{text}");
+            assert!(
+                !det.may_auto_wipe(&text),
+                "{text} -> {:?}",
+                all_rules(&det, &text)
+            );
+        }
+    }
+
+    /// What the counted list cost. A word list over the value fails open (§5.6),
+    /// and these are the values that pay for it: hyphenated, word-shaped and
+    /// machine-generated, which is how a deployment tool spells a key. Each
+    /// carries two or more vendored markers, so `api_key_kv`'s minimum of 2
+    /// suppressed the rule outright — no flag, no mask, and the plaintext in
+    /// `clipboard_fts` and offered to sync (DMY-162).
+    #[test]
+    fn a_word_shaped_api_key_value_is_still_withheld() {
+        let det = detector();
+        for text in [
+            "api_key: my-production-service-account-key-2024",
+            "api_key = prod-datadog-agent-key-1a2b3c4d5e6f",
+            "apikey=github-actions-deploy-token-2026",
+        ] {
+            assert!(fired(&det, text, "api_key_kv"), "{text} reached no rule");
+            assert!(det.is_sensitive(text), "{text}");
+            assert!(
+                !det.may_auto_wipe(text),
+                "{text} -> {:?}",
+                all_rules(&det, text)
+            );
         }
     }
 

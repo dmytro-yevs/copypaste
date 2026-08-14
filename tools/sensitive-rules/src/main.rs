@@ -124,13 +124,13 @@ mod tests {
         assert!(inputs.global_allowlists.is_empty());
         assert_eq!(inputs.selected_ids.len(), 27);
         assert_eq!(inputs.rules.len(), 49);
-        // Three rules carry gitleaks' 1,446-entry placeholder vocabulary, and
-        // spelled out at each site it is 2,892 lines of duplicate table. This
+        // Two rules carry gitleaks' 1,446-entry placeholder vocabulary, and
+        // spelled out at each site it is 1,446 lines of duplicate table. This
         // stopword is unique to that list, so one occurrence means one copy.
         let generated = render_generated(&inputs).unwrap();
         let marker = "\"6fe4476ee5a1832882e326b506d14126\"";
         assert_eq!(generated.matches(marker).count(), 1);
-        assert_eq!(generated.matches("SHARED_STOPWORDS_0").count(), 4);
+        assert_eq!(generated.matches("SHARED_STOPWORDS_0").count(), 3);
     }
 
     #[test]
