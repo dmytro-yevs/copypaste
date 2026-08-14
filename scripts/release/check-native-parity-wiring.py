@@ -162,8 +162,8 @@ def contract_errors(release, nightly, ci):
         (windows, "windows-native-evidence.ps1", "release Windows evidence"),
         (nightly_windows, "windows-native-evidence.ps1", "nightly Windows evidence"),
         (ci_jobs.get("frontend") or {}, "npm test", "CI frontend tests"),
-        (ci_jobs.get("windows-check") or {}, "npm test", "CI Windows frontend tests"),
-        (ci_jobs.get("windows-check") or {}, "windows-native-evidence.ps1", "CI Windows evidence"),
+        (ci_jobs.get("windows-test") or {}, "npm test", "CI Windows frontend tests"),
+        (ci_jobs.get("windows-package") or {}, "windows-native-evidence.ps1", "CI Windows evidence"),
         (ci_jobs.get("release-pipeline") or {}, "scripts/release/check.sh", "CI release self-tests"),
     )
     for job, marker, label in requirements_producers:
@@ -227,6 +227,16 @@ def self_test(release, nightly, ci):
         print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
         failures += 0 if held else 1
 
+    # Splitting the Windows job into two means either half can now go missing
+    # on its own, which no fixture above would notice.
+    def rejected_ci_dropped(label, job_name, expected):
+        nonlocal failures
+        fixture = copy.deepcopy(ci)
+        fixture["jobs"].pop(job_name)
+        held = any(expected in error for error in contract_errors(release, nightly, fixture))
+        print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
+        failures += 0 if held else 1
+
     rejected(
         "missing Windows platform dependency fails",
         lambda value: value["jobs"]["native-parity"]["needs"].remove("windows"),
@@ -280,8 +290,13 @@ def self_test(release, nightly, ci):
     )
     rejected_ci(
         "Windows frontend test before requirements install fails",
-        "windows-check",
+        "windows-test",
         "CI Windows frontend tests must install requirements-ci.txt",
+    )
+    rejected_ci_dropped(
+        "a CI Windows job that vanished fails",
+        "windows-package",
+        "CI Windows evidence must install requirements-ci.txt",
     )
     return failures
 
