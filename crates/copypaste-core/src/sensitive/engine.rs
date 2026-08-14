@@ -62,6 +62,10 @@ pub struct Detector {
     /// rule would silently drop out of the gate between detection and
     /// destruction.
     severities: Vec<Severity>,
+    /// Which rules rest on a context anchor alone. Derived from the rule table
+    /// for the same reason `severities` is: a rule that drops off this list
+    /// silently changes what a restricted neighbour is allowed to overrule.
+    anchor_only_rules: Vec<&'static str>,
     global_allowlists: Vec<CompiledAllowlist>,
 }
 
@@ -119,10 +123,16 @@ impl Detector {
             .iter()
             .map(|rule| rule.spec.finding().severity)
             .collect();
+        let anchor_only_rules = rules
+            .iter()
+            .filter(|rule| rule.spec.anchor_only)
+            .map(|rule| rule.spec.name)
+            .collect();
         Ok(Self {
             set,
             rules,
             severities,
+            anchor_only_rules,
             global_allowlists,
         })
     }
@@ -196,7 +206,7 @@ impl Detector {
     /// keeps them apart, and [`Severity::Restricted`] is the band where they
     /// disagree.
     ///
-    /// A high-confidence match licenses deletion only where no restricted match
+    /// An anchor-only match licenses deletion only where no restricted match
     /// covers the same bytes. As a plain disjunction the band was inert:
     /// `generic_api_key` judged the *same value* through the *same* anchor on
     /// weaker gates and reinstated every deletion it had refused (DMY-162).
@@ -207,7 +217,12 @@ impl Detector {
         findings
             .iter()
             .filter(|finding| finding.severity >= Severity::HighConfidence)
-            .any(|high| !findings.iter().any(|other| withholds(other, high)))
+            .any(|high| {
+                let anchor_only = self.anchor_only_rules.contains(&high.rule);
+                !findings
+                    .iter()
+                    .any(|other| withholds(other, high, anchor_only))
+            })
     }
 
     /// True when this text must be **withheld**: kept out of the search index,
@@ -242,14 +257,22 @@ impl Detector {
     }
 }
 
-/// Whether `restricted` refuses deletion of what `high` matched. Two rules over
-/// one span are one judgement and I1 takes the recoverable outcome; on disjoint
-/// spans they are independent evidence and the item still deletes.
+/// Whether `restricted` refuses deletion of what `high` matched. One judgement
+/// twice, and I1 takes the recoverable outcome — but only where `high` rests on
+/// the same context anchor and nothing else. A rule that matched a unique
+/// literal is separate evidence at any offset: vetoing on overlap alone took
+/// auto-wipe from `GITHUB_TOKEN=ghp_…`, `VAULT_TOKEN=hvs.…` and `AUTH_TOKEN=`
+/// with a JWT, two of which §9.1 binds as auto-wipes (DMY-162).
 ///
 /// Overlap, not containment: `generic_api_key` consumes the trailing newline its
 /// neighbour stops before, so the two spans differ by a byte on the same value.
-fn withholds(restricted: &SpannedFinding, high: &SpannedFinding) -> bool {
-    restricted.severity == Severity::Restricted
+fn withholds(
+    restricted: &SpannedFinding,
+    high: &SpannedFinding,
+    high_is_anchor_only: bool,
+) -> bool {
+    high_is_anchor_only
+        && restricted.severity == Severity::Restricted
         && restricted.start < high.end
         && high.start < restricted.end
 }
@@ -344,7 +367,10 @@ struct CompiledAllowlist {
     condition: AllowlistCondition,
     target: AllowlistTarget,
     regexes: Vec<Regex>,
+    /// Lowercased and deduplicated, so `stopword_minimum` counts *distinct*
+    /// words: the vendored lists repeat entries, and lowercasing creates more.
     stopwords: Vec<String>,
+    stopword_minimum: usize,
 }
 
 fn compile_allowlists(
@@ -361,15 +387,19 @@ fn compile_allowlists(
                     Regex::new(pattern).map_err(|source| DetectorError::Allowlist { rule, source })
                 })
                 .collect::<Result<_, _>>()?;
+            let mut stopwords: Vec<String> = spec
+                .stopwords
+                .iter()
+                .map(|word| word.to_lowercase())
+                .collect();
+            stopwords.sort_unstable();
+            stopwords.dedup();
             Ok(CompiledAllowlist {
                 condition: spec.condition,
                 target: spec.target,
                 regexes,
-                stopwords: spec
-                    .stopwords
-                    .iter()
-                    .map(|word| word.to_lowercase())
-                    .collect(),
+                stopwords,
+                stopword_minimum: spec.stopword_minimum,
             })
         })
         .collect()
@@ -417,10 +447,16 @@ fn is_allowed(allowlists: &[CompiledAllowlist], secret: &str, matched: &str, lin
             .then(|| allowlist.regexes.iter().any(|regex| regex.is_match(target)));
         let stopword_match = (!allowlist.stopwords.is_empty()).then(|| {
             let lowered_secret = secret.to_lowercase();
+            // A minimum of zero would allow everything, which is the one
+            // direction an allowlist may never fail in.
+            let needed = allowlist.stopword_minimum.max(1);
             allowlist
                 .stopwords
                 .iter()
-                .any(|word| lowered_secret.contains(word))
+                .filter(|word| lowered_secret.contains(word.as_str()))
+                .take(needed)
+                .count()
+                == needed
         });
         match allowlist.condition {
             AllowlistCondition::Any => {
@@ -958,7 +994,10 @@ mod tests {
             let deletes = all
                 .iter()
                 .filter(|high| high.severity >= Severity::HighConfidence)
-                .any(|high| !all.iter().any(|other| withholds(other, high)));
+                .any(|high| {
+                    let anchor_only = det.anchor_only_rules.contains(&high.rule);
+                    !all.iter().any(|other| withholds(other, high, anchor_only))
+                });
             assert_eq!(det.may_auto_wipe(text), deletes, "{text:?}");
             assert_eq!(
                 det.is_sensitive(text),
@@ -1033,7 +1072,25 @@ mod tests {
                 "{}",
                 rule.spec.name
             );
+            // A restricted rule never reaches the deletable side of the gate, so
+            // `anchor_only` there decides nothing; the generator refuses the
+            // pair and this is what keeps that true of the compiled table.
+            assert!(
+                !(rule.spec.anchor_only && rule.spec.never_auto_delete),
+                "{}",
+                rule.spec.name
+            );
         }
+        // The veto reads `anchor_only` by rule name, so the list must be the
+        // table's own rather than a copy that can go stale against it.
+        assert_eq!(
+            det.anchor_only_rules,
+            det.rules
+                .iter()
+                .filter(|rule| rule.spec.anchor_only)
+                .map(|rule| rule.spec.name)
+                .collect::<Vec<_>>()
+        );
     }
 
     /// The restricted band is the one place the two predicates disagree, and the
@@ -1041,11 +1098,11 @@ mod tests {
     /// index and never deleted. Derived from the table so the pin cannot go
     /// stale against a rule that changes bands.
     ///
-    /// The four context-anchored rules join it for the same reason at one
-    /// remove: the anchor proves the *field*, and no gate over a human-readable
-    /// value proves the value is a credential (§5.6, DMY-162). Pinned as a set
-    /// so the band can neither spread to a rule that has a distinctive token of
-    /// its own nor quietly lose one of these four.
+    /// The six keyword- and context-anchored rules join it for the same reason
+    /// at one remove: the anchor proves the *field*, and no gate over a
+    /// human-readable value proves the value is a credential (§5.6, DMY-162).
+    /// Pinned as a set so the band can neither spread to a rule that has a
+    /// distinctive token of its own nor quietly lose one of these six.
     #[test]
     fn withholding_and_deleting_are_the_same_gate_except_for_the_restricted_band() {
         let det = detector();
@@ -1060,6 +1117,7 @@ mod tests {
         assert_eq!(
             restricted,
             [
+                "api_key_kv",
                 "aws_secret_access_key",
                 "azure_storage_key",
                 "cloudflare_api_token",
@@ -1111,19 +1169,74 @@ mod tests {
                 .find(|finding| finding.severity == Severity::HighConfidence)
                 .unwrap_or_else(|| panic!("no generic rule fired on {text}"));
             assert!(
-                findings.iter().any(|other| withholds(other, high)),
+                findings.iter().any(|other| withholds(other, high, true)),
                 "{text}"
             );
         }
     }
 
+    /// The other side of the aggregate rule, and the reason it is not written
+    /// over every match above the floor. A secret with a unique literal is
+    /// separate evidence even where a restricted rule covers the very same
+    /// bytes, and `.env` is the commonest way one is pasted. A veto on overlap
+    /// alone took auto-wipe from all six, two of them — `hvs.` and the JWT —
+    /// against §9.1 rows that bind the deletion (DMY-162).
+    #[test]
+    fn a_secret_with_a_unique_literal_still_deletes_inside_a_kv_line() {
+        let det = detector();
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.\
+                   SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        for (text, literal) in [
+            (
+                format!("GITHUB_TOKEN=ghp_{}", noise(36, ALNUM)),
+                "github_classic_pat",
+            ),
+            (
+                format!("VAULT_TOKEN=hvs.{}", noise(32, ALNUM)),
+                "hashicorp_vault",
+            ),
+            (format!("AUTH_TOKEN={jwt}"), "jwt"),
+            (
+                "SLACK_TOKEN=xoxb-17653285717-17653285718-AbCdEfGhIjKlMnOpQrStUvWx".to_string(),
+                "slack_token",
+            ),
+            (
+                format!("api_key: ghp_{}", noise(36, ALNUM)),
+                "github_classic_pat",
+            ),
+            (format!("password=sk-{}", noise(48, ALNUM)), "openai_legacy"),
+        ] {
+            let findings = det.scan_all(&text);
+            let high = findings
+                .iter()
+                .find(|finding| finding.rule == literal)
+                .unwrap_or_else(|| panic!("{literal} did not fire on {text}"));
+            assert_eq!(high.severity, Severity::HighConfidence, "{text}");
+            // The restricted overlap has to be present, or this passes on a
+            // fixture that never reached the outer rule and proves nothing.
+            assert!(
+                findings.iter().any(|other| withholds(other, high, true)),
+                "no restricted match covers {literal} on {text} -> {:?}",
+                all_rules(&det, &text)
+            );
+            assert!(det.is_sensitive(&text), "{text}");
+            assert!(
+                det.may_auto_wipe(&text),
+                "{text} -> {:?}",
+                all_rules(&det, &text)
+            );
+        }
+    }
+
     /// Ordinary README and `.env` lines, through the public API rather than one
-    /// rule at a time. Every value is spelled out of words or repeated
-    /// characters, and most were `may_auto_wipe = true` mid-branch: the
-    /// `API_KEY=` lines through `generic_password_kv`, which carried neither a
-    /// threshold nor a shape guard, and `AccountKey=<86 letters>==` through
-    /// `generic_api_key`, whose capture takes the base64 padding so its own
-    /// guard missed the value it was written for.
+    /// rule at a time. Every value is spelled out of words, digits or repeated
+    /// characters, and most were `may_auto_wipe = true` mid-branch.
+    ///
+    /// **One corpus and no exception.** Splitting it into "these reach no rule"
+    /// and "these are merely withheld" is how the last six rows stayed outside
+    /// the acceptance while every gate passed: the last row reached *neither*
+    /// list and had no test at all (DMY-162). A row that has to be excused
+    /// belongs in §9.2 with its measurement, not in a second test.
     #[test]
     fn readme_and_dotenv_templates_reach_no_rule() {
         let det = detector();
@@ -1143,6 +1256,16 @@ mod tests {
             format!("CLOUDFLARE_API_TOKEN={}", noise(40, LETTERS)),
             format!("aws_secret_access_key = {}", noise(40, LETTERS)),
             format!("MY_API_TOKEN={}", noise(40, LETTERS)),
+            // Written in words *and* digits, so neither the threshold nor the
+            // shape guard reaches them: 3.516 to 4.354 against a ceiling
+            // `password=hunter2` fixes at 2.807. The vendored placeholder
+            // vocabulary is the third gate, and it is what these six need.
+            "api_key: PUT_YOUR_KEY_HERE_2024".to_string(),
+            "CLOUDFLARE_API_KEY=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234".to_string(),
+            "GITHUB_API_KEY=paste_the_token_from_settings_here_2024ab".to_string(),
+            "AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024".to_string(),
+            "my_api_key = \"CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT\"".to_string(),
+            "CLOUDFLARE_API_KEY=Replace_With_Your_Real_Token_Value123456".to_string(),
         ] {
             assert!(
                 det.scan_all(&text).is_empty(),
@@ -1151,30 +1274,6 @@ mod tests {
             );
             assert!(!det.is_sensitive(&text), "{text}");
             assert!(!det.may_auto_wipe(&text), "{text}");
-        }
-    }
-
-    /// The templates neither gate reaches: written in words *and* digits, so the
-    /// shape guard does not apply, and above every threshold `generic_password_kv`
-    /// may carry — its own §9.1 fixture `password=hunter2` measures 2.807 and
-    /// fixes the ceiling. They are withheld and never deleted, which is what the
-    /// band is for (I1).
-    #[test]
-    fn a_template_no_gate_reaches_is_withheld_and_never_deleted() {
-        let det = detector();
-        for text in [
-            "api_key: PUT_YOUR_KEY_HERE_2024",
-            "CLOUDFLARE_API_KEY=0000_REPLACE_THIS_WITH_A_REAL_TOKEN_1234",
-            "GITHUB_API_KEY=paste_the_token_from_settings_here_2024ab",
-            "AZURE_API_KEY=YOUR_AZURE_COGNITIVE_SERVICES_KEY_2024",
-            "my_api_key = \"CHANGE_THIS_VALUE_BEFORE_YOU_SHIP_IT\"",
-        ] {
-            assert!(det.is_sensitive(text), "{text}");
-            assert!(
-                !det.may_auto_wipe(text),
-                "{text} -> {:?}",
-                all_rules(&det, text)
-            );
         }
     }
 
@@ -1221,15 +1320,18 @@ mod tests {
             severity: Severity::HighConfidence,
             ..restricted(start, end)
         };
-        assert!(withholds(&restricted(0, 61), &high(0, 61)));
-        assert!(withholds(&restricted(0, 61), &high(0, 62)));
-        assert!(withholds(&restricted(48, 147), &high(48, 148)));
-        assert!(withholds(&restricted(10, 20), &high(0, 61)));
-        assert!(!withholds(&restricted(0, 61), &high(61, 100)));
-        assert!(!withholds(&restricted(61, 100), &high(0, 61)));
+        assert!(withholds(&restricted(0, 61), &high(0, 61), true));
+        assert!(withholds(&restricted(0, 61), &high(0, 62), true));
+        assert!(withholds(&restricted(48, 147), &high(48, 148), true));
+        assert!(withholds(&restricted(10, 20), &high(0, 61), true));
+        assert!(!withholds(&restricted(0, 61), &high(61, 100), true));
+        assert!(!withholds(&restricted(61, 100), &high(0, 61), true));
         // Only the restricted band withholds; two deletable rules over one span
         // are still deletable.
-        assert!(!withholds(&high(0, 61), &high(0, 61)));
+        assert!(!withholds(&high(0, 61), &high(0, 61), true));
+        // And overlap is no longer sufficient: a rule that matched a unique
+        // literal is separate evidence over the very same bytes.
+        assert!(!withholds(&restricted(0, 61), &high(0, 61), false));
     }
 
     /// I8: no silent drops. Name, category and confidence travel *with* the
@@ -1273,6 +1375,7 @@ mod tests {
                 target: AllowlistTarget::Secret,
                 regexes: Vec::new(),
                 stopwords: Vec::new(),
+                stopword_minimum: 1,
             }];
             assert!(!is_allowed(&empty, "s3cret", "s3cret", "s3cret"));
         }
@@ -1282,10 +1385,36 @@ mod tests {
             target: AllowlistTarget::Secret,
             regexes: vec![Regex::new("^ex").unwrap()],
             stopwords: vec!["ample".to_string()],
+            stopword_minimum: 1,
         }];
         assert!(is_allowed(&both, "example", "example", "example"));
         assert!(!is_allowed(&both, "exabcdef", "exabcdef", "exabcdef"));
         assert!(!is_allowed(&both, "sample", "sample", "sample"));
+    }
+
+    /// A minimum above one is what lets a placeholder vocabulary answer a prose
+    /// template without taking a credential that carries a single marker, and a
+    /// minimum of zero would allow everything — the direction §5.6's fail-closed
+    /// amendment forbids, so it is clamped rather than trusted.
+    #[test]
+    fn a_counted_stopword_list_needs_that_many_distinct_words() {
+        let counted = |minimum| {
+            [CompiledAllowlist {
+                condition: AllowlistCondition::Any,
+                target: AllowlistTarget::Secret,
+                regexes: Vec::new(),
+                stopwords: vec!["real".to_string(), "token".to_string(), "value".to_string()],
+                stopword_minimum: minimum,
+            }]
+        };
+        let one = "TodoRealK3y";
+        let three = "Real_Token_Value_1";
+        for list in [counted(1), counted(0)] {
+            assert!(is_allowed(&list, one, one, one));
+        }
+        assert!(!is_allowed(&counted(2), one, one, one));
+        assert!(is_allowed(&counted(3), three, three, three));
+        assert!(!is_allowed(&counted(4), three, three, three));
     }
 
     #[test]
