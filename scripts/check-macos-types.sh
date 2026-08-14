@@ -155,6 +155,9 @@ uuid = { version = "1", features = ["v4"] }
 url = "2"
 plist = "1.10"
 mime_guess = "2"
+# clipboard/mod.rs pulls in windows_attribution.rs under `#[cfg(any(target_os
+# = "windows", test))]`, so it compiles here too once tests are included.
+typed-path = "0.12"
 
 [dev-dependencies]
 tempfile = "3"
