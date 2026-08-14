@@ -175,6 +175,14 @@ export const EXEMPTIONS = [
     why:
       'The native bridge must calculate black or white from a runtime system accent before CSS can resolve a token; no component palette value is hard-coded.',
   },
+  {
+    rule: 'literal-colour',
+    files: ['startupFailure.ts'],
+    why:
+      'Runs when a polyfill, a screen or first render failed to load, so it cannot depend ' +
+      'on the CSS token bundle that may be exactly what failed; the light-mode literals are ' +
+      'its only safe fallback.',
+  },
 ];
 
 /** Exactly these, under `@media (pointer: coarse)`, and nothing else. */
