@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use anyhow::Result;
 
-use crate::model::{Allowlist, Category, Condition, Inputs, Rule, Target, Validator};
+use crate::schema::{Allowlist, Category, Condition, Inputs, Rule, Target, Validator};
 
 pub fn render(inputs: &Inputs) -> Result<String> {
     let source = &inputs.selection.source;

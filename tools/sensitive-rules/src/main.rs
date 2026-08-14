@@ -1,5 +1,8 @@
+mod borrow;
 mod model;
+mod refusals;
 mod render;
+mod schema;
 
 use std::fs;
 use std::io::Write as _;
@@ -8,6 +11,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use model::{load_inputs, read_selection, sha256};
+use schema::Inputs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -78,7 +82,7 @@ fn check(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn render_generated(inputs: &model::Inputs) -> Result<String> {
+fn render_generated(inputs: &Inputs) -> Result<String> {
     let rendered = render::render(inputs)?;
     let mut child = Command::new("rustfmt")
         .args(["--edition", "2021", "--emit", "stdout"])
