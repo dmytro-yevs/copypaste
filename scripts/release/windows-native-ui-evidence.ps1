@@ -15,6 +15,20 @@ function Get-AppAutomationRoot([Diagnostics.Process]$App) {
     return [Windows.Automation.AutomationElement]::FromHandle($App.MainWindowHandle)
 }
 
+# UIAutomationTypes registers only the 39 control types it shipped with,
+# 50000-50038. A provider reporting a later documented id (50039
+# UIA_SemanticZoomControlTypeId, 50040 UIA_AppBarControlTypeId) sends
+# Schema.ConvertToControlType through ControlType.LookupById, which returns
+# $null for an id it never registered; StrictMode then raises "The property
+# 'ProgrammaticName' cannot be found on this object". That is the client's
+# naming table, not a node without a control type: a provider supplying no
+# ControlType reads back as a real ControlType object, never as $null.
+# Measured against a provider reporting each id in turn.
+function Get-UiaControlTypeName([Windows.Automation.ControlType]$ControlType) {
+    if ($null -eq $ControlType) { return $null }
+    return $ControlType.ProgrammaticName
+}
+
 function Read-UiaNode([Windows.Automation.AutomationElement]$Element) {
     $bounds = $Element.Current.BoundingRectangle
     $coordinates = @($bounds.X, $bounds.Y, $bounds.Width, $bounds.Height)
@@ -25,7 +39,8 @@ function Read-UiaNode([Windows.Automation.AutomationElement]$Element) {
     }
     return [ordered]@{
         name = $Element.Current.Name
-        control_type = $Element.Current.ControlType.ProgrammaticName
+        control_type = Get-UiaControlTypeName $Element.Current.ControlType
+        localized_control_type = $Element.Current.LocalizedControlType
         automation_id = $Element.Current.AutomationId
         enabled = $Element.Current.IsEnabled
         offscreen = $Element.Current.IsOffscreen
@@ -200,6 +215,10 @@ function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) 
 function Test-WindowsUiEvidenceHelpers {
     Test-WindowsReadinessHelpers
     Test-UiaSnapshotHelpers
+    Assert-True ((Get-UiaControlTypeName ([Windows.Automation.ControlType]::Button)) -eq "ControlType.Button") `
+        "a registered control type was not read from the element"
+    Assert-True ($null -eq (Get-UiaControlTypeName $null)) `
+        "a control type the client cannot name was given a name anyway"
     $occluded = [ordered]@{ foreground = $false; visible = $true; minimized = $false; capture_allowed = $true }
     Assert-True (-not (Test-WindowCaptureReady $occluded)) "an occluded window was accepted for capture"
     $protected = [ordered]@{ foreground = $true; visible = $true; minimized = $false; capture_allowed = $false }
