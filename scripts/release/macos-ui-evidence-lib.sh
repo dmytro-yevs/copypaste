@@ -220,8 +220,13 @@ mac_ui_self_test() {
     [[ "$press_result" == "ok" && "$set_result" == "ok" ]] \
         && ok "accessibility actions retain their result shapes" \
         || bad "accessibility actions retain their result shapes"
-    grep -Fq 'set focused of elementRef to true' "${BASH_SOURCE[0]}" \
-        && grep -Fq 'keystroke inputValue' "${BASH_SOURCE[0]}" \
+    # `declare -f mac_ax`, not this file: grepping BASH_SOURCE matched the
+    # literals in these two lines, so the assertion passed with the production
+    # AppleScript deleted.
+    local dispatcher="$1/mac-ax-body.txt"
+    declare -f mac_ax > "$dispatcher"
+    grep -Fq 'set focused of elementRef to true' "$dispatcher" \
+        && grep -Fq 'keystroke inputValue' "$dispatcher" \
         && ok "field input dispatches keyboard events" \
         || bad "field input dispatches keyboard events"
     mac_ax_contains "$fixture" "Signed out" \
