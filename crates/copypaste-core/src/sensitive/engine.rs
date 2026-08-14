@@ -13,6 +13,7 @@ use super::spec::{AllowlistCondition, AllowlistSpec, AllowlistTarget, RuleSpec, 
 use super::validators::{
     card_number_valid, iban_valid, phone_is_formatted, ssn_structure_plausible, value_is_strong,
 };
+use super::verdict::deletes;
 
 /// Regex compilation failures. No variant carries a path or any input text
 /// (AGENTS.md rule 4).
@@ -206,23 +207,12 @@ impl Detector {
     /// keeps them apart, and [`Severity::Restricted`] is the band where they
     /// disagree.
     ///
-    /// An anchor-only match licenses deletion only where no restricted match
-    /// covers the same bytes. As a plain disjunction the band was inert:
-    /// `generic_api_key` judged the *same value* through the *same* anchor on
-    /// weaker gates and reinstated every deletion it had refused (DMY-162).
+    /// The aggregate rule over the matches is [`super::verdict::deletes`].
     pub fn may_auto_wipe(&self, text: &str) -> bool {
         let normalised = normalise(text);
         let findings =
             self.scan_normalised(&normalised, ScanMode::AllAtLeast(Severity::Restricted));
-        findings
-            .iter()
-            .filter(|finding| finding.severity >= Severity::HighConfidence)
-            .any(|high| {
-                let anchor_only = self.anchor_only_rules.contains(&high.rule);
-                !findings
-                    .iter()
-                    .any(|other| withholds(other, high, anchor_only))
-            })
+        deletes(&findings, &self.anchor_only_rules)
     }
 
     /// True when this text must be **withheld**: kept out of the search index,
@@ -255,26 +245,6 @@ impl Detector {
             redact_findings(&normalised, &findings)
         }
     }
-}
-
-/// Whether `restricted` refuses deletion of what `high` matched. One judgement
-/// twice, and I1 takes the recoverable outcome — but only where `high` rests on
-/// the same context anchor and nothing else. A rule that matched a unique
-/// literal is separate evidence at any offset: vetoing on overlap alone took
-/// auto-wipe from `GITHUB_TOKEN=ghp_…`, `VAULT_TOKEN=hvs.…` and `AUTH_TOKEN=`
-/// with a JWT, two of which §9.1 binds as auto-wipes (DMY-162).
-///
-/// Overlap, not containment: `generic_api_key` consumes the trailing newline its
-/// neighbour stops before, so the two spans differ by a byte on the same value.
-fn withholds(
-    restricted: &SpannedFinding,
-    high: &SpannedFinding,
-    high_is_anchor_only: bool,
-) -> bool {
-    high_is_anchor_only
-        && restricted.severity == Severity::Restricted
-        && restricted.start < high.end
-        && high.start < restricted.end
 }
 
 pub(super) fn compare_rank(a: &SpannedFinding, b: &SpannedFinding) -> std::cmp::Ordering {
@@ -557,6 +527,24 @@ pub(super) mod test_support {
             .collect()
     }
 
+    /// `n` distinct [`ALNUM`] characters, rotated by `line`.
+    ///
+    /// [`noise`] draws with replacement, so a few values in a large corpus fall
+    /// under a 4.3 threshold by chance and stop being vetoed — which silently
+    /// turns a whole-corpus veto fixture into a one-line one. Stepping by 13
+    /// over the 62-symbol alphabet repeats no character, so every value measures
+    /// above 5.2 and every line is vetoed. The two digits are forced in because
+    /// the vendored shape guard rejects an all-letter value.
+    pub(in crate::sensitive) fn rotation(n: usize, line: usize) -> String {
+        let chars: Vec<char> = ALNUM.chars().collect();
+        let mut value: Vec<char> = (0..n)
+            .map(|k| chars[(line * 7 + k * 13) % chars.len()])
+            .collect();
+        value[0] = char::from_digit((line % 10) as u32, 10).unwrap();
+        value[n - 1] = char::from_digit((line / 10 % 10) as u32, 10).unwrap();
+        value.into_iter().collect()
+    }
+
     /// The benign corpus. §7.7: v1's `max(len * 5 / 100, 2)` budget tolerated
     /// two unnamed FPs — `const password = prompt(...)` was one of them. v2
     /// asserts **zero**; any accepted FP must be named here with a reason.
@@ -603,10 +591,11 @@ pub(super) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{
-        all_rules, detector, fired, noise, ALNUM, BASE64, BENIGN_CORPUS, HEX, LETTERS,
+        all_rules, detector, fired, noise, rotation, ALNUM, BASE64, BENIGN_CORPUS, HEX, LETTERS,
     };
     use super::*;
     use crate::sensitive::finding::{Severity, AUTOWIPE_CONFIDENCE_FLOOR};
+    use crate::sensitive::verdict::{deletes_naive, withholds};
 
     // -- §9.1 true positives ------------------------------------------------
 
@@ -989,16 +978,23 @@ mod tests {
             noise(36, ALNUM)
         ));
 
+        // The shape that made the old nested scan quadratic, at a size a debug
+        // build can afford: every high match is anchor-only and every one of
+        // them is vetoed, so the ordered lookup is compared against the naive
+        // form on the input where neither can leave early.
+        corpus.push(
+            (0..400)
+                .map(|line| format!("CLOUDFLARE_API_TOKEN={}\n", rotation(40, line)))
+                .collect(),
+        );
+
         for text in &corpus {
             let all = det.scan_all(text);
-            let deletes = all
-                .iter()
-                .filter(|high| high.severity >= Severity::HighConfidence)
-                .any(|high| {
-                    let anchor_only = det.anchor_only_rules.contains(&high.rule);
-                    !all.iter().any(|other| withholds(other, high, anchor_only))
-                });
-            assert_eq!(det.may_auto_wipe(text), deletes, "{text:?}");
+            assert_eq!(
+                det.may_auto_wipe(text),
+                deletes_naive(&all, &det.anchor_only_rules),
+                "{text:?}"
+            );
             assert_eq!(
                 det.is_sensitive(text),
                 all.iter().any(|f| f.severity >= Severity::Restricted),
@@ -1440,38 +1436,6 @@ mod tests {
                 all_rules(&det, &text)
             );
         }
-    }
-
-    /// Overlap, not containment, and not adjacency. `generic_api_key` consumes
-    /// the trailing newline `cloudflare_api_token` stops before, so the two
-    /// spans over one value differ by a byte; a containment test would miss it
-    /// and delete. Two matches that merely touch are separate values.
-    #[test]
-    fn withholding_takes_any_shared_byte_and_no_fewer() {
-        let restricted = |start, end| SpannedFinding {
-            rule: "credit_card",
-            category: "financial",
-            confidence: 0.99,
-            severity: Severity::Restricted,
-            start,
-            end,
-        };
-        let high = |start, end| SpannedFinding {
-            severity: Severity::HighConfidence,
-            ..restricted(start, end)
-        };
-        assert!(withholds(&restricted(0, 61), &high(0, 61), true));
-        assert!(withholds(&restricted(0, 61), &high(0, 62), true));
-        assert!(withholds(&restricted(48, 147), &high(48, 148), true));
-        assert!(withholds(&restricted(10, 20), &high(0, 61), true));
-        assert!(!withholds(&restricted(0, 61), &high(61, 100), true));
-        assert!(!withholds(&restricted(61, 100), &high(0, 61), true));
-        // Only the restricted band withholds; two deletable rules over one span
-        // are still deletable.
-        assert!(!withholds(&high(0, 61), &high(0, 61), true));
-        // And overlap is no longer sufficient: a rule that matched a unique
-        // literal is separate evidence over the very same bytes.
-        assert!(!withholds(&restricted(0, 61), &high(0, 61), false));
     }
 
     /// I8: no silent drops. Name, category and confidence travel *with* the
