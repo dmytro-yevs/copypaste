@@ -55,6 +55,11 @@ pub struct SelectedRule {
     pub allowlist_decision: Option<String>,
     #[serde(default)]
     pub allowlist_regex_overrides: Vec<RegexOverride>,
+    pub secret_shape_allowlist_from: Option<String>,
+    pub secret_shape_allowlist_decision: Option<String>,
+    #[serde(default)]
+    pub never_auto_delete: bool,
+    pub never_auto_delete_decision: Option<String>,
     #[serde(default)]
     pub validator: Validator,
     pub secret_group: Option<usize>,
@@ -82,6 +87,8 @@ pub struct OverlayRule {
     #[serde(default)]
     pub never_auto_delete: bool,
     pub never_auto_delete_decision: Option<String>,
+    pub secret_shape_allowlist_from: Option<String>,
+    pub secret_shape_allowlist_decision: Option<String>,
     pub entropy: Option<f64>,
     pub entropy_decision: Option<String>,
 }
@@ -311,6 +318,9 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
                 }
             }
         }
+        if let Some(from) = &selected.secret_shape_allowlist_from {
+            allowlists.push(borrowed_secret_shape(&selected.name, from, &by_id)?);
+        }
         let secret_group = selected
             .secret_group
             .unwrap_or_else(|| sources.first().map_or(0, |source| source.secret_group));
@@ -324,10 +334,7 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             pattern,
             validator: selected.validator,
             secret_group,
-            // Upstream Gitleaks rules are credential rules; the band that
-            // classifies without deleting exists for the local overlay's
-            // user-owned financial and personal data.
-            never_auto_delete: false,
+            never_auto_delete: selected.never_auto_delete,
             entropy,
             keywords,
             allowlists,
@@ -358,6 +365,16 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             overlay.entropy.is_some(),
             &overlay.entropy_decision,
         )?;
+        require_decision(
+            &overlay.name,
+            "secret_shape_allowlist",
+            overlay.secret_shape_allowlist_from.is_some(),
+            &overlay.secret_shape_allowlist_decision,
+        )?;
+        let allowlists = match &overlay.secret_shape_allowlist_from {
+            Some(from) => vec![borrowed_secret_shape(&overlay.name, from, &by_id)?],
+            None => Vec::new(),
+        };
         insert_name(&mut names, &overlay.name)?;
         rules.push(Rule {
             upstream_ids: Vec::new(),
@@ -370,7 +387,7 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
             never_auto_delete: overlay.never_auto_delete,
             entropy: overlay.entropy,
             keywords: Vec::new(),
-            allowlists: Vec::new(),
+            allowlists,
         });
     }
 
@@ -400,6 +417,18 @@ fn validate_decisions(rule: &SelectedRule) -> Result<()> {
         "keywords",
         rule.keywords_override.is_some(),
         &rule.keywords_decision,
+    )?;
+    require_decision(
+        &rule.name,
+        "secret_shape_allowlist",
+        rule.secret_shape_allowlist_from.is_some(),
+        &rule.secret_shape_allowlist_decision,
+    )?;
+    require_decision(
+        &rule.name,
+        "never_auto_delete",
+        rule.never_auto_delete,
+        &rule.never_auto_delete_decision,
     )?;
     if !rule.use_rule_allowlists
         && rule
@@ -511,6 +540,40 @@ fn validate_allowlist_overrides(selected: &SelectedRule, sources: &[&RawRule]) -
         }
     }
     Ok(())
+}
+
+/// The one secret-target, regex-only allowlist an upstream rule carries, taken
+/// from the vendored config rather than restated here so the pinned checksum
+/// governs it and the two spellings cannot drift apart.
+fn borrowed_secret_shape(
+    name: &str,
+    from: &str,
+    by_id: &BTreeMap<&str, &RawRule>,
+) -> Result<Allowlist> {
+    let source = by_id
+        .get(from)
+        .with_context(|| format!("{name} borrows a secret allowlist from absent rule {from}"))?;
+    let mut found = Vec::new();
+    for raw in &source.allowlists {
+        let shapes_the_secret = raw.regex_target.is_empty()
+            && !raw.regexes.is_empty()
+            && raw.stopwords.is_empty()
+            && raw.paths.is_empty()
+            && raw.commits.is_empty();
+        if !shapes_the_secret {
+            continue;
+        }
+        if let Some(allowlist) = resolve_allowlist(raw, &[])? {
+            found.push(allowlist);
+        }
+    }
+    if found.len() != 1 {
+        bail!(
+            "{name} borrowing from {from} matched {} secret-shape allowlists",
+            found.len()
+        );
+    }
+    Ok(found.remove(0))
 }
 
 fn resolve_allowlist(raw: &RawAllowlist, overrides: &[RegexOverride]) -> Result<Option<Allowlist>> {
