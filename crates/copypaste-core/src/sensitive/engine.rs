@@ -1098,11 +1098,11 @@ mod tests {
     /// index and never deleted. Derived from the table so the pin cannot go
     /// stale against a rule that changes bands.
     ///
-    /// The six keyword- and context-anchored rules join it for the same reason
+    /// The seven keyword- and context-anchored rules join it for the same reason
     /// at one remove: the anchor proves the *field*, and no gate over a
     /// human-readable value proves the value is a credential (§5.6, DMY-162).
     /// Pinned as a set so the band can neither spread to a rule that has a
-    /// distinctive token of its own nor quietly lose one of these six.
+    /// distinctive token of its own nor quietly lose one of these seven.
     #[test]
     fn withholding_and_deleting_are_the_same_gate_except_for_the_restricted_band() {
         let det = detector();
@@ -1124,8 +1124,38 @@ mod tests {
                 "credit_card",
                 "dotenv_secret",
                 "generic_password_kv",
+                "heroku_api_key",
             ]
         );
+    }
+
+    /// A `heroku` keyword and a UUID. The rule's own decision says the value is
+    /// "distinctive to nothing", and a Heroku app, dyno, release and addon id are
+    /// all UUIDs printed beside that word by the CLI. `anchor_only` did not reach
+    /// them: it withholds only where a restricted match covers the same bytes,
+    /// and standing alone they were deleted at 0.95 (DMY-162). I1 ranks erasing
+    /// one above leaving it unsearchable.
+    #[test]
+    fn a_heroku_context_word_and_a_uuid_classify_without_deleting() {
+        let det = detector();
+        for text in [
+            "heroku config: 550e8400-e29b-41d4-a716-446655440000",
+            "heroku app id = 123e4567-e89b-12d3-a456-426614174000",
+            "heroku addon: 9f2c1d4e-8a7b-4c5d-9e3f-2a1b0c9d8e7f",
+        ] {
+            assert!(fired(&det, text, "heroku_api_key"), "{text}");
+            assert!(det.is_sensitive(text), "{text}");
+            assert!(
+                !det.may_auto_wipe(text),
+                "{text} -> {:?}",
+                all_rules(&det, text)
+            );
+        }
+        // The context word is still the whole of the evidence: a bare UUID
+        // reaches no rule at all.
+        assert!(det
+            .scan_all("550e8400-e29b-41d4-a716-446655440000")
+            .is_empty());
     }
 
     /// What the band is *worth*, which is not what any one rule declares.

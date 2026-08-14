@@ -143,8 +143,8 @@ upstream_ids = ["heroku-api-key"]
 name = "heroku_api_key"
 category = "credential"
 confidence = 0.95
-anchor_only = true
-anchor_only_decision = "The word heroku near a delimiter is the whole evidence, and the value is a UUID — the most common identifier shape there is and distinctive to nothing. Where a restricted rule already judged those bytes, this is that judgement again rather than a second one."
+never_auto_delete = true
+never_auto_delete_decision = "The word heroku near a delimiter is the whole evidence, and the value is a UUID — the most common identifier shape there is and distinctive to nothing. An app, dyno, release and addon id are all UUIDs and all appear beside the word heroku in ordinary CLI output. anchor_only withholds only where a restricted rule covers the same bytes, so standing alone the rule deleted those; a restricted rule never deletes at all, and manifest I1 ranks that erasure above leaving a real key unsearchable (DMY-162)."
 
 [[rules]]
 upstream_ids = ["vault-service-token", "vault-batch-token"]

@@ -338,7 +338,7 @@ example `pattern_name` (`ffi_sensitive.rs:73`) — that name does not exist.
 | **0.75 – 0.80** | `generic_password_kv` (0.75), `api_key_kv` (0.75), `dotenv_secret` (0.80) | Keyword-driven. All gate the value on strength and randomness, and all are restricted (§5.6). |
 | **≥ 0.70 floor** | — | Auto-wipe boundary. Nothing may sit *exactly* on it: `ip_with_port` did, and it caused data loss (`CopyPaste-8ys1`). Treat 0.70 as exclusive-in-spirit. |
 | **0.55 – 0.65 — INERT** | `phone_us`, `passport`, `email`, `iban`, `ssn_us`, `discord_bot_token`, `twilio_signing_key_sid`, `generic_bearer`, `http_basic_auth`, `ip_with_port` | Detected, labelled, masked, redacted in logs — **never deleted**, and still searchable. |
-| **RESTRICTED** | `credit_card`, `cloudflare_api_token`, `azure_storage_key`, `aws_secret_access_key`, `dotenv_secret`, `generic_password_kv`, `api_key_kv` | Above the floor *and* opted out of deletion. Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. |
+| **RESTRICTED** | `credit_card`, `cloudflare_api_token`, `azure_storage_key`, `aws_secret_access_key`, `dotenv_secret`, `generic_password_kv`, `api_key_kv`, `heroku_api_key` | Above the floor *and* opted out of deletion. Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. |
 
 **v2 amendment — the restricted band (DMY-162).** v1 had two bands and one
 question, so "how sure is this a card?" and "may this be erased?" shared a
@@ -375,8 +375,18 @@ band table that calls a unique literal safe to delete and §9.1 rows that bind
 pasted, so this was most of the feature. Two rules over one span are one
 judgement only where the second read the *same anchor* on weaker gates;
 `anchor_only` is a per-rule declaration with a written decision, derived into the
-predicate the way the band is, and it holds for exactly `generic_api_key` and
-`heroku_api_key`.
+predicate the way the band is, and it holds for exactly `generic_api_key`.
+
+**v2 amendment — the band only protects a rule that has a neighbour (DMY-162).**
+`anchor_only` withholds *where a restricted match covers the same bytes*, so a
+rule standing alone still deletes. `heroku_api_key` was declared `anchor_only`
+on the argument that a UUID beside the word `heroku` is "distinctive to
+nothing", and that argument holds for `heroku config: <UUID>` with no neighbour
+at all — an app, dyno, release and addon id are all UUIDs, and the CLI prints
+them beside that word. It is `never_auto_delete` instead: a restricted rule
+never deletes anywhere, and it cannot be reinstated by a generic neighbour
+either. Read `anchor_only` as the flag for a rule that must still delete
+*somewhere*.
 
 **v2 amendment — a restricted rule is now load-bearing for *not* deleting
 (DMY-162).** Before the aggregate rule, a restricted rule that stopped firing
@@ -1197,6 +1207,7 @@ entries and left the gate off. The lengths and the structure are what bind.
 | an Azure, Cloudflare, AWS or dotenv value of a credential's randomness that *contains or begins with* `todo`, `your`, `dummy` or `sample` | detected; classified, never auto-wipes — nothing tests the value for words (§5.6), and the aggregate rule holds whether or not a generic rule also matches (§4.2) |
 | `aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` | detected; classified, never auto-wipes — AWS's published secret carries a `/`, so the shape guard leaves it alone |
 | a real `password=`, `api_key:` or `client_secret=` value | detected; classified, **never auto-wipes** — the keyword proves the field and nothing proves the value (§4.2, §5.6) |
+| `heroku config: <UUID>`, `heroku app id = <UUID>`, `heroku addon: <UUID>` | detected; classified, **never auto-wipes** — the value is a UUID and the word is the whole evidence, so an app, dyno, release or addon id is indistinguishable from a key (§4.2, DMY-162). A bare UUID with no context word reaches no rule |
 | a card or a `.env` credential with a **distinct** secret beside it (`ghp_…`, `AKIA…`, a PEM header) | detected; the item **auto-wipes** — a disjoint span is independent evidence, not the same judgement twice (§4.2) |
 | `GITHUB_TOKEN=ghp_…`, `VAULT_TOKEN=hvs.…`, `AUTH_TOKEN=<JWT>`, `SLACK_TOKEN=xoxb-…`, `api_key: ghp_…`, `password=sk-…` | detected; the item **auto-wipes** — a unique literal is independent evidence *over the same bytes*, and a restricted match must be shown to cover it or the test passes on a fixture that never reached the outer rule (§4.2, DMY-162) |
 | `4111111111111111` | `CreditCard`; classified, **never auto-wipes** (§3.3, DMY-162) |
@@ -1318,9 +1329,9 @@ The api_key returns 401, please investigate
 | Confidence floor pin | `discord_bot_token`, `twilio_signing_key_sid`, `iban`, `ssn_us`, `generic_bearer`, `ip_with_port` all `< 0.70` |
 | `\b` anchor pin | `sendgrid_api_key`, `terraform_cloud_token`, `cloudflare_api_token`, `twilio_signing_key_sid`, `discord_bot_token` contain `\b` |
 | Context-anchor pin | `azure_storage_key` and `cloudflare_api_token` must NOT match without their anchors |
-| Restricted-band pin | the rules that classify without deleting are exactly `credit_card` and the six keyword/context-anchored rules — asserted as a set, so the band can neither spread nor lose one |
+| Restricted-band pin | the rules that classify without deleting are exactly `credit_card` and the seven keyword/context-anchored rules — asserted as a set, so the band can neither spread nor lose one |
 | Secret-shape pin | those six carry gitleaks' `^[a-zA-Z_.-]+$` secret allowlist, borrowed from the vendored config rather than restated; `generic_api_key`'s own copy admits base64 padding, because its capture swallows it (§5.6) |
-| Anchor-only pin | the rules a restricted match may overrule are exactly `generic_api_key` and `heroku_api_key` — asserted as a set, derived from the rule table the way the band is, and refused on a rule that is itself restricted |
+| Anchor-only pin | the rules a restricted match may overrule are exactly `generic_api_key` — asserted as a set, derived from the rule table the way the band is, and refused on a rule that is itself restricted. `heroku_api_key` is restricted instead, because standing alone it had no neighbour to be overruled by (§4.2) |
 | Counted-word-list pin | `api_key_kv` and `cloudflare_api_token` are the only rules carrying a word list over their value; it is the vendored 1 446-entry list rather than a copy, and each minimum is above one (§5.6) |
 | Aggregate-verdict pin | a real credential of each of the four classes is `is_sensitive` and **not** `may_auto_wipe` even where a generic rule matches the same bytes — and a disjoint secret beside one still deletes. The per-rule assertion this replaces could not see the defect (§4.2, DMY-162) |
 | Unique-literal pin | a `ghp_`, `hvs.`, JWT, Slack or OpenAI secret inside a `.env` or `api_key:` wrapper **does** auto-wipe, and the overlapping restricted match is asserted to exist, so the test cannot pass on a fixture that never reached the outer rule |
