@@ -25,7 +25,14 @@ object ClipQueue {
     private var dropped = 0L
     private var privateMode = false
 
-    /** Set by [CapturePlugin.load]; false means nothing is draining this yet. */
+    /**
+     * Set by [CapturePlugin.load] and cleared when its activity is destroyed;
+     * false means nothing is draining this.
+     *
+     * It must be cleared: the foreground service can outlive the WebView, and a
+     * process that keeps this true with no drain task turns every share into a
+     * clip that waits in memory until the process dies.
+     */
     @Volatile
     var rustIsUp = false
 
@@ -54,8 +61,12 @@ object ClipQueue {
         }
 
         privateMode = true
+        // Counted, not zeroed, exactly as `intake::Buffer::discard_all` counts
+        // the clips Rust discards for the same reason. Clearing the tally would
+        // erase drops that happened before private mode and were never
+        // reported, so history would have a hole nobody was told about.
+        dropped += queue.size
         queue.clear()
-        dropped = 0
     }
 
     /** Everything captured since the last call, oldest first. */

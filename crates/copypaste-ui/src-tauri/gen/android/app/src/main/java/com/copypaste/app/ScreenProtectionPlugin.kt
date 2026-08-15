@@ -1,6 +1,7 @@
 package com.copypaste.app
 
 import android.app.Activity
+import android.util.Log
 import android.view.WindowManager
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
@@ -27,6 +28,15 @@ class ScreenProtectionPlugin(private val activity: Activity) : Plugin(activity) 
     /**
      * The default is `true` on a malformed argument: the safe direction is the
      * one that keeps the window protected.
+     *
+     * Answered from inside the UI-thread block and only after the flag has been
+     * read back, so the reply is what the window carries rather than what was
+     * asked for. Resolving before the block ran told the caller a window was
+     * protected while the flag was still queued.
+     *
+     * The read-back proves the window attribute, not that the compositor
+     * honoured it; only a device can show the second, and INV-35's capture check
+     * is what covers it.
      */
     @Command
     fun setProtected(invoke: Invoke) {
@@ -34,12 +44,29 @@ class ScreenProtectionPlugin(private val activity: Activity) : Plugin(activity) 
         // Window flags are UI-thread state. Already on it when the call arrives
         // from the WebView, in which case this runs inline.
         activity.runOnUiThread {
-            if (protect) {
-                activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            val applied = try {
+                if (protect) {
+                    activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+                isProtected() == protect
+            } catch (e: Throwable) {
+                Log.w(TAG, "the window protection flag could not be changed", e)
+                false
+            }
+            if (applied) {
+                invoke.resolve(JSObject().put("protected", protect))
             } else {
-                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                invoke.reject("The window's screenshot protection could not be changed.")
             }
         }
-        invoke.resolve(JSObject())
+    }
+
+    private fun isProtected(): Boolean =
+        (activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE) != 0
+
+    private companion object {
+        const val TAG = "CopyPasteProtection"
     }
 }

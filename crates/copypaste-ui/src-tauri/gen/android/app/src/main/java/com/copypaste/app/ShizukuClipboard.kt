@@ -108,7 +108,7 @@ object ShizukuClipboard {
                         clip.text,
                         CaptureSource.BACKGROUND,
                         clip.sourceAppBundleId,
-                        SourceAppResolver.label(context, clip.sourceAppBundleId),
+                        PackageFacts.label(context, clip.sourceAppBundleId),
                     )
                 }
             }
@@ -238,19 +238,15 @@ object ShizukuClipboard {
     fun setToastSuppressed(suppressed: Boolean, completion: (Boolean) -> Unit) {
         ShizukuSettings.setClipboardAccessNotifications(suppressed) { changed ->
             if (!changed) lastFailure = "clipboard notice setting was refused"
+            // Before the caller re-reads the probe. The observer would get here
+            // eventually, and "eventually" is after we have already reported.
+            ClipboardNoticeSetting.invalidate()
             completion(changed)
         }
     }
 
-    fun isToastSuppressed(context: android.content.Context): Boolean = try {
-        android.provider.Settings.Secure.getInt(
-            context.contentResolver,
-            "clipboard_show_access_notifications",
-            1,
-        ) == 0
-    } catch (e: Throwable) {
-        false
-    }
+    fun isToastSuppressed(context: android.content.Context): Boolean =
+        ClipboardNoticeSetting.suppressed(context)
 
     private fun clipboardService(): Any {
         service?.let { return it }
@@ -263,34 +259,19 @@ object ShizukuClipboard {
         return resolved
     }
 
-    /**
-     * Call an `IClipboard` method whose exact signature depends on the API
-     * level, filling each parameter from its declared type.
-     *
-     * The order AOSP has used throughout is `(…, String callingPackage,
-     * [String attributionTag], int userId, [int deviceId])`, so the first
-     * `String` is the calling package and the first `int` the user id. Anything
-     * else is passed as a type-appropriate zero, which is what every one of
-     * these parameters defaults to.
-     */
+    /** Call an `IClipboard` method, whatever shape this API level gave it. */
     fun invoke(target: Any, name: String, vararg specific: Any): Any? {
-        val method = target.javaClass.methods.firstOrNull { it.name == name }
+        val candidates = HiddenApi.candidates(target.javaClass.methods, name)
+        val method = candidates.firstOrNull()
             ?: throw NoSuchMethodException("IClipboard has no $name on API ${Build.VERSION.SDK_INT}")
-        var sawString = false
-        var sawInt = false
-        val args = method.parameterTypes.map { type ->
-            val given = specific.firstOrNull { type.isAssignableFrom(it.javaClass) }
-            when {
-                given != null -> given
-                type == String::class.java && !sawString -> { sawString = true; SHELL }
-                type == String::class.java -> null
-                (type == Int::class.javaPrimitiveType) && !sawInt -> { sawInt = true; USER_SYSTEM }
-                type == Int::class.javaPrimitiveType -> DEVICE_ID_DEFAULT
-                type == Boolean::class.javaPrimitiveType -> false
-                else -> null
-            }
+        if (candidates.size > 1) {
+            // Reported rather than absorbed: the argument vector is built from
+            // one signature, so an interface that grew an overload is something
+            // the device spike has to learn about.
+            Log.w(TAG, "IClipboard.$name is overloaded on API ${Build.VERSION.SDK_INT}")
         }
-        return method.invoke(target, *args.toTypedArray())
+        val args = HiddenApi.arguments(method, specific, SHELL, USER_SYSTEM, DEVICE_ID_DEFAULT)
+        return method.invoke(target, *args)
     }
 
     /** Exposed so [ClipListener] can reach the same proxy. */
