@@ -10,24 +10,21 @@ use zeroize::Zeroize;
 use super::PeerStoreError;
 use crate::transport::TOKEN_LEN;
 
-/// One paired device.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Peer {
     /// [`crate::PairingToken::pairing_id`] — the non-secret, stable key for
     /// this pairing. Safe to log.
     pub pairing_id: String,
 
-    /// What the user calls this device. Cosmetic, peer-supplied, never trusted
-    /// for anything.
+    /// Cosmetic, peer-supplied, never trusted for anything.
     pub name: String,
 
-    /// The Noise pre-shared key. **This is the secret.** Serialised as hex
-    /// because JSON has no byte type; never rendered by `Debug`.
+    /// The Noise pre-shared key. **This is the secret**, never rendered by
+    /// `Debug`.
     #[serde(with = "psk_hex")]
     pub psk: [u8; TOKEN_LEN],
 
-    /// Where this peer was last reached, if it ever was. A hint that saves a
-    /// discovery round; always re-verified by the handshake.
+    /// A hint that saves a discovery round; always re-verified by the handshake.
     pub last_addr: Option<SocketAddr>,
 
     /// Unix milliseconds of the last successful contact. Written from the
@@ -53,22 +50,29 @@ impl Peer {
     }
 
     pub(super) fn validate(&self) -> Result<(), PeerStoreError> {
-        if self.pairing_id.is_empty() {
-            return Err(PeerStoreError::Invalid("pairing id is empty"));
-        }
-        if self.pairing_id.len() > 128 {
-            return Err(PeerStoreError::Invalid("pairing id is implausibly long"));
-        }
-        // An all-zero PSK is what an uninitialised buffer looks like, and
-        // storing one would pair this device with anyone who guessed the
-        // obvious. Fail closed rather than persist it. Constant-time, because
-        // the comparison is against key material.
+        validate_pairing_id(&self.pairing_id)?;
+        // An all-zero PSK is an uninitialised buffer, and storing one would pair
+        // this device with anyone who guessed the obvious. Fail closed.
+        // Constant-time: the comparison is against key material.
         if bool::from(self.psk[..].ct_eq(&[0u8; TOKEN_LEN][..])) {
             return Err(PeerStoreError::Invalid("pre-shared key is all zeroes"));
         }
         Ok(())
     }
 }
+
+/// Shared with the revocation list, which is keyed by the same ids.
+pub(super) fn validate_pairing_id(id: &str) -> Result<(), PeerStoreError> {
+    if id.is_empty() {
+        return Err(PeerStoreError::Invalid("pairing id is empty"));
+    }
+    if id.len() > MAX_PAIRING_ID_LEN {
+        return Err(PeerStoreError::Invalid("pairing id is implausibly long"));
+    }
+    Ok(())
+}
+
+pub(super) const MAX_PAIRING_ID_LEN: usize = 128;
 
 /// Wipes the pre-shared key when the record goes out of scope (port manifest
 /// 02, I-12). Consequence: fields cannot be moved out individually
@@ -92,10 +96,8 @@ impl fmt::Debug for Peer {
     }
 }
 
-/// Hex for the PSK, because JSON has no byte type.
-///
-/// `hex` is already a workspace dependency; port manifest 02 records ~6 sites
-/// where v1 hand-rolled this while depending on the same crate.
+/// Hex for the PSK, because JSON has no byte type. `hex` is already a workspace
+/// dependency; port manifest 02 records ~6 sites where v1 hand-rolled it anyway.
 mod psk_hex {
     use super::TOKEN_LEN;
     use serde::de::Error as _;
@@ -105,7 +107,10 @@ mod psk_hex {
         value: &[u8; TOKEN_LEN],
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&hex::encode(value))
+        // `hex::encode` returns an ordinary `String`: unwrapped, the key
+        // outlives the write in a buffer nothing wipes.
+        let encoded = zeroize::Zeroizing::new(hex::encode(value));
+        serializer.serialize_str(&encoded)
     }
 
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(
