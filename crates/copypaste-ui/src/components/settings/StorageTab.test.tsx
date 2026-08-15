@@ -12,7 +12,7 @@
  * sure?", and cancelling has to reach nothing.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 
 import { StorageTab } from "@/components/settings/StorageTab";
 import type { ExportReport, ImportPreview } from "@/lib/ipc";
@@ -25,20 +25,26 @@ const applyImportHistory = vi.fn();
 const cancelImportHistory = vi.fn();
 const backupDatabase = vi.fn();
 const restoreDatabase = vi.fn();
+const deleteAll = vi.fn();
+const historyCeiling = vi.fn();
 
 const toasts: string[] = [];
 const toastKinds: string[] = [];
+const toastOptions: unknown[] = [];
+const dismiss = vi.fn();
 
 vi.mock("sonner", () => {
-  const record = (kind: string) => (message: string) => {
+  const record = (kind: string) => (message: string, options?: unknown) => {
     toasts.push(message);
     toastKinds.push(kind);
+    toastOptions.push(options);
   };
   return {
     toast: Object.assign(record("default"), {
       success: record("success"),
       warning: record("warning"),
       error: record("error"),
+      dismiss: (...args: unknown[]) => dismiss(...args),
     }),
   };
 });
@@ -54,6 +60,8 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     cancelImportHistory: (token: string) => cancelImportHistory(token),
     backupDatabase: () => backupDatabase(),
     restoreDatabase: () => restoreDatabase(),
+    deleteAll: (through?: number) => deleteAll(through),
+    historyCeiling: () => historyCeiling(),
   };
 });
 
@@ -74,6 +82,10 @@ function preview(over: Partial<ImportPreview> = {}): ImportPreview {
 beforeEach(() => {
   toasts.length = 0;
   toastKinds.length = 0;
+  toastOptions.length = 0;
+  dismiss.mockReset();
+  deleteAll.mockReset().mockResolvedValue(3);
+  historyCeiling.mockReset().mockResolvedValue(42);
   getStatus.mockReset().mockResolvedValue(status());
   exportHistory.mockReset().mockResolvedValue(report());
   prepareImportHistory.mockReset().mockResolvedValue(preview());
@@ -319,4 +331,40 @@ it("names no path anywhere (INV-12)", async () => {
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
   }
   expect(container.innerHTML).not.toMatch(/\/Users\/|\/home\/|~\//);
+});
+
+/** DMY-168. Settings is the second clear-all entry point, and the one a user
+ *  reaches for "clear everything" — it has to be as undoable as the list's. */
+describe("clear all", () => {
+  function undoAction(): { label: string; onClick: () => void } | undefined {
+    const options = toastOptions.find(
+      (o) => (o as { action?: { label?: string } })?.action?.label === "Undo",
+    );
+    return (options as { action: { label: string; onClick: () => void } })?.action;
+  }
+
+  it("defers the delete behind an undo window rather than clearing at once", async () => {
+    const { user } = withUser(<StorageTab />);
+    await user.click(screen.getByRole("button", { name: /clear history/i }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(deleteAll).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: /clear all/i }));
+
+    await waitFor(() => expect(historyCeiling).toHaveBeenCalled());
+    expect(deleteAll).not.toHaveBeenCalled();
+    expect(undoAction()).toBeTruthy();
+  });
+
+  it("never calls the delete when the window is undone", async () => {
+    const { user } = withUser(<StorageTab />);
+    await user.click(screen.getByRole("button", { name: /clear history/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: /clear all/i }));
+    await waitFor(() => expect(undoAction()).toBeTruthy());
+
+    undoAction()!.onClick();
+
+    expect(deleteAll).not.toHaveBeenCalled();
+  });
 });
