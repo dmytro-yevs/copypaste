@@ -357,7 +357,7 @@ describe("clear all", () => {
   });
 
   it("never calls the delete when the window is undone", async () => {
-    const { user } = withUser(<StorageTab />);
+    const { user, unmount } = withUser(<StorageTab />);
     await user.click(screen.getByRole("button", { name: /clear history/i }));
     const dialog = await screen.findByRole("alertdialog");
     await user.click(within(dialog).getByRole("button", { name: /clear all/i }));
@@ -365,6 +365,10 @@ describe("clear all", () => {
 
     undoAction()!.onClick();
 
+    // Unmounting commits whatever is still pending (F11), so a batch the undo
+    // failed to drop would reach delete_all right here. Asserting before the
+    // unmount proves nothing: the call is 5s away and no timers are faked.
+    unmount();
     expect(deleteAll).not.toHaveBeenCalled();
   });
 });
