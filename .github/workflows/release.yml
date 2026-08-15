@@ -812,7 +812,7 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: ./scripts/release/android-smoke-release.sh
+          script: bash ./scripts/release/android-smoke-release.sh
         env:
           APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
           SMOKE_OUT: artifacts/release-android-smoke-api33
