@@ -17,34 +17,19 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# https://bford.info/cachedir/ — a tag file begins with exactly these 43 bytes.
-CACHEDIR_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
+from cargo_target import CACHEDIR_SIGNATURE, is_build_active, is_cache_dir  # noqa: F401
 
 # Rebuilt from a manifest that sits beside them, so nothing here is a last copy.
 ALWAYS_GENERATED = frozenset({"node_modules", "__pycache__"})
-
-# How deep a `.cargo-lock` can sit: `<profile>/` for a plain build,
-# `<triple>/<profile>/` once `--target` is given.
-_LOCK_GLOBS = ("*/.cargo-lock", "*/*/.cargo-lock")
 
 
 @dataclass(frozen=True)
 class Verdict:
     removable: bool
     reason: str
-
-
-def is_cache_dir(path: Path) -> bool:
-    tag = path / "CACHEDIR.TAG"
-    try:
-        with tag.open("rb") as handle:
-            return handle.read(len(CACHEDIR_SIGNATURE)) == CACHEDIR_SIGNATURE
-    except OSError:
-        return False
 
 
 def is_contained(path: Path, roots: list[Path]) -> bool:
@@ -58,45 +43,6 @@ def is_contained(path: Path, roots: list[Path]) -> bool:
         root = root.resolve()
         if resolved != root and root in resolved.parents:
             return True
-    return False
-
-
-def is_build_active(target: Path) -> bool:
-    """True if cargo holds a build lock, or we cannot prove that it does not.
-
-    Locks are discovered, not listed. Naming `debug` and `release` missed both
-    `--target <triple>` builds and `[profile.evidence]`, and each miss deletes a
-    cache under a running build.
-    """
-    try:
-        locks = [lock for pattern in _LOCK_GLOBS for lock in target.glob(pattern)]
-    except OSError:
-        return True
-    for lock in locks:
-        try:
-            handle = lock.open("r+b")
-        except FileNotFoundError:
-            # The only benign miss. `Path.exists()` cannot be used to pre-filter:
-            # it reports a permission error as absence, which is a fail-open step
-            # inside a function whose whole job is to fail closed.
-            continue
-        except OSError:
-            return True
-        try:
-            if sys.platform == "win32":
-                import msvcrt
-
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        except OSError:
-            return True
-        finally:
-            handle.close()
     return False
 
 
