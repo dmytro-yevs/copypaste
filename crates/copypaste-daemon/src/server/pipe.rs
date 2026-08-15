@@ -12,6 +12,11 @@ use tracing::info;
 use widestring::U16CString;
 use win_security_identifier::{GetCurrentSid, SecurityIdentifier};
 
+/// Names no path and no account, and does not say who the holder is, because
+/// binding cannot tell.
+pub const MSG_NAME_TAKEN: &str =
+    "the local IPC endpoint is already held by another process; quit any running CopyPaste and retry";
+
 /// Create the pipe, restricted to this account, and refuse to be the second
 /// daemon on it.
 pub fn bind(path: &Path) -> anyhow::Result<Listener> {
@@ -25,7 +30,12 @@ pub fn bind(path: &Path) -> anyhow::Result<Listener> {
         .create_tokio_duplex::<Bytes>()
         .map_err(|e| {
             if e.kind() == io::ErrorKind::PermissionDenied {
-                anyhow::anyhow!("another copypaste daemon is already listening")
+                // Not "another copypaste daemon": `FILE_FLAG_FIRST_PIPE_INSTANCE`
+                // refuses the same way whether the holder is our own second
+                // instance or another account that took the name first, and the
+                // pipe namespace is machine-global. Claiming the benign case
+                // would talk a user out of the one that matters (DMY-179).
+                anyhow::anyhow!(MSG_NAME_TAKEN)
             } else {
                 anyhow::Error::new(e).context("create the daemon pipe")
             }
@@ -141,8 +151,13 @@ mod tests {
         let second = bind(&path).expect_err("the second must not");
 
         let shown = format!("{second:#}");
-        assert!(shown.contains("already listening"), "{shown}");
+        assert_eq!(shown, MSG_NAME_TAKEN);
         assert!(!shown.contains('\\'), "rule 4: no path in a user message");
+        // The holder is unknown at bind time, so the message must not name one.
+        assert!(
+            !shown.contains("daemon is already"),
+            "a squatted name would be reported as our own second instance: {shown}"
+        );
 
         drop(first);
         bind(&path).expect("the name is free once the listener is dropped");
