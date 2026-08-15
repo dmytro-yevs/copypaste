@@ -121,7 +121,8 @@ fn requires_ready(method: &Method) -> bool {
         | Method::ImagePreview { .. }
         | Method::Add { .. }
         | Method::Delete { .. }
-        | Method::DeleteAll
+        | Method::DeleteAll { .. }
+        | Method::HistoryCeiling
         | Method::Pin { .. }
         | Method::ReorderPinned { .. }
         | Method::SetDeviceName { .. }
@@ -237,7 +238,8 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::ImagePreview { id: item_id } => items::image_preview(state, id, &item_id),
         Method::Add { content } => items::add(state, id, &content),
         Method::Delete { id: item_id } => items::delete(state, id, &item_id),
-        Method::DeleteAll => items::delete_all(state, id),
+        Method::DeleteAll { through } => items::delete_all(state, id, through),
+        Method::HistoryCeiling => items::history_ceiling(state, id),
         Method::Pin {
             id: item_id,
             pinned,
@@ -357,7 +359,7 @@ mod tests {
             content: "x".into()
         }));
         assert!(requires_ready(&Method::Delete { id: "x".into() }));
-        assert!(requires_ready(&Method::DeleteAll));
+        assert!(requires_ready(&Method::DeleteAll { through: None }));
         assert!(requires_ready(&Method::Pin {
             id: "x".into(),
             pinned: true

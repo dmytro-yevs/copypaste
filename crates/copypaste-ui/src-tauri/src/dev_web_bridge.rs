@@ -74,6 +74,11 @@ struct IdArgs {
     id: String,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct ClearArgs {
+    through: Option<i64>,
+}
+
 #[derive(Debug, Deserialize)]
 struct BundleIdArgs {
     #[serde(rename = "bundleId")]
@@ -234,7 +239,19 @@ async fn call(
                 .map_err(failure)
                 .and_then(value)
         }
-        "delete_all" => backend.clear().await.map_err(failure).and_then(value),
+        "delete_all" => {
+            let args: ClearArgs = parse(request.args).unwrap_or_default();
+            backend
+                .clear(args.through)
+                .await
+                .map_err(failure)
+                .and_then(value)
+        }
+        "history_ceiling" => backend
+            .history_ceiling()
+            .await
+            .map_err(failure)
+            .and_then(value),
         "set_pinned" => {
             let args: PinArgs = parse(request.args)?;
             backend
@@ -412,6 +429,7 @@ mod tests {
             "get_source_app_icon",
             "delete_item",
             "delete_all",
+            "history_ceiling",
             "set_pinned",
             "status",
             "set_device_name",

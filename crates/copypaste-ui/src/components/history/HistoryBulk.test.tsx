@@ -16,7 +16,7 @@
  * not exist.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 
 import { HistoryView } from "@/components/history/HistoryView";
 import { item, items, page, status, withUser } from "@/test/harness";
@@ -32,12 +32,14 @@ const deleteItem = vi.fn();
 const toastSuccess = vi.fn();
 const toastWarning = vi.fn();
 const toastError = vi.fn();
+const toastDismiss = vi.fn();
 
 vi.mock("sonner", async (importOriginal) => {
   const actual = await importOriginal<typeof import("sonner")>();
   return {
     ...actual,
     toast: Object.assign((...a: unknown[]) => toastSuccess(...a), {
+      dismiss: (...a: unknown[]) => toastDismiss(...a),
       success: (...a: unknown[]) => toastSuccess(...a),
       warning: (...a: unknown[]) => toastWarning(...a),
       error: (...a: unknown[]) => toastError(...a),
@@ -270,10 +272,20 @@ describe("the bulk pin toggle", () => {
   });
 });
 
+/** The Toaster is not mounted under test, so the undo control is read off the
+ *  toast call rather than the DOM — as in useDeferredDelete.test.tsx. */
+function undoAction(): { label: string; onClick: () => void } {
+  const call = [...toastSuccess.mock.calls]
+    .reverse()
+    .find(([, options]) => (options as { action?: { label?: string } })?.action?.label === "Undo");
+  if (call === undefined) throw new Error("no toast offered an Undo action");
+  return (call[1] as { action: { label: string; onClick: () => void } }).action;
+}
+
 describe("bulk delete", () => {
-  /** No undo window, unlike the single-row delete — so the dialog is the only
-   *  gate in front of it (§3.1.9). */
-  it("asks before deleting, and says the undo does not apply", async () => {
+  /** DMY-168: the dialog is no longer the only gate, but it stays — the window
+   *  is five seconds and the blast radius is the whole selection. */
+  it("asks before deleting, and offers an undo", async () => {
     const { user } = withUser(<HistoryView />);
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
     await selectRows(user, 2);
@@ -283,12 +295,35 @@ describe("bulk delete", () => {
 
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Delete 2 items?");
-    expect(dialog.textContent).toContain("cannot be undone");
-    // Nothing has gone yet.
+    expect(dialog.textContent).toContain("undo it");
     expect(deleteItem).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole("button", { name: /^delete$/i }));
-    await waitFor(() => expect(deleteItem).toHaveBeenCalledTimes(2));
+
+    // The rows go at once; the delete itself does not.
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
+    expect(deleteItem).not.toHaveBeenCalled();
+    expect(undoAction()).toBeTruthy();
+  });
+
+  /** The whole point of DMY-168: pressing undo means the rows were never
+   *  deleted, because a committed delete NULLs the ciphertext and cannot be
+   *  reconstructed. */
+  it("restores the selection and never calls the delete when undone", async () => {
+    const { user } = withUser(<HistoryView />);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    await selectRows(user, 2);
+
+    const bar = screen.getByRole("region", { name: /selection actions/i });
+    await user.click(within(bar).getByRole("button", { name: /delete/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: /^delete$/i }));
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
+
+    await act(async () => undoAction().onClick());
+
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    expect(deleteItem).not.toHaveBeenCalled();
   });
 });
 
