@@ -92,7 +92,10 @@ describe("a startup that never reaches the first render", () => {
       throw new Error(reason);
     });
     await import("@/main");
-    await vi.waitFor(() => notice());
+    // `vi.resetModules()` means the whole entry graph is re-evaluated per boot,
+    // so this waits on real work rather than on a poll; the 1000ms default is a
+    // budget the graph has outgrown.
+    await vi.waitFor(() => notice(), { timeout: 5000 });
   }
 
   test("shows the polyfill stage when the legacy polyfills cannot load", async () => {
@@ -124,7 +127,10 @@ describe("a component that throws during the first render", () => {
       },
     }));
     await import("@/main");
-    await vi.waitFor(() => notice());
+    // `vi.resetModules()` means the whole entry graph is re-evaluated per boot,
+    // so this waits on real work rather than on a poll; the 1000ms default is a
+    // budget the graph has outgrown.
+    await vi.waitFor(() => notice(), { timeout: 5000 });
 
     expect(notice().dataset.startupFailure).toBe("render");
     expect(notice().textContent).toContain("could not draw its first screen");
