@@ -34,7 +34,7 @@ mod wipe;
 
 pub use engine::{Detector, DetectorError};
 pub use finding::{Finding, Severity, SpannedFinding};
-pub use origin::is_password_manager_app;
+pub use origin::{default_excluded_app_ids, is_password_manager_app, Platform};
 pub use presentation::MAX_SURFACED_SENSITIVE_SPANS;
 pub use purge::{purge_indexed_secrets, purge_indexed_secrets_in_transaction, PurgeReport};
 pub use redact::redact_spans;

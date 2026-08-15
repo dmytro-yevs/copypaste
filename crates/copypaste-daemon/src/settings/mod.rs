@@ -24,6 +24,7 @@ mod record;
 use std::ops::Deref;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
+use copypaste_core::sensitive::{default_excluded_app_ids, Platform};
 use copypaste_ipc::{ConfigData, ConfigError, ConfigPatch, SettingsHealth};
 use tracing::warn;
 
@@ -31,6 +32,59 @@ use crate::meta::{Meta, MetaError};
 
 /// `sync_device_state` key holding the JSON record.
 const KEY_SETTINGS: &str = "settings";
+
+/// `sync_device_state` key recording that the platform defaults were applied.
+///
+/// Its own key rather than a [`ConfigData`] field, because every `ConfigData`
+/// field is also a [`ConfigPatch`] field that `set_config` accepts: a marker
+/// living there would be writable over IPC, and clearing it would force the
+/// defaults back after a user had removed them.
+const KEY_EXCLUSIONS_SEEDED: &str = "default_exclusions_seeded";
+
+/// The platform whose defaults this build seeds.
+fn build_platform() -> Platform {
+    if cfg!(target_os = "macos") {
+        Platform::MacOs
+    } else if cfg!(target_os = "windows") {
+        Platform::Windows
+    } else {
+        Platform::Android
+    }
+}
+
+/// Apply the platform's default exclusions, once ever.
+///
+/// Gated on the marker, never on the list being empty: [`record`] documents an
+/// empty list as the fail-*open* answer, so emptiness cannot also carry "the
+/// user cleared this".
+///
+/// An unreadable marker counts as **seeded**, inverting this file's usual
+/// instinct on purpose — repopulating would overrule a removal, and the removal
+/// is the gesture this exists to honour.
+///
+/// One `set_state_all`: a crash between the two writes would leave a seeded
+/// list with no marker, and seed again next launch.
+fn seed_default_exclusions(meta: &Meta, config: &mut ConfigData, platform: Platform) {
+    match meta.state(KEY_EXCLUSIONS_SEEDED) {
+        Ok(None) => {}
+        Ok(Some(_)) | Err(_) => return,
+    }
+    let seeded: Vec<String> = default_excluded_app_ids(platform)
+        .iter()
+        .map(|id| (*id).to_string())
+        .collect();
+    let mut next = config.clone();
+    next.excluded_app_bundle_ids = seeded;
+    let Ok(encoded) = serde_json::to_string(&next) else {
+        return;
+    };
+    if meta
+        .set_state_all(&[(KEY_SETTINGS, &encoded), (KEY_EXCLUSIONS_SEEDED, "1")])
+        .is_ok()
+    {
+        *config = next;
+    }
+}
 
 /// The settings, readable from anywhere and replaced only as a whole.
 ///
@@ -84,7 +138,7 @@ impl Settings {
     /// daemon that cannot be reached to fix it. What it will not do is run on
     /// the *defaults*, which are the open value for every privacy field.
     pub fn load(meta: &Meta) -> Self {
-        let (config, health) = match meta.state(KEY_SETTINGS) {
+        let (mut config, health) = match meta.state(KEY_SETTINGS) {
             Ok(Some(raw)) => record::read(&raw),
             Ok(None) => (ConfigData::default(), SettingsHealth::default()),
             Err(e) => {
@@ -98,6 +152,11 @@ impl Settings {
                 )
             }
         };
+        // Not when the read was degraded: rewriting the record would overwrite
+        // the very bytes that failed, losing whatever else was still in them.
+        if !health.is_degraded() {
+            seed_default_exclusions(meta, &mut config, build_platform());
+        }
         Self {
             current: RwLock::new(SettingsState {
                 config,
@@ -220,6 +279,75 @@ mod tests {
 
     use super::*;
     use crate::testutil::test_state;
+
+    /// DMY-170. A fresh install starts protected rather than open.
+    #[test]
+    fn a_fresh_config_seeds_the_platform_defaults() {
+        let (state, _dir) = test_state("seed-fresh");
+        // `test_state` loads settings, which seeds and marks; a fresh install
+        // has neither.
+        state.meta.clear_state(&[KEY_EXCLUSIONS_SEEDED]).unwrap();
+        let mut config = ConfigData::default();
+        seed_default_exclusions(&state.meta, &mut config, Platform::MacOs);
+
+        assert_eq!(
+            config.excluded_app_bundle_ids,
+            default_excluded_app_ids(Platform::MacOs)
+        );
+        assert_eq!(state.meta.state(KEY_EXCLUSIONS_SEEDED).unwrap().as_deref(), Some("1"));
+    }
+
+    /// The gesture the whole issue is about: an emptied list stays emptied.
+    ///
+    /// Gated on the marker, never on the list, because an empty list is already
+    /// the fail-open answer and cannot also mean "the user cleared this".
+    #[test]
+    fn an_emptied_list_is_never_repopulated() {
+        let (state, _dir) = test_state("seed-emptied");
+        state.meta.clear_state(&[KEY_EXCLUSIONS_SEEDED]).unwrap();
+        let mut config = ConfigData::default();
+        seed_default_exclusions(&state.meta, &mut config, Platform::MacOs);
+        assert!(!config.excluded_app_bundle_ids.is_empty());
+
+        // The user removes every entry.
+        config.excluded_app_bundle_ids.clear();
+        seed_default_exclusions(&state.meta, &mut config, Platform::MacOs);
+
+        assert!(config.excluded_app_bundle_ids.is_empty());
+    }
+
+    /// Android ships empty by platform evidence, not by omission.
+    #[test]
+    fn android_seeds_an_empty_list_and_still_marks_it_done() {
+        let (state, _dir) = test_state("seed-android");
+        state.meta.clear_state(&[KEY_EXCLUSIONS_SEEDED]).unwrap();
+        let mut config = ConfigData::default();
+        seed_default_exclusions(&state.meta, &mut config, Platform::Android);
+
+        assert!(config.excluded_app_bundle_ids.is_empty());
+        assert_eq!(state.meta.state(KEY_EXCLUSIONS_SEEDED).unwrap().as_deref(), Some("1"));
+    }
+
+    /// A seeded list survives a restart, and the restart does not seed again.
+    #[test]
+    fn a_removal_survives_a_restart() {
+        let (state, dir) = test_state("seed-restart");
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &ConfigPatch {
+                    excluded_app_bundle_ids: Some(Vec::new()),
+                    ..Default::default()
+                },
+            )
+            .expect("an empty list is valid");
+
+        let (restarted, _dir) =
+            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "seed-restart");
+
+        assert!(restarted.settings.get().excluded_app_bundle_ids.is_empty());
+    }
 
     #[test]
     fn settings_round_trip_through_the_database() {

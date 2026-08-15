@@ -42,21 +42,51 @@ const CREDENTIAL_STORE_FRAGMENTS: [&str; 11] = [
     "strongbox",
 ];
 
+/// macOS bundle identifiers, as each vendor ships them.
+const MACOS_CREDENTIAL_STORES: [&str; 7] = [
+    "com.1password.1password",
+    "com.agilebits.onepassword7",
+    "com.bitwarden.desktop",
+    "org.keepassxc.keepassxc",
+    "com.dashlane.dashlane",
+    "com.lastpass.lastpass",
+    "com.apple.passwords",
+];
+
+/// The identifiers a fresh install excludes from capture, per platform.
+///
+/// The exact entries above, never [`CREDENTIAL_STORE_FRAGMENTS`]: this list is
+/// user-editable, and a fragment would keep matching the entry the user just
+/// deleted, so removal would not remove.
+///
+/// Narrower than the sensitivity floor on purpose. The floor still catches
+/// everything it catches today whatever the user does here; exclusion only adds
+/// the never-captured guarantee for identifiers we can name exactly.
+pub fn default_excluded_app_ids(platform: Platform) -> &'static [&'static str] {
+    match platform {
+        Platform::MacOs => &MACOS_CREDENTIAL_STORES,
+        Platform::Windows => &WINDOWS_CREDENTIAL_STORES,
+        // No opt-out marker and no stable per-app identity to key on from the
+        // clipboard service; DMY-170 records the evidence.
+        Platform::Android => &[],
+    }
+}
+
+/// The shipped platforms ([ADR-0013](../../../../docs/adr/0013-windows-as-a-third-platform.md)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    MacOs,
+    Windows,
+    Android,
+}
+
 /// Credential managers are an independent sensitivity floor: their copied
 /// values must never enter full-text search even when their contents do not
 /// match a detector rule.
 pub fn is_password_manager_app(bundle_id: &str) -> bool {
     let bundle_id = bundle_id.trim().to_ascii_lowercase();
-    if matches!(
-        bundle_id.as_str(),
-        "com.1password.1password"
-            | "com.agilebits.onepassword7"
-            | "com.bitwarden.desktop"
-            | "org.keepassxc.keepassxc"
-            | "com.dashlane.dashlane"
-            | "com.lastpass.lastpass"
-            | "com.apple.passwords"
-    ) || WINDOWS_CREDENTIAL_STORES.contains(&bundle_id.as_str())
+    if MACOS_CREDENTIAL_STORES.contains(&bundle_id.as_str())
+        || WINDOWS_CREDENTIAL_STORES.contains(&bundle_id.as_str())
     {
         return true;
     }
@@ -73,6 +103,38 @@ pub fn is_password_manager_app(bundle_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The seed is a strict subset of the floor. If it ever is not, an entry a
+    /// user removed from the exclusion list would still be a credential store
+    /// the floor forces sensitive — two mechanisms disagreeing about one app.
+    #[test]
+    fn every_seeded_identifier_is_also_a_credential_store() {
+        for platform in [Platform::MacOs, Platform::Windows, Platform::Android] {
+            for id in default_excluded_app_ids(platform) {
+                assert!(is_password_manager_app(id), "{id}");
+            }
+        }
+    }
+
+    /// Fragments stay out: they are substring rules, and this list is edited by
+    /// hand. Removing an entry has to actually remove it.
+    #[test]
+    fn the_seed_carries_no_substring_rules() {
+        for platform in [Platform::MacOs, Platform::Windows] {
+            let seeded = default_excluded_app_ids(platform);
+            assert!(!seeded.is_empty());
+            for fragment in CREDENTIAL_STORE_FRAGMENTS {
+                assert!(!seeded.contains(&fragment), "{fragment}");
+            }
+        }
+    }
+
+    /// Android ships empty, and that is a claim about the platform rather than
+    /// an oversight — the UI has to say so (DMY-170).
+    #[test]
+    fn android_seeds_nothing() {
+        assert!(default_excluded_app_ids(Platform::Android).is_empty());
+    }
 
     #[test]
     fn macos_bundle_identifiers_are_recognised() {
