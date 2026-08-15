@@ -7,6 +7,7 @@ import { IpcFailure } from "@/lib/errors";
 import * as platform from "@/lib/platform";
 import { useUi } from "@/store/ui";
 import { captureSnapshot, testClient, withUser } from "@/test/harness";
+import { resetViewportWidth, setViewportWidth } from "@/test/viewport";
 
 const captureState = vi.hoisted(() => vi.fn());
 
@@ -23,6 +24,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  resetViewportWidth();
 });
 
 describe("desktop shell", () => {
@@ -62,6 +64,36 @@ describe("desktop shell", () => {
     await user.click(screen.getByRole("button", { name: "Devices" }));
 
     expect(await screen.findByRole("heading", { name: "Devices" })).not.toBeNull();
+  });
+});
+
+/**
+ * DMY-154: navigation sat where the user agent put it. A tablet, a foldable and
+ * a landscape phone all got the bottom bar; a narrow desktop window got a rail
+ * it had no room for.
+ */
+describe("the shell chrome", () => {
+  it("lays a wide Android window out beside its navigation", () => {
+    vi.spyOn(platform, "isAndroidPlatform").mockReturnValue(true);
+    setViewportWidth(891);
+    const { container } = withUser(<App />);
+    const root = container.firstElementChild!;
+
+    expect(root.getAttribute("data-size-class")).toBe("expanded");
+    expect(root.className).toContain("flex-row");
+    // Width moved the navigation; the ambient desktop treatment is still the
+    // platform's own and stays off Android.
+    expect(root.classList.contains("app-surface--desktop")).toBe(false);
+  });
+
+  it("lays a narrow desktop window out above its navigation", () => {
+    setViewportWidth(360);
+    const { container } = withUser(<App />);
+    const root = container.firstElementChild!;
+
+    expect(root.getAttribute("data-size-class")).toBe("compact");
+    expect(root.className).toContain("flex-col-reverse");
+    expect(root.classList.contains("app-surface--desktop")).toBe(true);
   });
 });
 

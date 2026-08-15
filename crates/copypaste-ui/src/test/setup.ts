@@ -10,11 +10,16 @@
  * test (INV-5).
  */
 import { afterEach, vi } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 
 // `globals: false` means React Testing Library does not register its own
 // cleanup, so a second render in the same file would stack on the first.
 afterEach(cleanup);
+
+// A lazy screen's first `import()` is a transform, not a fetch, and on a loaded
+// runner it does not fit the 1000ms default: adding two renders to a file was
+// enough to fail a `findBy` on an unrelated screen once in six runs.
+configure({ asyncUtilTimeout: 5000 });
 
 const VIEWPORT_PX = 800;
 
@@ -60,18 +65,61 @@ if (!window.PointerEvent) {
   vi.stubGlobal("PointerEvent", PointerEventStub);
 }
 
-if (!window.matchMedia) {
-  window.matchMedia = (query) => ({
-    matches: false,
+/**
+ * jsdom parses a media query and then never evaluates it: every query answers
+ * `matches: false` at every window size. A width-driven layout would therefore
+ * test as compact everywhere, which is the vacuous pass this file exists to
+ * prevent. `(min-width: Npx)` is answered from `window.innerWidth`, which jsdom
+ * does maintain, and re-answered on `resize`. Every other query keeps jsdom's
+ * answer.
+ */
+const MIN_WIDTH_QUERY = /^\(min-width:\s*(\d+)px\)$/;
+type QueryListener = (event: MediaQueryListEvent) => void;
+const liveQueries = new Set<() => void>();
+
+function widthAwareMatchMedia(query: string): MediaQueryList {
+  const minWidth = MIN_WIDTH_QUERY.exec(query);
+  const listeners = new Set<QueryListener>();
+  const answer = () =>
+    minWidth ? window.innerWidth >= Number(minWidth[1]) : false;
+  const list = {
     media: query,
+    matches: answer(),
     onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    addListener: (listener: QueryListener) => {
+      listeners.add(listener);
+      liveQueries.add(reevaluate);
+    },
+    removeListener: (listener: QueryListener) => {
+      listeners.delete(listener);
+      if (listeners.size === 0) liveQueries.delete(reevaluate);
+    },
+    addEventListener: (_type: string, listener: QueryListener) =>
+      list.addListener(listener),
+    removeEventListener: (_type: string, listener: QueryListener) =>
+      list.removeListener(listener),
     dispatchEvent: () => false,
-  });
+  };
+  function reevaluate() {
+    const next = answer();
+    if (next === list.matches) return;
+    list.matches = next;
+    for (const listener of listeners) {
+      listener({ matches: next, media: query } as MediaQueryListEvent);
+    }
+  }
+  return list as unknown as MediaQueryList;
 }
+
+Object.defineProperty(window, "matchMedia", {
+  configurable: true,
+  writable: true,
+  value: widthAwareMatchMedia,
+});
+
+window.addEventListener("resize", () => {
+  for (const reevaluate of [...liveQueries]) reevaluate();
+});
 
 const storage = new Map<string, string>();
 const localStorageStub: Storage = {
