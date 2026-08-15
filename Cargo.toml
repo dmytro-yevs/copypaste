@@ -147,9 +147,13 @@ codegen-units = 16
 
 [profile.dev]
 # `target/debug` reached 22 GB and filled the disk twice in one session. Full
-# debug info is most of that, and cargo never collects stale artifacts, so a
-# long session accumulates a test binary per code revision — 57 of them over
-# 50 MB each, 5.4 GB, at one point. Line tables keep backtraces useful.
+# debug info is most of that; line tables keep backtraces useful.
+#
+# This bounds artifact size, not artifact count, and the two were confused
+# here. `-Cmetadata` ignores source text, so a code revision overwrites in
+# place — six measured revisions moved the tree 141 bytes. Cargo retains a
+# generation per *configuration* instead, and collects none of them: see
+# ADR-0026 and `scripts/target-budget.py`.
 debug = "line-tables-only"
 
 [profile.test]
