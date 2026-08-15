@@ -42,8 +42,27 @@ class ClipQueueTest {
         assertTrue(ClipQueue.drain().first.isEmpty())
     }
 
+    /**
+     * `intake::Buffer::discard_all` counts the clips Rust throws away for the
+     * same reason, and this queue used to zero its tally instead. That erased
+     * drops which happened before private mode and had never been reported, so
+     * history had a hole nobody was told about.
+     */
+    @Test
+    fun enteringPrivateModeCountsWhatItDiscardsRatherThanZeroingTheTally() {
+        ClipQueue.offer("waiting for the drain", CaptureSource.IN_APP)
+
+        ClipQueue.setPrivateMode(true)
+        ClipQueue.setPrivateMode(false)
+
+        assertEquals(1L, ClipQueue.drain().second)
+    }
+
     private fun reset() {
         ClipQueue.setPrivateMode(true)
         ClipQueue.setPrivateMode(false)
+        // The tally now survives private mode, so it is the drain that clears
+        // it between tests.
+        ClipQueue.drain()
     }
 }
