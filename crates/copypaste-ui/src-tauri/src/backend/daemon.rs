@@ -235,8 +235,12 @@ impl Backend for DaemonBackend {
         Ok(())
     }
 
-    async fn clear(&self) -> Result<u64> {
-        expect_count(self.call(Method::DeleteAll).await?)
+    async fn clear(&self, through: Option<i64>) -> Result<u64> {
+        expect_count(self.call(Method::DeleteAll { through }).await?)
+    }
+
+    async fn history_ceiling(&self) -> Result<u64> {
+        expect_count(self.call(Method::HistoryCeiling).await?)
     }
 
     async fn set_pinned(&self, id: &str, pinned: bool) -> Result<Item> {

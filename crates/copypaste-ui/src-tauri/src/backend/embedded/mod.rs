@@ -27,6 +27,7 @@
 //! platform binding remains a native-runner assertion.
 
 mod backup;
+mod clear;
 mod cloud;
 mod open;
 mod pairing;
@@ -272,22 +273,12 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
-    async fn clear(&self) -> Result<u64> {
-        self.blocking(move |inner| {
-            let mutation_started = copypaste_core::now_ms();
-            let removed = inner
-                .state
-                .store
-                .delete_all()
-                .map_err(|_| BackendError::internal("history could not be cleared"))?;
-            if removed > 0 {
-                inner.note_version_written(mutation_started);
-                inner.note_local_version(mutation_started);
-                inner.publish_items(false, 0);
-            }
-            Ok(removed)
-        })
-        .await
+    async fn history_ceiling(&self) -> Result<u64> {
+        clear::ceiling(self).await
+    }
+
+    async fn clear(&self, through: Option<i64>) -> Result<u64> {
+        clear::clear(self, through).await
     }
 
     async fn set_pinned(&self, id: &str, pinned: bool) -> Result<Item> {

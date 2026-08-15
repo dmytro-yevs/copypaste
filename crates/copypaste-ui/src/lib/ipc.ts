@@ -132,8 +132,14 @@ export function deleteItem(id: string): Promise<boolean> {
 }
 
 /** Every unpinned item; pinned ones survive, as with `copypaste clear`. */
-export function deleteAll(): Promise<number> {
-  return call<number>("delete_all");
+/** `through` names the set the user meant when they asked, so a clip captured
+ *  during an undo window is not destroyed by an action that predates it. */
+export function deleteAll(through?: number): Promise<number> {
+  return call<number>("delete_all", { through: through ?? null });
+}
+
+export function historyCeiling(): Promise<number> {
+  return call<number>("history_ceiling");
 }
 
 export function setPinned(id: string, pinned: boolean): Promise<Item> {

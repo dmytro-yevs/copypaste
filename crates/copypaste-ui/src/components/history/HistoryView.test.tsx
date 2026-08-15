@@ -240,8 +240,9 @@ describe("clear all", () => {
   });
 
   it("asks first, and the prompt names what is lost and what is kept", async () => {
-    // Destructive and un-undoable: 5j9x / kayk / fjvz / vcnv / w6xc are all
-    // the same defect, a destructive action one misclick away.
+    // 5j9x / kayk / fjvz / vcnv / w6xc are all the same defect, a destructive
+    // action one misclick away. DMY-168 added an undo window behind this, but
+    // the prompt stays: it is what names the blast radius before the misclick.
     listItems.mockResolvedValue(page(items(2)));
     const { user } = withUser(<HistoryView />);
     await waitFor(() =>
@@ -256,7 +257,7 @@ describe("clear all", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Clear all clipboard history?");
     expect(dialog.textContent).toContain("Pinned items are kept");
-    expect(dialog.textContent).toContain("cannot be undone");
+    expect(dialog.textContent).toContain("undo it");
   });
 });
 

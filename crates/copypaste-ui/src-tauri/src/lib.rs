@@ -207,6 +207,7 @@ pub fn run() {
             commands::history::list_installed_source_apps,
             commands::history::delete_item,
             commands::history::delete_all,
+            commands::history::history_ceiling,
             commands::history::set_pinned,
             commands::history::reorder_pinned,
             // state
