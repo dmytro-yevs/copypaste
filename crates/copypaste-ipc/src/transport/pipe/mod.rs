@@ -12,6 +12,11 @@ use interprocess::os::windows::named_pipe::{
 };
 use sha2::{Digest, Sha256};
 
+#[allow(unsafe_code)]
+mod owner;
+
+pub use owner::MSG_FOREIGN_OWNER;
+
 const LOCAL_PIPES: &str = r"\\.\pipe\";
 
 pub type Listener = PipeListener<Bytes, Bytes>;
@@ -37,8 +42,15 @@ pub fn name_for(path: &Path) -> OsString {
     ))
 }
 
+/// Connect, then refuse the pipe unless this account owns it.
+///
+/// The check is here rather than at each caller because every byte the CLI and
+/// the app send crosses this one function, and the first thing a squatter would
+/// be handed is a sign-in.
 pub async fn connect(path: &Path) -> io::Result<Stream> {
-    Stream::connect_by_path(name_for(path)).await
+    let stream = Stream::connect_by_path(name_for(path)).await?;
+    owner::verify(&stream)?;
+    Ok(stream)
 }
 
 /// A private connected pair for transport tests.

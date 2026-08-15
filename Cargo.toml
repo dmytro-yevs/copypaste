@@ -59,6 +59,14 @@ futures-util = "0.3"
 interprocess = { version = "2.4", features = ["tokio"] }
 widestring = "1"
 win-security-identifier = "0.2"
+# Pinned to the version `interprocess` already builds against, so the pipe's
+# owner is read through the same bindings rather than a second copy of them.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+] }
 # retry/backoff — ONE implementation (v1 had six). `backon`, not `backoff`:
 # backoff 0.4 is unmaintained (RUSTSEC-2025-0012, which names this as the
 # replacement) and pulled unmaintained `instant` in with it (RUSTSEC-2024-0384).

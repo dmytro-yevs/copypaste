@@ -34,3 +34,9 @@ typescript = ["dep:ts-rs"]
 interprocess.workspace = true
 sha2.workspace = true
 hex.workspace = true
+# The owner check on a connected pipe. Same version `interprocess` already
+# builds against, so this adds bindings rather than a second copy of them.
+# Evaluated instead: `win-security-identifier` (the daemon's, for the server's
+# DACL) reads SIDs but cannot query a kernel object's owner, and
+# `interprocess` exposes no owner or SQOS surface of its own.
+windows-sys.workspace = true

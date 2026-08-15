@@ -12,7 +12,12 @@
 //! codec, so the daemon uses `tokio_util::codec::LinesCodec` instead of a
 //! byte-scanning read loop.
 
-#![forbid(unsafe_code)]
+// `deny` rather than `forbid`: one module opts out, and `forbid` cannot be
+// opted out of. `transport::pipe::owner` asks Windows who owns the pipe it just
+// connected to, which is four `advapi32` calls with no safe binding — the
+// wrappers that exist either cannot query a kernel object's owner or panic on
+// the null the check exists to catch. Every other module stays denied.
+#![deny(unsafe_code)]
 
 pub mod config;
 pub mod content_type;
