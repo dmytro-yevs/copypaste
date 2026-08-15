@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(registered_entries.len(), registered.len());
         assert_eq!(annotated, registered);
         assert_eq!(registered, product_command_names());
-        assert_eq!(registered.len(), 72);
+        assert_eq!(registered.len(), 73);
     }
 
     #[test]
