@@ -7,9 +7,10 @@
 //! re-announcing cannot bring the pairing back (`CopyPaste-gbo`). Pruning is
 //! neither — it is hygiene for credentials that were minted and never used.
 
+use super::peer::validate_pairing_id;
 use super::store::PeerStore;
 use super::tentative;
-use super::{PeerStoreError, RevokedDevice};
+use super::{PeerStoreError, RevokedDevice, MAX_REVOCATIONS};
 
 impl PeerStore {
     /// Cut a device off for good: drop its key **and** record the pairing id so
@@ -23,7 +24,14 @@ impl PeerStore {
     ///
     /// As [`PeerStore::remove`].
     pub fn revoke(&self, pairing_id: &str, now_ms: i64) -> Result<bool, PeerStoreError> {
+        // Checked here as well as on load: `revoke` is the one way an id that
+        // was never a peer's reaches the list, so an unvalidated caller could
+        // write a file this store then refuses to open.
+        validate_pairing_id(pairing_id)?;
         let mut guard = self.state.write().map_err(|_| PeerStoreError::Poisoned)?;
+        if !guard.revoked.contains_key(pairing_id) && guard.revoked.len() >= MAX_REVOCATIONS {
+            return Err(PeerStoreError::TooManyRevocations);
+        }
         let removed = guard.peers.remove(pairing_id);
         let deadline = guard.pending.remove(pairing_id);
         let previous_revocation = guard.revoked.insert(pairing_id.to_string(), now_ms);
@@ -308,6 +316,26 @@ mod tests {
         for id in &ids {
             assert!(text.contains(id), "the audit trail must survive");
         }
+    }
+
+    /// `revoke` is the only way an id that was never a peer's reaches the list,
+    /// so it is where the shape is checked. Recording one the store would then
+    /// refuse to open is the failure this prevents.
+    #[test]
+    fn revoking_an_id_no_peer_could_carry_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PeerStore::open(&store_path(&dir)).expect("open");
+
+        for bad in ["", &"a".repeat(129)] {
+            assert!(
+                matches!(store.revoke(bad, 1), Err(PeerStoreError::Invalid(_))),
+                "an invalid pairing id was revoked"
+            );
+        }
+        assert!(
+            store.revoked().is_empty(),
+            "a refused revocation was recorded anyway"
+        );
     }
 
     /// Revoking an id this device has not seen still refuses it later — which is

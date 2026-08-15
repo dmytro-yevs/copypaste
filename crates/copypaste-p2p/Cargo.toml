@@ -37,6 +37,9 @@ if-addrs = "0.15"
 
 [dev-dependencies]
 tempfile.workspace = true
+# The cursor-store warnings are the one place a path could reach a log, so the
+# test asserts on what is emitted rather than on a reading of the source.
+tracing-subscriber.workspace = true
 # `start_paused`, so the pairing commit deadline is asserted without a test
 # that really waits it out.
 tokio = { workspace = true, features = ["test-util"] }

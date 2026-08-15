@@ -310,7 +310,8 @@ impl PeerNode {
     }
 
     pub(super) fn note_cloud_version_applied(&self, created_at: i64) {
-        self.node.cursors().note_applied("", created_at);
+        // No peer to hold back: a row from the cloud is new to all of them.
+        self.node.cursors().note_local(created_at);
     }
 
     pub(super) fn note_local_version(&self, floor_ms: i64) {

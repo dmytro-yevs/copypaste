@@ -60,6 +60,16 @@ pub const PAIRING_CODE_TTL: Duration = Duration::from_secs(300);
 /// per inbound connection (security review F-13).
 pub const MAX_PAIRINGS: usize = 16;
 
+/// The cap on the revocation list, which unlike the pairings only ever grows —
+/// a revocation is never evicted, because evicting one is exactly what lets a
+/// device someone still holds a code for be re-added (`CopyPaste-gbo`).
+///
+/// So the refusal is the same shape as [`MAX_PAIRINGS`] and for the same
+/// reason: at the cap a *new* revocation fails rather than displacing an old
+/// one. Deliberately far above [`MAX_PAIRINGS`] — every pairing this device can
+/// hold could be revoked and re-made many times over before it binds.
+pub const MAX_REVOCATIONS: usize = 4096;
+
 /// A pairing that was cut off, and when.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RevokedDevice {

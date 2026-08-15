@@ -22,7 +22,8 @@ use std::path::Path;
 use copypaste_fs::Visibility;
 use zeroize::Zeroizing;
 
-use super::{Peer, PeerStoreError};
+use super::peer::validate_pairing_id;
+use super::{Peer, PeerStoreError, MAX_REVOCATIONS};
 
 /// Everything the store holds, in memory and on disk.
 ///
@@ -72,6 +73,15 @@ pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
         .into_iter()
         .filter(|(id, _)| peers.contains_key(id))
         .collect();
+    // Refused rather than trimmed. Dropping a revocation is what lets a device
+    // someone still holds a code for be re-added, so the two safe answers to an
+    // implausible list are to keep all of it or to open none of it.
+    if file.revoked.len() > MAX_REVOCATIONS {
+        return Err(PeerStoreError::Corrupt);
+    }
+    for id in file.revoked.keys() {
+        validate_pairing_id(id).map_err(|_| PeerStoreError::Corrupt)?;
+    }
     Ok(State {
         peers,
         pending,
@@ -148,6 +158,46 @@ mod tests {
     use crate::peers::testutil::{peer, store_path};
     use crate::peers::{PeerStore, DEFAULT_FILE_NAME};
     use crate::transport::PairingToken;
+
+    fn file_with_revocations(revoked: &str) -> Vec<u8> {
+        format!(r#"{{"peers":[],"pending":{{}},"revoked":{{{revoked}}}}}"#).into_bytes()
+    }
+
+    /// The list is the thing that stops a revoked device coming back, so an
+    /// implausible one is refused whole rather than trimmed to fit: trimming
+    /// re-admits whichever device the dropped entry was cutting off.
+    #[test]
+    fn a_revocation_list_past_the_cap_is_refused_not_trimmed() {
+        let entries: Vec<String> = (0..=MAX_REVOCATIONS)
+            .map(|i| format!(r#""pairing-{i}":1"#))
+            .collect();
+        let bytes = file_with_revocations(&entries.join(","));
+        assert!(
+            matches!(parse(&bytes), Err(PeerStoreError::Corrupt)),
+            "an oversized revocation list was accepted"
+        );
+
+        // One under the cap still opens: the bound refuses absurdity, not use.
+        let entries: Vec<String> = (0..MAX_REVOCATIONS)
+            .map(|i| format!(r#""pairing-{i}":1"#))
+            .collect();
+        let state = parse(&file_with_revocations(&entries.join(","))).expect("at the cap");
+        assert_eq!(state.revoked.len(), MAX_REVOCATIONS);
+    }
+
+    #[test]
+    fn a_revoked_id_no_peer_could_carry_is_refused() {
+        let long = "a".repeat(129);
+        for entry in [r#""":1"#.to_string(), format!(r#""{long}":1"#)] {
+            assert!(
+                matches!(
+                    parse(&file_with_revocations(&entry)),
+                    Err(PeerStoreError::Corrupt)
+                ),
+                "an invalid revoked id was accepted: {entry}"
+            );
+        }
+    }
 
     #[test]
     fn a_torn_write_cannot_be_observed() {
