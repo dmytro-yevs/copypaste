@@ -60,6 +60,15 @@ which rebuild from a manifest beside them, or any directory carrying
 Gradle writes instrumentation evidence under `build/reports/`, so a scan could
 return clean and take the leftover with it.
 
+**The walk must never read content under a cargo `target/`.** Proving
+recoverability runs `git hash-object`, which reads the file and so moves its
+atime — measured here: enumerating a directory leaves atime alone, hashing moves
+it immediately. Atime under `target/debug/.fingerprint/` is how a cargo cache
+cleaner decides what is stale, so a walk that hashes there makes every artifact
+look used and reclaims nothing. `CACHEDIR.TAG` keeps the walk out today, pinned
+by `test_a_tagged_cache_directory_is_still_skipped`; widening that skip rule
+would destroy the signal silently.
+
 **A Gradle tree is consequently never reclaimable**, because its intermediates
 are in no git object. Do not narrow this to win those bytes back. Everything it
 could ever recover is 0.9 GiB, against the 42 GiB DMY-189 owns — forty times
