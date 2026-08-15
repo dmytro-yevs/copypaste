@@ -32,6 +32,12 @@ pub enum PeerStoreError {
     #[error("this device is already paired with as many devices as it can hold; unpair one first")]
     TooManyPairings,
 
+    /// The revocation list is at [`super::MAX_REVOCATIONS`]. Refused rather
+    /// than trimmed, for the reason the list exists: dropping the oldest
+    /// revocation to make room re-admits the device it was cutting off.
+    #[error("this device is holding as many revocations as it can record")]
+    TooManyRevocations,
+
     /// Another write landed on this pairing between reading it and writing it
     /// back. The caller decided from a record that is no longer there, and
     /// overwriting it would discard whatever replaced it.
@@ -57,6 +63,8 @@ mod tests {
             PeerStoreError::Invalid("pairing id is empty"),
             PeerStoreError::Revoked,
             PeerStoreError::TooManyPairings,
+            PeerStoreError::TooManyRevocations,
+            PeerStoreError::Contended,
             PeerStoreError::Poisoned,
         ];
         for err in &errors {

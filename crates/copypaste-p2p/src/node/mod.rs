@@ -160,6 +160,9 @@ impl Node {
         self.cursors.note_local(floor_ms);
     }
 
+    /// Order is load-bearing: `record_session` clears this peer's relay floor,
+    /// so lowering the *other* peers' floors has to happen first. Swapped, the
+    /// session would wipe the floor this exchange just established.
     pub(crate) fn record_cursor(&self, pairing_id: &str, outcome: &SyncOutcome) {
         if let Some(floor) = outcome.applied_floor {
             self.cursors.note_applied(pairing_id, floor);
