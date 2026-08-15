@@ -98,18 +98,32 @@ pub mod android {
         protected: bool,
     }
 
+    /// What the window carries now — read back from it, not echoed from the
+    /// request. Kotlin rejects rather than sending a disagreeing value, so this
+    /// mismatch arm should be unreachable; it is checked because the one thing
+    /// worse than losing protection is believing it is on.
+    #[derive(serde::Deserialize)]
+    struct Applied {
+        protected: bool,
+    }
+
     pub struct ScreenProtection(PluginHandle<Wry>);
 
     impl ScreenProtection {
         pub(super) fn set(&self, protect: bool) {
-            // The reply carries nothing; `serde_json::Value` accepts the empty
-            // object Kotlin resolves with, where `()` would fail to deserialise.
-            let call = self.0.run_mobile_plugin::<serde_json::Value>(
-                "setProtected",
-                Args { protected: protect },
-            );
-            if let Err(error) = call {
-                tracing::warn!(%error, "screen-capture protection could not be changed");
+            match self
+                .0
+                .run_mobile_plugin::<Applied>("setProtected", Args { protected: protect })
+            {
+                Ok(applied) if applied.protected == protect => {}
+                Ok(applied) => tracing::warn!(
+                    requested = protect,
+                    applied = applied.protected,
+                    "the window did not take the screen-capture protection it was given"
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "screen-capture protection could not be changed");
+                }
             }
         }
     }
