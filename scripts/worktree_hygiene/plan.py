@@ -40,11 +40,29 @@ def plan(repo: Path, candidates: list[Candidate], roots: list[Path]) -> list[Act
 def _for_candidate(repo: Path, candidate: Candidate, roots: list[Path]) -> list[Action]:
     path = candidate.path
     if path == repo:
-        return [Action(path, False, "primary checkout; run scripts/clean-target.sh by hand")]
+        return _for_primary(path)
 
     if candidate.registered:
         return _for_registered(candidate, roots)
     return _for_orphan(repo, candidate, roots)
+
+
+_PRIMARY_REASON = (
+    "primary checkout, never removed here; reclaim with scripts/clean-target.sh (DMY-189)"
+)
+
+
+def _for_primary(repo: Path) -> list[Action]:
+    """Size the primary checkout's caches without ever offering to remove them.
+
+    Reported per cache rather than as one checkout total: it holds most of the
+    bytes on disk, and a report that omitted them would understate the problem
+    by roughly four fifths.
+    """
+    caches = [repo / relative for relative in CACHE_SUBPATHS if (repo / relative).is_dir()]
+    if not caches:
+        return [Action(repo, False, _PRIMARY_REASON)]
+    return [Action(cache, False, _PRIMARY_REASON) for cache in caches]
 
 
 def _for_registered(candidate: Candidate, roots: list[Path]) -> list[Action]:

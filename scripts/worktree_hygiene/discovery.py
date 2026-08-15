@@ -1,8 +1,10 @@
 """Enumerate the worktrees and leftover directories under declared roots.
 
-`git worktree prune` cannot see a leftover: it prunes registrations, and a
-swept directory keeps none. Orphans are therefore found by walking the roots
-and differencing against `git worktree list`, never by asking git.
+Do not reduce this to `git worktree prune`. Prune removes registrations, and a
+swept directory keeps none, so it cannot see a leftover at all: after the
+2026-08-15 sweep `git worktree prune --dry-run` reported nothing while nine
+leftover directories sat on disk, one of them holding 0.923 GiB. Orphans are
+found by walking the roots and differencing against `git worktree list`.
 """
 
 from __future__ import annotations
