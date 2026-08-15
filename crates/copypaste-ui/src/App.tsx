@@ -13,6 +13,7 @@ import { HistoryView } from "@/components/history/HistoryView";
 import { useCaptureState, useCaptureSync } from "@/hooks/useCapture";
 import { statusReachable, useStatus } from "@/hooks/useStatus";
 import { usePush } from "@/hooks/usePush";
+import { useSizeClass } from "@/hooks/useSizeClass";
 import { useTranslation } from "@/i18n";
 import { classifyError } from "@/lib/errors";
 import { hasBridge, setAllowScreenshots } from "@/lib/ipc";
@@ -116,6 +117,7 @@ export default function App() {
   const statusKind = status.error ? classifyError(status.error) : null;
   const screen = SCREENS[view];
   const android = isAndroidPlatform();
+  const sizeClass = useSizeClass();
   const navigationReady = !android || androidStartupSettled;
 
   useEffect(() => {
@@ -139,9 +141,13 @@ export default function App() {
   return (
     <div
       data-navigation-ready={navigationReady}
+      data-size-class={sizeClass}
       className={cn(
         "app-surface flex h-full min-h-0 text-foreground",
-        android ? "flex-col-reverse" : "app-surface--desktop flex-row",
+        // Where the navigation sits is width; the ambient desktop treatment is
+        // the platform's own and stays with it.
+        sizeClass === "compact" ? "flex-col-reverse" : "flex-row",
+        !android && "app-surface--desktop",
       )}
     >
       <Boundary label={t("shell.boundary.navigation")}>

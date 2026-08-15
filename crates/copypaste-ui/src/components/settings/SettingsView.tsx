@@ -1,28 +1,14 @@
-import {
-  CircleHelp,
-  Database,
-  Keyboard,
-  List,
-  MonitorSmartphone,
-  ClipboardCheck,
-  Palette,
-  Settings2,
-  Stethoscope,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTranslation } from "@/i18n";
-import { AboutTab } from "@/components/settings/AboutTab";
-import { AppearanceTab } from "@/components/settings/AppearanceTab";
-import { DiagnosticsTab } from "@/components/settings/DiagnosticsTab";
-import { ListTab } from "@/components/settings/ListTab";
-import { ServiceTab } from "@/components/settings/ServiceTab";
-import { ShortcutTab } from "@/components/settings/ShortcutTab";
-import { StorageTab } from "@/components/settings/StorageTab";
-import { SyncTab } from "@/components/settings/SyncTab";
-import { CaptureSetup } from "@/components/capture/CaptureSetup";
+import { SettingsIndex } from "@/components/settings/SettingsIndex";
+import { useSettingsLevel } from "@/components/settings/useSettingsLevel";
+import {
+  groupedTabs,
+  visibleTabs,
+  type SettingsTab,
+} from "@/components/settings/settingsTabs";
 import {
   resolveSettingsSearch,
   SettingsSearchField,
@@ -32,50 +18,21 @@ import {
   SETTINGS_SEARCH_ITEMS,
   type SettingsSearchTab,
 } from "@/components/settings/settingsSearchIndex";
+import { useSizeClass } from "@/hooks/useSizeClass";
 import { cn } from "@/lib/cn";
 import { isAndroid, isWindows } from "@/lib/platform";
 import { useUi } from "@/store/ui";
 
-const TABS = [
-  { value: "appearance", label: "settings.tabs.appearance", icon: Palette, render: () => <AppearanceTab /> },
-  { value: "list", label: "settings.tabs.list", icon: List, render: () => <ListTab /> },
-  { value: "shortcut", label: "settings.tabs.shortcut", icon: Keyboard, render: () => <ShortcutTab /> },
-  { value: "service", label: "settings.tabs.service", icon: Settings2, render: () => <ServiceTab /> },
-  { value: "capture", label: "capture.title", icon: ClipboardCheck, render: () => <CaptureSetup /> },
-  { value: "sync", label: "settings.tabs.sync", icon: MonitorSmartphone, render: () => <SyncTab /> },
-  { value: "storage", label: "settings.tabs.storage", icon: Database, render: () => <StorageTab /> },
-  { value: "diagnostics", label: "settings.tabs.diagnostics", icon: Stethoscope, render: () => <DiagnosticsTab /> },
-  { value: "about", label: "settings.tabs.about", icon: CircleHelp, render: () => <AboutTab /> },
-] as const;
-
-type SettingsTab = (typeof TABS)[number];
-
-const GROUPS = [
-  { label: "settings.groups.personal", tabs: ["appearance", "list", "shortcut"] },
-  { label: "settings.groups.service", tabs: ["service", "sync", "storage"] },
-  { label: "settings.groups.support", tabs: ["diagnostics", "about"] },
-] as const satisfies ReadonlyArray<{
-  label: "settings.groups.personal" | "settings.groups.service" | "settings.groups.support";
-  tabs: readonly SettingsTab["value"][];
-}>;
-
-function TabButton({ tab, desktop }: { tab: SettingsTab; desktop: boolean }) {
+function TabButton({ tab }: { tab: SettingsTab }) {
   const { t } = useTranslation();
-  const Icon: LucideIcon = tab.icon;
+  const Icon = tab.icon;
 
   return (
     <TabsTrigger
       value={tab.value}
-      className={cn(
-        desktop
-          ? "w-full justify-start rounded-lg px-s-2 text-left data-[state=active]:bg-muted data-[state=active]:shadow-none"
-          : // A11Y-15 requires wrapping. The default `flex: 1 1 0%` always
-            // fits one line, and overflowing labels stole neighbouring taps
-            // on API 36.
-            "flex-none",
-      )}
+      className="w-full justify-start rounded-lg px-s-2 text-left data-[state=active]:bg-muted data-[state=active]:shadow-none"
     >
-      {desktop && <Icon aria-hidden="true" />}
+      <Icon aria-hidden="true" />
       {t(tab.label)}
     </TabsTrigger>
   );
@@ -84,19 +41,24 @@ function TabButton({ tab, desktop }: { tab: SettingsTab; desktop: boolean }) {
 export function SettingsView() {
   const { t } = useTranslation();
   const android = isAndroid();
+  const compact = useSizeClass() === "compact";
   const visiblePlatform = android ? "android" : isWindows() ? "windows" : "desktop";
   const [activeTab, setActiveTab] = useState<SettingsSearchTab>("appearance");
+  const [subpage, setSubpage] = useState<SettingsSearchTab | null>(null);
   const requestedTab = useUi((state) => state.settingsTab);
   const setSettingsTab = useUi((state) => state.setSettingsTab);
   const [query, setQuery] = useState("");
   const [searchAnnouncement, setSearchAnnouncement] = useState("");
   const highlightTimer = useRef<number | undefined>(undefined);
   const deferredQuery = useDeferredValue(query);
-  // Android has its own capture setup, but Service and Storage expose controls
-  // backed by native commands on every product platform.
-  const tabs = android
-    ? TABS.filter((tab) => tab.value !== "shortcut")
-    : TABS.filter((tab) => tab.value !== "capture");
+  const tabs = useMemo(() => visibleTabs(android), [android]);
+  const groups = useMemo(() => groupedTabs(tabs), [tabs]);
+  const closeSubpage = useCallback(() => setSubpage(null), []);
+  const goBack = useSettingsLevel(compact && subpage !== null, closeSubpage);
+  const openTab = useCallback((value: SettingsSearchTab) => {
+    setActiveTab(value);
+    setSubpage(value);
+  }, []);
   const tabLabels = useMemo(
     () => new Map(tabs.map((tab) => [tab.value, t(tab.label)])),
     [t, tabs],
@@ -120,10 +82,10 @@ export function SettingsView() {
   useEffect(() => {
     if (requestedTab === null) return;
     if (tabs.some((tab) => tab.value === requestedTab)) {
-      setActiveTab(requestedTab as SettingsSearchTab);
+      openTab(requestedTab as SettingsSearchTab);
     }
     setSettingsTab(null);
-  }, [requestedTab, setSettingsTab, tabs]);
+  }, [openTab, requestedTab, setSettingsTab, tabs]);
 
   useEffect(
     () => () => {
@@ -135,7 +97,7 @@ export function SettingsView() {
   );
 
   const selectResult = (result: ResolvedSettingsSearchItem) => {
-    setActiveTab(result.item.tab);
+    openTab(result.item.tab);
     setQuery("");
     setSearchAnnouncement(t("settings.search.opened", { title: result.title }));
     window.requestAnimationFrame(() => {
@@ -181,45 +143,47 @@ export function SettingsView() {
         />
       </header>
 
-      <div className={cn("min-h-0 flex-1 overflow-y-auto", android && "p-s-3")}>
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as SettingsSearchTab)}
-          orientation={android ? "horizontal" : "vertical"}
-          className={cn(android ? "" : "min-h-full flex-row gap-0")}
-        >
-          <TabsList
-            aria-label={t("settings.sections")}
-            variant={android ? "floating" : "bare"}
-            className={cn(
-              android
-                ? "w-full"
-                : "min-h-full w-60 shrink-0 self-stretch flex-col items-stretch gap-s-4 border-r border-divider px-s-3 py-s-4 text-foreground",
-            )}
+      <div className={cn("min-h-0 flex-1 overflow-y-auto", compact && "p-s-3")}>
+        {compact ? (
+          <SettingsIndex
+            groups={groups}
+            open={tabs.find((tab) => tab.value === subpage) ?? null}
+            onOpen={(value) => openTab(value as SettingsSearchTab)}
+            onBack={goBack}
+          />
+        ) : (
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as SettingsSearchTab)}
+            orientation="vertical"
+            className="min-h-full flex-row gap-0"
           >
-              {android
-                ? tabs.map((tab) => <TabButton key={tab.value} tab={tab} desktop={false} />)
-                : GROUPS.map((group) => (
-                    <div key={group.label} className="flex flex-col gap-1">
-                      <p className="pt-s-2 text-[11px] font-medium tracking-wide text-muted-foreground">
-                        {t(group.label)}
-                      </p>
-                      {group.tabs.map((value) => {
-                        const tab = TABS.find((candidate) => candidate.value === value)!;
-                        return <TabButton key={tab.value} tab={tab} desktop />;
-                      })}
-                    </div>
+            <TabsList
+              aria-label={t("settings.sections")}
+              variant="bare"
+              className="min-h-full w-60 shrink-0 self-stretch flex-col items-stretch gap-s-4 border-r border-divider px-s-3 py-s-4 text-foreground"
+            >
+              {groups.map((group) => (
+                <div key={group.label} className="flex flex-col gap-1">
+                  <p className="pt-s-2 text-[11px] font-medium tracking-wide text-muted-foreground">
+                    {t(group.label)}
+                  </p>
+                  {group.tabs.map((tab) => (
+                    <TabButton key={tab.value} tab={tab} />
                   ))}
-          </TabsList>
+                </div>
+              ))}
+            </TabsList>
 
-          <div className={cn("min-h-full min-w-0 flex-1", !android && "px-s-4 py-s-3 sm:px-s-5")}>
-            {tabs.map((tab) => (
-              <TabsContent key={tab.value} value={tab.value} className="min-h-full">
-                {tab.render()}
-              </TabsContent>
-            ))}
-          </div>
-        </Tabs>
+            <div className="min-h-full min-w-0 flex-1 px-s-4 py-s-3 sm:px-s-5">
+              {tabs.map((tab) => (
+                <TabsContent key={tab.value} value={tab.value} className="min-h-full">
+                  {tab.render()}
+                </TabsContent>
+              ))}
+            </div>
+          </Tabs>
+        )}
       </div>
       <p className="sr-only" aria-live="polite">
         {searchAnnouncement}
