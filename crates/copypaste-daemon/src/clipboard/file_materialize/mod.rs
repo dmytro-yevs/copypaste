@@ -874,6 +874,12 @@ mod tests {
             1,
             "the plaintext was accounted for by a second paste-back, not by the death"
         );
+        // The file and its directory go in two steps: the unlink happens inside
+        // sweep_content_dir, and remove_emptied only runs once that returns —
+        // a whole cycle later if the budget suspended the sweep. Waiting on the
+        // file alone and asserting on the directory raced that gap and reddened
+        // CI on 2026-08-15.
+        wait_until_gone(path.parent().unwrap(), Duration::from_secs(10));
         assert!(
             !path.parent().unwrap().exists(),
             "the emptied content directory outlived its owner"
