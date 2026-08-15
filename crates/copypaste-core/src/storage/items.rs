@@ -334,12 +334,47 @@ impl Store {
 
     /// Soft-deletes every live item, returning how many were affected.
     pub fn delete_all(&self) -> Result<u64, StoreError> {
+        self.delete_all_through(i64::MAX)
+    }
+
+    /// Highest `rowid` in the table, or 0 when it is empty.
+    pub fn max_rowid(&self) -> Result<i64, StoreError> {
+        let conn = self.conn()?;
+        Ok(conn.query_row(
+            "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Soft-deletes every live item stored at or before `through`, returning how
+    /// many were affected.
+    ///
+    /// `through` is a `rowid` and deliberately not a `created_at`. The UI defers
+    /// this call behind an undo window, so the bound has to mean "what existed
+    /// when the user pressed clear". A clip captured during that window and a
+    /// row whose clock is skewed ahead (DMY-180) both carry a `created_at`
+    /// above any press-time instant, so a timestamp cannot separate them and a
+    /// skewed row would survive a clear the user believes emptied everything.
+    /// `rowid` is insert order, so it separates them without consulting a clock.
+    ///
+    /// SQLite only reuses a `rowid` when the row holding the largest one is hard
+    /// deleted; the sole hard delete is cap eviction, which takes the oldest.
+    ///
+    /// Repeated calls need no guard. `deleted = 0` excludes anything an earlier
+    /// call tombstoned, and a later ceiling is strictly larger, so it can only
+    /// add rows that are still live.
+    pub fn delete_all_through(&self, through: i64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
         // Pinned rows survive. Manifest 04 is explicit that delete_all
         // tombstones non-pinned rows only, and pinning is the one gesture by
         // which a user says "keep this" — clearing history must not be the
         // thing that discards it.
+        //
+        // 9223372036854775807 is i64::MAX used as a saturation ceiling
+        // (manifest 03 §3.11), so the CASE is overflow safety for a row already
+        // at the ceiling — not a sentinel marking a row to treat differently.
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
@@ -350,8 +385,8 @@ impl Store {
                     END, \
                     pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, \
                     fts_rowid = NULL \
-              WHERE deleted = 0 AND pinned = 0",
-            [crate::now_ms()],
+              WHERE deleted = 0 AND pinned = 0 AND rowid <= ?2",
+            params![crate::now_ms(), through],
         )?;
         // Drop index rows for everything that is no longer live, which also
         // sweeps orphans. Pinned rows stay live and keep their entries.
@@ -374,7 +409,9 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::super::model::NewItem;
-    use super::super::test_support::{fts_dump, fts_row_count, item, store, KEY, T0};
+    use super::super::test_support::{
+        fts_dump, fts_row_count, item, plant_fts_row, sensitive_item, store, KEY, T0,
+    };
     use super::super::Store;
 
     #[test]
@@ -523,6 +560,74 @@ mod tests {
         assert_eq!(fts_dump(&s), "");
 
         assert_eq!(s.delete_all().unwrap(), 0);
+    }
+
+    /// The UI defers `delete_all` behind an undo window, so a clip captured
+    /// during that window must survive an action the user took before it
+    /// existed.
+    #[test]
+    fn delete_all_through_spares_what_arrived_after_the_bound() {
+        let s = store();
+        for n in 0..3 {
+            s.insert(item(&format!("before {n}"), T0 + n * 60_000))
+                .unwrap();
+        }
+        let bound = s.max_rowid().unwrap();
+        let after = s.insert(item("captured mid-window", T0 + 600_000)).unwrap();
+
+        assert_eq!(s.delete_all_through(bound).unwrap(), 3);
+        let live = s.list(10, 0).unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].id, after.id);
+    }
+
+    /// A deferred clear must remove exactly what an immediate one would. Both a
+    /// clock skewed ahead (DMY-180) and the `i64::MAX` saturation ceiling put
+    /// `created_at` above any press-time instant, which is why the bound is a
+    /// `rowid` — a timestamp bound would leave these behind.
+    #[test]
+    fn delete_all_through_clears_rows_dated_ahead_of_the_clock() {
+        let s = store();
+        s.insert(item("skewed", crate::now_ms() + 86_400_000))
+            .unwrap();
+        s.insert(item("at the ceiling", i64::MAX)).unwrap();
+        let bound = s.max_rowid().unwrap();
+
+        assert_eq!(s.delete_all_through(bound).unwrap(), 2);
+        assert_eq!(s.count().unwrap(), 0);
+        assert_eq!(fts_dump(&s), "");
+    }
+
+    /// A sensitive item is out of the index before the clear, is not put into it
+    /// by the clear, and is still out of it afterwards while it remains live —
+    /// the state an undone clear leaves behind.
+    #[test]
+    fn a_sensitive_item_spared_by_the_bound_never_enters_the_index() {
+        let s = store();
+        let doomed = s.insert(item("ordinary", T0)).unwrap();
+        let bound = s.max_rowid().unwrap();
+        let secret = s.insert(sensitive_item("swordfish", T0 + 1_000)).unwrap();
+
+        assert_eq!(fts_row_count(&s, &secret.id), 0);
+        assert_eq!(s.delete_all_through(bound).unwrap(), 1);
+
+        assert_eq!(fts_row_count(&s, &secret.id), 0);
+        assert_eq!(fts_row_count(&s, &doomed.id), 0);
+        assert!(s.search("swordfish", 10).unwrap().is_empty());
+        assert_eq!(s.count().unwrap(), 1);
+    }
+
+    /// A database written before the write-time guard existed carries the index
+    /// row anyway; clearing must sweep it rather than leave it searchable.
+    #[test]
+    fn a_planted_index_row_does_not_survive_the_clear() {
+        let s = store();
+        let secret = s.insert(sensitive_item("swordfish", T0)).unwrap();
+        plant_fts_row(&s, &secret.id, "swordfish");
+        assert_eq!(fts_row_count(&s, &secret.id), 1);
+
+        assert_eq!(s.delete_all_through(s.max_rowid().unwrap()).unwrap(), 1);
+        assert_eq!(fts_row_count(&s, &secret.id), 0);
     }
 
     /// Manifest 04: `delete_all` tombstones non-pinned rows only. The

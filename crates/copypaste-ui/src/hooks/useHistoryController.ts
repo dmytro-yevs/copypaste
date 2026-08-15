@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { type OriginDevice, originsOf } from "@/components/history/origin";
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
 import { historyOf, useHistory, useHistorySearch } from "@/hooks/useHistory";
-import { useClearHistory } from "@/hooks/useHistoryMutations";
 import { statusItemCount, useStatus } from "@/hooks/useStatus";
 import { type ErrorKind, ipcFailure, toFriendly } from "@/lib/errors";
 import type { Item } from "@/lib/ipc";
@@ -48,6 +47,7 @@ export interface HistoryController {
   readonly loadMore: () => void;
   readonly retry: () => void;
   readonly remove: (item: Item) => void;
+  readonly removeMany: (items: readonly Item[]) => void;
   readonly clearAll: () => void;
 }
 
@@ -79,8 +79,7 @@ export function useHistoryController(pushLive: boolean): HistoryController {
   const history = useHistory("", pushLive);
   const serverSearch = useHistorySearch(serverQuery);
   const status = useStatus(statusItemCount);
-  const clear = useClearHistory();
-  const { pending, remove } = useDeferredDelete();
+  const { pending, pendingAll, remove, removeMany, removeAll } = useDeferredDelete();
 
   /** INV-2: with nothing pending and the default view this returns the query's
    *  own array, so an idle poll that fetched identical data produces the same
@@ -130,15 +129,17 @@ export function useHistoryController(pushLive: boolean): HistoryController {
   // or decrypting — the 8,999 rows in front of it (§3.1.2, AT-73).
 
   const result = useMemo(() => {
+    const hidden = (item: Item) =>
+      pending.has(item.id) || (pendingAll && !item.pinned);
     const shown =
-      pending.size === 0
+      pending.size === 0 && !pendingAll
         ? page.items
-        : page.items.filter((item) => !pending.has(item.id));
+        : page.items.filter((item) => !hidden(item));
     targets.retain(shown);
     const searched = searching
       ? mergeSearchResults(
           fuzzyItems(shown, filterQuery, targets),
-          serverItems.filter((item) => !pending.has(item.id)),
+          serverItems.filter((item) => !hidden(item)),
         )
       : shown;
     const all = applyView(searched, view, searching);
@@ -153,6 +154,7 @@ export function useHistoryController(pushLive: boolean): HistoryController {
     historyDisplayLimit,
     page.items,
     pending,
+    pendingAll,
     searching,
     serverItems,
     view,
@@ -198,6 +200,7 @@ export function useHistoryController(pushLive: boolean): HistoryController {
     loadMore,
     retry,
     remove,
-    clearAll: clear.mutate,
+    removeMany,
+    clearAll: removeAll,
   };
 }

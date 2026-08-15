@@ -277,14 +277,16 @@ pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
     }
 }
 
-pub(super) fn delete_all(state: &AppState, id: u64) -> Response {
+pub(super) fn delete_all(state: &AppState, id: u64, through: Option<i64>) -> Response {
     // Manifest 03 (`CopyPaste-cb7u`) has `delete_all` tombstone only the
-    // non-pinned rows — a pin is the user saying "keep this". `Store::delete_all`
-    // currently clears pinned rows too; that is a storage-layer decision and it
-    // is deliberately not second-guessed here, because filtering in the server
-    // would put the rule in two places and leave the store's own callers with
-    // the other behaviour.
-    match state.store.delete_all() {
+    // non-pinned rows — a pin is the user saying "keep this". The predicate
+    // lives in `Store::delete_all_through` and is deliberately not repeated
+    // here: filtering in the server would put one manifest rule in two places.
+    let result = match through {
+        Some(through) => state.store.delete_all_through(through),
+        None => state.store.delete_all(),
+    };
+    match result {
         Ok(deleted) => {
             if deleted > 0 {
                 state.note_local_change();
@@ -292,6 +294,13 @@ pub(super) fn delete_all(state: &AppState, id: u64) -> Response {
             Response::ok(id, ResponseData::Count(deleted))
         }
         Err(e) => storage_error(id, "delete_all", &e),
+    }
+}
+
+pub(super) fn history_ceiling(state: &AppState, id: u64) -> Response {
+    match state.store.max_rowid() {
+        Ok(ceiling) => Response::ok(id, ResponseData::Count(ceiling.max(0) as u64)),
+        Err(e) => storage_error(id, "history_ceiling", &e),
     }
 }
 

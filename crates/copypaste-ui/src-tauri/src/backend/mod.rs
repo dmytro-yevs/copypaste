@@ -170,8 +170,12 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
 
     async fn delete(&self, id: &str) -> Result<()>;
 
-    /// Delete everything. Returns how many rows went.
-    async fn clear(&self) -> Result<u64>;
+    /// Delete everything stored at or before `through`, or everything when it
+    /// is `None`. Returns how many rows went.
+    async fn clear(&self, through: Option<i64>) -> Result<u64>;
+
+    /// A marker for everything stored so far, to pass to [`Backend::clear`].
+    async fn history_ceiling(&self) -> Result<u64>;
 
     /// Pin or unpin. Returns the updated item so the caller need not re-list.
     async fn set_pinned(&self, id: &str, pinned: bool) -> Result<Item>;

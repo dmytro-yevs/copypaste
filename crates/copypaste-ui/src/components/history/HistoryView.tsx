@@ -44,7 +44,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
   const history = useHistoryController(pushLive);
-  const bulk = useHistorySelection(history.items);
+  const bulk = useHistorySelection(history.items, history.removeMany);
   const reveal = useReveal();
   const copy = useCopy();
   const pin = usePin();

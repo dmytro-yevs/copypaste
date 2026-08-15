@@ -13,7 +13,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 
 import { HISTORY_HEAD_KEY, HISTORY_KEY } from "@/hooks/historyRefresh";
 import { useHistory, useHistorySearch } from "@/hooks/useHistory";
-import { useBulkDelete, useReorderPinned } from "@/hooks/useHistoryMutations";
+import { useDeferredDelete } from "@/hooks/useDeferredDelete";
+import { useReorderPinned } from "@/hooks/useHistoryMutations";
 import { IpcFailure } from "@/lib/errors";
 import { PAGE_SIZE } from "@/lib/layout";
 import { item, items, page, testClient } from "@/test/harness";
@@ -337,7 +338,10 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
 });
 
 describe("search", () => {
-  it("settles an active server search before bulk delete completes", async () => {
+  /** B3/INV-3 through the deferred path: the row stays masked until a proven
+   *  post-delete read, so an in-flight search settling late cannot re-expose
+   *  the row the delete just removed. */
+  it("settles an active server search before a bulk delete releases the mask", async () => {
     const initial = items(2);
     const refresh = deferred<ReturnType<typeof page>>();
     searchItems
@@ -347,25 +351,27 @@ describe("search", () => {
 
     const { Wrapper } = wrapper();
     const { result } = renderHook(
-      () => ({ search: useHistorySearch("needle"), remove: useBulkDelete() }),
+      () => ({ search: useHistorySearch("needle"), deferred: useDeferredDelete() }),
       { wrapper: Wrapper },
     );
     await waitFor(() => expect(result.current.search.data?.items).toHaveLength(2));
 
-    let completed = false;
-    const completion = result.current.remove.mutateAsync([initial[0]]).then(() => {
-      completed = true;
-    });
+    act(() => result.current.deferred.removeMany([initial[0]]));
+    expect(result.current.deferred.pending.has(initial[0].id)).toBe(true);
+    act(() => result.current.deferred.flush());
 
     await waitFor(() => expect(searchItems).toHaveBeenCalledTimes(2));
     await Promise.resolve();
-    expect(completed).toBe(false);
+    // Still masked: the refresh proving the delete has not come back yet.
+    expect(result.current.deferred.pending.has(initial[0].id)).toBe(true);
 
     await act(async () => {
       refresh.resolve(page([initial[1]]));
-      await completion;
     });
 
+    await waitFor(() =>
+      expect(result.current.deferred.pending.has(initial[0].id)).toBe(false),
+    );
     await waitFor(() => expect(result.current.search.data?.items).toHaveLength(1));
     expect(result.current.search.data?.items[0].id).toBe(initial[1].id);
   });

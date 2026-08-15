@@ -182,14 +182,14 @@ export const history = {
 
   clear: {
     title: "Clear all clipboard history?",
-    body: "This permanently deletes every unpinned item on this device. Pinned items are kept. This cannot be undone.",
+    body: "This deletes every unpinned item on this device. Pinned items are kept. You have a few seconds to undo it.",
     action: "Clear all",
   },
 
   bulkDelete: {
     title_one: "Delete {{count}} item?",
     title_other: "Delete {{count}} items?",
-    body: "This permanently removes the selected clipboard items. Unlike deleting one item, this cannot be undone.",
+    body: "This removes the selected clipboard items. You have a few seconds to undo it.",
     action: "Delete",
   },
 
@@ -197,8 +197,17 @@ export const history = {
     copied: "Copied — press ⌘V to paste",
     cleared_one: "Cleared {{count}} item — pinned items kept",
     cleared_other: "Cleared {{count}} items — pinned items kept",
+    // The count is only known once `delete_all` has run, and this is shown
+    // while it is still undoable.
+    clearing: "Clearing history — pinned items kept. Not deleted until the undo window closes.",
     deleted: "Deleted",
     undo: "Undo",
+    undoIn_one: "{{count}}s left",
+    undoIn_other: "{{count}}s left",
+    // Stated once in the accessible name; the visible counter is
+    // aria-hidden so it does not interrupt a screen reader every second.
+    undoWindow_one: "Undo — {{count}} second to change your mind",
+    undoWindow_other: "Undo — {{count}} seconds to change your mind",
     pinned_one: "Pinned {{count}} item",
     pinned_other: "Pinned {{count}} items",
     unpinned_one: "Unpinned {{count}} item",

@@ -27,7 +27,7 @@ fn expected(method: &Method) -> Expected {
             Expected::Data(|data| matches!(data, ResponseData::Page(_)))
         }
         Method::Add { .. } => Expected::Data(|data| matches!(data, ResponseData::Item(_))),
-        Method::DeleteAll | Method::ReorderPinned { .. } => {
+        Method::DeleteAll { .. } | Method::ReorderPinned { .. } | Method::HistoryCeiling => {
             Expected::Data(|data| matches!(data, ResponseData::Count(_)))
         }
         Method::PairCreate { .. } => {
@@ -108,7 +108,8 @@ fn cases(root: &Path) -> Vec<Method> {
         Method::Delete {
             id: "missing".into(),
         },
-        Method::DeleteAll,
+        Method::DeleteAll { through: None },
+        Method::HistoryCeiling,
         Method::Pin {
             id: "missing".into(),
             pinned: true,

@@ -149,7 +149,11 @@ impl Backend for FakeBackend {
         Err(refused())
     }
 
-    async fn clear(&self) -> Result<u64> {
+    async fn clear(&self, _through: Option<i64>) -> Result<u64> {
+        Err(refused())
+    }
+
+    async fn history_ceiling(&self) -> Result<u64> {
         Err(refused())
     }
 

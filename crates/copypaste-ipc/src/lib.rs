@@ -158,7 +158,19 @@ pub enum Method {
     Delete {
         id: String,
     },
-    DeleteAll,
+    /// Tombstone every live, unpinned item stored at or before `through`.
+    ///
+    /// `through` is a [`Method::HistoryCeiling`] value, and `None` means "no
+    /// bound". A client that defers this behind an undo window takes the
+    /// ceiling when the user asks and passes it here, so a clip captured
+    /// during the window is not destroyed by an action that predates it.
+    DeleteAll {
+        through: Option<i64>,
+    },
+    /// An opaque marker for "everything stored up to now", for a client that
+    /// has to name that set later. Insert order, so it does not move when a
+    /// clock does.
+    HistoryCeiling,
     Pin {
         id: String,
         pinned: bool,
