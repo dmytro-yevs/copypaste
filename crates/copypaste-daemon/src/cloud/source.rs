@@ -160,7 +160,9 @@ impl CloudSource for StoreSource {
         // moves it.
         if let Some(floor) = floor {
             if outcomes.iter().any(|o| matches!(o, Applied::Merged)) {
-                self.state.p2p.node().cursors().note_applied("", floor);
+                // No peer to hold back: a row from the cloud is new to all of
+                // them.
+                self.state.p2p.node().cursors().note_local(floor);
             }
         }
         Ok(outcomes)
