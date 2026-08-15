@@ -58,6 +58,13 @@ skipped unread only when it says what it is: `node_modules` and `__pycache__`,
 which rebuild from a manifest beside them, or any directory carrying
 `CACHEDIR.TAG`. Skipping by the names `build` and `target` alone was a hole —
 Gradle writes instrumentation evidence under `build/reports/`, so a scan could
-return clean and take the leftover with it. A Gradle tree is consequently never
-reclaimable, because its intermediates are in no git object; preserving 0.9 GiB
-is the cheaper error.
+return clean and take the leftover with it.
+
+**A Gradle tree is consequently never reclaimable**, because its intermediates
+are in no git object. Do not narrow this to win those bytes back. Everything it
+could ever recover is 0.9 GiB, against the 42 GiB DMY-189 owns — forty times
+larger, and already being worked. "Regenerable" is true of the file type and
+false of the situation: a leftover has no `.git`, so nothing there can be
+rebuilt from where it sits. Trading an irreplaceable file for a rounding error
+is the wrong side of rule 4, and a narrower rule built from another name list
+would reintroduce exactly the defect this paragraph exists to record.
