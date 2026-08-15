@@ -22,6 +22,12 @@ export const settings = {
     support: "Support",
   },
 
+  index: {
+    /** Names where Back goes, not the gesture: a bare "Back" is ambiguous once
+     *  the system gesture reaches the same control (A11Y-4). */
+    back: "All settings",
+  },
+
   tabs: {
     appearance: "Appearance",
     list: "List",

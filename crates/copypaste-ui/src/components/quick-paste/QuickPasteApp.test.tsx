@@ -8,6 +8,7 @@ import { rowHeight } from "@/lib/layout";
 import { absoluteTime } from "@/lib/format";
 import { DEFAULT_PREFS, STORAGE_KEY } from "@/store/prefs";
 import { item, page, withUser } from "@/test/harness";
+import { DEFAULT_TEST_WIDTH, setViewportWidth } from "@/test/viewport";
 
 const copyItem = vi.fn();
 const copyItemAsPlainText = vi.fn();
@@ -520,5 +521,20 @@ describe("the popup reads its text from the catalogue", () => {
     expect(
       screen.getByRole("button", { name: en.quickPaste.offline.action }),
     ).not.toBeNull();
+  });
+
+  /** The popover's geometry is the window's, fixed by the platform that opens
+   *  it. DMY-169 made the main shell width-adaptive; this surface is not. */
+  it("keeps one geometry at every viewport width", async () => {
+    const { container } = withUser(<QuickPasteApp />);
+    await screen.findByRole("list");
+    const root = container.firstElementChild!;
+    const before = root.className;
+
+    for (const width of [360, 891, DEFAULT_TEST_WIDTH]) {
+      setViewportWidth(width);
+      expect(root.className).toBe(before);
+      expect(root.getAttribute("data-size-class")).toBeNull();
+    }
   });
 });
