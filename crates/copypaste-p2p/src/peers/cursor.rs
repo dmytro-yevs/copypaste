@@ -314,10 +314,11 @@ mod tests {
         );
     }
 
-    /// One durable write for the page, not one per row: the whole point of
-    /// lowering the floor with a single `min`.
+    /// One *call* lowers every peer and reaches the disk. It does not count
+    /// writes — two would pass this identically; the bound on how many happen
+    /// is [`a_page_that_changes_nothing_does_not_write_at_all`]'s.
     #[test]
-    fn one_page_lowers_every_peer_in_a_single_write() {
+    fn one_call_lowers_every_peer_and_reaches_the_disk() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(DEFAULT_CURSOR_FILE_NAME);
         let cursors = CursorStore::open(&path);
