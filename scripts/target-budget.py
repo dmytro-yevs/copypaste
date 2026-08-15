@@ -20,8 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from cargo_target import held_locks, is_cache_dir  # noqa: E402
 from target_budget import marks as marking  # noqa: E402
-from target_budget.locks import held_locks, is_cargo_target  # noqa: E402
 from target_budget.plan import build  # noqa: E402
 from target_budget.reclaim import apply, gib, render  # noqa: E402
 from target_budget.survey import survey, total_size  # noqa: E402
@@ -64,7 +64,7 @@ def main(argv: list[str]) -> int:
     if not target.is_dir():
         print(f"no such directory: {target}", file=sys.stderr)
         return 2
-    if not is_cargo_target(target):
+    if not is_cache_dir(target):
         print(f"not a cargo target directory (no CACHEDIR.TAG): {target}", file=sys.stderr)
         return 2
 
