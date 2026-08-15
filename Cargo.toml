@@ -137,6 +137,14 @@ strip = "symbols"
 [profile.release.build-override]
 strip = false
 
+# Evidence builds, which test behaviour rather than performance. Trades the
+# runtime speed and size that `codegen-units = 1` and thin LTO buy for the
+# codegen parallelism they forbid. Never use it for an artifact a user installs.
+[profile.evidence]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 [profile.dev]
 # `target/debug` reached 22 GB and filled the disk twice in one session. Full
 # debug info is most of that, and cargo never collects stale artifacts, so a
