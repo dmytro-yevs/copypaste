@@ -110,12 +110,22 @@ class TestContainment(Base):
 
 class TestProtections(Base):
     def test_primary_checkout_is_never_removed(self) -> None:
-        make_cache(self.repo / "target")
-        actions = self.run_plan()
-        primary = [a for a in actions if a.path == self.repo]
-        self.assertEqual(len(primary), 1)
-        self.assertFalse(primary[0].remove)
-        self.assertIn("primary checkout", primary[0].reason)
+        cache = make_cache(self.repo / "target")
+        primary = [a for a in self.run_plan() if a.path in (self.repo, cache)]
+        self.assertTrue(primary)
+        self.assertTrue(all(not a.remove for a in primary))
+        self.assertTrue(all("primary checkout" in a.reason for a in primary))
+
+    def test_primary_checkout_cache_size_is_reported(self) -> None:
+        """It holds most of the bytes; a report that hid them would mislead."""
+        cache = make_cache(self.repo / "target", payload=8192)
+        outcomes = apply(self.run_plan(), dry_run=True)
+        reported = [o for o in outcomes if o.action.path == cache]
+        self.assertEqual(len(reported), 1)
+        self.assertFalse(reported[0].action.remove)
+        self.assertGreaterEqual(reported[0].size, 8192)
+        self.assertTrue(cache.exists())
+        self.assertIn("clean-target.sh", render(outcomes, dry_run=True))
 
     def test_dirty_worktree_is_preserved(self) -> None:
         tree = self.add_worktree("dirty")
