@@ -119,13 +119,18 @@ pub trait CredentialStore {
 
 impl CredentialStore for Store {
     fn cloud_credentials(&self) -> Result<Option<StoredCredentials>, CredentialError> {
-        let values = CREDENTIAL_KEYS
+        let mut values = CREDENTIAL_KEYS
             .iter()
             .map(|key| self.state(key.as_str()))
             .collect::<Result<Vec<_>, _>>()?;
         if values.iter().all(Option::is_none) {
             return Ok(None);
         }
+        // The sync key is the one secret in this row. Moved out of the plain
+        // `String` the store handed back before anything reads it, so the only
+        // copy left is one that wipes itself. Index 5 is `SyncKey`, pinned by
+        // `schema_names_and_key_serialization_are_canonical`.
+        let key_hex = values[5].take().map(Zeroizing::new);
 
         let complete = (|| {
             let email = values[0].clone()?;
@@ -133,15 +138,24 @@ impl CredentialStore for Store {
             let access_token = values[2].clone()?;
             let refresh_token = values[3].clone()?;
             let expires_at_ms = values[4].as_deref()?.parse::<i64>().ok()?.max(0);
-            let key_hex = values[5].as_deref()?;
+            let key_hex = key_hex.as_deref()?;
             if user_id.is_empty() {
                 return None;
             }
             if values[6].as_deref()? != user_id || values[7].as_deref()? != user_id {
                 return None;
             }
-            let key_bytes: [u8; 32] = hex::decode(key_hex).ok()?.try_into().ok()?;
-            if hex::encode(key_bytes) != key_hex {
+            // Every intermediate the key passes through wipes itself: `decode`
+            // hands back an ordinary `Vec`, and re-encoding to check the stored
+            // form is canonical would otherwise leave a second copy of the key
+            // in an unwiped `String`.
+            let decoded = Zeroizing::new(hex::decode(key_hex).ok()?);
+            if decoded.len() != 32 {
+                return None;
+            }
+            let mut key_bytes = Zeroizing::new([0u8; 32]);
+            key_bytes.copy_from_slice(&decoded);
+            if *Zeroizing::new(hex::encode(*key_bytes)) != *key_hex {
                 return None;
             }
             Some(StoredCredentials {
@@ -152,7 +166,7 @@ impl CredentialStore for Store {
                     user_id,
                     expires_at_ms,
                 },
-                sync_key: SyncKey::from_bytes(key_bytes),
+                sync_key: SyncKey::from_bytes(*key_bytes),
             })
         })();
 
