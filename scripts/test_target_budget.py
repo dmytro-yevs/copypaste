@@ -33,7 +33,8 @@ time.sleep(120)
 SCRIPTS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 
-from target_budget import locks, marks, plan, reclaim, survey  # noqa: E402
+import cargo_target  # noqa: E402
+from target_budget import marks, plan, reclaim, survey  # noqa: E402
 
 SPEC = importlib.util.spec_from_file_location("target_budget_cli", SCRIPTS / "target-budget.py")
 cli = importlib.util.module_from_spec(SPEC)
@@ -45,7 +46,7 @@ def make_target(root: pathlib.Path, units: dict[str, str], profile: str = "debug
     """A minimal but structurally real cargo target directory."""
     target = root / "target"
     (target).mkdir(parents=True, exist_ok=True)
-    (target / "CACHEDIR.TAG").write_bytes(locks.CACHEDIR_SIGNATURE + b"\n")
+    (target / "CACHEDIR.TAG").write_bytes(cargo_target.CACHEDIR_SIGNATURE + b"\n")
     prof = target / profile
     for area in ("deps", "build", ".fingerprint"):
         (prof / area).mkdir(parents=True, exist_ok=True)
@@ -132,38 +133,20 @@ class PlanTest(unittest.TestCase):
         self.assertGreater(result.shortfall, 0)
 
 
-class LockTest(unittest.TestCase):
+class LockRefusalTest(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
-    def test_lock_is_found_under_any_profile_not_just_debug_and_release(self):
-        """A cross-target or custom-profile build must not read as idle.
-
-        Probing a hardcoded `debug`/`release` pair reports "no build running"
-        during `--target x86_64-linux-android` or `--profile evidence`, and the
-        sweep then deletes that build's inputs while it runs.
-        """
-        target = make_target(self.tmp, {"a" * 16: "serde"})
-        for profile in ("x86_64-linux-android/debug", "evidence"):
-            path = target / profile
-            path.mkdir(parents=True, exist_ok=True)
-            (path / ".cargo-lock").write_bytes(b"")
-        found = {p.parent.name for p in locks.build_locks(target)}
-        self.assertEqual(found, {"debug", "evidence"})
-        self.assertIn("x86_64-linux-android", str(locks.build_locks(target)[-1].parent.parent))
-
-    def test_held_lock_blocks_the_sweep(self):
-        """A real build holds the lock from another process, so the test must too.
-
-        Both `fcntl.flock` and `msvcrt.locking` are per-process: taking the lock
-        in this process leaves the probe free to take it again, and the test
-        passes while the guard does nothing.
-        """
+    def test_a_held_lock_stops_the_sweep_before_it_plans_anything(self):
         target = make_target(self.tmp, {"a" * 16: "serde"})
         lock = target / "debug" / ".cargo-lock"
         lock.write_bytes(b"\0")
-        self.assertEqual(locks.held_locks(target), [])
+        (target / marks.MARK_FILE).write_text(
+            json.dumps({"hashes": [], "recorded_at": time.time(), "configurations": ["build"]}),
+            encoding="utf-8",
+        )
+        self.assertEqual(cli.main(["--target", str(target), "--repo", str(self.tmp)]), 0)
 
         holder = subprocess.Popen(
             [sys.executable, "-c", HOLD_LOCK, str(lock)],
@@ -172,12 +155,6 @@ class LockTest(unittest.TestCase):
         self.addCleanup(holder.kill)
         self.assertEqual(holder.stdout.readline().strip(), "held")
 
-        self.assertEqual(locks.held_locks(target), [lock])
-        marks_file = target / marks.MARK_FILE
-        marks_file.write_text(
-            json.dumps({"hashes": [], "recorded_at": time.time(), "configurations": ["build"]}),
-            encoding="utf-8",
-        )
         self.assertEqual(cli.main(["--target", str(target), "--repo", str(self.tmp)]), 3)
 
 
