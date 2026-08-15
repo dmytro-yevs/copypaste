@@ -27,7 +27,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Row } from "@/components/settings/Row";
-import { useClearHistory } from "@/hooks/useHistoryMutations";
+import { useDeferredDelete } from "@/hooks/useDeferredDelete";
 import { statusItemCount, useStatus } from "@/hooks/useStatus";
 import {
   useBackupDatabase,
@@ -44,7 +44,10 @@ type Confirming = "none" | "clear" | "export" | "restore";
 export function StorageTab() {
   const { t } = useTranslation();
   const status = useStatus(statusItemCount);
-  const clear = useClearHistory();
+  // Its own instance rather than one shared with the history list (DMY-168).
+  // Only one screen is mounted at a time, so the two can never both hold a
+  // pending clear, and a module-level store would buy nothing here.
+  const { removeAll } = useDeferredDelete();
   const exportHistory = useExportHistory();
   const importHistory = useImportHistory();
   const backup = useBackupDatabase();
@@ -146,7 +149,6 @@ export function StorageTab() {
           variant="outline"
           size="sm"
           className="text-err-strong"
-          disabled={clear.isPending}
           onClick={() => setConfirming("clear")}
         >
           <Trash2 aria-hidden="true" />
@@ -170,7 +172,7 @@ export function StorageTab() {
             <AlertDialogAction
               className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
-                clear.mutate();
+                void removeAll();
                 close();
               }}
             >

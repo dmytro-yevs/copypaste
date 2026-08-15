@@ -4,15 +4,21 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
+import { UndoCountdown } from "@/components/history/UndoCountdown";
 import { useHistory } from "@/hooks/useHistory";
 import { HISTORY_COALESCE_MS, PAGE_SIZE } from "@/lib/layout";
 import { item, items, page, testClient } from "@/test/harness";
 
 const toast = vi.fn();
+const dismiss = vi.fn();
 const deleteItem = vi.fn();
 const listItems = vi.fn();
 
-vi.mock("sonner", () => ({ toast: (...args: unknown[]) => toast(...args) }));
+vi.mock("sonner", () => ({
+  toast: Object.assign((...args: unknown[]) => toast(...args), {
+    dismiss: (...args: unknown[]) => dismiss(...args),
+  }),
+}));
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
   return {
@@ -31,11 +37,41 @@ function wrapper() {
 
 beforeEach(() => {
   toast.mockReset();
+  dismiss.mockReset();
   deleteItem.mockReset().mockResolvedValue(undefined);
   listItems.mockReset();
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+/** A batch commits early on unmount and on the next delete (§3.1.8). The toast
+ *  outlives both, so without an explicit dismiss the user is left looking at an
+ *  Undo button that does nothing when pressed. */
+describe("the undo control never outlives the batch", () => {
+  it("dismisses the first toast when the next delete commits it", () => {
+    const { result } = renderHook(() => useDeferredDelete(), { wrapper: wrapper() });
+    toast.mockReturnValueOnce("first").mockReturnValueOnce("second");
+
+    act(() => result.current.remove(item({ id: "a" })));
+    act(() => result.current.remove(item({ id: "b" })));
+
+    expect(dismiss).toHaveBeenCalledWith("first");
+    expect(dismiss).not.toHaveBeenCalledWith("second");
+  });
+
+  it("dismisses a pending toast when the view unmounts", () => {
+    const { result, unmount } = renderHook(() => useDeferredDelete(), {
+      wrapper: wrapper(),
+    });
+    toast.mockReturnValueOnce("only");
+
+    act(() => result.current.remove(item({ id: "a" })));
+    dismiss.mockClear();
+    unmount();
+
+    expect(dismiss).toHaveBeenCalledWith("only");
+  });
+});
 
 describe("single-item delete feedback", () => {
   it("shows only Deleted with an inline Undo action, never the clip or its id", () => {
@@ -49,7 +85,10 @@ describe("single-item delete feedback", () => {
     expect(options).toEqual(expect.objectContaining({
       action: expect.objectContaining({ label: "Undo" }),
     }));
-    expect(options).not.toHaveProperty("description");
+    // The description carries the countdown and nothing else. It is the only
+    // free-text slot on the toast, so it is the one that could leak a clip.
+    expect(options.description.type).toBe(UndoCountdown);
+    expect(options.description.props).toEqual({ ms: 5000 });
     expect(JSON.stringify([title, options])).not.toContain(clip.content);
     expect(JSON.stringify([title, options])).not.toContain(clip.id);
 

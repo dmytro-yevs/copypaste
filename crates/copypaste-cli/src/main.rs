@@ -70,7 +70,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 out("cancelled; nothing was deleted");
                 return Ok(());
             }
-            Method::DeleteAll
+            Method::DeleteAll { through: None }
         }
         Command::Pin { id } => Method::Pin {
             id: id.clone(),
