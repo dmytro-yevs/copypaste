@@ -45,9 +45,22 @@ generation per *configuration*: version bumps, `Cargo.lock` changes, differing
 feature sets between gates, profile and toolchain changes. Six workspace version
 bumps grew the same tree from 4.66 GiB to 15.75 GiB, about 1.57 GiB each.
 
-`line-tables-only` therefore was not an outgrown partial fix. It bounded
-artifact *size*; the growth is in the *count of configurations*, a different
-axis, and it stays in force for the reason it was added.
+`line-tables-only` therefore was not an outgrown partial fix, and this is the
+part to keep: **it shrinks each artifact, and the problem is how many artifacts
+are retained.** No size knob can reach that, so the next one will fail the same
+way. The measured distribution says the same thing — the mass is not in fat
+artifacts but in ordinary ones, many times over:
+
+| `target/debug/deps` | files | size |
+|---|---|---|
+| over 50 MB | 42 | 3.67 GiB |
+| 10–50 MB | 451 | 8.36 GiB |
+| 1–10 MB | 2,690 | 8.03 GiB |
+
+15,106 files across 1,270 package stems is **11.9 artifacts per stem**, and
+`build/` holds 904 directories across 93 stems, **9.7 per stem**. A single
+configuration needs about 1.6. The mitigation stays in force for the reason it
+was added; it was never going to bound this.
 
 ## Rule 1 exemption 1 — no maintained package provides the behaviour
 
@@ -75,7 +88,10 @@ which is open, `S-needs-design`, and treats target-dir GC as a future question.
 
 Removal and size accounting come from the standard library.
 
-## Do not group generations by package name
+## The trap: do not group generations by package name
+
+**Anyone writing a target cleaner reaches for "keep the newest N per crate"
+first. Against real data it deletes live output.**
 
 One package legitimately holds many live hashes at once. In a single clean build
 `copypaste-ipc` has four — the lib, its test binary, and the `wire_roundtrip`
@@ -116,3 +132,21 @@ only for a crate that is not currently being edited.
 
 This owns the primary checkout. ADR-0025 owns worktrees and refuses to touch
 this directory; the two do not overlap and neither should grow into the other.
+The cargo markers both rely on — `CACHEDIR.TAG` and `.cargo-lock` — live in
+`scripts/cargo_target.py`, shared, because two copies of a fail-closed check
+drift into one strict and one permissive and the permissive one deletes.
+
+## Measured, and deliberately not addressed here
+
+`scripts/clean-target.sh` removes `target/debug/incremental` and files over
+50 MB in `target/debug/deps`. On the measured tree that is 15.82 + 3.67 =
+19.49 GiB of 46.13 — a partial reclaim, not a bound, because the 50 MB
+threshold sits above where the mass actually is. It also takes no build lock and
+has no dry run. Left as it is rather than fixed alongside; whoever needs it
+should decide whether it survives `target-budget.py` at all.
+
+All `target/` directories under the WSL `$HOME` total **100 GiB**, against the
+58.9 GiB ADR-0025 was written from. That is neither the primary checkout nor a
+git worktree — it is sandbox trees agents create outside both mechanisms — so it
+belongs to neither ADR and needs its own issue rather than a quiet widening of
+this one.
