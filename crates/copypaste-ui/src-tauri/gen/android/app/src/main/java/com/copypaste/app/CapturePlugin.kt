@@ -9,14 +9,18 @@ import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import android.webkit.WebView
+import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.util.concurrent.atomic.AtomicReference
 import rikka.shizuku.Shizuku
 
 /**
@@ -30,15 +34,49 @@ import rikka.shizuku.Shizuku
  */
 @TauriPlugin
 class CapturePlugin(private val activity: Activity) : Plugin(activity) {
-    private var pendingArm: PendingArm? = null
-    private var pendingShizukuArm: PendingArm? = null
+    /**
+     * The arm request waiting on each permission dialog.
+     *
+     * `AtomicReference` because every transition here has to be take-once:
+     * `getAndSet` hands back whatever it displaced so a second request cannot
+     * strand the first, and `compareAndSet` lets the timeout settle its own
+     * request without settling its successor. An unsettled request is a promise
+     * the WebView waits on forever, which looks exactly like a control that did
+     * nothing.
+     */
+    private val pendingArm = AtomicReference<ArmRequest?>()
+    private val pendingShizukuArm = AtomicReference<ArmRequest?>()
+    private val main = Handler(Looper.getMainLooper())
 
     override fun load(webView: WebView) {
         super.load(webView)
         CaptureNotifications.ensureChannels(activity)
+        PackageFacts.observe(activity)
+        ClipboardNoticeSetting.observe(activity)
         // Tells the rung 0 doorways that something is draining the queue, so
         // they need not start the app to make sure a clip is picked up.
         ClipQueue.rustIsUp = true
+    }
+
+    /**
+     * The activity can be destroyed while a permission dialog is still up, and
+     * the foreground service can keep the process alive afterwards. Everything
+     * that would otherwise outlive this plugin goes here: an unsettled request
+     * is a promise the WebView waits on forever, a `rustIsUp` left true is a
+     * queue with no drain task, and the caches must stop being fed by receivers
+     * belonging to an activity that is gone.
+     */
+    override fun onDestroy(activity: AppCompatActivity) {
+        ClipQueue.rustIsUp = false
+        PackageFacts.stopObserving(this.activity)
+        ClipboardNoticeSetting.stopObserving(this.activity)
+        if (active === this) active = null
+        abandon(pendingArm.getAndSet(null))
+        abandon(pendingShizukuArm.getAndSet(null))
+    }
+
+    private fun abandon(request: ArmRequest?) {
+        request?.invoke?.reject("The window closed before background capture was set up.")
     }
 
     @Command
@@ -122,7 +160,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             // The permission result is asynchronous. Keep this exact request
             // pending so a granted dialog continues the user's original arm,
             // instead of making the control look as though it did nothing.
-            pendingArm = PendingArm(invoke, title, body)
+            abandon(pendingArm.getAndSet(ArmRequest(invoke, title, body)))
             (activity as MainActivity).requestNotificationPermission(::onNotificationPermissionResult)
             return
         }
@@ -133,18 +171,20 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     private fun finishArm(invoke: Invoke, title: String, body: String) {
         if (ShizukuClipboard.isRunning() && !ShizukuClipboard.hasPermission()) {
             active = this@CapturePlugin
-            val pending = PendingArm(invoke, title, body)
-            pendingShizukuArm = pending
+            val pending = ArmRequest(invoke, title, body)
+            abandon(pendingShizukuArm.getAndSet(pending))
             if (!ShizukuClipboard.requestPermission()) {
-                pendingShizukuArm = null
+                pendingShizukuArm.compareAndSet(pending, null)
                 active = null
                 resolveArm(invoke, false)
                 return
             }
-            activity.window.decorView.postDelayed(
+            // On the main looper rather than on the decor view: a destroyed
+            // activity's view hierarchy runs no callbacks, and this is the
+            // failsafe that keeps the request from hanging forever.
+            main.postDelayed(
                 {
-                    if (pendingShizukuArm === pending) {
-                        pendingShizukuArm = null
+                    if (pendingShizukuArm.compareAndSet(pending, null)) {
                         active = null
                         resolveArm(pending.invoke, false)
                     }
@@ -156,8 +196,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         val listening = ShizukuClipboard.arm(activity) {
             CaptureService.lost(activity, title, body)
         }
-        pendingShizukuArm = null
-        if (pendingArm === null) active = null
+        abandon(pendingShizukuArm.getAndSet(null))
+        if (pendingArm.get() == null) active = null
         if (listening) {
             CaptureService.start(activity, "Capturing from every app.", title, body)
         } else {
@@ -190,8 +230,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun onNotificationPermissionResult(granted: Boolean) {
-        val pending = pendingArm ?: return
-        pendingArm = null
+        val pending = pendingArm.getAndSet(null) ?: return
         active = null
         if (granted) {
             finishArm(pending.invoke, pending.title, pending.body)
@@ -312,12 +351,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         return asked
     }
 
-    private fun isShizukuInstalled(): Boolean = try {
-        activity.packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0)
-        true
-    } catch (e: Throwable) {
-        false
-    }
+    private fun isShizukuInstalled(): Boolean =
+        PackageFacts.isInstalled(activity, SHIZUKU_PACKAGE)
 
     companion object {
         private const val SHIZUKU_PERMISSION_REQUEST = 4919
@@ -337,8 +372,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun onShizukuPermissionResult(granted: Boolean) {
-        val pending = pendingShizukuArm ?: return
-        pendingShizukuArm = null
+        val pending = pendingShizukuArm.getAndSet(null) ?: return
         if (granted) {
             finishArm(pending.invoke, pending.title, pending.body)
             return
@@ -347,7 +381,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         resolveArm(pending.invoke, false)
     }
 
-    private data class PendingArm(
+    private data class ArmRequest(
         val invoke: Invoke,
         val title: String,
         val body: String,
