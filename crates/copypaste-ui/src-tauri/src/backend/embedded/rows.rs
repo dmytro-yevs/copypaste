@@ -184,9 +184,11 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
             index_purged: inner.state.index_purged,
             ..Default::default()
         },
-        // The in-process backend keeps its settings in the app's own store and
-        // has no persisted daemon record to fail closed on.
-        settings_health: None,
+        // Android has no daemon, but it does have a persisted settings record
+        // and it does fail closed on one it cannot read (DMY155-B2). Reporting
+        // `None` here would leave the user running on privacy values they never
+        // chose with nothing on screen saying so.
+        settings_health: settings.health.clone(),
     })
 }
 

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use copypaste_ipc::{ConfigApplied, ConfigData, ConfigPatch, PrivateModeData};
+use copypaste_ipc::{ConfigApplied, ConfigData, ConfigPatch, PrivateModeData, SettingsHealth};
 
 use super::open::{EmbeddedBackend, Inner};
 use super::{BackendError, Result};
@@ -14,6 +14,10 @@ const MSG_SAVE_FAILED: &str = "CopyPaste couldn't save these settings.";
 pub(super) struct SettingsSnapshot {
     pub(super) config: ConfigData,
     pub(super) private_mode_epoch: u64,
+    /// `None` while the stored record read back cleanly. Anything else means
+    /// these are not the user's own values, and `SettingsHealthNotice` is what
+    /// says so.
+    pub(super) health: Option<SettingsHealth>,
 }
 
 pub(super) struct EmbeddedSettings {
@@ -23,16 +27,22 @@ pub(super) struct EmbeddedSettings {
 
 impl EmbeddedSettings {
     pub(super) fn open(path: PathBuf) -> Self {
-        let config = match load(&path) {
-            Ok(config) => config,
-            Err(Unreadable::FirstRun) => ConfigData::default(),
+        let (config, health) = match load(&path) {
+            Ok(config) => (config, None),
+            Err(Unreadable::FirstRun) => (ConfigData::default(), None),
             Err(Unreadable::Corrupt) => {
                 // No path in the message: it discloses the local user name.
                 tracing::warn!(
                     "the settings file could not be read; capture, sync and LAN \
                      visibility stay off until it is set again"
                 );
-                fail_closed()
+                (
+                    fail_closed(),
+                    Some(SettingsHealth {
+                        record_unreadable: true,
+                        unreadable_fields: Vec::new(),
+                    }),
+                )
             }
         };
         Self {
@@ -40,6 +50,7 @@ impl EmbeddedSettings {
             current: RwLock::new(SettingsSnapshot {
                 config,
                 private_mode_epoch: 0,
+                health,
             }),
         }
     }
@@ -70,6 +81,9 @@ impl EmbeddedSettings {
         write_settings(&self.path, &next)?;
         current.config = next.clone();
         current.private_mode_epoch = next_epoch;
+        // The record on disk is this one now, so the degraded state is over.
+        // Leaving it set would keep warning a user who had already repaired it.
+        current.health = None;
         inner.publish_items(false, 0);
         Ok(AppliedSettings {
             config: next,
@@ -286,6 +300,32 @@ mod tests {
         assert!(!config.lan_visibility);
     }
 
+    /// Failing closed silently is still a user running on values they did not
+    /// choose. `SettingsHealthNotice` already renders this on the Service tab
+    /// for the daemon; Android reported `None` and showed nothing.
+    #[test]
+    fn an_unreadable_file_is_reported_as_degraded_rather_than_healthy() {
+        let (_dir, path) = stored(Some(b"{\"private_mode\": tru"));
+
+        let health = EmbeddedSettings::open(path).snapshot().health;
+
+        let health = health.expect("a fail-closed read reported itself healthy");
+        assert!(health.record_unreadable);
+        assert!(health.is_degraded());
+        // Field names only ever cross this boundary, and there are none here:
+        // the whole record went, not individual fields.
+        assert!(health.unreadable_fields.is_empty());
+    }
+
+    #[test]
+    fn settings_that_read_cleanly_are_not_reported_as_degraded() {
+        let (_dir, path) = stored(Some(&serde_json::to_vec(&ConfigData::default()).unwrap()));
+        assert!(EmbeddedSettings::open(path).snapshot().health.is_none());
+
+        let (_empty, absent) = stored(None);
+        assert!(EmbeddedSettings::open(absent).snapshot().health.is_none());
+    }
+
     /// Rule 4: data loss is the worst outcome. The degraded state is in memory
     /// only, so the unreadable bytes are still there to be recovered.
     #[test]
@@ -296,5 +336,49 @@ mod tests {
         let _settings = EmbeddedSettings::open(path.clone());
 
         assert_eq!(fs::read(&path).unwrap(), corrupt);
+    }
+
+    /// End to end through the status the WebView actually reads, because a
+    /// health record the backend never reports is a notice that never renders.
+    #[tokio::test]
+    async fn the_degraded_status_reaches_the_frontend_and_clears_on_repair() {
+        use crate::backend::Backend as _;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("settings-v2.json"),
+            b"{\"private_mode\": tru",
+        )
+        .unwrap();
+        let backend = super::super::open::EmbeddedBackend::open(
+            dir.path(),
+            Box::new(std::sync::Arc::new(
+                super::super::tests::FakeClipboard::default(),
+            )),
+        )
+        .unwrap();
+
+        let degraded = backend.status().await.unwrap();
+        assert!(degraded.private_mode, "a restart resumed capture");
+        assert!(
+            degraded
+                .settings_health
+                .is_some_and(|health| health.is_degraded()),
+            "the status claimed the settings were fine"
+        );
+
+        backend
+            .set_config(ConfigPatch {
+                private_mode: Some(false),
+                ..ConfigPatch::default()
+            })
+            .await
+            .unwrap();
+
+        let repaired = backend.status().await.unwrap();
+        assert!(
+            repaired.settings_health.is_none(),
+            "the notice outlived the record it was warning about"
+        );
     }
 }
