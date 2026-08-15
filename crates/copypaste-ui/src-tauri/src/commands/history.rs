@@ -229,8 +229,18 @@ pub async fn delete_item(backend: State<'_, SelectedBackend>, id: String) -> Res
 /// ask, but a dialog is the frontend's to own, and putting a second gate in the
 /// bridge would mean two places could disagree about whether the user meant it.
 #[tauri::command]
-pub async fn delete_all(backend: State<'_, SelectedBackend>) -> Result<u64> {
-    backend.clear().await
+pub async fn delete_all(backend: State<'_, SelectedBackend>, through: Option<i64>) -> Result<u64> {
+    backend.clear(through).await
+}
+
+/// A marker for everything stored so far, to pass back to `delete_all`.
+///
+/// The frontend defers a clear behind an undo window, so it has to name the set
+/// the user meant at the moment they asked rather than at the moment the call
+/// finally runs.
+#[tauri::command]
+pub async fn history_ceiling(backend: State<'_, SelectedBackend>) -> Result<u64> {
+    backend.history_ceiling().await
 }
 
 /// Pin or unpin an item, returning the updated item so the caller need not

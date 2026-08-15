@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-import { useBulkDelete, useBulkPin } from "@/hooks/useHistoryMutations";
+import { useBulkPin } from "@/hooks/useHistoryMutations";
 import { type Selection, useSelection } from "@/hooks/useSelection";
 import type { Item } from "@/lib/ipc";
 
@@ -15,13 +15,15 @@ export interface HistorySelection {
   readonly confirmDelete: () => void;
 }
 
-/** Bulk delete has no undo window, unlike the single-row delete (§3.1.9), so
- *  the confirmation is part of the operation rather than a decision a caller
- *  can forget to make. */
-export function useHistorySelection(items: readonly Item[]): HistorySelection {
+/** The confirmation stays even though bulk delete is now undoable (DMY-168):
+ *  the undo window is five seconds and the blast radius is the whole selection,
+ *  so the two guards answer different risks. */
+export function useHistorySelection(
+  items: readonly Item[],
+  removeMany: (items: readonly Item[]) => void,
+): HistorySelection {
   const selection = useSelection(items);
   const bulkPin = useBulkPin();
-  const bulkDelete = useBulkDelete();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const togglePin = useCallback(() => {
@@ -32,13 +34,14 @@ export function useHistorySelection(items: readonly Item[]): HistorySelection {
   }, [bulkPin, selection]);
 
   const confirmDelete = useCallback(() => {
-    bulkDelete.mutate(selection.items, { onSettled: () => selection.end() });
+    removeMany(selection.items);
+    selection.end();
     setConfirmingDelete(false);
-  }, [bulkDelete, selection]);
+  }, [removeMany, selection]);
 
   return {
     selection,
-    busy: bulkPin.isPending || bulkDelete.isPending,
+    busy: bulkPin.isPending,
     togglePin,
     confirmingDelete,
     requestDelete: useCallback(() => setConfirmingDelete(true), []),

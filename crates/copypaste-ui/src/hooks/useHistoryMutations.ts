@@ -3,16 +3,8 @@ import { toast } from "sonner";
 
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
-import { IMAGE_PREVIEW_KEY, imagePreviewKey } from "@/hooks/useHistoryMedia";
-import { STATUS_KEY, invalidateHistoryQueries } from "@/hooks/historyRefresh";
-import {
-  type Item,
-  copyItem,
-  deleteAll,
-  deleteItem,
-  reorderPinned,
-  setPinned,
-} from "@/lib/ipc";
+import { invalidateHistoryQueries } from "@/hooks/historyRefresh";
+import { type Item, copyItem, reorderPinned, setPinned } from "@/lib/ipc";
 
 /**
  * Not optimistic, and nothing here reorders locally: INV-31 (a pinned item
@@ -40,24 +32,6 @@ export function usePin() {
   return useMutation({
     mutationFn: (item: Item) => setPinned(item.id, !item.pinned),
     onSuccess: () => invalidateHistoryQueries(qc),
-    onError: (raw) => toast.error(toFriendly(raw)),
-  });
-}
-
-/** Destructive and un-undoable: the caller must gate it behind a confirm
- *  dialog (5j9x, kayk, fjvz, vcnv, w6xc are all one misclick away). */
-export function useClearHistory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => deleteAll(),
-    onSuccess: async (removed) => {
-      toast.success(t("history.toast.cleared", { count: removed }));
-      qc.removeQueries({ queryKey: IMAGE_PREVIEW_KEY });
-      await Promise.all([
-        invalidateHistoryQueries(qc),
-        qc.invalidateQueries({ queryKey: STATUS_KEY }),
-      ]);
-    },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
 }
@@ -116,25 +90,6 @@ export function useBulkPin() {
     onSuccess: async (outcome, { pinned }) => {
       report(pinned ? "pinned" : "unpinned", outcome);
       await invalidateHistoryQueries(qc);
-    },
-    onError: (raw) => toast.error(toFriendly(raw)),
-  });
-}
-
-/** Bulk delete has no undo (§3.1.9), so the caller must confirm first. */
-export function useBulkDelete() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (items: readonly Item[]) => runBulk(items, (item) => deleteItem(item.id)),
-    onSuccess: async (outcome, items) => {
-      report("deleted", outcome);
-      for (const item of items) {
-        qc.removeQueries({ queryKey: imagePreviewKey(item.id) });
-      }
-      await Promise.all([
-        invalidateHistoryQueries(qc),
-        qc.invalidateQueries({ queryKey: STATUS_KEY }),
-      ]);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
