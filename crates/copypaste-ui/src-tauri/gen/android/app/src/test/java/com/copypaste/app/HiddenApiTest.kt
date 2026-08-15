@@ -80,4 +80,51 @@ class HiddenApiTest {
 
         assertArrayEquals(arrayOf<Any?>("com.example.caller", 0), args)
     }
+
+    /**
+     * A supplied argument takes its positional slot with it. Before this, the
+     * caller's String filled parameter one *and* left the calling-package slot
+     * unclaimed, so `attributionTag` — added in API 30 — took `com.android.shell`
+     * where AOSP wants null.
+     */
+    @Test
+    fun aSuppliedCallingPackageDoesNotLeaveTheNextStringTakingOne() {
+        val four = HiddenApi.candidates(methods, "getPrimaryClip").last()
+
+        val args = HiddenApi.arguments(four, arrayOf("com.example.caller"), "com.android.shell", 11, 7)
+
+        assertArrayEquals(arrayOf<Any?>("com.example.caller", null, 11, 7), args)
+    }
+
+    /**
+     * One argument fills one parameter. `firstOrNull` rescanned from the start
+     * for every parameter, so a single value answered each one of its type.
+     */
+    @Test
+    fun oneSuppliedArgumentIsNotSpreadAcrossEveryParameterOfItsType() {
+        val four = HiddenApi.candidates(methods, "getPrimaryClip").last()
+
+        val args = HiddenApi.arguments(
+            four,
+            arrayOf("first", "second"),
+            "com.android.shell",
+            11,
+            7,
+        )
+
+        assertArrayEquals(arrayOf<Any?>("first", "second", 11, 7), args)
+    }
+
+    /**
+     * `int.class.isAssignableFrom(Integer.class)` is false, so a supplied `Int`
+     * silently lost its parameter to the positional default.
+     */
+    @Test
+    fun aSuppliedIntCanFillAPrimitiveIntParameter() {
+        val two = HiddenApi.candidates(methods, "hasPrimaryClip").single()
+
+        val args = HiddenApi.arguments(two, arrayOf(42), "com.android.shell", 11, 7)
+
+        assertArrayEquals(arrayOf<Any?>("com.android.shell", 42), args)
+    }
 }

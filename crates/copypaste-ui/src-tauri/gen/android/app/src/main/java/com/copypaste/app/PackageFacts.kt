@@ -21,6 +21,12 @@ import androidx.core.content.ContextCompat
  * A lookup that fails for any reason other than "no such package" is not
  * cached. Remembering a transient failure would turn one bad call into a
  * permanent wrong answer about whether rung 2 is available at all.
+ *
+ * The monitor is held across the PackageManager call, so a miss serialises the
+ * drain and capture threads on a binder round trip. Deliberate: after the first
+ * lookup every call is a hit, and the alternative — releasing the lock to query
+ * and retaking it — lets two threads race a package event and store an answer
+ * the broadcast has already retracted.
  */
 object PackageFacts {
     private const val TAG = "CopyPastePackages"
@@ -111,7 +117,11 @@ object PackageFacts {
         receiver = registered
     }
 
-    /** Idempotent: teardown runs on every activity destroy, rotation included. */
+    /**
+     * Idempotent: this is process-wide state that outlives any one activity, so
+     * it can be stopped when it was never started — a failed [observe] leaves
+     * nothing registered, and `unregisterReceiver` throws on that.
+     */
     @Synchronized
     fun stopObserving(context: Context) {
         val registered = receiver ?: return

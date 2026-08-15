@@ -65,12 +65,20 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      * is a promise the WebView waits on forever, a `rustIsUp` left true is a
      * queue with no drain task, and the caches must stop being fed by receivers
      * belonging to an activity that is gone.
+     *
+     * This is real teardown, not a rotation: `MainActivity` declares
+     * `orientation`, `screenSize`, `smallestScreenSize` and `screenLayout` in
+     * `configChanges`, so a turn of the phone arrives at
+     * `PluginManager.onConfigurationChanged` and never reaches here.
      */
     override fun onDestroy(activity: AppCompatActivity) {
         ClipQueue.rustIsUp = false
         PackageFacts.stopObserving(this.activity)
         ClipboardNoticeSetting.stopObserving(this.activity)
         if (active === this) active = null
+        // Before the requests go: a pending failsafe keeps this plugin, and the
+        // request it closes over, reachable for the rest of its timeout.
+        main.removeCallbacksAndMessages(null)
         abandon(pendingArm.getAndSet(null))
         abandon(pendingShizukuArm.getAndSet(null))
     }

@@ -65,7 +65,10 @@ object ClipboardNoticeSetting {
         observer = registered
     }
 
-    /** Idempotent: teardown runs on every activity destroy, rotation included. */
+    /**
+     * Idempotent: this is process-wide state that outlives any one activity, so
+     * it can be stopped when it was never started.
+     */
     @Synchronized
     fun stopObserving(context: Context) {
         val registered = observer ?: return
