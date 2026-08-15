@@ -238,8 +238,8 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        40,
-        "a Method was added without a contract case"
+        41,
+        "a Method has no contract case, or this count was not bumped with it"
     );
 
     for (index, method) in methods.into_iter().enumerate() {

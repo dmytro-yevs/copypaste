@@ -359,7 +359,13 @@ impl Store {
     /// `rowid` is insert order, so it separates them without consulting a clock.
     ///
     /// SQLite only reuses a `rowid` when the row holding the largest one is hard
-    /// deleted; the sole hard delete is cap eviction, which takes the oldest.
+    /// deleted. Of the three eviction paths, `evict_over_cap` and
+    /// `evict_over_byte_cap` take the oldest, but `evict_older_than` selects on
+    /// `created_at`, so a clock jump **backward** can backdate the newest row —
+    /// the one holding the largest `rowid` — into the age sweep. Reuse then
+    /// needs a fresh insert inside the same undo window to land at or below a
+    /// ceiling already taken, which would clear a clip captured after the user
+    /// pressed. Narrow, and not closed by this bound.
     ///
     /// Repeated calls need no guard. `deleted = 0` excludes anything an earlier
     /// call tombstoned, and a later ceiling is strictly larger, so it can only
