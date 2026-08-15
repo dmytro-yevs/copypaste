@@ -16,9 +16,13 @@ Two published markers carry that decision instead of a heuristic:
 - **`CACHEDIR.TAG`** ([spec](https://bford.info/cachedir/)) — cargo writes one
   into `target/`. A directory is treated as a regenerable cache only when the
   tag's 43-byte signature matches.
-- **`target/<profile>/.cargo-lock`** — a build in progress holds it. The cleaner
-  tries the lock (`msvcrt.locking` on Windows, `fcntl.flock` elsewhere) and
-  preserves the cache when it cannot take it.
+- **`.cargo-lock`** — a build in progress holds it. The cleaner tries every lock
+  it can find under `target/` (`msvcrt.locking` on Windows, `fcntl.flock`
+  elsewhere) and preserves the cache when it cannot take one. Discovered by
+  glob, not by naming profiles: `--target <triple>` nests one level deeper and
+  `[profile.evidence]` is neither `debug` nor `release`. It is re-tested
+  immediately before removal, because sizing the tree first leaves a long
+  window.
 
 Anything else is proved disposable file by file: content is removable only if
 `git hash-object` produces a blob that `git cat-file -e` already has.
@@ -49,6 +53,11 @@ Fail-closed costs reclaim. A leftover holding one unrecoverable file is
 preserved whole, which is why `complete-android-e2e` keeps 0.923 GiB: it holds
 `Screenshot_1786337929.png`, whose content is in no git object.
 
-The recoverability proof spawns two git processes per file, so directories named
-`node_modules`, `build`, `target` and `__pycache__` are skipped as regenerable
-rather than hashed.
+The recoverability proof spawns two git processes per file, so a directory is
+skipped unread only when it says what it is: `node_modules` and `__pycache__`,
+which rebuild from a manifest beside them, or any directory carrying
+`CACHEDIR.TAG`. Skipping by the names `build` and `target` alone was a hole —
+Gradle writes instrumentation evidence under `build/reports/`, so a scan could
+return clean and take the leftover with it. A Gradle tree is consequently never
+reclaimable, because its intermediates are in no git object; preserving 0.9 GiB
+is the cheaper error.

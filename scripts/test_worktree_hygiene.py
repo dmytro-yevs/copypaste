@@ -174,6 +174,28 @@ class TestProtections(Base):
         self.assertEqual(len(actions), 1)
         self.assertTrue(actions[0].remove)
 
+    def test_a_unique_file_under_gradle_build_still_blocks_removal(self) -> None:
+        """Gradle writes instrumentation evidence under `build/`, and it carries
+        no CACHEDIR.TAG. Skipping the name unconditionally let the scan return
+        clean and the whole leftover be removed."""
+        orphan = self.trees / "gradle"
+        buried = orphan / "app" / "build" / "reports" / "androidTests"
+        buried.mkdir(parents=True)
+        (buried / "Screenshot.png").write_bytes(b"the only copy of this")
+        actions = [a for a in self.run_plan() if a.path == orphan]
+        self.assertEqual(len(actions), 1)
+        self.assertFalse(actions[0].remove)
+        self.assertIn("Screenshot.png", actions[0].reason)
+
+    def test_a_tagged_cache_directory_is_still_skipped(self) -> None:
+        """The speed-up has to survive the fix: a real cargo target proves
+        itself with the tag and is not hashed file by file."""
+        orphan = self.trees / "tagged"
+        cache = make_cache(orphan / "target")
+        (cache / "debug" / "huge.rlib").write_bytes(b"\0" * 4096)
+        (orphan / "README.md").write_text("hello\n", encoding="utf-8")
+        self.assertEqual(unrecoverable_files(orphan, self.repo), [])
+
     def test_generated_directories_do_not_block_an_orphan(self) -> None:
         orphan = self.trees / "generated"
         (orphan / "node_modules" / "pkg").mkdir(parents=True)
@@ -206,6 +228,32 @@ class TestActiveBuild(Base):
     def test_held_lock_makes_the_cache_active(self) -> None:
         cache = make_cache(self.root / "busy")
         lock = cache / "debug" / ".cargo-lock"
+        lock.write_bytes(b"\0")
+        handle = self._lock(lock)
+        try:
+            self.assertTrue(is_build_active(cache))
+        finally:
+            handle.close()
+
+    def test_a_custom_profile_lock_is_found(self) -> None:
+        """`[profile.evidence]` landed in c33f8518 and puts its lock at
+        `target/evidence/.cargo-lock`. Listing debug and release missed it."""
+        cache = make_cache(self.root / "custom")
+        lock = cache / "evidence" / ".cargo-lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_bytes(b"\0")
+        handle = self._lock(lock)
+        try:
+            self.assertTrue(is_build_active(cache))
+        finally:
+            handle.close()
+
+    def test_a_cross_target_lock_is_found(self) -> None:
+        """`--target aarch64-apple-darwin` nests the profile one level deeper,
+        and check-macos-types.sh runs inside the standard gate."""
+        cache = make_cache(self.root / "cross")
+        lock = cache / "aarch64-apple-darwin" / "debug" / ".cargo-lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_bytes(b"\0")
         handle = self._lock(lock)
         try:
@@ -260,6 +308,28 @@ class TestApply(Base):
         self.assertIn("preserved", text)
         self.assertIn("uncommitted work", text)
         self.assertIn("reclaimable", text)
+
+    def test_a_build_started_after_the_plan_stands_the_removal_down(self) -> None:
+        """Sizing walks the whole tree before `rmtree`; on 11 GiB that window is
+        long enough for a build to start in, and nothing used to re-check."""
+        tree = self.add_worktree("racing")
+        cache = make_cache(tree / "target")
+        actions = [a for a in self.run_plan() if a.path == cache]
+        self.assertTrue(actions[0].remove, "the plan should have offered to remove it")
+
+        lock = cache / "debug" / ".cargo-lock"
+        lock.write_bytes(b"\0")
+        handle = TestActiveBuild._lock(lock)
+        try:
+            outcomes = apply(actions, dry_run=False)
+        finally:
+            handle.close()
+
+        self.assertTrue(cache.exists(), "a cache was removed under a running build")
+        self.assertEqual(len(outcomes), 1)
+        self.assertFalse(outcomes[0].removed)
+        self.assertIsNone(outcomes[0].error)
+        self.assertIn("cargo lock", outcomes[0].action.reason)
 
     def test_failure_is_reported_not_raised(self) -> None:
         tree = self.add_worktree("locked")

@@ -3,8 +3,14 @@
 The rule that earns its place: `complete-android-e2e` sat on disk as a full
 source tree with no `.git`, holding `Screenshot_1786337929.png` whose content
 is in no git object. A cleaner that removed leftover directories wholesale
-would have destroyed the only copy. Nothing without a recoverable-content
-proof or a cache tag is ever removed.
+would have destroyed the only copy.
+
+Content is removed only where it is proved recoverable, with one stated
+exception: directories that regenerate from a manifest they sit next to
+([`ALWAYS_GENERATED`]) are skipped unread. `build/` and `target/` are *not* in
+that set — Gradle writes instrumentation evidence under `build/reports/`, and
+skipping the name let a scan return clean and take the whole leftover with it.
+They are skipped only when they carry the cache tag that proves what they are.
 """
 
 from __future__ import annotations
@@ -18,8 +24,12 @@ from pathlib import Path
 # https://bford.info/cachedir/ — a tag file begins with exactly these 43 bytes.
 CACHEDIR_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
 
-# Regenerable by their own toolchain, and too large to hash file by file.
-GENERATED_DIR_NAMES = frozenset({"node_modules", "build", "target", "__pycache__"})
+# Rebuilt from a manifest that sits beside them, so nothing here is a last copy.
+ALWAYS_GENERATED = frozenset({"node_modules", "__pycache__"})
+
+# How deep a `.cargo-lock` can sit: `<profile>/` for a plain build,
+# `<triple>/<profile>/` once `--target` is given.
+_LOCK_GLOBS = ("*/.cargo-lock", "*/*/.cargo-lock")
 
 
 @dataclass(frozen=True)
@@ -52,15 +62,24 @@ def is_contained(path: Path, roots: list[Path]) -> bool:
 
 
 def is_build_active(target: Path) -> bool:
-    """True if cargo holds a build lock, or we cannot prove that it does not."""
-    locks = [target / profile / ".cargo-lock" for profile in ("debug", "release")]
+    """True if cargo holds a build lock, or we cannot prove that it does not.
+
+    Locks are discovered, not listed. Naming `debug` and `release` missed both
+    `--target <triple>` builds and `[profile.evidence]`, and each miss deletes a
+    cache under a running build.
+    """
+    try:
+        locks = [lock for pattern in _LOCK_GLOBS for lock in target.glob(pattern)]
+    except OSError:
+        return True
     for lock in locks:
-        if not lock.exists():
-            continue
         try:
             handle = lock.open("r+b")
-        except PermissionError:
-            return True
+        except FileNotFoundError:
+            # The only benign miss. `Path.exists()` cannot be used to pre-filter:
+            # it reports a permission error as absence, which is a fail-open step
+            # inside a function whose whole job is to fail closed.
+            continue
         except OSError:
             return True
         try:
@@ -98,12 +117,18 @@ def is_dirty(worktree: Path) -> bool | None:
 def unrecoverable_files(path: Path, repo: Path, limit: int = 5) -> list[Path]:
     """Files under `path` whose exact content is in no object of `repo`.
 
-    Directories named in GENERATED_DIR_NAMES are skipped: their toolchain
-    rebuilds them, and hashing gigabytes of them would make this unusable.
+    A directory is skipped only when it says what it is: a manifest-backed name
+    in [`ALWAYS_GENERATED`], or a cache carrying `CACHEDIR.TAG`. A bare `build/`
+    or `target/` is read, because neither name proves anything on its own.
     """
     suspects: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(path):
-        dirnames[:] = [d for d in dirnames if d not in GENERATED_DIR_NAMES and d != ".git"]
+        here = Path(dirpath)
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d != ".git" and d not in ALWAYS_GENERATED and not is_cache_dir(here / d)
+        ]
         for name in filenames:
             candidate = Path(dirpath) / name
             if not _in_object_store(candidate, repo):
