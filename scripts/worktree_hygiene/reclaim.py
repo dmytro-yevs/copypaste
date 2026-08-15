@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 import shutil
 import stat
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .plan import Action
+from .safety import is_build_active, is_cache_dir
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,24 @@ def _force_writable(func, path, _exc):
         pass
 
 
+def _rmtree(path: Path) -> None:
+    # `onerror` is removed in 3.14; `onexc` arrived in 3.12. Both hand the
+    # callback (func, path, ...), so one callback serves either.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_force_writable)
+    else:
+        shutil.rmtree(path, onerror=_force_writable)
+
+
+def _stood_down(action: Action) -> Outcome:
+    return Outcome(
+        replace(action, remove=False, reason="a build took the cargo lock after the plan was made"),
+        0,
+        False,
+        None,
+    )
+
+
 def apply(actions: list[Action], *, dry_run: bool) -> list[Outcome]:
     outcomes: list[Outcome] = []
     for action in actions:
@@ -50,8 +70,13 @@ def apply(actions: list[Action], *, dry_run: bool) -> list[Outcome]:
             # Idempotent: a second run finds the work already done.
             outcomes.append(Outcome(action, 0, False, None))
             continue
+        # Re-tested here, not just in the plan: sizing walks the whole tree, and
+        # on 11 GiB that is long enough for a build to start in.
+        if is_cache_dir(action.path) and is_build_active(action.path):
+            outcomes.append(_stood_down(action))
+            continue
         try:
-            shutil.rmtree(action.path, onerror=_force_writable)
+            _rmtree(action.path)
         except OSError as exc:
             outcomes.append(Outcome(action, size, False, str(exc)))
             continue
