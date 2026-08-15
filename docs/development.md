@@ -54,10 +54,33 @@ apply it only after reading which paths it names. Manual recovery is the same
 command; it is idempotent, so a second run after a partial failure finishes the
 job.
 
-It never touches the primary checkout. Reclaim there with
-`scripts/clean-target.sh`, which drops the incremental cache and stale test
-binaries without a full rebuild.
+It never touches the primary checkout. Bound that with
+`scripts/target-budget.py`, below.
 
 A worktree with uncommitted work, a running build, or any file whose content is
 in no git object is preserved whole. `--root` overrides the searched worktree
 parents; a root that does not exist is skipped rather than guessed at.
+
+## Keeping `target/` bounded
+
+`target/` grows one artifact generation per *configuration* — a version bump, a
+`Cargo.lock` change, a different feature set, a toolchain change. Code edits
+overwrite in place and cost nothing.
+
+Mark each configuration you build, then sweep what no mark named:
+
+```sh
+python3 scripts/target-budget.py --mark -- build --workspace --tests --locked
+python3 scripts/target-budget.py --mark -- clippy --workspace --all-targets --locked
+python3 scripts/target-budget.py            # report; removes nothing
+python3 scripts/target-budget.py --apply    # remove
+```
+
+Mark clippy separately even though it builds the same crates. The two share
+only 164 units of 781 and 859, so marking `build` alone sweeps 695 clippy units
+and the next lint gate rebuilds nearly everything.
+
+A marked configuration keeps building at its normal cost; a configuration never
+marked pays a full rebuild. The sweep refuses while any `.cargo-lock` under
+`target/` is held, and nothing runs it for you. See
+[ADR-0026](adr/0026-bound-the-primary-checkout-target-directory.md).
