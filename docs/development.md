@@ -42,3 +42,22 @@ deliberately omit updater metadata.
 
 Incomplete records fail validation. Do not encode completion with TODOs,
 waivers, placeholders, skipped assertions, or green jobs that lack evidence.
+
+## Reclaiming build artifacts
+
+`python3 scripts/worktree-hygiene.py` reports what per-worktree build output
+could be reclaimed and what it is preserving, with byte counts and a reason per
+preserved path. It removes nothing without `--apply`.
+
+Run the report at wave completion, once every worker terminal is released, and
+apply it only after reading which paths it names. Manual recovery is the same
+command; it is idempotent, so a second run after a partial failure finishes the
+job.
+
+It never touches the primary checkout. Reclaim there with
+`scripts/clean-target.sh`, which drops the incremental cache and stale test
+binaries without a full rebuild.
+
+A worktree with uncommitted work, a running build, or any file whose content is
+in no git object is preserved whole. `--root` overrides the searched worktree
+parents; a root that does not exist is skipped rather than guessed at.
