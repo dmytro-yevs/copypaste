@@ -107,7 +107,11 @@ fn every_ipc_method_has_one_executable_wire_contract() {
         let encoded = serde_json::to_value(&method).unwrap();
         assert_eq!(encoded, fixture, "wire contract drifted for {name}");
     }
-    assert_eq!(names.len(), 40);
+    assert_eq!(
+        names.len(),
+        41,
+        "a Method has no wire fixture, or this count was not bumped with it"
+    );
 }
 
 #[test]
