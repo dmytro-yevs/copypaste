@@ -126,11 +126,15 @@ impl CredentialStore for Store {
         if values.iter().all(Option::is_none) {
             return Ok(None);
         }
-        // The sync key is the one secret in this row. Moved out of the plain
-        // `String` the store handed back before anything reads it, so the only
-        // copy left is one that wipes itself. Index 5 is `SyncKey`, pinned by
-        // `schema_names_and_key_serialization_are_canonical`.
-        let key_hex = values[5].take().map(Zeroizing::new);
+        // The sync key is the one secret in this row, so it is moved out of the
+        // plain `String` the store handed back before anything reads it.
+        let Some(key_at) = CREDENTIAL_KEYS
+            .iter()
+            .position(|key| *key == CloudStateKey::SyncKey)
+        else {
+            return Ok(None);
+        };
+        let key_hex = values[key_at].take().map(Zeroizing::new);
 
         let complete = (|| {
             let email = values[0].clone()?;
@@ -145,10 +149,11 @@ impl CredentialStore for Store {
             if values[6].as_deref()? != user_id || values[7].as_deref()? != user_id {
                 return None;
             }
-            // Every intermediate the key passes through wipes itself: `decode`
-            // hands back an ordinary `Vec`, and re-encoding to check the stored
-            // form is canonical would otherwise leave a second copy of the key
-            // in an unwiped `String`.
+            // The heap intermediates wipe themselves: `decode` hands back an
+            // ordinary `Vec`, and re-encoding to check the stored form is
+            // canonical would otherwise leave a second copy of the key in an
+            // unwiped `String`. The 32-byte array itself is `Copy`, so the
+            // stack copies `SyncKey::from_bytes` takes are not covered.
             let decoded = Zeroizing::new(hex::decode(key_hex).ok()?);
             if decoded.len() != 32 {
                 return None;
