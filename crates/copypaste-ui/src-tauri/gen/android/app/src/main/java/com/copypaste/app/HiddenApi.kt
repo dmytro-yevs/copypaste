@@ -50,13 +50,26 @@ object HiddenApi {
         userId: Int,
         deviceId: Int,
     ): Array<Any?> {
+        val remaining = specific.toMutableList()
         var sawString = false
         var sawInt = false
         return method.parameterTypes
             .map { type ->
-                val given = specific.firstOrNull { type.isAssignableFrom(it.javaClass) }
+                // Each supplied argument fills one parameter and takes that
+                // positional slot with it. Neither was true before: the same
+                // element answered every parameter of its type, and a supplied
+                // String left `sawString` false, so the *next* String — which
+                // is `attributionTag` from API 30 on — took the calling package
+                // instead of null. Unreachable while no call site passes two of
+                // a type, which is exactly how it would have survived to the
+                // API level that added the parameter that springs it.
+                val index = remaining.indexOfFirst { boxed(type).isAssignableFrom(it.javaClass) }
+                if (index >= 0) {
+                    if (type == String::class.java) sawString = true
+                    if (type == Int::class.javaPrimitiveType) sawInt = true
+                    return@map remaining.removeAt(index)
+                }
                 when {
-                    given != null -> given
                     type == String::class.java && !sawString -> {
                         sawString = true
                         callingPackage
@@ -72,5 +85,16 @@ object HiddenApi {
                 }
             }
             .toTypedArray()
+    }
+
+    /**
+     * `int.class.isAssignableFrom(Integer.class)` is false, so a supplied `Int`
+     * could never fill an `int` parameter and was dropped without a word.
+     */
+    private fun boxed(type: Class<*>): Class<*> = when (type) {
+        Int::class.javaPrimitiveType -> Integer::class.java
+        Long::class.javaPrimitiveType -> java.lang.Long::class.java
+        Boolean::class.javaPrimitiveType -> java.lang.Boolean::class.java
+        else -> type
     }
 }

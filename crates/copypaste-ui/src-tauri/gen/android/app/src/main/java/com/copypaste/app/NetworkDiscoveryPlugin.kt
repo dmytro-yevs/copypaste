@@ -60,7 +60,7 @@ class NetworkDiscoveryPlugin(private val activity: Activity) : Plugin(activity) 
         false
     }
 
-    /** Idempotent: teardown runs on every activity destroy, rotation included. */
+    /** Idempotent: `release` and destroy both reach it, in either order. */
     private fun releaseLock() {
         try {
             multicastLock?.takeIf { it.isHeld }?.release()
