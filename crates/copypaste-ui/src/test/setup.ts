@@ -18,9 +18,9 @@ afterEach(cleanup);
 
 // A lazy screen's first `import()` is a transform, not a fetch, and on a loaded
 // runner it does not fit the 1000ms default: adding two renders to a file was
-// enough to fail a `findBy` on an unrelated screen once in six runs. Kept well
-// under vitest's 5000ms `testTimeout` — a wait that can consume the whole test
-// budget turns a named assertion failure into an anonymous timeout.
+// enough to fail a `findBy` on an unrelated screen once in six runs. Kept under
+// the config's `testTimeout` — a wait that can consume the whole test budget
+// turns a named assertion failure into an anonymous timeout.
 configure({ asyncUtilTimeout: 2500 });
 
 const VIEWPORT_PX = 800;
