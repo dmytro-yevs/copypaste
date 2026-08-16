@@ -95,6 +95,25 @@ test("requests all target types so WebView pages are not excluded", () => {
   expect(app).toMatch(/\.pages\(\s*true\s*\)/);
 });
 
+// DMY-141: On old WebView engines (109, API 29/33) Puppeteer's `pages(true)`
+// omits the app target. The ground truth is `/json/list` — the raw CDP endpoint
+// that lists every open debugger page. The harness must fall back to it when
+// `pages()` yields no matching target.
+test("falls back to /json/list when pages() hides the app target", () => {
+  const here = fileURLToPath(import.meta.url);
+  const app = readFileSync(resolve(here, "../../src/harness/app.ts"), "utf8");
+  expect(app).toMatch(/\/json\/list/);
+  expect(app).toMatch(/rawTargets/);
+});
+
+// The ground-truth query must be bounded: a devtools endpoint that never
+// answers `/json/list` must not delay attachment beyond its normal backoff.
+test("raw target discovery bounds its fetch", () => {
+  const here = fileURLToPath(import.meta.url);
+  const app = readFileSync(resolve(here, "../../src/harness/app.ts"), "utf8");
+  expect(app).toMatch(/AbortSignal\.timeout/);
+});
+
 describe("giving up", () => {
   test("names the process state rather than the wait when the app died", () => {
     expect(nextAttachStep({ ...RUNNING, pid: undefined, msLeft: 0 })).toEqual({

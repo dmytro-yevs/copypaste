@@ -46,6 +46,29 @@ async function open(port: number, msLeft: number): Promise<{ browser: Browser; e
   return { browser, endpoint };
 }
 
+/**
+ * Raw CDP target from `/json/list`, used when Puppeteer's `pages()` does not
+ * expose the app target. Old WebView engines (109, API 33) publish the page
+ * with type `"webview"` which `pages(includeAll)` should surface but doesn't
+ * always — the raw endpoint is the ground truth.
+ */
+interface RawTarget {
+  type: string;
+  url: string;
+  title: string;
+  webSocketDebuggerUrl: string;
+}
+
+async function rawTargets(browserUrl: string): Promise<RawTarget[]> {
+  try {
+    const response = await fetch(`${browserUrl}/json/list`, { signal: AbortSignal.timeout(3_000) });
+    if (!response.ok) return [];
+    return (await response.json()) as RawTarget[];
+  } catch {
+    return [];
+  }
+}
+
 async function resolveAppPage(port: number, deadline: number): Promise<Attached> {
   const msLeft = () => Math.max(0, deadline - Date.now());
   let { browser, endpoint } = await open(port, msLeft());
@@ -58,8 +81,27 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
     const page = pages?.find((candidate) => isAppTarget(candidate.url()));
     if (page) return { browser, page, endpoint };
 
+    // Old WebView engines (109, API 29/33) may list the app target in the raw
+    // `/json/list` response while `pages()` omits it.  The page is the ground
+    // truth — if it exists there with the right origin, open it directly.
+    const targets = await rawTargets(endpoint.browserUrl);
+    const raw = targets.find((t) => isAppTarget(t.url));
+    if (raw?.webSocketDebuggerUrl) {
+      try {
+        const directBrowser = await puppeteer.connect({
+          browserWSEndpoint: raw.webSocketDebuggerUrl,
+          defaultViewport: null,
+        });
+        const [directPage] = await directBrowser.pages();
+        if (directPage) return { browser: directBrowser, page: directPage, endpoint };
+      } catch {
+        // The direct WebSocket may be rejected; fall through to normal wait.
+      }
+    }
+
+    const allTargets = pages?.map((c) => c.url()) ?? targets.map((t) => t.url);
     const step = nextAttachStep({
-      targets: pages?.map((candidate) => candidate.url()),
+      targets: allTargets,
       pid: await appPid(),
       endpointPid: endpoint.pid,
       msLeft: msLeft(),
