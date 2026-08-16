@@ -341,7 +341,12 @@ quiet="$(db_fingerprint quiescence)"
     && probe "the store is quiescent before the capture" "yes — a change after this is the capture" \
     || probe "the store is quiescent before the capture" "no, it changes on its own; the assertion below is necessary but not sufficient"
 
-adb logcat -c || true
+doorway_capture() {
+    adb logcat -c || true
+    sh_ am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT "$CANARY_SEND" -n "$INTAKE"
+    sh_ am start -a android.intent.action.PROCESS_TEXT -t text/plain --es android.intent.extra.PROCESS_TEXT "$CANARY_PROC" -n "$INTAKE"
+}
+
 send_out="$(sh_ am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT "$CANARY_SEND" -n "$INTAKE")"
 grep -q 'Error' <<<"$send_out" \
     && bad "the share-sheet doorway accepted an ACTION_SEND" "$send_out" \
@@ -363,6 +368,26 @@ crashes3="$(crash_report "$OUT/capture.log" "$pid2")"
 [[ -z "$crashes3" ]] \
     && ok "no crash block while capturing" \
     || bad "no crash block while capturing" "$(head -n 20 <<<"$crashes3")"
+
+# GMS FontsProvider or another provider host can die while the doorways run,
+# and the platform kills every client of the dying provider — including this
+# app. Relaunch and retry once; a second foreign kill is the emulator image's
+# own problem and stays the caller's to note.
+doorway_foreign_kill="$(foreign_dependency_kill "$OUT/capture.log" "$pid2" || true)"
+if [[ -z "$(app_pid)" && -n "$doorway_foreign_kill" ]]; then
+    probe "the platform killed the app during doorways" "$doorway_foreign_kill"
+    sh_ am force-stop "$PKG" 2>/dev/null || true
+    sleep 2
+    adb logcat -c || true
+    sh_ am start -W -n "$MAIN" >/dev/null || true
+    wait_for 30 has_pid || true
+    pid2="$(app_pid)"
+    sleep "$SETTLE_SECS"
+    dump_logcat capture-retry
+    doorway_capture
+    sleep 10
+    dump_logcat capture-retry-done
+fi
 
 [[ -n "$(app_pid)" ]] \
     && ok "the app is still running after both doorways" \
