@@ -316,7 +316,14 @@ adb logcat -c || true
 
 group "Seed encrypted history"
 sh_ mkdir -p /sdcard/Download >/dev/null
-sh_ rm -f "/sdcard/Download/$SEED_FILE" "/sdcard/Download/$EXPORT_FILE" "/sdcard/Download/$INVALID_FILE" >/dev/null
+# rm -f returns 0 even when files don't exist, so a non-zero exit means a real
+# error: device offline, permission denied, or adb itself failed.  The old code
+# swallowed this with `>/dev/null`, so a broken device continued into the
+# picker-automation and failed much later with a confusing toast timeout.
+cleanup_out="$(sh_ rm -f "/sdcard/Download/$SEED_FILE" "/sdcard/Download/$EXPORT_FILE" "/sdcard/Download/$INVALID_FILE" 2>&1)" || {
+    bad "the transfer fixtures are cleared on the device" "${cleanup_out:-cleanup backend failure}"
+    summary; exit 1
+}
 python3 - "$CANARY" <<'PY' | adb_ shell dd "of=/sdcard/Download/$SEED_FILE" >/dev/null
 import json
 import sys

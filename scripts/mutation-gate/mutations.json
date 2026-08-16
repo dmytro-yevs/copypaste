@@ -356,6 +356,36 @@
       ]
     },
     {
+      "id": "android-emulator-legs",
+      "verifies": "the API-36 rung fails closed on probe failure and records not-applicable receipts",
+      "command": ["bash", "scripts/release/android-emulator-legs.sh", "--self-test"],
+      "platforms": ["linux", "macos"],
+      "requires": ["bash"],
+      "mutations": [
+        {
+          "name": "probe-failure-accepted",
+          "file": "scripts/release/android-emulator-legs.sh",
+          "find": "if [[ $status -ne 0 ]]; then",
+          "replace": "if false; then",
+          "expect": "FAIL  adb failure fails closed"
+        },
+        {
+          "name": "empty-probe-accepted",
+          "file": "scripts/release/android-emulator-legs.sh",
+          "find": "if [[ ! \"$probe\" =~ ^[0-9]+$ ]]; then",
+          "replace": "if false; then",
+          "expect": "FAIL  empty probe fails closed"
+        },
+        {
+          "name": "valid-level-rejected",
+          "file": "scripts/release/android-emulator-legs.sh",
+          "find": "if [[ ! \"$probe\" =~ ^[0-9]+$ ]]; then",
+          "replace": "if true; then",
+          "expect": "FAIL  API 36 is recognized"
+        }
+      ]
+    },
+    {
       "id": "check-wiring",
       "verifies": "the CI runner-image detector: an unknown label or a mixed image family must be rejected",
       "command": ["python3", "scripts/release/check-wiring.py", "--self-test"],
