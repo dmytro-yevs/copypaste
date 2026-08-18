@@ -466,7 +466,7 @@ render as ASCII but do not match ASCII character classes. Pinned by
 `\u{FF21}\u{FF2B}\u{FF29}\u{FF21}` + 16 ASCII chars → must detect as an AWS
 key.
 
-Two consequences that must be carried:
+Three consequences that must be carried:
 
 - **Idempotence on ASCII** — `nfkc_normalize("AKIAIOSFODNN7EXAMPLE")` is the
   identity (`detector/mod.rs:249-253`). This is what lets callers usually index
@@ -475,6 +475,11 @@ Two consequences that must be carried:
   against the same normalised string (`normalize.rs:6-9`), and the
   byte→char offset mapping for UI masking must be computed over it
   (`ffi_sensitive.rs:283-292`, daemon `handlers_items_read.rs:290-306`).
+- **Default-ignorable code points are stripped** after NFKC (ZWJ, ZWSP,
+  variation selectors, …). A spliced secret such as `AKIA\u{200D}IOS…` must
+  still match. Spans index the stripped string. Auto-wipe stays on the
+  high-confidence band: inert PII with ignorables stripped must not become
+  deletable (`AGENTS.md` rule 4).
 
 ### 5.2 Structural anchoring (the primary defence)
 
@@ -1066,11 +1071,11 @@ comment saying why.**
   `from_pattern_name` string-prefix dispatch (`kind.rs:25-45`). Prefix matching
   on names (`n.starts_with("aws")`) means renaming a rule silently changes its
   label. **v2: the label belongs in the rule definition.**
-- `nfkc_zwj_in_jwt_normalises_away` (`detector/mod.rs:239-247`) asserts nothing
-  about ZWJ — its body tests a clean ASCII JWT and the doc comment admits NFKC
-  keeps ZWJ. **The ZWJ bypass is untested and probably still open.** Write a
-  real test in v2 (and decide whether to strip default-ignorable code points
-  before matching).
+- `nfkc_zwj_in_jwt_normalises_away` (`detector/mod.rs:239-247`) asserted
+  nothing about ZWJ. **v2 strips default-ignorable code points after NFKC**
+  (`sensitive/normalise.rs`) so a ZWJ-spliced secret matches. Tests:
+  `default_ignorables_are_stripped_so_spliced_secrets_are_detected` and
+  `stripping_ignorables_does_not_make_inert_pii_wipeable`.
 
 ---
 
