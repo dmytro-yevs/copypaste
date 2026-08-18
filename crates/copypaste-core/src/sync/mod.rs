@@ -22,7 +22,7 @@ mod source;
 #[cfg(test)]
 mod testkit;
 
-pub use batch::apply_remote_versions;
+pub use batch::{apply_remote_p2p_versions, apply_remote_versions, P2pPin};
 pub use merge::{
     apply_remote_version, local_winner_stamp, open_version, open_version_bytes, MergeError,
     OpenVersionError, RemoteVersion,
