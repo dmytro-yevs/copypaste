@@ -5,7 +5,8 @@
 
 /// Largest plaintext content one item may carry.
 ///
-/// 4 MiB is `copypaste_p2p::protocol::MAX_CONTENT_BYTES`, so anything storable
+/// Shared with Settings and UI payload ceilings in `copypaste_ipc::config`.
+/// Matches `copypaste_p2p::protocol::MAX_CONTENT_BYTES`, so anything storable
 /// is also transportable to a peer.
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 
