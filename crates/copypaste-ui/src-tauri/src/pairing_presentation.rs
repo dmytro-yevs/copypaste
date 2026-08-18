@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
 use copypaste_ipc::{PairingInviteData, PairingProgressData};
 use zeroize::Zeroizing;
+
+pub type NativeAbort = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg(any(
     test,
@@ -19,6 +23,15 @@ mod macos_model;
 
 #[cfg(target_os = "windows")]
 mod windows;
+
+#[cfg(target_os = "windows")]
+pub fn windows_ui(abort: NativeAbort) -> impl NativePairingUi {
+    windows::WindowsPairingUi::new(
+        invite::encode_native_invite,
+        invite::decode_native_invite,
+        abort,
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
@@ -60,6 +73,7 @@ impl Default for PairingPresenter {
         let native = Box::new(windows::WindowsPairingUi::new(
             invite::encode_native_invite,
             invite::decode_native_invite,
+            Arc::new(|| {}),
         ));
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let native = Box::new(UnavailablePairingUi);
