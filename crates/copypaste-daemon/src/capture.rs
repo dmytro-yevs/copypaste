@@ -111,6 +111,7 @@ fn sweep_sensitive_items(state: &AppState) {
         // one history change nobody asked for, and a client cannot say so on an
         // event that only reports that the count moved.
         Ok(removed) => {
+            crate::cloud::note_version_written(state, copypaste_core::now_ms());
             state.note_sensitive_swept(u32::try_from(removed).unwrap_or(u32::MAX));
         }
         Err(e) => warn!(error = ?e, "the sensitive-item sweep failed"),
@@ -547,6 +548,42 @@ mod tests {
         let mut events = state.subscribe();
         sweep_sensitive_items(&state);
         assert!(events.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_sensitive_sweep_pulls_the_cloud_upload_floor_back() {
+        let (state, _dir) = test_state("alpha");
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &copypaste_ipc::ConfigPatch {
+                    sensitive_ttl_secs: Some(30),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let old = copypaste_core::now_ms() - 10 * 60 * 1000;
+        ingest_at(&state, "AKIAIOSFODNN7EXAMPLE", "text", old).unwrap();
+        let ahead = copypaste_core::now_ms().saturating_add(60_000);
+        state
+            .meta
+            .set_state_ms(crate::cloud::KEY_UPLOAD_FLOOR, ahead)
+            .unwrap();
+
+        sweep_sensitive_items(&state);
+
+        let floor = state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap();
+        assert!(floor < ahead, "the sweep left the upload floor ahead");
+        assert!(
+            state
+                .store
+                .versions_since(floor, 100)
+                .unwrap()
+                .iter()
+                .any(|row| row.deleted),
+            "the wipe tombstone was not offered"
+        );
     }
 
     /// Every other history change reports `swept: 0`, so a client can branch on
