@@ -57,6 +57,18 @@ pub fn test_state(name: &str) -> (Arc<AppState>, tempfile::TempDir) {
     test_state_with_cloud(name, Cloud::new(None))
 }
 
+pub fn test_state_with_clipboard(
+    name: &str,
+    clipboard: Box<dyn ClipboardSource>,
+) -> (Arc<AppState>, tempfile::TempDir) {
+    reopen_with(
+        tempfile::tempdir().expect("tempdir"),
+        Cloud::new(None),
+        name,
+        clipboard,
+    )
+}
+
 /// A state plus the log of everything written to its clipboard.
 pub fn test_state_watching_clipboard(name: &str) -> (Arc<AppState>, tempfile::TempDir, WriteLog) {
     let writes = WriteLog::default();
