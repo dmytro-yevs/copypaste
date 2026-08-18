@@ -9,6 +9,7 @@
 use copypaste_p2p::protocol::ItemSummary;
 use copypaste_p2p::sync::{merge_decision, pin_state_wins, MergeDecision};
 use tracing::{debug, warn};
+use zeroize::Zeroizing;
 
 use super::prepare::prepare_remote_version;
 use super::{MSG_ENCRYPT, MSG_STORE};
@@ -36,7 +37,7 @@ fn open_error(error: &crate::CryptoError) -> OpenVersionError {
 pub fn open_version_bytes(
     keyring: &Keyring,
     row: &StoredItem,
-) -> Result<Vec<u8>, OpenVersionError> {
+) -> Result<Zeroizing<Vec<u8>>, OpenVersionError> {
     if row.content_ciphertext.is_empty() {
         warn!(id = %row.id, "live item has no payload; not sending it");
         return Err(OpenVersionError::MissingPayload);
@@ -75,8 +76,11 @@ pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Result<String, OpenV
     if !copypaste_ipc::content_type::is_text(&row.content_type) {
         return Err(OpenVersionError::MissingPayload);
     }
-    String::from_utf8(open_version_bytes(keyring, row)?)
-        .map_err(|_| OpenVersionError::InvalidPayload)
+    String::from_utf8({
+        let mut bytes = open_version_bytes(keyring, row)?;
+        std::mem::take(&mut *bytes)
+    })
+    .map_err(|_| OpenVersionError::InvalidPayload)
 }
 
 /// One version of one item, arriving from another device.
