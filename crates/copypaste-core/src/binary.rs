@@ -4,6 +4,7 @@ use chacha20poly1305::aead::Buffer;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 use crate::crypto::{stream_decryptor, stream_encryptor, STREAM_NONCE_LEN, TAG_LEN};
 use crate::{CryptoError, ItemKey};
@@ -251,7 +252,7 @@ pub fn seal_with_digest(
 }
 
 /// Open and verify a binary chunk envelope.
-pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoError> {
+pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     if envelope.len() < HEADER_BYTES || &envelope[..4] != MAGIC || envelope[4] != VERSION {
         return Err(CryptoError::AuthFailed);
     }
@@ -343,7 +344,7 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoE
     {
         return Err(CryptoError::AuthFailed);
     }
-    Ok(plain)
+    Ok(Zeroizing::new(plain))
 }
 
 #[cfg(test)]
@@ -352,7 +353,7 @@ mod tests {
     use crate::Keyring;
     use std::ops::Range;
 
-    fn assert_auth_failed(result: Result<Vec<u8>, CryptoError>) {
+    fn assert_auth_failed(result: Result<Zeroizing<Vec<u8>>, CryptoError>) {
         assert!(matches!(result, Err(CryptoError::AuthFailed)));
     }
 
@@ -397,9 +398,21 @@ mod tests {
         let key = Keyring::from_secret(&[9; 32]).item_key();
         let id = item_id(&bytes);
         let sealed = seal(&bytes, &key, &id).unwrap();
-        assert_eq!(open(&sealed, &key, &id).unwrap(), bytes);
+        assert_eq!(open(&sealed, &key, &id).unwrap().as_slice(), bytes);
         assert_eq!(metadata(&bytes).chunk_count, 2);
         assert_eq!(id, item_id(&bytes));
+    }
+
+    #[test]
+    fn open_plaintext_is_zeroizing() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        let bytes = b"binary secret";
+        let key = Keyring::from_secret(&[9; 32]).item_key();
+        let id = item_id(bytes);
+        let sealed = seal(bytes, &key, &id).unwrap();
+        let out = open(&sealed, &key, &id).unwrap();
+        assert_zeroize_on_drop(&out);
+        assert_eq!(out.as_slice(), bytes);
     }
 
     /// The digest is threaded through instead of recomputed at each spelling,
@@ -434,7 +447,7 @@ mod tests {
             hashed[..STREAM_NONCE_OFFSET]
         );
         assert_eq!(threaded.len(), hashed.len());
-        assert_eq!(open(&threaded, &key, &id).unwrap(), bytes);
+        assert_eq!(open(&threaded, &key, &id).unwrap().as_slice(), bytes);
     }
 
     #[test]
@@ -442,7 +455,7 @@ mod tests {
         let key = Keyring::from_secret(&[9; 32]).item_key();
         let maximum = vec![0; MAX_BINARY_BYTES as usize];
         let sealed = seal(&maximum, &key, "maximum").unwrap();
-        assert_eq!(open(&sealed, &key, "maximum").unwrap(), maximum);
+        assert_eq!(open(&sealed, &key, "maximum").unwrap().as_slice(), maximum);
 
         let bytes = vec![0; MAX_BINARY_BYTES as usize + 1];
         assert!(matches!(
@@ -460,7 +473,7 @@ mod tests {
             let sealed = seal(&bytes, &key, &id).unwrap();
 
             assert_eq!(metadata(&bytes).chunk_count, expected_chunks);
-            assert_eq!(open(&sealed, &key, &id).unwrap(), bytes);
+            assert_eq!(open(&sealed, &key, &id).unwrap().as_slice(), bytes);
         }
     }
 
