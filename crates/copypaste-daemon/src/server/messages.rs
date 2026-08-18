@@ -65,6 +65,8 @@ pub(crate) const MSG_KEY_LOCKED: &str =
 pub(crate) const MSG_KEY_UNUSABLE: &str =
     "this device's key is present and cannot be used, so the history encrypted with it \
      cannot be read by anything; trying again will not change that";
+pub(crate) const MSG_SEARCH_INDEX_PURGE: &str =
+    "the search index could not be cleared of sensitive content";
 
 /// A failure that carries a code of its own, distinct from the operation that
 /// met it.
@@ -84,6 +86,27 @@ impl Refusal for StoreError {
             StoreError::InvalidDeviceName => Some((ErrorCode::InvalidRequest, MSG_DEVICE_NAME)),
             _ => None,
         }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct SearchIndexPurgeFailed(pub StoreError);
+
+impl std::fmt::Display for SearchIndexPurgeFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for SearchIndexPurgeFailed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+impl Refusal for SearchIndexPurgeFailed {
+    fn refusal(&self) -> Option<(ErrorCode, &'static str)> {
+        Some((ErrorCode::KeyUnusable, MSG_SEARCH_INDEX_PURGE))
     }
 }
 
@@ -163,6 +186,7 @@ mod tests {
         MSG_RESTORE_FAILED,
         MSG_KEY_LOCKED,
         MSG_KEY_UNUSABLE,
+        MSG_SEARCH_INDEX_PURGE,
     ];
 
     #[test]
