@@ -280,14 +280,20 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun readNow(invoke: Invoke) {
         val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = clipboard.primaryClip
-            ?.takeIf { it.itemCount > 0 }
-            ?.getItemAt(0)
-            ?.coerceToText(activity)
-            ?.toString()
+        val primary = clipboard.primaryClip
+        val text = when {
+            primary == null -> null
+            ClipSensitivity.isSensitive(primary) -> null
+            else -> primary
+                .takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)
+                ?.coerceToText(activity)
+                ?.toString()
+        }
 
         val outcome = when {
             !text.isNullOrBlank() -> ReadOutcome.SUCCEEDED
+            primary != null && ClipSensitivity.isSensitive(primary) -> ReadOutcome.EMPTY
             clipboard.hasPrimaryClip() -> ReadOutcome.REFUSED
             else -> ReadOutcome.EMPTY
         }
