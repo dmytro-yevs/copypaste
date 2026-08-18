@@ -1,20 +1,40 @@
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use tracing::warn;
 use winsafe::{co, gui, prelude::*};
 
+use crate::pairing_presentation::NativeAbort;
+
 #[derive(Clone)]
-pub(super) struct CloseHandle(gui::WindowMain);
+pub(super) struct CloseHandle {
+    window: gui::WindowMain,
+    programmatic: Arc<AtomicBool>,
+}
 
 impl CloseHandle {
     pub(super) fn new(window: gui::WindowMain) -> Self {
-        Self(window)
+        Self {
+            window,
+            programmatic: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(super) fn programmatic_flag(&self) -> Arc<AtomicBool> {
+        self.programmatic.clone()
     }
 
     pub(super) fn close(&self) {
-        if self.0.hwnd().IsWindow() {
-            self.0.close();
+        self.programmatic.store(true, Ordering::Release);
+        if self.window.hwnd().IsWindow() {
+            self.window.close();
         }
+    }
+}
+
+pub(super) fn abort_if_user_dismissed(programmatic: &AtomicBool, abort: &NativeAbort) {
+    if !programmatic.swap(true, Ordering::AcqRel) {
+        abort();
     }
 }
 

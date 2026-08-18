@@ -16,7 +16,7 @@ const TIMER_ID: usize = 1;
 #[derive(Zeroize, ZeroizeOnDrop)]
 struct ConfirmationCopy {
     heading: String,
-    sas: String,
+    sas_digits: [char; 6],
     details: String,
 }
 
@@ -47,8 +47,21 @@ fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult
         (24, 58),
         (560, 42),
     );
-    let sas = common::label(&wnd, &copy.sas, (24, 108), (560, 66));
-    let details = common::label(&wnd, &copy.details, (24, 184), (560, 94));
+    let _sas_caption = common::label(&wnd, "Security code:", (24, 108), (560, 24));
+    let sas_digits: Vec<_> = copy
+        .sas_digits
+        .iter()
+        .enumerate()
+        .map(|(index, digit)| {
+            common::label(
+                &wnd,
+                &digit.to_string(),
+                (24 + (index as i32) * 44, 140),
+                (40, 48),
+            )
+        })
+        .collect();
+    let details = common::label(&wnd, &copy.details, (24, 200), (560, 94));
     let reject = common::button(&wnd, "&Doesn't match", (164, 326), (130, 36), 1001);
     let accept = common::button(&wnd, "&Match", (314, 326), (130, 36), co::DLGID::OK.raw());
     let cancel = common::button(
@@ -81,17 +94,17 @@ fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult
         let wnd = wnd.clone();
         let reject = reject.clone();
         let instructions = instructions.clone();
-        let sas = sas.clone();
         let details = details.clone();
+        let sas_digits = sas_digits.clone();
         move |_| {
             if !common::protect_from_capture(wnd.hwnd(), affinity) {
-                sas.hwnd().SetWindowText("")?;
+                for digit in &sas_digits {
+                    digit.hwnd().SetWindowText("")?;
+                }
                 details.hwnd().SetWindowText("")?;
                 instructions
                     .hwnd()
                     .SetWindowText("Pairing cannot be confirmed on this display.")?;
-                // `result` is still `Cancel`, so the peer is rejected rather
-                // than confirmed against a code nobody could safely read.
                 wnd.close();
                 return Ok(0);
             }
@@ -103,7 +116,7 @@ fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult
     wnd.on().wm_timer(TIMER_ID, {
         let wnd = wnd.clone();
         let instructions = instructions.clone();
-        let sas = sas.clone();
+        let sas_digits = sas_digits.clone();
         let reject = reject.clone();
         let accept = accept.clone();
         let cancel = cancel.clone();
@@ -115,8 +128,10 @@ fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult
             instructions.hwnd().SetWindowText(
                 "Pairing timed out. Check that both devices are on the same network and try again.",
             )?;
-            sas.hwnd().SetWindowText("")?;
-            common::hide(sas.hwnd());
+            for digit in &sas_digits {
+                digit.hwnd().SetWindowText("")?;
+                common::hide(digit.hwnd());
+            }
             common::hide(reject.hwnd());
             common::hide(accept.hwnd());
             cancel.hwnd().SetWindowText("&Close")?;
@@ -141,14 +156,13 @@ fn copy(progress: &PairingProgressData) -> Option<ConfirmationCopy> {
     }
     let name = bounded(progress.peer_name.as_deref().unwrap_or("Unknown device"));
     let address = bounded(progress.peer_addr.as_deref().unwrap_or("Not reported"));
-    let sas = sas
-        .chars()
-        .map(|digit| digit.to_string())
-        .collect::<Vec<_>>()
-        .join("  ");
+    let mut sas_digits = ['\0'; 6];
+    for (index, digit) in sas.chars().enumerate() {
+        sas_digits[index] = digit;
+    }
     Some(ConfirmationCopy {
         heading: format!("Pair with {name}"),
-        sas: format!("Security code: {sas}"),
+        sas_digits,
         details: format!(
             "Unverified device details — reported by the peer, not yet confirmed\r\nName: {name}\r\nAddress: {address}"
         ),
@@ -186,10 +200,21 @@ mod tests {
     #[test]
     fn confirmation_is_display_only_and_labels_peer_data_unverified() {
         let copy = copy(&progress()).unwrap();
-        assert_eq!(copy.sas, "Security code: 1  2  3  4  5  6");
+        assert_eq!(copy.sas_digits, ['1', '2', '3', '4', '5', '6']);
         assert!(copy.details.contains("Unverified device details"));
         assert!(copy.details.contains("192.0.2.1:47654"));
         assert!(!copy.details.contains("device-key-material"));
+    }
+
+    #[test]
+    fn confirmation_source_uses_one_glyph_per_digit() {
+        let source = include_str!("confirm.rs")
+            .split_once("#[cfg(test)]")
+            .unwrap()
+            .0;
+        assert!(source.contains("sas_digits"));
+        assert!(!source.contains("join(\"  \")"));
+        assert!(source.contains("Security code:"));
     }
 
     #[test]

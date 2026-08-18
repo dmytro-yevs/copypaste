@@ -161,6 +161,8 @@ mod tests {
             "setAccessibilityProtectedContent(true)",
             "NSWindowSharingType::NSWindowSharingNone",
             "Security code: {spoken}",
+            "setSelectable(false)",
+            "for (index, digit) in sas.chars().enumerate()",
         ] {
             assert!(
                 source.contains(required),

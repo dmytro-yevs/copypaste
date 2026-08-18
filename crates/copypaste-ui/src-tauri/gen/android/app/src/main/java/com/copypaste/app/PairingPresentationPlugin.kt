@@ -6,9 +6,11 @@ import android.content.pm.PackageManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
 import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -26,14 +28,13 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
 
     @Command
     fun presentInvite(invoke: Invoke) {
-        val args = invoke.getArgs()
-        val payload = args.optString("payload")
-        val code = args.optString("code")
-        val expires = args.optLong("expiresInSecs", 0L)
+        val args = invoke.parseArgs(PresentInviteArgs::class.java)
         activity.runOnUiThread {
-            val presented = payload.withinUtf8Bytes(MAX_PAYLOAD_BYTES) &&
-                code.withinUtf8Bytes(MAX_CODE_BYTES) &&
-                dialogs.presentInvite(payload, code, expires)
+            val presented = args.payload.withinUtf8Bytes(MAX_PAYLOAD_BYTES) &&
+                args.code.withinUtf8Bytes(MAX_CODE_BYTES) &&
+                dialogs.presentInvite(args.payload, args.code, args.expiresInSecs) {
+                    args.onAbort?.send(JSObject())
+                }
             invoke.resolve(JSObject().put("presented", presented))
         }
     }
@@ -70,9 +71,16 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
 
     @Command
     fun presentProgress(invoke: Invoke) {
-        val state = invoke.getArgs().optString("state")
+        val args = invoke.parseArgs(PresentProgressArgs::class.java)
         activity.runOnUiThread {
-            invoke.resolve(JSObject().put("presented", dialogs.presentProgress(state)))
+            invoke.resolve(
+                JSObject().put(
+                    "presented",
+                    dialogs.presentProgress(args.state) {
+                        args.onAbort?.send(JSObject())
+                    },
+                ),
+            )
         }
     }
 
@@ -123,4 +131,18 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
         const val MAX_PAYLOAD_BYTES = 512
         const val MAX_CODE_BYTES = 128
     }
+}
+
+@InvokeArg
+class PresentInviteArgs {
+    @JvmField var payload: String = ""
+    @JvmField var code: String = ""
+    @JvmField var expiresInSecs: Long = 0
+    @JvmField var onAbort: Channel? = null
+}
+
+@InvokeArg
+class PresentProgressArgs {
+    @JvmField var state: String = ""
+    @JvmField var onAbort: Channel? = null
 }
