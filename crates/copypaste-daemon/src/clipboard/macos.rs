@@ -336,7 +336,10 @@ impl ClipboardSource for MacOsClipboard {
             }
             let actual = unsafe { pb.changeCount() } as i64;
             if actual != pre + SELF_WRITE_DELTA {
-                self.tracker.sentinel.clear();
+                debug!(
+                    expected = pre + SELF_WRITE_DELTA,
+                    actual, "another app wrote to the pasteboard during our write"
+                );
             }
             Ok(())
         })
