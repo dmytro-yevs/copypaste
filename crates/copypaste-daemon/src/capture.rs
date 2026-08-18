@@ -146,12 +146,12 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
             // `note_local_change` because this is the one caller that knows the
             // change was a *copy*, which is what a client needs to decide
             // whether to notify (parity finding 18).
-            state.note_capture(item.created_at);
-            crate::notify::on_capture(state);
+            announce_capture(state, item.created_at);
             Ok(())
         }
         Ok(Ingested::Duplicate(item)) => {
             debug!(id = %item.id, "capture deduplicated against a recent item");
+            announce_capture(state, item.created_at);
             Ok(())
         }
         // An empty clipboard is not a failure, and there is nothing to store.
@@ -164,6 +164,11 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
         }
         Err(e) => Err(e),
     }
+}
+
+fn announce_capture(state: &AppState, created_at: i64) {
+    state.note_capture(created_at);
+    crate::notify::on_capture(state);
 }
 
 /// `settings` is the caller's snapshot, not a second read.
@@ -611,6 +616,59 @@ mod tests {
             .search("xK9mQ3nR7pT2vW5", 10)
             .unwrap()
             .is_empty());
+    }
+
+    struct OnceCapture {
+        inner: Option<crate::clipboard::Capture>,
+    }
+
+    impl crate::clipboard::ClipboardSource for OnceCapture {
+        fn poll(&mut self) -> Option<crate::clipboard::Capture> {
+            self.inner.take()
+        }
+
+        fn set_contents(&mut self, _text: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn backend_name(&self) -> &'static str {
+            "fake-memory"
+        }
+    }
+
+    #[test]
+    fn a_recopy_wakes_the_ui_and_sync_like_a_fresh_capture() {
+        let content = "the same clipping again";
+        let (state, _dir) = crate::testutil::test_state_with_clipboard(
+            "recopy-wake",
+            Box::new(OnceCapture {
+                inner: Some(captured(content, None)),
+            }),
+        );
+        let first = ingest(&state, content, copypaste_ipc::content_type::TEXT)
+            .unwrap()
+            .into_item();
+        assert_eq!(state.store.count().unwrap(), 1);
+
+        let mut events = state.subscribe();
+        tick(&state, false).unwrap();
+
+        let after = state.store.get(&first.id).unwrap().unwrap();
+        assert!(
+            after.created_at > first.created_at,
+            "the recopy never reached ingest"
+        );
+        assert_eq!(state.store.count().unwrap(), 1);
+
+        let event = events
+            .try_recv()
+            .expect("a recopy must publish a capture event");
+        assert!(
+            event.captured,
+            "UI watchers and notify_on_copy stay asleep on recopy"
+        );
+        assert_eq!(event.item_count, 1);
+        assert_eq!(event.swept, 0);
     }
 
     #[test]
