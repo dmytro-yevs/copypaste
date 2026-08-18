@@ -6,6 +6,7 @@ use copypaste_ipc::{PairingProgressData, PairingState};
 use winsafe::{co, prelude::*};
 
 use super::common::{self, CloseHandle};
+use crate::pairing_presentation::NativeAbort;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct StatusCopy {
@@ -13,7 +14,7 @@ pub(super) struct StatusCopy {
     pub(super) message: &'static str,
 }
 
-pub(super) fn spawn(progress: &PairingProgressData) -> Option<CloseHandle> {
+pub(super) fn spawn(progress: &PairingProgressData, abort: NativeAbort) -> Option<CloseHandle> {
     let copy = copy(progress);
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
@@ -23,13 +24,17 @@ pub(super) fn spawn(progress: &PairingProgressData) -> Option<CloseHandle> {
                 let _ = sender.send(None);
                 return;
             };
-            let _ = run(copy, sender);
+            let _ = run(copy, sender, abort);
         })
         .ok()?;
     receiver.recv_timeout(Duration::from_secs(5)).ok().flatten()
 }
 
-fn run(copy: StatusCopy, ready: mpsc::SyncSender<Option<CloseHandle>>) -> winsafe::AnyResult<i32> {
+fn run(
+    copy: StatusCopy,
+    ready: mpsc::SyncSender<Option<CloseHandle>>,
+    abort: NativeAbort,
+) -> winsafe::AnyResult<i32> {
     let wnd = common::window("CopyPaste pairing", (520, 250));
     let _heading = common::label(&wnd, copy.heading, (24, 20), (460, 38));
     let _message = common::label(&wnd, copy.message, (24, 68), (460, 76));
@@ -47,15 +52,19 @@ fn run(copy: StatusCopy, ready: mpsc::SyncSender<Option<CloseHandle>>) -> winsaf
             Ok(())
         }
     });
+    let handle = CloseHandle::new(wnd.clone());
+    let programmatic = handle.programmatic_flag();
     wnd.on().wm_create({
-        let wnd = wnd.clone();
+        let close = close.clone();
         move |_| {
-            let _ = ready.send(Some(CloseHandle::new(wnd.clone())));
+            let _ = ready.send(Some(handle));
             close.focus()?;
             Ok(0)
         }
     });
-    wnd.run_main(None)
+    let result = wnd.run_main(None);
+    common::abort_if_user_dismissed(&programmatic, &abort);
+    result
 }
 
 pub(super) fn copy(progress: &PairingProgressData) -> StatusCopy {

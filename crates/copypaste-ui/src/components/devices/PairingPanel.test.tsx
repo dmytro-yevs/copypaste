@@ -101,7 +101,31 @@ describe("native pairing boundary", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("keeps decision controls when native confirmation is unavailable", async () => {
+  it("does not allow confirm when native presentation is unavailable", async () => {
+    createPairingInvite.mockResolvedValue(
+      ceremony({
+        ceremony_id: "ceremony-3",
+        role: "initiator",
+        state: "awaiting_confirmation",
+        presentation: "unavailable",
+      }),
+    );
+    const { user } = withUser(<PairingPanel disabled={false} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Show pairing code" }),
+    );
+
+    expect(await screen.findByText("Compare the security codes")).toBeTruthy();
+    const confirm = screen.getByRole("button", {
+      name: "Codes match — confirm pairing in the native view",
+    });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/protected pairing view didn't open/i)).toBeTruthy();
+    expect(confirmPairing).not.toHaveBeenCalled();
+  });
+
+  it("enables confirm only after native presentation is shown", async () => {
     const awaiting = ceremony({
       ceremony_id: "ceremony-3",
       role: "initiator",
@@ -113,19 +137,20 @@ describe("native pairing boundary", () => {
     confirmPairing.mockResolvedValue(awaiting);
     const { user } = withUser(<PairingPanel disabled={false} />);
 
-    await user.click(await screen.findByRole("button", { name: "Show details" }));
+    const confirmBefore = (await screen.findByRole("button", {
+      name: "Codes match — confirm pairing in the native view",
+    })) as HTMLButtonElement;
+    expect(confirmBefore.disabled).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Show details" }));
     await waitFor(() => expect(presentPairing).toHaveBeenCalledOnce());
-    await user.click(
-      screen.getByRole("button", {
-        name: "Codes match — confirm pairing in the native view",
-      }),
-    );
+    const confirm = screen.getByRole("button", {
+      name: "Codes match — confirm pairing in the native view",
+    });
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    await user.click(confirm);
     await waitFor(() => expect(confirmPairing).toHaveBeenCalledOnce());
-    expect(
-      screen.getByRole("button", {
-        name: "Codes match — confirm pairing in the native view",
-      }),
-    ).toBeTruthy();
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByText(/decision was sent/i)).toBeNull();
     expect(screen.getByText(/protected pairing view didn't open/i)).toBeTruthy();
   });
@@ -198,6 +223,43 @@ describe("native pairing boundary", () => {
 
     await waitFor(() => expect(cancelPairing).toHaveBeenCalledOnce());
     expect(cancelPairing).toHaveBeenCalledWith();
+  });
+
+  it("aborts after a confirmed ceremony when the panel unmounts", async () => {
+    getPairingProgress.mockResolvedValue(
+      ceremony({
+        ceremony_id: "ceremony-confirmed-unmount",
+        role: "initiator",
+        state: "confirmed",
+        presentation: "presented",
+        known_device: { name: "Phone", last_seen_ms: 1, online: true },
+      }),
+    );
+    const { unmount } = withUser(<PairingPanel disabled={false} />);
+
+    expect(
+      await screen.findByText("Phone is now paired and ready to sync."),
+    ).toBeTruthy();
+    unmount();
+
+    await waitFor(() => expect(cancelPairing).toHaveBeenCalledOnce());
+    expect(cancelPairing).toHaveBeenCalledWith();
+  });
+
+  it("does not replace a live invite with a progress sheet", async () => {
+    getPairingProgress.mockResolvedValue(
+      ceremony({
+        ceremony_id: "ceremony-invite",
+        role: "responder",
+        state: "waiting_for_peer",
+        presentation: "presented",
+      }),
+    );
+    withUser(<PairingPanel disabled={false} />);
+
+    expect(await screen.findByText("Waiting for the other device")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show details" })).toBeNull();
+    expect(presentPairing).not.toHaveBeenCalled();
   });
 
   it("fences a stale mutation from a newer ceremony and its polling", async () => {
