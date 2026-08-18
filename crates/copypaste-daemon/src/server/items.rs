@@ -268,8 +268,10 @@ pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
         Ok(Some(_)) => {}
     };
 
+    let mutation_started = copypaste_core::now_ms();
     match state.store.delete(item_id) {
         Ok(_) => {
+            crate::cloud::note_version_written(state, mutation_started);
             state.note_local_change();
             Response::ok(id, ResponseData::Empty {})
         }
@@ -282,6 +284,7 @@ pub(super) fn delete_all(state: &AppState, id: u64, through: Option<i64>) -> Res
     // non-pinned rows — a pin is the user saying "keep this". The predicate
     // lives in `Store::delete_all_through` and is deliberately not repeated
     // here: filtering in the server would put one manifest rule in two places.
+    let mutation_started = copypaste_core::now_ms();
     let result = match through {
         Some(through) => state.store.delete_all_through(through),
         None => state.store.delete_all(),
@@ -289,6 +292,7 @@ pub(super) fn delete_all(state: &AppState, id: u64, through: Option<i64>) -> Res
     match result {
         Ok(deleted) => {
             if deleted > 0 {
+                crate::cloud::note_version_written(state, mutation_started);
                 state.note_local_change();
             }
             Response::ok(id, ResponseData::Count(deleted))
@@ -1150,6 +1154,56 @@ mod tests {
             Some(ResponseData::Item(item)) => assert!(!item.too_large_to_sync),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn a_delete_pulls_the_cloud_upload_floor_back_to_the_tombstone() {
+        let (state, _dir) = test_state("server");
+        let added = match add(&state, 1, "to delete").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        let ahead = added.created_at.saturating_add(60_000);
+        state
+            .meta
+            .set_state_all(&[
+                (crate::cloud::KEY_UPLOAD_FLOOR, &ahead.to_string()),
+                (crate::cloud::KEY_UPLOAD_FLOOR_ITEM, "zzzz"),
+            ])
+            .unwrap();
+
+        assert!(delete(&state, 2, &added.id).ok);
+
+        let floor = state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap();
+        assert!(
+            floor <= ahead,
+            "delete left the upload floor ahead of the tombstone"
+        );
+        let offered = state.store.versions_since(floor, 100).unwrap();
+        assert!(
+            offered.iter().any(|row| row.id == added.id && row.deleted),
+            "the tombstone was not offered above the floor"
+        );
+    }
+
+    #[test]
+    fn delete_all_pulls_the_cloud_upload_floor_back() {
+        let (state, _dir) = test_state("server");
+        assert!(add(&state, 1, "clear me").ok);
+        let ahead = copypaste_core::now_ms().saturating_add(60_000);
+        state
+            .meta
+            .set_state_ms(crate::cloud::KEY_UPLOAD_FLOOR, ahead)
+            .unwrap();
+
+        assert!(delete_all(&state, 2, None).ok);
+
+        let floor = state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap();
+        assert!(floor < ahead, "delete_all left the upload floor ahead");
+        assert!(
+            !state.store.versions_since(floor, 100).unwrap().is_empty(),
+            "cleared tombstones were not offered"
+        );
     }
 
     /// Empty content is a rejected request, not an empty row.
