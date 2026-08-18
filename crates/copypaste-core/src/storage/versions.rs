@@ -8,9 +8,9 @@
 //!   property of the protocol rather than a promise: a session serves only ids
 //!   it advertised, so an item outside the summary list cannot be requested out
 //!   of this device.
-//! * **A tombstone is a version.** It keeps its item's `content_hash` and its
-//!   `created_at`, which is what lets a delete tie the row it deletes on merge
-//!   keys 1 and 2 and win on key 3.
+//! * **A tombstone is a version.** It keeps its item's `content_hash`.
+//!   [`Store::delete`] restamps `created_at` so the tombstone wins on merge
+//!   key 1; key 3 (`deleted`) still breaks an exact-stamp tie.
 
 use std::collections::{HashMap, HashSet};
 
@@ -300,10 +300,9 @@ impl Store {
     /// boundary row costs one idempotent upsert, and excluding it loses every
     /// row that shares the boundary millisecond.
     ///
-    /// Note that a tombstone keeps the *item's* `created_at`
-    /// ([`Store::delete`] does not restamp), so deleting an item older than the
-    /// cursor produces a version this query cannot see. Callers pull their
-    /// cursor back rather than this query widening.
+    /// A local [`Store::delete`] restamps `created_at`, so a tombstone of an
+    /// older item still appears after the cursor. Remote tombstones use the
+    /// stamp they carried on the wire and follow the same keyset.
     pub fn versions_since(&self, since_ms: i64, limit: i64) -> Result<Vec<StoredItem>, StoreError> {
         self.versions_after(since_ms, None, limit)
     }
