@@ -34,6 +34,8 @@
 
 use std::time::Duration;
 
+use zeroize::{Zeroize, Zeroizing};
+
 use crate::crypto::{decrypt, ItemKey};
 use crate::sensitive::Detector;
 use crate::storage::{Store, StoreError};
@@ -85,7 +87,7 @@ pub fn sweep_sensitive(
     let mut victims = Vec::new();
     let mut unjudged = 0u64;
     for row in store.expired_sensitive(cutoff_ms)? {
-        let Ok(plaintext) = decrypt(&row.content_ciphertext, &row.nonce, key, &row.id) else {
+        let Ok(mut plaintext) = decrypt(&row.content_ciphertext, &row.nonce, key, &row.id) else {
             tracing::warn!(id = %row.id, "not wiping a sensitive item that could not be read");
             unjudged += 1;
             continue;
@@ -97,9 +99,14 @@ pub fn sweep_sensitive(
         // index, so it is withheld rather than forgotten. Counted because a
         // history where auto-wipe silently never fires looks identical to one
         // where it has nothing to do (`AGENTS.md` rule 4).
-        let Ok(text) = String::from_utf8(plaintext) else {
-            unjudged += 1;
-            continue;
+        let text = match String::from_utf8(std::mem::take(&mut *plaintext)) {
+            Ok(text) => Zeroizing::new(text),
+            Err(err) => {
+                let mut leftover = err.into_bytes();
+                leftover.zeroize();
+                unjudged += 1;
+                continue;
+            }
         };
         if detector.may_auto_wipe(&text) {
             victims.push((row.id, row.created_at, row.content_hash));
