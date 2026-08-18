@@ -551,6 +551,17 @@ mod tests {
     }
 
     #[test]
+    fn delete_restamps_created_at_above_the_live_version() {
+        let s = store();
+        let a = s.insert(item("payload", T0)).unwrap();
+        assert!(s.delete(&a.id).unwrap());
+        let tomb = s.version(&a.id).unwrap().unwrap();
+        assert!(tomb.deleted);
+        assert!(tomb.created_at > T0);
+        assert!(tomb.created_at >= T0.saturating_add(1));
+    }
+
+    #[test]
     fn delete_all_clears_every_live_item() {
         let s = store();
         for n in 0..4 {
