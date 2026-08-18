@@ -31,6 +31,8 @@ pub const DEDUP_WINDOW_MS: i64 = 60_000;
 /// agree about where a bucket starts.
 const DEDUP_BUCKET_MS: i64 = DEDUP_WINDOW_MS;
 
+pub(crate) const EVICTION_BATCH: i64 = 500;
+
 pub(super) fn live_count(conn: &Connection) -> rusqlite::Result<u64> {
     let live: i64 = conn.query_row(LIVE_COUNT_SQL, [], |r| r.get(0))?;
     Ok(live.max(0) as u64)
@@ -119,7 +121,7 @@ const AGE_GATE_SQL: &str = concat!(
 const AGE_VICTIMS_SQL: &str = concat!(
     "SELECT id FROM ",
     "clipboard_items INDEXED BY idx_items_evictable",
-    " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1"
+    " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1       ORDER BY created_at ASC, id ASC LIMIT ?2"
 );
 
 /// `idx_items_sensitive_wipe`'s partial predicate is these two WHERE clauses, so
@@ -137,7 +139,7 @@ const EXPIRED_SENSITIVE_SQL: &str = concat!(
     item_columns!(),
     " FROM clipboard_items INDEXED BY idx_items_sensitive_wipe \
       WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0 AND created_at < ?1 \
-      ORDER BY created_at ASC, id ASC"
+      ORDER BY created_at ASC, id ASC LIMIT ?2"
 );
 
 impl Store {
@@ -231,15 +233,24 @@ impl Store {
         if !has_expired(&conn, cutoff_ms)? {
             return Ok(0);
         }
-        let tx = write_tx(&mut conn)?;
-        let victims: Vec<String> = {
-            let mut stmt = tx.prepare_cached(AGE_VICTIMS_SQL)?;
-            let rows = stmt.query_map([cutoff_ms], |r| r.get(0))?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        let removed = hard_delete_in_tx(&tx, &victims)?;
-        tx.commit()?;
-        Ok(removed)
+        let mut removed = 0u64;
+        loop {
+            let tx = write_tx(&mut conn)?;
+            let victims: Vec<String> = {
+                let mut stmt = tx.prepare_cached(AGE_VICTIMS_SQL)?;
+                let rows = stmt.query_map(params![cutoff_ms, EVICTION_BATCH], |r| r.get(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            if victims.is_empty() {
+                return Ok(removed);
+            }
+            let batch = victims.len() as i64;
+            removed += hard_delete_in_tx(&tx, &victims)?;
+            tx.commit()?;
+            if batch < EVICTION_BATCH {
+                return Ok(removed);
+            }
+        }
     }
 
     /// Is there anything the sensitive sweep could possibly delete?
@@ -265,11 +276,15 @@ impl Store {
     /// floor, in [`crate::sensitive::sweep_sensitive`]. Pinned rows are excluded
     /// here rather than at the delete, so no later edit can lose the exemption
     /// (manifest 03 I9).
-    pub(crate) fn expired_sensitive(&self, cutoff_ms: i64) -> Result<Vec<StoredItem>, StoreError> {
+    pub(crate) fn expired_sensitive(
+        &self,
+        cutoff_ms: i64,
+        limit: i64,
+    ) -> Result<Vec<StoredItem>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(EXPIRED_SENSITIVE_SQL)?;
         let columns = ItemColumns::resolve(&stmt)?;
-        let rows = stmt.query_map([cutoff_ms], |row| row_to_item(row, &columns))?;
+        let rows = stmt.query_map(params![cutoff_ms, limit], |row| row_to_item(row, &columns))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }
@@ -370,18 +385,17 @@ fn hard_delete_in_tx(tx: &Transaction<'_>, ids: &[String]) -> rusqlite::Result<u
     if ids.is_empty() {
         return Ok(0);
     }
-    // By rowid, and while the item row still holds it. Keyed by `id` this was
-    // one full scan of the plaintext index per victim, so an eviction was
-    // quadratic in history and held the write lock for all of it.
-    let mut del_fts = tx.prepare(
-        "DELETE FROM clipboard_fts \
-          WHERE rowid = (SELECT fts_rowid FROM clipboard_items WHERE id = ?1)",
-    )?;
-    let mut del_item = tx.prepare("DELETE FROM clipboard_items WHERE id = ?1")?;
     let mut removed = 0u64;
-    for id in ids {
-        del_fts.execute([id])?;
-        removed += del_item.execute([id])? as u64;
+    for chunk in ids.chunks(EVICTION_BATCH as usize) {
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let fts_sql = format!(
+            "DELETE FROM clipboard_fts WHERE rowid IN (               SELECT fts_rowid FROM clipboard_items                 WHERE id IN ({placeholders}) AND fts_rowid IS NOT NULL)"
+        );
+        let item_sql = format!("DELETE FROM clipboard_items WHERE id IN ({placeholders})");
+        tx.execute(&fts_sql, rusqlite::params_from_iter(chunk.iter()))?;
+        removed += tx.execute(&item_sql, rusqlite::params_from_iter(chunk.iter()))? as u64;
     }
     Ok(removed)
 }
@@ -871,6 +885,18 @@ mod tests {
                 .any(|detail| detail.contains("idx_items_unpinned_bytes")),
             "byte quota gate must use its expression index, got {plan:?}"
         );
+    }
+
+    #[test]
+    fn age_eviction_deletes_in_bounded_batches() {
+        let s = store();
+        for n in 0..1_050 {
+            s.insert(item(&format!("stale {n}"), T0 + n)).unwrap();
+        }
+        s.insert(item("fresh", T0 + 600_000)).unwrap();
+        assert_eq!(s.evict_older_than(T0 + 300_000).unwrap(), 1_050);
+        assert_eq!(s.count().unwrap(), 1);
+        assert_eq!(s.search("fresh", 10).unwrap().len(), 1);
     }
 
     #[test]

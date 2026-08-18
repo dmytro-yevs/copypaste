@@ -104,9 +104,8 @@ async fn main() -> anyhow::Result<()> {
     // search index" (AGENTS.md rule 4). `is_sensitive` is decided once at
     // capture, so a row taken before a detector rule existed keeps its
     // plaintext searchable; this is the only thing that ever revisits it. It
-    // touches the index and never the history. Not fatal: a history that
-    // cannot be purged is still a history, and refusing to start would cost
-    // the user access to it over a background sweep.
+    // touches the index and never the history. Fail closed: serving search
+    // with uncleared sensitive FTS is worse than refusing to become ready.
     let mut index_purged = 0u64;
     match copypaste_core::purge_indexed_secrets(&store, &detector) {
         Ok(report) if report.purged > 0 => {
@@ -118,7 +117,14 @@ async fn main() -> anyhow::Result<()> {
             )
         }
         Ok(_) => {}
-        Err(e) => tracing::warn!(error = %e, "the search-index purge did not finish"),
+        Err(e) => {
+            return halt_or_fail(
+                &socket_path,
+                server::messages::SearchIndexPurgeFailed(e),
+                "clear sensitive content from the search index",
+            )
+            .await;
+        }
     }
 
     let source = clipboard::new_source(&data_dir).context("initialize the clipboard backend")?;
