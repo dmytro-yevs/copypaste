@@ -205,6 +205,7 @@ pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
+            Some(_) = connections.join_next() => {}
             accepted = listener.accept() => match accepted {
                 Ok(stream) => {
                     // Non-blocking: waiting for a permit here would stop the
@@ -1129,6 +1130,25 @@ mod tests {
         assert!(
             matches!(next, None | Some(Err(_))),
             "the rejected watch produced another frame: {next:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn finished_connection_tasks_are_drained_from_the_join_set() {
+        let mut connections = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            connections.spawn(async {});
+        }
+        for _ in 0..20 {
+            if connections.is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+            while connections.try_join_next().is_some() {}
+        }
+        assert!(
+            connections.is_empty(),
+            "completed JoinSet tasks must be joinable so they do not leak"
         );
     }
 }
