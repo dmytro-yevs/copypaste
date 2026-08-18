@@ -86,15 +86,15 @@ export const settingsService = {
   },
   maxText: {
     title: "Ignore text larger than",
-    description: "Larger text is not captured.",
+    description: "Larger text is not captured. Maximum is 4 MiB.",
   },
   maxImage: {
     title: "Ignore images larger than",
-    description: "Larger images are not captured.",
+    description: "Larger images are not captured. Maximum is 4 MiB.",
   },
   maxFile: {
     title: "Ignore files larger than",
-    description: "Larger files are not captured; effective limit is 4 MiB.",
+    description: "Larger files are not captured. Maximum is 4 MiB.",
   },
   maxDecodedImage: {
     title: "Decoded image memory limit",
@@ -102,9 +102,9 @@ export const settingsService = {
   },
   validation: {
     poll: "Choose an interval from 100 ms through 5000 ms.",
-    text: "Choose a text limit of at least 64 KB.",
-    image: "Choose an image limit of at least 1 MB.",
-    file: "Choose a file limit from 1 MB through 100 MB.",
+    text: "Choose a text limit from 64 KB through 4 MB.",
+    image: "Choose an image limit from 1 MB through 4 MB.",
+    file: "Choose a file limit from 1 MB through 4 MB.",
     decodedImage: "Choose a decoded image budget of at least 1 MB.",
   },
 
