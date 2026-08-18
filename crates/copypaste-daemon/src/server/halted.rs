@@ -42,6 +42,7 @@ pub async fn serve(
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
+            Some(_) = connections.join_next() => {}
             accepted = listener.accept() => match accepted {
                 Ok(stream) => {
                     let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else {
@@ -204,5 +205,24 @@ mod tests {
             .expect("the halted server did not stop on a shutdown request")
             .unwrap();
         assert!(*stop.borrow());
+    }
+
+    #[tokio::test]
+    async fn finished_connection_tasks_are_drained_from_the_join_set() {
+        let mut connections = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            connections.spawn(async {});
+        }
+        for _ in 0..20 {
+            if connections.is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+            while connections.try_join_next().is_some() {}
+        }
+        assert!(
+            connections.is_empty(),
+            "completed JoinSet tasks must be joinable so they do not leak"
+        );
     }
 }
