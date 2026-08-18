@@ -1,9 +1,8 @@
 //! Persistent state and startup repair for the in-process backend.
 //!
 //! The v2 store, its keys, the device identity and the detector are opened as
-//! one unit. The search-index purge is best-effort: losing a stale FTS row is
-//! better than blocking access to encrypted history when SQLite cannot read
-//! the index.
+//! one unit. The search-index purge fails closed: the backend will not serve
+//! search while sensitive plaintext may still sit in FTS.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -65,9 +64,8 @@ impl BackendState {
             .map_err(|e| BackendError::internal(&format!("could not build the detector: {e}")))?;
         // The third enforcement layer: a detector rule can be added after a
         // row entered FTS. This only removes the plaintext index entry, never
-        // history, so failure is logged rather than preventing the app from
-        // opening the user's clips (the daemon follows the same rule).
-        let index_purged = purge_search_index(&store, &detector);
+        // history. Failure refuses open rather than serving uncleared FTS.
+        let index_purged = purge_search_index(&store, &detector)?;
 
         Ok(Self {
             store,
@@ -135,7 +133,7 @@ fn store_open_error(error: StoreError) -> BackendError {
     BackendError::from_code(Some(code), None, Some(&message))
 }
 
-fn purge_search_index(store: &Store, detector: &Detector) -> u64 {
+fn purge_search_index(store: &Store, detector: &Detector) -> Result<u64> {
     match purge_indexed_secrets(store, detector) {
         Ok(report) => {
             if report.purged > 0 {
@@ -145,11 +143,15 @@ fn purge_search_index(store: &Store, detector: &Detector) -> u64 {
                     "removed search-index rows the current ruleset calls sensitive"
                 );
             }
-            report.purged
+            Ok(report.purged)
         }
         Err(error) => {
-            tracing::warn!(%error, "the search-index purge did not finish");
-            0
+            tracing::error!(%error, "the search-index purge did not finish");
+            Err(BackendError::from_code(
+                Some(ErrorCode::KeyUnusable),
+                None,
+                Some("the search index could not be cleared of sensitive content"),
+            ))
         }
     }
 }
@@ -197,7 +199,10 @@ mod tests {
         assert_eq!(store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().len(), 1);
         assert_eq!(store.search("alice", 10).unwrap().len(), 1);
 
-        assert_eq!(purge_search_index(&store, &Detector::new().unwrap()), 1);
+        assert_eq!(
+            purge_search_index(&store, &Detector::new().unwrap()).unwrap(),
+            1
+        );
         assert!(store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().is_empty());
         assert_eq!(
             store.search("alice", 10).unwrap().len(),
@@ -244,7 +249,7 @@ mod tests {
         );
 
         assert_eq!(
-            purge_search_index(&backend.inner.state.store, &backend.inner.state.detector),
+            purge_search_index(&backend.inner.state.store, &backend.inner.state.detector).unwrap(),
             1
         );
         assert!(backend.search(secret, 10).await.unwrap().items.is_empty());
