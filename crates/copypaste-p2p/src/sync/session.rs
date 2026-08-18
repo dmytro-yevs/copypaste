@@ -185,11 +185,6 @@ async fn recv_summary_page<C: SyncChannel>(
     }
 }
 
-struct PreparedSummaries {
-    advertised: HashMap<String, ItemSummary>,
-    pages: Vec<Vec<ItemSummary>>,
-}
-
 struct Applied {
     attempted: HashSet<String>,
     floor: Option<i64>,
@@ -221,51 +216,53 @@ fn watermark(
     reached.min(blocked)
 }
 
-fn summary_pages<S: SyncSource>(source: &S, since_ms: i64) -> Result<PreparedSummaries, SyncError> {
-    let items = source.summaries(since_ms)?;
-    if items.len() > MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION {
-        return Err(SyncError::TooManySummaryPages);
+fn next_summary_page<S: SyncSource>(
+    source: &S,
+    since_ms: i64,
+    after_id: Option<&str>,
+) -> Result<(Vec<ItemSummary>, bool), SyncError> {
+    let mut items = source.summary_page(since_ms, after_id, MAX_SUMMARIES_PER_MESSAGE + 1)?;
+    let more = items.len() > MAX_SUMMARIES_PER_MESSAGE;
+    if more {
+        items.truncate(MAX_SUMMARIES_PER_MESSAGE);
     }
-    let advertised = items
-        .iter()
-        .cloned()
-        .map(|summary| (summary.item_id.clone(), summary))
-        .collect();
-    let mut pages: Vec<Vec<ItemSummary>> = items
-        .chunks(MAX_SUMMARIES_PER_MESSAGE)
-        .map(<[ItemSummary]>::to_vec)
-        .collect();
-    if pages.is_empty() {
-        pages.push(Vec::new());
-    }
-    Ok(PreparedSummaries { advertised, pages })
+    Ok((items, more))
 }
 
-/// Exchanges every summary page in lock-step. The old implementation sent just
-/// the newest 10,000 entries, permanently hiding older history because every
-/// later round repeated that same page. A `more` marker makes the page boundary
-/// explicit, while the lock-step exchange keeps either side from filling a
-/// bounded channel before it reads the other side's history.
+fn remember_page(advertised: &mut HashMap<String, ItemSummary>, items: &[ItemSummary]) {
+    for summary in items {
+        advertised.insert(summary.item_id.clone(), summary.clone());
+    }
+}
+
+/// Exchanges every summary page in lock-step. Each side reads one SQLite (or
+/// in-memory) page at a time so a catch-up round never holds the whole history
+/// in a single `Vec` before the first page is sent. A `more` marker makes the
+/// page boundary explicit, while the lock-step exchange keeps either side from
+/// filling a bounded channel before it reads the other side's history.
 async fn exchange_summaries_initiator<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
     since_ms: i64,
 ) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let PreparedSummaries { advertised, pages } = summary_pages(source, since_ms)?;
+    let mut advertised = HashMap::new();
     let mut remote = Vec::new();
+    let mut after_id: Option<String> = None;
+    let mut cursor_ms = since_ms;
     let mut page = 0;
     loop {
-        let more = page + 1 < pages.len();
-        chan.send(SyncMessage::Summary {
-            items: pages.get(page).cloned().unwrap_or_default(),
-            more,
-        })
-        .await?;
-        let (items, peer_more) = recv_summary_page(chan).await?;
         if page >= MAX_SUMMARY_PAGES_PER_SESSION {
             return Err(SyncError::TooManySummaryPages);
         }
-        remote.extend(items);
+        let (items, more) = next_summary_page(source, cursor_ms, after_id.as_deref())?;
+        if let Some(last) = items.last() {
+            cursor_ms = summary_key(last);
+            after_id = Some(last.item_id.clone());
+        }
+        remember_page(&mut advertised, &items);
+        chan.send(SyncMessage::Summary { items, more }).await?;
+        let (peer_items, peer_more) = recv_summary_page(chan).await?;
+        remote.extend(peer_items);
         if !more && !peer_more {
             return Ok((advertised, remote));
         }
@@ -278,21 +275,24 @@ async fn exchange_summaries_responder<C: SyncChannel, S: SyncSource>(
     source: &S,
     since_ms: i64,
 ) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let PreparedSummaries { advertised, pages } = summary_pages(source, since_ms)?;
+    let mut advertised = HashMap::new();
     let mut remote = Vec::new();
+    let mut after_id: Option<String> = None;
+    let mut cursor_ms = since_ms;
     let mut page = 0;
     loop {
-        let (items, peer_more) = recv_summary_page(chan).await?;
         if page >= MAX_SUMMARY_PAGES_PER_SESSION {
             return Err(SyncError::TooManySummaryPages);
         }
-        remote.extend(items);
-        let more = page + 1 < pages.len();
-        chan.send(SyncMessage::Summary {
-            items: pages.get(page).cloned().unwrap_or_default(),
-            more,
-        })
-        .await?;
+        let (peer_items, peer_more) = recv_summary_page(chan).await?;
+        remote.extend(peer_items);
+        let (items, more) = next_summary_page(source, cursor_ms, after_id.as_deref())?;
+        if let Some(last) = items.last() {
+            cursor_ms = summary_key(last);
+            after_id = Some(last.item_id.clone());
+        }
+        remember_page(&mut advertised, &items);
+        chan.send(SyncMessage::Summary { items, more }).await?;
         if !more && !peer_more {
             return Ok((advertised, remote));
         }
@@ -339,6 +339,8 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
         msg.validate()?;
         match msg {
             SyncMessage::Items { items } => {
+                let mut batch = Vec::with_capacity(items.len());
+                let mut stamps = Vec::with_capacity(items.len());
                 for mut item in items {
                     let Some(promised) = wanted.get(&item.item_id) else {
                         tracing::warn!("peer sent an item that was not requested; dropping it");
@@ -385,8 +387,15 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
                         // must still land, or the delete is lost.
                         item.content.clear();
                     }
-                    let stamp = summary_key(&item.summary());
-                    if source.apply(item)? {
+                    stamps.push(summary_key(&item.summary()));
+                    batch.push(item);
+                }
+                if batch.is_empty() {
+                    continue;
+                }
+                let outcomes = source.apply_batch(batch)?;
+                for (stored, stamp) in outcomes.into_iter().zip(stamps) {
+                    if stored {
                         stats.received += 1;
                         floor = Some(floor.map_or(stamp, |low: i64| low.min(stamp)));
                     } else {
@@ -496,6 +505,7 @@ mod tests {
         item, session, session_with, summary, tombstone, try_session,
         try_session_with_listen_addresses, ScriptChannel, TestSource,
     };
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     const CONVERGED: SyncCursor = SyncCursor {
         since_ms: 5_000,
@@ -1401,5 +1411,188 @@ mod tests {
             "second apply stored again"
         );
         assert_eq!(store.snapshot().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn receive_items_applies_a_wire_batch_in_one_source_call() {
+        struct CountingSource {
+            inner: TestSource,
+            apply_calls: AtomicUsize,
+            batch_calls: AtomicUsize,
+            last_batch_len: AtomicUsize,
+        }
+
+        impl SyncSource for CountingSource {
+            fn device_id(&self) -> String {
+                self.inner.device_id()
+            }
+            fn device_name(&self) -> String {
+                self.inner.device_name()
+            }
+            fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
+                self.inner.summaries(since_ms)
+            }
+            fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
+                self.inner.fetch(ids)
+            }
+            fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
+                self.apply_calls.fetch_add(1, Ordering::SeqCst);
+                self.inner.apply(item)
+            }
+            fn apply_batch(&self, items: Vec<SyncItem>) -> Result<Vec<bool>, SyncError> {
+                self.batch_calls.fetch_add(1, Ordering::SeqCst);
+                self.last_batch_len.store(items.len(), Ordering::SeqCst);
+                items
+                    .into_iter()
+                    .map(|item| self.inner.apply(item))
+                    .collect()
+            }
+        }
+
+        let a = CountingSource {
+            inner: TestSource::new("dev-a", vec![]),
+            apply_calls: AtomicUsize::new(0),
+            batch_calls: AtomicUsize::new(0),
+            last_batch_len: AtomicUsize::new(0),
+        };
+        let batch = vec![
+            item("one", 100, "a", "dev-b"),
+            item("two", 200, "b", "dev-b"),
+            item("three", 300, "c", "dev-b"),
+        ];
+        let promised: Vec<_> = batch.iter().map(SyncItem::summary).collect();
+        let mut chan = ScriptChannel::new(vec![
+            SyncMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                device_id: "dev-b".into(),
+                device_name: "B".into(),
+                listen_addr: None,
+                since_ms: 0,
+            },
+            SyncMessage::Summary {
+                items: promised,
+                more: false,
+            },
+            SyncMessage::Items { items: batch },
+            SyncMessage::Done,
+            SyncMessage::Request { item_ids: vec![] },
+        ]);
+
+        let outcome = run_initiator(&mut chan, &a, None, SyncCursor::default())
+            .await
+            .unwrap();
+        assert_eq!(outcome.stats.received, 3);
+        assert_eq!(
+            a.batch_calls.load(Ordering::SeqCst),
+            1,
+            "a wire Items frame must land as one apply_batch"
+        );
+        assert_eq!(a.last_batch_len.load(Ordering::SeqCst), 3);
+        assert_eq!(
+            a.apply_calls.load(Ordering::SeqCst),
+            0,
+            "receive_items must not fall back to per-item apply"
+        );
+        assert!(a.inner.get("one").is_some());
+        assert!(a.inner.get("two").is_some());
+        assert!(a.inner.get("three").is_some());
+    }
+
+    #[tokio::test]
+    async fn summary_exchange_does_not_load_the_full_history_at_once() {
+        struct PagedOnly {
+            inner: TestSource,
+            full_loads: AtomicUsize,
+            page_loads: AtomicUsize,
+        }
+
+        impl SyncSource for PagedOnly {
+            fn device_id(&self) -> String {
+                self.inner.device_id()
+            }
+            fn device_name(&self) -> String {
+                self.inner.device_name()
+            }
+            fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
+                self.full_loads.fetch_add(1, Ordering::SeqCst);
+                self.inner.summaries(since_ms)
+            }
+            fn summary_page(
+                &self,
+                since_ms: i64,
+                after_id: Option<&str>,
+                limit: usize,
+            ) -> Result<Vec<ItemSummary>, SyncError> {
+                self.page_loads.fetch_add(1, Ordering::SeqCst);
+                Ok(self.inner.page(since_ms, after_id, limit))
+            }
+            fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
+                self.inner.fetch(ids)
+            }
+            fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
+                self.inner.apply(item)
+            }
+        }
+
+        let history: Vec<_> = (0..50)
+            .map(|n| item(&format!("i{n:02}"), 1_000 + n as i64, "body", "dev-a"))
+            .collect();
+        let a = PagedOnly {
+            inner: TestSource::new("dev-a", history),
+            full_loads: AtomicUsize::new(0),
+            page_loads: AtomicUsize::new(0),
+        };
+        let b = PagedOnly {
+            inner: TestSource::new("dev-b", vec![]),
+            full_loads: AtomicUsize::new(0),
+            page_loads: AtomicUsize::new(0),
+        };
+
+        let (oa, ob) = {
+            use tokio::sync::mpsc;
+            let (a_tx, b_rx) = mpsc::channel(8);
+            let (b_tx, a_rx) = mpsc::channel(8);
+            struct Mem {
+                tx: mpsc::Sender<Vec<u8>>,
+                rx: mpsc::Receiver<Vec<u8>>,
+            }
+            impl SyncChannel for Mem {
+                async fn send(&mut self, msg: SyncMessage) -> Result<(), SyncError> {
+                    self.tx
+                        .send(msg.encode()?)
+                        .await
+                        .map_err(|_| SyncError::Channel("peer went away".into()))
+                }
+                async fn recv(&mut self) -> Result<SyncMessage, SyncError> {
+                    let bytes = self
+                        .rx
+                        .recv()
+                        .await
+                        .ok_or_else(|| SyncError::Channel("peer went away".into()))?;
+                    Ok(SyncMessage::decode(&bytes)?)
+                }
+            }
+            let (oa, ob) = tokio::join!(
+                async {
+                    let mut ca = Mem { tx: a_tx, rx: a_rx };
+                    let out = run_initiator(&mut ca, &a, None, SyncCursor::default()).await;
+                    drop(ca);
+                    out
+                },
+                async {
+                    let mut cb = Mem { tx: b_tx, rx: b_rx };
+                    let out = run_responder(&mut cb, &b, None, SyncCursor::default()).await;
+                    drop(cb);
+                    out
+                }
+            );
+            (oa.unwrap(), ob.unwrap())
+        };
+        assert_eq!(oa.stats.sent, 50);
+        assert_eq!(ob.stats.received, 50);
+        assert_eq!(a.full_loads.load(Ordering::SeqCst), 0);
+        assert_eq!(b.full_loads.load(Ordering::SeqCst), 0);
+        assert!(a.page_loads.load(Ordering::SeqCst) >= 1);
+        assert!(b.page_loads.load(Ordering::SeqCst) >= 1);
     }
 }
