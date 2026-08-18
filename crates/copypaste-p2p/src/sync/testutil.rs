@@ -107,6 +107,34 @@ impl TestSource {
     pub(crate) fn get(&self, id: &str) -> Option<SyncItem> {
         self.items.lock().unwrap().get(id).cloned()
     }
+
+    pub(crate) fn page(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Vec<ItemSummary> {
+        let sensitive = self.sensitive.lock().unwrap();
+        let mut v: Vec<_> = self
+            .items
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|i| i.deleted || !sensitive.contains(&i.item_id))
+            .map(|i| i.summary())
+            .filter(|s| super::session::summary_key(s) >= since_ms)
+            .collect();
+        v.sort_by_key(|s| (super::session::summary_key(s), s.item_id.clone()));
+        let start = match after_id {
+            None => 0,
+            Some(id) => v
+                .iter()
+                .position(|summary| summary.item_id.as_str() == id)
+                .map(|index| index + 1)
+                .unwrap_or(v.len()),
+        };
+        v.into_iter().skip(start).take(limit).collect()
+    }
 }
 
 impl SyncSource for TestSource {
@@ -119,18 +147,16 @@ impl SyncSource for TestSource {
     }
 
     fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
-        let sensitive = self.sensitive.lock().unwrap();
-        let mut v: Vec<_> = self
-            .items
-            .lock()
-            .unwrap()
-            .values()
-            .filter(|i| i.deleted || !sensitive.contains(&i.item_id))
-            .map(|i| i.summary())
-            .filter(|s| super::session::summary_key(s) >= since_ms)
-            .collect();
-        v.sort_by_key(|s| (super::session::summary_key(s), s.item_id.clone()));
-        Ok(v)
+        Ok(self.page(since_ms, None, usize::MAX))
+    }
+
+    fn summary_page(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ItemSummary>, SyncError> {
+        Ok(self.page(since_ms, after_id, limit))
     }
 
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
