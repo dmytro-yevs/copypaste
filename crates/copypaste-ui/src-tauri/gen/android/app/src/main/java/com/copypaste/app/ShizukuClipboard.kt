@@ -283,15 +283,6 @@ object ShizukuClipboard {
     )
 
     /** The first text item of a `ClipData`, or null when it holds none. */
-    private fun asText(clip: Any): String? {
-        val getItemCount = clip.javaClass.getMethod("getItemCount")
-        val count = getItemCount.invoke(clip) as Int
-        val getItemAt = clip.javaClass.getMethod("getItemAt", Int::class.javaPrimitiveType)
-        for (i in 0 until count) {
-            val item = getItemAt.invoke(clip, i) ?: continue
-            val text = item.javaClass.getMethod("getText").invoke(item) as? CharSequence
-            if (!text.isNullOrBlank()) return text.toString()
-        }
-        return null
-    }
+    private fun asText(clip: Any): String? = ClipSensitivity.asText(clip)
 }
+

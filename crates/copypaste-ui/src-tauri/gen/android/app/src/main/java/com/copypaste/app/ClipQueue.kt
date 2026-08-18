@@ -21,6 +21,8 @@ object ClipQueue {
     /** Beyond this, the oldest go. Matches `MAX_BUFFERED` on the Rust side. */
     private const val CAPACITY = 128
 
+    const val MAX_TEXT_BYTES = 4 * 1024 * 1024
+
     private val queue = ArrayDeque<CapturedClip>(CAPACITY)
     private var dropped = 0L
     private var privateMode = false
@@ -44,6 +46,10 @@ object ClipQueue {
         sourceAppName: String? = null,
     ) {
         if (privateMode || text.isBlank()) return
+        if (text.toByteArray(Charsets.UTF_8).size > MAX_TEXT_BYTES) {
+            dropped++
+            return
+        }
         queue.addLast(
             CapturedClip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName),
         )
