@@ -219,23 +219,24 @@ unsafe fn join_form(
     (form, payload)
 }
 
-unsafe fn sas_view(mtm: MainThreadMarker, sas: &str) -> objc2::rc::Retained<NSTextField> {
-    let grouped = sas
-        .chars()
-        .map(|digit| digit.to_string())
-        .collect::<Vec<_>>()
-        .join("  ");
+unsafe fn sas_view(mtm: MainThreadMarker, sas: &str) -> objc2::rc::Retained<NSView> {
     let spoken = sas
         .chars()
         .map(|digit| digit.to_string())
         .collect::<Vec<_>>()
         .join(" ");
-    let view = NSTextField::labelWithString(&NSString::from_str(&grouped), mtm);
-    view.setFrame(rect(0.0, 0.0, 360.0, 44.0));
-    view.setAccessibilityLabel(Some(&NSString::from_str(&format!(
+    let container = NSView::initWithFrame(mtm.alloc::<NSView>(), rect(0.0, 0.0, 360.0, 44.0));
+    for (index, digit) in sas.chars().enumerate() {
+        let field = NSTextField::labelWithString(&NSString::from_str(&digit.to_string()), mtm);
+        field.setSelectable(false);
+        field.setEditable(false);
+        field.setFrame(rect((index as f64) * 44.0, 0.0, 40.0, 44.0));
+        container.addSubview(&field);
+    }
+    container.setAccessibilityLabel(Some(&NSString::from_str(&format!(
         "Security code: {spoken}"
     ))));
-    view
+    container
 }
 
 fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
