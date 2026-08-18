@@ -566,7 +566,7 @@ mod tests {
             "from-the-cloud",
         )
         .expect("the local key must open it");
-        assert_eq!(String::from_utf8(plain).unwrap(), "from another device");
+        assert_eq!(plain.as_slice(), b"from another device");
     }
 
     #[test]

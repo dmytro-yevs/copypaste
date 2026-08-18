@@ -433,7 +433,7 @@ mod tests {
             let key = self.keyring.item_key();
             let bytes = crate::decrypt(&item.content_ciphertext, &item.nonce, &key, &item.id)
                 .expect("the local key must open it");
-            String::from_utf8(bytes).unwrap()
+            String::from_utf8(bytes.to_vec()).unwrap()
         }
     }
 
@@ -740,7 +740,8 @@ mod tests {
                 &f.keyring.item_key(),
                 &stored.id
             )
-            .unwrap(),
+            .unwrap()
+            .as_slice(),
             bytes
         );
     }
