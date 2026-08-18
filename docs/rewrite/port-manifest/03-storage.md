@@ -1,13 +1,13 @@
 # Port Manifest 03 — Storage Subsystem (SQLCipher / SQLite)
 
-> STATUS: COMPLETE. Harvested from `copypaste-core` v0.4.1, on-disk schema
-> `user_version = 15`.
+> STATUS: COMPLETE. Historical harvest; not a compatibility contract.
+> Provenance: `copypaste-core` at an earlier tag (`user_version = 15`).
 >
 > Source of truth for the old implementation:
 > `crates/copypaste-core/src/storage/**` plus
 > `crates/copypaste-core/tests/{migration,dedup,fts5_search,encryption_at_rest,corruption,key_version_tests,pool_stress,concurrent_writers}.rs`.
-> All `file:line` citations are repo-relative and refer to the **old** tree at
-> v0.4.1 — they are provenance, not instructions to copy.
+> All `file:line` citations are repo-relative and refer to that **old** tree —
+> provenance, not instructions to copy.
 > Legacy formats, probes, migrations and compatibility tests in this file are
 > non-binding historical reference. Only the behaviour mapped as binding by
 > [README.md](README.md) applies to v2.
@@ -43,7 +43,7 @@ the IPC verbs (see `04-ipc-protocol.md`).
 
 v0.4.x had to open every shipped predecessor. The ladder, plaintext
 auto-migration and rekey procedure below record that history; v2 does not port
-them.
+them and never opens prior-product files.
 
 ### File layout on disk
 
@@ -62,11 +62,10 @@ so a crashed previous attempt cannot poison the next one.
 
 ## 2. Invariants (MUST hold)
 
-**I1 — Historical openability (reference only).** v0.4.x migrated database
-files at `user_version` 1 through 15 in one atomic transaction. v2 writes a
-distinct database, never opens or migrates those files, and leaves any old
-history untouched. If an old history is encountered, it must be explained
-without a path rather than misreported as a damaged v2 database.
+**I1 — Historical openability (reference only).** An earlier product migrated
+database files at `user_version` 1 through 15 in one atomic transaction. v2
+writes only its own distinct database and never opens or migrates prior-product
+files.
 
 **I2 — No silent downgrade.** v2 accepts only the exact schema its build writes.
 Any other layout fails with a typed, path-redacted incompatibility error and is

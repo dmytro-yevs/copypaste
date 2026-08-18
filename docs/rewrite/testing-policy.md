@@ -144,7 +144,6 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Export, import, backup, restore over IPC | Rust | Verified |
 | The same four from the Settings screen | Windows, Browser (WebKitGTK) | **NOT VERIFIED IN CI** — the Windows run asserts export and restore safety dialogs, but native file pickers prevent completing these flows through WebDriver |
 | Secret-detection ruleset, NFKC, Luhn, confidence bands | Rust | Verified |
-| A v0.4 database encountered by v2 is explained, never opened | Rust | **NOT VERIFIED IN CI** — the distinct filename prevents ordinary discovery, and no current test exercises an explicit encounter |
 
 ### IPC and daemon
 

@@ -62,9 +62,9 @@ Two consequences worth stating:
   size cap survives as a custom `Decoder` — it fixed a real RAM-amplification
   bug.
 - `PROTOCOL_VERSION` is `2`, and changing it is a decision rather than a breach.
-  Nothing has to interoperate with a v0.4.x client; the field stays because a
-  local socket needs a handshake that fails loudly when a stale binary is left
-  behind.
+  Nothing has to interoperate with a prior-product client; the field stays
+  because a local socket needs a handshake that fails loudly when a stale
+  binary is left behind.
 
 ## Backend
 
@@ -195,15 +195,14 @@ the better outcome.
 
 ## Constraints
 
-- **v2 must never open, modify, or misreport a v1 file.** The database is
-  `copypaste-v2.db`, a distinct filename, so an old file survives a downgrade
-  intact. A detected v0.4 history must be surfaced without opening it.
+- **v2 opens only its own database filename.** Never open, migrate, or probe
+  prior-product files. No `LegacyDatabase`, encounter detection, or special
+  messaging about old versions.
 - **No migration path may be retrofitted casually.** Adding one is a feature to
   decide, and it is materially harder now the v1 formats have left the tree.
-- **Keychain service and account names are fixed strings.** Not for
-  compatibility with v0.4.x, which is gone, but because renaming them orphans
-  keys already written by a v2 build (manifest 02, I-10). A frozen-identifier
-  test asserts it.
+- **Keychain service and account names are fixed strings.** Renaming them
+  orphans keys already written by a v2 build (manifest 02, I-10). A
+  frozen-identifier test asserts it.
 - **The security properties survive the format change.** Fail closed on a wrong
   key or a wrong AAD, never fall back to a plaintext read; the AAD binds item
   identity; key material is zeroized; comparisons are constant-time.

@@ -1,14 +1,15 @@
 # Port manifests — what is binding and what is reference
 
-~9,100 lines harvested from the v0.4.1 implementation and its tests: roughly 500
-acceptance tests and 200+ recovered bug IDs.
+~9,100 lines harvested from an earlier implementation and its tests: roughly 500
+acceptance tests and 200+ recovered bug IDs. Historical harvest; not a
+compatibility contract.
 
 Two decisions have narrowed what these documents oblige. Both narrow *formats*
 and *appearance*; neither narrows behaviour.
 
-1. **v2 drops backward compatibility** with v0.4.x (CLAUDE.md rule 3). The
-   on-disk and on-wire formats stop being contracts. It never migrates or reads
-   old data; the separate v2 filename keeps old history untouched.
+1. **v2 uses only its own database and formats** (CLAUDE.md rule 3). Harvested
+   on-disk and on-wire layouts are reference only. v2 never opens or migrates
+   prior-product files.
 2. **v1's visual design is explicitly rejected.** The look is being redesigned,
    so manifest 06's *visual* sections stop being requirements. What the UI must
    *do* is unaffected. (The surface is one Tauri v2 + React app for both

@@ -64,8 +64,8 @@ build something that contradicts it.
 Every manifest has a section listing complexity that looks gratuitous but is
 load-bearing. Read it before "cleaning up" anything.
 
-**Not every manifest rule is binding — see rule 3.** Since v2 drops backward
-compatibility, the parts that exist purely to preserve v1 *formats* are now
+**Not every manifest rule is binding — see rule 3.** Since v2 uses only its own
+formats, the parts that exist purely to preserve prior-product *formats* are now
 reference material: byte layouts, the migration ladder, `key_version` dispatch,
 and warts kept for bug-compatibility. What stays binding is everything about
 *behaviour* — the platform quirks, the security properties, the accessibility
@@ -73,36 +73,17 @@ contract, the secret-detection ruleset, and the several hundred acceptance tests
 that encode bugs someone already paid for. `docs/rewrite/port-manifest/README.md`
 says which is which, per manifest.
 
-## 3. There is no backward compatibility with v0.4.x
+## 3. v2 uses only its own database
 
-**Decided deliberately.** v2 does not read databases, ciphertext, or pairings
-written by any earlier version. Existing installs lose their clipboard history
-and their paired devices on upgrade.
+**v2 opens only its own DB filename.** Never open, migrate, or probe any prior
+product's files. Do not add `LegacyDatabase`, encounter detection, or special
+messaging about old versions — old installs are irrelevant.
 
-This is the single largest simplification available to the rewrite, and it
-removes a great deal of the complexity catalogued in the manifests:
+One schema, one key path, one AEAD path. Manifest format history is reference
+only (see rule 2). Do not add a migration path later without deciding it as a
+feature.
 
-- One schema. No migration ladder, no `user_version` dispatch, no idempotency
-  guards for partially-applied upgrades.
-- One key derivation and one AEAD path. No `key_version` dispatch, no rotation
-  sweep, no repair pass for rows that were stamped v2 but encrypted with v1.
-- Chunking can use `aead::stream` (STREAM) directly, with no legacy decoder and
-  no bespoke framing to preserve.
-- Warts that only existed to stay bug-compatible can simply be fixed. The dedup
-  bucket is the clearest: v1 buckets on `(wall_time / 60)` where `wall_time` is
-  in milliseconds, so the "minute" is not a minute. v2 uses a real interval.
-
-**The one obligation this creates:** v2 must not open — or appear to open — a v1
-database. Use a distinct filename so an old file is never touched. A user who
-downgrades or reinstalls should find their old data intact on disk, and a v2
-build that stumbles onto it must say so plainly rather than failing with a
-decryption error that reads like corruption.
-
-Do not add a migration path later without deciding it as a feature. Retrofitting
-one is materially harder than writing it now, because the v1 formats will no
-longer be in the tree.
-
-## 4. Correctness rules carried from v1
+## 4. Correctness rules
 
 - **Data loss is the worst outcome.** Sensitive-content detection may flag, but
   auto-deletion needs high confidence — a false positive destroys user data

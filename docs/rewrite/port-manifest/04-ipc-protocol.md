@@ -2,8 +2,8 @@
 
 > **v2 scope:** The method inventory, error taxonomy, readiness semantics and
 > path-redaction rule remain binding. Exact envelopes, version negotiation,
-> legacy verbs and platform transports below describe v1 only; v2 deliberately
-> has no wire compatibility with v0.4.x. See [the manifest scope](README.md).
+> legacy verbs and platform transports below are historical harvest; not a
+> compatibility contract. See [the manifest scope](README.md).
 
 Harvested from the legacy tree at `crates/copypaste-ipc/**`,
 `crates/copypaste-daemon/src/protocol.rs`, `crates/copypaste-daemon/src/ipc/**`,

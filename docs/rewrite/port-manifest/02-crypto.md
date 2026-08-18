@@ -1,12 +1,13 @@
 # Port Manifest 02 — Crypto Subsystem
 
-> Harvested from `copypaste` v0.4.1 (`crates/copypaste-core/src/crypto/**`, plus
+> Historical harvest; not a compatibility contract. Provenance:
+> `copypaste` (`crates/copypaste-core/src/crypto/**`, plus
 > `copypaste-daemon/src/keychain/**`, `copypaste-p2p/src/pake.rs`, and
 > `copypaste-core/src/relay.rs`).
 > Legacy byte layouts, key versions, decoders, migrations and compatibility
 > tests in this file are non-binding historical reference. Only the security
 > properties mapped as binding by [README.md](README.md) apply to v2; v2 never
-> opens old data.
+> opens prior-product data.
 
 ## 1. Purpose & scope
 
