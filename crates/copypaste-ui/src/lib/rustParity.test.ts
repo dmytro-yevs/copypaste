@@ -262,6 +262,11 @@ test(`CURRENT_PROTOCOL_VERSION matches PROTOCOL_VERSION in ${IPC_LIB}`, () => {
   expect(CURRENT_PROTOCOL_VERSION).toBe(number(IPC_LIB, "PROTOCOL_VERSION"));
 });
 
+test(`service payload ceilings match MAX_CONTENT_BYTES in ${IPC_LIMITS}`, () => {
+  const hard = product(IPC_LIMITS, "MAX_CONTENT_BYTES");
+  expect(MAX_FILE_SIZE_BYTES_LIMIT).toBe(hard);
+});
+
 test(`MAX_PAIRINGS matches ${P2P_PEERS}`, () => {
   expect(MAX_PAIRINGS).toBe(number(P2P_PEERS, "MAX_PAIRINGS"));
 });
@@ -365,10 +370,17 @@ test("service choices include every capture default and binding boundary", () =>
     ]),
   );
   expect(Math.max(...values(FILE_CHOICES))).toBe(MAX_FILE_SIZE_BYTES_LIMIT);
+  expect(Math.max(...values(TEXT_CHOICES))).toBe(MAX_FILE_SIZE_BYTES_LIMIT);
+  expect(Math.max(...values(IMAGE_CHOICES))).toBe(MAX_FILE_SIZE_BYTES_LIMIT);
   expect(values(DECODED_IMAGE_CHOICES)).toEqual(
     expect.arrayContaining([
       product(IPC_CONFIG, "MIN_DECODED_IMAGE_MB"),
       product(IPC_CONFIG, "MAX_DECODED_IMAGE_MB"),
     ]),
   );
+});
+
+test(`service payload ceilings match MAX_CONTENT_BYTES in ${IPC_LIMITS}`, () => {
+  const hard = product(IPC_LIMITS, "MAX_CONTENT_BYTES");
+  expect(MAX_FILE_SIZE_BYTES_LIMIT).toBe(hard);
 });
