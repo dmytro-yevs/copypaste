@@ -14,9 +14,10 @@
 //! *started*, so an item captured mid-round is still offered by the next one.
 //!
 //! A version can also appear *below* the floor — a peer applies rows carrying
-//! the sender's stamp, and `Store::delete` tombstones without restamping. Both
-//! call [`crate::cloud::note_version_written`] to pull the floor back; without
-//! it, peer items and deletes of old items never reach the account.
+//! the sender's stamp. Local deletes restamp, but a keyset floor can still
+//! skip a same-millisecond tombstone until [`crate::cloud::note_version_written`]
+//! clears the boundary; without that, peer items and deletes never reach the
+//! account.
 
 use std::sync::Arc;
 
