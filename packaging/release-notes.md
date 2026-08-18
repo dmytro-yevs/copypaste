@@ -27,9 +27,8 @@ where you run `adb`, then install or update it with:
 adb install -r ./CopyPaste-android.apk
 ```
 
-This is not an upgrade from v0.4. The v0.4 app is
-`com.copypaste.android`; v2 is `com.copypaste.app`, starts with new history and
-pairings, and can remain installed beside v0.4.
+This is a clean v2 install (`com.copypaste.app`). It starts with new history and
+pairings; it does not import or upgrade any prior product install.
 
 Only v2 alpha.1 or a local/debug APK installed as `com.copypaste.app` with an
 incompatible key needs a one-time uninstall. If installation reports
@@ -43,8 +42,8 @@ adb shell pm list packages --user 10 com.copypaste.app  # repeat for each listed
 ```
 
 **Uninstalling erases that v2 install's history, pairings and settings for all
-users and profiles.** Do not uninstall `com.copypaste.android`; remove only the
-incompatibly signed v2 package, then rerun the install command above:
+users and profiles.** Remove only the incompatibly signed `com.copypaste.app`
+package, then rerun the install command above:
 
 ```sh
 adb uninstall com.copypaste.app
