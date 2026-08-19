@@ -149,6 +149,18 @@ mac_wait_label() { # <label> <dump> [timeout]
     return 1
 }
 
+mac_reach_settings() { # <dump> [timeout]
+    local dump="$1" timeout="${2:-30}" started="$SECONDS"
+    while (( SECONDS - started < timeout )); do
+        mac_ax find "Settings" > "$dump" 2>/dev/null && return 0
+        if mac_ax find "Skip setup" > /dev/null 2>&1; then
+            mac_ax press "Skip setup" >/dev/null 2>&1 || true
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 mac_capture_state() { # <directory>
     mkdir -p "$1"
     mac_ax dump > "$1/ax.txt"

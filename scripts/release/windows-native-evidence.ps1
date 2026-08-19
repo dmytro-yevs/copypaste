@@ -230,6 +230,7 @@ try {
     $timer.Stop()
     if ($evidencePath) {
         $featureStates = @()
+        Complete-WindowsFirstRun $app
         Invoke-UiaNamedControl $app "Settings" "Theme"
         Invoke-UiaNamedControl $app "List" "Allow screenshots"
         Set-UiaScreenshots $app $true
