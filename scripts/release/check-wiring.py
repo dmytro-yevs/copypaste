@@ -570,22 +570,14 @@ if emu:
 release = docs.get("release.yml") or {}
 release_jobs = release.get("jobs") or {}
 hardware = release_jobs.get("android-hardware") or {}
-rec(bool(hardware), "release.yml has a physical arm64 Android gate",
-    "an x86_64 emulator cannot execute the native library users install")
-if hardware:
-    labels = hardware.get("runs-on") or []
-    labels = labels if isinstance(labels, list) else [labels]
-    rec({"self-hosted", "ARM64", "android-device"} <= set(labels),
-        "the Android hardware gate selects the arm64 device runner", repr(labels))
-    publish_needs = (release_jobs.get("publish") or {}).get("needs") or []
-    publish_needs = publish_needs if isinstance(publish_needs, list) else [publish_needs]
-    rec("android-hardware" in publish_needs,
-        "publishing requires the Android hardware gate", repr(publish_needs))
-    bodies = "\n".join(s.get("run") or "" for s in steps(hardware))
-    rec("arm64-v8a" in bodies and "android-smoke-release.sh" in bodies
-        and "android-storage-transfer.sh" in bodies,
-        "the hardware gate verifies arm64 and runs release smoke plus storage transfer",
-        "the gate must reject another ABI and exercise the signed APK through DocumentsUI")
+rec(not hardware, "release.yml does not wait on a physical arm64 Android runner",
+    "there is no labelled device runner; emulator smoke is the Android publish gate")
+publish_needs = (release_jobs.get("publish") or {}).get("needs") or []
+publish_needs = publish_needs if isinstance(publish_needs, list) else [publish_needs]
+rec("android-hardware" not in publish_needs,
+    "publishing does not require a physical Android hardware gate", repr(publish_needs))
+rec("android-smoke" in publish_needs,
+    "publishing requires the Android emulator smoke gate", repr(publish_needs))
 
 release_smoke = release_jobs.get("android-smoke") or {}
 release_runner_scripts = [str((step.get("with") or {}).get("script", ""))
