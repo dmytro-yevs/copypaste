@@ -10,10 +10,10 @@ Ship the upstream `VariantStrIter::impl_get` mutability fix (`&mut p` into
 stays **0.18.5** so `[patch.crates-io]` still satisfies Tauri 2.11's `glib ^0.18`.
 
 A crates.io bump to 0.20 needs gtk4/webkit6, which Tauri 2.11 does not take.
-cargo-audit therefore still reports RUSTSEC-2024-0429 against the version
-number. The rustsec policy accepts that warning only while the vendor file
-contains `&mut p`. Dependabot should treat the lockfile path package (no
-crates.io checksum) as outside the advisory crate.
+cargo-audit therefore no longer reports RUSTSEC-2024-0429 against the path
+crate. `scripts/check_rustsec_policy.py` still fails if `vendor/glib` loses
+`&mut p`. Dependabot may lag until it treats the lockfile path package as
+outside the crates.io advisory.
 
 ## Constraint
 

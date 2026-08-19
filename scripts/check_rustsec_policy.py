@@ -125,7 +125,21 @@ def run_audit():
         raise RuntimeError(detail) from error
 
 
-def target_errors(entries):
+def glib_vendor_errors(root):
+    variant = root / "vendor/glib/src/variant_iter.rs"
+    if not variant.is_file():
+        return [
+            "vendor/glib is missing; restore the RUSTSEC-2024-0429 VariantStrIter patch"
+        ]
+    try:
+        text = variant.read_text(encoding="utf-8")
+    except OSError:
+        return ["vendor/glib/src/variant_iter.rs could not be read"]
+    if "&mut p" not in text:
+        return [
+            "vendor/glib lost the VariantStrIter mutability patch (RUSTSEC-2024-0429)"
+        ]
+    return []
     errors = []
     cargo = os.environ.get("CARGO", "cargo")
     for entry in entries:
@@ -164,6 +178,7 @@ def main():
         errors, accepted = evaluate(report, policy, datetime.datetime.now(datetime.UTC).date())
         if not errors:
             errors.extend(target_errors(accepted))
+        errors.extend(glib_vendor_errors(ROOT))
     except (OSError, ValueError, RuntimeError) as error:
         print(f"rustsec-policy: {error}", file=sys.stderr)
         return 1
