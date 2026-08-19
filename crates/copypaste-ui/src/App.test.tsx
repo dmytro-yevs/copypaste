@@ -5,6 +5,7 @@ import App from "@/App";
 import { CAPTURE_KEY } from "@/hooks/useCapture";
 import { IpcFailure } from "@/lib/errors";
 import * as platform from "@/lib/platform";
+import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 import { captureSnapshot, testClient, withUser } from "@/test/harness";
 import { resetViewportWidth, setViewportWidth } from "@/test/viewport";
@@ -18,7 +19,8 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
 
 beforeEach(() => {
   captureState.mockReset().mockImplementation(() => new Promise(() => {}));
-  useUi.setState({ view: "history", settingsTab: null });
+  useUi.setState({ view: "history", settingsTab: null, onboardingOpen: false });
+  usePrefs.setState({ onboardingComplete: true });
 });
 
 afterEach(() => {

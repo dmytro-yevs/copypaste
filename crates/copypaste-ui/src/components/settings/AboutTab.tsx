@@ -20,6 +20,7 @@ import { usePrefs } from "@/store/prefs";
 import { Row } from "@/components/settings/Row";
 import { UpdateRow } from "@/components/settings/UpdateRow";
 import { isWindows } from "@/lib/platform";
+import { useUi } from "@/store/ui";
 
 const REAL_BACKENDS = /pasteboard|nspasteboard|system/i;
 
@@ -41,6 +42,7 @@ export function AboutTab() {
   const { t } = useTranslation();
   const status = useStatus(statusService);
   const resetPrefs = usePrefs((s) => s.reset);
+  const openOnboarding = useUi((s) => s.openOnboarding);
 
   const appVersion = useQuery({
     queryKey: ["app-version"],
@@ -160,6 +162,15 @@ export function AboutTab() {
             </a>
           ))}
         </div>
+      </Row>
+
+      <Row
+        title={t("onboarding.settings.title")}
+        description={t("onboarding.settings.description")}
+      >
+        <Button variant="outline" size="sm" onClick={openOnboarding}>
+          {t("onboarding.settings.action")}
+        </Button>
       </Row>
 
       <Row
