@@ -138,7 +138,7 @@ impl StoreSource {
     /// retains image and file bytes exactly.
     #[must_use = "authentication failures must be handled"]
     pub fn open_bytes(&self, row: &StoredItem) -> Result<Vec<u8>, OpenVersionError> {
-        super::open_version_bytes(&self.keyring, row)
+        super::open_version_bytes(&self.keyring, row).map(|mut bytes| std::mem::take(&mut *bytes))
     }
 
     /// Merge one remote version in, whichever transport carried it.
@@ -523,7 +523,7 @@ mod tests {
             "peer-item",
         )
         .expect("the local key must open it");
-        assert_eq!(String::from_utf8(plain).unwrap(), "from the other device");
+        assert_eq!(plain.as_slice(), b"from the other device");
         assert_eq!(row.origin_device_id, "device-a");
     }
 

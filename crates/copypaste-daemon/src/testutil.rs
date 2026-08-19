@@ -142,7 +142,7 @@ pub fn contents(state: &Arc<AppState>) -> Vec<String> {
         .map(|row| {
             let plain = copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
                 .expect("decrypt");
-            String::from_utf8(plain).expect("utf-8")
+            String::from_utf8(plain.to_vec()).expect("utf-8")
         })
         .collect()
 }
