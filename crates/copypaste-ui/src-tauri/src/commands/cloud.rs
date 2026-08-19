@@ -21,6 +21,29 @@ pub async fn cloud_sign_in(
 }
 
 #[tauri::command]
+pub async fn cloud_sign_up(
+    backend: State<'_, SelectedBackend>,
+    email: String,
+    password: String,
+    passphrase: String,
+) -> Result<CloudStatusData> {
+    let password = Zeroizing::new(password);
+    let passphrase = Zeroizing::new(passphrase);
+    backend
+        .cloud_sign_up(email.trim(), &password, &passphrase)
+        .await
+}
+
+#[tauri::command]
+pub async fn cloud_set_endpoint(
+    backend: State<'_, SelectedBackend>,
+    url: String,
+    anon_key: String,
+) -> Result<CloudStatusData> {
+    backend.cloud_set_endpoint(&url, &anon_key).await
+}
+
+#[tauri::command]
 pub async fn cloud_sign_out(backend: State<'_, SelectedBackend>) -> Result<CloudStatusData> {
     backend.cloud_sign_out().await
 }

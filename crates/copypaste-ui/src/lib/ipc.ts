@@ -168,6 +168,14 @@ export function cloudSignIn(credentials: CloudCredentials): Promise<CloudStatusD
   return call<CloudStatusData>("cloud_sign_in", { ...credentials });
 }
 
+export function cloudSignUp(credentials: CloudCredentials): Promise<CloudStatusData> {
+  return call<CloudStatusData>("cloud_sign_up", { ...credentials });
+}
+
+export function cloudSetEndpoint(url: string, anonKey: string): Promise<CloudStatusData> {
+  return call<CloudStatusData>("cloud_set_endpoint", { url, anon_key: anonKey });
+}
+
 export function cloudSignOut(): Promise<CloudStatusData> {
   return call<CloudStatusData>("cloud_sign_out");
 }
