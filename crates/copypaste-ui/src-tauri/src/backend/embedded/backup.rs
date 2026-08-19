@@ -52,7 +52,7 @@ mod tests {
         let backup = dir.path().join("history.cpbak");
         assert!(backend.backup(&backup).await.unwrap().size_bytes > 0);
         backend.set_device_name("Current phone").await.unwrap();
-        backend.clear().await.unwrap();
+        backend.clear(None).await.unwrap();
         backend.restore(&backup).await.unwrap();
         assert_eq!(backend.list(10, None).await.unwrap().items.len(), 1);
         assert_eq!(backend.status().await.unwrap().device_name, "Current phone");

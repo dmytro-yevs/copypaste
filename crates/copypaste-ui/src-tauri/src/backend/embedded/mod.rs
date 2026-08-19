@@ -991,7 +991,7 @@ mod tests {
     #[tokio::test]
     async fn clearing_an_empty_history_is_a_success_reporting_zero() {
         let (backend, _clip, _dir) = backend();
-        assert_eq!(backend.clear().await.unwrap(), 0);
+        assert_eq!(backend.clear(None).await.unwrap(), 0);
     }
 
     #[tokio::test]
