@@ -102,15 +102,38 @@ async function sectionLabels(): Promise<string[]> {
   );
 }
 
-async function ensureIndex(): Promise<void> {
-  const onIndex = await app.withPage((page) =>
-    page.evaluate((selector: string) => document.querySelector(selector) !== null, INDEX),
+async function settingsLevel(): Promise<"index" | "subpage" | "neither"> {
+  return app.withPage((page) =>
+    page.evaluate(
+      (index: string, subpage: string) => {
+        if (document.querySelector(index)) return "index";
+        if (document.querySelector(subpage)) return "subpage";
+        return "neither";
+      },
+      INDEX,
+      SUBPAGE,
+    ),
   );
-  if (onIndex) return;
-  await tapButton(app, BACK);
+}
+
+/**
+ * After a WebView reload Settings remounts empty for a beat: neither the index
+ * nor a subpage is in the document yet. Tapping Back in that window fails —
+ * wait for one of the two levels, then climb if needed.
+ */
+async function ensureIndex(): Promise<void> {
   await waitFor(
-    async () => (await sectionLabels()).length > 0,
-    "the Settings index never came back after All settings",
+    async () => {
+      const level = await settingsLevel();
+      if (level === "index") return true;
+      if (level === "subpage") {
+        await tapButton(app, BACK);
+        return false;
+      }
+      return false;
+    },
+    "the Settings index never became available",
+    60_000,
   );
 }
 
