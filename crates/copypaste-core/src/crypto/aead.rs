@@ -9,6 +9,7 @@ use chacha20poly1305::{
     Key, XChaCha20Poly1305, XNonce,
 };
 use rand::{rngs::OsRng, RngCore};
+use zeroize::Zeroizing;
 
 use super::{CryptoError, ItemKey};
 
@@ -96,7 +97,7 @@ pub fn decrypt(
     nonce: &[u8],
     key: &ItemKey,
     item_id: &str,
-) -> Result<Vec<u8>, CryptoError> {
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     if nonce.len() != NONCE_LEN {
         return Err(CryptoError::InvalidNonce);
     }
@@ -117,6 +118,7 @@ pub fn decrypt(
                 aad: &aad,
             },
         )
+        .map(Zeroizing::new)
         .map_err(|_| CryptoError::AuthFailed)
 }
 
@@ -141,7 +143,17 @@ mod tests {
         );
 
         let out = decrypt(&ct, &nonce, &key, ITEM).unwrap();
-        assert_eq!(out, msg);
+        assert_eq!(out.as_slice(), msg);
+    }
+
+    #[test]
+    fn decrypt_plaintext_is_zeroizing() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        let key = key_a();
+        let (nonce, ct) = encrypt(b"secret", &key, ITEM).unwrap();
+        let out = decrypt(&ct, &nonce, &key, ITEM).unwrap();
+        assert_zeroize_on_drop(&out);
+        assert_eq!(out.as_slice(), b"secret");
     }
 
     #[test]
@@ -149,7 +161,10 @@ mod tests {
         // A restarted daemon re-derives the key from the same device secret.
         let (nonce, ct) = encrypt(b"persisted", &key_a(), ITEM).unwrap();
         let reloaded = Keyring::from_secret(&SECRET_A).item_key();
-        assert_eq!(decrypt(&ct, &nonce, &reloaded, ITEM).unwrap(), b"persisted");
+        assert_eq!(
+            decrypt(&ct, &nonce, &reloaded, ITEM).unwrap().as_slice(),
+            b"persisted"
+        );
     }
 
     #[test]
@@ -190,7 +205,10 @@ mod tests {
     fn empty_item_id_is_bound_too() {
         let key = key_a();
         let (nonce, ct) = encrypt(b"secret", &key, "").unwrap();
-        assert_eq!(decrypt(&ct, &nonce, &key, "").unwrap(), b"secret");
+        assert_eq!(
+            decrypt(&ct, &nonce, &key, "").unwrap().as_slice(),
+            b"secret"
+        );
         assert!(decrypt(&ct, &nonce, &key, ITEM).is_err());
     }
 
@@ -281,7 +299,7 @@ mod tests {
         // An empty plaintext still produces a tag, so the ciphertext is not
         // empty and "no content" is not distinguishable by length alone.
         assert_eq!(ct.len(), TAG_LEN);
-        assert_eq!(decrypt(&ct, &nonce, &key, ITEM).unwrap(), Vec::<u8>::new());
+        assert_eq!(decrypt(&ct, &nonce, &key, ITEM).unwrap().as_slice(), b"");
     }
 
     #[test]
@@ -293,7 +311,7 @@ mod tests {
 
         let (nonce, ct) = encrypt(&big, &key, ITEM).unwrap();
         assert_eq!(ct.len(), big.len() + TAG_LEN);
-        assert_eq!(decrypt(&ct, &nonce, &key, ITEM).unwrap(), big);
+        assert_eq!(decrypt(&ct, &nonce, &key, ITEM).unwrap().as_slice(), big);
     }
 
     #[test]
@@ -301,7 +319,7 @@ mod tests {
         let key = key_a();
         for msg in [&[0xff, 0xfe, 0x00, 0x01][..], "🔐 ключ".as_bytes()] {
             let (nonce, ct) = encrypt(msg, &key, ITEM).unwrap();
-            assert_eq!(decrypt(&ct, &nonce, &key, ITEM).unwrap(), msg);
+            assert_eq!(decrypt(&ct, &nonce, &key, ITEM).unwrap().as_slice(), msg);
         }
     }
 
