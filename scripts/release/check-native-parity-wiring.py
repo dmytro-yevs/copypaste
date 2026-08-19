@@ -30,6 +30,21 @@ def downloads(job):
     }
 
 
+def requirements_ci_install_at(command):
+    needle = "install --requirement requirements-ci.txt"
+    at = command.find(needle)
+    if at < 0:
+        return -1
+    # Quoted venv pip (`"$RUNNER_TEMP/ci-python/bin/pip" install`) is still pip.
+    if "pip" not in command[:at]:
+        return -1
+    return at
+
+
+def step_installs_requirements(step):
+    return requirements_ci_install_at(str(step.get("run") or "")) >= 0
+
+
 def installs_requirements_before(job, marker):
     installed = False
     for step in steps(job):
@@ -38,7 +53,7 @@ def installs_requirements_before(job, marker):
             str((step.get("with") or {}).get("script") or ""),
         ))
         marker_at = command.find(marker)
-        install_at = command.find("pip install --requirement requirements-ci.txt")
+        install_at = requirements_ci_install_at(command)
         if marker_at >= 0:
             return installed or (install_at >= 0 and install_at < marker_at)
         if install_at >= 0:
@@ -185,10 +200,7 @@ def self_test(release, nightly, ci):
 
     def move_install_after_test(value, job_name):
         job_steps = value["jobs"][job_name]["steps"]
-        install = next(
-            step for step in job_steps
-            if "pip install --requirement requirements-ci.txt" in str(step.get("run") or "")
-        )
+        install = next(step for step in job_steps if step_installs_requirements(step))
         job_steps.remove(install)
         test_index = next(
             index for index, step in enumerate(job_steps)
@@ -271,7 +283,7 @@ def self_test(release, nightly, ci):
         "missing requirements install fails",
         lambda value: value["jobs"]["windows"]["steps"].__setitem__(
             slice(None),
-            [step for step in value["jobs"]["windows"]["steps"] if "pip install --requirement requirements-ci.txt" not in str(step.get("run") or "")],
+            [step for step in value["jobs"]["windows"]["steps"] if not step_installs_requirements(step)],
         ),
         "release Windows evidence must install requirements-ci.txt",
     )
@@ -279,9 +291,17 @@ def self_test(release, nightly, ci):
         "missing Android producer requirements install fails",
         lambda value: value["jobs"]["android-smoke-api33"]["steps"].__setitem__(
             slice(None),
-            [step for step in value["jobs"]["android-smoke-api33"]["steps"] if "pip install --requirement requirements-ci.txt" not in str(step.get("run") or "")],
+            [step for step in value["jobs"]["android-smoke-api33"]["steps"] if not step_installs_requirements(step)],
         ),
         "release Android API 33 evidence must install requirements-ci.txt",
+    )
+    rejected(
+        "missing macOS producer requirements install fails",
+        lambda value: value["jobs"]["macos"]["steps"].__setitem__(
+            slice(None),
+            [step for step in value["jobs"]["macos"]["steps"] if not step_installs_requirements(step)],
+        ),
+        "release macOS evidence must install requirements-ci.txt",
     )
     rejected_ci(
         "frontend test before requirements install fails",

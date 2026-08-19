@@ -465,6 +465,13 @@
           "find": "        private_signing_env & set(windows_env)\n",
           "replace": "        False\n",
           "expect": "FAIL|job-wide Tauri private signing input fails|"
+        },
+        {
+          "name": "quoted-venv-pip-not-counted",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "    needle = \"install --requirement requirements-ci.txt\"",
+          "replace": "    needle = \"pip install --requirement requirements-ci.txt\"",
+          "expect": "FAIL|release macOS evidence must install requirements-ci.txt before its producer|"
         }
       ]
     },
