@@ -174,7 +174,7 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         // daemon and no clipboard polling. Reporting `true` would tell the
         // status line that history is growing when it is not.
         capture_running: false,
-        clipboard_backend: super::BACKEND_NAME.to_string(),
+        clipboard_backend: super::messages::BACKEND_NAME.to_string(),
         private_mode: settings.config.private_mode,
         private_mode_epoch: settings.private_mode_epoch,
         // Android has no daemon poller, but it does run the same startup FTS
