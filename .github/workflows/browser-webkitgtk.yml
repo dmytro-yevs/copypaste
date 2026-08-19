@@ -51,6 +51,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: System dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
         # webkit2gtk-driver supplies /usr/bin/WebKitWebDriver, which
         # tauri-driver proxies to. It is a separate package from the webkit
         # runtime and is not installed by default on the runner image.
