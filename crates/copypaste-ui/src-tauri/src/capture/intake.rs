@@ -126,6 +126,10 @@ impl Buffer {
         self.queue.push_front(clip);
     }
 
+    pub fn reject(&mut self) {
+        self.dropped = self.dropped.saturating_add(1);
+    }
+
     fn discard_all(&mut self) -> u64 {
         let lost = self.queue.len() as u64;
         self.dropped = self.dropped.saturating_add(lost);
@@ -353,12 +357,13 @@ async fn drain_buffer<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer) {
                 sync_after_capture(app).await;
             }
             Err(error) => {
-                // Back on the queue, and stop for this tick: whatever refused
-                // this clip will refuse the next one, and draining the rest
-                // into the same error would only lose their ordering.
                 tracing::warn!(%error, "a captured clip could not be stored");
-                buffer.requeue(clip);
-                break;
+                let had = buffer.dropped();
+                if remember_store_failure(buffer, clip, &error) {
+                    report_dropped(app, buffer.dropped() - had);
+                } else {
+                    break;
+                }
             }
         }
     }
@@ -426,7 +431,20 @@ async fn announce<R: Runtime>(
 /// `Unsupported` is structural, so a retry loop would spin forever and the
 /// user would never learn that nothing is being saved.
 pub fn is_structural(error: &BackendError) -> bool {
-    matches!(error, BackendError::Unsupported(_))
+    matches!(
+        error,
+        BackendError::Unsupported(_) | BackendError::Invalid(_)
+    )
+}
+
+pub fn remember_store_failure(buffer: &mut Buffer, clip: Clip, error: &BackendError) -> bool {
+    if is_structural(error) {
+        buffer.reject();
+        true
+    } else {
+        buffer.requeue(clip);
+        false
+    }
 }
 
 #[cfg(test)]
@@ -480,6 +498,46 @@ mod tests {
         assert_eq!(buffer.pop().unwrap().text, "first");
         assert_eq!(buffer.pop().unwrap().text, "second");
         assert_eq!(buffer.pop().unwrap().text, "third");
+    }
+
+    #[test]
+    fn an_oversized_clip_is_dropped_so_later_clips_still_drain() {
+        let mut buffer = Buffer::default();
+        buffer.push_all([clip("too large"), clip("still wanted")]);
+        let oversized = buffer.pop().unwrap();
+
+        let continue_drain = remember_store_failure(
+            &mut buffer,
+            oversized,
+            &BackendError::Invalid("That item is larger than the size limit you set."),
+        );
+
+        assert!(continue_drain);
+        assert_eq!(buffer.dropped(), 1);
+        assert_eq!(buffer.pop().unwrap().text, "still wanted");
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn a_transient_store_failure_is_retried_before_anything_newer() {
+        let mut buffer = Buffer::default();
+        buffer.push_all([clip("first"), clip("second")]);
+        let first = buffer.pop().unwrap();
+
+        let continue_drain = remember_store_failure(&mut buffer, first, &BackendError::Unreachable);
+
+        assert!(!continue_drain);
+        assert_eq!(buffer.dropped(), 0);
+        assert_eq!(buffer.pop().unwrap().text, "first");
+        assert_eq!(buffer.pop().unwrap().text, "second");
+    }
+
+    #[test]
+    fn invalid_and_unsupported_refusals_are_structural() {
+        assert!(is_structural(&BackendError::Invalid("too large")));
+        assert!(is_structural(&BackendError::Unsupported("not yet")));
+        assert!(!is_structural(&BackendError::Unreachable));
+        assert!(!is_structural(&BackendError::NotReady));
     }
 
     #[test]
