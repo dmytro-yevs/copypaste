@@ -29,4 +29,4 @@ for test in supabase/tests/01_schema_audit.sql \
     psql "$database_url" -v ON_ERROR_STOP=1 -f "$test"
 done
 
-cargo test -p copypaste-cloud --test real_supabase -- --ignored --exact real_supabase_contract
+cargo test -p copypaste-cloud --features test-endpoints --test real_supabase -- --ignored --exact real_supabase_contract
