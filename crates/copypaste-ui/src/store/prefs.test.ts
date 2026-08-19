@@ -37,7 +37,11 @@ describe("per-field recovery (AT-50)", () => {
   it("defaults an absent field silently", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const prefs = parsePrefs({ accent: "rose" });
-    expect(prefs).toEqual({ ...DEFAULT_PREFS, accent: "rose" });
+    expect(prefs).toEqual({
+      ...DEFAULT_PREFS,
+      accent: "rose",
+      onboardingComplete: true,
+    });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -88,7 +92,11 @@ describe("unknown keys are dropped (AT-52)", () => {
       oldHistoryDisplayLimit: 1000,
       __proto__: { polluted: true },
     });
-    expect(prefs).toEqual({ ...DEFAULT_PREFS, accent: "blue" });
+    expect(prefs).toEqual({
+      ...DEFAULT_PREFS,
+      accent: "blue",
+      onboardingComplete: true,
+    });
     expect(Object.keys(prefs).sort()).toEqual(Object.keys(DEFAULT_PREFS).sort());
   });
 });
@@ -164,5 +172,23 @@ describe("the screenshot preference fails towards protected (INV-35)", () => {
       JSON.stringify({ state: { allowScreenshots: true }, version: 0 }),
     );
     expect(readPrefs().allowScreenshots).toBe(true);
+  });
+});
+
+describe("first-run onboarding completion", () => {
+  it("starts incomplete when nothing has been stored", () => {
+    expect(DEFAULT_PREFS.onboardingComplete).toBe(false);
+    expect(parsePrefs({}).onboardingComplete).toBe(false);
+  });
+
+  it("treats an existing preferences blob as already past first-run", () => {
+    expect(parsePrefs({ theme: "dark" }).onboardingComplete).toBe(true);
+  });
+
+  it("honours an explicit stored flag", () => {
+    expect(parsePrefs({ onboardingComplete: true }).onboardingComplete).toBe(true);
+    expect(parsePrefs({ onboardingComplete: false }).onboardingComplete).toBe(
+      false,
+    );
   });
 });

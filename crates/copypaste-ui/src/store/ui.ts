@@ -30,6 +30,7 @@ interface UiStore {
   query: string;
   activeId: string | null;
   dismissed: readonly BannerId[];
+  onboardingOpen: boolean;
 
   setView: (view: unknown) => void;
   setSettingsTab: (tab: string | null) => void;
@@ -37,6 +38,8 @@ interface UiStore {
   setActiveId: (id: string | null) => void;
   dismiss: (id: BannerId) => void;
   isDismissed: (id: BannerId) => boolean;
+  openOnboarding: () => void;
+  closeOnboarding: () => void;
 }
 
 export const useUi = create<UiStore>()((set, get) => ({
@@ -45,6 +48,7 @@ export const useUi = create<UiStore>()((set, get) => ({
   query: "",
   activeId: null,
   dismissed: [],
+  onboardingOpen: false,
 
   setView: (view) => set({ view: resolveView(view) }),
   setSettingsTab: (settingsTab) => set({ settingsTab }),
@@ -59,4 +63,6 @@ export const useUi = create<UiStore>()((set, get) => ({
         : { dismissed: [...state.dismissed, id] },
     ),
   isDismissed: (id) => get().dismissed.includes(id),
+  openOnboarding: () => set({ onboardingOpen: true }),
+  closeOnboarding: () => set({ onboardingOpen: false }),
 }));
