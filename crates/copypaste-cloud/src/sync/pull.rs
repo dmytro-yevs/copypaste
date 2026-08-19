@@ -183,7 +183,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     Vec::new()
                 } else {
                     match decrypt_row(&row.ciphertext, &row.nonce, &self.key, &row.item_id) {
-                        Ok(plaintext) => plaintext,
+                        Ok(plaintext) => plaintext.to_vec(),
                         Err(_) => {
                             // Never a delete, never a partial row, never a log
                             // line containing the payload or the key.
