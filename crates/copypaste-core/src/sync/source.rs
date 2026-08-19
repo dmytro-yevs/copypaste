@@ -27,9 +27,9 @@ use copypaste_p2p::protocol::{
 use copypaste_p2p::sync::{SyncError, SyncSource};
 use tracing::warn;
 
+use super::batch::{apply_remote_p2p_versions, P2pPin};
 use super::merge::{
-    apply_remote_p2p_version_with_pin_stamp, apply_remote_version, open_version, MergeError,
-    OpenVersionError, RemoteVersion,
+    apply_remote_version, open_version, MergeError, OpenVersionError, RemoteVersion,
 };
 use super::MSG_STORE;
 use crate::retention::{RetentionGate, RETENTION_DEBOUNCE};
@@ -334,14 +334,18 @@ impl SyncSource for StoreSource {
     }
 
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
+        Ok(self.apply_batch(vec![item])?.pop().unwrap_or(false))
+    }
+
+    fn apply_batch(&self, items: Vec<SyncItem>) -> Result<Vec<bool>, SyncError> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
         let settings = self.settings_if_sync_enabled()?;
         super::blocking(|| {
-            let result = apply_remote_p2p_version_with_pin_stamp(
-                &self.store,
-                &self.keyring,
-                &self.detector,
-                &self.device_id,
-                &RemoteVersion {
+            let versions: Vec<RemoteVersion<'_>> = items
+                .iter()
+                .map(|item| RemoteVersion {
                     item_id: &item.item_id,
                     content: &item.content,
                     binary_content: (!item.binary_content.is_empty())
@@ -350,24 +354,69 @@ impl SyncSource for StoreSource {
                     content_type: &item.content_type,
                     created_at: item.created_at,
                     deleted: item.deleted,
-                    // The peer protocol carries the sender's hash, and a
-                    // tombstone's hash is the deleted item's — so it is passed
-                    // through rather than recomputed from the empty content.
                     content_hash: Some(&item.content_hash),
                     origin_device_id: &item.origin_device_id,
-                },
-                item.pinned,
-                item.pin_order,
-                item.pin_updated_at,
+                })
+                .collect();
+            let pins: Vec<P2pPin> = items
+                .iter()
+                .map(|item| P2pPin {
+                    pinned: item.pinned,
+                    pin_order: item.pin_order,
+                    pin_updated_at: item.pin_updated_at,
+                })
+                .collect();
+            let outcomes = apply_remote_p2p_versions(
+                &self.store,
+                &self.keyring,
+                &self.detector,
+                &self.device_id,
+                &versions,
+                &pins,
             )
             .map_err(|e| SyncError::Source(e.message().to_string()))?;
-            if result.content {
+            let floor = items
+                .iter()
+                .zip(&outcomes)
+                .filter(|(_, outcome)| outcome.content)
+                .map(|(item, _)| item.created_at)
+                .min();
+            if let Some(floor) = floor {
                 self.enforce_retention(Some(&settings));
                 if let Some(hook) = &self.on_applied {
-                    hook(item.created_at);
+                    hook(floor);
                 }
             }
-            Ok(result.any())
+            Ok(outcomes.into_iter().map(|outcome| outcome.any()).collect())
+        })
+    }
+
+    fn summary_page(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ItemSummary>, SyncError> {
+        self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let rows = self
+                .store
+                .summaries_since(since_ms, after_id, limit as i64)
+                .map_err(|e| store_error(e, "could not read item summaries for a sync session"))?;
+            Ok(rows
+                .into_iter()
+                .map(|version| ItemSummary {
+                    item_id: version.id,
+                    created_at: version.created_at,
+                    deleted: version.deleted,
+                    content_hash: version.content_hash,
+                    origin_device_id: origin_or(&version.origin_device_id, &self.device_id)
+                        .to_string(),
+                    pinned: version.pinned,
+                    pin_order: version.pin_order,
+                    pin_updated_at: version.pin_updated_at,
+                })
+                .collect())
         })
     }
 }

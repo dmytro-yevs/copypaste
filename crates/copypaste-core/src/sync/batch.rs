@@ -14,11 +14,24 @@ use std::collections::HashMap;
 
 use tracing::warn;
 
-use super::merge::{apply_remote_version, payload_is_refused, MergeError, RemoteVersion};
+use copypaste_p2p::protocol::ItemSummary;
+use copypaste_p2p::sync::pin_state_wins;
+
+use super::merge::{
+    apply_remote_p2p_version_with_pin_stamp, apply_remote_version, payload_is_refused,
+    stored_summary, MergeError, P2pApply, RemoteVersion,
+};
 use super::prepare::{prepare_remote_version, Prepared};
 use crate::sensitive::Detector;
 use crate::storage::{IncomingItem, MergePageError, Store, Version};
 use crate::Keyring;
+
+#[derive(Debug, Clone, Copy)]
+pub struct P2pPin {
+    pub pinned: bool,
+    pub pin_order: Option<f64>,
+    pub pin_updated_at: i64,
+}
 
 /// How many times a moved snapshot is re-prepared before the page gives up.
 ///
@@ -46,6 +59,51 @@ pub fn apply_remote_versions(
     here: &str,
     incoming: &[RemoteVersion<'_>],
 ) -> Result<Vec<bool>, MergeError> {
+    Ok(apply_page(store, keyring, detector, here, incoming, None)?
+        .into_iter()
+        .map(ApplyFlags::any)
+        .collect())
+}
+
+pub fn apply_remote_p2p_versions(
+    store: &Store,
+    keyring: &Keyring,
+    detector: &Detector,
+    here: &str,
+    incoming: &[RemoteVersion<'_>],
+    pins: &[P2pPin],
+) -> Result<Vec<P2pApply>, MergeError> {
+    debug_assert_eq!(incoming.len(), pins.len());
+    let applied = apply_page(store, keyring, detector, here, incoming, Some(pins))?;
+    Ok(applied
+        .into_iter()
+        .map(|flags| P2pApply {
+            content: flags.content,
+            pin: flags.pin,
+        })
+        .collect())
+}
+
+#[derive(Clone, Copy)]
+struct ApplyFlags {
+    content: bool,
+    pin: bool,
+}
+
+impl ApplyFlags {
+    fn any(self) -> bool {
+        self.content || self.pin
+    }
+}
+
+fn apply_page(
+    store: &Store,
+    keyring: &Keyring,
+    detector: &Detector,
+    here: &str,
+    incoming: &[RemoteVersion<'_>],
+    pins: Option<&[P2pPin]>,
+) -> Result<Vec<ApplyFlags>, MergeError> {
     if incoming.is_empty() {
         return Ok(Vec::new());
     }
@@ -56,7 +114,8 @@ pub fn apply_remote_versions(
     })?;
 
     for _ in 0..SNAPSHOT_ATTEMPTS {
-        let (prepared, slots) = prepare(keyring, detector, here, incoming, &snapshot)?;
+        let (prepared, slots, pin_only) =
+            prepare(keyring, detector, here, incoming, pins, &snapshot)?;
         let writes: Vec<IncomingItem<'_>> = prepared.iter().map(Prepared::as_incoming).collect();
         match store.merge_page(&ids, &snapshot, &writes) {
             Ok(written) => {
@@ -64,16 +123,40 @@ pub fn apply_remote_versions(
                     warn!("the database did not answer for every row of a merged page");
                     return Err(MergeError::Store);
                 }
-                let mut applied: Vec<bool> = slots
+                let mut applied: Vec<ApplyFlags> = slots
                     .iter()
-                    .map(|slot| slot.is_some_and(|index| written[index]))
+                    .map(|slot| {
+                        let content = slot.is_some_and(|index| written[index]);
+                        ApplyFlags {
+                            content,
+                            pin: content && pins.is_some(),
+                        }
+                    })
                     .collect();
+                for index in pin_only {
+                    if applied[index].any() {
+                        continue;
+                    }
+                    let pin = pins.expect("pin-only rows require P2P pins")[index];
+                    applied[index].pin = store
+                        .apply_pin_state(
+                            incoming[index].item_id,
+                            pin.pinned,
+                            pin.pin_order,
+                            pin.pin_updated_at,
+                        )
+                        .map_err(|e| {
+                            warn!(error = ?e, "could not store incoming P2P pin state");
+                            MergeError::Store
+                        })?;
+                }
                 redo_after_refusals(
                     store,
                     keyring,
                     detector,
                     here,
                     incoming,
+                    pins,
                     &slots,
                     &written,
                     &mut applied,
@@ -103,29 +186,65 @@ fn prepare(
     detector: &Detector,
     here: &str,
     incoming: &[RemoteVersion<'_>],
+    pins: Option<&[P2pPin]>,
     local: &HashMap<String, Version>,
-) -> Result<(Vec<Prepared>, Vec<Option<usize>>), MergeError> {
+) -> Result<(Vec<Prepared>, Vec<Option<usize>>, Vec<usize>), MergeError> {
     let mut local = local.clone();
     let mut prepared: Vec<Prepared> = Vec::new();
     let mut slots: Vec<Option<usize>> = Vec::with_capacity(incoming.len());
-    for item in incoming {
+    let mut pin_only: Vec<usize> = Vec::new();
+    for (index, item) in incoming.iter().enumerate() {
         if payload_is_refused(item) {
             slots.push(None);
             continue;
         }
-        match prepare_remote_version(keyring, detector, here, item, None, local.get(item.item_id))?
-        {
+        let pin_state = pins.map(|pins| {
+            let pin = pins[index];
+            let remote_pin_wins = !item.deleted
+                && local.get(item.item_id).is_none_or(|row| {
+                    pin_state_wins(
+                        &stored_summary(row, here),
+                        &ItemSummary {
+                            item_id: item.item_id.to_string(),
+                            created_at: item.created_at,
+                            deleted: item.deleted,
+                            content_hash: String::new(),
+                            origin_device_id: item.origin_device_id.to_string(),
+                            pinned: pin.pinned,
+                            pin_order: pin.pin_order,
+                            pin_updated_at: pin.pin_updated_at,
+                        },
+                    )
+                });
+            (
+                pin.pinned,
+                pin.pin_order,
+                pin.pin_updated_at,
+                remote_pin_wins,
+            )
+        });
+        match prepare_remote_version(
+            keyring,
+            detector,
+            here,
+            item,
+            pin_state,
+            local.get(item.item_id),
+        )? {
             Some(ready) => {
-                // A second version of the same id later in this page must
-                // compare against this decision, not against the row on disk.
                 local.insert(item.item_id.to_string(), ready.as_version(here));
                 slots.push(Some(prepared.len()));
                 prepared.push(ready);
             }
-            None => slots.push(None),
+            None => {
+                if pin_state.is_some_and(|state| state.3) {
+                    pin_only.push(index);
+                }
+                slots.push(None);
+            }
         }
     }
-    Ok((prepared, slots))
+    Ok((prepared, slots, pin_only))
 }
 
 /// Re-apply the versions that were decided against a winner the store then
@@ -144,9 +263,10 @@ fn redo_after_refusals(
     detector: &Detector,
     here: &str,
     incoming: &[RemoteVersion<'_>],
+    pins: Option<&[P2pPin]>,
     slots: &[Option<usize>],
     written: &[bool],
-    applied: &mut [bool],
+    applied: &mut [ApplyFlags],
 ) -> Result<(), MergeError> {
     let mut refused_at: HashMap<&str, usize> = HashMap::new();
     for (index, slot) in slots.iter().enumerate() {
@@ -158,14 +278,36 @@ fn redo_after_refusals(
         return Ok(());
     }
     for (index, item) in incoming.iter().enumerate() {
-        if applied[index]
+        if applied[index].any()
             || refused_at
                 .get(item.item_id)
                 .is_none_or(|first| index <= *first)
         {
             continue;
         }
-        applied[index] = apply_remote_version(store, keyring, detector, here, item)?;
+        applied[index] = match pins {
+            Some(pins) => {
+                let pin = pins[index];
+                let outcome = apply_remote_p2p_version_with_pin_stamp(
+                    store,
+                    keyring,
+                    detector,
+                    here,
+                    item,
+                    pin.pinned,
+                    pin.pin_order,
+                    pin.pin_updated_at,
+                )?;
+                ApplyFlags {
+                    content: outcome.content,
+                    pin: outcome.pin,
+                }
+            }
+            None => ApplyFlags {
+                content: apply_remote_version(store, keyring, detector, here, item)?,
+                pin: false,
+            },
+        };
     }
     Ok(())
 }
