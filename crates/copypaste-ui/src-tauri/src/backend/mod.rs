@@ -205,6 +205,13 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
         password: &str,
         passphrase: &str,
     ) -> Result<CloudStatusData>;
+    async fn cloud_sign_up(
+        &self,
+        email: &str,
+        password: &str,
+        passphrase: &str,
+    ) -> Result<CloudStatusData>;
+    async fn cloud_set_endpoint(&self, url: &str, anon_key: &str) -> Result<CloudStatusData>;
     async fn cloud_sign_out(&self) -> Result<CloudStatusData>;
     async fn cloud_status(&self) -> Result<CloudStatusData>;
     async fn cloud_sync(&self) -> Result<CloudSyncData>;

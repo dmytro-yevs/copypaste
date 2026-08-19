@@ -36,6 +36,8 @@ const MSG_THROTTLED: &str = "the account service is rate limiting this device; t
 const MSG_STORE: &str = "the sync account could not be stored";
 const MSG_DERIVE: &str = "the sync key could not be derived";
 const MSG_ACCOUNT_CHANGED: &str = "the sync account changed while sign-in was completing";
+const MSG_BAD_ENDPOINT: &str = "the cloud address is not valid";
+const MSG_INCOMPLETE_ENDPOINT: &str = "a cloud address and key are both required";
 
 /// Every client-visible string this module can produce. Asserted pathless.
 #[cfg(test)]
@@ -51,6 +53,8 @@ const ALL_MESSAGES: &[&str] = &[
     MSG_STORE,
     MSG_DERIVE,
     MSG_ACCOUNT_CHANGED,
+    MSG_BAD_ENDPOINT,
+    MSG_INCOMPLETE_ENDPOINT,
 ];
 
 /// Sign in, derive the sync key, and start syncing.
@@ -61,7 +65,29 @@ pub async fn sign_in(
     password: &str,
     passphrase: &str,
 ) -> Response {
-    let Some(config) = state.cloud.config().cloned() else {
+    establish_account(state, id, email, password, passphrase, false).await
+}
+
+/// Create an account, then unlock the sync key.
+pub async fn sign_up(
+    state: &Arc<AppState>,
+    id: u64,
+    email: &str,
+    password: &str,
+    passphrase: &str,
+) -> Response {
+    establish_account(state, id, email, password, passphrase, true).await
+}
+
+async fn establish_account(
+    state: &Arc<AppState>,
+    id: u64,
+    email: &str,
+    password: &str,
+    passphrase: &str,
+    create: bool,
+) -> Response {
+    let Some(config) = state.cloud.config() else {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_NOT_CONFIGURED);
     };
     let email = email.trim().to_string();
@@ -69,26 +95,23 @@ pub async fn sign_in(
         return Response::err(id, ErrorCode::InvalidRequest, MSG_NO_EMAIL);
     }
     let attempt = state.cloud.begin_sign_in();
-
-    let session = match SupabaseAuth::new(config.clone())
-        .sign_in(&email, password)
-        .await
-    {
+    let auth = SupabaseAuth::new(config.clone());
+    let session = if create {
+        auth.sign_up(&email, password).await
+    } else {
+        auth.sign_in(&email, password).await
+    };
+    let session = match session {
         Ok(session) => session,
         Err(e) => return sign_in_failure(id, e),
     };
     let user_id = session.user_id.clone();
 
-    // Argon2id at 19 MiB and two passes is hundreds of milliseconds of CPU:
-    // running it on the reactor would stall every other request for the
-    // duration. The passphrase copy handed over is zeroized when the task ends.
     let passphrase = Zeroizing::new(passphrase.to_string());
     let account = user_id.clone();
     let derived = tokio::task::spawn_blocking(move || derive_sync_key(&passphrase, &account)).await;
     let key = match derived {
         Ok(Ok(key)) => key,
-        // The only client-fixable failure the derivation has is a passphrase
-        // below the minimum length; anything else is this daemon's problem.
         Ok(Err(e)) => {
             warn!(error = ?e, "could not derive the sync key");
             return Response::err(id, ErrorCode::InvalidRequest, MSG_WEAK_PASSPHRASE);
@@ -155,7 +178,7 @@ fn sign_in_failure(id: u64, error: AuthError) -> Response {
 /// a device the user has just asked to forget them.
 pub async fn sign_out(state: &Arc<AppState>, id: u64) -> Response {
     let driver = state.cloud.sign_out(&state.store);
-    if let (Some(driver), Some(config)) = (driver, state.cloud.config().cloned()) {
+    if let (Some(driver), Some(config)) = (driver, state.cloud.config()) {
         let token = driver.inspect_session(|session| session.access_token.clone());
         if let Err(e) = SupabaseAuth::new(config).sign_out(&token).await {
             warn!(error = ?e, "could not revoke the session with the backend");
@@ -163,6 +186,31 @@ pub async fn sign_out(state: &Arc<AppState>, id: u64) -> Response {
     }
     info!("signed out of the sync account");
     Response::ok(id, ResponseData::CloudStatus(state.cloud.status()))
+}
+
+pub async fn set_endpoint(state: &Arc<AppState>, id: u64, url: &str, anon_key: &str) -> Response {
+    if state.cloud.signed_in() {
+        let driver = state.cloud.sign_out(&state.store);
+        if let (Some(driver), Some(config)) = (driver, state.cloud.config()) {
+            let token = driver.inspect_session(|session| session.access_token.clone());
+            if let Err(e) = SupabaseAuth::new(config).sign_out(&token).await {
+                warn!(error = ?e, "could not revoke the session with the backend");
+            }
+        }
+    }
+    match state.cloud.set_custom_endpoint(&state.store, url, anon_key) {
+        Ok(()) => Response::ok(id, ResponseData::CloudStatus(state.cloud.status())),
+        Err(crate::cloud::SetEndpointError::Incomplete) => {
+            Response::err(id, ErrorCode::InvalidRequest, MSG_INCOMPLETE_ENDPOINT)
+        }
+        Err(crate::cloud::SetEndpointError::Invalid) => {
+            Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_ENDPOINT)
+        }
+        Err(crate::cloud::SetEndpointError::Store(error)) => {
+            warn!(error = ?error, "could not store the cloud endpoint");
+            Response::err(id, ErrorCode::Internal, MSG_STORE)
+        }
+    }
 }
 
 pub async fn status(state: &Arc<AppState>, id: u64) -> Response {

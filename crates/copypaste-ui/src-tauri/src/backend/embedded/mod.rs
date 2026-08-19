@@ -354,6 +354,29 @@ impl Backend for EmbeddedBackend {
             .await
     }
 
+    async fn cloud_sign_up(
+        &self,
+        email: &str,
+        password: &str,
+        passphrase: &str,
+    ) -> Result<copypaste_ipc::CloudStatusData> {
+        self.inner
+            .cloud
+            .sign_up(&self.inner, email, password, passphrase)
+            .await
+    }
+
+    async fn cloud_set_endpoint(
+        &self,
+        url: &str,
+        anon_key: &str,
+    ) -> Result<copypaste_ipc::CloudStatusData> {
+        self.inner
+            .cloud
+            .set_endpoint(&self.inner, url, anon_key)
+            .await
+    }
+
     async fn cloud_sign_out(&self) -> Result<copypaste_ipc::CloudStatusData> {
         self.inner.cloud.sign_out(&self.inner).await;
         Ok(self.inner.cloud.status())

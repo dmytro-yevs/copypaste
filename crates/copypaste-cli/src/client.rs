@@ -775,6 +775,11 @@ mod tests {
                 password: "p".into(),
                 passphrase: "s".into(),
             },
+            Method::CloudSignUp {
+                email: "a@b.c".into(),
+                password: "p".into(),
+                passphrase: "s".into(),
+            },
             Method::PairJoin {
                 code: "code".into(),
                 addr: "127.0.0.1:1".into(),

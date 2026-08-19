@@ -159,7 +159,7 @@ impl EmbeddedCloud {
     }
 
     pub(super) fn restore(&self, state: &super::super::state::BackendState) {
-        let Some(config) = self.config.clone() else {
+        let Some(config) = self.active_config() else {
             return;
         };
         let store = &state.store;
@@ -380,10 +380,10 @@ mod tests {
     use crate::backend::embedded::cloud::{sensitive_guard, UploadCursor};
 
     fn configured() -> Arc<EmbeddedCloud> {
+        let hosted = copypaste_cloud::CloudConfig::new("https://example.invalid", "anon").unwrap();
         Arc::new(EmbeddedCloud {
-            config: Some(
-                copypaste_cloud::CloudConfig::new("https://example.invalid", "anon").unwrap(),
-            ),
+            hosted: Some(hosted.clone()),
+            config: Mutex::new(Some(hosted)),
             account: AccountSlot::default(),
             account_revision: std::sync::atomic::AtomicU64::new(0),
             last_sync_ms: std::sync::atomic::AtomicI64::new(0),
@@ -402,7 +402,7 @@ mod tests {
         state: &crate::backend::embedded::state::BackendState,
         user_id: &str,
     ) -> Arc<Driver> {
-        let config = cloud.config.clone().unwrap();
+        let config = cloud.active_config().unwrap();
         Arc::new(CloudSync::new(
             SupabaseRest::new(config.clone()),
             SupabaseAuth::new(config.clone()),

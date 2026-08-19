@@ -1,10 +1,15 @@
 import { Link2 } from "lucide-react";
 
+import { PairingPanel } from "@/components/devices/PairingPanel";
 import { OnboardingStepLayout } from "@/components/onboarding/OnboardingStepLayout";
 import type { OnboardingStepProps } from "@/components/onboarding/types";
 import { useTranslation } from "@/i18n";
 
-export function PairingStep({ continue: onContinue, skip, optional }: OnboardingStepProps) {
+export function PairingStep({
+  continue: onContinue,
+  skip,
+  optional,
+}: OnboardingStepProps) {
   const { t } = useTranslation();
 
   return (
@@ -14,10 +19,10 @@ export function PairingStep({ continue: onContinue, skip, optional }: Onboarding
       body={t("onboarding.pairing.body")}
       primary={{ label: t("onboarding.pairing.action"), onClick: onContinue }}
       skip={
-        optional
-          ? { label: t("onboarding.skip"), onClick: skip }
-          : undefined
+        optional ? { label: t("onboarding.skip"), onClick: skip } : undefined
       }
-    />
+    >
+      <PairingPanel disabled={false} hideIntro onConfirmed={onContinue} />
+    </OnboardingStepLayout>
   );
 }

@@ -68,9 +68,9 @@
     {
       "id": "cloud-account",
       "status": "product",
-      "contracts": ["cloud_sign_in", "cloud_sign_out", "cloud_status", "cloud_sync_now"],
+      "contracts": ["cloud_sign_in", "cloud_sign_up", "cloud_set_endpoint", "cloud_sign_out", "cloud_status", "cloud_sync_now"],
       "backend_tests": ["cargo test -p copypaste-cloud -p copypaste-ui"],
-      "ui_tests": ["npm --prefix crates/copypaste-ui test -- SyncTab"],
+      "ui_tests": ["npm --prefix crates/copypaste-ui test -- SyncTab CloudStep PairingStep"],
       "accessibility_states": ["unconfigured", "signed_out", "connected", "sync_result", "upload_skipped", "offline_error", "screen_reader"],
       "failure_states": ["restart", "offline", "authentication_rejected"],
       "performance": {

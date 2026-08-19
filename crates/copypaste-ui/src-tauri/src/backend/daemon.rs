@@ -295,6 +295,32 @@ impl Backend for DaemonBackend {
         )
     }
 
+    async fn cloud_sign_up(
+        &self,
+        email: &str,
+        password: &str,
+        passphrase: &str,
+    ) -> Result<CloudStatusData> {
+        expect_cloud_status(
+            self.call(Method::CloudSignUp {
+                email: email.to_string(),
+                password: password.to_string(),
+                passphrase: passphrase.to_string(),
+            })
+            .await?,
+        )
+    }
+
+    async fn cloud_set_endpoint(&self, url: &str, anon_key: &str) -> Result<CloudStatusData> {
+        expect_cloud_status(
+            self.call(Method::CloudSetEndpoint {
+                url: url.to_string(),
+                anon_key: anon_key.to_string(),
+            })
+            .await?,
+        )
+    }
+
     async fn cloud_sign_out(&self) -> Result<CloudStatusData> {
         expect_cloud_status(self.call(Method::CloudSignOut).await?)
     }
