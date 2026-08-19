@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -52,12 +52,14 @@ fn run(
             Ok(())
         }
     });
-    let handle = CloseHandle::new(wnd.clone());
-    let programmatic = handle.programmatic_flag();
+    let close_handle = CloseHandle::new(wnd.clone());
+    let programmatic = close_handle.programmatic_flag();
+    let handle = Arc::new(Mutex::new(Some(close_handle)));
     wnd.on().wm_create({
         let close = close.clone();
+        let handle = handle.clone();
         move |_| {
-            let _ = ready.send(Some(handle));
+            let _ = ready.send(handle.lock().ok().and_then(|mut slot| slot.take()));
             close.focus()?;
             Ok(0)
         }
