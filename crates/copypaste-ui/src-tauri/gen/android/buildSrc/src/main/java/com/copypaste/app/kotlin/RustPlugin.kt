@@ -47,6 +47,7 @@ open class RustPlugin : Plugin<Project> {
         }
 
         afterEvaluate {
+            val skipRust = findProperty("skipRust") == "true"
             for (profile in listOf("debug", "release")) {
                 val profileCapitalized = profile.replaceFirstChar { it.uppercase() }
                 val buildTask = tasks.maybeCreate(
@@ -57,7 +58,9 @@ open class RustPlugin : Plugin<Project> {
                     description = "Build dynamic library in $profile mode for all targets"
                 }
 
-                tasks["mergeUniversal${profileCapitalized}JniLibFolders"].dependsOn(buildTask)
+                if (!skipRust) {
+                    tasks["mergeUniversal${profileCapitalized}JniLibFolders"].dependsOn(buildTask)
+                }
 
                 for (targetPair in targetsList.withIndex()) {
                     val targetName = targetPair.value
@@ -74,10 +77,12 @@ open class RustPlugin : Plugin<Project> {
                         release = profile == "release"
                     }
 
-                    buildTask.dependsOn(targetBuildTask)
-                    tasks["merge$targetArchCapitalized${profileCapitalized}JniLibFolders"].dependsOn(
-                        targetBuildTask
-                    )
+                    if (!skipRust) {
+                        buildTask.dependsOn(targetBuildTask)
+                        tasks["merge$targetArchCapitalized${profileCapitalized}JniLibFolders"].dependsOn(
+                            targetBuildTask
+                        )
+                    }
                 }
             }
         }

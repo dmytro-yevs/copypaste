@@ -35,6 +35,7 @@ use super::transport::{AuthApi, RestApi};
 use crate::auth::now_ms;
 use crate::crypto::decrypt_row;
 use crate::rest::CloudItem;
+use zeroize::Zeroizing;
 
 /// Rows requested per page.
 ///
@@ -177,13 +178,10 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 }
 
                 let content = if row.deleted {
-                    // A tombstone has no ciphertext to open. It is still a
-                    // version, and it must reach the store even for an item
-                    // this device has never seen (T-3).
-                    Vec::new()
+                    Zeroizing::new(Vec::new())
                 } else {
                     match decrypt_row(&row.ciphertext, &row.nonce, &self.key, &row.item_id) {
-                        Ok(plaintext) => plaintext.to_vec(),
+                        Ok(plaintext) => plaintext,
                         Err(_) => {
                             // Never a delete, never a partial row, never a log
                             // line containing the payload or the key.
@@ -361,8 +359,8 @@ mod tests {
 
         assert_eq!(stats.downloaded, 2);
         assert_eq!(stats.applied, 2);
-        assert_eq!(source.get("a").unwrap().content, b"first");
-        assert_eq!(source.get("b").unwrap().content, b"second");
+        assert_eq!(source.get("a").unwrap().content.as_slice(), b"first");
+        assert_eq!(source.get("b").unwrap().content.as_slice(), b"second");
         assert_eq!(source.watermark().unwrap(), 2_000);
     }
 
@@ -400,7 +398,10 @@ mod tests {
         let stats = sync.pull(&source).await.unwrap();
 
         assert_eq!(stats.applied, 1, "only the unseen row should have merged");
-        assert_eq!(source.get("a").unwrap().content, b"the local winner");
+        assert_eq!(
+            source.get("a").unwrap().content.as_slice(),
+            b"the local winner"
+        );
         assert_eq!(
             source.upload_floor().unwrap(),
             5_000,
@@ -443,7 +444,7 @@ mod tests {
         // The row is re-offered (the cursor bound is inclusive) and loses the
         // ordering, so nothing changes.
         assert_eq!(second.applied, 0);
-        assert_eq!(source.get("a").unwrap().content, b"first");
+        assert_eq!(source.get("a").unwrap().content.as_slice(), b"first");
         assert_eq!(source.watermark().unwrap(), 1_000);
     }
 
@@ -583,7 +584,10 @@ mod tests {
             FakeAuth::default(),
         );
         sync.pull(&source).await.unwrap();
-        assert_eq!(source.get("a").unwrap().content, b"the real version");
+        assert_eq!(
+            source.get("a").unwrap().content.as_slice(),
+            b"the real version"
+        );
 
         // The backend rewrites the stamp, leaving the signature as it was.
         sync.rest
@@ -629,7 +633,7 @@ mod tests {
         assert_eq!(stats.skipped_forged, 1);
         let stored = source.get("a").expect("the item was deleted by a forgery");
         assert!(!stored.deleted);
-        assert_eq!(stored.content, b"keep me");
+        assert_eq!(stored.content.as_slice(), b"keep me");
     }
 
     #[tokio::test]
@@ -649,7 +653,7 @@ mod tests {
         assert_eq!(stats.skipped_forged, 1);
         assert_eq!(stats.applied, 1);
         assert!(source.get("forged").is_none());
-        assert_eq!(source.get("real").unwrap().content, b"genuine");
+        assert_eq!(source.get("real").unwrap().content.as_slice(), b"genuine");
         assert_eq!(source.watermark().unwrap(), 2_000);
 
         // And the refused row is not re-offered forever: the cursor is past it.
@@ -715,7 +719,7 @@ mod tests {
 
         assert_eq!(stats.skipped_future, 1);
         assert!(source.get("hostile").is_none());
-        assert_eq!(source.get("a").unwrap().content, b"real");
+        assert_eq!(source.get("a").unwrap().content.as_slice(), b"real");
         assert_eq!(
             source.watermark().unwrap(),
             1_000,
@@ -774,7 +778,7 @@ mod tests {
 
         assert_eq!(stats.applied, 1);
         assert_eq!(
-            source.get("a-zero").unwrap().content,
+            source.get("a-zero").unwrap().content.as_slice(),
             b"honest boundary row"
         );
         assert_eq!(source.watermark().unwrap(), 0);

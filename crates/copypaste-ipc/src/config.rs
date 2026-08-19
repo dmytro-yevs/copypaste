@@ -128,27 +128,11 @@ pub struct ConfigData {
     /// delete time rather than trusting a stored flag, so lowering this cannot
     /// widen *what* is deleted, only hasten it.
     ///
-    /// # Off by default, against the manifests
+    /// # On by default
     ///
-    /// Manifest 01 §4 and manifest 07 §6.2 both give `30` as v1's default, and
-    /// manifest 07 §1.2 says the entire confidence model exists to make that
-    /// default safe. v2 ships `0`, and both manifests are amended to say so.
-    ///
-    /// The reason is not the detector, which v2 improved — the three rules
-    /// manifest 07 §7.1 called out as unsafe above the floor are all fixed
-    /// here. It is that **v2 has nowhere to say it happened.** v1 shipped this
-    /// default beside a Settings tab that showed the value; v2's Settings has no
-    /// control for it, the sweep raises no notice, and a deleted item simply
-    /// stops being in the list. That is a silent, irreversible delete a user can
-    /// neither discover nor switch off from the product surface — AGENTS.md
-    /// rule 4's worst outcome arrived at through rule 6's gap.
-    ///
-    /// The asymmetry decides it: a user who wants the wipe turns it on once,
-    /// while a user whose data went is not getting it back.
-    ///
-    /// **What flips this back to 30:** a Settings control for the TTL, and a
-    /// visible notice when the sweep deletes something. With both, the manifest
-    /// default is the right one and should be restored.
+    /// Manifest 01 §4 and manifest 07 §6.2 give `30`. Settings exposes the
+    /// control, including `0` as an explicit off sentinel, and the same row
+    /// warns that a wipe is irreversible.
     pub sensitive_ttl_secs: u64,
     /// Bundle ids whose copies are never captured, e.g. a password manager.
     /// **Live.**
@@ -206,12 +190,7 @@ impl Default for ConfigData {
             max_image_size_bytes: MAX_IMAGE_SIZE_BYTES,
             max_file_size_bytes: MAX_FILE_SIZE_BYTES,
             max_decoded_image_mb: MAX_DECODED_IMAGE_MB,
-            // Auto-wipe off. `copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL`
-            // is still 30 s and is still the right value *once switched on* —
-            // it is the suggestion, not the default. See the field's doc for
-            // why the two differ, and `the_sensitive_wipe_is_off_until_a_user_
-            // asks_for_it` for the assertion that keeps them apart.
-            sensitive_ttl_secs: 0,
+            sensitive_ttl_secs: 30,
             excluded_app_bundle_ids: Vec::new(),
             lan_visibility: true,
             sync_enabled: true,
@@ -716,30 +695,17 @@ mod tests {
         assert_eq!(next.storage_quota_bytes, MIN_STORAGE_QUOTA_BYTES);
     }
 
-    /// **The assertion whose absence is why this survived.**
-    ///
-    /// A default of 30 hard-deletes anything the detector reads as a
-    /// high-confidence secret half a minute after it is copied, with no
-    /// Settings control to find it and no notice when it fires. AGENTS.md rule
-    /// 4 puts unrecoverable data loss above everything; this is the line that
-    /// keeps the shipped value honest, and the field's doc records what would
-    /// justify changing it back.
     #[test]
-    fn the_sensitive_wipe_is_off_until_a_user_asks_for_it() {
-        assert_eq!(
-            ConfigData::default().sensitive_ttl_secs,
-            0,
-            "auto-deletion is on by default; a false positive is not recoverable"
-        );
+    fn the_sensitive_wipe_defaults_on_and_can_be_switched_off() {
+        assert_eq!(ConfigData::default().sensitive_ttl_secs, 30);
 
-        // Off is a *default*, not a removal: the setting still takes a real TTL.
-        let on = ConfigPatch {
-            sensitive_ttl_secs: Some(30),
+        let off = ConfigPatch {
+            sensitive_ttl_secs: Some(0),
             ..Default::default()
         }
         .apply(&ConfigData::default())
         .unwrap();
-        assert_eq!(on.sensitive_ttl_secs, 30);
+        assert_eq!(off.sensitive_ttl_secs, 0);
     }
 
     /// Parity finding 18. Both are off out of the box: a clipboard manager
