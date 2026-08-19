@@ -205,14 +205,10 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: PostgreSQL server binaries
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          # verify-schema.sh needs initdb/pg_ctl, not a running cluster. Preseed
-          # so apt does not block the runner on debconf or a system service start.
-          echo 'postgresql postgresql/auto-setup boolean false' | sudo debconf-set-selections
-          sudo apt-get install -y --no-install-recommends postgresql
+        # verify-schema.sh needs initdb/pg_ctl only (docs/supabase-deployment.md).
+        # The installer lives in scripts/ci so a hang has a timeout and so a
+        # maintainer can run the same steps locally.
+        run: ./scripts/ci/install-postgresql-server.sh
 
       - name: supabase/dev/verify-schema.sh
         run: ./supabase/dev/verify-schema.sh
