@@ -3,6 +3,7 @@
 use copypaste_core::StoredItem;
 use copypaste_ipc::{Item, ItemPage};
 use tracing::warn;
+use zeroize::Zeroizing;
 
 use crate::AppState;
 
@@ -19,7 +20,7 @@ pub(super) fn to_wire(
 pub(super) fn to_wire_and_plaintext(
     state: &AppState,
     row: StoredItem,
-) -> Result<(Item, Vec<u8>), copypaste_core::CryptoError> {
+) -> Result<(Item, Zeroizing<Vec<u8>>), copypaste_core::CryptoError> {
     let origin = state.meta.origin_of(&row).unwrap_or_else(|e| {
         // Attribution is advisory: a row whose origin cannot be read is still
         // the user's item, and the fallback is the same one the origin table's
@@ -39,7 +40,7 @@ fn to_wire_with(
     origin: &crate::meta::Origin,
     key: &copypaste_core::ItemKey,
     detector: &copypaste_core::Detector,
-) -> Result<(Item, Vec<u8>), copypaste_core::CryptoError> {
+) -> Result<(Item, Zeroizing<Vec<u8>>), copypaste_core::CryptoError> {
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (AGENTS.md rule 4,
     // "fail closed on crypto").
