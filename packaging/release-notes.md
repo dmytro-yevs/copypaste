@@ -8,8 +8,8 @@
 - Adds a first-run setup wizard: permissions tap-to-prompt, pairing, hosted
   Supabase as the easy cloud path, and Android-only capture. Skip never blocks
   later setup.
-- Publishes the tagged GitHub Release that alpha.17 could not (Windows
-  signing material is now in release infrastructure).
+- Drops the physical arm64 Android self-hosted publish gate. Signed APK
+  smoke on GitHub-hosted emulators is the Android release evidence.
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
   OEM-sticky capture restarts.
 

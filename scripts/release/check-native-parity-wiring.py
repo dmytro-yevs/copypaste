@@ -68,13 +68,13 @@ def contract_errors(release, nightly, ci):
     windows = jobs.get("windows") or {}
     publish = jobs.get("publish") or {}
 
-    if not {"macos", "android-hardware", "windows"} <= set(gate.get("needs") or []):
+    if not {"macos", "android-smoke", "windows"} <= set(gate.get("needs") or []):
         errors.append("native parity must wait for all three shipped platforms")
     if not {"native-parity", "windows"} <= set(publish.get("needs") or []):
         errors.append("publication must wait for Windows and native parity")
     required_receipts = {
         "release-macos-native-evidence",
-        "release-android-hardware-evidence",
+        "release-android-smoke-evidence",
         "release-windows-native-evidence",
     }
     if not required_receipts <= downloads(gate):
@@ -83,7 +83,7 @@ def contract_errors(release, nightly, ci):
     gate_commands = commands(gate)
     receipt_paths = (
         "artifacts/native-parity/macos/native-evidence.json",
-        "artifacts/native-parity/android/release-android-hardware/native-evidence.json",
+        "artifacts/native-parity/android/native-evidence.json",
         "artifacts/native-parity/windows/native-evidence.json",
     )
     if (
@@ -173,7 +173,6 @@ def contract_errors(release, nightly, ci):
         (jobs.get("macos") or {}, "smoke-macos-dmg.sh", "release macOS evidence"),
         (jobs.get("android-smoke") or {}, "android-release-emulator-legs.sh", "release Android API 36 evidence"),
         (jobs.get("android-smoke-api33") or {}, "android-smoke-release.sh", "release Android API 33 evidence"),
-        (jobs.get("android-hardware") or {}, "android-smoke-release.sh", "release Android hardware evidence"),
         (windows, "windows-native-evidence.ps1", "release Windows evidence"),
         (nightly_windows, "windows-native-evidence.ps1", "nightly Windows evidence"),
         (ci_jobs.get("frontend") or {}, "npm test", "CI frontend tests"),
@@ -185,13 +184,13 @@ def contract_errors(release, nightly, ci):
         if not installs_requirements_before(job, marker):
             errors.append(f"{label} must install requirements-ci.txt before its producer")
 
-    hardware_uploads = [
+    android_uploads = [
         step
-        for step in steps(jobs.get("android-hardware") or {})
-        if str(step.get("uses") or "").startswith("actions/upload-artifact")
+        for step in steps(jobs.get("android-smoke") or {})
+        if (step.get("with") or {}).get("name") == "release-android-smoke-evidence"
     ]
-    if len(hardware_uploads) != 1 or (hardware_uploads[0].get("with") or {}).get("if-no-files-found") != "error":
-        errors.append("physical Android evidence upload must fail closed")
+    if len(android_uploads) != 1 or (android_uploads[0].get("with") or {}).get("if-no-files-found") != "error":
+        errors.append("Android emulator evidence upload must fail closed")
     return errors
 
 

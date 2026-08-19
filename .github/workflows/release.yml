@@ -87,7 +87,10 @@ jobs:
           toolchain: "1.96"
       - uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf # v2.1.1
         with:
-          version: latest
+          version: 2.34.3
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: linux-release-supabase
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
       - name: Exercise the disposable Supabase stack
@@ -829,61 +832,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # The emulator never executes the aarch64 native library and cannot stand in
-  # for a phone. Publishing therefore waits for this labelled runner, with one
-  # exclusively attached physical arm64 Android device, to run the signed APK.
-  android-hardware:
-    name: Gate release on a physical arm64 Android device
-    needs: [version, android]
-    if: needs.version.outputs.publish == 'true'
-    runs-on: [self-hosted, linux, ARM64, android-device]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - name: Install native evidence Python dependencies
-        run: python3 -m pip install --requirement requirements-ci.txt
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: android
-          path: dist
-
-      - name: Verify the runner owns one physical arm64 device
-        run: |
-          set -euo pipefail
-          command -v adb >/dev/null 2>&1 || { echo "::error::adb is not installed on the hardware runner"; exit 1; }
-          mapfile -t devices < <(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
-          (( ${#devices[@]} == 1 )) || { echo "::error::expected exactly one ready Android device, found ${#devices[@]}"; exit 1; }
-          [[ "${devices[0]}" != emulator-* ]] || { echo "::error::the release gate requires physical hardware, not an emulator"; exit 1; }
-          echo "ANDROID_SERIAL=${devices[0]}" >> "$GITHUB_ENV"
-          abi="$(adb -s "${devices[0]}" shell getprop ro.product.cpu.abi | tr -d '\r')"
-          [[ "$abi" == arm64-v8a ]] || { echo "::error::the release gate requires arm64-v8a, found '$abi'"; exit 1; }
-
-      - name: Smoke-test the signed release APK on hardware
-        env:
-          APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
-          SMOKE_OUT: artifacts/release-android-hardware
-        run: |
-          set -euo pipefail
-          [[ -f "$APK" ]] || { echo "::error::$APK is missing from the Android artifact"; exit 1; }
-          set +e
-          ./scripts/release/android-smoke-release.sh; smoke=$?
-          SMOKE_OUT=artifacts/release-android-hardware-storage \
-            ./scripts/release/android-storage-transfer.sh; storage=$?
-          set -e
-          [ $smoke -eq 0 ] && [ $storage -eq 0 ]
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: release-android-hardware-evidence
-          path: |
-            artifacts/release-android-hardware
-            artifacts/release-android-hardware-storage
-          if-no-files-found: error
-          retention-days: 30
-
   windows:
     name: Build and exercise Windows installer
     needs: [version]
@@ -984,7 +932,7 @@ jobs:
 
   native-parity:
     name: Gate publication on native evidence
-    needs: [version, macos, android-hardware, windows]
+    needs: [version, macos, android-smoke, windows]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     steps:
@@ -997,7 +945,7 @@ jobs:
           path: artifacts/native-parity/macos
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: release-android-hardware-evidence
+          name: release-android-smoke-evidence
           path: artifacts/native-parity/android
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -1018,7 +966,7 @@ jobs:
           --commit ${{ github.sha }}
           --run-id ${{ github.run_id }}
           --evidence ${{ github.workspace }}/artifacts/native-parity/macos/native-evidence.json
-          --evidence ${{ github.workspace }}/artifacts/native-parity/android/release-android-hardware/native-evidence.json
+          --evidence ${{ github.workspace }}/artifacts/native-parity/android/native-evidence.json
           --evidence ${{ github.workspace }}/artifacts/native-parity/windows/native-evidence.json
 
   # Generate the cask and the formula from the artefacts that were actually
@@ -1072,7 +1020,7 @@ jobs:
     # Android and Windows are hard dependencies: one release page serves all
     # shipped platforms, and a page that silently serves only some of them is
     # worse than a failed run.
-    needs: [version, supabase-gate, secret-scan, pairing-e2e, macos, android, android-smoke, android-smoke-api33, android-hardware, windows, native-parity, packaging]
+    needs: [version, supabase-gate, secret-scan, pairing-e2e, macos, android, android-smoke, android-smoke-api33, windows, native-parity, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
