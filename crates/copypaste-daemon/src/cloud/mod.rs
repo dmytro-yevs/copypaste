@@ -323,10 +323,9 @@ impl Cloud {
 /// Tell the cloud transport that a version was written *below* its cursor.
 ///
 /// The floor assumes a version's `created_at` is when it appeared here. A peer
-/// session breaks that (rows carry the sender's stamp) and so does a delete
-/// (`Store::delete` does not restamp). Neither would ever reach the account
-/// otherwise. Lowering the floor costs one re-offer of everything above it, and
-/// a re-offer is an idempotent upsert.
+/// session breaks that (rows carry the sender's stamp); without pulling the
+/// floor back those rows never upload. Lowering the floor costs one re-offer
+/// of everything above it, and a re-offer is an idempotent upsert.
 pub fn note_version_written(state: &AppState, created_at_ms: i64) {
     state.cloud.note_version_written(&state.meta, created_at_ms);
 }
