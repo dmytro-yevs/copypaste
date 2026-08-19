@@ -63,9 +63,27 @@ export async function waitForRows(
   );
 }
 
+/**
+ * First launch owns the window until setup is skipped. History E2E is the
+ * product shell, not the wizard — `data-navigation-ready` is not on the
+ * onboarding root (API 36 ui=1, run 32251302258).
+ */
+export async function dismissFirstRun(app: AndroidApp): Promise<void> {
+  await waitFor(
+    async () => {
+      if ((await count(app, NAVIGATION_READY)) === 1) return true;
+      await tapWhere(app, null, "button", "Skip setup", -1);
+      return (await count(app, NAVIGATION_READY)) === 1;
+    },
+    "neither Skip setup nor settled navigation appeared",
+    60_000,
+  );
+}
+
 /** Switch screens the way a user does — see `tapWhere` for why the tap is
  *  dispatched at a point this harness computes rather than by `click()`. */
 export async function gotoView(app: AndroidApp, label: string): Promise<void> {
+  await dismissFirstRun(app);
   await waitFor(
     async () => (await count(app, NAVIGATION_READY)) === 1,
     "Android navigation never settled after capture health loaded",
