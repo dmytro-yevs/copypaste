@@ -1,6 +1,7 @@
 //! Onboarding permission requests. The OS prompt is raised only from a tap.
 
 use tauri::{AppHandle, Runtime};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri_plugin_opener::OpenerExt as _;
 
 use crate::backend::BackendError;
