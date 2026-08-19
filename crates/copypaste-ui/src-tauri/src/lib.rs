@@ -113,7 +113,8 @@ pub fn run() {
         // `set_content_protected` is a no-op on Android (tao gates it to macOS
         // and Windows), so INV-35's Android half is `FLAG_SECURE` and needs a
         // Kotlin call to reach it.
-        .plugin(shell::protection::android::plugin());
+        .plugin(shell::protection::android::plugin())
+        .plugin(shell::permissions::android::plugin());
 
     builder
         .on_window_event(shell::window::on_event)
@@ -272,6 +273,9 @@ pub fn run() {
             commands::shortcut::set_shortcut,
             commands::autostart::get_open_at_login,
             commands::autostart::set_open_at_login,
+            commands::permissions::permission_snapshot,
+            commands::permissions::permission_request,
+            commands::permissions::permission_open_settings,
             // the service's own settings
             commands::config::get_config,
             commands::config::set_config,
