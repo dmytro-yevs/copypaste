@@ -42,6 +42,26 @@ class ClipQueueTest {
         assertTrue(ClipQueue.drain().first.isEmpty())
     }
 
+    @Test
+    fun anOversizedClipIsRejectedBeforeItEntersTheQueue() {
+        val oversized = "x".repeat(ClipQueue.MAX_TEXT_BYTES + 1)
+        ClipQueue.offer(oversized, CaptureSource.BACKGROUND)
+
+        val (clips, dropped) = ClipQueue.drain()
+        assertTrue(clips.isEmpty())
+        assertEquals(1L, dropped)
+    }
+
+    @Test
+    fun aClipAtTheSizeCapIsQueued() {
+        val exact = "x".repeat(ClipQueue.MAX_TEXT_BYTES)
+        ClipQueue.offer(exact, CaptureSource.BACKGROUND)
+
+        val (clips, dropped) = ClipQueue.drain()
+        assertEquals(1, clips.size)
+        assertEquals(0L, dropped)
+    }
+
     /**
      * `intake::Buffer::discard_all` counts the clips Rust throws away for the
      * same reason, and this queue used to zero its tally instead. That erased
