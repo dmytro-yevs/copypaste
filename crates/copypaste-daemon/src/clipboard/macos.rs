@@ -43,7 +43,7 @@ use tracing::{debug, warn};
 
 mod attribution;
 
-use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
+use super::change::{clear_sentinel_on_delta_mismatch, Change, ChangeTracker, SELF_WRITE_DELTA};
 use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
 use attribution::{Attribution, FrontmostApp};
 
@@ -280,6 +280,9 @@ impl ClipboardSource for MacOsClipboard {
             // correcting it is what would suppress their content as ours.
             let actual = unsafe { pb.changeCount() } as i64;
             if actual != pre + SELF_WRITE_DELTA {
+                if clear_sentinel_on_delta_mismatch() {
+                    self.tracker.sentinel.clear();
+                }
                 debug!(
                     expected = pre + SELF_WRITE_DELTA,
                     actual, "another app wrote to the pasteboard during our write"
@@ -336,6 +339,9 @@ impl ClipboardSource for MacOsClipboard {
             }
             let actual = unsafe { pb.changeCount() } as i64;
             if actual != pre + SELF_WRITE_DELTA {
+                if clear_sentinel_on_delta_mismatch() {
+                    self.tracker.sentinel.clear();
+                }
                 debug!(
                     expected = pre + SELF_WRITE_DELTA,
                     actual, "another app wrote to the pasteboard during our write"
