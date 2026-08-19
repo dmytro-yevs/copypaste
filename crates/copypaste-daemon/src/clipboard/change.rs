@@ -151,6 +151,14 @@ impl ChangeTracker {
             return Change::SelfWrite;
         }
 
+        // CopyPaste-8yzf: a count that does not match the armed sentinel is
+        // someone else's write. Clearing to "repair" onto this count is what
+        // would suppress their content as ours; the policy flag is the seam
+        // that keeps that closed.
+        if clear_sentinel_on_delta_mismatch() {
+            self.sentinel.clear();
+        }
+
         // I-4: the delta comes from the *old* cursor value, before advancing.
         // I-2: a cursor still at the sentinel is startup, not a burst.
         let lost = if self.cursor < 0 {
