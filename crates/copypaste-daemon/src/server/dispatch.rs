@@ -144,6 +144,8 @@ fn requires_ready(method: &Method) -> bool {
         // exception, for the same reason `Status` is: it is how a client finds
         // out what state the daemon is in.
         | Method::CloudSignIn { .. }
+        | Method::CloudSignUp { .. }
+        | Method::CloudSetEndpoint { .. }
         | Method::CloudSignOut
         | Method::CloudSyncNow
         // Transfer and database administration all read or write history.
@@ -206,6 +208,18 @@ pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) ->
             let password = Zeroizing::new(password);
             let passphrase = Zeroizing::new(passphrase);
             crate::cloud::handlers::sign_in(state, id, &email, &password, &passphrase).await
+        }
+        Method::CloudSignUp {
+            email,
+            password,
+            passphrase,
+        } => {
+            let password = Zeroizing::new(password);
+            let passphrase = Zeroizing::new(passphrase);
+            crate::cloud::handlers::sign_up(state, id, &email, &password, &passphrase).await
+        }
+        Method::CloudSetEndpoint { url, anon_key } => {
+            crate::cloud::handlers::set_endpoint(state, id, &url, &anon_key).await
         }
         Method::CloudSignOut => crate::cloud::handlers::sign_out(state, id).await,
         Method::CloudStatus => crate::cloud::handlers::status(state, id).await,
@@ -273,6 +287,8 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         | Method::Discovered
         | Method::Rescan
         | Method::CloudSignIn { .. }
+        | Method::CloudSignUp { .. }
+        | Method::CloudSetEndpoint { .. }
         | Method::CloudSignOut
         | Method::CloudStatus
         | Method::CloudSyncNow
@@ -342,6 +358,15 @@ mod tests {
             email: "a@example.com".into(),
             password: "pw".into(),
             passphrase: "a long passphrase".into(),
+        }));
+        assert!(requires_ready(&Method::CloudSignUp {
+            email: "a@example.com".into(),
+            password: "pw".into(),
+            passphrase: "a long passphrase".into(),
+        }));
+        assert!(requires_ready(&Method::CloudSetEndpoint {
+            url: "https://example.supabase.co".into(),
+            anon_key: "anon".into(),
         }));
         assert!(requires_ready(&Method::List {
             limit: 10,
