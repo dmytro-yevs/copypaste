@@ -303,7 +303,7 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8
             .decrypt_next_in_place(
                 &aad,
                 &mut Tail {
-                    out: &mut *plain,
+                    out: &mut plain,
                     start: record,
                 },
             )
@@ -330,7 +330,7 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8
         .decrypt_last_in_place(
             &aad,
             &mut Tail {
-                out: &mut *plain,
+                out: &mut plain,
                 start: record,
             },
         )
