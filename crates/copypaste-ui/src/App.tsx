@@ -9,6 +9,7 @@ import { listen } from "@tauri-apps/api/event";
 import { BannerBar } from "@/components/shell/Banners";
 import { Boundary } from "@/components/shell/Boundary";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { OnboardingShell } from "@/components/onboarding/OnboardingShell";
 import { HistoryView } from "@/components/history/HistoryView";
 import { useCaptureState, useCaptureSync } from "@/hooks/useCapture";
 import { useInboundPairingNav } from "@/hooks/usePairing";
@@ -23,6 +24,7 @@ import { isAndroidPlatform } from "@/lib/platform";
 import { EVENT_OPEN_SETTINGS } from "@/lib/tauriEvents";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
 import { selectAppearance, usePrefs } from "@/store/prefs";
+import { usePrefsHydrated } from "@/store/prefsHydrated";
 import { useUi } from "@/store/ui";
 import { useShallow } from "zustand/react/shallow";
 
@@ -64,6 +66,11 @@ export default function App() {
   useInboundPairingNav();
   const capture = useCaptureState();
   const [androidStartupSettled, setAndroidStartupSettled] = useState(false);
+  const prefsHydrated = usePrefsHydrated();
+  const onboardingComplete = usePrefs((s) => s.onboardingComplete);
+  const onboardingOpen = useUi((s) => s.onboardingOpen);
+  const showOnboarding =
+    prefsHydrated && (!onboardingComplete || onboardingOpen);
 
   useEffect(() => {
     const global = window as typeof window & { __copypasteRequestedView?: string };
@@ -124,6 +131,7 @@ export default function App() {
 
   useEffect(() => {
     if (
+      showOnboarding ||
       !android ||
       androidStartupSettled ||
       (capture.data === undefined && !capture.isError)
@@ -138,7 +146,22 @@ export default function App() {
       setView("capture");
     }
     setAndroidStartupSettled(true);
-  }, [android, androidStartupSettled, capture.data, capture.isError, setView]);
+  }, [android, androidStartupSettled, capture.data, capture.isError, setView, showOnboarding]);
+
+  if (showOnboarding) {
+    return (
+      <div
+        data-onboarding-root=""
+        data-size-class={sizeClass}
+        className={cn(
+          "app-surface flex h-full min-h-0 text-foreground",
+          !android && "app-surface--desktop",
+        )}
+      >
+        <OnboardingShell />
+      </div>
+    );
+  }
 
   return (
     <div

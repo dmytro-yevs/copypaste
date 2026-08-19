@@ -67,6 +67,7 @@ export interface Prefs {
    *  default matches what the window is created with, so a preference that
    *  fails to load leaves the user protected. */
   allowScreenshots: boolean;
+  onboardingComplete: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -77,6 +78,7 @@ export const DEFAULT_PREFS: Prefs = {
   historyDisplayLimit: 1000,
   warnBeforeReveal: true,
   allowScreenshots: false,
+  onboardingComplete: false,
 };
 
 /**
@@ -99,6 +101,7 @@ const FIELD = {
     ),
   warnBeforeReveal: z.boolean(),
   allowScreenshots: z.boolean(),
+  onboardingComplete: z.boolean(),
 } as const;
 
 /** Never throws. Unknown keys are dropped by construction: the result is built
@@ -124,7 +127,17 @@ export function parsePrefs(raw: unknown): Prefs {
   const out = { ...DEFAULT_PREFS, ...appearance };
 
   for (const key of Object.keys(FIELD) as Array<keyof typeof FIELD>) {
-    if (!(key in source)) continue; // absent -> silent default
+    if (!(key in source)) {
+      if (key === "onboardingComplete") {
+        // An existing prefs blob is not a first launch.
+        out.onboardingComplete = Object.keys(source).some(
+          (stored) =>
+            stored !== "onboardingComplete" &&
+            Object.prototype.hasOwnProperty.call(DEFAULT_PREFS, stored),
+        );
+      }
+      continue;
+    }
     const result = FIELD[key].safeParse(source[key]);
     if (result.success) {
       (out[key] as unknown) = result.data;
@@ -231,7 +244,11 @@ export const usePrefs = create<PrefsStore>()(
     (setState) => ({
       ...DEFAULT_PREFS,
       set: (key, value) => setState({ [key]: value } as Partial<Prefs>),
-      reset: () => setState({ ...DEFAULT_PREFS }),
+      reset: () =>
+        setState((state) => ({
+          ...DEFAULT_PREFS,
+          onboardingComplete: state.onboardingComplete,
+        })),
     }),
     {
       name: STORAGE_KEY,
