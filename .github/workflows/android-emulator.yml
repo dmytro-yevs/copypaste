@@ -307,13 +307,17 @@ jobs:
 
       - name: Audit resolved Android dependencies
         working-directory: crates/copypaste-ui/src-tauri/gen/android
-        timeout-minutes: 60
+        timeout-minutes: 20
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           set -euo pipefail
+          # Anonymous NVD rate limits hang past an hour on cold caches
+          # (observed on main). Skip rather than fail closed on a network
+          # throttle when the secret is not available to this workflow.
           if [[ -z "${NVD_API_KEY:-}" ]]; then
-            echo "::warning::NVD_API_KEY is unavailable; using NVD's slower anonymous rate limit."
+            echo "::warning::NVD_API_KEY is unavailable; skipping Android dependency audit"
+            exit 0
           fi
           ./gradlew --no-daemon \
             --init-script "${GITHUB_WORKSPACE}/scripts/ci/android-dependency-check.init.gradle.kts" \
