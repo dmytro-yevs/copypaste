@@ -289,6 +289,32 @@ export async function byLabel(
 }
 
 /**
+ * First launch owns the window until setup is skipped. History E2E is the
+ * product shell, not the wizard.
+ */
+export async function dismissFirstRun(browser: Browser): Promise<void> {
+  await browser.waitUntil(
+    async () => {
+      const skip = await browser.$("button=Skip setup");
+      const nav = await browser.$('nav[aria-label="Primary"]');
+      return (await skip.isExisting()) || (await nav.isExisting());
+    },
+    {
+      timeout: 30_000,
+      timeoutMsg: "neither Skip setup nor the primary navigation appeared",
+    },
+  );
+  const skip = await browser.$("button=Skip setup");
+  if (await skip.isExisting()) {
+    await skip.waitForClickable({ timeout: 15_000 });
+    await skip.click();
+    await (await browser.$('nav[aria-label="Primary"]')).waitForExist({
+      timeout: 15_000,
+    });
+  }
+}
+
+/**
  * Click a button by the label a user sees — its rendered text, or its
  * accessible name when it has only an icon.
  *
