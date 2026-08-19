@@ -47,11 +47,11 @@ impl CloudSource for Source {
 }
 
 fn config() -> CloudConfig {
-    CloudConfig::new(
+    CloudConfig::new_loopback(
         std::env::var("SUPABASE_URL").expect("SUPABASE_URL"),
         std::env::var("SUPABASE_ANON_KEY").expect("SUPABASE_ANON_KEY"),
     )
-    .expect("secure SUPABASE_URL")
+    .expect("loopback SUPABASE_URL")
 }
 
 fn stamp() -> i64 {
