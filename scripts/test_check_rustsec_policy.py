@@ -83,6 +83,12 @@ class RustsecPolicyTest(unittest.TestCase):
         errors, _ = self.evaluate(report)
         self.assertTrue(any("VariantStrIter" in error for error in errors))
 
+    def test_glib_vendor_gate_requires_the_mutability_fix(self):
+        self.assertEqual(policy_check.glib_vendor_errors(self.root), [])
+        (self.root / "vendor/glib/src/variant_iter.rs").write_text("&p\n", encoding="utf-8")
+        errors = policy_check.glib_vendor_errors(self.root)
+        self.assertTrue(any("lost" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
