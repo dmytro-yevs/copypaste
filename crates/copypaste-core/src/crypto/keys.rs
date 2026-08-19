@@ -406,7 +406,9 @@ mod tests {
         // daemon restart does.
         let (nonce, ct) = encrypt(b"stable", &a.item_key(), ITEM).unwrap();
         assert_eq!(
-            decrypt(&ct, &nonce, &b.item_key(), ITEM).unwrap(),
+            decrypt(&ct, &nonce, &b.item_key(), ITEM)
+                .unwrap()
+                .as_slice(),
             b"stable"
         );
     }

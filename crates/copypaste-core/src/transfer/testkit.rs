@@ -61,7 +61,7 @@ impl Fixture {
             .map(|row| {
                 let bytes = crate::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
                     .expect("the local key must open it");
-                String::from_utf8(bytes).expect("utf-8")
+                String::from_utf8(bytes.to_vec()).expect("utf-8")
             })
             .collect();
         out.sort();
