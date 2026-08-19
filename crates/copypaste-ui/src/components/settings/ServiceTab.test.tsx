@@ -54,9 +54,9 @@ function config(over: Partial<ConfigData> = {}): ConfigData {
     storage_quota_bytes: 10 * 1_073_741_824,
     retention_days: 0,
     dedup_window_secs: 30,
-    max_text_size_bytes: 10 * 1_048_576,
-    max_image_size_bytes: 64 * 1_048_576,
-    max_file_size_bytes: 100 * 1_048_576,
+    max_text_size_bytes: 4 * 1_048_576,
+    max_image_size_bytes: 4 * 1_048_576,
+    max_file_size_bytes: 4 * 1_048_576,
     max_decoded_image_mb: 50,
     sensitive_ttl_secs: 0,
     excluded_app_bundle_ids: [],
@@ -121,9 +121,9 @@ describe("reading the service's settings", () => {
   it("shows every binding payload default", async () => {
     withUser(<ServiceTab />);
     const expected = [
-      ["Ignore text larger than", 10 * 1_048_576],
-      ["Ignore images larger than", 64 * 1_048_576],
-      ["Ignore files larger than", 100 * 1_048_576],
+      ["Ignore text larger than", 4 * 1_048_576],
+      ["Ignore images larger than", 4 * 1_048_576],
+      ["Ignore files larger than", 4 * 1_048_576],
       ["Decoded image memory limit", 50],
     ] as const;
     for (const [name, value] of expected) {
@@ -219,9 +219,9 @@ describe("writing one", () => {
   });
 
   it.each([
-    ["Ignore text larger than", String(16 * 1_048_576), { max_text_size_bytes: 16 * 1_048_576 }],
-    ["Ignore images larger than", String(128 * 1_048_576), { max_image_size_bytes: 128 * 1_048_576 }],
-    ["Ignore files larger than", String(50 * 1_048_576), { max_file_size_bytes: 50 * 1_048_576 }],
+    ["Ignore text larger than", String(2 * 1_048_576), { max_text_size_bytes: 2 * 1_048_576 }],
+    ["Ignore images larger than", String(2 * 1_048_576), { max_image_size_bytes: 2 * 1_048_576 }],
+    ["Ignore files larger than", String(1 * 1_048_576), { max_file_size_bytes: 1 * 1_048_576 }],
     ["Decoded image memory limit", "100", { max_decoded_image_mb: 100 }],
   ])("patches only %s", async (name, value, patch) => {
     const { user } = withUser(<ServiceTab />);
