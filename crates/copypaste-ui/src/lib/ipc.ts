@@ -312,6 +312,18 @@ export {
   captureState,
   captureToastExplanation,
 } from "./ipcCapture";
+export {
+  permissionOpenSettings,
+  permissionRequest,
+  permissionSnapshot,
+} from "./ipcPermissions";
+export type {
+  OnboardingPermissionId,
+  OnboardingPermissionItem,
+  OnboardingPermissionStatus,
+  OnboardingPermissions,
+  PermissionHost,
+} from "./ipcPermissions";
 
 export function getConfig(): Promise<ConfigApplied> {
   return call<ConfigApplied>("get_config");
