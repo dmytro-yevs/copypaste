@@ -306,6 +306,18 @@ pub enum Method {
         password: String,
         passphrase: String,
     },
+    /// Create an account, then unlock the sync key the same way as sign-in.
+    CloudSignUp {
+        email: String,
+        password: String,
+        passphrase: String,
+    },
+    /// Persist a self-hosted URL and anon key, or clear both to use the hosted
+    /// bake. Empty `url` and `anon_key` together restore the hosted default.
+    CloudSetEndpoint {
+        url: String,
+        anon_key: String,
+    },
     /// Forget the account, the tokens and the sync key on this device.
     ///
     /// Persistent, and it keeps the deployment's URL and anon key — those are
@@ -396,6 +408,7 @@ impl Method {
                 | Self::SyncNow { .. }
                 | Self::CloudSyncNow
                 | Self::CloudSignIn { .. }
+                | Self::CloudSignUp { .. }
                 | Self::PairJoin { .. }
                 | Self::PairConfirm { .. }
         )
@@ -436,6 +449,16 @@ mod tests {
             },
             Method::SyncNow { pairing_id: None },
             Method::CloudSyncNow,
+            Method::CloudSignIn {
+                email: "a@b.c".into(),
+                password: "p".into(),
+                passphrase: "s".into(),
+            },
+            Method::CloudSignUp {
+                email: "a@b.c".into(),
+                password: "p".into(),
+                passphrase: "s".into(),
+            },
             Method::PairJoin {
                 code: "c".into(),
                 addr: "a".into(),

@@ -200,6 +200,23 @@ impl Backend for FakeBackend {
         Err(refused())
     }
 
+    async fn cloud_sign_up(
+        &self,
+        _email: &str,
+        _password: &str,
+        _passphrase: &str,
+    ) -> Result<copypaste_ipc::CloudStatusData> {
+        Err(refused())
+    }
+
+    async fn cloud_set_endpoint(
+        &self,
+        _url: &str,
+        _anon_key: &str,
+    ) -> Result<copypaste_ipc::CloudStatusData> {
+        Err(refused())
+    }
+
     async fn cloud_sign_out(&self) -> Result<copypaste_ipc::CloudStatusData> {
         Err(refused())
     }
