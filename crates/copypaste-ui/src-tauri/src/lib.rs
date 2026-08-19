@@ -244,6 +244,8 @@ pub fn run() {
             commands::status::status,
             commands::status::set_device_name,
             commands::cloud::cloud_sign_in,
+            commands::cloud::cloud_sign_up,
+            commands::cloud::cloud_set_endpoint,
             commands::cloud::cloud_sign_out,
             commands::cloud::cloud_status,
             commands::cloud::cloud_sync_now,

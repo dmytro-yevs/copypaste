@@ -7,7 +7,47 @@ import { DEFAULT_PREFS, usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 import { withUser } from "@/test/harness";
 
+const getPairingProgress = vi.fn();
+const getCloudStatus = vi.fn();
+const cancelPairing = vi.fn();
+
+vi.mock("@/lib/ipc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ipc")>();
+  return {
+    ...actual,
+    getPairingProgress: () => getPairingProgress(),
+    cancelPairing: () => cancelPairing(),
+    getCloudStatus: () => getCloudStatus(),
+  };
+});
+
 beforeEach(() => {
+  getPairingProgress.mockReset().mockResolvedValue({
+    ceremony_id: null,
+    role: null,
+    state: "idle",
+    presentation: "unavailable",
+    known_device: null,
+    error: null,
+  });
+  cancelPairing.mockReset().mockResolvedValue({
+    ceremony_id: null,
+    role: null,
+    state: "idle",
+    presentation: "unavailable",
+    known_device: null,
+    error: null,
+  });
+  getCloudStatus.mockReset().mockResolvedValue({
+    configured: true,
+    signed_in: false,
+    key_ready: false,
+    email: null,
+    last_sync_ms: null,
+    last_error: null,
+    poll_interval_secs: 60,
+    unreadable_uploads: 0,
+  });
   usePrefs.setState({ ...DEFAULT_PREFS, onboardingComplete: false });
   useUi.setState({ view: "history", settingsTab: null, onboardingOpen: false });
 });
