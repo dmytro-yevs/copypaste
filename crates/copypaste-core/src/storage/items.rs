@@ -294,42 +294,51 @@ impl Store {
     /// Turn exactly the sensitive version inspected by the auto-wipe into a
     /// tombstone. The predicates close the select/decrypt/delete race: a pin
     /// or a re-copy after the sweep selected its candidate must keep the item.
+    #[cfg(test)]
     pub(crate) fn wipe_sensitive_if_unchanged(
         &self,
         id: &str,
         created_at: i64,
         content_hash: &str,
     ) -> Result<bool, StoreError> {
+        Ok(self.wipe_sensitive_batch_if_unchanged(&[(
+            id.to_string(),
+            created_at,
+            content_hash.to_string(),
+        )])? > 0)
+    }
+
+    pub(crate) fn wipe_sensitive_batch_if_unchanged(
+        &self,
+        victims: &[(String, i64, String)],
+    ) -> Result<u64, StoreError> {
+        if victims.is_empty() {
+            return Ok(0);
+        }
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
-        // Read before the update clears it; the delete still runs only if the
-        // update fired, so a row the predicates saved keeps its index entry.
-        let fts_rowid: Option<i64> = tx
-            .query_row(
-                "SELECT fts_rowid FROM clipboard_items WHERE id = ?1",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?
-            .flatten();
-        let changed = tx.execute(
-            "UPDATE clipboard_items \
-                SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
-                    content_hash = '', pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, \
-                    payload_metadata = NULL, fts_rowid = NULL, \
-                    created_at = CASE \
-                        WHEN created_at = 9223372036854775807 THEN created_at \
-                        ELSE MAX(created_at + 1, ?4) \
-                    END \
-              WHERE id = ?1 AND created_at = ?2 AND content_hash = ?3 \
-                AND is_sensitive = 1 AND pinned = 0 AND deleted = 0",
-            params![id, created_at, content_hash, crate::now_ms()],
-        )?;
-        if let (true, Some(rowid)) = (changed > 0, fts_rowid) {
-            tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])?;
+        let now = crate::now_ms();
+        let mut removed = 0u64;
+        for (id, created_at, content_hash) in victims {
+            let fts_rowid: Option<i64> = tx
+                .query_row(
+                    "SELECT fts_rowid FROM clipboard_items WHERE id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .flatten();
+            let changed = tx.execute(
+                "UPDATE clipboard_items                     SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL,                         content_hash = '', pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL,                         payload_metadata = NULL, fts_rowid = NULL,                         created_at = CASE                             WHEN created_at = 9223372036854775807 THEN created_at                             ELSE MAX(created_at + 1, ?4)                         END                   WHERE id = ?1 AND created_at = ?2 AND content_hash = ?3                     AND is_sensitive = 1 AND pinned = 0 AND deleted = 0",
+                params![id, created_at, content_hash, now],
+            )?;
+            if let (true, Some(rowid)) = (changed > 0, fts_rowid) {
+                tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])?;
+            }
+            removed += u64::from(changed > 0);
         }
         tx.commit()?;
-        Ok(changed > 0)
+        Ok(removed)
     }
 
     /// Soft-deletes every live item, returning how many were affected.
