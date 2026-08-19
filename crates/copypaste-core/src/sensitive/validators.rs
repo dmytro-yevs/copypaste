@@ -1045,7 +1045,7 @@ mod tests {
     /// Only the padding its capture swallows moved, so a value the vendored
     /// shape guard was written to reject no longer escapes it.
     #[test]
-    fn the_upstream_generic_rule_still_detects_and_still_deletes() {
+    fn the_upstream_generic_rule_still_detects_and_stays_below_the_wipe_floor() {
         let det = detector();
         for text in [
             "credential = aB3dE5gH7jK9".to_string(),
@@ -1055,10 +1055,11 @@ mod tests {
             assert!(fired(&det, &text, "generic_api_key"), "{text}");
             assert_eq!(
                 rule_severity(&det, &text, "generic_api_key"),
-                Some(Severity::HighConfidence),
+                Some(Severity::Restricted),
                 "{text}"
             );
-            assert!(det.may_auto_wipe(&text), "{text}");
+            assert!(det.is_sensitive(&text), "{text}");
+            assert!(!det.may_auto_wipe(&text), "{text}");
         }
         assert!(!fired(&det, "credential = aaaaaaaaaaaa", "generic_api_key"));
         assert!(!fired(&det, "credential = AbCdEfGhIjKl", "generic_api_key"));

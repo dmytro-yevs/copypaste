@@ -176,3 +176,34 @@ mod tests {
         assert!(presenter.confirm(&progress()).is_none());
     }
 }
+
+#[cfg(test)]
+mod native_pairing_source_contracts {
+    fn production(source: &'static str) -> &'static str {
+        source
+            .split_once("#[cfg(test)]")
+            .map_or(source, |part| part.0)
+    }
+
+    #[test]
+    fn windows_and_android_pairing_keep_credentials_off_the_webview() {
+        let sources = [
+            production(include_str!("pairing_presentation/windows/mod.rs")),
+            production(include_str!("pairing_presentation/windows/invite.rs")),
+            production(include_str!("pairing_presentation/windows/entry.rs")),
+            production(include_str!("pairing_presentation/windows/confirm.rs")),
+            production(include_str!("pairing_presentation/windows/status.rs")),
+            production(include_str!("pairing_presentation/android.rs")),
+        ];
+        let joined = sources.join("\n");
+        for forbidden in ["WebviewWindow", ".eval(", "write_text("] {
+            assert!(
+                !joined.contains(forbidden),
+                "forbidden pairing sink: {forbidden}"
+            );
+        }
+        assert!(joined.contains("encode_native_invite"));
+        assert!(joined.contains("decode_native_invite"));
+        assert!(joined.contains("Zeroizing"));
+    }
+}

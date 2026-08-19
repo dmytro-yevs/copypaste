@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use zeroize::Zeroizing;
+
 use super::outcome::SyncError;
 
 // The local side
@@ -23,7 +25,7 @@ pub struct LocalItem {
     /// (manifest 05 R-ID-1).
     pub item_id: String,
     /// Plaintext. Empty for a tombstone — see [`LocalItem::deleted`].
-    pub content: Vec<u8>,
+    pub content: Zeroizing<Vec<u8>>,
     pub content_type: String,
     /// Opaque payload metadata needed to restore a binary value faithfully.
     /// For file payloads this is the validated JSON form of `FileMetadata`.

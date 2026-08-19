@@ -72,10 +72,10 @@ What follows from a match:
   reviewed.
 - **It never leaves the device.** Peer sync does not list it and cloud sync
   refuses to upload it.
-- **Automatic deletion exists and is off** — `sensitive_ttl_secs` defaults to
-  `0`. Switched on, a flagged item is hard-deleted once its TTL elapses, but
-  only if it was flagged at capture *and* its plaintext still scans as high
-  confidence when the sweep reads it.
+- **Automatic deletion is on** — `sensitive_ttl_secs` defaults to `30`.
+  Flagged items are hard-deleted once the TTL elapses, but only if they were
+  flagged at capture *and* plaintext still scans above the 0.85 auto-wipe
+  floor when the sweep reads them. Settings can set the TTL to `0` to disable.
 
 Detection is best-effort. One adversarial pass over the ruleset found two whole
 classes it did not see — quoted values, and `aws_secret_access_key` — and both

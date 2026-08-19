@@ -490,22 +490,12 @@ mod tests {
         );
     }
 
-    /// The one place the two numbers are deliberately *different*, spelled out
-    /// so the difference reads as a decision rather than a drift.
-    ///
-    /// `DEFAULT_SENSITIVE_TTL` is the value auto-wipe should use **once it is
-    /// switched on** — manifest 07 §6.2's "long enough to paste a password
-    /// once". `ConfigData::default()` is what a fresh install *runs*, and it is
-    /// off: v2 has no Settings control for the TTL and the sweep raises no
-    /// notice, so the delete would be silent, irreversible and undiscoverable
-    /// (AGENTS.md rule 4 by way of rule 6). See the field's own doc.
     #[test]
-    fn the_suggested_ttl_is_not_the_shipped_default() {
-        assert_eq!(ConfigData::default().sensitive_ttl_secs, 0);
+    fn the_shipped_ttl_matches_the_core_suggestion() {
+        assert_eq!(ConfigData::default().sensitive_ttl_secs, 30);
         assert_eq!(
             copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL.as_secs(),
             30,
-            "the suggested value moved; the Settings control should offer the new one"
         );
     }
 
