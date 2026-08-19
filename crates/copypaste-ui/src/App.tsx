@@ -11,6 +11,7 @@ import { Boundary } from "@/components/shell/Boundary";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { HistoryView } from "@/components/history/HistoryView";
 import { useCaptureState, useCaptureSync } from "@/hooks/useCapture";
+import { useInboundPairingNav } from "@/hooks/usePairing";
 import { statusReachable, useStatus } from "@/hooks/useStatus";
 import { usePush } from "@/hooks/usePush";
 import { useSizeClass } from "@/hooks/useSizeClass";
@@ -60,6 +61,7 @@ export default function App() {
   // same queries twice for one change.
   const pushLive = usePush();
   useCaptureSync();
+  useInboundPairingNav();
   const capture = useCaptureState();
   const [androidStartupSettled, setAndroidStartupSettled] = useState(false);
 

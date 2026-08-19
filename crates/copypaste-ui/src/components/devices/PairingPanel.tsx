@@ -259,17 +259,19 @@ export function PairingPanel({ disabled }: PairingPanelProps) {
                 >
                   {t("devices.pairing.cancel")}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={pairing.isPending}
-                  onClick={() => pairing.run("present")}
-                >
-                  <ShieldCheck aria-hidden="true" />
-                  {pending === "present"
-                    ? t("devices.pairing.presenting")
-                    : t("devices.pairing.present")}
-                </Button>
+                {state !== "waiting_for_peer" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pairing.isPending}
+                    onClick={() => pairing.run("present")}
+                  >
+                    <ShieldCheck aria-hidden="true" />
+                    {pending === "present"
+                      ? t("devices.pairing.presenting")
+                      : t("devices.pairing.present")}
+                  </Button>
+                )}
                 {state === "awaiting_confirmation" &&
                   pairing.decisionSubmitted === null && (
                     <>
@@ -286,7 +288,10 @@ export function PairingPanel({ disabled }: PairingPanelProps) {
                       </Button>
                       <Button
                         size="sm"
-                        disabled={pairing.isPending}
+                        disabled={
+                          pairing.isPending ||
+                          pairing.presentation !== "presented"
+                        }
                         aria-label={t("devices.pairing.confirmLabel")}
                         onClick={() => pairing.run("confirm")}
                       >
