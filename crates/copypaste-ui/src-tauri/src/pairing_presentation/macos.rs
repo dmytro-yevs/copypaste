@@ -23,10 +23,20 @@ use zeroize::Zeroizing;
 
 use super::invite::{decode_native_invite, encode_native_invite};
 use super::macos_model::{progress_copy, sas_digits};
-use super::{NativePairingUi, PairingDecision, PairingPresentationState, ScannedPairing};
+use super::{
+    NativeAbort, NativePairingUi, PairingDecision, PairingPresentationState, ScannedPairing,
+};
 use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 
-pub(super) struct MacOsPairingUi;
+pub(crate) struct MacOsPairingUi {
+    abort: NativeAbort,
+}
+
+impl MacOsPairingUi {
+    pub(crate) fn new(abort: NativeAbort) -> Self {
+        Self { abort }
+    }
+}
 
 impl NativePairingUi for MacOsPairingUi {
     fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState {
@@ -111,9 +121,16 @@ impl NativePairingUi for MacOsPairingUi {
     }
 
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState {
+        // SAS comparison is owned by confirm(). A blocking progress alert would
+        // trap the WebView Confirm control the same way Android's modal did.
+        if progress.state == PairingState::AwaitingConfirmation {
+            return PairingPresentationState::Presented;
+        }
         let copy = progress_copy(progress);
         show_message(&copy.title, copy.message);
-        PairingPresentationState::Presented
+        // INV-16: Close must reset the ceremony, matching Windows/Android.
+        (self.abort)();
+        PairingPresentationState::Unavailable
     }
 
     fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision> {
