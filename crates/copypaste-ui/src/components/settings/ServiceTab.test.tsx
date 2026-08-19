@@ -140,7 +140,7 @@ describe("reading the service's settings", () => {
     const helpId = file.getAttribute("aria-describedby");
     expect(helpId).toBeTruthy();
     expect(document.getElementById(helpId!)?.textContent).toContain(
-      "effective limit is 4 MiB",
+      "Maximum is 4 MiB",
     );
   });
 
