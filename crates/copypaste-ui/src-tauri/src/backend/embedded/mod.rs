@@ -29,6 +29,7 @@
 mod backup;
 mod clear;
 mod cloud;
+mod messages;
 mod open;
 mod pairing;
 mod peers;
@@ -48,21 +49,13 @@ use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
     ImagePreview, ImportData, Item, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
+use messages::{
+    BACKEND_NAME, MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_NO_PEER,
+    MSG_TOO_LARGE,
+};
 pub use open::{Clipboard, EmbeddedBackend};
 use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 
-/// Reported in [`StatusData::clipboard_backend`] so a build that is not polling
-/// anything cannot be mistaken for one that is.
-const BACKEND_NAME: &str = "android-inprocess";
-
-const MSG_EMPTY: &str = "There was nothing to save.";
-const MSG_TOO_LARGE: &str = "That item is larger than the size limit you set.";
-const MSG_NOT_STORED: &str = "That item could not be saved.";
-const MSG_NO_ITEM: &str = "That item is no longer there.";
-/// Refused rather than restarted: a load-more that silently began again would
-/// replay the whole history and the caller could not tell.
-const MSG_BAD_CURSOR: &str = "That page marker isn't one this app issued.";
-const MSG_NO_PEER: &str = "That device isn't paired.";
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
         let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
