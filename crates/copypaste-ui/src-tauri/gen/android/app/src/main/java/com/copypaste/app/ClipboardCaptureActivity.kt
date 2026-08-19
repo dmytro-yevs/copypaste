@@ -14,11 +14,16 @@ class ClipboardCaptureActivity : Activity() {
 
         handled = true
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = clipboard.primaryClip
-            ?.takeIf { it.itemCount > 0 }
-            ?.getItemAt(0)
-            ?.coerceToText(this)
-            ?.toString()
+        val primary = clipboard.primaryClip
+        val text = when {
+            primary == null -> null
+            ClipSensitivity.isSensitive(primary) -> null
+            else -> primary
+                .takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)
+                ?.coerceToText(this)
+                ?.toString()
+        }
         if (!text.isNullOrBlank()) queueClip(text, CaptureSource.TILE)
         finish()
     }

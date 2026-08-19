@@ -98,12 +98,15 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 /// and what would justify turning it back on out of the box.
 fn sweep_sensitive_items(state: &AppState) {
     let ttl = Duration::from_secs(state.settings.get().sensitive_ttl_secs);
+    // Capture before wipe stamps so the upload floor cannot land above the
+    // tombstone `created_at` (decrypt/judge can cross a millisecond).
+    let mutation_started = copypaste_core::now_ms();
     let removed = copypaste_core::sensitive::sweep_sensitive(
         &state.store,
         &state.detector,
         &state.keyring.item_key(),
         ttl,
-        copypaste_core::now_ms(),
+        mutation_started,
     );
     match removed {
         Ok(0) => {}
@@ -111,7 +114,7 @@ fn sweep_sensitive_items(state: &AppState) {
         // one history change nobody asked for, and a client cannot say so on an
         // event that only reports that the count moved.
         Ok(removed) => {
-            crate::cloud::note_version_written(state, copypaste_core::now_ms());
+            crate::cloud::note_version_written(state, mutation_started);
             state.note_sensitive_swept(u32::try_from(removed).unwrap_or(u32::MAX));
         }
         Err(e) => warn!(error = ?e, "the sensitive-item sweep failed"),
