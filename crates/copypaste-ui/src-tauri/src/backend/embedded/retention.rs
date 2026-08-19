@@ -7,15 +7,21 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) fn sweep(inner: &Inner) {
     let ttl = Duration::from_secs(inner.settings().sensitive_ttl_secs);
+    // Same bound as daemon wipe: floor must not land above tombstone stamps.
+    let mutation_started = copypaste_core::now_ms();
     match copypaste_core::sweep_sensitive(
         &inner.state.store,
         &inner.state.detector,
         &inner.state.keyring.item_key(),
         ttl,
-        copypaste_core::now_ms(),
+        mutation_started,
     ) {
         Ok(0) => {}
-        Ok(removed) => inner.publish_items(false, u32::try_from(removed).unwrap_or(u32::MAX)),
+        Ok(removed) => {
+            inner.note_version_written(mutation_started);
+            inner.note_local_version(mutation_started);
+            inner.publish_items(false, u32::try_from(removed).unwrap_or(u32::MAX));
+        }
         Err(error) => tracing::warn!(?error, "the sensitive-item sweep failed"),
     }
 }
@@ -106,6 +112,60 @@ mod tests {
         assert!(!event.captured);
         assert_eq!(event.swept, 1);
         assert!(backend.get(&item.id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_sensitive_sweep_pulls_the_embedded_cloud_upload_floor_back() {
+        use super::super::cloud::KEY_UPLOAD_FLOOR;
+
+        let (backend, _clipboard, _dir) = backend();
+        backend
+            .set_config(copypaste_ipc::ConfigPatch {
+                sensitive_ttl_secs: Some(1),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let created_at = copypaste_core::now_ms().saturating_sub(2_000);
+        let item = copypaste_core::ingest_into(
+            &backend.inner.state.store,
+            &backend.inner.state.detector,
+            &backend.inner.state.keyring,
+            SECRET,
+            copypaste_ipc::content_type::TEXT,
+            created_at,
+            &backend.inner.settings(),
+        )
+        .unwrap()
+        .into_item();
+        let ahead = copypaste_core::now_ms().saturating_add(60_000);
+        backend
+            .inner
+            .state
+            .store
+            .set_state_ms(KEY_UPLOAD_FLOOR, ahead)
+            .unwrap();
+
+        sweep(&backend.inner);
+
+        let floor = backend
+            .inner
+            .state
+            .store
+            .state_ms(KEY_UPLOAD_FLOOR)
+            .unwrap();
+        assert!(floor < ahead, "the sweep left the upload floor ahead");
+        assert!(
+            backend
+                .inner
+                .state
+                .store
+                .versions_since(floor, 100)
+                .unwrap()
+                .iter()
+                .any(|row| row.deleted && row.id == item.id),
+            "the wipe tombstone was not offered"
+        );
     }
 
     #[tokio::test]

@@ -325,7 +325,7 @@ mod tests {
 
         let (nonce, ct) = encrypt_row(b"across a restart", &derived, ITEM).unwrap();
         assert_eq!(
-            decrypt_row(&ct, &nonce, &rebuilt, ITEM).unwrap(),
+            decrypt_row(&ct, &nonce, &rebuilt, ITEM).unwrap().as_slice(),
             b"across a restart"
         );
     }

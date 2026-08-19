@@ -289,7 +289,9 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8
     // untrusted header ask for an arbitrary allocation
     // (`an_absurd_untrusted_byte_length_fails_without_allocating`). The tag
     // slack is the room STREAM's in-place decrypt needs before it truncates.
-    let mut plain = Vec::with_capacity(plain_len.saturating_add(TAG_LEN));
+    // Hold recovered chunks in Zeroizing for the whole open: a mid-stream
+    // AuthFailed must not leave decrypted plaintext on the heap.
+    let mut plain = Zeroizing::new(Vec::with_capacity(plain_len.saturating_add(TAG_LEN)));
     for _ in 0..chunk_count - 1 {
         let end = offset
             .checked_add(CHUNK_BYTES + TAG_LEN)
@@ -301,7 +303,7 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8
             .decrypt_next_in_place(
                 &aad,
                 &mut Tail {
-                    out: &mut plain,
+                    out: &mut *plain,
                     start: record,
                 },
             )
@@ -328,7 +330,7 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8
         .decrypt_last_in_place(
             &aad,
             &mut Tail {
-                out: &mut plain,
+                out: &mut *plain,
                 start: record,
             },
         )
@@ -344,7 +346,7 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8
     {
         return Err(CryptoError::AuthFailed);
     }
-    Ok(Zeroizing::new(plain))
+    Ok(plain)
 }
 
 #[cfg(test)]

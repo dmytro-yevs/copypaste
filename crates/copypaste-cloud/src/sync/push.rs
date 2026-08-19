@@ -187,7 +187,9 @@ mod tests {
 
         // And it is the *cloud* key that opens it, bound to this item id.
         assert_eq!(
-            decrypt_row(&row.ciphertext, &row.nonce, &key(), "a").unwrap(),
+            decrypt_row(&row.ciphertext, &row.nonce, &key(), "a")
+                .unwrap()
+                .as_slice(),
             b"hunter2 in the clear"
         );
         assert!(decrypt_row(&row.ciphertext, &row.nonce, &key(), "b").is_err());
@@ -218,7 +220,9 @@ mod tests {
             "round trip".len() + 16
         );
         assert_eq!(
-            decrypt_row(&row.ciphertext, &row.nonce, &key(), "a").unwrap(),
+            decrypt_row(&row.ciphertext, &row.nonce, &key(), "a")
+                .unwrap()
+                .as_slice(),
             b"round trip"
         );
     }

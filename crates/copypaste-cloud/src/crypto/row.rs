@@ -37,6 +37,7 @@ use chacha20poly1305::{
     Key, XChaCha20Poly1305, XNonce,
 };
 use rand::{rngs::OsRng, RngCore};
+use zeroize::Zeroizing;
 
 use super::error::CloudCryptoError;
 use super::key::SyncKey;
@@ -125,7 +126,7 @@ pub fn decrypt_row(
     nonce_b64: &str,
     key: &SyncKey,
     item_id: &str,
-) -> Result<Vec<u8>, CloudCryptoError> {
+) -> Result<Zeroizing<Vec<u8>>, CloudCryptoError> {
     let nonce = B64
         .decode(nonce_b64)
         .map_err(|_| CloudCryptoError::Malformed)?;
@@ -152,6 +153,7 @@ pub fn decrypt_row(
                 aad: &aad,
             },
         )
+        .map(Zeroizing::new)
         .map_err(|_| CloudCryptoError::AuthFailed)
 }
 
@@ -180,7 +182,7 @@ mod tests {
             "plaintext is recognisable in the ciphertext"
         );
 
-        assert_eq!(decrypt_row(&ct, &nonce, &k, ITEM).unwrap(), msg);
+        assert_eq!(decrypt_row(&ct, &nonce, &k, ITEM).unwrap().as_slice(), msg);
     }
 
     #[test]
@@ -190,7 +192,9 @@ mod tests {
         let (nonce, ct) = encrypt_row(b"synced", &key(), ITEM).unwrap();
         let other_device = derive_sync_key(PASS, ACCOUNT).unwrap();
         assert_eq!(
-            decrypt_row(&ct, &nonce, &other_device, ITEM).unwrap(),
+            decrypt_row(&ct, &nonce, &other_device, ITEM)
+                .unwrap()
+                .as_slice(),
             b"synced"
         );
     }
@@ -201,14 +205,11 @@ mod tests {
 
         let (nonce, ct) = encrypt_row(b"", &k, ITEM).unwrap();
         assert_eq!(B64.decode(&ct).unwrap().len(), TAG_LEN);
-        assert_eq!(
-            decrypt_row(&ct, &nonce, &k, ITEM).unwrap(),
-            Vec::<u8>::new()
-        );
+        assert_eq!(decrypt_row(&ct, &nonce, &k, ITEM).unwrap().as_slice(), b"");
 
         let big: Vec<u8> = (0..512 * 1024).map(|i| (i % 251) as u8).collect();
         let (nonce, ct) = encrypt_row(&big, &k, ITEM).unwrap();
-        assert_eq!(decrypt_row(&ct, &nonce, &k, ITEM).unwrap(), big);
+        assert_eq!(decrypt_row(&ct, &nonce, &k, ITEM).unwrap().as_slice(), big);
     }
 
     #[test]
@@ -216,7 +217,7 @@ mod tests {
         let k = key();
         for msg in [&[0xff, 0xfe, 0x00, 0x01][..], "🔐 ключ".as_bytes()] {
             let (nonce, ct) = encrypt_row(msg, &k, ITEM).unwrap();
-            assert_eq!(decrypt_row(&ct, &nonce, &k, ITEM).unwrap(), msg);
+            assert_eq!(decrypt_row(&ct, &nonce, &k, ITEM).unwrap().as_slice(), msg);
         }
     }
 

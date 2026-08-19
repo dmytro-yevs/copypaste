@@ -61,7 +61,7 @@ impl CloudCrypto {
         ciphertext_b64: &str,
         nonce_b64: &str,
         item_id: &str,
-    ) -> Result<Vec<u8>, CloudCryptoError> {
+    ) -> Result<zeroize::Zeroizing<Vec<u8>>, CloudCryptoError> {
         decrypt_row(ciphertext_b64, nonce_b64, &self.key, item_id)
     }
 }
@@ -84,13 +84,15 @@ mod tests {
         let (nonce, ct) = crypto.seal(b"through the handle", ITEM).unwrap();
 
         assert_eq!(
-            crypto.open(&ct, &nonce, ITEM).unwrap(),
+            crypto.open(&ct, &nonce, ITEM).unwrap().as_slice(),
             b"through the handle"
         );
         // And the free function opens what the handle sealed, with the key the
         // handle exposes.
         assert_eq!(
-            decrypt_row(&ct, &nonce, crypto.key(), ITEM).unwrap(),
+            decrypt_row(&ct, &nonce, crypto.key(), ITEM)
+                .unwrap()
+                .as_slice(),
             b"through the handle"
         );
     }
