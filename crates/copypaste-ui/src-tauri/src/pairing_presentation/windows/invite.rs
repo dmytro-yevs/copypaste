@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -71,8 +71,9 @@ fn run(
         (110, 34),
         co::DLGID::CANCEL.raw(),
     );
-    let handle = CloseHandle::new(wnd.clone());
-    let programmatic = handle.programmatic_flag();
+    let close_handle = CloseHandle::new(wnd.clone());
+    let programmatic = close_handle.programmatic_flag();
+    let handle = Arc::new(Mutex::new(Some(close_handle)));
     let revealed = Arc::new(AtomicBool::new(false));
     reveal.on().bn_clicked({
         let wnd = wnd.clone();
@@ -116,7 +117,7 @@ fn run(
             }
             wnd.hwnd().SetTimer(TIMER_ID, 1_000, None)?;
             reveal.focus()?;
-            let _ = ready.send(Some(handle));
+            let _ = ready.send(handle.lock().ok().and_then(|mut slot| slot.take()));
             Ok(0)
         }
     });
