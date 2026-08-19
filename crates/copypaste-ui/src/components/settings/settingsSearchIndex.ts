@@ -88,5 +88,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { tab: "about", title: "settings.about.protocol.title", description: "settings.about.protocol.description" },
   { tab: "about", title: "settings.about.items.title", description: "settings.about.items.description" },
   { tab: "about", title: "settings.about.links.title" },
+  { tab: "about", title: "onboarding.settings.title", description: "onboarding.settings.description", keywords: ["setup", "onboarding", "welcome", "first run"] },
   { tab: "about", title: "settings.about.reset.title", description: "settings.about.reset.description", keywords: ["defaults", "restore"] },
 ];
