@@ -1,6 +1,6 @@
 /**
- * Settings on Android: the tab strip, a preference that reaches layout, and a
- * preference that has to survive a reload.
+ * Settings on Android: the compact section index, a preference that reaches
+ * layout, and a preference that has to survive a reload.
  *
  * The persistence half is a genuinely different mechanism here. The browser
  * layer round-trips the daemon's own settings over a socket; Android has no
@@ -8,9 +8,10 @@
  * (`preferences.json`) and the service-shaped ones to the in-process core
  * (ADR-0003). Neither path exists on the other layer.
  *
- * Android also shows a different set of tabs — no Shortcut, plus Background
- * capture — which is why the list is measured from the screen rather than
- * copied from `e2e/tests/settings.e2e.test.ts`.
+ * Below the expanded width boundary Settings is an index + one subpage at a
+ * time (DMY-154 / A11Y-15), not a tab strip — so this suite measures the
+ * ladder, not `[role="tab"]`. Android also shows a different set of sections
+ * — no Shortcut, plus Background capture.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -20,7 +21,6 @@ import { rowBoxes } from "../src/harness/list.js";
 import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import {
-  SEARCH,
   filterHistoryTo,
   gotoView,
   resetHistoryFilters,
@@ -54,13 +54,11 @@ function expectReservedFor(lines: 1 | 2, heights: number[]): boolean {
   return height >= ROW_HEIGHT[lines] && height < ROW_HEIGHT[lines] + TITLE_LINE_PX;
 }
 
-/**
- * The settings tabs only — not the ones a pane brings with it. Diagnostics has
- * its own tab strip, and a document-wide `[role="tab"]` picks up "Overview"
- * the moment that pane is opened, then tries to open it as a settings section.
- */
-const TABLIST = '[role="tablist"]:not([role="tabpanel"] *)';
-const TAB = `${TABLIST} > [role="tab"]`;
+/** The compact Settings index — not Diagnostics' own nested tab strip. */
+const INDEX = 'nav[aria-label="Settings sections"]';
+const INDEX_ITEM = `${INDEX} button[data-settings-index-item]`;
+const SUBPAGE = 'section[aria-labelledby="settings-subpage-title"]';
+const BACK = "All settings";
 
 let app: AndroidApp;
 let seeded: string[] = [];
@@ -80,8 +78,8 @@ beforeAll(async () => {
   await scrollListToTop(app);
   await gotoView(app, "Settings");
   await waitFor(
-    async () => (await tabLabels()).length > 0,
-    "the Settings screen never rendered its tabs",
+    async () => (await sectionLabels()).length > 0,
+    "the Settings screen never rendered its section index",
   );
 }, 300_000);
 
@@ -92,66 +90,76 @@ afterAll(async () => {
   await app?.detach();
 });
 
-async function tabLabels(): Promise<string[]> {
+async function sectionLabels(): Promise<string[]> {
   return app.withPage((page) =>
     page.evaluate(
       (selector: string) =>
         Array.from(document.querySelectorAll(selector), (node) =>
           (node as HTMLElement).textContent!.trim(),
         ),
-      TAB,
+      INDEX_ITEM,
     ),
   );
 }
 
-async function openTab(label: string): Promise<void> {
-  await tapButton(app, label, { within: TABLIST });
+async function ensureIndex(): Promise<void> {
+  const onIndex = await app.withPage((page) =>
+    page.evaluate((selector: string) => document.querySelector(selector) !== null, INDEX),
+  );
+  if (onIndex) return;
+  await tapButton(app, BACK);
+  await waitFor(
+    async () => (await sectionLabels()).length > 0,
+    "the Settings index never came back after All settings",
+  );
+}
+
+async function openSection(label: string): Promise<void> {
+  await ensureIndex();
+  await tapButton(app, label, { within: INDEX });
   await waitFor(
     async () =>
       app.withPage((page) =>
         page.evaluate(
-          (selector: string, name: string) =>
-            Array.from(document.querySelectorAll(selector)).some(
-              (node) =>
-                node.textContent?.trim() === name &&
-                node.getAttribute("aria-selected") === "true",
-            ),
-          TAB,
+          (subpage: string, name: string) => {
+            const title = document.querySelector(`${subpage} #settings-subpage-title`);
+            return title?.textContent?.trim() === name;
+          },
+          SUBPAGE,
           label,
         ),
       ),
-    `the ${label} tab never became selected`,
+    `the ${label} section never opened`,
   );
 }
 
 /**
- * The visible panel, as the engine laid it out.
+ * The open subpage, as the engine laid it out.
  *
- * `:not([hidden])` is load-bearing: a tab that has been opened once stays in
- * the DOM hidden, so the first `[role="tabpanel"]` is whichever pane was
- * visited first rather than the one on screen.
+ * Compact Settings keeps only one section mounted, so there is no hidden
+ * tabpanel sibling to exclude the way the desktop strip does.
  */
 async function panel() {
   return app.withPage((page) =>
-    page.evaluate(() => {
-      const el = document.querySelector('[role="tabpanel"]:not([hidden])') as HTMLElement | null;
+    page.evaluate((selector: string) => {
+      const el = document.querySelector(selector) as HTMLElement | null;
       if (!el) return null;
       const rect = el.getBoundingClientRect();
       return { width: rect.width, height: rect.height, text: el.innerText.trim() };
-    }),
+    }, SUBPAGE),
   );
 }
 
-describe("the tabs", () => {
+describe("the section index", () => {
   test("Android shows its own set, and every one opens onto a pane with a real box", async () => {
-    const labels = await tabLabels();
+    const labels = await sectionLabels();
     // Shortcut is desktop-only; Background capture is Android's.
     expect(labels).toContain("Background capture");
     expect(labels).toContain("Storage");
     expect(labels).not.toContain("Shortcut");
 
     for (const label of labels) {
-      await openTab(label);
+      await openSection(label);
       // Waited for, not sampled: Diagnostics fills in from a command and was
       // measured mid-flight at exactly its heading.
       let pane: Awaited<ReturnType<typeof panel>> = null;
@@ -164,67 +172,62 @@ describe("the tabs", () => {
         20_000,
       );
     }
+    await ensureIndex();
   }, 120_000);
 
   /**
-   * A11Y-15: the row wraps rather than scrolling, and every tab is reachable.
-   *
-   * "Reachable" is asked of the engine's hit test at the tab's own centre, not
-   * of its box. Those disagreed: the trigger's `flex-1` is `flex: 1 1 0%`, a
-   * hypothetical main size of zero always fits, so the line never broke and
-   * seven `nowrap` labels overflowed onto each other. Every box was still
-   * correct and non-overlapping — only `elementFromPoint` knew that a tap on
-   * Service would open Background capture.
+   * A11Y-15: the nine-item strip was replaced by this index because overflowing
+   * labels stole neighbouring taps. Every index row must still own a tap at
+   * its own centre — `elementFromPoint`, not only its box.
    */
-  test("every tab is laid out, unclipped, and answers a tap at its own centre", async () => {
+  test("every section row is laid out, unclipped, and answers a tap at its own centre", async () => {
+    await ensureIndex();
     const strip = await app.withPage((page) =>
       page.evaluate((selector: string) => {
         const list = document.querySelector(
-          '[role="tablist"]:not([role="tabpanel"] *)',
+          'nav[aria-label="Settings sections"]',
         ) as HTMLElement | null;
         if (!list) return null;
         return {
-          wrap: getComputedStyle(list).flexWrap,
-          overflow: list.scrollWidth - list.clientWidth,
           documentOverflow:
             document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          tabs: Array.from(document.querySelectorAll(selector), (node) => {
-            const tab = node as HTMLElement;
-            const rect = tab.getBoundingClientRect();
+          rows: Array.from(document.querySelectorAll(selector), (node) => {
+            const row = node as HTMLElement;
+            const rect = row.getBoundingClientRect();
             const hit = document.elementFromPoint(
               rect.x + rect.width / 2,
               rect.y + rect.height / 2,
             );
             return {
-              text: tab.textContent!.trim(),
+              text: row.textContent!.trim(),
               width: rect.width,
               height: rect.height,
-              clipped: tab.scrollWidth - tab.clientWidth,
-              hit: hit?.closest('[role="tab"]')?.textContent?.trim() ?? null,
+              clipped: row.scrollWidth - row.clientWidth,
+              hit:
+                hit?.closest("[data-settings-index-item]")?.textContent?.trim() ?? null,
             };
           }),
         };
-      }, TAB),
+      }, INDEX_ITEM),
     );
 
     expect(strip).not.toBeNull();
-    expect(strip!.wrap).toBe("wrap");
-    expect(strip!.overflow).toBeLessThanOrEqual(1);
     expect(strip!.documentOverflow).toBeLessThanOrEqual(1);
 
-    for (const tab of strip!.tabs) {
-      expect(tab.width, tab.text).toBeGreaterThan(0);
-      expect(tab.height, tab.text).toBeGreaterThanOrEqual(44);
-      expect(tab.clipped, `${tab.text} does not fit its own box`).toBeLessThanOrEqual(1);
-      expect(tab.hit, `a tap on the middle of ${tab.text} lands elsewhere`).toBe(tab.text);
+    for (const row of strip!.rows) {
+      expect(row.width, row.text).toBeGreaterThan(0);
+      expect(row.height, row.text).toBeGreaterThanOrEqual(44);
+      expect(row.clipped, `${row.text} does not fit its own box`).toBeLessThanOrEqual(1);
+      expect(row.hit, `a tap on the middle of ${row.text} lands elsewhere`).toBe(row.text);
     }
   });
 
   test("names no filesystem path on any pane (INV-12)", async () => {
-    for (const label of await tabLabels()) {
-      await openTab(label);
+    for (const label of await sectionLabels()) {
+      await openSection(label);
       expectNoFilesystemPath(await accessibleSurface(app));
     }
+    await ensureIndex();
   }, 120_000);
 });
 
@@ -236,7 +239,7 @@ describe("a preference that changes layout", () => {
     lines: 1 | 2,
     rendered: string,
   ): Promise<void> {
-    await openTab("List");
+    await openSection("List");
     await app.withPage(async (page) => {
       await page.click('[aria-label="Preview lines"]');
       await page.keyboard.press(key);
@@ -285,7 +288,7 @@ describe("appearance", () => {
    * the reloaded document paints.
    */
   test("survives a reload of the WebView", async () => {
-    await openTab("Appearance");
+    await openSection("Appearance");
     await tapButton(app, "Teal");
     await waitFor(
       async () =>
@@ -312,7 +315,7 @@ describe("appearance", () => {
     ).toBe("teal");
 
     await gotoView(app, "Settings");
-    await openTab("Appearance");
+    await openSection("Appearance");
     const pressed = await app.withPage((page) =>
       page.evaluate(
         () => document.querySelector('[aria-label="Teal"]')?.getAttribute("aria-pressed") ?? null,
@@ -328,7 +331,7 @@ describe("appearance", () => {
 
 describe("the service-shaped settings", () => {
   test("Background capture reports its state in words a user can act on", async () => {
-    await openTab("Background capture");
+    await openSection("Background capture");
     const text = await visibleText(app);
     expect(text).toContain("Background capture");
     expectNoFilesystemPath(await accessibleSurface(app));
