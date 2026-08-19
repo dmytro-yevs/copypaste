@@ -277,7 +277,7 @@ describe("writing one", () => {
 });
 
 describe("payload-limit validation", () => {
-  it("offers the exact 64 KiB, 1 MiB, 100 MiB, and 5000 ms boundaries", async () => {
+  it("offers the exact 64 KiB, 1 MiB, 4 MiB, and 5000 ms boundaries", async () => {
     withUser(<ServiceTab />);
     const values = async (name: string) =>
       [...((await screen.findByRole("combobox", { name })) as HTMLSelectElement).options].map(
@@ -287,19 +287,19 @@ describe("payload-limit validation", () => {
     expect(await values("Check the clipboard every")).toContain("5000");
     expect(await values("Ignore text larger than")).toContain(String(64 * 1_024));
     expect(await values("Ignore images larger than")).toContain(String(1_048_576));
-    expect(await values("Ignore files larger than")).toContain(String(100 * 1_048_576));
+    expect(await values("Ignore files larger than")).toContain(String(4 * 1_048_576));
     expect(await values("Decoded image memory limit")).toContain("1");
   });
 
   it("announces an out-of-range service value accessibly", async () => {
-    getConfig.mockResolvedValue(applied({ max_file_size_bytes: 101 * 1_048_576 }));
+    getConfig.mockResolvedValue(applied({ max_file_size_bytes: 5 * 1_048_576 }));
     withUser(<ServiceTab />);
     const file = await screen.findByRole("combobox", {
       name: "Ignore files larger than",
     });
     expect(file.getAttribute("aria-invalid")).toBe("true");
     const error = await screen.findByRole("alert");
-    expect(error.textContent).toContain("1 MB through 100 MB");
+    expect(error.textContent).toContain("1 MB through 4 MB");
     expect(file.getAttribute("aria-errormessage")).toBe(error.id);
   });
 });
