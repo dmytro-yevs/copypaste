@@ -107,6 +107,11 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./gradlew
+          # tauri-build writes these with cargo-registry paths. Unit tests do
+          # not load native plugins, so empty stubs are enough to evaluate
+          # settings.gradle / app/build.gradle.kts.
+          : > tauri.settings.gradle
+          : > app/tauri.build.gradle.kts
           ./gradlew --no-daemon :app:testArm64DebugUnitTest -PskipRust=true
 
 
@@ -466,6 +471,8 @@ jobs:
     # A macOS runner bills at ten times a Linux one, and the platform steps
     # start processes.
     timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: "1.96"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -495,8 +502,8 @@ jobs:
         if: success() || failure()
         run: |
           set -euo pipefail
-          bin="$(find target -type f -name copypaste-ui -perm -111 | head -n 1)"
-          [[ -n "$bin" ]] || { echo "::error::no copypaste-ui binary after cargo test"; exit 1; }
+          bin="$(find target -type f -name copypaste-ui -perm -111 -print -quit)"
+          [[ -n "$bin" ]] || { echo "::error::no copypaste-ui binary after the workspace tests"; exit 1; }
           otool -L "$bin" | grep -q '/System/Library/Frameworks/WebKit.framework' \
             || { echo "::error::$bin does not link WebKit.framework"; otool -L "$bin"; exit 1; }
 
