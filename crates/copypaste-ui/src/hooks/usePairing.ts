@@ -1,12 +1,16 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { STATUS_POLL_MS } from "@/lib/layout";
+import { useUi } from "@/store/ui";
+
 import { DISCOVERED_KEY, PEERS_KEY } from "@/hooks/useDevices";
 import {
   cancelPairing,
   confirmPairing,
   createPairingInvite,
   getPairingProgress,
+  hasBridge,
   type PairingCeremony,
   type PairingPresentationState,
   type PairingState,
@@ -185,9 +189,7 @@ export function usePairing() {
       void queryClient.cancelQueries({
         queryKey: [...PAIRING_KEY, sessionId],
       });
-      if (isPairingActive(ceremonyRef.current?.state)) {
-        void cancelPairing().catch(() => undefined);
-      }
+      void cancelPairing().catch(() => undefined);
     };
   }, [queryClient, sessionId]);
 
@@ -222,4 +224,29 @@ export function usePairing() {
     run,
     retry,
   };
+}
+
+const INBOUND_PAIRING_KEY = ["pairing", "inbound"] as const;
+
+export function inboundPairingNeedsDevices(state: PairingState): boolean {
+  return state === "handshaking" || state === "awaiting_confirmation";
+}
+
+export function useInboundPairingNav() {
+  const view = useUi((state) => state.view);
+  const setView = useUi((state) => state.setView);
+  const bridge = hasBridge();
+  const progress = useQuery({
+    queryKey: INBOUND_PAIRING_KEY,
+    queryFn: getPairingProgress,
+    enabled: bridge && view !== "devices",
+    retry: false,
+    refetchInterval: STATUS_POLL_MS,
+  });
+
+  useEffect(() => {
+    const state = progress.data?.state;
+    if (state === undefined || view === "devices") return;
+    if (inboundPairingNeedsDevices(state)) setView("devices");
+  }, [progress.data?.state, setView, view]);
 }

@@ -19,26 +19,35 @@ pub(super) struct WindowsPairingUi {
     encode_payload: PayloadEncoder,
     decode_payload: entry::PayloadDecoder,
     affinity: Affinity,
+    abort: NativeAbort,
 }
 
 impl WindowsPairingUi {
     pub(super) fn new(
         encode_payload: PayloadEncoder,
         decode_payload: entry::PayloadDecoder,
+        abort: NativeAbort,
     ) -> Self {
-        Self::with_affinity(encode_payload, decode_payload, common::system_affinity)
+        Self::with_affinity(
+            encode_payload,
+            decode_payload,
+            common::system_affinity,
+            abort,
+        )
     }
 
     fn with_affinity(
         encode_payload: PayloadEncoder,
         decode_payload: entry::PayloadDecoder,
         affinity: Affinity,
+        abort: NativeAbort,
     ) -> Self {
         Self {
             active: Mutex::new(None),
             encode_payload,
             decode_payload,
             affinity,
+            abort,
         }
     }
 
@@ -73,16 +82,14 @@ impl NativePairingUi for WindowsPairingUi {
         let Some(payload) = (self.encode_payload)(invite) else {
             return PairingPresentationState::Unavailable;
         };
-        let address = invite.listen_addr.clone().unwrap_or_default();
-        if address.is_empty() {
+        if invite.listen_addr.as_deref().unwrap_or_default().is_empty() {
             return PairingPresentationState::Unavailable;
         }
         let window = invite::spawn(
             payload,
-            Zeroizing::new(invite.code.clone()),
-            Zeroizing::new(address),
             invite.expires_in_secs,
             self.affinity,
+            self.abort.clone(),
         );
         let state = if window.is_some() {
             PairingPresentationState::Presented
@@ -103,7 +110,7 @@ impl NativePairingUi for WindowsPairingUi {
             return PairingPresentationState::Presented;
         }
         self.close_active();
-        let window = status::spawn(progress);
+        let window = status::spawn(progress, self.abort.clone());
         let state = if window.is_some() {
             PairingPresentationState::Presented
         } else {
@@ -232,7 +239,12 @@ mod refusal_tests {
         ALIVE_WHEN_ASKED.store(false, Ordering::Release);
         VISIBLE_WHEN_ASKED.store(false, Ordering::Release);
         DECODES.store(0, Ordering::Release);
-        WindowsPairingUi::with_affinity(codec::encode_native_invite, counting_decoder, affinity)
+        WindowsPairingUi::with_affinity(
+            codec::encode_native_invite,
+            counting_decoder,
+            affinity,
+            std::sync::Arc::new(|| {}),
+        )
     }
 
     /// The guard runs from `WM_CREATE`, so the window exists but has not been

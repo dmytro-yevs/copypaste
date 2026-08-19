@@ -9,6 +9,7 @@ use winsafe::{co, prelude::*, HBITMAP, POINT, SIZE};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::common::{self, CloseHandle};
+use crate::pairing_presentation::NativeAbort;
 
 const QR_SIZE: u32 = 240;
 const TIMER_ID: usize = 1;
@@ -20,10 +21,9 @@ struct NativeQr {
 
 pub(super) fn spawn(
     payload: Zeroizing<String>,
-    code: Zeroizing<String>,
-    address: Zeroizing<String>,
     expires_in_secs: u64,
     affinity: common::Affinity,
+    abort: NativeAbort,
 ) -> Option<CloseHandle> {
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
@@ -33,7 +33,7 @@ pub(super) fn spawn(
                 let _ = sender.send(None);
                 return;
             };
-            let _ = run(payload, code, address, expires_in_secs, sender, affinity);
+            let _ = run(payload, expires_in_secs, sender, affinity, abort);
         })
         .ok()?;
     receiver.recv_timeout(Duration::from_secs(5)).ok().flatten()
@@ -41,49 +41,38 @@ pub(super) fn spawn(
 
 fn run(
     payload: Zeroizing<String>,
-    code: Zeroizing<String>,
-    address: Zeroizing<String>,
     expires_in_secs: u64,
     ready: mpsc::SyncSender<Option<CloseHandle>>,
     affinity: common::Affinity,
+    abort: NativeAbort,
 ) -> winsafe::AnyResult<i32> {
     let qr_bitmap = qr_bitmap(payload.as_bytes()).ok_or("QR generation failed")?;
     let qr_size = qr_bitmap.size;
-    let wnd = common::window("Pair a new device", (620, 570));
+    let wnd = common::window("Pair a new device", (620, 520));
     let _heading = common::label(&wnd, "Pair a new device", (24, 18), (560, 32));
     let _instructions = common::label(
         &wnd,
-        "Scan this QR code from CopyPaste on the other device, or enter the invite there.",
+        "Scan this QR code from CopyPaste on the other device.",
         (24, 52),
         (560, 48),
     );
     let qr_description = common::label(&wnd, "Pairing QR code is hidden", (24, 104), (150, 48));
     let reveal = common::button(&wnd, "&Reveal pairing QR code", (190, 200), (240, 46), 1001);
-    let code_label = common::label(
-        &wnd,
-        &format!("Pairing code: {}", code.as_str()),
-        (24, 366),
-        (560, 44),
-    );
-    let address_label = common::label(
-        &wnd,
-        &format!("Device address: {}", address.as_str()),
-        (24, 410),
-        (560, 34),
-    );
     let expires = common::label(
         &wnd,
         &format!("Expires in {expires_in_secs} seconds"),
-        (24, 448),
+        (24, 380),
         (350, 32),
     );
     let close = common::button(
         &wnd,
         "&Close",
-        (474, 492),
+        (474, 424),
         (110, 34),
         co::DLGID::CANCEL.raw(),
     );
+    let handle = CloseHandle::new(wnd.clone());
+    let programmatic = handle.programmatic_flag();
     let revealed = Arc::new(AtomicBool::new(false));
     reveal.on().bn_clicked({
         let wnd = wnd.clone();
@@ -113,14 +102,11 @@ fn run(
         let reveal = reveal.clone();
         let ready = ready.clone();
         let qr_description = qr_description.clone();
-        let code_label = code_label.clone();
-        let address_label = address_label.clone();
+        let programmatic = programmatic.clone();
+        let handle = handle.clone();
         move |_| {
             if !common::protect_from_capture(wnd.hwnd(), affinity) {
-                // The QR is painted only once revealed, so clearing these two
-                // is what leaves nothing of the invite to capture.
-                code_label.hwnd().SetWindowText("")?;
-                address_label.hwnd().SetWindowText("")?;
+                programmatic.store(true, Ordering::Release);
                 qr_description
                     .hwnd()
                     .SetWindowText("Pairing cannot be shown on this display")?;
@@ -130,7 +116,7 @@ fn run(
             }
             wnd.hwnd().SetTimer(TIMER_ID, 1_000, None)?;
             reveal.focus()?;
-            let _ = ready.send(Some(CloseHandle::new(wnd.clone())));
+            let _ = ready.send(Some(handle));
             Ok(0)
         }
     });
@@ -139,8 +125,6 @@ fn run(
         let revealed = revealed.clone();
         let qr_description = qr_description.clone();
         let reveal = reveal.clone();
-        let code_label = code_label.clone();
-        let address_label = address_label.clone();
         let expires = expires.clone();
         let close = close.clone();
         move || {
@@ -152,8 +136,6 @@ fn run(
                 qr_description
                     .hwnd()
                     .SetWindowText("Pairing QR code expired")?;
-                code_label.hwnd().SetWindowText("")?;
-                address_label.hwnd().SetWindowText("")?;
                 expires.hwnd().SetWindowText("Pairing invite expired.")?;
                 wnd.hwnd().InvalidateRect(None, true)?;
                 close.focus()?;
@@ -184,7 +166,9 @@ fn run(
             Ok(())
         }
     });
-    wnd.run_main(None)
+    let result = wnd.run_main(None);
+    common::abort_if_user_dismissed(&programmatic, &abort);
+    result
 }
 
 fn qr_bitmap(payload: &[u8]) -> Option<NativeQr> {
@@ -229,6 +213,21 @@ mod tests {
     }
 
     #[test]
+    fn invite_never_shows_code_or_listen_addr_as_window_text() {
+        let source = include_str!("invite.rs")
+            .split_once("#[cfg(test)]")
+            .unwrap()
+            .0;
+        for forbidden in ["Pairing code:", "Device address:", "format!(\"Pairing code"] {
+            assert!(
+                !source.contains(forbidden),
+                "invite credential text must stay out of the window: {forbidden}"
+            );
+        }
+        assert!(source.contains("abort_if_user_dismissed"));
+    }
+
+    #[test]
     fn maintained_encoder_builds_a_native_bitmap() {
         let bitmap = qr_bitmap(br#"{"version":1,"code":"ABCD-EFGH","listen_addr":"host:1"}"#)
             .expect("valid invite renders");
@@ -247,10 +246,9 @@ mod tests {
             Zeroizing::new(
                 r#"{"version":1,"code":"ABCD-EFGH","listen_addr":"192.0.2.1:47654"}"#.into(),
             ),
-            Zeroizing::new("ABCD-EFGH".into()),
-            Zeroizing::new("192.0.2.1:47654".into()),
             120,
             common::system_affinity,
+            std::sync::Arc::new(|| {}),
         )
         .expect("the native invite window opens");
         close.close();
