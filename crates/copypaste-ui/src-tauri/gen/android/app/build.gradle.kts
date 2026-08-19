@@ -106,6 +106,13 @@ dependencies {
 
 apply(from = "tauri.build.gradle.kts")
 
+if (findProperty("skipRust") == "true") {
+    android.sourceSets.getByName("main") {
+        java.srcDir("src/skipRust/java")
+        java.exclude("com/copypaste/app/generated/**")
+    }
+}
+
 // The Android CI entry point assembles the debug APK. Keep the Kotlin fixture
 // guard on that maintained surface instead of relying on a manual Gradle call.
 tasks.matching { it.name.startsWith("assemble") && it.name.endsWith("Debug") }
