@@ -181,6 +181,7 @@ fn apply_page(
 /// Decide the whole page against `local`, threading each id's own decisions
 /// forward. `slots[i]` is `None` for a version that lost outright, otherwise
 /// its index in the returned writes.
+#[allow(clippy::type_complexity)]
 fn prepare(
     keyring: &Keyring,
     detector: &Detector,
@@ -257,6 +258,7 @@ fn prepare(
 /// might well have been admitted. Only the versions that came out `false` are
 /// redone: a `true` is a row that actually landed, and re-offering it would
 /// have it decline against itself.
+#[allow(clippy::too_many_arguments)]
 fn redo_after_refusals(
     store: &Store,
     keyring: &Keyring,
