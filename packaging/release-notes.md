@@ -2,11 +2,20 @@
 
 - Turns sensitive auto-wipe on by default (30s TTL) with a 0.85 wipe floor so
   generic/KV noise is withheld rather than deleted.
-- Patches glib 0.18.5 in-tree for RUSTSEC-2024-0429 (VariantStrIter).
 - Zeroizes STREAM, binary-open and sync plaintext buffers.
+- Patches glib 0.18.5 in-tree for RUSTSEC-2024-0429 (VariantStrIter) and keeps
+  Dependabot on for remaining moderate advisories.
+- Adds a first-run setup wizard: permissions tap-to-prompt, pairing, hosted
+  Supabase as the easy cloud path, and Android-only capture. Skip never blocks
+  later setup.
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
-  OEM-sticky capture restarts. Windows/Android pairing is not manually verified
-  on a Mac.
+  OEM-sticky capture restarts.
+
+## Not verified on this host
+
+macOS TCC permission prompts, the Android Quick Settings tile add flow, and
+Windows pairing were not exercised on the machine that cut this tag. Treat
+those paths as implemented and CI-covered, not as a live walkthrough.
 
 ## Install
 
