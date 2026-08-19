@@ -15,6 +15,7 @@ import {
 import { startDaemon, type Daemon } from "./daemon.js";
 import { sleep, track, type Child } from "./process.js";
 import { assertReallyRunning, type Browser } from "./webview-guard.js";
+import { dismissFirstRun } from "./ui.js";
 
 export interface App {
   readonly browser: Browser;
@@ -168,6 +169,7 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
 
   try {
     await assertReallyRunning(browser, driver);
+    await dismissFirstRun(browser);
   } catch (error) {
     await app.stop();
     throw error;
