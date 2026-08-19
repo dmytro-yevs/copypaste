@@ -7,14 +7,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
-  private var notificationPermissionResult: ((Boolean) -> Unit)? = null
+  private val notificationWaiters = ArrayList<(Boolean) -> Unit>()
 
   private val notificationPermission = registerForActivityResult(
     ActivityResultContracts.RequestPermission(),
   ) { granted ->
-    notificationPermissionResult
-      ?.also { notificationPermissionResult = null }
-      ?.invoke(granted)
+    val waiters = ArrayList(notificationWaiters)
+    notificationWaiters.clear()
+    waiters.forEach { it(granted) }
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,7 +43,13 @@ class MainActivity : TauriActivity() {
   }
 
   fun requestNotificationPermission(onResult: (Boolean) -> Unit) {
-    notificationPermissionResult = onResult
-    notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    if (CaptureNotifications.isPermissionGranted(this)) {
+      onResult(true)
+      return
+    }
+    notificationWaiters.add(onResult)
+    if (notificationWaiters.size == 1) {
+      notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
   }
 }

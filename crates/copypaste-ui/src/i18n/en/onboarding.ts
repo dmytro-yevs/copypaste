@@ -18,9 +18,17 @@ export const onboarding = {
   },
 
   permissions: {
-    title: "Allow clipboard access",
-    body: "CopyPaste needs permission to save what you copy. The next screen is the system prompt. You can skip this and turn it on later.",
-    action: "Continue",
+    title: "Know when a copy is saved",
+    body: "CopyPaste can ping you when a copy is saved in the background. Clipboard history does not need this permission, and you can skip it.",
+    bodyWindows:
+      "Windows does not show a permission prompt for notices. Turn them on here, or skip — history still works.",
+    bodyDenied:
+      "Notifications were not allowed. Try again, or open Settings. CopyPaste still saves your history either way.",
+    action: "Allow notifications",
+    actionEnable: "Turn on save notices",
+    actionRetry: "Try again",
+    actionContinue: "Continue",
+    openSettings: "Open Settings",
   },
 
   pairing: {
@@ -37,8 +45,12 @@ export const onboarding = {
 
   capture: {
     title: "Capture from other apps",
-    body: "Optional. Needs a one-time setup and a re-tap after each restart. Items synced from your other devices already work.",
+    body: "CopyPaste already saves what you copy in this app, share to it, or capture with a Quick Settings tile. Background capture from every app is optional and can wait.",
     action: "Continue",
+    saveNow: "Save the clipboard now",
+    addTile: "Add Quick Settings tile",
+    tileAdded: "Quick Settings tile added",
+    background: "Turn on background capture",
   },
 
   settings: {

@@ -107,6 +107,14 @@ objc2.workspace = true
 # it is already present through Tauri and avoids raw dispatch FFI.
 dispatch2 = "0.3.1"
 objc2-foundation = { workspace = true, features = ["NSThread"] }
+# tauri-plugin-notification reports Granted on desktop without asking TCC.
+# The maintained objc2 binding is the real UNUserNotificationCenter prompt.
+objc2-user-notifications = { version = "0.2.2", features = [
+    "UNUserNotificationCenter",
+    "UNNotificationSettings",
+    "block2",
+] }
+block2 = "=0.5.1"
 # Maintained encoder/rendering crates own the QR matrix and PNG; pairing code
 # must not grow another handwritten QR implementation.
 qrcode = { version = "0.14.1", default-features = false, features = ["image"] }

@@ -28,6 +28,16 @@ export type CaptureSnapshot = { rung: CaptureRung, health: CaptureHealth, shizuk
 
 export type CapturedPayload = { id: string, source: CaptureSource, isSensitive: boolean, };
 
+export type PermissionHost = "macos" | "windows" | "android" | "linux";
+
+export type OnboardingPermissionId = "notifications" | "tile";
+
+export type OnboardingPermissionStatus = "prompt" | "granted" | "denied" | "not_required" | "unavailable";
+
+export type OnboardingPermissionItem = { id: OnboardingPermissionId, status: OnboardingPermissionStatus, required: boolean, };
+
+export type OnboardingPermissions = { platform: PermissionHost, notifications: OnboardingPermissionItem, tile: OnboardingPermissionItem, clipboardStatus: OnboardingPermissionStatus, };
+
 export type DiagnosticCounters = { rejected_too_large: number, lost_intermediates: number, sensitive_swept: number, index_purged: number, uptime_secs: number, };
 
 export type DiscoveredDevice = { discovery_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, };

@@ -30,6 +30,7 @@ mod document;
 pub mod history;
 pub mod pairing;
 pub mod peers;
+pub mod permissions;
 pub mod protection;
 pub mod service;
 pub mod shortcut;
