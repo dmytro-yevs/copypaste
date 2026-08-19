@@ -21,7 +21,7 @@ pub(crate) fn plugin() -> TauriPlugin<Wry> {
     Builder::new("android-pairing-presentation")
         .setup(|app, api| {
             let handle = api.register_android_plugin(PLUGIN_PACKAGE, PLUGIN_CLASS)?;
-            let abort = pairing_abort(app.handle().clone());
+            let abort = pairing_abort(app.clone());
             app.manage(PairingPresenter::new(AndroidPairingUi::new(handle, abort)));
             Ok(())
         })
