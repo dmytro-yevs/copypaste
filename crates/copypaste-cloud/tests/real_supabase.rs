@@ -111,7 +111,8 @@ async fn real_supabase_contract() {
     assert_eq!(
         crypto
             .open(&row.ciphertext, &row.nonce, &row.item_id)
-            .expect("device B decrypts device A's row"),
+            .expect("device B decrypts device A's row")
+            .as_slice(),
         b"encrypted convergence"
     );
 
