@@ -67,57 +67,84 @@ function Get-UiaSummary([Diagnostics.Process]$App) {
     return "UIA names: $($names -join ' | ') [$(Get-UiaSnapshotReport $snapshot)]"
 }
 
+function Get-UiaNamedElement([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
+    $App.Refresh()
+    if ($App.HasExited) { return $null }
+    $root = Get-AppAutomationRoot $App
+    if ($null -eq $root) { return $null }
+    $condition = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::NameProperty,
+        $Name
+    )
+    try {
+        $candidates = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+    } catch {
+        return $null
+    }
+    foreach ($match in $candidates) {
+        try {
+            $bounds = $match.Current.BoundingRectangle
+            $canAct = -not $Actionable -or $match.Current.IsKeyboardFocusable -or @(
+                $match.GetSupportedPatterns() | Where-Object {
+                    $_ -eq [Windows.Automation.InvokePattern]::Pattern -or
+                    $_ -eq [Windows.Automation.SelectionItemPattern]::Pattern
+                }
+            ).Count -gt 0
+            if ($canAct -and $match.Current.IsEnabled -and -not $match.Current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
+                return $match
+            }
+        } catch {
+            continue
+        }
+    }
+    return $null
+}
+
 function Wait-UiaName([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
     return Wait-Readiness "UI state '$Name'" {
         $App.Refresh()
         if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
-        $root = Get-AppAutomationRoot $App
-        if ($null -eq $root) { return New-ProbeNotReady "the app has published no native window handle" }
-        $condition = [Windows.Automation.PropertyCondition]::new(
-            [Windows.Automation.AutomationElement]::NameProperty,
-            $Name
-        )
-        try {
-            $candidates = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
-        } catch {
-            return New-ProbeTransient "the accessibility tree could not be searched: $($_.Exception.Message)"
-        }
-        $unread = $null
-        foreach ($match in $candidates) {
-            try {
-                $bounds = $match.Current.BoundingRectangle
-                $canAct = -not $Actionable -or $match.Current.IsKeyboardFocusable -or @(
-                    $match.GetSupportedPatterns() | Where-Object {
-                        $_ -eq [Windows.Automation.InvokePattern]::Pattern -or
-                        $_ -eq [Windows.Automation.SelectionItemPattern]::Pattern
-                    }
-                ).Count -gt 0
-                if ($canAct -and $match.Current.IsEnabled -and -not $match.Current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
-                    return New-ProbeReady $match
-                }
-            } catch {
-                $unread = $_.Exception.Message
-            }
-        }
-        if ($unread) { return New-ProbeTransient "an element named '$Name' could not be read: $unread" }
+        $match = Get-UiaNamedElement $App $Name $Actionable
+        if ($null -ne $match) { return New-ProbeReady $match }
+        if ($null -eq (Get-AppAutomationRoot $App)) { return New-ProbeNotReady "the app has published no native window handle" }
         return New-ProbeNotReady "no enabled, on-screen element is named '$Name'"
     } { Get-UiaSummary $App } 15000
 }
 
-function Invoke-UiaNamedControl([Diagnostics.Process]$App, [string]$Name, [string]$ExpectedName) {
-    $element = Wait-UiaName $App $Name $true
+function Invoke-UiaElement([Windows.Automation.AutomationElement]$Element, [string]$Name) {
     $pattern = $null
-    if ($element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+    if ($Element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
         ([Windows.Automation.InvokePattern]$pattern).Invoke()
-    } elseif ($element.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) {
+    } elseif ($Element.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) {
         ([Windows.Automation.SelectionItemPattern]$pattern).Select()
-    } elseif ($element.Current.IsKeyboardFocusable) {
-        $element.SetFocus()
+    } elseif ($Element.Current.IsKeyboardFocusable) {
+        $Element.SetFocus()
         [Windows.Forms.SendKeys]::SendWait("{ENTER}")
     } else {
-        $supported = @($element.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ", "
+        $supported = @($Element.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ", "
         throw "UI control '$Name' has no actionable accessibility pattern; supported: $supported"
     }
+}
+
+function Complete-WindowsFirstRun([Diagnostics.Process]$App) {
+    Wait-Readiness "first-run skipped or product shell" {
+        $App.Refresh()
+        if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
+        if ($null -ne (Get-UiaNamedElement $App "Settings" $true)) {
+            return New-ProbeReady $true
+        }
+        $skip = Get-UiaNamedElement $App "Skip setup" $true
+        if ($null -ne $skip) {
+            Invoke-UiaElement $skip "Skip setup"
+            return New-ProbeNotReady "welcome dismissed"
+        }
+        return New-ProbeNotReady "neither Skip setup nor Settings is on screen"
+    } { Get-UiaSummary $App } 20000 | Out-Null
+}
+
+function Invoke-UiaNamedControl([Diagnostics.Process]$App, [string]$Name, [string]$ExpectedName) {
+    $element = Wait-UiaName $App $Name $true
+    Invoke-UiaElement $element $Name
     Wait-UiaName $App $ExpectedName | Out-Null
 }
 

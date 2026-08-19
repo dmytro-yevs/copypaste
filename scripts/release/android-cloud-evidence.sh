@@ -51,7 +51,7 @@ install_and_open() { # <apk>
     }
     wake_screen
     sh_ am start -W -n "$MAIN" >/dev/null
-    wait_selector "Settings" "$OUT/launch.xml" 90 || {
+    reach_settings_tab "$OUT/launch.xml" 90 || {
         bad "the launched app exposes its Settings tab" \
             "uiautomator did not expose Settings within 90s"
         return 1
