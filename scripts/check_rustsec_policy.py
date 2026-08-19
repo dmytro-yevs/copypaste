@@ -140,6 +140,9 @@ def glib_vendor_errors(root):
             "vendor/glib lost the VariantStrIter mutability patch (RUSTSEC-2024-0429)"
         ]
     return []
+
+
+def target_errors(entries):
     errors = []
     cargo = os.environ.get("CARGO", "cargo")
     for entry in entries:
