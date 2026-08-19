@@ -49,7 +49,7 @@ describe("first-run onboarding", () => {
     const { user } = withUser(<App />);
 
     await user.click(screen.getByRole("button", { name: "Get started" }));
-    expect(screen.getByRole("heading", { name: "Allow clipboard access" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Know when a copy is saved" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByRole("heading", { name: "Add another device" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Continue" }));

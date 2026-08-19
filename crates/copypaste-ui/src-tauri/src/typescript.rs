@@ -23,6 +23,9 @@ use crate::model::{
 };
 use crate::pairing_presentation::PairingPresentationState;
 use crate::service::ServiceState;
+use crate::shell::permissions::{
+    OnboardingPermissions, PermissionHost, PermissionId, PermissionItem, PermissionStatus,
+};
 use crate::updater::{UpdateProgress, UpdateStatus};
 
 /// Export every Rust-owned DTO into one checked-in frontend module.
@@ -48,6 +51,11 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<ShizukuProbe>(&config, &mut output);
     declaration::<CaptureSnapshot>(&config, &mut output);
     declaration::<CapturedPayload>(&config, &mut output);
+    declaration::<PermissionHost>(&config, &mut output);
+    declaration::<PermissionId>(&config, &mut output);
+    declaration::<PermissionStatus>(&config, &mut output);
+    declaration::<PermissionItem>(&config, &mut output);
+    declaration::<OnboardingPermissions>(&config, &mut output);
     declaration::<DiagnosticCounters>(&config, &mut output);
     declaration::<DiscoveredDevice>(&config, &mut output);
     declaration::<ErrorCode>(&config, &mut output);
@@ -127,6 +135,8 @@ mod tests {
             "export type CapturedPayload = { id: string, source: CaptureSource, isSensitive: boolean, };"
         ));
         assert!(!generated.contains("export type Clip ="));
+        assert!(generated.contains("export type PermissionHost ="));
+        assert!(generated.contains("export type OnboardingPermissions ="));
         assert!(!generated.contains("export type ReadOutcome ="));
 
         let snapshot = CaptureSnapshot {

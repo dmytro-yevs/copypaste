@@ -6,6 +6,7 @@ pub mod autostart;
 #[cfg(not(target_os = "android"))]
 pub mod hotkey;
 pub mod notify;
+pub mod permissions;
 pub mod protection;
 pub mod shortcut;
 #[cfg(not(target_os = "android"))]
