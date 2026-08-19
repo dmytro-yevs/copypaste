@@ -232,18 +232,18 @@ mod tests {
                 &state.meta,
                 &ConfigPatch {
                     poll_interval_ms: Some(250),
-                    max_text_size_bytes: Some(12 * 1024 * 1024),
-                    max_image_size_bytes: Some(72 * 1024 * 1024),
-                    max_file_size_bytes: Some(90 * 1024 * 1024),
+                    max_text_size_bytes: Some(256 * 1024),
+                    max_image_size_bytes: Some(2 * 1024 * 1024),
+                    max_file_size_bytes: Some(3 * 1024 * 1024),
                     max_decoded_image_mb: Some(75),
                     ..Default::default()
                 },
             )
             .expect("a valid patch");
         assert_eq!(applied.poll_interval_ms, 250);
-        assert_eq!(applied.max_text_size_bytes, 12 * 1024 * 1024);
-        assert_eq!(applied.max_image_size_bytes, 72 * 1024 * 1024);
-        assert_eq!(applied.max_file_size_bytes, 90 * 1024 * 1024);
+        assert_eq!(applied.max_text_size_bytes, 256 * 1024);
+        assert_eq!(applied.max_image_size_bytes, 2 * 1024 * 1024);
+        assert_eq!(applied.max_file_size_bytes, 3 * 1024 * 1024);
         assert_eq!(applied.max_decoded_image_mb, 75);
         assert_eq!(state.settings.get().poll_interval_ms, 250);
 
@@ -252,9 +252,9 @@ mod tests {
             crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
         let loaded = restarted.settings.get();
         assert_eq!(loaded.poll_interval_ms, 250);
-        assert_eq!(loaded.max_text_size_bytes, 12 * 1024 * 1024);
-        assert_eq!(loaded.max_image_size_bytes, 72 * 1024 * 1024);
-        assert_eq!(loaded.max_file_size_bytes, 90 * 1024 * 1024);
+        assert_eq!(loaded.max_text_size_bytes, 256 * 1024);
+        assert_eq!(loaded.max_image_size_bytes, 2 * 1024 * 1024);
+        assert_eq!(loaded.max_file_size_bytes, 3 * 1024 * 1024);
         assert_eq!(loaded.max_decoded_image_mb, 75);
         assert!(loaded.health().is_none());
     }
