@@ -50,8 +50,7 @@ use copypaste_ipc::{
     ImagePreview, ImportData, Item, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
 use messages::{
-    BACKEND_NAME, MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_NO_PEER,
-    MSG_TOO_LARGE,
+    MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_NO_PEER, MSG_TOO_LARGE,
 };
 pub use open::{Clipboard, EmbeddedBackend};
 use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
@@ -538,7 +537,7 @@ mod tests {
             !status.capture_running,
             "there is no capture loop in this build"
         );
-        assert_eq!(status.clipboard_backend, BACKEND_NAME);
+        assert_eq!(status.clipboard_backend, super::messages::BACKEND_NAME);
     }
 
     #[tokio::test]

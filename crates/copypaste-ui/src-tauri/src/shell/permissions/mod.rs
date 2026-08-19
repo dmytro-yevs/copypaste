@@ -75,11 +75,11 @@ fn notification_status<R: Runtime>(app: &AppHandle<R>) -> Result<PermissionStatu
     #[cfg(target_os = "macos")]
     {
         let _ = app;
-        return Ok(policy::notification_status(macos::authorization()?));
+        Ok(policy::notification_status(macos::authorization()?))
     }
     #[cfg(target_os = "android")]
     {
-        return Ok(android::notification_status(app)?);
+        Ok(android::notification_status(app)?)
     }
     #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
@@ -91,7 +91,7 @@ fn notification_status<R: Runtime>(app: &AppHandle<R>) -> Result<PermissionStatu
 fn tile_status<R: Runtime>(app: &AppHandle<R>) -> Result<PermissionStatus, BackendError> {
     #[cfg(target_os = "android")]
     {
-        return android::tile_status(app);
+        android::tile_status(app)
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -104,11 +104,11 @@ fn request_notifications<R: Runtime>(app: &AppHandle<R>) -> Result<(), BackendEr
     #[cfg(target_os = "macos")]
     {
         let _ = app;
-        return macos::request();
+        macos::request()
     }
     #[cfg(target_os = "android")]
     {
-        return android::request_notifications(app);
+        android::request_notifications(app)
     }
     #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
@@ -120,7 +120,7 @@ fn request_notifications<R: Runtime>(app: &AppHandle<R>) -> Result<(), BackendEr
 fn request_tile<R: Runtime>(app: &AppHandle<R>) -> Result<(), BackendError> {
     #[cfg(target_os = "android")]
     {
-        return android::request_tile(app);
+        android::request_tile(app)
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -134,7 +134,7 @@ fn request_tile<R: Runtime>(app: &AppHandle<R>) -> Result<(), BackendError> {
 fn open_notification_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(), BackendError> {
     #[cfg(target_os = "android")]
     {
-        return android::open_notification_settings(app);
+        android::open_notification_settings(app)
     }
     #[cfg(target_os = "macos")]
     const URL: &str = "x-apple.systemsettings:com.apple.Notifications-Settings.extension";
@@ -143,7 +143,7 @@ fn open_notification_settings<R: Runtime>(app: &AppHandle<R>) -> Result<(), Back
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
     {
         let _ = app;
-        return Err(BackendError::Unsupported(MSG_SETTINGS));
+        Err(BackendError::Unsupported(MSG_SETTINGS))
     }
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
@@ -159,10 +159,8 @@ mod tests {
 
     #[test]
     fn settings_and_request_messages_carry_no_path() {
-        for message in [MSG_SETTINGS] {
-            assert!(!message.contains('/'), "{message}");
-            assert!(!message.contains('\\'), "{message}");
-        }
+        assert!(!MSG_SETTINGS.contains('/'), "{MSG_SETTINGS}");
+        assert!(!MSG_SETTINGS.contains('\\'), "{MSG_SETTINGS}");
     }
 
     #[test]
