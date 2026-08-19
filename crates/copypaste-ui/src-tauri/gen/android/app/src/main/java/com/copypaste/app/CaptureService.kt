@@ -49,7 +49,8 @@ class CaptureService : Service() {
         CaptureNotifications.ensureChannels(this)
         val text = intent.getStringExtra(EXTRA_TEXT) ?: state.text
         startForeground(CaptureNotifications.ONGOING_ID, CaptureNotifications.ongoing(this, text))
-        return START_STICKY
+        // OEM process death must not resurrect this service with a null intent.
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {

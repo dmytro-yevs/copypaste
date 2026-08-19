@@ -1,7 +1,7 @@
 //! What a rule *is*: the fields every entry in [`super::rules::RULES`] carries,
 //! and the mapping from a rule to the [`Finding`] it produces.
 
-use super::finding::{Finding, Severity, AUTOWIPE_CONFIDENCE_FLOOR};
+use super::finding::{severity_for, Finding};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Category {
@@ -103,14 +103,7 @@ impl RuleSpec {
             rule: self.name,
             category: self.category.as_str(),
             confidence: self.confidence,
-            severity: match (
-                self.confidence >= AUTOWIPE_CONFIDENCE_FLOOR,
-                self.never_auto_delete,
-            ) {
-                (true, false) => Severity::HighConfidence,
-                (true, true) => Severity::Restricted,
-                (false, _) => Severity::Flag,
-            },
+            severity: severity_for(self.confidence, self.never_auto_delete),
         }
     }
 }
