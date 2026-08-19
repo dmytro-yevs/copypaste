@@ -10,7 +10,9 @@ use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 use zeroize::Zeroizing;
 
 use self::common::{Affinity, CloseHandle};
-use super::{NativePairingUi, PairingDecision, PairingPresentationState, ScannedPairing};
+use super::{
+    NativeAbort, NativePairingUi, PairingDecision, PairingPresentationState, ScannedPairing,
+};
 
 type PayloadEncoder = fn(&PairingInviteData) -> Option<Zeroizing<String>>;
 
