@@ -1,8 +1,10 @@
+#[cfg(any(target_os = "android", target_os = "macos", target_os = "windows"))]
 use std::sync::Arc;
 
 use copypaste_ipc::{PairingInviteData, PairingProgressData};
 use zeroize::Zeroizing;
 
+#[cfg(any(target_os = "android", target_os = "macos", target_os = "windows"))]
 pub type NativeAbort = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg(any(
