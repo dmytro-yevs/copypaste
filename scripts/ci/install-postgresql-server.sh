@@ -2,8 +2,7 @@
 # Install PostgreSQL server binaries for supabase/dev/verify-schema.sh.
 #
 # That script needs initdb/pg_ctl/psql and starts its own throwaway cluster
-# (docs/supabase-deployment.md). It must not start a system service — the
-# meta `postgresql` package used to hang GHA runners on debconf/cluster setup.
+# (docs/supabase-deployment.md). It must not start a system service.
 #
 # Usage (CI or local Ubuntu):
 #   scripts/ci/install-postgresql-server.sh
@@ -11,9 +10,28 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Bound wall-clock so a stuck apt/mirror fails the job instead of sitting for
-# an hour under cancel-in-progress noise.
-APT_TIMEOUT_SECS="${APT_TIMEOUT_SECS:-600}"
+# Bound wall-clock so a stuck apt fails the job instead of sitting for an hour.
+APT_TIMEOUT_SECS="${APT_TIMEOUT_SECS:-300}"
+
+# GitHub-hosted ubuntu images point apt at azure.archive.ubuntu.com. That
+# mirror intermittently hangs (Ign: … then silence until the job times out).
+# Force the public archive before any apt call.
+prefer_public_ubuntu_archive() {
+  local f
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+           /etc/apt/sources.list.d/*.sources; do
+    [[ -f "$f" ]] || continue
+    sudo sed -i \
+      -e 's|http://azure\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+      -e 's|https://azure\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+      "$f"
+  done
+  if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+    printf 'http://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+  fi
+}
+
+prefer_public_ubuntu_archive
 
 # Pin a versioned server package: the meta package pulls cluster auto-setup.
 # Ubuntu 24.04 ships 16; fall back if the image only has another major.
