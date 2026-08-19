@@ -191,7 +191,8 @@ impl Cloud {
     }
 
     pub(crate) fn restore(&self, state: &AppState) -> bool {
-        let Some(config) = self.config.clone() else {
+        self.overlay_persisted_endpoint(&state.store);
+        let Some(config) = self.config() else {
             return false;
         };
         let mut account = self.lock_account();

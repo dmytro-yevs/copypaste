@@ -1,5 +1,6 @@
 mod account;
 mod cursor;
+mod endpoint;
 mod schedule;
 mod source;
 
@@ -43,9 +44,12 @@ const MSG_CONFIRM: &str = "Confirm the email address before signing in.";
 const MSG_UNAVAILABLE: &str = "The account service could not be reached.";
 const MSG_PASSPHRASE: &str = "The sync passphrase is too short.";
 const MSG_STORE: &str = "The sync account could not be stored.";
+const MSG_ENDPOINT: &str = "The cloud address is not valid.";
+const MSG_ENDPOINT_INCOMPLETE: &str = "A cloud address and key are both required.";
 
 pub(super) struct EmbeddedCloud {
-    config: Option<CloudConfig>,
+    hosted: Option<CloudConfig>,
+    config: Mutex<Option<CloudConfig>>,
     account: AccountSlot,
     account_revision: AtomicU64,
     last_sync_ms: AtomicI64,
@@ -63,9 +67,12 @@ pub(super) struct EmbeddedCloud {
 
 impl EmbeddedCloud {
     pub(super) fn open(state: &super::state::BackendState) -> Result<Self> {
+        let hosted =
+            cloud_config().map_err(|_| BackendError::internal("Cloud sync is misconfigured."))?;
+        let config = endpoint::overlay(&state.store, hosted.clone());
         let cloud = Self {
-            config: cloud_config()
-                .map_err(|_| BackendError::internal("Cloud sync is misconfigured."))?,
+            hosted,
+            config: Mutex::new(config),
             account: AccountSlot::default(),
             account_revision: AtomicU64::new(0),
             last_sync_ms: AtomicI64::new(0),
@@ -85,7 +92,7 @@ impl EmbeddedCloud {
         let account = self.account();
         let last_sync = self.last_sync_ms.load(Ordering::Acquire);
         CloudStatusData {
-            configured: self.config.is_some(),
+            configured: self.active_config().is_some(),
             signed_in: account.is_some(),
             key_ready: account.is_some(),
             email: account.as_ref().map(|value| value.email.clone()),
@@ -114,19 +121,44 @@ impl EmbeddedCloud {
         password: &str,
         passphrase: &str,
     ) -> Result<CloudStatusData> {
+        self.establish_account(inner, email, password, passphrase, false)
+            .await
+    }
+
+    pub(super) async fn sign_up(
+        &self,
+        inner: &Arc<Inner>,
+        email: &str,
+        password: &str,
+        passphrase: &str,
+    ) -> Result<CloudStatusData> {
+        self.establish_account(inner, email, password, passphrase, true)
+            .await
+    }
+
+    async fn establish_account(
+        &self,
+        inner: &Arc<Inner>,
+        email: &str,
+        password: &str,
+        passphrase: &str,
+        create: bool,
+    ) -> Result<CloudStatusData> {
         let config = self
-            .config
-            .clone()
+            .active_config()
             .ok_or(BackendError::Unsupported(MSG_NOT_CONFIGURED))?;
         let email = email.trim().to_string();
         if email.is_empty() {
             return Err(BackendError::Invalid("An email address is required."));
         }
         let attempt = self.begin_sign_in();
-        let session = SupabaseAuth::new(config.clone())
-            .sign_in(&email, password)
-            .await
-            .map_err(auth_error)?;
+        let auth = SupabaseAuth::new(config.clone());
+        let session = if create {
+            auth.sign_up(&email, password).await
+        } else {
+            auth.sign_in(&email, password).await
+        }
+        .map_err(auth_error)?;
         let user_id = session.user_id.clone();
         let phrase = Zeroizing::new(passphrase.to_string());
         let key_account = user_id.clone();
@@ -164,7 +196,7 @@ impl EmbeddedCloud {
 
     pub(super) async fn sign_out(&self, inner: &Arc<Inner>) {
         let driver = self.take_for_sign_out(&inner.state.store);
-        if let (Some(driver), Some(config)) = (driver, self.config.clone()) {
+        if let (Some(driver), Some(config)) = (driver, self.active_config()) {
             let token = driver.inspect_session(|session| session.access_token.clone());
             if let Err(error) = SupabaseAuth::new(config).sign_out(&token).await {
                 tracing::warn!(?error, "cloud session revocation failed");
@@ -194,7 +226,7 @@ impl EmbeddedCloud {
         if !inner.settings().sync_enabled {
             return Err(BackendError::NotReady);
         }
-        if self.config.is_none() {
+        if self.active_config().is_none() {
             return Err(BackendError::Unsupported(MSG_NOT_CONFIGURED));
         }
         if self.shutdown.is_cancelled() {
@@ -282,6 +314,43 @@ impl EmbeddedCloud {
     ) -> std::result::Result<(), copypaste_core::StoreError> {
         self.upload_cursor
             .commit(&inner.state.store, started, started_epoch, candidate)
+    }
+
+    fn lock_config(&self) -> std::sync::MutexGuard<'_, Option<CloudConfig>> {
+        self.config
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    pub(super) fn active_config(&self) -> Option<CloudConfig> {
+        self.lock_config().clone()
+    }
+
+    pub(super) async fn set_endpoint(
+        &self,
+        inner: &Arc<Inner>,
+        url: &str,
+        anon_key: &str,
+    ) -> Result<CloudStatusData> {
+        if self.account().as_ref().is_some() {
+            self.sign_out(inner).await;
+        }
+        let url = url.trim();
+        let anon_key = anon_key.trim();
+        if url.is_empty() && anon_key.is_empty() {
+            endpoint::clear(&inner.state.store).map_err(|_| BackendError::internal(MSG_STORE))?;
+            *self.lock_config() = self.hosted.clone();
+            return Ok(self.status());
+        }
+        if url.is_empty() || anon_key.is_empty() {
+            return Err(BackendError::Invalid(MSG_ENDPOINT_INCOMPLETE));
+        }
+        let config = validated_cloud_config(url.to_string(), anon_key.to_string())
+            .map_err(|_| BackendError::Invalid(MSG_ENDPOINT))?;
+        endpoint::persist(&inner.state.store, url, anon_key)
+            .map_err(|_| BackendError::internal(MSG_STORE))?;
+        *self.lock_config() = Some(config);
+        Ok(self.status())
     }
 }
 
@@ -398,9 +467,27 @@ mod tests {
         assert!(validated_cloud_config("http://example.com:47800".into(), "key".into()).is_err());
     }
 
+    #[test]
+    fn a_stored_endpoint_overlays_the_hosted_bake() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        state
+            .store
+            .set_state_all(&[
+                (CloudStateKey::EndpointUrl.as_str(), "https://self.example"),
+                (CloudStateKey::EndpointAnonKey.as_str(), "anon-key"),
+            ])
+            .unwrap();
+        let hosted = CloudConfig::new("https://hosted.example", "hosted-anon").unwrap();
+        let config = endpoint::overlay(&state.store, Some(hosted)).unwrap();
+        assert_eq!(config.url(), "https://self.example/");
+    }
+
     fn configured() -> EmbeddedCloud {
+        let hosted = CloudConfig::new("https://example.invalid", "public-anon").unwrap();
         EmbeddedCloud {
-            config: Some(CloudConfig::new("https://example.invalid", "public-anon").unwrap()),
+            hosted: Some(hosted.clone()),
+            config: Mutex::new(Some(hosted)),
             account: AccountSlot::default(),
             account_revision: AtomicU64::new(0),
             last_sync_ms: AtomicI64::new(0),
@@ -419,7 +506,7 @@ mod tests {
         state: &super::super::state::BackendState,
         token: &str,
     ) -> Arc<Driver> {
-        let config = cloud.config.clone().unwrap();
+        let config = cloud.active_config().unwrap();
         Arc::new(CloudSync::new(
             SupabaseRest::new(config.clone()),
             SupabaseAuth::new(config.clone()),
@@ -447,7 +534,7 @@ mod tests {
             expires_at_ms: 123_000,
         };
         let key = SyncKey::from_bytes([9; 32]);
-        let config = cloud.config.clone().unwrap();
+        let config = cloud.active_config().unwrap();
         let driver = Arc::new(CloudSync::new(
             SupabaseRest::new(config.clone()),
             SupabaseAuth::new(config.clone()),

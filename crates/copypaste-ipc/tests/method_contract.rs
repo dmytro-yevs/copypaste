@@ -37,6 +37,8 @@ fn wire_name(method: &Method) -> &'static str {
         Method::Backup { .. } => "backup",
         Method::Restore { .. } => "restore",
         Method::CloudSignIn { .. } => "cloud_sign_in",
+        Method::CloudSignUp { .. } => "cloud_sign_up",
+        Method::CloudSetEndpoint { .. } => "cloud_set_endpoint",
         Method::CloudSignOut => "cloud_sign_out",
         Method::CloudStatus => "cloud_status",
         Method::CloudSyncNow => "cloud_sync_now",
@@ -83,6 +85,8 @@ fn catalog() -> Vec<Value> {
         json!({"method":"backup","params":{"dest_path":"backup.db"}}),
         json!({"method":"restore","params":{"src_path":"backup.db","confirm":true}}),
         json!({"method":"cloud_sign_in","params":{"email":"a@example.com","password":"secret","passphrase":"phrase"}}),
+        json!({"method":"cloud_sign_up","params":{"email":"a@example.com","password":"secret","passphrase":"phrase"}}),
+        json!({"method":"cloud_set_endpoint","params":{"url":"https://example.supabase.co","anon_key":"anon"}}),
         json!({"method":"cloud_sign_out"}),
         json!({"method":"cloud_status"}),
         json!({"method":"cloud_sync_now"}),
@@ -109,7 +113,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        41,
+        43,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }

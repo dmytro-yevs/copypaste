@@ -9,6 +9,8 @@ import {
   type CloudStatusData,
   type CloudSyncData,
   cloudSignIn,
+  cloudSignUp,
+  cloudSetEndpoint,
   cloudSignOut,
   getCloudStatus,
   syncCloudNow,
@@ -36,6 +38,35 @@ export function useCloudSignIn() {
     onSuccess: (status) => {
       qc.setQueryData(CLOUD_STATUS_KEY, status);
       toast.success(t("settings.sync.cloud.toast.signedIn"));
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+export function useCloudSignUp() {
+  const qc = useQueryClient();
+  return useMutation<CloudStatusData, unknown, CloudCredentials>({
+    mutationFn: cloudSignUp,
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: CLOUD_STATUS_KEY });
+    },
+    onSuccess: (status) => {
+      qc.setQueryData(CLOUD_STATUS_KEY, status);
+      toast.success(t("settings.sync.cloud.toast.signedIn"));
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+export function useCloudSetEndpoint() {
+  const qc = useQueryClient();
+  return useMutation<CloudStatusData, unknown, { url: string; anonKey: string }>({
+    mutationFn: ({ url, anonKey }) => cloudSetEndpoint(url, anonKey),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: CLOUD_STATUS_KEY });
+    },
+    onSuccess: (status) => {
+      qc.setQueryData(CLOUD_STATUS_KEY, status);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });

@@ -22,6 +22,8 @@ pub enum CloudStateKey {
     UploadFloorMs,
     UploadFloorItemId,
     UnreadableUploads,
+    EndpointUrl,
+    EndpointAnonKey,
 }
 
 impl CloudStateKey {
@@ -42,6 +44,8 @@ impl CloudStateKey {
             Self::UploadFloorMs => "cloud_upload_floor_ms",
             Self::UploadFloorItemId => "cloud_upload_floor_item_id",
             Self::UnreadableUploads => "cloud_unreadable_uploads",
+            Self::EndpointUrl => "cloud_endpoint_url",
+            Self::EndpointAnonKey => "cloud_endpoint_anon_key",
         }
     }
 }
@@ -323,6 +327,9 @@ mod tests {
                 CloudStateKey::WatermarkItemId,
                 CloudStateKey::UploadFloorMs,
                 CloudStateKey::UploadFloorItemId,
+                CloudStateKey::UnreadableUploads,
+                CloudStateKey::EndpointUrl,
+                CloudStateKey::EndpointAnonKey,
             ]
             .map(CloudStateKey::as_str),
             [
@@ -340,6 +347,9 @@ mod tests {
                 "cloud_watermark_item_id",
                 "cloud_upload_floor_ms",
                 "cloud_upload_floor_item_id",
+                "cloud_unreadable_uploads",
+                "cloud_endpoint_url",
+                "cloud_endpoint_anon_key",
             ]
         );
         let store = store();

@@ -31,6 +31,7 @@ use copypaste_cloud::rest::SupabaseRest;
 use copypaste_cloud::sync::{CloudSync, SensitiveGuard};
 use copypaste_cloud::CloudConfig;
 use copypaste_core::sync::{RoundGate, RoundGuard};
+use copypaste_core::StoreError;
 use copypaste_ipc::CloudStatusData;
 use tokio::sync::{watch, Notify};
 use tracing::warn;
@@ -52,6 +53,18 @@ pub(crate) const KEY_SYNC_KEY: &str = CloudStateKey::SyncKey.as_str();
 
 /// The production instantiation of the driver.
 pub type Driver = CloudSync<SupabaseRest, SupabaseAuth>;
+
+pub(crate) enum SetEndpointError {
+    Incomplete,
+    Invalid,
+    Store(StoreError),
+}
+
+impl From<StoreError> for SetEndpointError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
 
 /// The download cursor: everything this device has reconciled with the account.
 pub(crate) const KEY_WATERMARK: &str = CloudStateKey::WatermarkMs.as_str();
@@ -76,9 +89,11 @@ pub(crate) struct UploadFloor {
 
 /// Everything the cloud half of the daemon shares.
 pub struct Cloud {
+    /// First-party bake or process env. Custom Advanced values overlay this.
+    hosted: Option<CloudConfig>,
     /// `None` when no deployment is configured. Not a credential — the anon key
     /// is publishable and row-level security is what restricts access.
-    config: Option<CloudConfig>,
+    config: Mutex<Option<CloudConfig>>,
     account: Mutex<Option<Account>>,
     account_revision: AtomicU64,
     /// Zero means "never". An `AtomicI64` rather than a field of `Account` so
@@ -116,7 +131,7 @@ impl std::fmt::Debug for Cloud {
     /// No URL, no email, no tokens: this type exists to hold credentials.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Cloud")
-            .field("configured", &self.config.is_some())
+            .field("configured", &self.is_configured())
             .field("signed_in", &self.signed_in())
             .finish_non_exhaustive()
     }
@@ -126,7 +141,8 @@ impl Cloud {
     pub fn new(config: Option<CloudConfig>) -> Self {
         let (session_revision, _) = watch::channel(0_u64);
         Self {
-            config,
+            hosted: config.clone(),
+            config: Mutex::new(config),
             account: Mutex::new(None),
             account_revision: AtomicU64::new(0),
             last_sync_ms: AtomicI64::new(0),
@@ -141,7 +157,7 @@ impl Cloud {
     }
 
     pub fn is_configured(&self) -> bool {
-        self.config.is_some()
+        self.config().is_some()
     }
 
     pub fn signed_in(&self) -> bool {
@@ -205,7 +221,7 @@ impl Cloud {
         let account = self.lock_account();
         let last_sync_ms = self.last_sync_ms.load(Ordering::Acquire);
         CloudStatusData {
-            configured: self.config.is_some(),
+            configured: self.is_configured(),
             signed_in: account.is_some(),
             // One and the same in v2: the key is derived during sign-in, so a
             // session without a key cannot be constructed. v1 could be signed
@@ -315,8 +331,62 @@ impl Cloud {
         self.store_upload_floor(meta, &current.max(candidate.clone()))
     }
 
-    pub fn config(&self) -> Option<&CloudConfig> {
-        self.config.as_ref()
+    fn lock_config(&self) -> MutexGuard<'_, Option<CloudConfig>> {
+        self.config.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn config(&self) -> Option<CloudConfig> {
+        self.lock_config().clone()
+    }
+
+    pub(crate) fn overlay_persisted_endpoint(&self, store: &copypaste_core::Store) {
+        let url = store
+            .state(CloudStateKey::EndpointUrl.as_str())
+            .ok()
+            .flatten();
+        let key = store
+            .state(CloudStateKey::EndpointAnonKey.as_str())
+            .ok()
+            .flatten();
+        let next = match (url, key) {
+            (Some(url), Some(key)) => match CloudConfig::new(url, key) {
+                Ok(config) => Some(config),
+                Err(_) => {
+                    warn!("stored cloud endpoint was rejected; using the hosted default");
+                    self.hosted.clone()
+                }
+            },
+            _ => self.hosted.clone(),
+        };
+        *self.lock_config() = next;
+    }
+
+    pub(crate) fn set_custom_endpoint(
+        &self,
+        store: &copypaste_core::Store,
+        url: &str,
+        anon_key: &str,
+    ) -> Result<(), SetEndpointError> {
+        let url = url.trim();
+        let anon_key = anon_key.trim();
+        if url.is_empty() && anon_key.is_empty() {
+            store.clear_state(&[
+                CloudStateKey::EndpointUrl.as_str(),
+                CloudStateKey::EndpointAnonKey.as_str(),
+            ])?;
+            *self.lock_config() = self.hosted.clone();
+            return Ok(());
+        }
+        if url.is_empty() || anon_key.is_empty() {
+            return Err(SetEndpointError::Incomplete);
+        }
+        let config = CloudConfig::new(url, anon_key).map_err(|_| SetEndpointError::Invalid)?;
+        store.set_state_all(&[
+            (CloudStateKey::EndpointUrl.as_str(), url),
+            (CloudStateKey::EndpointAnonKey.as_str(), anon_key),
+        ])?;
+        *self.lock_config() = Some(config);
+        Ok(())
     }
 }
 

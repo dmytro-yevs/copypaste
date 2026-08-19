@@ -47,7 +47,7 @@ fn expected(method: &Method) -> Expected {
         }
         Method::Export { .. } => Expected::Data(|data| matches!(data, ResponseData::Export(_))),
         Method::Backup { .. } => Expected::Data(|data| matches!(data, ResponseData::Backup(_))),
-        Method::CloudSignOut | Method::CloudStatus => {
+        Method::CloudSignOut | Method::CloudStatus | Method::CloudSetEndpoint { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::CloudStatus(_)))
         }
         Method::GetConfig | Method::SetConfig { .. } => {
@@ -72,6 +72,7 @@ fn expected(method: &Method) -> Expected {
         Method::Import { .. }
         | Method::Restore { .. }
         | Method::CloudSignIn { .. }
+        | Method::CloudSignUp { .. }
         | Method::CloudSyncNow => Expected::Error(ErrorCode::InvalidRequest),
     }
 }
@@ -157,9 +158,18 @@ fn cases(root: &Path) -> Vec<Method> {
             password: "secret".into(),
             passphrase: "correct horse battery staple".into(),
         },
+        Method::CloudSignUp {
+            email: "person@example.com".into(),
+            password: "secret".into(),
+            passphrase: "correct horse battery staple".into(),
+        },
         Method::CloudSignOut,
         Method::CloudStatus,
         Method::CloudSyncNow,
+        Method::CloudSetEndpoint {
+            url: "https://example.supabase.co".into(),
+            anon_key: "anon".into(),
+        },
         Method::GetConfig,
         Method::SetConfig {
             patch: copypaste_ipc::ConfigPatch::default(),
@@ -238,7 +248,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        41,
+        43,
         "a Method has no contract case, or this count was not bumped with it"
     );
 
