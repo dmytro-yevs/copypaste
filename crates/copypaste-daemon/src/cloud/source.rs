@@ -290,7 +290,7 @@ mod tests {
 
         let items = source.local_changes_since(0).unwrap();
         assert_eq!(ids(&items), [id.as_str()]);
-        assert_eq!(items[0].content, b"shared clipboard text");
+        assert_eq!(items[0].content.as_slice(), b"shared clipboard text");
         assert_eq!(items[0].origin_device_id, source.device_id());
         assert!(!items[0].deleted);
     }
@@ -375,7 +375,7 @@ mod tests {
         source
             .apply_remote(LocalItem {
                 item_id: "from-a-peer".into(),
-                content: b"arrived over the peer transport".to_vec(),
+                content: zeroize::Zeroizing::new(b"arrived over the peer transport".to_vec()),
                 content_type: "text".into(),
                 payload_metadata: None,
                 created_at: old_stamp,
@@ -402,7 +402,7 @@ mod tests {
             source
                 .apply_remote(LocalItem {
                     item_id: format!("boundary-{n:04}"),
-                    content: format!("row {n}").into_bytes(),
+                    content: zeroize::Zeroizing::new(format!("row {n}").into_bytes()),
                     content_type: "text".into(),
                     created_at: stamp,
                     deleted: false,
@@ -453,7 +453,7 @@ mod tests {
             source
                 .apply_remote(LocalItem {
                     item_id: "relayed-through-cloud".into(),
-                    content: b"older than the peer cursor".to_vec(),
+                    content: zeroize::Zeroizing::new(b"older than the peer cursor".to_vec()),
                     content_type: "text".into(),
                     payload_metadata: None,
                     created_at: old_stamp,
@@ -542,7 +542,7 @@ mod tests {
         let (source, state, _dir) = source("beta");
         let incoming = || LocalItem {
             item_id: "from-the-cloud".into(),
-            content: b"from another device".to_vec(),
+            content: zeroize::Zeroizing::new(b"from another device".to_vec()),
             content_type: "text".into(),
             payload_metadata: None,
             created_at: 1_700_000_000_000,
@@ -577,7 +577,7 @@ mod tests {
         source
             .apply_remote(LocalItem {
                 item_id: "file-from-cloud".into(),
-                content: b"%PDF-binary".to_vec(),
+                content: zeroize::Zeroizing::new(b"%PDF-binary".to_vec()),
                 content_type: copypaste_ipc::content_type::FILE.into(),
                 payload_metadata: Some(metadata.into()),
                 created_at: 1_700_000_000_000,
@@ -590,7 +590,7 @@ mod tests {
         assert_eq!(row.payload_metadata.as_deref(), Some(metadata));
         let offered = source.local_changes_since(0).unwrap();
         assert_eq!(offered[0].payload_metadata.as_deref(), Some(metadata));
-        assert_eq!(offered[0].content, b"%PDF-binary");
+        assert_eq!(offered[0].content.as_slice(), b"%PDF-binary");
     }
 
     /// A round's own upload, echoed back by the account, must be a no-op — and
@@ -824,7 +824,7 @@ mod round_tests {
         let page: Vec<LocalItem> = (0..500)
             .map(|n| LocalItem {
                 item_id: format!("page-{n:04}"),
-                content: format!("row {n}").into_bytes(),
+                content: zeroize::Zeroizing::new(format!("row {n}").into_bytes()),
                 content_type: "text".into(),
                 payload_metadata: None,
                 created_at: 1_700_000_000_000 + i64::from(n),
@@ -854,7 +854,7 @@ mod round_tests {
         let (source, state, _dir) = source("alpha");
         let version = |created_at: i64, body: &str| LocalItem {
             item_id: "same-id".into(),
-            content: body.as_bytes().to_vec(),
+            content: zeroize::Zeroizing::new(body.as_bytes().to_vec()),
             content_type: "text".into(),
             payload_metadata: None,
             created_at,

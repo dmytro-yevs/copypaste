@@ -335,7 +335,7 @@ mod tests {
             cloud
                 .apply_remote(LocalItem {
                     item_id: "cloud-item".into(),
-                    content: b"from cloud".to_vec(),
+                    content: zeroize::Zeroizing::new(b"from cloud".to_vec()),
                     content_type: copypaste_ipc::content_type::TEXT.into(),
                     payload_metadata: None,
                     created_at: 2_000,
@@ -437,7 +437,7 @@ mod tests {
         assert!(cloud
             .requeue_local_winner(&LocalItem {
                 item_id: "same-stamp-delete".into(),
-                content: text.as_bytes().to_vec(),
+                content: zeroize::Zeroizing::new(text.as_bytes().to_vec()),
                 content_type: copypaste_ipc::content_type::TEXT.into(),
                 payload_metadata: None,
                 created_at: tombstone.created_at,
@@ -480,7 +480,7 @@ mod tests {
         assert!(source
             .apply_remote(LocalItem {
                 item_id: "old-account-item".into(),
-                content: b"must not land".to_vec(),
+                content: zeroize::Zeroizing::new(b"must not land".to_vec()),
                 content_type: copypaste_ipc::content_type::TEXT.into(),
                 payload_metadata: None,
                 created_at: 9_000,

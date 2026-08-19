@@ -155,10 +155,8 @@ export const MAX_DECODED_IMAGE_MB: readonly Choice[] = [
 ];
 
 /**
- * `30` first, because it is the value manifest 01 §4 and manifest 07 §6.2 both
- * give and the one `copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL` still
- * holds. It is a suggestion here and not a default: the field ships at `0`, and
- * this control is the interface whose absence is why.
+ * `30` first, matching `copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL` and
+ * the shipped `ConfigData` default. `0` remains the explicit off sentinel.
  */
 export const SENSITIVE_TTL_SECS: readonly Choice[] = [
   OFF,

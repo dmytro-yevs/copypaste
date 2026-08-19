@@ -4,10 +4,29 @@
 
 use std::ops::Range;
 
-/// Manifest §4.1. Nothing may sit *exactly* on the floor: `ip_with_port` did,
-/// and RFC1918 addresses in docker-compose snippets were silently auto-wiped
-/// (`CopyPaste-8ys1`). Pinned by `no_rule_sits_exactly_on_the_floor`.
-pub(super) const AUTOWIPE_CONFIDENCE_FLOOR: f32 = 0.70;
+/// Whole-item withholding starts here. Matches below this stay [`Severity::Flag`]:
+/// detectable and redactable, but they do not leave the search index.
+pub(super) const CLASSIFY_CONFIDENCE_FLOOR: f32 = 0.70;
+
+/// Manifest §4.1. The wipe floor is exclusive-in-spirit: nothing may sit
+/// exactly on it. `0.85` keeps generic/KV noise (`generic_api_key` at 0.75)
+/// below deletion now that the TTL ships on; credentials at 0.90+ still wipe.
+/// Classification still uses [`CLASSIFY_CONFIDENCE_FLOOR`].
+pub(super) const AUTOWIPE_CONFIDENCE_FLOOR: f32 = 0.85;
+
+/// Map a rule's confidence and deletion policy onto the three-band severity.
+#[must_use]
+pub(super) fn severity_for(confidence: f32, never_auto_delete: bool) -> Severity {
+    match (
+        confidence >= CLASSIFY_CONFIDENCE_FLOOR,
+        confidence >= AUTOWIPE_CONFIDENCE_FLOOR,
+        never_auto_delete,
+    ) {
+        (false, _, _) => Severity::Flag,
+        (true, true, false) => Severity::HighConfidence,
+        (true, _, _) => Severity::Restricted,
+    }
+}
 
 /// What a match permits, in increasing order of consequence. Ordered so a
 /// caller states the least severity it acts on rather than listing variants.

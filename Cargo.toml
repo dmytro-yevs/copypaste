@@ -158,3 +158,8 @@ debug = "line-tables-only"
 
 [profile.test]
 debug = "line-tables-only"
+
+# GHSA-wrw7-89jp-8q8g / RUSTSEC-2024-0429. Tauri 2.11 still pulls GTK3 glib
+# ^0.18; this path crate is 0.18.5 with the VariantStrIter `&mut p` fix.
+[patch.crates-io]
+glib = { path = "vendor/glib" }

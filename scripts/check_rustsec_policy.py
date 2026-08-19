@@ -86,6 +86,16 @@ def evaluate(report, policy, today, root=ROOT):
             continue
         used.add(advisory_id)
         accepted.append(entry)
+        if advisory_id == "RUSTSEC-2024-0429":
+            variant = root / "vendor/glib/src/variant_iter.rs"
+            try:
+                patched = "&mut p" in variant.read_text(encoding="utf-8")
+            except OSError:
+                patched = False
+            if not patched:
+                errors.append(
+                    f"{advisory_id}: vendor/glib lost the VariantStrIter mutability patch"
+                )
 
     for advisory_id in sorted(exceptions.keys() - used):
         errors.append(f"{advisory_id}: exception is stale; the advisory was not detected")

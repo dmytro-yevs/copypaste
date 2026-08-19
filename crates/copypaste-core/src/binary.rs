@@ -136,7 +136,7 @@ fn header(
 /// output vector removes the per-chunk allocate-then-copy-twice without moving
 /// a byte of the framing.
 struct Tail<'a> {
-    out: &'a mut Vec<u8>,
+    out: &'a mut Zeroizing<Vec<u8>>,
     start: usize,
 }
 
@@ -198,12 +198,12 @@ pub fn seal_with_digest(
     let header = header(digest, bytes.len() as u64, &stream_nonce);
     let aad = stream_aad(id, &header);
     let tag_bytes = (chunk_count as usize).saturating_mul(TAG_LEN);
-    let mut out = Vec::with_capacity(
+    let mut out = Zeroizing::new(Vec::with_capacity(
         bytes
             .len()
             .saturating_add(HEADER_BYTES)
             .saturating_add(tag_bytes),
-    );
+    ));
     out.extend_from_slice(&header);
 
     let mut stream = stream_encryptor(key, &stream_nonce);
@@ -248,7 +248,7 @@ pub fn seal_with_digest(
             },
         )
         .map_err(|_| CryptoError::Internal("STREAM rejected the binary chunk"))?;
-    Ok(out)
+    Ok(std::mem::take(&mut *out))
 }
 
 /// Open and verify a binary chunk envelope.

@@ -93,9 +93,7 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 ///
 /// Best-effort, and deliberately never fatal to a tick: the sweep deletes user
 /// data, so a failure must leave the data alone and retry, not stop capture
-/// (AGENTS.md rule 4). `0` disables it, and that is the default until a user
-/// asks for it — `copypaste_ipc::ConfigData::sensitive_ttl_secs` records why,
-/// and what would justify turning it back on out of the box.
+/// (AGENTS.md rule 4). `0` disables it. The shipped default is 30 seconds.
 fn sweep_sensitive_items(state: &AppState) {
     let ttl = Duration::from_secs(state.settings.get().sensitive_ttl_secs);
     // Capture before wipe stamps so the upload floor cannot land above the
@@ -487,10 +485,8 @@ mod tests {
         assert_eq!(state.store.count().unwrap(), 0);
     }
 
-    /// The auto-wipe is the only thing in the daemon that deletes an item the
-    /// user never asked it to, and until the count rode the event there was no
-    /// way to tell them it had happened — which is the whole reason
-    /// `sensitive_ttl_secs` ships at `0`.
+    /// `sensitive_ttl_secs` ships at 30 seconds; this test turns it on
+    /// explicitly so the fixture does not depend on the default.
     #[test]
     fn a_sweep_reports_how_many_secrets_it_deleted() {
         let (state, _dir) = test_state("alpha");

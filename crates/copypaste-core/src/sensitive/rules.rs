@@ -62,6 +62,7 @@ mod tests {
             "phone_us",
             "passport",
             "aws_arn",
+            "generic_api_key",
         ] {
             assert!(
                 rule(name).confidence < AUTOWIPE_CONFIDENCE_FLOOR,

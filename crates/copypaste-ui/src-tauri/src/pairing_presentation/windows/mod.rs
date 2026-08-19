@@ -164,6 +164,26 @@ mod tests {
     }
 
     #[test]
+    fn missing_listen_addr_is_unavailable_without_opening_a_window() {
+        let ui = super::WindowsPairingUi::new(
+            crate::pairing_presentation::invite::encode_native_invite,
+            crate::pairing_presentation::invite::decode_native_invite,
+            std::sync::Arc::new(|| {}),
+        );
+        let invite = copypaste_ipc::PairingInviteData {
+            code: "ABCD-EFGH-IJKL".into(),
+            pairing_id: "public-id".into(),
+            listen_addr: None,
+            expires_in_secs: 120,
+        };
+        assert_eq!(
+            crate::pairing_presentation::NativePairingUi::present_invite(&ui, &invite),
+            PairingPresentationState::Unavailable
+        );
+        assert!(ui.active.lock().expect("active").is_none());
+    }
+
+    #[test]
     fn inv_13_serialization_exposes_only_the_presentation_state() {
         let secret = "ABCD-EFGH-IJKL";
         let serialized = serde_json::to_string(&PairingPresentationState::Presented).unwrap();

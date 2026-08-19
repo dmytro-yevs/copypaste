@@ -15,8 +15,9 @@
 //! [`Detector::is_sensitive`] is the whole-item withholding gate the index,
 //! sync and previews read; [`Detector::may_auto_wipe`] is the deletion gate.
 //! They disagree by exactly the restricted band, which is the point (§4.2).
-//! Everything below the 0.70 floor remains detectable and redactable but
-//! inert. Password-manager provenance is an independent capture-time floor.
+//! Matches below the 0.70 classify floor stay flag-only. Matches from 0.70 up
+//! to the 0.85 wipe floor are withheld and never auto-deleted. Password-manager
+//! provenance is an independent capture-time floor.
 
 mod engine;
 mod finding;

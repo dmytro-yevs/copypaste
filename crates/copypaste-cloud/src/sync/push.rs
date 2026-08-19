@@ -233,7 +233,7 @@ mod tests {
         // backend ends up holding rather than at the call site, so a second
         // construction path added later fails here.
         let mut dead = tombstone("gone", 3_000);
-        dead.content = b"still in memory".to_vec();
+        dead.content = zeroize::Zeroizing::new(b"still in memory".to_vec());
         let source = FakeSource::with_outgoing(vec![item("a", 1_000, "live"), dead]);
         let sync = driver(FakeRest::default(), FakeAuth::default());
 
@@ -324,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn a_sensitive_tombstone_is_uploaded() {
         let mut dead = tombstone("secret", 3_000);
-        dead.content = b"AKIAIOSFODNN7EXAMPLE".to_vec();
+        dead.content = zeroize::Zeroizing::new(b"AKIAIOSFODNN7EXAMPLE".to_vec());
         let source = FakeSource::with_outgoing(vec![dead]);
         let sync = CloudSync::new(
             FakeRest::default(),
@@ -373,7 +373,7 @@ mod tests {
         // T-4: even if the local version still has content in memory, the
         // tombstone must not carry it.
         let mut dead = tombstone("a", 3_000);
-        dead.content = b"content that must not be uploaded".to_vec();
+        dead.content = zeroize::Zeroizing::new(b"content that must not be uploaded".to_vec());
 
         let source = FakeSource::with_outgoing(vec![item("a", 1_000, "live"), dead]);
         let sync = driver(FakeRest::default(), FakeAuth::default());
@@ -394,19 +394,19 @@ mod tests {
     async fn an_item_over_the_per_type_cap_is_withheld_and_the_rest_still_upload() {
         let big_text = || {
             let mut item = item("huge-text", 1_000, "");
-            item.content = vec![b'x'; MAX_TEXT_BYTES + 1];
+            item.content = zeroize::Zeroizing::new(vec![b'x'; MAX_TEXT_BYTES + 1]);
             item
         };
         // The same bytes as an image are under the binary cap and go up.
         let big_image = || {
             let mut item = item("big-image", 2_000, "");
-            item.content = vec![0u8; MAX_TEXT_BYTES + 1];
+            item.content = zeroize::Zeroizing::new(vec![0u8; MAX_TEXT_BYTES + 1]);
             item.content_type = "image".into();
             item
         };
         let huge_image = || {
             let mut item = item("huge-image", 3_000, "");
-            item.content = vec![0u8; MAX_BINARY_BYTES + 1];
+            item.content = zeroize::Zeroizing::new(vec![0u8; MAX_BINARY_BYTES + 1]);
             item.content_type = "image".into();
             item
         };
@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn the_caps_are_the_manifests_and_the_boundary_is_inclusive() {
         let mut at_limit = item("a", 1, "");
-        at_limit.content = vec![b'x'; MAX_TEXT_BYTES];
+        at_limit.content = zeroize::Zeroizing::new(vec![b'x'; MAX_TEXT_BYTES]);
         assert_eq!(over_size_limit(&at_limit), None, "the cap itself must fit");
 
         at_limit.content.push(b'x');

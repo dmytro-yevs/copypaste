@@ -115,11 +115,11 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | `ACTION_SEND` / `ACTION_PROCESS_TEXT` reach SQLCipher | Android | Partial — debug leg only; the release leg has no `run-as` and prints `NOT ASSERTED`. `e2e-android/` follows an `ACTION_SEND` onto the screen |
 | Rung 2: the shell-uid clipboard read | Android | Partial — the API 36 leg reads a foreign clip as uid 2000 without focus; Shizuku's binder proxy and listener still need pairing on a phone |
 | Kotlin → Rust capture bridge shape | Rust, Android | Verified — the debug APK build runs the Kotlin serializer/fixture guard, and the Rust workspace test strictly consumes that fixture |
-| `ClipListener` / `ClipQueue` | Android | **NOT VERIFIED IN CI** — the listener never registers without Shizuku; no Kotlin unit test exists |
-| `CaptureService` | Android | Partial — the API 36 leg proves it stays stopped and makes no claim when no listener exists; nothing asserts positive capture through it |
+| `ClipListener` / `ClipQueue` | Android | Partial — `ClipQueue` Robolectric tests run in `ci.yml`; `ClipListener` still needs a Shizuku binder. `ShizukuClipboard.arm` fails closed without Shizuku |
+| `CaptureService` | Android | Partial — Robolectric asserts sticky-restart is `START_NOT_STICKY`; the API 36 emulator leg still proves it stays stopped without a listener |
 | Quick Settings tile | Android | Partial — the API 36 leg requires one tile click to persist a foreign clip in encrypted history |
 | Android 12+ clipboard-toast consent gate | Android | **NOT VERIFIED IN CI** — the Rust refusal and the jsdom dialog support it; the OS toast is unobserved |
-| Capture surviving OEM battery policy | Android | **NOT VERIFIED IN CI** — stock AOSP applies no vendor background restrictions; this needs a phone left idle |
+| Capture surviving OEM battery policy | Android | Partial — unit tests pin the fail-closed sticky restart; a vendor battery manager killing the process still needs a phone |
 | API-level spread | Android | Partial — the scheduled matrix runs API 24, 29, 33, 34 and 36; targeted dispatches run one selected level |
 
 ### Crypto and device secret
@@ -160,7 +160,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 
 | Requirement | Authoritative layer | State |
 |---|---|---|
-| Pairing: code mint, TTL, wrong code, unpair, revoke, Noise `NNpsk0` | Rust, Windows, Browser (WebKitGTK) | Verified — both desktop WebDriver runs pair against a second real daemon |
+| Pairing: code mint, TTL, wrong code, unpair, revoke, Noise `NNpsk0` | Rust, Windows, Browser (WebKitGTK) | Verified — both desktop WebDriver runs pair against a second real daemon; Windows CI also drives ignored native Win32 pairing refusal tests |
 | Merge: LWW, delete-wins, total tie-break, skew refusal | Rust | Verified |
 | The QR payload never enters the DOM (INV-13) | Browser (WebKitGTK) | Verified |
 | Camera QR scanning | macOS, Android | **NOT VERIFIED IN CI** — only the no-camera fallback runs |
@@ -180,7 +180,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Keyboard navigation, focus, accessibility tree (the 15 A11Y rules) | Browser (WebKitGTK) | Verified as DOM and ARIA |
 | i18n: no catalogue key reaches the screen | Rust, Browser (WebKitGTK) | Verified |
 | Design tokens and contrast | `ci.yml` → `design tokens` | Verified |
-| The app renders on WKWebView | macOS | **NOT VERIFIED IN CI** — the tag-only smoke now requires native accessibility, screenshot and latency evidence, but no recovered run establishes it yet |
+| The app renders on WKWebView | macOS | Partial — `macos-check` requires the debug binary to link `WebKit.framework`; layout and VoiceOver remain the tag smoke |
 | The app renders and lays out in WebView2 | Windows | Verified — the Windows suite requires the Tauri bridge, a populated React root and non-zero layout boxes |
 | The app renders on the Android WebView | Android | Verified — both APK legs fail unless the screen is awake and uiautomator reports named WebView content |
 | The frontend mounts and lays out in the Android WebView | Android | Verified — `e2e-android/` requires a populated React root and non-zero history-row boxes |
@@ -208,7 +208,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Launch-at-login registration | Windows | Partial — Settings changes and reads back the Windows registration; execution after sign-in is **NOT VERIFIED IN CI** |
 | Notification on copy | macOS | **NOT VERIFIED IN CI** — nothing posts or asserts one |
 | Sound on copy | macOS | **NOT VERIFIED IN CI** — the `should_play` gate is Rust-verified; the spawn is not |
-| Screen-capture protection, INV-35 (`contentProtected`, `FLAG_SECURE`) | macOS, Android | Partial — the Android API 36 leg finds `FLAG_SECURE` in twenty window dumps, with another window read as unprotected by the same reader. macOS `contentProtected` remains unasserted |
+| Screen-capture protection, INV-35 (`contentProtected`, `FLAG_SECURE`) | macOS, Android | Partial — `check-android-manifest.sh` and `ScreenProtectionPlugin` require `FLAG_SECURE`; `contentProtected` is pinned in Tauri config tests. MediaProjection is forbidden by the Android manifest guard. A compositor honouring the flag still needs a device |
 
 ### Packaging
 

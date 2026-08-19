@@ -72,15 +72,17 @@ pub fn open_version_bytes(
 /// Open a text version for the P2P wire. Binary callers must use
 /// [`open_version_bytes`] so arbitrary bytes can never be lossily stringified.
 #[must_use = "authentication failures must be handled"]
-pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Result<String, OpenVersionError> {
+pub fn open_version(
+    keyring: &Keyring,
+    row: &StoredItem,
+) -> Result<Zeroizing<String>, OpenVersionError> {
     if !copypaste_ipc::content_type::is_text(&row.content_type) {
         return Err(OpenVersionError::MissingPayload);
     }
-    String::from_utf8({
-        let mut bytes = open_version_bytes(keyring, row)?;
-        std::mem::take(&mut *bytes)
-    })
-    .map_err(|_| OpenVersionError::InvalidPayload)
+    let mut bytes = open_version_bytes(keyring, row)?;
+    String::from_utf8(std::mem::take(&mut *bytes))
+        .map(Zeroizing::new)
+        .map_err(|_| OpenVersionError::InvalidPayload)
 }
 
 /// One version of one item, arriving from another device.
@@ -675,7 +677,9 @@ mod tests {
         assert!(outcome.pin);
         let stored = f.store.version("shared").unwrap().unwrap();
         assert_eq!(
-            open_version(&f.keyring, &stored).as_deref(),
+            open_version(&f.keyring, &stored)
+                .as_ref()
+                .map(|text| text.as_str()),
             Ok("new content")
         );
         assert!(stored.pinned);

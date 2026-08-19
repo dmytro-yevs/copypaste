@@ -115,7 +115,10 @@ mod tests {
         let stats = device_b.pull(&b_source).await.unwrap();
 
         assert_eq!(stats.applied, 1);
-        assert_eq!(b_source.get("a").unwrap().content, b"shared clipboard text");
+        assert_eq!(
+            b_source.get("a").unwrap().content.as_slice(),
+            b"shared clipboard text"
+        );
 
         // Replaying the whole exchange changes nothing on either side.
         device_a.push(&a_source).await.unwrap();
@@ -129,7 +132,7 @@ mod tests {
         let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#;
         let a_source = FakeSource::with_outgoing(vec![LocalItem {
             item_id: "file-a".into(),
-            content: b"%PDF-binary".to_vec(),
+            content: zeroize::Zeroizing::new(b"%PDF-binary".to_vec()),
             content_type: "file".into(),
             payload_metadata: Some(metadata.into()),
             created_at: 1_000,
@@ -158,7 +161,7 @@ mod tests {
         assert_eq!(device_b.pull(&b_source).await.unwrap().applied, 1);
 
         let received = b_source.get("file-a").unwrap();
-        assert_eq!(received.content, b"%PDF-binary");
+        assert_eq!(received.content.as_slice(), b"%PDF-binary");
         assert_eq!(received.payload_metadata.as_deref(), Some(metadata));
     }
 

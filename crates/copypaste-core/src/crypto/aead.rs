@@ -63,7 +63,8 @@ pub fn encrypt(
     key: &ItemKey,
     item_id: &str,
 ) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.0.as_ref()));
+    let key_bytes = Zeroizing::new(*key.0);
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key_bytes.as_ref()));
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -107,7 +108,8 @@ pub fn decrypt(
         return Err(CryptoError::AuthFailed);
     }
 
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.0.as_ref()));
+    let key_bytes = Zeroizing::new(*key.0);
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key_bytes.as_ref()));
     let aad = item_aad(item_id);
 
     cipher

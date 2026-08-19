@@ -72,6 +72,44 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: sh ./scripts/check-android-manifest.sh
 
+  android-kotlin:
+    name: Android Kotlin unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ANDROID_PLATFORM: "android-36"
+      BUILD_TOOLS_VERSION: "36.0.0"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            crates/copypaste-ui/src-tauri/gen/android/**/*.gradle*
+            crates/copypaste-ui/src-tauri/gen/android/**/gradle-wrapper.properties
+      - name: Install SDK platform for unit tests
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME is unset — the runner image has no Android SDK}"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [[ -x "$sdkmanager" ]] || { echo "::error::$sdkmanager not found"; exit 1; }
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager" --install \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS_VERSION}"
+          [[ -d "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM}" ]] \
+            || { echo "::error::sdkmanager did not install platforms;${ANDROID_PLATFORM}"; exit 1; }
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> "$GITHUB_ENV"
+      - name: Kotlin unit tests (Robolectric)
+        working-directory: crates/copypaste-ui/src-tauri/gen/android
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:testArm64DebugUnitTest -PskipRust=true
+
+
   commit-messages:
     name: commit messages
     runs-on: ubuntu-latest
@@ -453,6 +491,15 @@ jobs:
         if: success() || failure()
         run: cargo +1.96 test --workspace --locked
 
+      - name: The debug binary links WebKit
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          bin="$(find target -type f -name copypaste-ui -perm -111 | head -n 1)"
+          [[ -n "$bin" ]] || { echo "::error::no copypaste-ui binary after cargo test"; exit 1; }
+          otool -L "$bin" | grep -q '/System/Library/Frameworks/WebKit.framework' \
+            || { echo "::error::$bin does not link WebKit.framework"; otool -L "$bin"; exit 1; }
+
       - name: What this runner can reach
         # Reports, never fails. Whether a headless runner has a pasteboard
         # server and an unlocked keychain is the thing nobody here knows, and
@@ -641,6 +688,14 @@ jobs:
 
       - name: cargo test (full Windows workspace)
         run: cargo +1.96 test --workspace --locked
+
+      - name: Native Windows pairing windows
+        # Interactive desktop on windows-2022. These are ignored locally because
+        # they open real Win32 dialogs; here they are the pairing layer CI.
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +1.96 test -p copypaste-ui --locked pairing_presentation::windows::refusal_tests -- --ignored --test-threads=1 --nocapture
 
       # `npm test` runs native-parity-gate.test.mjs, which shells out to
       # write-native-evidence.py and validates a real PNG through Pillow. Both

@@ -324,8 +324,9 @@ example `pattern_name` (`ffi_sensitive.rs:73`) — that name does not exist.
 
 | Constant | Value | Where |
 |---|---|---|
-| `AUTOWIPE_CONFIDENCE_FLOOR` | **0.70** | `detector/engine.rs:141` |
-| Default sensitive TTL | **30 s** in v1; **`0` (off)** in v2 — see §1.2 | `config/defaults.rs:51` |
+| `CLASSIFY_CONFIDENCE_FLOOR` | **0.70** | `sensitive/finding.rs` |
+| `AUTOWIPE_CONFIDENCE_FLOOR` | **0.85** | `sensitive/finding.rs` |
+| Default sensitive TTL | **30 s** (off sentinel remains `0`) | `copypaste_ipc::ConfigData::sensitive_ttl_secs` |
 | `sensitive_ttl_secs == 0` | sentinel: **auto-wipe disabled**, never clamped away | `config/mod.rs:248`, `:286` |
 | FP-corpus budget | ≤ 5 % of benign corpus, floor of 2 absolute | `tests/false_positive_corpus.rs:91-103` |
 | TP-corpus recall | **100 %**, ≥ 20 entries | `tests/true_positive_corpus.rs:368-391` |
@@ -336,9 +337,10 @@ example `pattern_name` (`ffi_sensitive.rs:73`) — that name does not exist.
 |---|---|---|
 | **0.90 – 0.99** | Prefixed/structural tokens with a unique literal or a mandatory context anchor | "Cannot plausibly be anything else." Safe to auto-delete on a unique literal; a rule resting on a context anchor alone is restricted instead (§5.6). |
 | **0.75 – 0.80** | `generic_password_kv` (0.75), `api_key_kv` (0.75), `dotenv_secret` (0.80) | Keyword-driven. All gate the value on strength and randomness, and all are restricted (§5.6). |
-| **≥ 0.70 floor** | — | Auto-wipe boundary. Nothing may sit *exactly* on it: `ip_with_port` did, and it caused data loss (`CopyPaste-8ys1`). Treat 0.70 as exclusive-in-spirit. |
+| **≥ 0.70 classify floor** | — | Withholding boundary. Matches below this stay Flag. |
+| **≥ 0.85 wipe floor** | — | Auto-wipe boundary. Nothing may sit *exactly* on it. `generic_api_key` at 0.75 is Restricted. |
 | **0.55 – 0.65 — INERT** | `phone_us`, `passport`, `email`, `iban`, `ssn_us`, `discord_bot_token`, `twilio_signing_key_sid`, `generic_bearer`, `http_basic_auth`, `ip_with_port` | Detected, labelled, masked, redacted in logs — **never deleted**, and still searchable. |
-| **RESTRICTED** | `credit_card`, `cloudflare_api_token`, `azure_storage_key`, `aws_secret_access_key`, `dotenv_secret`, `generic_password_kv`, `api_key_kv`, `heroku_api_key` | Above the floor *and* opted out of deletion. Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. |
+| **RESTRICTED** | `credit_card`, `cloudflare_api_token`, `azure_storage_key`, `aws_secret_access_key`, `dotenv_secret`, `generic_password_kv`, `api_key_kv`, `heroku_api_key`, `generic_api_key` | Classified sensitive — never indexed, never synced, preview masked — but **never deleted**. Includes `never_auto_delete` rules and the 0.70–0.85 band. |
 
 **v2 amendment — the restricted band (DMY-162).** v1 had two bands and one
 question, so "how sure is this a card?" and "may this be erased?" shared a
@@ -917,7 +919,7 @@ existing sensitive item rather than only new ones.
 
 | Property | Value |
 |---|---|
-| Config field | `sensitive_ttl_secs`, v1 default **30**, v2 default **0** (off — §1.2) |
+| Config field | `sensitive_ttl_secs`, shipped default **30**, `0` disables |
 | `0` | "auto-wipe disabled" — a valid value, **explicitly not clamped** (`config/mod.rs:248`, `:286`) |
 | Stamped at capture | `expires_at = now_ms + ttl_secs * 1000` (`capture/text.rs:233`) |
 | Pinned items | never expire — excluded by both the backfill and the delete (`storage/items/delete.rs:130-131`, `:151`, `:166`) |

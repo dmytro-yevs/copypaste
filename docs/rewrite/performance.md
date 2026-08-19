@@ -143,7 +143,7 @@ question whose answer was almost always "nothing changed". `ClipboardSource`
 now answers that on the async side (`changed()`, a bare `changeCount` read),
 and only a tick with something to do is handed off. The sensitive-item sweep
 used to ride the poll and so moved onto its own cadence, and does not run at
-all while `sensitive_ttl_secs` is `0`, which is the shipped default.
+all while `sensitive_ttl_secs` is `0`. The shipped default is `30`; `0` remains the off sentinel.
 
 Re-measured on the same harness, `NO_MDNS=1`, 500 ms, load 2.67:
 

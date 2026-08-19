@@ -629,7 +629,7 @@ mod tests {
         let guard = sensitive_guard(&state);
         let item = |content: &str| copypaste_cloud::sync::LocalItem {
             item_id: "a".into(),
-            content: content.as_bytes().to_vec(),
+            content: zeroize::Zeroizing::new(content.as_bytes().to_vec()),
             content_type: "text".into(),
             payload_metadata: None,
             created_at: 1_000,
