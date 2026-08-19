@@ -33,14 +33,24 @@ export const onboarding = {
 
   pairing: {
     title: "Add another device",
-    body: "Pair a phone or computer to share your clipboard between them. You can do this later from Devices.",
+    body: "Show or scan a pairing code. Codes stay in CopyPaste's protected view. Skip if you only use this device.",
     action: "Continue",
   },
 
   cloud: {
     title: "Sync over the internet",
-    body: "Optional. Sign in later from Settings if you want a backup when devices aren't on the same network.",
+    body: "Optional. This device works on its own. Open Advanced only for a self-hosted project.",
+    hosted:
+      "Sign in or create an account. CopyPaste already knows the cloud — you don't paste a project URL or key.",
+    connected: "Cloud sync is on for this device.",
     action: "Continue",
+    signIn: "Sign in",
+    createAccount: "Create account",
+    advanced: "Advanced — self-hosted project",
+    advancedForm: "Self-hosted cloud endpoint",
+    url: "Project URL",
+    anonKey: "Anon key",
+    saveEndpoint: "Use this project",
   },
 
   capture: {
