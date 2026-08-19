@@ -71,7 +71,7 @@ mod tests {
         let data = backend.export(0, false).await.unwrap();
         assert_eq!(data.items.len(), 1);
 
-        backend.clear().await.unwrap();
+        backend.clear(None).await.unwrap();
         assert_eq!(backend.import(data.items).await.unwrap().inserted, 1);
         assert_eq!(
             backend.list(50, None).await.unwrap().items[0].content,
