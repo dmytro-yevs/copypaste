@@ -26,25 +26,6 @@ struct CaptureFeedInner {
     observed: i64,
 }
 
-impl CaptureFeed {
-    fn push_capture(&self, capture: Capture) {
-        let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        inner.pending.push_back(capture);
-        inner.generation += 1;
-    }
-}
-
-#[derive(Clone)]
-pub struct FakeClipboardHandle {
-    feed: CaptureFeed,
-}
-
-impl FakeClipboardHandle {
-    pub fn push_capture(&self, capture: Capture) {
-        self.feed.push_capture(capture);
-    }
-}
-
 #[derive(Default)]
 pub struct FakeClipboard {
     writes: WriteLog,
@@ -133,23 +114,6 @@ pub fn test_state_watching_clipboard(name: &str) -> (Arc<AppState>, tempfile::Te
         }),
     );
     (state, dir, writes)
-}
-
-pub fn test_state_with_clipboard(
-    name: &str,
-) -> (Arc<AppState>, tempfile::TempDir, FakeClipboardHandle) {
-    let feed = CaptureFeed::default();
-    let handle = FakeClipboardHandle { feed: feed.clone() };
-    let (state, dir) = reopen_with(
-        tempfile::tempdir().expect("tempdir"),
-        Cloud::new(None),
-        name,
-        Box::new(FakeClipboard {
-            writes: WriteLog::default(),
-            feed,
-        }),
-    );
-    (state, dir, handle)
 }
 
 pub fn test_state_with_cloud(name: &str, cloud: Cloud) -> (Arc<AppState>, tempfile::TempDir) {
