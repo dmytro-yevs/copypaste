@@ -135,7 +135,7 @@ def glib_vendor_errors(root):
         text = variant.read_text(encoding="utf-8")
     except OSError:
         return ["vendor/glib/src/variant_iter.rs could not be read"]
-    if "&mut p" not in text:
+    if "let mut p:" not in text or "&mut p" not in text:
         return [
             "vendor/glib lost the VariantStrIter mutability patch (RUSTSEC-2024-0429)"
         ]

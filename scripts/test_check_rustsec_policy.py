@@ -26,7 +26,7 @@ class RustsecPolicyTest(unittest.TestCase):
         decision.write_text("accepted\n", encoding="utf-8")
         variant = self.root / "vendor/glib/src/variant_iter.rs"
         variant.parent.mkdir(parents=True)
-        variant.write_text("&mut p\n", encoding="utf-8")
+        variant.write_text("let mut p:\n&mut p\n", encoding="utf-8")
         self.exception = {
             "advisory": "RUSTSEC-2024-0429",
             "aliases": ["GHSA-wrw7-89jp-8q8g"],

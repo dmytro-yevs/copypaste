@@ -117,7 +117,7 @@ impl<'a> VariantStrIter<'a> {
 
     fn impl_get(&self, i: usize) -> &'a str {
         unsafe {
-            let p: *mut libc::c_char = std::ptr::null_mut();
+            let mut p: *mut libc::c_char = std::ptr::null_mut();
             let s = b"&s\0";
             ffi::g_variant_get_child(
                 self.variant.to_glib_none().0,
