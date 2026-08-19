@@ -249,6 +249,19 @@ tap_selector() { # <selector> <artifact> [timeout]
     prepare_action "$@" && tap_prepared_action
 }
 
+reach_settings_tab() { # <artifact> [timeout]
+    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}" started="$SECONDS" point
+    while (( SECONDS - started < timeout )); do
+        if dump_hierarchy "$artifact"; then
+            [[ -n "$(action_center "$artifact" "Settings")" ]] && return 0
+            point="$(action_center "$artifact" "Skip setup")"
+            [[ -n "$point" ]] && sh_ input tap $point >/dev/null
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 screen_size() {
     sh_ wm size | sed -n 's/.* \([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' | tail -n 1
 }

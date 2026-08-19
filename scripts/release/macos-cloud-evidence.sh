@@ -37,7 +37,7 @@ launch_app() { # <unconfigured|configured>
     fi
     APP_PID=$!
     mac_set_app_pid "$APP_PID"
-    mac_wait_label "Settings" "$OUT/app-$1-ready.txt" 30
+    mac_reach_settings "$OUT/app-$1-ready.txt" 30
 }
 
 open_cloud() {
