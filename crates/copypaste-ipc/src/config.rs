@@ -23,13 +23,16 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_STORAGE_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 /// The smallest retention budget a user may select: 50 MiB.
 pub const MIN_STORAGE_QUOTA_BYTES: u64 = 50 * 1024 * 1024;
-pub const MAX_TEXT_SIZE_BYTES: u64 = crate::MAX_CONTENT_BYTES as u64;
+/// Default and hard maximum captured text payload: 4 MiB ([`crate::MAX_CONTENT_BYTES`]).
+pub const MAX_TEXT_SIZE_BYTES: u64 = 4 * 1024 * 1024;
 /// Smallest useful captured text payload: 64 KiB.
 pub const MIN_TEXT_SIZE_BYTES: u64 = 64 * 1024;
-pub const MAX_IMAGE_SIZE_BYTES: u64 = crate::MAX_CONTENT_BYTES as u64;
+/// Default and hard maximum captured image payload: 4 MiB ([`crate::MAX_CONTENT_BYTES`]).
+pub const MAX_IMAGE_SIZE_BYTES: u64 = 4 * 1024 * 1024;
 /// Smallest useful captured image payload: 1 MiB.
 pub const MIN_IMAGE_SIZE_BYTES: u64 = 1024 * 1024;
-pub const MAX_FILE_SIZE_BYTES: u64 = crate::MAX_CONTENT_BYTES as u64;
+/// Default and hard maximum captured file payload: 4 MiB ([`crate::MAX_CONTENT_BYTES`]).
+pub const MAX_FILE_SIZE_BYTES: u64 = 4 * 1024 * 1024;
 /// Smallest useful captured file payload: 1 MiB.
 pub const MIN_FILE_SIZE_BYTES: u64 = 1024 * 1024;
 /// Default decoded-image memory budget, in MiB.
