@@ -81,6 +81,35 @@ pub trait SyncSource {
 
     /// Applies a remote item. Returns whether it was stored.
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError>;
+
+    /// Applies a wire batch. Default loops [`apply`](Self::apply); store
+    /// backends override to one write transaction.
+    fn apply_batch(&self, items: Vec<SyncItem>) -> Result<Vec<bool>, SyncError> {
+        items.into_iter().map(|item| self.apply(item)).collect()
+    }
+
+    /// One summary page for wire exchange, keyset-paged after `(stamp, id)`.
+    ///
+    /// Default slices [`summaries`](Self::summaries). Store backends override
+    /// to a bounded SQLite read so a catch-up round never materialises the
+    /// whole history before the first page goes on the wire.
+    fn summary_page(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ItemSummary>, SyncError> {
+        let all = self.summaries(since_ms)?;
+        let start = match after_id {
+            None => 0,
+            Some(id) => all
+                .iter()
+                .position(|summary| summary.item_id.as_str() == id)
+                .map(|index| index + 1)
+                .unwrap_or(all.len()),
+        };
+        Ok(all.into_iter().skip(start).take(limit).collect())
+    }
 }
 
 /// The channel one session runs over. Deliberately not `transport::Session`:
