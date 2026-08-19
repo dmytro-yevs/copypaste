@@ -8,7 +8,7 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
-import type { TFunction } from "i18next";
+import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import { usePairing } from "@/hooks/usePairing";
@@ -18,6 +18,8 @@ import type { PairingCeremony, PairingState } from "@/lib/ipc";
 
 interface PairingPanelProps {
   disabled: boolean;
+  hideIntro?: boolean;
+  onConfirmed?: () => void;
 }
 
 function stateCopy(
@@ -80,7 +82,7 @@ function stateCopy(
   }
 }
 
-export function PairingPanel({ disabled }: PairingPanelProps) {
+export function PairingPanel({ disabled, hideIntro, onConfirmed }: PairingPanelProps) {
   const { t } = useTranslation();
   const pairing = usePairing();
   const state = pairing.ceremony?.state ?? "idle";
@@ -99,21 +101,28 @@ export function PairingPanel({ disabled }: PairingPanelProps) {
     pairing.presentation === "unavailable" &&
     (state !== "idle" || pairing.lastAttempt !== null);
 
+  useEffect(() => {
+    if (state === "confirmed") onConfirmed?.();
+  }, [onConfirmed, state]);
+
   return (
     <section
-      aria-labelledby="pair-device-heading"
+      aria-labelledby={hideIntro ? undefined : "pair-device-heading"}
+      aria-label={hideIntro ? t("devices.pairing.heading") : undefined}
       aria-busy={pairing.isPending || undefined}
       className="flex flex-col gap-s-2"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-s-2">
-        <div>
-          <h2 id="pair-device-heading" className="text-sm font-semibold">
-            {t("devices.pairing.heading")}
-          </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t("devices.pairing.description")}
-          </p>
-        </div>
+        {hideIntro ? null : (
+          <div>
+            <h2 id="pair-device-heading" className="text-sm font-semibold">
+              {t("devices.pairing.heading")}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("devices.pairing.description")}
+            </p>
+          </div>
+        )}
         <div className="flex flex-wrap gap-s-2">
           <Button
             size="sm"
