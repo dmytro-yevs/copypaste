@@ -212,7 +212,7 @@ describe("the bulk bar", () => {
 
     const copy = await visibleText(app);
     expect(copy).toContain("Delete 2 items?");
-    expect(copy).toContain("cannot be undone");
+    expect(copy).toContain("You have a few seconds to undo it.");
 
     // The two rows the checkboxes ticked, by the text they render. Never a row
     // count: the virtualiser draws a fixed window, so deleting two rows pulls
