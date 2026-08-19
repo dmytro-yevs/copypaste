@@ -71,7 +71,48 @@ class PairingDialogControllerTest {
         dialog.findViewById<View>(R.id.pairing_reveal)!!.performClick()
         assertEquals(payload, rendered)
         assertNoViewValue(dialog.window!!.decorView, payload)
+        assertNoViewValue(dialog.window!!.decorView, "SECRET-CODE")
+        assertNull(dialog.findViewById(R.id.pairing_code))
         assertEquals("Pairing QR code", dialog.findViewById<View>(R.id.pairing_qr)!!.contentDescription)
+    }
+
+    @Test
+    fun inviteAndProgressCancelAbortTheCeremony() {
+        val dialogs = PairingDialogController(activity)
+        var aborted = 0
+
+        assertTrue(dialogs.presentInvite("payload", "CODE", 120) { aborted += 1 })
+        latestDialog().getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, aborted)
+
+        assertTrue(dialogs.presentProgress("handshaking") { aborted += 1 })
+        latestDialog().getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(2, aborted)
+    }
+
+    @Test
+    fun waitingProgressDoesNotDestroyALiveInviteQr() {
+        var aborted = 0
+        val renderer = PairingQrRenderer { _, _ ->
+            Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        }
+        val dialogs = PairingDialogController(activity, renderer)
+        assertTrue(dialogs.presentInvite("payload", "CODE", 120) { aborted += 1 })
+        val invite = latestDialog()
+        invite.findViewById<View>(R.id.pairing_reveal)!!.performClick()
+        assertEquals(View.VISIBLE, invite.findViewById<View>(R.id.pairing_qr)!!.visibility)
+
+        assertTrue(dialogs.presentProgress("waiting_for_peer") { aborted += 1 })
+        assertTrue(invite.isShowing)
+        assertEquals(View.VISIBLE, invite.findViewById<View>(R.id.pairing_qr)!!.visibility)
+        assertEquals(0, aborted)
+
+        assertTrue(dialogs.presentProgress("handshaking") { aborted += 1 })
+        assertFalse(invite.isShowing)
+        assertEquals(0, aborted)
+        assertNull(latestDialog().findViewById(R.id.pairing_qr))
     }
 
     @Test
@@ -146,7 +187,7 @@ class PairingDialogControllerTest {
         assertEquals(listOf("cancel"), decisions)
         assertFalse(confirmation.isShowing)
         assertTrue(qr!!.isRecycled)
-        assertFalse(dialogs.presentProgress("handshaking"))
+        assertFalse(dialogs.presentProgress("handshaking") {})
     }
 
     @Test
@@ -154,7 +195,7 @@ class PairingDialogControllerTest {
         val dialogs = PairingDialogController(activity)
         val untrusted = "failed at /data/user/0/name with 192.0.2.1"
 
-        assertTrue(dialogs.presentProgress(untrusted))
+        assertTrue(dialogs.presentProgress(untrusted) {})
         val dialog = latestDialog()
         assertNoViewValue(dialog.window!!.decorView, untrusted)
         assertTrue(allText(dialog.window!!.decorView).contains("Pairing is ready."))
