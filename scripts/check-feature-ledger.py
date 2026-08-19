@@ -14,7 +14,7 @@ CLOUD_STATES = {"unconfigured", "signed-out", "signed-in", "sync-with-skips", "o
 CLOUD_RELEASE = {
     "release-android-api33-smoke-evidence",
     "release-android-cloud-evidence",
-    "release-android-hardware-evidence",
+    "release-android-smoke-evidence",
     "release-macos-cloud-evidence",
     "release-macos-native-evidence",
     "release-windows-native-evidence",
@@ -22,7 +22,7 @@ CLOUD_RELEASE = {
 SHIPPED_PLATFORMS = {"android", "macos", "windows"}
 PERFORMANCE_PLATFORMS = SHIPPED_PLATFORMS
 REQUIRED_RELEASE = {
-    "release-android-hardware-evidence",
+    "release-android-smoke-evidence",
     "release-macos-native-evidence",
     "release-windows-native-evidence",
 }
