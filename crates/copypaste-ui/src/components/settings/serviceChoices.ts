@@ -90,7 +90,7 @@ export const POLL_INTERVAL_MAX_MS = 5_000;
 export const MIN_TEXT_SIZE_BYTES = 64 * 1_024;
 export const MIN_IMAGE_SIZE_BYTES = 1_048_576;
 export const MIN_FILE_SIZE_BYTES = 1_048_576;
-export const MAX_FILE_SIZE_BYTES_LIMIT = 100 * 1_048_576;
+export const MAX_FILE_SIZE_BYTES_LIMIT = 4 * 1_048_576;
 export const MIN_DECODED_IMAGE_MB = 1;
 
 export const HISTORY_LIMIT: readonly Choice[] = [
@@ -130,24 +130,20 @@ export const DEDUP_WINDOW_SECS: readonly Choice[] = [
 export const MAX_TEXT_SIZE_BYTES: readonly Choice[] = [
   kilobytes(64),
   megabytes(1),
+  megabytes(2),
   megabytes(4),
-  megabytes(10),
-  megabytes(16),
 ];
 
 export const MAX_IMAGE_SIZE_BYTES: readonly Choice[] = [
   megabytes(1),
-  megabytes(16),
-  megabytes(32),
-  megabytes(64),
-  megabytes(128),
+  megabytes(2),
+  megabytes(4),
 ];
 
 export const MAX_FILE_SIZE_BYTES: readonly Choice[] = [
   megabytes(1),
-  megabytes(10),
-  megabytes(50),
-  megabytes(100),
+  megabytes(2),
+  megabytes(4),
 ];
 
 export const MAX_DECODED_IMAGE_MB: readonly Choice[] = [

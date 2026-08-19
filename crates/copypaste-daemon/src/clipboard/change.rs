@@ -43,6 +43,10 @@ const COUNT_NONE: i64 = -1;
 /// the OS and as the burst arithmetic below.
 pub(super) const SELF_WRITE_DELTA: i64 = 1;
 
+pub(super) fn clear_sentinel_on_delta_mismatch() -> bool {
+    false
+}
+
 /// What a `changeCount` observation means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Change {
@@ -326,7 +330,11 @@ mod tests {
         elsewhere.arm(landed);
 
         assert_eq!(t.observe(landed), Change::SelfWrite);
-        // Consumed once, by whoever polls first.
         assert!(!elsewhere.consume_if(landed));
+    }
+
+    #[test]
+    fn delta_mismatch_must_not_clear_the_sentinel() {
+        assert!(!clear_sentinel_on_delta_mismatch());
     }
 }

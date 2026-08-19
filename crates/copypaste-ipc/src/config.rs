@@ -23,16 +23,13 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_STORAGE_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 /// The smallest retention budget a user may select: 50 MiB.
 pub const MIN_STORAGE_QUOTA_BYTES: u64 = 50 * 1024 * 1024;
-/// Default maximum captured text payload: 10 MiB.
-pub const MAX_TEXT_SIZE_BYTES: u64 = 10 * 1024 * 1024;
+pub const MAX_TEXT_SIZE_BYTES: u64 = crate::MAX_CONTENT_BYTES as u64;
 /// Smallest useful captured text payload: 64 KiB.
 pub const MIN_TEXT_SIZE_BYTES: u64 = 64 * 1024;
-/// Default maximum captured image payload: 64 MiB.
-pub const MAX_IMAGE_SIZE_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_IMAGE_SIZE_BYTES: u64 = crate::MAX_CONTENT_BYTES as u64;
 /// Smallest useful captured image payload: 1 MiB.
 pub const MIN_IMAGE_SIZE_BYTES: u64 = 1024 * 1024;
-/// Default and hard maximum captured file payload: 100 MiB.
-pub const MAX_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
+pub const MAX_FILE_SIZE_BYTES: u64 = crate::MAX_CONTENT_BYTES as u64;
 /// Smallest useful captured file payload: 1 MiB.
 pub const MIN_FILE_SIZE_BYTES: u64 = 1024 * 1024;
 /// Default decoded-image memory budget, in MiB.
@@ -227,8 +224,8 @@ const HISTORY_LIMIT: (u32, u32) = (10, 1_000_000);
 const STORAGE_QUOTA_BYTES: (u64, u64) = (MIN_STORAGE_QUOTA_BYTES, u64::MAX);
 const RETENTION_DAYS: (u32, u32) = (0, 3_650);
 const DEDUP_WINDOW_SECS: (u32, u32) = (0, 86_400);
-const MAX_TEXT_SIZE_RANGE: (u64, u64) = (MIN_TEXT_SIZE_BYTES, u64::MAX);
-const MAX_IMAGE_SIZE_RANGE: (u64, u64) = (MIN_IMAGE_SIZE_BYTES, u64::MAX);
+const MAX_TEXT_SIZE_RANGE: (u64, u64) = (MIN_TEXT_SIZE_BYTES, MAX_TEXT_SIZE_BYTES);
+const MAX_IMAGE_SIZE_RANGE: (u64, u64) = (MIN_IMAGE_SIZE_BYTES, MAX_IMAGE_SIZE_BYTES);
 const MAX_FILE_SIZE_RANGE: (u64, u64) = (MIN_FILE_SIZE_BYTES, MAX_FILE_SIZE_BYTES);
 const MAX_DECODED_IMAGE_MB_RANGE: (u32, u32) = (MIN_DECODED_IMAGE_MB, u32::MAX);
 const SENSITIVE_TTL_SECS: (u64, u64) = (0, 86_400);
@@ -470,11 +467,8 @@ impl ConfigData {
 
     /// Effective live capture cap for one shared content-type classification.
     ///
-    /// The binding configuration can express larger image and file limits,
-    /// but the current binary envelope, local reader, and transport contract
-    /// support at most [`crate::MAX_CONTENT_BYTES`]. Raising that hard bound
-    /// requires a coordinated storage and chunk-transport change; until then
-    /// every pre-read and ingest boundary fails closed at the smaller value.
+    /// Settings, UI, and ingest share [`crate::MAX_CONTENT_BYTES`] as the
+    /// hard ceiling; configured per-type limits cannot exceed it.
     #[must_use]
     pub fn capture_limit_bytes(&self, content_type: &str) -> u64 {
         let configured = match crate::content_type::classify(content_type) {
@@ -502,12 +496,12 @@ mod tests {
     fn a_patch_sets_only_what_it_names() {
         let base = ConfigData::default();
         let next = ConfigPatch {
-            max_image_size_bytes: Some(32 * 1024 * 1024),
+            max_image_size_bytes: Some(2 * 1024 * 1024),
             ..Default::default()
         }
         .apply(&base)
         .unwrap();
-        assert_eq!(next.max_image_size_bytes, 32 * 1024 * 1024);
+        assert_eq!(next.max_image_size_bytes, 2 * 1024 * 1024);
         assert_eq!(next.max_text_size_bytes, base.max_text_size_bytes);
         assert_eq!(next.max_file_size_bytes, base.max_file_size_bytes);
         assert_eq!(next.max_decoded_image_mb, base.max_decoded_image_mb);
@@ -558,7 +552,15 @@ mod tests {
                 ..Default::default()
             },
             ConfigPatch {
+                max_text_size_bytes: Some(MAX_TEXT_SIZE_BYTES + 1),
+                ..Default::default()
+            },
+            ConfigPatch {
                 max_image_size_bytes: Some(MIN_IMAGE_SIZE_BYTES - 1),
+                ..Default::default()
+            },
+            ConfigPatch {
+                max_image_size_bytes: Some(MAX_IMAGE_SIZE_BYTES + 1),
                 ..Default::default()
             },
             ConfigPatch {
@@ -587,9 +589,10 @@ mod tests {
     fn payload_limits_have_the_binding_defaults() {
         let defaults = ConfigData::default();
         assert_eq!(defaults.poll_interval_ms, 500);
-        assert_eq!(defaults.max_text_size_bytes, 10 * 1024 * 1024);
-        assert_eq!(defaults.max_image_size_bytes, 64 * 1024 * 1024);
-        assert_eq!(defaults.max_file_size_bytes, 100 * 1024 * 1024);
+        let hard = crate::MAX_CONTENT_BYTES as u64;
+        assert_eq!(defaults.max_text_size_bytes, hard);
+        assert_eq!(defaults.max_image_size_bytes, hard);
+        assert_eq!(defaults.max_file_size_bytes, hard);
         assert_eq!(defaults.max_decoded_image_mb, 50);
     }
 
@@ -610,16 +613,16 @@ mod tests {
         assert_eq!(next.poll_interval_ms, 5_000);
         assert_eq!(next.max_text_size_bytes, 64 * 1024);
         assert_eq!(next.max_image_size_bytes, 1024 * 1024);
-        assert_eq!(next.max_file_size_bytes, 100 * 1024 * 1024);
+        assert_eq!(next.max_file_size_bytes, MAX_FILE_SIZE_BYTES);
         assert_eq!(next.max_decoded_image_mb, 1);
     }
 
     #[test]
     fn every_payload_limit_round_trips_in_a_full_config_and_patch() {
         let patch = ConfigPatch {
-            max_text_size_bytes: Some(12 * 1024 * 1024),
-            max_image_size_bytes: Some(72 * 1024 * 1024),
-            max_file_size_bytes: Some(90 * 1024 * 1024),
+            max_text_size_bytes: Some(2 * 1024 * 1024),
+            max_image_size_bytes: Some(3 * 1024 * 1024),
+            max_file_size_bytes: Some(4 * 1024 * 1024),
             max_decoded_image_mb: Some(75),
             ..Default::default()
         };
@@ -660,6 +663,17 @@ mod tests {
             hard
         );
         assert_eq!(config.capture_limit_bytes(crate::content_type::FILE), hard);
+    }
+
+    #[test]
+    fn settings_payload_ceilings_match_max_content_bytes() {
+        let hard = crate::MAX_CONTENT_BYTES as u64;
+        assert_eq!(MAX_TEXT_SIZE_BYTES, hard);
+        assert_eq!(MAX_IMAGE_SIZE_BYTES, hard);
+        assert_eq!(MAX_FILE_SIZE_BYTES, hard);
+        assert_eq!(MAX_TEXT_SIZE_RANGE.1, hard);
+        assert_eq!(MAX_IMAGE_SIZE_RANGE.1, hard);
+        assert_eq!(MAX_FILE_SIZE_RANGE.1, hard);
     }
 
     /// `0` disables the sweep. It must not be mistaken for "delete now", and it
