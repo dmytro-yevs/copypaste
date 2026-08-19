@@ -77,6 +77,22 @@ class PairingDialogControllerTest {
     }
 
     @Test
+    fun awaitingConfirmationProgressDoesNotOpenAbortingDialog() {
+        val dialogs = PairingDialogController(activity)
+        var aborted = 0
+
+        assertTrue(dialogs.presentProgress("handshaking") { aborted += 1 })
+        val progress = latestDialog()
+        assertTrue(progress.isShowing)
+
+        assertTrue(dialogs.presentProgress("awaiting_confirmation") { aborted += 1 })
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(progress.isShowing)
+        assertEquals(0, aborted)
+        assertNull(ShadowDialog.getLatestDialog()?.takeIf { it.isShowing })
+    }
+
+    @Test
     fun inviteAndProgressCancelAbortTheCeremony() {
         val dialogs = PairingDialogController(activity)
         var aborted = 0

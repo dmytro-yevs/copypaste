@@ -33,6 +33,11 @@ pub fn windows_ui(abort: NativeAbort) -> impl NativePairingUi {
     )
 }
 
+#[cfg(target_os = "macos")]
+pub fn macos_ui(abort: NativeAbort) -> impl NativePairingUi {
+    macos::MacOsPairingUi::new(abort)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
@@ -68,7 +73,7 @@ pub struct PairingPresenter {
 impl Default for PairingPresenter {
     fn default() -> Self {
         #[cfg(target_os = "macos")]
-        let native = Box::new(macos::MacOsPairingUi);
+        let native = Box::new(macos::MacOsPairingUi::new(Arc::new(|| {})));
         #[cfg(target_os = "windows")]
         let native = Box::new(windows::WindowsPairingUi::new(
             invite::encode_native_invite,

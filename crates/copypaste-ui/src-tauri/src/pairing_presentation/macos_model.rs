@@ -163,6 +163,9 @@ mod tests {
             "Security code: {spoken}",
             "setSelectable(false)",
             "for (index, digit) in sas.chars().enumerate()",
+            "NativeAbort",
+            "(self.abort)()",
+            "PairingPresentationState::Unavailable",
         ] {
             assert!(
                 source.contains(required),
@@ -175,5 +178,23 @@ mod tests {
                 "forbidden native path: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn progress_close_aborts_and_awaiting_skips_blocking_alert() {
+        let source = include_str!("macos.rs");
+        let present = source
+            .split("fn present_progress")
+            .nth(1)
+            .and_then(|body| body.split("fn confirm").next())
+            .expect("present_progress");
+        assert!(present.contains("AwaitingConfirmation"));
+        assert!(present.contains("PairingPresentationState::Presented"));
+        assert!(present.contains("(self.abort)()"));
+        assert!(present.contains("PairingPresentationState::Unavailable"));
+        assert!(
+            present.find("AwaitingConfirmation").unwrap() < present.find("(self.abort)()").unwrap(),
+            "awaiting confirmation must return before aborting Close"
+        );
     }
 }

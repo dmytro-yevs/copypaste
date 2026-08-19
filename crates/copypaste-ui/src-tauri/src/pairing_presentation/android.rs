@@ -154,6 +154,12 @@ impl NativePairingUi for AndroidPairingUi {
     }
 
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState {
+        // Awaiting confirmation uses the SAS sheet from confirm(). A modal
+        // progress dialog would block the WebView Confirm control and abort the
+        // ceremony on dismiss (INV-16), so inbound pairing could never finish.
+        if progress.state == PairingState::AwaitingConfirmation {
+            return PairingPresentationState::Presented;
+        }
         let on_abort = self.retain_abort_channel();
         self.call::<_, PresentationResult>(
             "presentProgress",

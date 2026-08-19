@@ -82,6 +82,15 @@ internal class PairingDialogController(
         if (state == "waiting_for_peer" && showingInvite && activeDialog?.isShowing == true) {
             return true
         }
+        // SAS confirmation is owned by confirm(). Opening a modal progress sheet
+        // here would block WebView Confirm and abort on dismiss before the user
+        // can compare codes — close any prior progress without aborting.
+        if (state == "awaiting_confirmation") {
+            dismissActive()
+            this.onAbort = null
+            showingInvite = false
+            return true
+        }
         dismissActive()
         this.onAbort = onAbort
         showingInvite = false
