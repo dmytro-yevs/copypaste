@@ -8,6 +8,8 @@
 - Adds a first-run setup wizard: permissions tap-to-prompt, pairing, hosted
   Supabase as the easy cloud path, and Android-only capture. Skip never blocks
   later setup.
+- Publishes the tagged GitHub Release that alpha.17 could not (Windows
+  signing material is now in release infrastructure).
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
   OEM-sticky capture restarts.
 
@@ -68,6 +70,8 @@ release app.
 The macOS workflow uses ad-hoc signing and does not notarize artifacts with
 Apple. The Homebrew cask removes quarantine only from the installed CopyPaste
 bundle and re-signs it locally. Android publication requires the configured
-durable release key and fails closed when it is unavailable.
+durable release key and fails closed when it is unavailable. Windows
+Authenticode on this alpha uses a project-generated code-signing certificate,
+not a public CA; SmartScreen may warn until a CA-issued identity is in place.
 
 Verify downloaded artifacts against their attached `.sha256` files.
