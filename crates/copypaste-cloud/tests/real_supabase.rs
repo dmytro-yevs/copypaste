@@ -173,7 +173,7 @@ async fn real_supabase_contract() {
 
     let sensitive = LocalItem {
         item_id: "real-sensitive".into(),
-        content: b"must never leave this device".to_vec(),
+        content: zeroize::Zeroizing::new(b"must never leave this device".to_vec()),
         content_type: "text".into(),
         payload_metadata: None,
         created_at: created_at + 3,

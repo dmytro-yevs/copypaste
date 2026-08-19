@@ -1064,14 +1064,10 @@ mod tests {
         let det = detector();
         assert_eq!(det.severities.len(), det.rules.len());
         for (rule, severity) in det.rules.iter().zip(&det.severities) {
-            let expected = match (
-                rule.spec.confidence >= AUTOWIPE_CONFIDENCE_FLOOR,
+            let expected = crate::sensitive::finding::severity_for(
+                rule.spec.confidence,
                 rule.spec.never_auto_delete,
-            ) {
-                (true, false) => Severity::HighConfidence,
-                (true, true) => Severity::Restricted,
-                (false, _) => Severity::Flag,
-            };
+            );
             assert_eq!(*severity, expected, "{}", rule.spec.name);
             assert_eq!(
                 *severity,
@@ -1130,6 +1126,7 @@ mod tests {
                 "cloudflare_api_token",
                 "credit_card",
                 "dotenv_secret",
+                "generic_api_key",
                 "generic_password_kv",
                 "heroku_api_key",
             ]
@@ -1199,15 +1196,23 @@ mod tests {
                 "{text} -> {:?}",
                 all_rules(&det, text)
             );
-            // The overlap has to be present, or the assertion above would pass
-            // on a fixture that never reached the generic rule at all.
-            let high = findings
-                .iter()
-                .find(|finding| finding.severity == Severity::HighConfidence)
-                .unwrap_or_else(|| panic!("no generic rule fired on {text}"));
+            // The generic rule used to sit above the wipe floor and reinstate
+            // deletion over the same bytes. It is now Restricted with the
+            // overlay, so the overlap must still be present and nothing on
+            // these fixtures may be HighConfidence.
             assert!(
-                findings.iter().any(|other| withholds(other, high, true)),
-                "{text}"
+                findings
+                    .iter()
+                    .any(|finding| finding.rule == "generic_api_key"),
+                "{text} -> {:?}",
+                all_rules(&det, text)
+            );
+            assert!(
+                findings
+                    .iter()
+                    .all(|finding| finding.severity != Severity::HighConfidence),
+                "{text} -> {:?}",
+                all_rules(&det, text)
             );
         }
     }

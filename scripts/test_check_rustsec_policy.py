@@ -24,6 +24,9 @@ class RustsecPolicyTest(unittest.TestCase):
         decision = self.root / "docs/adr/decision.md"
         decision.parent.mkdir(parents=True)
         decision.write_text("accepted\n", encoding="utf-8")
+        variant = self.root / "vendor/glib/src/variant_iter.rs"
+        variant.parent.mkdir(parents=True)
+        variant.write_text("&mut p\n", encoding="utf-8")
         self.exception = {
             "advisory": "RUSTSEC-2024-0429",
             "aliases": ["GHSA-wrw7-89jp-8q8g"],
@@ -73,6 +76,12 @@ class RustsecPolicyTest(unittest.TestCase):
     def test_rejects_stale_exception_after_remediation(self):
         errors, _ = self.evaluate({"warnings": {}})
         self.assertTrue(any("stale" in error for error in errors))
+
+    def test_rejects_glib_exception_when_vendor_patch_is_missing(self):
+        (self.root / "vendor/glib/src/variant_iter.rs").write_text("&p\n", encoding="utf-8")
+        report = {"warnings": {"unsound": [finding()]}}
+        errors, _ = self.evaluate(report)
+        self.assertTrue(any("VariantStrIter" in error for error in errors))
 
 
 if __name__ == "__main__":

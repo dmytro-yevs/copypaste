@@ -130,15 +130,18 @@ impl StoreSource {
 
     /// Decrypt one stored row for sending. See [`open_version`].
     #[must_use = "authentication failures must be handled"]
-    pub fn open(&self, row: &StoredItem) -> Result<String, OpenVersionError> {
+    pub fn open(&self, row: &StoredItem) -> Result<zeroize::Zeroizing<String>, OpenVersionError> {
         open_version(&self.keyring, row)
     }
 
     /// Decrypt the raw payload for a transport.  Unlike [`Self::open`], this
     /// retains image and file bytes exactly.
     #[must_use = "authentication failures must be handled"]
-    pub fn open_bytes(&self, row: &StoredItem) -> Result<Vec<u8>, OpenVersionError> {
-        super::open_version_bytes(&self.keyring, row).map(|mut bytes| std::mem::take(&mut *bytes))
+    pub fn open_bytes(
+        &self,
+        row: &StoredItem,
+    ) -> Result<zeroize::Zeroizing<Vec<u8>>, OpenVersionError> {
+        super::open_version_bytes(&self.keyring, row)
     }
 
     /// Merge one remote version in, whichever transport carried it.
@@ -247,9 +250,12 @@ impl StoreSource {
         let (content, binary_content) = if row.deleted {
             (String::new(), Vec::new())
         } else if copypaste_ipc::content_type::is_binary(&row.content_type) {
-            (String::new(), self.open_bytes(&row).ok()?)
+            (
+                String::new(),
+                std::mem::take(&mut *self.open_bytes(&row).ok()?),
+            )
         } else {
-            (self.open(&row).ok()?, Vec::new())
+            (std::mem::take(&mut *self.open(&row).ok()?), Vec::new())
         };
         Some(SyncItem {
             content,

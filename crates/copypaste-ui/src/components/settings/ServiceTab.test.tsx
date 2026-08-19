@@ -8,9 +8,8 @@
  * command routed `GetConfig` or `SetConfig`.
  *
  * The payload limits are independently live and patchable. The final contract
- * covered here is `sensitive_ttl_secs`: it ships off, and the reason recorded on
- * the field is that v2 had nowhere to say the sweep had happened — so the
- * assertions here are about what the control says, not about what it stores.
+ * covered here is `sensitive_ttl_secs`: it ships at 30 seconds, and the
+ * assertions here are about what the control says as well as what it stores.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
@@ -58,7 +57,7 @@ function config(over: Partial<ConfigData> = {}): ConfigData {
     max_image_size_bytes: 4 * 1_048_576,
     max_file_size_bytes: 4 * 1_048_576,
     max_decoded_image_mb: 50,
-    sensitive_ttl_secs: 0,
+    sensitive_ttl_secs: 30,
     excluded_app_bundle_ids: [],
     lan_visibility: true,
     sync_enabled: true,
@@ -339,13 +338,15 @@ describe("liveness", () => {
 });
 
 describe("the sensitive-content sweep", () => {
-  it("has a control, and it is off out of the box", async () => {
+  it("has a control, and it is on out of the box", async () => {
     withUser(<ServiceTab />);
     const ttl = await screen.findByRole("combobox", {
       name: "Delete detected secrets after",
     });
-    expect((ttl as HTMLSelectElement).value).toBe("0");
-    expect(screen.getByText(/kept until you delete them/)).toBeTruthy();
+    expect((ttl as HTMLSelectElement).value).toBe("30");
+    expect(
+      screen.getByText(/deleted without asking and cannot be recovered/i),
+    ).toBeTruthy();
   });
 
   /** Turning it on is turning on an unrecoverable delete. The control has to

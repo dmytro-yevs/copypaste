@@ -17,6 +17,7 @@ use crate::auth::{now_ms, Session};
 use crate::crypto::{encrypt_row, SyncKey};
 use crate::rest::CloudItem;
 use crate::CloudConfig;
+use zeroize::Zeroizing;
 
 pub(super) const PASS: &str = "correct horse battery staple";
 pub(super) const ACCOUNT: &str = "acct-1";
@@ -54,7 +55,7 @@ pub(super) fn allow_everything() -> SensitiveGuard {
 pub(super) fn item(id: &str, created_at: i64, content: &str) -> LocalItem {
     LocalItem {
         item_id: id.into(),
-        content: content.as_bytes().to_vec(),
+        content: Zeroizing::new(content.as_bytes().to_vec()),
         content_type: "text".into(),
         payload_metadata: None,
         created_at,
@@ -66,7 +67,7 @@ pub(super) fn item(id: &str, created_at: i64, content: &str) -> LocalItem {
 pub(super) fn tombstone(id: &str, created_at: i64) -> LocalItem {
     LocalItem {
         item_id: id.into(),
-        content: Vec::new(),
+        content: Zeroizing::new(Vec::new()),
         content_type: "text".into(),
         payload_metadata: None,
         created_at,

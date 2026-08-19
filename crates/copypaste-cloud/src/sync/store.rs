@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use copypaste_core::{RemoteVersion, Store, StoreSource};
 use tracing::warn;
+use zeroize::Zeroizing;
 
 use super::source::{Applied, LocalItem};
 use super::unreadable::{Sweep, UnreadableUploads, UploadFloor};
@@ -314,7 +315,7 @@ impl StoreView {
     /// (manifest 05 T-4).
     fn to_local(&self, row: &copypaste_core::StoredItem) -> Option<LocalItem> {
         let content = if row.deleted {
-            Vec::new()
+            Zeroizing::new(Vec::new())
         } else {
             self.shared.open_bytes(row).ok()?
         };
