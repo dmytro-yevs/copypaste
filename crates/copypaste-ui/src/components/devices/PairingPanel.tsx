@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
+import type { TFunction } from "i18next";
 import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
