@@ -180,6 +180,7 @@ export function ServiceTab() {
           disabled={busy}
           validation={{
             min: MIN_TEXT_SIZE_BYTES,
+            max: MAX_FILE_SIZE_BYTES_LIMIT,
             message: t("settings.service.validation.text"),
           }}
           onChange={(max_text_size_bytes) => apply({ max_text_size_bytes })}
@@ -193,6 +194,7 @@ export function ServiceTab() {
           disabled={busy}
           validation={{
             min: MIN_IMAGE_SIZE_BYTES,
+            max: MAX_FILE_SIZE_BYTES_LIMIT,
             message: t("settings.service.validation.image"),
           }}
           onChange={(max_image_size_bytes) => apply({ max_image_size_bytes })}

@@ -1,6 +1,7 @@
 //! A fully wired `AppState` on a temporary data directory — one fixture for the
 //! whole crate, so there is one definition of what a daemon is.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use copypaste_core::{Detector, Keyring, Store};
@@ -15,9 +16,39 @@ use crate::AppState;
 
 /// Reads nothing; records what is written, so a test can assert the *absence*
 /// of a pasteboard write — the whole difference between `get` and `copy`.
+#[derive(Default, Clone)]
+struct CaptureFeed(Arc<std::sync::Mutex<CaptureFeedInner>>);
+
+#[derive(Default)]
+struct CaptureFeedInner {
+    pending: VecDeque<Capture>,
+    generation: i64,
+    observed: i64,
+}
+
+impl CaptureFeed {
+    fn push_capture(&self, capture: Capture) {
+        let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        inner.pending.push_back(capture);
+        inner.generation += 1;
+    }
+}
+
+#[derive(Clone)]
+pub struct FakeClipboardHandle {
+    feed: CaptureFeed,
+}
+
+impl FakeClipboardHandle {
+    pub fn push_capture(&self, capture: Capture) {
+        self.feed.push_capture(capture);
+    }
+}
+
 #[derive(Default)]
 pub struct FakeClipboard {
     writes: WriteLog,
+    feed: CaptureFeed,
 }
 
 /// Everything written to a [`FakeClipboard`], shared with whoever made it.
@@ -32,8 +63,28 @@ impl WriteLog {
 
 impl ClipboardSource for FakeClipboard {
     fn poll(&mut self) -> Option<Capture> {
-        None
+        self.poll_with_policy(crate::clipboard::CapturePolicy::new(
+            &copypaste_ipc::ConfigData::default(),
+        ))
     }
+
+    fn poll_with_policy(
+        &mut self,
+        _policy: crate::clipboard::CapturePolicy<'_>,
+    ) -> Option<Capture> {
+        let mut inner = self.feed.0.lock().unwrap_or_else(|e| e.into_inner());
+        if inner.generation == inner.observed {
+            return None;
+        }
+        inner.observed = inner.generation;
+        inner.pending.pop_front()
+    }
+
+    fn changed(&mut self) -> bool {
+        let inner = self.feed.0.lock().unwrap_or_else(|e| e.into_inner());
+        inner.generation != inner.observed
+    }
+
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
         self.writes
             .0
@@ -57,6 +108,18 @@ pub fn test_state(name: &str) -> (Arc<AppState>, tempfile::TempDir) {
     test_state_with_cloud(name, Cloud::new(None))
 }
 
+pub fn test_state_with_clipboard(
+    name: &str,
+    clipboard: Box<dyn ClipboardSource>,
+) -> (Arc<AppState>, tempfile::TempDir) {
+    reopen_with(
+        tempfile::tempdir().expect("tempdir"),
+        Cloud::new(None),
+        name,
+        clipboard,
+    )
+}
+
 /// A state plus the log of everything written to its clipboard.
 pub fn test_state_watching_clipboard(name: &str) -> (Arc<AppState>, tempfile::TempDir, WriteLog) {
     let writes = WriteLog::default();
@@ -66,9 +129,27 @@ pub fn test_state_watching_clipboard(name: &str) -> (Arc<AppState>, tempfile::Te
         name,
         Box::new(FakeClipboard {
             writes: writes.clone(),
+            feed: CaptureFeed::default(),
         }),
     );
     (state, dir, writes)
+}
+
+pub fn test_state_with_clipboard(
+    name: &str,
+) -> (Arc<AppState>, tempfile::TempDir, FakeClipboardHandle) {
+    let feed = CaptureFeed::default();
+    let handle = FakeClipboardHandle { feed: feed.clone() };
+    let (state, dir) = reopen_with(
+        tempfile::tempdir().expect("tempdir"),
+        Cloud::new(None),
+        name,
+        Box::new(FakeClipboard {
+            writes: WriteLog::default(),
+            feed,
+        }),
+    );
+    (state, dir, handle)
 }
 
 pub fn test_state_with_cloud(name: &str, cloud: Cloud) -> (Arc<AppState>, tempfile::TempDir) {
@@ -84,7 +165,15 @@ pub fn reopen(
     cloud: Cloud,
     name: &str,
 ) -> (Arc<AppState>, tempfile::TempDir) {
-    reopen_with(dir, cloud, name, Box::new(FakeClipboard::default()))
+    reopen_with(
+        dir,
+        cloud,
+        name,
+        Box::new(FakeClipboard {
+            writes: WriteLog::default(),
+            feed: CaptureFeed::default(),
+        }),
+    )
 }
 
 fn reopen_with(

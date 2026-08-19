@@ -65,7 +65,7 @@ pub struct AppState {
 
 /// How many change events are buffered per subscriber before it is told it
 /// lagged. Small on purpose: the recovery for a lag is one extra re-read.
-const EVENT_BUFFER: usize = 32;
+const EVENT_BUFFER: usize = 256;
 
 impl AppState {
     #[allow(clippy::too_many_arguments)]
@@ -237,5 +237,15 @@ impl AppState {
             index_purged: self.index_purged.load(Ordering::Acquire),
             uptime_secs: self.started_at.elapsed().as_secs(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_buffer_capacity_is_two_fifty_six() {
+        assert_eq!(EVENT_BUFFER, 256);
     }
 }
