@@ -288,10 +288,7 @@ export function PairingPanel({ disabled }: PairingPanelProps) {
                       </Button>
                       <Button
                         size="sm"
-                        disabled={
-                          pairing.isPending ||
-                          pairing.presentation !== "presented"
-                        }
+                        disabled={pairing.isPending}
                         aria-label={t("devices.pairing.confirmLabel")}
                         onClick={() => pairing.run("confirm")}
                       >

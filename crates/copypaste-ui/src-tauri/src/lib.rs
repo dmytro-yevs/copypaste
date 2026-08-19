@@ -142,7 +142,22 @@ pub fn run() {
                     pairing_presentation::windows_ui(abort),
                 ));
             }
-            #[cfg(not(any(target_os = "android", target_os = "windows")))]
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.handle().clone();
+                let abort = std::sync::Arc::new(move || {
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        use backend::PairingBackend as _;
+                        let backend = handle.state::<SelectedBackend>();
+                        let _ = backend.pair_cancel().await;
+                    });
+                });
+                app.manage(pairing_presentation::PairingPresenter::new(
+                    pairing_presentation::macos_ui(abort),
+                ));
+            }
+            #[cfg(not(any(target_os = "android", target_os = "windows", target_os = "macos")))]
             app.manage(pairing_presentation::PairingPresenter::default());
             app.manage(Supervisor::default());
             app.manage(shell::shortcut::ShortcutSettings::load(app.handle())?);
