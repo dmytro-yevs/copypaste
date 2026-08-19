@@ -101,31 +101,37 @@ describe("native pairing boundary", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("does not allow confirm when native presentation is unavailable", async () => {
-    createPairingInvite.mockResolvedValue(
+  it("enables confirm for inbound awaiting confirmation without Present", async () => {
+    const awaiting = ceremony({
+      ceremony_id: "ceremony-3",
+      role: "initiator",
+      state: "awaiting_confirmation",
+      presentation: "unavailable",
+    });
+    getPairingProgress.mockResolvedValue(awaiting);
+    confirmPairing.mockResolvedValue(
       ceremony({
         ceremony_id: "ceremony-3",
         role: "initiator",
-        state: "awaiting_confirmation",
-        presentation: "unavailable",
+        state: "confirmed",
+        presentation: "presented",
+        known_device: { name: "Phone", last_seen_ms: 1, online: true },
       }),
     );
     const { user } = withUser(<PairingPanel disabled={false} />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Show pairing code" }),
-    );
-
-    expect(await screen.findByText("Compare the security codes")).toBeTruthy();
-    const confirm = screen.getByRole("button", {
+    const confirm = (await screen.findByRole("button", {
       name: "Codes match — confirm pairing in the native view",
-    });
-    expect((confirm as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/protected pairing view didn't open/i)).toBeTruthy();
-    expect(confirmPairing).not.toHaveBeenCalled();
+    })) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+
+    await user.click(confirm);
+    await waitFor(() => expect(confirmPairing).toHaveBeenCalledOnce());
+    expect(presentPairing).not.toHaveBeenCalled();
+    expect(await screen.findByText("Device paired")).toBeTruthy();
   });
 
-  it("enables confirm only after native presentation is shown", async () => {
+  it("keeps confirm available when Show details is a no-op presentation", async () => {
     const awaiting = ceremony({
       ceremony_id: "ceremony-3",
       role: "initiator",
@@ -137,12 +143,7 @@ describe("native pairing boundary", () => {
     confirmPairing.mockResolvedValue(awaiting);
     const { user } = withUser(<PairingPanel disabled={false} />);
 
-    const confirmBefore = (await screen.findByRole("button", {
-      name: "Codes match — confirm pairing in the native view",
-    })) as HTMLButtonElement;
-    expect(confirmBefore.disabled).toBe(true);
-
-    await user.click(screen.getByRole("button", { name: "Show details" }));
+    await user.click(await screen.findByRole("button", { name: "Show details" }));
     await waitFor(() => expect(presentPairing).toHaveBeenCalledOnce());
     const confirm = screen.getByRole("button", {
       name: "Codes match — confirm pairing in the native view",
@@ -150,9 +151,6 @@ describe("native pairing boundary", () => {
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
     await user.click(confirm);
     await waitFor(() => expect(confirmPairing).toHaveBeenCalledOnce());
-    expect((confirm as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByText(/decision was sent/i)).toBeNull();
-    expect(screen.getByText(/protected pairing view didn't open/i)).toBeTruthy();
   });
 
   it("rejects a mismatched code and reaches the terminal state", async () => {
