@@ -114,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          cargo +1.96 fetch --locked -p tauri --manifest-path "$GITHUB_WORKSPACE/Cargo.toml"
+          cargo +1.96 fetch --locked --manifest-path "$GITHUB_WORKSPACE/Cargo.toml"
           python3 "$GITHUB_WORKSPACE/scripts/write_android_unit_test_gradle.py" --self-test \
             --repo "$GITHUB_WORKSPACE" \
             --android-project "$PWD"
