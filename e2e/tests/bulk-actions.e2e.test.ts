@@ -142,7 +142,7 @@ describe("the bulk bar", () => {
     });
     const copy = await dialog.getText();
     expect(copy).toContain("Delete 2 items?");
-    expect(copy).toContain("cannot be undone");
+    expect(copy).toContain("You have a few seconds to undo it.");
 
     const before = await app.daemon.items();
     await clickButton(app.browser, "Delete", { within: '[role="alertdialog"]' });
