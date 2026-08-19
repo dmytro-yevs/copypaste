@@ -81,6 +81,13 @@ jobs:
       BUILD_TOOLS_VERSION: "36.0.0"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: linux-1.96-android-kotlin
+          cache-targets: false
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
@@ -107,11 +114,13 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          # tauri-build writes these with cargo-registry paths. Unit tests do
-          # not load native plugins, so empty stubs are enough to evaluate
-          # settings.gradle / app/build.gradle.kts.
-          : > tauri.settings.gradle
-          : > app/tauri.build.gradle.kts
+          cargo +1.96 fetch --locked -p tauri --manifest-path "$GITHUB_WORKSPACE/Cargo.toml"
+          python3 "$GITHUB_WORKSPACE/scripts/write_android_unit_test_gradle.py" --self-test \
+            --repo "$GITHUB_WORKSPACE" \
+            --android-project "$PWD"
+          python3 "$GITHUB_WORKSPACE/scripts/write_android_unit_test_gradle.py" \
+            --repo "$GITHUB_WORKSPACE" \
+            --android-project "$PWD"
           ./gradlew --no-daemon :app:testArm64DebugUnitTest -PskipRust=true
 
 
