@@ -3,19 +3,38 @@
 //! offset — anything that ever returns spans indexes into its output.
 
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
+use regex::Regex;
 use unicode_normalization::UnicodeNormalization;
 
-/// NFKC-normalise before matching. Without this, `Ａ` (U+FF21 FULLWIDTH LATIN
-/// CAPITAL A) and every other compatibility form renders as ASCII but bypasses
-/// every ASCII character class. NFKC is the identity on ASCII (§5.1), so ASCII
-/// input skips the pass and the allocation entirely.
+/// NFKC-normalise before matching, then strip default-ignorable code points.
+/// Without NFKC, `Ａ` (U+FF21 FULLWIDTH LATIN CAPITAL A) renders as ASCII but
+/// bypasses every ASCII character class. Without stripping ignorables, a ZWJ
+/// spliced into a token defeats every regex (§7.8). ASCII has neither, so it
+/// skips the pass and the allocation entirely.
 pub(super) fn normalise(text: &str) -> Cow<'_, str> {
     if text.is_ascii() {
         Cow::Borrowed(text)
     } else {
-        Cow::Owned(text.nfkc().collect())
+        let nfkc: String = text.nfkc().collect();
+        match strip_default_ignorables(&nfkc) {
+            Cow::Borrowed(_) => Cow::Owned(nfkc),
+            Cow::Owned(stripped) => Cow::Owned(stripped),
+        }
     }
+}
+
+fn strip_default_ignorables(text: &str) -> Cow<'_, str> {
+    default_ignorable_re().replace_all(text, "")
+}
+
+fn default_ignorable_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\p{Default_Ignorable_Code_Point}+")
+            .expect("Default_Ignorable_Code_Point is a supported regex property")
+    })
 }
 
 #[cfg(test)]
@@ -68,18 +87,38 @@ mod tests {
         }
     }
 
-    /// §7.8: v1's `nfkc_zwj_in_jwt_normalises_away` asserted nothing about ZWJ
-    /// — its body tested a clean ASCII JWT. This is the real test. NFKC does
-    /// **not** strip default-ignorable code points, so a ZWJ spliced into a
-    /// token still defeats the regex. The bypass is open, by decision:
-    /// stripping default-ignorables before matching would change every offset
-    /// this module might ever return, and the failure direction is a false
-    /// negative (I1's preferred direction), not data loss.
     #[test]
-    fn zwj_bypass_is_documented_and_still_open() {
+    fn default_ignorables_are_stripped_so_spliced_secrets_are_detected() {
         let det = detector();
         let spliced = "AKIA\u{200D}IOSFODNN7EXAMPLE";
-        assert_eq!(normalise(spliced), spliced, "NFKC keeps ZWJ");
-        assert!(!det.is_sensitive(spliced), "known gap, tracked in §7.8");
+        assert_eq!(normalise(spliced), "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(det.scan(spliced).unwrap().rule, "aws_access_key");
+        assert!(det.is_sensitive(spliced));
+        assert!(det.may_auto_wipe(spliced));
+    }
+
+    #[test]
+    fn other_default_ignorables_cannot_splice_a_secret() {
+        let det = detector();
+        for splice in ['\u{200B}', '\u{200C}', '\u{2060}', '\u{FEFF}', '\u{FE0F}'] {
+            let text = format!("AKIA{splice}IOSFODNN7EXAMPLE");
+            assert_eq!(normalise(&text), "AKIAIOSFODNN7EXAMPLE", "{splice:?}");
+            assert!(det.is_sensitive(&text), "{splice:?}");
+        }
+    }
+
+    #[test]
+    fn stripping_ignorables_does_not_make_inert_pii_wipeable() {
+        let det = detector();
+        let email = "please email alice\u{200D}.smith@example.com about it";
+        let card = "Customer card: 4111\u{200D}111111111111 — expires 12/26";
+
+        assert!(!det.scan_all(email).is_empty());
+        assert!(!det.is_sensitive(email));
+        assert!(!det.may_auto_wipe(email));
+
+        assert_eq!(det.scan(card).unwrap().rule, "credit_card");
+        assert!(det.is_sensitive(card));
+        assert!(!det.may_auto_wipe(card));
     }
 }
