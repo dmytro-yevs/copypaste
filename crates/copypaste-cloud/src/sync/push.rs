@@ -1,15 +1,14 @@
 //! The upload path: what leaves the device, sealed, signed, and what never does.
 //!
-//! Three rules are enforced here and nowhere else in this module: the sensitive
-//! gate runs before anything is sealed or counted, a tombstone is sent as a
-//! tombstone rather than as a row that happens to have a flag set, and every
-//! row is signed before it is handed to the transport.
+//! Three rules are enforced here and nowhere else in this module: a tombstone
+//! is sent as a tombstone rather than as a row that happens to have a flag set,
+//! the sensitive gate runs on live rows before anything is sealed or counted,
+//! and every row is signed before it is handed to the transport.
 
 use super::driver::CloudSync;
 use super::outcome::{SyncError, SyncStats};
 use super::source::{CloudSource, LocalItem};
 use super::transport::{AuthApi, RestApi};
-use crate::auth::now_ms;
 use crate::crypto::encrypt_row;
 use crate::rest::CloudItem;
 
@@ -53,18 +52,6 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         let mut rows: Vec<CloudItem> = Vec::new();
 
         for mut item in source.local_changes_after(since, after_item_id.as_deref())? {
-            // The gate, before anything is sealed or counted. A sensitive item
-            // is not merely withheld from this request — it is never given an
-            // opportunity to reach the network at all.
-            if self.sensitive.is_sensitive(&item) {
-                stats.skipped_sensitive += 1;
-                tracing::debug!(
-                    item_id = %item.item_id,
-                    "withholding a sensitive item from upload"
-                );
-                continue;
-            }
-
             // Preserve the original origin across hops; restamping it breaks
             // the ordering's final tie-break. Taken rather than cloned because
             // both branches below consume the rest of `item`.
@@ -80,21 +67,25 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 // travels on the same upsert as a live row — the id-only PATCH
                 // path is gone, because a partial write cannot sign the columns
                 // it does not send.
-                //
-                // Restamped, for the reason that path restamped it: `created_at`
-                // is what the poll cursor pages on, and a tombstone that kept
-                // the item's original stamp sits below the watermark of every
-                // device that already has the item, so the deletion never
-                // propagates. `max` rather than a bare `now`, so a delete
-                // stamped ahead of this device's clock cannot be demoted below
-                // the very version it deletes.
                 stats.tombstoned += 1;
                 rows.push(self.signed(CloudItem::tombstone(
                     item.item_id,
                     item.content_type,
-                    item.created_at.max(now_ms()),
+                    item.created_at,
                     origin,
                 )));
+                continue;
+            }
+
+            // The gate, before anything is sealed or counted. A sensitive item
+            // is not merely withheld from this request — it is never given an
+            // opportunity to reach the network at all.
+            if self.sensitive.is_sensitive(&item) {
+                stats.skipped_sensitive += 1;
+                tracing::debug!(
+                    item_id = %item.item_id,
+                    "withholding a sensitive item from upload"
+                );
                 continue;
             }
 
@@ -252,24 +243,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_tombstone_is_restamped_so_it_sorts_above_every_watermark() {
-        // `created_at` is what the poll cursor pages on. A tombstone that kept
-        // the item's original stamp would sit below the watermark of every
-        // device that already has the item, and the delete would never arrive.
-        let before = now_ms();
-        let source = FakeSource::with_outgoing(vec![tombstone("a", 1_000)]);
+    async fn a_tombstone_keeps_the_stores_created_at() {
+        let stamped = 1_700_000_000_000i64;
+        let source = FakeSource::with_outgoing(vec![tombstone("a", stamped)]);
         let sync = driver(FakeRest::default(), FakeAuth::default());
         sync.push(&source).await.unwrap();
 
         let rows = sync.rest.rows.lock().unwrap();
         let row = &rows["a"];
         assert!(row.deleted);
-        assert!(
-            row.created_at >= before,
-            "the tombstone kept the item's original stamp"
+        assert_eq!(
+            row.created_at, stamped,
+            "push must not restamp a tombstone's created_at"
         );
-        // And the restamp is under the signature, so the backend cannot move it.
-        row.verify(&key()).expect("signed at the restamped value");
+        row.verify(&key()).expect("signed at the store stamp");
     }
 
     #[tokio::test]
@@ -328,6 +315,32 @@ mod tests {
             !rows.contains_key("secret"),
             "a sensitive item reached the backend"
         );
+    }
+
+    #[tokio::test]
+    async fn a_sensitive_tombstone_is_uploaded() {
+        let mut dead = tombstone("secret", 3_000);
+        dead.content = b"AKIAIOSFODNN7EXAMPLE".to_vec();
+        let source = FakeSource::with_outgoing(vec![dead]);
+        let sync = CloudSync::new(
+            FakeRest::default(),
+            FakeAuth::default(),
+            key(),
+            config(),
+            session("token-1"),
+            SensitiveGuard::new(|item| item.item_id == "secret"),
+        );
+
+        let stats = sync.push(&source).await.unwrap();
+        assert_eq!(stats.tombstoned, 1);
+        assert_eq!(stats.skipped_sensitive, 0);
+
+        let rows = sync.rest.rows.lock().unwrap();
+        let row = rows
+            .get("secret")
+            .expect("sensitive tombstone was withheld");
+        assert!(row.deleted);
+        assert!(row.ciphertext.is_empty());
     }
 
     #[tokio::test]
