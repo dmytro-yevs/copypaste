@@ -52,6 +52,8 @@ pub const DEFAULT_SENSITIVE_TTL: Duration = Duration::from_secs(30);
 /// of the user's "turn it off".
 pub const SENSITIVE_TTL_DISABLED: Duration = Duration::ZERO;
 
+const SENSITIVE_WIPE_PAGE: i64 = 64;
+
 /// Remove every sensitive item that is past its TTL and above the auto-wipe
 /// floor. Returns how many were removed.
 ///
@@ -86,7 +88,7 @@ pub fn sweep_sensitive(
 
     let mut victims = Vec::new();
     let mut unjudged = 0u64;
-    for row in store.expired_sensitive(cutoff_ms)? {
+    for row in store.expired_sensitive(cutoff_ms, SENSITIVE_WIPE_PAGE)? {
         let Ok(mut plaintext) = decrypt(&row.content_ciphertext, &row.nonce, key, &row.id) else {
             tracing::warn!(id = %row.id, "not wiping a sensitive item that could not be read");
             unjudged += 1;
@@ -119,13 +121,7 @@ pub fn sweep_sensitive(
         );
     }
 
-    // A wiped secret becomes a payload-less tombstone. The sync boundary offers
-    // that tombstone but never a live sensitive row, so a device that already
-    // has an older copy converges on deletion without receiving the secret.
-    let mut removed = 0;
-    for (id, created_at, content_hash) in victims {
-        removed += u64::from(store.wipe_sensitive_if_unchanged(&id, created_at, &content_hash)?);
-    }
+    let removed = store.wipe_sensitive_batch_if_unchanged(&victims)?;
     if removed > 0 {
         tracing::info!(removed, "wiped expired sensitive items");
     }
@@ -408,6 +404,40 @@ mod tests {
         )
         .unwrap();
         assert_eq!(removed, 1);
+    }
+
+    #[test]
+    fn the_sweep_pages_expired_candidates() {
+        let f = fixture();
+        let mut ids = Vec::new();
+        for n in 0..70 {
+            let text = format!("{}{n:02}", &SECRET[..18]);
+            assert!(f.detector.may_auto_wipe(&text), "fixture must be wipeable");
+            ids.push(capture(&f, &text, T0 + n as i64));
+        }
+        let removed = sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 60_000,
+        )
+        .unwrap();
+        assert_eq!(removed, 64);
+        let remaining: usize = ids
+            .iter()
+            .filter(|id| f.store.get(id).unwrap().is_some())
+            .count();
+        assert_eq!(remaining, 6);
+        let removed = sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 60_000,
+        )
+        .unwrap();
+        assert_eq!(removed, 6);
     }
 
     #[test]
