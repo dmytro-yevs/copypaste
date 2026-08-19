@@ -55,6 +55,7 @@ pub async fn listen<S, F>(
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
+            Some(_) = sessions.join_next() => {}
             accepted = listener.accept() => match accepted {
                 Ok((stream, addr)) => {
                     let Ok(permit) = Arc::clone(&node.sessions).try_acquire_owned() else {
@@ -452,5 +453,24 @@ mod tests {
     fn binding_the_peer_port_listens_on_every_interface() {
         let listener = bind(0).expect("bind an ephemeral port");
         assert!(listener.local_addr().unwrap().ip().is_unspecified());
+    }
+
+    #[tokio::test]
+    async fn finished_session_tasks_are_drained_from_the_join_set() {
+        let mut sessions = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            sessions.spawn(async {});
+        }
+        for _ in 0..20 {
+            if sessions.is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+            while sessions.try_join_next().is_some() {}
+        }
+        assert!(
+            sessions.is_empty(),
+            "completed JoinSet tasks must be joinable so they do not leak"
+        );
     }
 }
