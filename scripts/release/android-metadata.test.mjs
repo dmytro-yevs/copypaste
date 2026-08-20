@@ -46,6 +46,7 @@ test("prereleases and releases are strictly monotonic", () => {
     "2.0.0-alpha.17",
     "2.0.0-alpha.18",
     "2.0.0-alpha.19",
+    "2.0.0-alpha.20",
     "2.0.0-beta.0",
     "2.0.0-rc.0",
     "2.0.0",
@@ -58,6 +59,7 @@ test("prereleases and releases are strictly monotonic", () => {
   assert.equal(versionCodeFor("2.0.0-alpha.17"), 200000017);
   assert.equal(versionCodeFor("2.0.0-alpha.18"), 200000018);
   assert.equal(versionCodeFor("2.0.0-alpha.19"), 200000019);
+  assert.equal(versionCodeFor("2.0.0-alpha.20"), 200000020);
 });
 
 test("unsupported SemVer shapes fail closed", () => {
@@ -72,6 +74,7 @@ test("upgrade fixture precedes the product version", () => {
     "2.0.0-alpha.17": "2.0.0-alpha.16",
     "2.0.0-alpha.18": "2.0.0-alpha.17",
     "2.0.0-alpha.19": "2.0.0-alpha.18",
+    "2.0.0-alpha.20": "2.0.0-alpha.19",
     "2.0.0-beta.0": "2.0.0-alpha.2999",
     "2.0.0-rc.0": "2.0.0-beta.2999",
     "2.0.1-alpha.0": "2.0.0",

@@ -10,6 +10,8 @@
   later setup.
 - Drops the physical arm64 Android self-hosted publish gate. Signed APK
   smoke on GitHub-hosted emulators is the Android release evidence.
+- Unblocks release publish: authenticated clipboard column privileges,
+  Android upgrade-fixture metadata deps, and macOS cloud evidence launch.
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
   OEM-sticky capture restarts.
 

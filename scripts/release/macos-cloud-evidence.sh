@@ -24,20 +24,64 @@ cleanup() {
     "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
 }
 
+seed_onboarding_complete() {
+    # First-run wizard hides Settings. Seed the Tauri store the same way a
+    # completed setup would, so cloud evidence can open the Sync row.
+    local prefs_dir="$HOME/Library/Application Support/com.copypaste.app"
+    mkdir -p "$prefs_dir"
+    python3 - "$prefs_dir/preferences.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+blob = {
+    "state": {
+        "theme": "system",
+        "accent": "indigo",
+        "translucency": 0,
+        "previewLines": 2,
+        "previewLinesPopup": 1,
+        "sortByDevice": False,
+        "historyDisplayLimit": 1000,
+        "warnBeforeReveal": True,
+        "allowScreenshots": True,
+        "onboardingComplete": True,
+    },
+    "version": 0,
+}
+store = {}
+if path.exists():
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(store, dict):
+            store = {}
+    except (OSError, json.JSONDecodeError):
+        store = {}
+store["copypaste.prefs"] = json.dumps(blob, separators=(",", ":"))
+path.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
 launch_app() { # <unconfigured|configured>
     mac_stop_executable "$BINARY" || return 1
     "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
     pkill -f "$APP/Contents/MacOS/copypaste-daemon" 2>/dev/null || true
+    seed_onboarding_complete
+    # Launch Services registration matches macos-native-evidence; a raw binary
+    # background job is not reliably addressable by System Events.
     if [[ "$1" == configured ]]; then
-        COPYPASTE_CLOUD_URL="http://127.0.0.1:$STUB_PORT" \
-        COPYPASTE_CLOUD_ANON_KEY="native-evidence" "$BINARY" > "$OUT/app-$1.log" 2>&1 &
+        open -n -a "$APP" \
+            --env "COPYPASTE_CLOUD_URL=http://127.0.0.1:$STUB_PORT" \
+            --env "COPYPASTE_CLOUD_ANON_KEY=native-evidence" \
+            > "$OUT/app-$1-open.log" 2>&1 || return 1
     else
         env -u COPYPASTE_CLOUD_URL -u COPYPASTE_CLOUD_ANON_KEY \
-            "$BINARY" > "$OUT/app-$1.log" 2>&1 &
+            open -n -a "$APP" > "$OUT/app-$1-open.log" 2>&1 || return 1
     fi
-    APP_PID=$!
+    APP_PID="$(mac_wait_executable_pid "$BINARY" 30)" || return 1
     mac_set_app_pid "$APP_PID"
-    mac_reach_settings "$OUT/app-$1-ready.txt" 30
+    if ! mac_reach_settings "$OUT/app-$1-ready.txt" 30; then
+        mac_ax dump > "$OUT/app-$1-ax-fail.txt" 2>&1 || true
+        return 1
+    fi
 }
 
 open_cloud() {
