@@ -67,14 +67,18 @@ launch_app() { # <unconfigured|configured>
     seed_onboarding_complete
     # Launch Services registration matches macos-native-evidence; a raw binary
     # background job is not reliably addressable by System Events.
+    # COPYPASTE_EVIDENCE_AX asks the app to publish the WKWebView AX tree.
     if [[ "$1" == configured ]]; then
         open -n -a "$APP" \
+            --env "COPYPASTE_EVIDENCE_AX=1" \
             --env "COPYPASTE_CLOUD_URL=http://127.0.0.1:$STUB_PORT" \
             --env "COPYPASTE_CLOUD_ANON_KEY=native-evidence" \
             > "$OUT/app-$1-open.log" 2>&1 || return 1
     else
         env -u COPYPASTE_CLOUD_URL -u COPYPASTE_CLOUD_ANON_KEY \
-            open -n -a "$APP" > "$OUT/app-$1-open.log" 2>&1 || return 1
+            open -n -a "$APP" \
+            --env "COPYPASTE_EVIDENCE_AX=1" \
+            > "$OUT/app-$1-open.log" 2>&1 || return 1
     fi
     APP_PID="$(mac_wait_executable_pid "$BINARY" 30)" || return 1
     mac_set_app_pid "$APP_PID"
