@@ -18,6 +18,7 @@
 - Report (do not enforce) macOS cloud UI AX on hosted runners; uncredit its p95.
 - Sign Windows via Tauri signCommand with SignTool /f PFX + /p (no Root trust).
 - Map Windows Authenticode TSA secrets to SignTool-compatible http:// RFC 3161 URLs.
+- Speed release CI: reuse published Android upgrade fixtures, parallel cloud-evidence APK, cache tauri-driver.
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
   OEM-sticky capture restarts.
 
