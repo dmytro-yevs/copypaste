@@ -99,7 +99,11 @@ try {
     if ($Unsigned -and $authenticode.Status -ne "NotSigned") {
         throw "Unsigned build unexpectedly has Authenticode status $($authenticode.Status)"
     }
-    if (-not $Unsigned -and $authenticode.Status -ne "Valid") {
+    if (-not $Unsigned -and (
+            $null -eq $authenticode.SignerCertificate -or
+            $authenticode.Status -notin @("Valid", "UnknownError")
+        )) {
+        # Self-signed project certs without a trusted root report UnknownError.
         throw "Signed build has Authenticode status $($authenticode.Status)"
     }
     if (-not $Unsigned) {
