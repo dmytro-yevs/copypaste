@@ -31,7 +31,7 @@ mac_set_app_pid() { # <pid>
     MAC_APP_PID="$1"
 }
 
-mac_ax() { # <ready|surface|dump|find|press|set> [label] [value]
+mac_ax() { # <ready|surface|dump|find|press|set|menu-press|enable> [label] [value]
     [[ -n "${MAC_APP_PID:-}" ]] || {
         echo "macOS accessibility target PID is unavailable" >&2
         return 1
@@ -50,6 +50,15 @@ on run argv
         if (count of processMatches) is not 1 then error "CopyPaste process is unavailable"
         set processRef to item 1 of processMatches
         tell processRef
+            if actionMode is "enable" then
+                try
+                    set value of attribute "AXManualAccessibility" to true
+                end try
+                try
+                    set value of attribute "AXEnhancedUserInterface" to true
+                end try
+                return "ok"
+            end if
             if (count of windows) is 0 then error "CopyPaste window is unavailable"
             if actionMode is "ready" then
                 if (count of menu bars) is 0 then error "CopyPaste menu bar is unavailable"
@@ -57,7 +66,7 @@ on run argv
                 if windowName is "" then error "CopyPaste window is unnamed"
                 return "ok"
             end if
-            if actionMode is "surface" then
+            if actionMode is "surface" or actionMode is "menu-press" then
                 set elementsList to entire contents
             else
                 set elementsList to entire contents of window 1
@@ -107,6 +116,13 @@ on run argv
                         if descriptionText contains targetLabel or helpText contains targetLabel or valueText contains targetLabel then
                             return roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
                         end if
+                    else if actionMode is "menu-press" then
+                        if roleText is "AXMenuItem" and nameText is targetLabel then
+                            try
+                                perform action "AXPress" of elementRef
+                                return "ok"
+                            end try
+                        end if
                     else if actionMode is "press" then
                         -- Match find(contains): WKWebView names are not always exact.
                         if nameText contains targetLabel or descriptionText contains targetLabel or helpText contains targetLabel or valueText contains targetLabel then
@@ -154,13 +170,18 @@ mac_wait_label() { # <label> <dump> [timeout]
 
 mac_reach_settings() { # <dump> [timeout]
     local dump="$1" timeout="${2:-30}" started="$SECONDS"
+    mac_ax enable >/dev/null 2>&1 || true
     while (( SECONDS - started < timeout )); do
         mac_ax find "Settings" > "$dump" 2>/dev/null && return 0
         # First-run wizard replaces the shell; dismiss it before Settings exists.
         if mac_ax find "Skip setup" > /dev/null 2>&1; then
             mac_ax press "Skip setup" >/dev/null 2>&1 || true
-        elif mac_ax find "Get started" > /dev/null 2>&1; then
-            mac_ax press "Skip setup" >/dev/null 2>&1 || true
+        fi
+        # WKWebView AX can stay empty; the tray menu item still opens Settings.
+        if mac_ax menu-press "Open Settings" >/dev/null 2>&1; then
+            sleep 1
+            mac_ax find "Sync" > "$dump" 2>/dev/null && return 0
+            mac_ax find "Settings" > "$dump" 2>/dev/null && return 0
         fi
         sleep 1
     done
