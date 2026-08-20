@@ -78,8 +78,14 @@ launch_app() { # <unconfigured|configured>
     fi
     APP_PID="$(mac_wait_executable_pid "$BINARY" 30)" || return 1
     mac_set_app_pid "$APP_PID"
-    if ! mac_reach_settings "$OUT/app-$1-ready.txt" 30; then
+    local ready_started="$SECONDS"
+    while (( SECONDS - ready_started < 30 )); do
+        mac_ax ready >/dev/null 2>"$OUT/app-$1-ax.err" && break
+        sleep 0.1
+    done
+    if ! mac_reach_settings "$OUT/app-$1-ready.txt" 45; then
         mac_ax dump > "$OUT/app-$1-ax-fail.txt" 2>&1 || true
+        mac_ax surface > "$OUT/app-$1-ax-surface.txt" 2>&1 || true
         return 1
     fi
 }

@@ -12,6 +12,8 @@
   smoke on GitHub-hosted emulators is the Android release evidence.
 - Unblocks release publish: authenticated clipboard column privileges,
   Android upgrade-fixture metadata deps, and macOS cloud evidence launch.
+- Restores payload_metadata grants after the authenticated revoke and
+  hardens macOS cloud AX reach (ready wait, contains press, always-upload).
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
   OEM-sticky capture restarts.
 
