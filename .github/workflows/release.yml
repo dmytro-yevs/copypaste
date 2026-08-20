@@ -174,7 +174,13 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: linux-1.96-pairing-e2e-release
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: tauri-driver
+        with:
+          path: ~/.cargo/bin/tauri-driver
+          key: tauri-driver-2.0.6-${{ runner.os }}-gnu
       - name: Install tauri-driver
+        if: steps.tauri-driver.outputs.cache-hit != 'true'
         run: cargo install tauri-driver --version 2.0.6 --locked
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -444,6 +450,8 @@ jobs:
           ./scripts/release/android-ndk-env.sh "$NDK_HOME" | tee -a "$GITHUB_ENV"
 
       - name: Build the APK
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gen="crates/copypaste-ui/src-tauri/gen/android"
@@ -495,17 +503,26 @@ jobs:
             exit 1
           }
 
-          previous="$(node ../../scripts/release/android-metadata.mjs --previous-fixture)"
-          previous_config="${RUNNER_TEMP}/copypaste-previous-tauri.json"
-          COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 \
-            node ../../scripts/release/android-metadata.mjs \
-              --version "$previous" --write-overlay "$previous_config"
-          npm run tauri -- android build --apk --config "$previous_config"
           outputs="src-tauri/gen/android/app/build/outputs/apk"
-          previous_apk="$(find "$outputs" -name '*universal*release*.apk' -print -quit)"
-          [[ -n "$previous_apk" ]] || { echo "::error::the previous-version universal APK was not produced"; exit 1; }
-          cp "$previous_apk" "${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
-          find "$outputs" -type f -name '*.apk' -delete
+          previous="$(node ../../scripts/release/android-metadata.mjs --previous-fixture)"
+          previous_name="CopyPaste-v${previous}-android.apk"
+          # Prefer the already-published previous APK over a full rebuild
+          # (~26m cold). Fall back to building when that tag has no asset yet.
+          if gh release download "v${previous}" --pattern "$previous_name" --dir "$RUNNER_TEMP"; then
+            mv "${RUNNER_TEMP}/${previous_name}" "${RUNNER_TEMP}/copypaste-previous-release.apk"
+            echo "ANDROID_PREVIOUS_FROM_RELEASE=1" >> "$GITHUB_ENV"
+            echo "Reused published upgrade fixture v${previous}"
+          else
+            previous_config="${RUNNER_TEMP}/copypaste-previous-tauri.json"
+            COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 \
+              node ../../scripts/release/android-metadata.mjs \
+                --version "$previous" --write-overlay "$previous_config"
+            npm run tauri -- android build --apk --config "$previous_config"
+            previous_apk="$(find "$outputs" -name '*universal*release*.apk' -print -quit)"
+            [[ -n "$previous_apk" ]] || { echo "::error::the previous-version universal APK was not produced"; exit 1; }
+            cp "$previous_apk" "${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
+            find "$outputs" -type f -name '*.apk' -delete
+          fi
 
           npm run tauri -- android build --apk
 
@@ -513,13 +530,7 @@ jobs:
           [[ -n "$published" ]] || { echo "::error::the universal release APK was not produced"; exit 1; }
           cp "$published" "${RUNNER_TEMP}/copypaste-release-unsigned.apk"
           find "$outputs" -type f -name '*.apk' -delete
-
-          COPYPASTE_CLOUD_URL=http://127.0.0.1:47800 \
-          COPYPASTE_CLOUD_ANON_KEY=native-evidence \
-            npm run tauri -- android build --apk --target x86_64 --features cloud-evidence
-          configured="$(find "$outputs" -name '*release*.apk' -print -quit)"
-          [[ -n "$configured" ]] || { echo "::error::the configured x86_64 evidence APK was not produced"; exit 1; }
-          cp "$configured" "${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
+          # cloud-evidence APK builds in parallel job android-cloud-evidence
 
       - name: Locate and sign the APK
         env:
@@ -532,13 +543,17 @@ jobs:
           set -euo pipefail
           unsigned="${RUNNER_TEMP}/copypaste-release-unsigned.apk"
           previous_unsigned="${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
-          cloud_unsigned="${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
-          [[ -f "$unsigned" && -f "$previous_unsigned" && -f "$cloud_unsigned" ]] \
-            || { echo "::error::the staged release APKs are missing"; exit 1; }
+          previous_from_release="${RUNNER_TEMP}/copypaste-previous-release.apk"
+          [[ -f "$unsigned" ]] || { echo "::error::the staged release APK is missing"; exit 1; }
+          if [[ "${ANDROID_PREVIOUS_FROM_RELEASE:-}" == "1" ]]; then
+            [[ -f "$previous_from_release" ]] || { echo "::error::reused previous APK is missing"; exit 1; }
+          else
+            [[ -f "$previous_unsigned" ]] || { echo "::error::the staged previous APK is missing"; exit 1; }
+          fi
           echo "Built: $unsigned"
 
           tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
-          mkdir -p dist evidence-dist upgrade-dist
+          mkdir -p dist upgrade-dist
 
           # Report what the APK claims about itself before signing it. The macOS
           # job makes the same check on CFBundleShortVersionString: a version
@@ -589,26 +604,22 @@ jobs:
             --out "$out" \
             "${out}.aligned"
           previous_out="upgrade-dist/copypaste-previous-release.apk"
-          "${tools}/zipalign" -p -f 4 "$previous_unsigned" "${previous_out}.aligned"
-          "${tools}/apksigner" sign \
-            --ks "$keystore" \
-            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass "pass:${KEY_PASSWORD}" \
-            --out "$previous_out" \
-            "${previous_out}.aligned"
-          cloud_out="evidence-dist/copypaste-cloud-evidence-x86_64-release.apk"
-          "${tools}/zipalign" -p -f 4 "$cloud_unsigned" "${cloud_out}.aligned"
-          "${tools}/apksigner" sign \
-            --ks "$keystore" \
-            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass "pass:${KEY_PASSWORD}" \
-            --out "$cloud_out" \
-            "${cloud_out}.aligned"
-          rm -f "${out}.aligned" "${previous_out}.aligned" "${cloud_out}.aligned" "$keystore"
+          previous="$(node scripts/release/android-metadata.mjs --previous-fixture)"
+          if [[ "${ANDROID_PREVIOUS_FROM_RELEASE:-}" == "1" ]]; then
+            cp "$previous_from_release" "$previous_out"
+          else
+            "${tools}/zipalign" -p -f 4 "$previous_unsigned" "${previous_out}.aligned"
+            "${tools}/apksigner" sign \
+              --ks "$keystore" \
+              --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "pass:${KEY_PASSWORD}" \
+              --out "$previous_out" \
+              "${previous_out}.aligned"
+            rm -f "${previous_out}.aligned"
+          fi
+          rm -f "${out}.aligned" "$keystore"
           "${tools}/apksigner" verify "$previous_out"
-          "${tools}/apksigner" verify "$cloud_out"
 
           signer_report="$("${tools}/apksigner" verify --verbose --print-certs "$out")"
           printf '%s\n' "$signer_report"
@@ -632,7 +643,6 @@ jobs:
             --apk "$out" --build-type release \
             --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner" \
             --expected-cert "$expected_cert"
-          previous="$(node scripts/release/android-metadata.mjs --previous-fixture)"
           COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 bash scripts/release/android-artifact-check.sh \
             --apk "$previous_out" --build-type release --version "$previous" \
             --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner" \
@@ -670,15 +680,123 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: android-cloud-evidence-apk
-          path: evidence-dist/copypaste-cloud-evidence-x86_64-release.apk
+          name: android-upgrade-fixture
+          path: upgrade-dist/copypaste-previous-release.apk
           if-no-files-found: error
           retention-days: 7
 
+  # x86_64-only cloud-evidence APK for emulator smoke. Parallel with the
+  # universal release build so it does not add serial Rust/Gradle time.
+  android-cloud-evidence:
+    name: Build Android cloud-evidence APK
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: "1.96"
+      NDK_VERSION: "27.2.12479018"
+      ANDROID_PLATFORM: "android-36"
+      BUILD_TOOLS_VERSION: "36.0.0"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+          targets: x86_64-linux-android
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: android-cloud-evidence-x86_64
+          save-if: "true"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            crates/copypaste-ui/src-tauri/gen/android/**/*.gradle*
+            crates/copypaste-ui/src-tauri/gen/android/**/gradle-wrapper.properties
+      - name: Install the pinned SDK components
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME is unset — the runner image has no Android SDK}"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [[ -x "$sdkmanager" ]] || { echo "::error::$sdkmanager not found"; exit 1; }
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager" --install \
+            "ndk;${NDK_VERSION}" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS_VERSION}"
+          ndk="${ANDROID_HOME}/ndk/${NDK_VERSION}"
+          tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
+          [[ -d "$ndk" ]] || { echo "::error::sdkmanager did not install ndk;${NDK_VERSION}"; exit 1; }
+          [[ -x "${tools}/zipalign" && -x "${tools}/apksigner" ]] \
+            || { echo "::error::build-tools;${BUILD_TOOLS_VERSION} incomplete"; exit 1; }
+          {
+            echo "NDK_HOME=${ndk}"
+            echo "ANDROID_NDK_HOME=${ndk}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_HOME}"
+          } >> "$GITHUB_ENV"
+      - name: Point the Android builds at the NDK's llvm-ar and llvm-ranlib
+        run: |
+          set -euo pipefail
+          ./scripts/release/android-ndk-env.sh "$NDK_HOME" | tee -a "$GITHUB_ENV"
+      - name: Build and sign cloud-evidence APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for tool in perl make; do
+            command -v "$tool" >/dev/null 2>&1 \
+              || { echo "::error::$tool is required to build OpenSSL for Android (ADR-0007)"; exit 1; }
+          done
+          cd crates/copypaste-ui
+          npm ci
+          COPYPASTE_CLOUD_URL=http://127.0.0.1:47800 \
+          COPYPASTE_CLOUD_ANON_KEY=native-evidence \
+            npm run tauri -- android build --apk --target x86_64 --features cloud-evidence
+          outputs="src-tauri/gen/android/app/build/outputs/apk"
+          unsigned="$(find "$outputs" -name '*release*.apk' -print -quit)"
+          [[ -n "$unsigned" ]] || { echo "::error::cloud-evidence APK was not produced"; exit 1; }
+          unsigned="$(cd ../.. && realpath "crates/copypaste-ui/$unsigned")"
+          cd ../..
+
+          missing=()
+          [[ -n "${KEYSTORE_BASE64:-}" ]] || missing+=(ANDROID_KEYSTORE_BASE64)
+          [[ -n "${KEYSTORE_PASSWORD:-}" ]] || missing+=(ANDROID_KEYSTORE_PASSWORD)
+          [[ -n "${KEY_ALIAS:-}" ]] || missing+=(ANDROID_KEY_ALIAS)
+          [[ -n "${KEY_PASSWORD:-}" ]] || missing+=(ANDROID_KEY_PASSWORD)
+          if (( ${#missing[@]} )); then
+            echo "::error::Android release signing is fail-closed (ADR-0006): missing ${missing[*]}"
+            exit 1
+          fi
+          tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
+          keystore="${RUNNER_TEMP}/release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+          mkdir -p evidence-dist
+          out="evidence-dist/copypaste-cloud-evidence-x86_64-release.apk"
+          "${tools}/zipalign" -p -f 4 "$unsigned" "${out}.aligned"
+          "${tools}/apksigner" sign \
+            --ks "$keystore" \
+            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:${KEY_PASSWORD}" \
+            --out "$out" \
+            "${out}.aligned"
+          rm -f "${out}.aligned" "$keystore"
+          "${tools}/apksigner" verify "$out"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: android-upgrade-fixture
-          path: upgrade-dist/copypaste-previous-release.apk
+          name: android-cloud-evidence-apk
+          path: evidence-dist/copypaste-cloud-evidence-x86_64-release.apk
           if-no-files-found: error
           retention-days: 7
 
@@ -689,7 +807,7 @@ jobs:
   # still build artifacts without spending an emulator runner.
   android-smoke:
     name: Smoke-test published Android APK
-    needs: [version, android]
+    needs: [version, android, android-cloud-evidence]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
