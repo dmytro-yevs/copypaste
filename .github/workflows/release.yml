@@ -892,11 +892,14 @@ jobs:
           $password = ConvertTo-SecureString $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
           $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
           if (-not $certificate.HasPrivateKey) { throw "Windows release certificate has no private key" }
-          $cer = Join-Path $env:RUNNER_TEMP "copypaste-release.cer"
-          Export-Certificate -Cert $certificate -FilePath $cer | Out-Null
-          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
-          Remove-Item -LiteralPath $cer -Force
+          # Import-Certificate into Root/TrustedPublisher can hang on a UAC
+          # confirmation dialog on hosted runners. X509Store.Add is silent.
+          foreach ($storeName in @("Root", "TrustedPublisher")) {
+            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($storeName, "CurrentUser")
+            $store.Open("ReadWrite")
+            $store.Add($certificate)
+            $store.Close()
+          }
           "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Remove-Item -LiteralPath $pfx -Force
       - name: Build signed Windows release package
