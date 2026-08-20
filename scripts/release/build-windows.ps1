@@ -50,10 +50,11 @@ $releaseBaseUrl = $null
 
 try {
     if (-not $Unsigned) {
-        $thumbprint = Require-Environment "WINDOWS_CERTIFICATE_THUMBPRINT"
-        if ($thumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
-            throw "WINDOWS_CERTIFICATE_THUMBPRINT must contain 40 hexadecimal characters"
+        $pfxPath = Require-Environment "WINDOWS_CERTIFICATE_PFX_PATH"
+        if (-not (Test-Path -LiteralPath $pfxPath -PathType Leaf)) {
+            throw "WINDOWS_CERTIFICATE_PFX_PATH does not point at a PFX file"
         }
+        Require-Environment "WINDOWS_SIGNING_CERTIFICATE_PASSWORD" | Out-Null
         $timestampUrl = Require-Environment "WINDOWS_TIMESTAMP_URL"
         $publicKey = Require-Environment "TAURI_UPDATER_PUBLIC_KEY"
         $endpoint = Require-Environment "TAURI_UPDATER_ENDPOINT"
@@ -63,10 +64,18 @@ try {
             if (-not $url.StartsWith("https://")) { throw "Release URLs must use HTTPS" }
         }
 
+        $signScript = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "windows-sign.ps1")).Path
         $template = Get-Content -Raw -LiteralPath (Join-Path $tauriRoot "tauri.windows.signed.conf.template.json") |
             ConvertFrom-Json
-        $template.bundle.windows.certificateThumbprint = $thumbprint
-        $template.bundle.windows.timestampUrl = $timestampUrl
+        $template.bundle.windows.signCommand.cmd = "powershell.exe"
+        $template.bundle.windows.signCommand.args = @(
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            $signScript,
+            "%1"
+        )
         $template.plugins.updater.pubkey = $publicKey
         $template.plugins.updater.endpoints[0] = $endpoint
         $template | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $generatedConfig -Encoding utf8
