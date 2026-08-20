@@ -3,6 +3,8 @@
 
 pub mod appearance;
 pub mod autostart;
+#[cfg(target_os = "macos")]
+pub mod evidence_ax;
 #[cfg(not(target_os = "android"))]
 pub mod hotkey;
 pub mod notify;
