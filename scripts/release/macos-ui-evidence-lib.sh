@@ -107,13 +107,16 @@ on run argv
                         if descriptionText contains targetLabel or helpText contains targetLabel or valueText contains targetLabel then
                             return roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
                         end if
-                    else if nameText is targetLabel or descriptionText is targetLabel or helpText is targetLabel or valueText is targetLabel then
-                        if actionMode is "press" then
+                    else if actionMode is "press" then
+                        -- Match find(contains): WKWebView names are not always exact.
+                        if nameText contains targetLabel or descriptionText contains targetLabel or helpText contains targetLabel or valueText contains targetLabel then
                             try
                                 perform action "AXPress" of elementRef
                                 return "ok"
                             end try
-                        else if actionMode is "set" then
+                        end if
+                    else if actionMode is "set" then
+                        if nameText is targetLabel or descriptionText is targetLabel or helpText is targetLabel or valueText is targetLabel then
                             try
                                 set focused of elementRef to true
                                 keystroke "a" using command down
@@ -153,7 +156,10 @@ mac_reach_settings() { # <dump> [timeout]
     local dump="$1" timeout="${2:-30}" started="$SECONDS"
     while (( SECONDS - started < timeout )); do
         mac_ax find "Settings" > "$dump" 2>/dev/null && return 0
+        # First-run wizard replaces the shell; dismiss it before Settings exists.
         if mac_ax find "Skip setup" > /dev/null 2>&1; then
+            mac_ax press "Skip setup" >/dev/null 2>&1 || true
+        elif mac_ax find "Get started" > /dev/null 2>&1; then
             mac_ax press "Skip setup" >/dev/null 2>&1 || true
         fi
         sleep 1

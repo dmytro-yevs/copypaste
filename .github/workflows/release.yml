@@ -287,17 +287,19 @@ jobs:
           ./scripts/release/smoke-macos-dmg.sh "${{ needs.version.outputs.version }}" arm64
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
           name: release-macos-native-evidence
           path: artifacts/release-macos-native
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 14
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
           name: release-macos-cloud-evidence
           path: artifacts/release-macos-cloud
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 14
 
       - name: Checksums
