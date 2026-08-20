@@ -887,21 +887,24 @@ jobs:
           $ErrorActionPreference = "Stop"
           if (-not $env:WINDOWS_SIGNING_CERTIFICATE_BASE64) { throw "WINDOWS_SIGNING_CERTIFICATE_BASE64 is required" }
           if (-not $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD) { throw "WINDOWS_SIGNING_CERTIFICATE_PASSWORD is required" }
-          $pfx = Join-Path $env:RUNNER_TEMP "copypaste-release.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64))
-          $password = ConvertTo-SecureString $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          # Import-PfxCertificate / Import-Certificate into Root can hang on a
+          # confirmation dialog for ~1h on hosted runners. Load the PFX in-process
+          # and only put it in CurrentUser\My for signtool/Tauri.
+          $flags = [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet -bor
+            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor
+            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
+          $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $bytes,
+            $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD,
+            $flags
+          )
           if (-not $certificate.HasPrivateKey) { throw "Windows release certificate has no private key" }
-          # Import-Certificate into Root/TrustedPublisher can hang on a UAC
-          # confirmation dialog on hosted runners. X509Store.Add is silent.
-          foreach ($storeName in @("Root", "TrustedPublisher")) {
-            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($storeName, "CurrentUser")
-            $store.Open("ReadWrite")
-            $store.Add($certificate)
-            $store.Close()
-          }
+          $store = New-Object Security.Cryptography.X509Certificates.X509Store("My", "CurrentUser")
+          $store.Open("ReadWrite")
+          $store.Add($certificate)
+          $store.Close()
           "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          Remove-Item -LiteralPath $pfx -Force
       - name: Build signed Windows release package
         if: needs.version.outputs.publish == 'true'
         shell: pwsh
