@@ -56,11 +56,21 @@ try {
         }
         Require-Environment "WINDOWS_SIGNING_CERTIFICATE_PASSWORD" | Out-Null
         $timestampUrl = Require-Environment "WINDOWS_TIMESTAMP_URL"
+        # SignTool /tr needs an RFC 3161 TSA. Public TSAs are http://; do not
+        # force https here (alpha.27: https DigiCert → "Invalid Timestamp URL").
+        try {
+            $timestampUri = [Uri]::new($timestampUrl.Trim())
+        } catch {
+            throw "WINDOWS_TIMESTAMP_URL is not a valid URI"
+        }
+        if ($timestampUri.Scheme -notin @("http", "https") -or [string]::IsNullOrWhiteSpace($timestampUri.Host)) {
+            throw "WINDOWS_TIMESTAMP_URL must be an http(s) URL with a host"
+        }
         $publicKey = Require-Environment "TAURI_UPDATER_PUBLIC_KEY"
         $endpoint = Require-Environment "TAURI_UPDATER_ENDPOINT"
         $releaseBaseUrl = Require-Environment "WINDOWS_RELEASE_BASE_URL"
         Require-Environment "TAURI_SIGNING_PRIVATE_KEY" | Out-Null
-        foreach ($url in @($timestampUrl, $endpoint, $releaseBaseUrl)) {
+        foreach ($url in @($endpoint, $releaseBaseUrl)) {
             if (-not $url.StartsWith("https://")) { throw "Release URLs must use HTTPS" }
         }
 

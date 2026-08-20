@@ -6,14 +6,15 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot "windows-timestamp.ps1")
+
 $pfx = $env:WINDOWS_CERTIFICATE_PFX_PATH
 $password = $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD
-$timestampUrl = $env:WINDOWS_TIMESTAMP_URL
+$timestampUrl = Resolve-SignToolTimestampUrl $env:WINDOWS_TIMESTAMP_URL
 
 if ([string]::IsNullOrWhiteSpace($pfx)) { throw "WINDOWS_CERTIFICATE_PFX_PATH is required" }
 if (-not (Test-Path -LiteralPath $pfx -PathType Leaf)) { throw "PFX not found at WINDOWS_CERTIFICATE_PFX_PATH" }
 if ([string]::IsNullOrWhiteSpace($password)) { throw "WINDOWS_SIGNING_CERTIFICATE_PASSWORD is required" }
-if ([string]::IsNullOrWhiteSpace($timestampUrl)) { throw "WINDOWS_TIMESTAMP_URL is required" }
 if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { throw "File to sign is missing: $File" }
 
 $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
