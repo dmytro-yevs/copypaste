@@ -131,7 +131,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Device secret in the Android Keystore | Android | Verified — a second launch reopens the same database |
 | Device secret protected by DPAPI | Windows | Verified — Windows runs the keystore suite and refuses an unusable persisted blob over the named pipe |
 | The Keychain item survives a re-signed binary (manifest 02 §3.8) | macOS | **NOT VERIFIED IN CI** — REPORTED leg, tag-only |
-| The aarch64 hardware SHA-2 path executes as built | Android | Partial — the signed universal APK must pass on a physical `arm64-v8a` device before a release is published |
+| The aarch64 hardware SHA-2 path executes as built | Android | **NOT VERIFIED IN CI** — publication uses GitHub-hosted emulator smoke of the signed universal APK; physical `arm64-v8a` execution is no longer a publish gate |
 
 ### Storage and detection
 
@@ -191,6 +191,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | The release APK cannot enable WebView debugging | Android | Verified — release smoke rejects wry's debugger call and fails closed if its neighbouring JNI markers are absent |
 | Android native accessibility surface | Android | Partial — the API 33 and API 36 release jobs fail when the native tree cannot be observed, exposes fewer than three named nodes, has no actions, or exposes unnamed actions |
 | VoiceOver and TalkBack surfaces | macOS, Android | Partial — the macOS release job fails when the native accessibility surface cannot be observed, has no menu bar, or exposes no named elements; gestures and speech output remain **NOT VERIFIED IN CI** |
+| macOS cloud account UI (Settings → Sync lifecycle) | macOS | **NOT VERIFIED IN CI** — hosted runners expose tray `Open Settings` but leave WKWebView's `AXWebArea` empty, so System Events cannot reach Sync / Sign in. The release smoke still runs `macos-cloud-evidence.sh` for dumps; failure is reported, not enforced. Android cloud UI evidence remains enforced |
 
 ### Native shell
 
@@ -218,7 +219,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Cask postflight, quarantine removal, re-seal | macOS | Partial — ENFORCED, tag-only; Gatekeeper's verdict is a note |
 | `brew install --cask` as a user runs it | macOS | **NOT VERIFIED IN CI** — `check.sh` round-trips the generators only |
 | Published universal APK: build, R8, release signing, install, launch, no stripped symbol | Android | Partial — the exact signed artifact is checksum-verified and smoke-tested on API 33 and API 36 before publication, tag-only |
-| The signed release APK installed on a physical device | Android | Partial — publication depends on a tag-only hardware gate that installs and smoke-tests the exact artifact on one physical `arm64-v8a` device |
+| The signed release APK installed on a physical device | Android | **NOT VERIFIED IN CI** — emulator smoke of the signed APK is the Android publish evidence |
 | Windows current-user install, sidecars, launch, update and uninstall | Windows | Verified unsigned in `ci.yml`; `release.yml` requires Authenticode and Tauri updater signatures, validates `latest.json`, installs the exact published NSIS artifact, launches its installed sidecar, verifies an in-place reinstall preserves history, and requires complete uninstall |
 | Notarisation and Gatekeeper acceptance | macOS | **NOT VERIFIED IN CI** — ADR-0001 decided against notarisation; recorded so it is not mistaken for coverage |
 | CLI verbs and `--json` | Rust | Verified |

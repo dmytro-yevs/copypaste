@@ -377,17 +377,7 @@
           }
         },
         "macos": {
-          "status": "credited",
-          "scenario": "offline-error",
-          "p95_ms": 60000,
-          "evidence": {
-            "kind": "scenario",
-            "path": "scripts/release/macos-cloud-evidence.sh",
-            "executed_by": [
-              "scripts/release/smoke-macos-dmg.sh",
-              ".github/workflows/release.yml"
-            ]
-          }
+          "status": "uncredited"
         },
         "windows": {
           "status": "uncredited"
