@@ -7,10 +7,17 @@
       "binaries/copypaste-daemon"
     ],
     "windows": {
-      "certificateThumbprint": "__WINDOWS_CERTIFICATE_THUMBPRINT__",
-      "digestAlgorithm": "sha256",
-      "timestampUrl": "__WINDOWS_TIMESTAMP_URL__",
-      "tsp": true
+      "signCommand": {
+        "cmd": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "__WINDOWS_SIGN_SCRIPT__",
+          "%1"
+        ]
+      }
     }
   },
   "plugins": {

@@ -887,50 +887,32 @@ jobs:
           $ErrorActionPreference = "Stop"
           if (-not $env:WINDOWS_SIGNING_CERTIFICATE_BASE64) { throw "WINDOWS_SIGNING_CERTIFICATE_BASE64 is required" }
           if (-not $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD) { throw "WINDOWS_SIGNING_CERTIFICATE_PASSWORD is required" }
-          # Tauri GHA path: Import-PfxCertificate into CurrentUser\My only.
-          # Do not Import-Certificate into Root/TrustedPublisher — those hung
-          # hosted runners on a confirmation dialog for ~1h (alpha.25).
+          if (-not $env:WINDOWS_TIMESTAMP_URL) { throw "WINDOWS_TIMESTAMP_URL is required" }
+          # Keep the PFX on disk for Tauri signCommand (/f + /p). Do not import
+          # into Root/TrustedPublisher — those hung hosted runners (~1h, alpha.25).
+          # Store thumbprint signing still failed after Import-Pfx (alpha.26).
           $pfx = Join-Path $env:RUNNER_TEMP "copypaste-release.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64))
-          try {
-            $password = ConvertTo-SecureString $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
-            $imported = Import-PfxCertificate `
-              -FilePath $pfx `
-              -CertStoreLocation Cert:\CurrentUser\My `
-              -Password $password `
-              -Exportable
-            $thumbprint = @($imported | ForEach-Object { $_.Thumbprint })[0]
-            if (-not $thumbprint) { throw "Import-PfxCertificate returned no certificate" }
-            $certificate = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert |
-              Where-Object { $_.Thumbprint -eq $thumbprint } |
-              Select-Object -First 1
-            if (-not $certificate) {
-              throw "Imported certificate $thumbprint is not a code-signing cert in CurrentUser\My"
-            }
-            if (-not $certificate.HasPrivateKey) { throw "Windows release certificate has no private key" }
-            "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "WINDOWS_CERTIFICATE_PFX_PATH=$pfx" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-            # Fail fast before the long Tauri build if signtool cannot use the key.
-            # Sign only (no /v verify): self-signed certs report UnknownError without Root trust.
-            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-              Where-Object { $_.Directory.Name -eq "x64" } |
-              Sort-Object FullName -Descending |
-              Select-Object -First 1
-            if (-not $signtool) { throw "signtool.exe not found under Windows Kits" }
-            $smoke = Join-Path $env:RUNNER_TEMP "copypaste-sign-smoke.exe"
-            Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $smoke -Force
-            & $signtool.FullName sign /fd sha256 /sha1 $thumbprint $smoke
-            if ($LASTEXITCODE -ne 0) { throw "signtool smoke sign failed with exit $LASTEXITCODE" }
-            Remove-Item -LiteralPath $smoke -Force -ErrorAction SilentlyContinue
-          } finally {
-            Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
-          }
+          # Fail fast with the same /f+/p+/tr path the build will use.
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.Directory.Name -eq "x64" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found under Windows Kits" }
+          $smoke = Join-Path $env:RUNNER_TEMP "copypaste-sign-smoke.exe"
+          Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $smoke -Force
+          & $signtool.FullName sign /fd sha256 /f $pfx /p $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD /tr $env:WINDOWS_TIMESTAMP_URL /td sha256 $smoke
+          if ($LASTEXITCODE -ne 0) { throw "signtool /f PFX smoke sign failed with exit $LASTEXITCODE" }
+          Remove-Item -LiteralPath $smoke -Force -ErrorAction SilentlyContinue
       - name: Build signed Windows release package
         if: needs.version.outputs.publish == 'true'
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
           ./scripts/release/build-windows.ps1 -OutputDirectory artifacts/windows-x86_64
