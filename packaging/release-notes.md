@@ -16,7 +16,7 @@
   hardens macOS cloud AX reach (ready wait, contains press, always-upload).
 - Opt-in COPYPASTE_EVIDENCE_AX so WKWebView publishes its AX tree on CI.
 - Report (do not enforce) macOS cloud UI AX on hosted runners; uncredit its p95.
-- Restore Import-PfxCertificate into CurrentUser\My (no Root/TrustedPublisher).
+- Sign Windows via Tauri signCommand with SignTool /f PFX + /p (no Root trust).
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
   OEM-sticky capture restarts.
 
