@@ -194,6 +194,9 @@ pub fn run() {
                     .register_startup(handle);
             }
 
+            #[cfg(target_os = "macos")]
+            shell::evidence_ax::bootstrap(app.handle());
+
             // ADR-0004: opening the app starts the background service.
             //
             // Spawned rather than awaited. `setup` blocks the first paint, and
