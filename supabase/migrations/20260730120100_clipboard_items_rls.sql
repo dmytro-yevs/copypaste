@@ -20,8 +20,10 @@ alter table public.clipboard_items enable row level security;
 alter table public.clipboard_items force row level security;
 
 -- Postgres' default ACL grants ALL on new objects to PUBLIC, which `anon`
--- inherits. Revoke before granting, or the publishable key alone can read.
-revoke all on public.clipboard_items from anon, public;
+-- inherits. Newer Supabase images also grant table-level INSERT/UPDATE to
+-- `authenticated` before this migration runs. Revoke every client role before
+-- the column grants below, or server-assigned columns stay writable.
+revoke all on public.clipboard_items from anon, authenticated, public;
 
 -- ---------------------------------------------------------------------------
 -- Privileges: what the role may touch at all, before any policy runs.
