@@ -877,6 +877,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           ./scripts/release/test-package-windows.ps1
           ./scripts/release/windows-native-evidence.ps1 -SelfTest
+          ./scripts/release/windows-timestamp.ps1 -SelfTest
       - name: Import Windows release certificate
         if: needs.version.outputs.publish == 'true'
         shell: pwsh
@@ -891,19 +892,15 @@ jobs:
           # Keep the PFX on disk for Tauri signCommand (/f + /p). Do not import
           # into Root/TrustedPublisher — those hung hosted runners (~1h, alpha.25).
           # Store thumbprint signing still failed after Import-Pfx (alpha.26).
+          # alpha.27: raw /tr on https:// TSA secrets → SignTool "Invalid Timestamp URL".
           $pfx = Join-Path $env:RUNNER_TEMP "copypaste-release.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64))
           "WINDOWS_CERTIFICATE_PFX_PATH=$pfx" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-          # Fail fast with the same /f+/p+/tr path the build will use.
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.Directory.Name -eq "x64" } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if (-not $signtool) { throw "signtool.exe not found under Windows Kits" }
+          # Same script Tauri signCommand runs (includes TSA https→http rewrite).
           $smoke = Join-Path $env:RUNNER_TEMP "copypaste-sign-smoke.exe"
           Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $smoke -Force
-          & $signtool.FullName sign /fd sha256 /f $pfx /p $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD /tr $env:WINDOWS_TIMESTAMP_URL /td sha256 $smoke
+          & ./scripts/release/windows-sign.ps1 -File $smoke
           if ($LASTEXITCODE -ne 0) { throw "signtool /f PFX smoke sign failed with exit $LASTEXITCODE" }
           Remove-Item -LiteralPath $smoke -Force -ErrorAction SilentlyContinue
       - name: Build signed Windows release package
