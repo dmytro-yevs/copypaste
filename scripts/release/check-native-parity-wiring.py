@@ -281,6 +281,34 @@ def contract_errors(release, nightly, ci):
         ci_jobs, "windows-package", "windows-sidecars", "windows-ci-sidecars"
     ):
         errors.append("CI Windows packaging must consume an x86_64 prebuilt sidecar artifact")
+    ci_windows_package = ci_jobs.get("windows-package") or {}
+    installed_evidence_steps = [
+        step
+        for step in steps(ci_windows_package)
+        if step.get("id") == "installed-evidence"
+        and "windows-native-evidence.ps1" in str(step.get("run") or "")
+    ]
+    launch_diagnostic_uploads = [
+        step
+        for step in steps(ci_windows_package)
+        if (step.get("with") or {}).get("name")
+        == "windows-ci-launch-failure-diagnostics"
+    ]
+    if len(installed_evidence_steps) != 1 or len(launch_diagnostic_uploads) != 1:
+        errors.append("CI Windows evidence failure must upload one launch diagnostic artifact")
+    else:
+        diagnostic_upload = launch_diagnostic_uploads[0]
+        diagnostic_with = diagnostic_upload.get("with") or {}
+        if (
+            diagnostic_upload.get("if")
+            != "failure() && steps.installed-evidence.outcome == 'failure'"
+            or diagnostic_with.get("path")
+            != "artifacts/windows-ci-native/failure-diagnostics"
+            or diagnostic_with.get("if-no-files-found") != "error"
+        ):
+            errors.append(
+                "CI Windows launch diagnostics must be failure-only and fail closed"
+            )
     if not prebuilt_sidecar_contract(
         jobs, "windows", "windows-sidecars", "windows-release-sidecars"
     ):
@@ -610,6 +638,48 @@ def self_test(release, nightly, ci):
         "Linux frontend test before build fails",
         lambda value: swap_frontend_commands(value, "npm run build", "npm test"),
         "in dependency order",
+    )
+    rejected_ci_mutation(
+        "missing Windows launch diagnostics upload fails",
+        lambda value: value["jobs"]["windows-package"]["steps"].__setitem__(
+            slice(None),
+            [
+                step
+                for step in value["jobs"]["windows-package"]["steps"]
+                if (step.get("with") or {}).get("name")
+                != "windows-ci-launch-failure-diagnostics"
+            ],
+        ),
+        "must upload one launch diagnostic artifact",
+    )
+    rejected_ci_mutation(
+        "unaddressable Windows evidence step fails",
+        lambda value: next(
+            step
+            for step in value["jobs"]["windows-package"]["steps"]
+            if step.get("id") == "installed-evidence"
+        ).pop("id"),
+        "must upload one launch diagnostic artifact",
+    )
+    rejected_ci_mutation(
+        "always-uploaded Windows launch diagnostics fail",
+        lambda value: next(
+            step
+            for step in value["jobs"]["windows-package"]["steps"]
+            if (step.get("with") or {}).get("name")
+            == "windows-ci-launch-failure-diagnostics"
+        ).update({"if": "always()"}),
+        "must be failure-only and fail closed",
+    )
+    rejected_ci_mutation(
+        "broad Windows launch diagnostics path fails",
+        lambda value: next(
+            step
+            for step in value["jobs"]["windows-package"]["steps"]
+            if (step.get("with") or {}).get("name")
+            == "windows-ci-launch-failure-diagnostics"
+        )["with"].update({"path": "artifacts"}),
+        "must be failure-only and fail closed",
     )
     rejected_ci_dropped(
         "a CI Windows job that vanished fails",

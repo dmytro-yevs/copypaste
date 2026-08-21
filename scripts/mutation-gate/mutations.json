@@ -558,6 +558,13 @@
           "find": "    return (\n        sidecar_job in needs(package)\n",
           "replace": "    return True or (\n        sidecar_job in needs(package)\n",
           "expect": "FAIL|missing CI Windows sidecar shard fails|"
+        },
+        {
+          "name": "windows-launch-diagnostic-contract-disabled",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "        if (\n            diagnostic_upload.get(\"if\")\n",
+          "replace": "        if False and (\n            diagnostic_upload.get(\"if\")\n",
+          "expect": "FAIL|always-uploaded Windows launch diagnostics fail|"
         }
       ]
     },
