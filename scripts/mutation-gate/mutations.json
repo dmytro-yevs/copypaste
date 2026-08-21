@@ -479,6 +479,20 @@
           "find": "    needle = \"install --requirement requirements-ci.txt\"",
           "replace": "    needle = \"pip install --requirement requirements-ci.txt\"",
           "expect": "FAIL|release macOS evidence must install requirements-ci.txt before its producer|"
+        },
+        {
+          "name": "linux-frontend-exact-command-count-not-enforced",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "    if any(len(positions) != 1 for positions in frontend_positions):",
+          "replace": "    if any(len(positions) == 0 for positions in frontend_positions):",
+          "expect": "FAIL|duplicate Linux frontend test fails|"
+        },
+        {
+          "name": "linux-frontend-command-order-not-enforced",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "    elif [positions[0] for positions in frontend_positions] != sorted(\n        positions[0] for positions in frontend_positions\n    ):",
+          "replace": "    elif False:",
+          "expect": "FAIL|Linux frontend build before install fails|"
         }
       ]
     },
