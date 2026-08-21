@@ -1489,13 +1489,14 @@ jobs:
           prerelease=()
           if [[ "$VERSION" == *-* ]]; then
             prerelease+=(--prerelease)
+          else
+            prerelease+=(--latest)
           fi
           gh release create "v${VERSION}" \
             --repo "${{ github.repository }}" \
             --title "v${VERSION}" \
             --notes-file packaging/release-notes.md \
             --verify-tag \
-            --latest \
             "${prerelease[@]}" \
             dist/*.dmg dist/*.dmg.sha256 \
             dist/*.tar.gz dist/*.tar.gz.sha256 \
