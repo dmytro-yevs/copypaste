@@ -21,6 +21,12 @@ const WINDOWS_STATES = new Map([
   ["settings-and-service/updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8DAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==" }],
   ["cloud-account", { state: "not-configured", name: "Not configured", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPkmLiJgYGBiYGBQWz9XwARoQMR3PtkxgAAAABJRU5ErkJggg==" }],
 ]);
+const WINDOWS_UNCONFIGURED_UPDATER = {
+  feature: "settings-and-service",
+  state: "updater-unconfigured",
+  name: "Updates aren't configured in this build.",
+  png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8DAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==",
+};
 const PNG = Buffer.from(WINDOWS_STATES.get("history").png, "base64");
 
 const RECEIPT_VALUES = {
@@ -60,6 +66,7 @@ const RECEIPT_VALUES = {
 };
 
 async function fixture(root, platform, overrides = {}) {
+  const { windowsUpdaterState = "updater-configured", ...receiptOverrides } = overrides;
   const directory = path.join(root, platform);
   const artifacts = [];
   const kinds = platform === "windows"
@@ -69,7 +76,12 @@ async function fixture(root, platform, overrides = {}) {
 
   if (platform === "windows") {
     const states = [];
-    for (const [evidenceDirectory, expected] of WINDOWS_STATES) {
+    const windowsStates = new Map(WINDOWS_STATES);
+    if (windowsUpdaterState === "updater-unconfigured") {
+      windowsStates.delete("settings-and-service/updater-configured");
+      windowsStates.set("settings-and-service/updater-unconfigured", WINDOWS_UNCONFIGURED_UPDATER);
+    }
+    for (const [evidenceDirectory, expected] of windowsStates) {
       const feature = expected.feature ?? evidenceDirectory;
       const featureDirectory = path.join(directory, evidenceDirectory);
       await mkdir(featureDirectory, { recursive: true });
@@ -110,7 +122,7 @@ async function fixture(root, platform, overrides = {}) {
           bytes: Buffer.byteLength(accessibility),
         },
       });
-      if (expected.state !== "updater-configured") {
+      if (!expected.state.startsWith("updater-")) {
         artifacts.push(
           { kind: "screenshot", ...states.at(-1).screenshot },
           { kind: "accessibility", ...states.at(-1).accessibility },
@@ -149,7 +161,7 @@ async function fixture(root, platform, overrides = {}) {
     scenario: RECEIPT_VALUES[platform].scenario,
     assertions: RECEIPT_VALUES[platform].assertions,
     artifacts,
-    ...overrides,
+    ...receiptOverrides,
   };
   const receiptPath = path.join(directory, "native-evidence.json");
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
@@ -178,6 +190,19 @@ test("accepts alpha.29 macOS, emulator Android, and Windows release evidence", (
     runId: RUN_ID,
   });
   assert.equal(receipts.length, 3);
+}));
+
+test("accepts unconfigured updater evidence only when the unsigned workflow requests it", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows", { windowsUpdaterState: "updater-unconfigured" });
+  const options = {
+    commit: COMMIT,
+    evidence: [receiptPath],
+    required: new Set(["windows"]),
+    runId: RUN_ID,
+  };
+  await assert.rejects(validateEvidence(options), /updater-unconfigured/);
+  const receipts = await validateEvidence({ ...options, windowsUpdaterState: "updater-unconfigured" });
+  assert.equal(receipts.length, 1);
 }));
 
 test("fails closed when a required platform is absent", () => withRoot(async (root) => {
