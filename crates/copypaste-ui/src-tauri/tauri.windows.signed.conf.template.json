@@ -15,6 +15,9 @@
           "Bypass",
           "-File",
           "__WINDOWS_SIGN_SCRIPT__",
+          "-Operation",
+          "Sign",
+          "-File",
           "%1"
         ]
       }

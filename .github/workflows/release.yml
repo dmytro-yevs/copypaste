@@ -995,8 +995,8 @@ jobs:
           $ErrorActionPreference = "Stop"
           ./scripts/release/test-package-windows.ps1
           ./scripts/release/windows-native-evidence.ps1 -SelfTest
-          ./scripts/release/windows-timestamp.ps1 -SelfTest
-      - name: Import Windows release certificate
+          ./scripts/release/windows-sign.ps1 -Operation SelfTest
+      - name: Prepare Windows release signing
         if: needs.version.outputs.publish == 'true'
         shell: pwsh
         env:
@@ -1004,26 +1004,10 @@ jobs:
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-          if (-not $env:WINDOWS_SIGNING_CERTIFICATE_BASE64) { throw "WINDOWS_SIGNING_CERTIFICATE_BASE64 is required" }
-          if (-not $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD) { throw "WINDOWS_SIGNING_CERTIFICATE_PASSWORD is required" }
-          if (-not $env:WINDOWS_TIMESTAMP_URL) { throw "WINDOWS_TIMESTAMP_URL is required" }
-          # Keep the PFX on disk for Tauri signCommand (/f + /p). Do not import
-          # into Root/TrustedPublisher — those hung hosted runners (~1h, alpha.25).
-          # Store thumbprint signing still failed after Import-Pfx (alpha.26).
-          # alpha.27: raw /tr on https:// TSA secrets → SignTool "Invalid Timestamp URL".
-          $pfx = Join-Path $env:RUNNER_TEMP "copypaste-release.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64))
-          # GITHUB_ENV applies to later steps only; smoke runs in this process
-          # (alpha.28 failed with WINDOWS_CERTIFICATE_PFX_PATH is required).
-          $env:WINDOWS_CERTIFICATE_PFX_PATH = $pfx
-          "WINDOWS_CERTIFICATE_PFX_PATH=$pfx" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-          # Same script Tauri signCommand runs (includes TSA https→http rewrite).
-          $smoke = Join-Path $env:RUNNER_TEMP "copypaste-sign-smoke.exe"
-          Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $smoke -Force
-          & ./scripts/release/windows-sign.ps1 -File $smoke
-          if ($LASTEXITCODE -ne 0) { throw "signtool /f PFX smoke sign failed with exit $LASTEXITCODE" }
-          Remove-Item -LiteralPath $smoke -Force -ErrorAction SilentlyContinue
+          ./scripts/release/windows-sign.ps1 `
+            -Operation Prepare `
+            -PersistEnvironment `
+            -SmokeSign
       - name: Build signed Windows release package
         if: needs.version.outputs.publish == 'true'
         shell: pwsh
@@ -1040,6 +1024,10 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           ./scripts/release/build-windows.ps1 -Unsigned -OutputDirectory artifacts/windows-x86_64
+      - name: Remove Windows signing material
+        if: always() && needs.version.outputs.publish == 'true'
+        shell: pwsh
+        run: ./scripts/release/windows-sign.ps1 -Operation Cleanup
       - name: Install, launch with packaged sidecar, and uninstall
         shell: pwsh
         run: |
