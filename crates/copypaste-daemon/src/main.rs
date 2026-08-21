@@ -73,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
         copypaste_runtime_log::Process::Daemon,
     )
     .context("initialize runtime logging")?;
+    info!("daemon process started pid={}", std::process::id());
 
     if !args.foreground {
         warn!(
@@ -246,6 +247,7 @@ async fn main() -> anyhow::Result<()> {
     ];
     loops.extend(peers_task.map(|task| ("peer listener", task)));
     shutdown::teardown(&state, loops, &socket_path).await;
+    info!("daemon process stopped pid={}", std::process::id());
     Ok(())
 }
 
