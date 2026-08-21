@@ -232,16 +232,21 @@ def contract_errors(release, nightly, ci):
     ci_jobs = ci.get("jobs") or {}
     ci_frontend = ci_jobs.get("frontend") or {}
     ci_windows_test = ci_jobs.get("windows-test") or {}
+    ci_windows_native_test = ci_jobs.get("windows-native-test") or {}
     windows_parity = "npm run test:native-parity"
     windows_parity_steps = exact_command_occurrences(
-        ci_windows_test, ("npm", "run", "test:native-parity")
+        ci_windows_native_test, ("npm", "run", "test:native-parity")
     )
-    windows_npm_ci_steps = exact_command_occurrences(ci_windows_test, ("npm", "ci"))
+    windows_npm_ci_steps = exact_command_occurrences(ci_windows_native_test, ("npm", "ci"))
     windows_test_timeout = ci_windows_test.get("timeout-minutes")
+    windows_native_test_timeout = ci_windows_native_test.get("timeout-minutes")
     if (
         not isinstance(windows_test_timeout, int)
         or isinstance(windows_test_timeout, bool)
         or not 0 < windows_test_timeout <= 20
+        or not isinstance(windows_native_test_timeout, int)
+        or isinstance(windows_native_test_timeout, bool)
+        or not 0 < windows_native_test_timeout <= 20
     ):
         errors.append("CI Windows workspace tests must be bounded to at most 20 minutes")
     if (
@@ -268,7 +273,7 @@ def contract_errors(release, nightly, ci):
 
     windows_npm_commands = [
         argv
-        for _, _, argv in parsed_commands(ci_windows_test)
+        for _, _, argv in parsed_commands(ci_windows_native_test)
         if argv[:1] == ("npm",)
     ]
     allowed_windows_npm = {
@@ -323,7 +328,7 @@ def contract_errors(release, nightly, ci):
         (windows, "windows-native-evidence.ps1", "release Windows evidence"),
         (nightly_windows, "windows-native-evidence.ps1", "nightly Windows evidence"),
         (ci_frontend, "npm test", "CI frontend tests"),
-        (ci_windows_test, windows_parity, "CI Windows native-parity tests"),
+        (ci_windows_native_test, windows_parity, "CI Windows native-parity tests"),
         (ci_jobs.get("windows-package") or {}, "windows-native-evidence.ps1", "CI Windows evidence"),
         (ci_jobs.get("release-pipeline") or {}, "scripts/release/check.sh", "CI release self-tests"),
     )
@@ -583,7 +588,7 @@ def self_test(release, nightly, ci):
     )
     rejected_ci(
         "Windows parity test before requirements install fails",
-        "windows-test",
+        "windows-native-test",
         "npm run test:native-parity",
         "CI Windows native-parity tests must install requirements-ci.txt",
     )
@@ -591,7 +596,7 @@ def self_test(release, nightly, ci):
         "missing Windows parity command fails",
         lambda value: next(
             step
-            for step in value["jobs"]["windows-test"]["steps"]
+            for step in value["jobs"]["windows-native-test"]["steps"]
             if "npm run test:native-parity" in str(step.get("run") or "")
         ).update({"run": "npm ci"}),
         "must run exactly once after npm ci",
@@ -600,7 +605,7 @@ def self_test(release, nightly, ci):
         "Windows parity command before npm ci fails",
         lambda value: next(
             step
-            for step in value["jobs"]["windows-test"]["steps"]
+            for step in value["jobs"]["windows-native-test"]["steps"]
             if "npm run test:native-parity" in str(step.get("run") or "")
         ).update({"run": "npm run test:native-parity\nnpm ci"}),
         "must run exactly once after npm ci",

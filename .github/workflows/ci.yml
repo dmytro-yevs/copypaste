@@ -715,17 +715,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: windows-2022-1.96-test
-          # A red run here still paid ~13 minutes to compile the dependency
-          # graph, and the default drops it. Only dependent crates are cached
-          # (`cache-workspace-crates` defaults to false), so a failing test
-          # cannot poison what is stored.
-          cache-on-failure: true
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: crates/copypaste-ui/package-lock.json
+          # The full workspace used 19m58s before post-job work. Restore here;
+          # the shorter native assertion shard owns saves for this key.
+          save-if: false
 
       - name: Confirm OpenSSL's Perl
         shell: pwsh
@@ -735,6 +727,33 @@ jobs:
 
       - name: cargo test (full Windows workspace)
         run: cargo +1.96 test --workspace --locked
+
+  windows-native-test:
+    name: Windows native assertions (x64)
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96-test
+          save-if: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - name: Confirm OpenSSL's Perl
+        shell: pwsh
+        run: |
+          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
+          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
 
       - name: Native Windows pairing windows
         # Interactive desktop on windows-2022. These are ignored locally because

@@ -421,6 +421,20 @@
           "expect": "FAIL|self-test: a missing job budget is rejected|"
         },
         {
+          "name": "windows-cache-consumer-save-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        and (caches[1][0].get(\"with\") or {}).get(\"save-if\") is False\n",
+          "replace": "        and True\n",
+          "expect": "FAIL|self-test: a Windows post-job cache save is rejected|"
+        },
+        {
+          "name": "windows-cache-producer-not-required",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        and (caches[2][0].get(\"with\") or {}).get(\"save-if\") is True\n",
+          "replace": "        and True\n",
+          "expect": "FAIL|self-test: a missing Windows cache producer is rejected|"
+        },
+        {
           "name": "runner-local-android-settings-transfer-accepted",
           "file": "scripts/release/check-wiring.py",
           "find": "                if token in detail:\n",
