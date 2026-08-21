@@ -412,6 +412,13 @@
           "find": "                yield (bool(runners) and set(runners) <= known,",
           "replace": "                yield (True,",
           "expect": "FAIL|self-test: a mistyped label in a matrix is not|"
+        },
+        {
+          "name": "missing-job-timeout-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "            yield (isinstance(timeout, int) and not isinstance(timeout, bool)\n                   and 0 < timeout <= maximum,",
+          "replace": "            yield (True,",
+          "expect": "FAIL|self-test: a missing job budget is rejected|"
         }
       ]
     },

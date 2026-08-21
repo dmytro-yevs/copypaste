@@ -61,6 +61,7 @@ jobs:
     # change-time gate complementing the scheduled Rust advisory checks below.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -73,6 +74,7 @@ jobs:
   deny:
     name: cargo-deny (${{ matrix.check }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -97,6 +99,7 @@ jobs:
   audit:
     name: cargo-audit
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
