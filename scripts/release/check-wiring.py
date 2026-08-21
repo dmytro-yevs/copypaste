@@ -291,7 +291,16 @@ for review in review_steps:
 # npm treats an unmet `engines.node` as a warning unless engine-strict is set,
 # so a lockfile can outgrow the runners without anything failing — until the day
 # a dependency uses the syntax it asked for. @zxing/library 0.23.0 raised the
-# floor to 24 while every job pinned 22.
+# floor to 24 while every job pinned 22. The pin lives in .nvmrc; every
+# setup-node step must read it via node-version-file so majors cannot drift
+# job-by-job again.
+NVMRC = pathlib.Path(".nvmrc")
+nvmrc_text = NVMRC.read_text().strip() if NVMRC.is_file() else ""
+nvmrc_major_m = re.match(r"(\d+)", nvmrc_text)
+rec(bool(nvmrc_major_m), ".nvmrc pins a Node major ({})".format(nvmrc_text or "<missing>"),
+    "create .nvmrc with a major like 24; workflows read it via node-version-file")
+canonical_major = int(nvmrc_major_m.group(1)) if nvmrc_major_m else 0
+
 locks = {}
 for wf, doc in docs.items():
     for jn, j in (doc.get("jobs") or {}).items():
@@ -299,13 +308,17 @@ for wf, doc in docs.items():
             if not (s.get("uses") or "").startswith("actions/setup-node"):
                 continue
             with_ = s.get("with") or {}
-            pinned = str(with_.get("node-version", ""))
-            m = re.match(r"(\d+)", pinned)
-            rec(bool(m), "{}: {} pins a Node major ({})".format(wf, jn, pinned or "<unset>"),
-                "setup-node without an explicit node-version follows whatever the runner ships")
-            if not m:
+            file_pin = str(with_.get("node-version-file", "")).strip()
+            hardcoded = str(with_.get("node-version", "")).strip()
+            rec(not hardcoded,
+                "{}: {} does not hardcode node-version".format(wf, jn),
+                "use node-version-file: '.nvmrc' instead of node-version: {!r}".format(hardcoded))
+            rec(file_pin in (".nvmrc", "./.nvmrc"),
+                "{}: {} reads Node from .nvmrc ({})".format(wf, jn, file_pin or "<unset>"),
+                "setup-node must set node-version-file: '.nvmrc'")
+            if not canonical_major:
                 continue
-            major = int(m.group(1))
+            major = canonical_major
             for lock in str(with_.get("cache-dependency-path", "")).split():
                 p = pathlib.Path(lock)
                 if not p.is_file():

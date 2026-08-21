@@ -109,7 +109,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
 
@@ -184,7 +184,7 @@ jobs:
         run: cargo install tauri-driver --version 2.0.6 --locked
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: |
             crates/copypaste-ui/package-lock.json
@@ -234,7 +234,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
 
@@ -376,7 +376,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
 
@@ -710,7 +710,7 @@ jobs:
           save-if: "true"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
@@ -819,7 +819,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
 
@@ -983,7 +983,7 @@ jobs:
           shared-key: windows-2022-release
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
       - name: Install native evidence Python dependencies
@@ -1090,7 +1090,7 @@ jobs:
           path: artifacts/native-parity/windows
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
       - run: npm ci
