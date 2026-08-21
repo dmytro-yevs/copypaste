@@ -140,6 +140,8 @@ function Invoke-SelfTest {
     $root = Join-Path ([IO.Path]::GetTempPath()) "copypaste-windows-evidence-self-test-$([guid]::NewGuid())"
     [IO.Directory]::CreateDirectory($root) | Out-Null
     try {
+        Test-WindowsReadinessHelpers
+
         foreach ($name in @("copypaste-ui.exe", "copypaste.exe", "uninstall.exe")) {
             [IO.File]::WriteAllText((Join-Path $root $name), "fixture")
         }
