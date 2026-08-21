@@ -38,7 +38,8 @@ describe("build support states", () => {
     getUpdateStatus.mockResolvedValue({ state });
     withClient(<UpdateRow />);
 
-    expect((await screen.findByRole("status")).textContent).toContain(message);
+    await screen.findByText(message);
+    expect(screen.getByRole("status").textContent).toContain(message);
     expect(screen.queryByRole("button")).toBeNull();
   });
 });
