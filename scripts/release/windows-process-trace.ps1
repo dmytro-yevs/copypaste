@@ -235,11 +235,11 @@ function Test-WindowsProcessTraceHelpers {
         $stopRecord = [pscustomobject]@{ TIME_CREATED = 200; ProcessName = "copypaste-ui";
             ProcessID = 51; ParentProcessID = 7; ExitStatus = 9 }
         $reuseRecord = [pscustomobject]@{ TIME_CREATED = 200; ProcessName = "copypaste-daemon.exe";
-            ProcessID = 51; ParentProcessID = 1; ExitStatus = 0 }
+            ProcessID = 51; ParentProcessID = 1 }
         $reuseStop = [pscustomobject]@{ TIME_CREATED = 300; ProcessName = "unrelated.exe";
             ProcessID = 51; ParentProcessID = 1; ExitStatus = 4 }
         $secondStart = [pscustomobject]@{ TIME_CREATED = 400; ProcessName = "copypaste-daemon.exe";
-            ProcessID = 52; ParentProcessID = 7; ExitStatus = 0 }
+            ProcessID = 52; ParentProcessID = 7 }
         $records = @(
             [pscustomobject]@{ Kind = "stop"; Record = $reuseStop; Sequence = 4 },
             [pscustomobject]@{ Kind = "start"; Record = $reuseRecord; Sequence = 3 },
