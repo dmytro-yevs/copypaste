@@ -418,17 +418,17 @@ for check in toolchain_component_checks(docs, TEST_SPAWNED_COMPONENTS):
 # exports RANLIB_<triple>. android-ndk-env.sh exports it, per triple, so its
 # list and the list of targets the job installs have to stay the same set: a
 # target it misses fails only after several minutes of OpenSSL build.
-android = (docs["release.yml"].get("jobs") or {}).get("android") or {}
+android = (docs["release.yml"].get("jobs") or {}).get("android-abi") or {}
 wiring = [s for s in steps(android) if "android-ndk-env.sh" in (s.get("run") or "")]
-rec(len(wiring) == 1, "release.yml: android runs android-ndk-env.sh exactly once",
+rec(len(wiring) == 1, "release.yml: android-abi runs android-ndk-env.sh exactly once",
     "found {} steps invoking it".format(len(wiring)))
 rec(any("GITHUB_ENV" in (s.get("run") or "") for s in wiring),
-    "release.yml: android-ndk-env.sh output reaches GITHUB_ENV",
+    "release.yml: android-abi android-ndk-env.sh output reaches GITHUB_ENV",
     "the script only prints; nothing reads it unless it is appended to GITHUB_ENV")
-installed = set()
-for s in steps(android):
-    if (s.get("uses") or "").startswith("dtolnay/rust-toolchain"):
-        installed |= {t.strip() for t in str((s.get("with") or {}).get("targets", "")).split(",") if t.strip()}
+installed = {
+    entry.get("triple")
+    for entry in (((android.get("strategy") or {}).get("matrix") or {}).get("include") or [])
+}
 script = pathlib.Path("scripts/release/android-ndk-env.sh")
 m = re.search(r"TRIPLES=\(([^)]*)\)", script.read_text()) if script.is_file() else None
 listed = set((m.group(1) if m else "").split())
@@ -542,7 +542,7 @@ if emu:
     # becomes a slower copy of the debug one.
     for emulator_job, apk_job, script, debug in (
         ("emulator", "apk", "android-smoke.sh", True),
-        ("release-emulator", "release-apk", "android-smoke-release.sh", False),
+        ("release-emulator", "release-apk-shard", "android-smoke-release.sh", False),
     ):
         ejob = ejobs.get(emulator_job) or {}
         rec(bool(ejob), "android-emulator.yml has a {} job".format(emulator_job),
@@ -658,11 +658,56 @@ for name, body in (("release.yml", release_android_workflow),
         and "--features cloud-evidence" in body and "10.0.2.2:47800" not in body,
         f"{name} confines plaintext cloud evidence to its loopback feature",
         "configured evidence must use 127.0.0.1 and cloud-evidence, never emulator plaintext routing")
-rec(bool(re.search(r"^\s*npm run tauri -- android build --apk\s*$", release_android_workflow, re.M)),
-    "release.yml builds the published APK without cloud evidence configuration")
+release_abi = release_jobs.get("android-abi") or {}
+release_abi_matrix = ((release_abi.get("strategy") or {}).get("matrix") or {}).get("include") or []
+release_abi_targets = {entry.get("target") for entry in release_abi_matrix}
+release_android_body = "\n".join(step.get("run") or "" for step in steps(release_android))
+release_android_downloads = {
+    str((step.get("with") or {}).get("name", ""))
+    for step in steps(release_android)
+    if (step.get("uses") or "").startswith("actions/download-artifact")
+}
+rec(release_abi_targets == {"aarch64", "armv7", "i686", "x86_64"}
+    and "android-abi" in closure(release_jobs, "android")
+    and {
+        "android-release-scaffold",
+        "android-native-aarch64",
+        "android-native-armv7",
+        "android-native-i686",
+        "android-native-x86_64",
+    } <= release_android_downloads
+    and "assembleUniversalRelease" in release_android_body
+    and "-x rustBuildUniversalRelease" in release_android_body
+    and "for abi in arm64-v8a armeabi-v7a x86 x86_64" in release_android_body,
+    "release.yml shards and reassembles the published universal APK",
+    "all four native shards must feed one Gradle universal package without relinking")
 rec(bool(re.search(r"^\s*npm run tauri -- android build --apk --target x86_64\s*$",
                    emulator_android_workflow, re.M)),
     "android-emulator.yml rebuilds the shipped APK without cloud evidence configuration")
+emulator_shard = ejobs.get("release-apk-shard") or {}
+emulator_variants = set(
+    (((emulator_shard.get("strategy") or {}).get("matrix") or {}).get("variant") or [])
+)
+emulator_sign = ejobs.get("release-apk") or {}
+emulator_sign_downloads = {
+    str((step.get("with") or {}).get("name", ""))
+    for step in steps(emulator_sign)
+    if (step.get("uses") or "").startswith("actions/download-artifact")
+}
+rec(emulator_variants == {"shipped", "upgrade", "cloud"}
+    and "release-apk-shard" in closure(ejobs, "release-apk")
+    and {
+        "android-release-unsigned",
+        "android-upgrade-unsigned",
+        "android-cloud-unsigned",
+    } <= emulator_sign_downloads
+    and str(((next(
+        (step for step in steps(emulator_shard)
+         if (step.get("uses") or "").startswith("Swatinem/rust-cache")),
+        {},
+    ).get("with") or {}).get("shared-key", ""))).endswith("${{ matrix.variant }}"),
+    "android-emulator.yml builds release APK variants in isolated shards",
+    "shipped, upgrade, and cloud builds need distinct caches and one signing join")
 
 release_windows = release_jobs.get("windows") or {}
 windows_body = "\n".join(step.get("run") or "" for step in steps(release_windows))
