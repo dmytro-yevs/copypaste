@@ -421,18 +421,25 @@
           "expect": "FAIL|self-test: a missing job budget is rejected|"
         },
         {
-          "name": "windows-cache-consumer-save-accepted",
+          "name": "windows-package-coverage-not-required",
           "file": "scripts/release/check-wiring.py",
-          "find": "        and (caches[1][0].get(\"with\") or {}).get(\"save-if\") is False\n",
-          "replace": "        and True\n",
-          "expect": "FAIL|self-test: a Windows post-job cache save is rejected|"
+          "find": "        and valid_commands and set(selected) == expected and len(selected) == len(expected)\n",
+          "replace": "        and valid_commands\n",
+          "expect": "FAIL|self-test: reduced Windows workspace coverage is rejected|"
         },
         {
-          "name": "windows-cache-producer-not-required",
+          "name": "windows-cache-writers-may-collide",
           "file": "scripts/release/check-wiring.py",
-          "find": "        and (caches[2][0].get(\"with\") or {}).get(\"save-if\") is True\n",
-          "replace": "        and True\n",
-          "expect": "FAIL|self-test: a missing Windows cache producer is rejected|"
+          "find": "        and len(cache_keys) == len(names) == len(set(cache_keys))\n",
+          "replace": "        and len(cache_keys) == len(names)\n",
+          "expect": "FAIL|self-test: duplicate Windows cache writers are rejected|"
+        },
+        {
+          "name": "windows-shard-target-not-enforced",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        and all(shards[name].get(\"timeout-minutes\") == 15 for name in test_names)\n",
+          "replace": "        and all(shards[name].get(\"timeout-minutes\") <= 20 for name in test_names)\n",
+          "expect": "FAIL|self-test: a Windows test shard above its target is rejected|"
         },
         {
           "name": "runner-local-android-settings-transfer-accepted",
@@ -562,8 +569,8 @@
         {
           "name": "windows-test-over-budget-accepted",
           "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "        or not 0 < windows_test_timeout <= 20\n",
-          "replace": "        or not 0 < windows_test_timeout <= 25\n",
+          "find": "        or any(not isinstance(timeout, int) or isinstance(timeout, bool) or not 0 < timeout <= 15\n",
+          "replace": "        or any(not isinstance(timeout, int) or isinstance(timeout, bool) or not 0 < timeout <= 20\n",
           "expect": "FAIL|Windows test timeout above budget fails|"
         },
         {

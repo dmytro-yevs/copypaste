@@ -37,27 +37,65 @@ def steps(job):
 
 
 def windows_workspace_shards_hold(jobs):
-    names = ("windows-clippy", "windows-test", "windows-native-test")
-    shards = [jobs.get(name) or {} for name in names]
-    bodies = ["\n".join(step.get("run") or "" for step in steps(job)) for job in shards]
-    caches = [
-        [step for step in steps(job)
-         if str(step.get("uses") or "").startswith("Swatinem/rust-cache")]
-        for job in shards
+    test_names = ("windows-test-core", "windows-test-services", "windows-test-apps")
+    names = ("windows-clippy", *test_names, "windows-native-test")
+    shards = {name: jobs.get(name) or {} for name in names}
+    bodies = {
+        name: "\n".join(str(step.get("run") or "") for step in steps(job))
+        for name, job in shards.items()
+    }
+    caches = {
+        name: [step for step in steps(job)
+               if str(step.get("uses") or "").startswith("Swatinem/rust-cache")]
+        for name, job in shards.items()
+    }
+    root = pathlib.Path("Cargo.toml").read_text()
+    members_block = re.search(r"(?ms)^members\s*=\s*\[(.*?)^\]", root)
+    members = re.findall(r'"([^"]+)"', members_block.group(1) if members_block else "")
+    expected = set()
+    for member in members:
+        manifest = (pathlib.Path(member) / "Cargo.toml").read_text()
+        package = re.search(r'(?m)^name\s*=\s*"([^"]+)"', manifest)
+        if package:
+            expected.add(package.group(1))
+    selected = []
+    valid_commands = True
+    for name in test_names:
+        commands = []
+        for line in bodies[name].splitlines():
+            try:
+                argv = tuple(shlex.split(line.strip()))
+            except ValueError:
+                continue
+            if len(argv) >= 3 and argv[0] == "cargo" and argv[2] == "test":
+                commands.append(argv)
+        if len(commands) != 1:
+            valid_commands = False
+            continue
+        command = commands[0]
+        if "--locked" not in command or any(flag in command for flag in (
+            "--workspace", "--exclude", "--no-default-features", "--features", "--all-features"
+        )):
+            valid_commands = False
+        selected += [command[index + 1] for index, token in enumerate(command[:-1]) if token in ("-p", "--package")]
+    cache_keys = [
+        str((caches[name][0].get("with") or {}).get("shared-key", ""))
+        for name in names if len(caches[name]) == 1
     ]
     return (
-        all(job.get("timeout-minutes") == 20 for job in shards)
-        and all(len(cache) == 1 for cache in caches)
-        and (caches[1][0].get("with") or {}).get("save-if") is False
-        and (caches[2][0].get("with") or {}).get("save-if") is True
-        and (caches[1][0].get("with") or {}).get("shared-key")
-            == (caches[2][0].get("with") or {}).get("shared-key")
-        and "cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings" in bodies[0]
-        and "cargo +1.96 test --workspace --locked" in bodies[1]
-        and "pairing_presentation::windows::refusal_tests" in bodies[2]
-        and "crypto::keystore::" in bodies[2]
-        and "test:native-parity" in bodies[2]
-        and all("cargo +1.96 test --workspace --locked" not in body for body in (bodies[0], bodies[2]))
+        shards["windows-clippy"].get("timeout-minutes") == 20
+        and shards["windows-native-test"].get("timeout-minutes") == 20
+        and all(shards[name].get("timeout-minutes") == 15 for name in test_names)
+        and all(len(caches[name]) == 1 for name in names)
+        and len(cache_keys) == len(names) == len(set(cache_keys))
+        and all((caches[name][0].get("with") or {}).get("save-if") is True
+                for name in (*test_names, "windows-native-test"))
+        and valid_commands and set(selected) == expected and len(selected) == len(expected)
+        and "cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings" in bodies["windows-clippy"]
+        and "pairing_presentation::windows::refusal_tests" in bodies["windows-native-test"]
+        and "crypto::keystore::" in bodies["windows-native-test"]
+        and "test:native-parity" in bodies["windows-native-test"]
+        and all("cargo +1.96 test --workspace --locked" not in body for body in bodies.values())
     )
 
 
@@ -235,8 +273,8 @@ rec("macos-cloud-evidence.sh artifacts/release-macos-cloud" in macos_smoke,
 
 ci_jobs = docs["ci.yml"].get("jobs") or {}
 rec(windows_workspace_shards_hold(ci_jobs),
-    "ci.yml shards Windows checks and gives cache saves to the shorter producer",
-    "full tests must restore only while native assertions refresh their shared cache")
+    "ci.yml shards every Windows package under 15 minutes with isolated cache writers",
+    "test shards must cover each workspace package once with default features and unique cache keys")
 documentation = ci_jobs.get("documentation") or {}
 documentation_body = "\n".join(step.get("run") or "" for step in steps(documentation))
 rec("check-docs.py" in documentation_body,
@@ -996,45 +1034,57 @@ rec("check-feature-ledger.py" in release_ledger_body,
 # --- self-test: prove the runner-image detector fails when it should --------
 if SELF_TEST:
     def windows_shard_fixture():
-        def job(command):
+        def job(command, timeout=20, key="fixture"):
             return {
-                "timeout-minutes": 20,
+                "timeout-minutes": timeout,
                 "steps": [
-                    {"uses": "Swatinem/rust-cache@fixture", "with": {"save-if": False}},
+                    {"uses": "Swatinem/rust-cache@fixture",
+                     "with": {"save-if": True, "shared-key": key}},
                     {"run": command},
                 ],
             }
         return {
             "windows-clippy": job(
-                "cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings"),
-            "windows-test": job("cargo +1.96 test --workspace --locked"),
+                "cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings",
+                key="clippy"),
+            "windows-test-core": job(
+                "cargo +1.96 test --locked -p copypaste-core -p copypaste-sensitive-rules",
+                timeout=15, key="core"),
+            "windows-test-services": job(
+                "cargo +1.96 test --locked -p copypaste-p2p -p copypaste-cloud -p copypaste-daemon",
+                timeout=15, key="services"),
+            "windows-test-apps": job(
+                "cargo +1.96 test --locked -p copypaste-ui -p copypaste-cli -p copypaste-ipc "
+                "-p copypaste-runtime-log -p copypaste-fs -p copypaste-clock",
+                timeout=15, key="apps"),
             "windows-native-test": job(
                 "pairing_presentation::windows::refusal_tests\n"
-                "crypto::keystore::\ntest:native-parity"),
+                "crypto::keystore::\ntest:native-parity", key="native"),
         }
 
     windows_fixture = windows_shard_fixture()
-    windows_fixture["windows-native-test"]["steps"][0]["with"]["save-if"] = True
-    windows_save_fixture = windows_shard_fixture()
-    windows_save_fixture["windows-native-test"]["steps"][0]["with"]["save-if"] = True
-    windows_save_fixture["windows-test"]["steps"][0]["with"]["save-if"] = True
-    windows_no_producer_fixture = windows_shard_fixture()
+    windows_cache_fixture = windows_shard_fixture()
+    windows_cache_fixture["windows-test-apps"]["steps"][0]["with"]["shared-key"] = "core"
     windows_coverage_fixture = windows_shard_fixture()
-    windows_coverage_fixture["windows-test"]["steps"][1]["run"] = "cargo test -p copypaste-core"
+    windows_coverage_fixture["windows-test-apps"]["steps"][1]["run"] = \
+        windows_coverage_fixture["windows-test-apps"]["steps"][1]["run"].replace(
+            " -p copypaste-clock", "")
     windows_combined_fixture = windows_shard_fixture()
     windows_combined_fixture["windows-native-test"]["steps"][1]["run"] += \
         "\ncargo +1.96 test --workspace --locked"
+    windows_budget_fixture = windows_shard_fixture()
+    windows_budget_fixture["windows-test-core"]["timeout-minutes"] = 16
     for desc, held in (
-        ("bounded Windows shards with one cache producer are accepted",
+        ("bounded package-complete Windows shards are accepted",
          windows_workspace_shards_hold(windows_fixture)),
-        ("a Windows post-job cache save is rejected",
-         not windows_workspace_shards_hold(windows_save_fixture)),
-        ("a missing Windows cache producer is rejected",
-         not windows_workspace_shards_hold(windows_no_producer_fixture)),
+        ("duplicate Windows cache writers are rejected",
+         not windows_workspace_shards_hold(windows_cache_fixture)),
         ("reduced Windows workspace coverage is rejected",
          not windows_workspace_shards_hold(windows_coverage_fixture)),
         ("recombined Windows workspace work is rejected",
          not windows_workspace_shards_hold(windows_combined_fixture)),
+        ("a Windows test shard above its target is rejected",
+         not windows_workspace_shards_hold(windows_budget_fixture)),
     ):
         emit(held, "self-test: {}".format(desc),
              "the Windows workspace shard detector did not behave as stated")

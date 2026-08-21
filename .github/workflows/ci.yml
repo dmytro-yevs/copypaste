@@ -695,12 +695,12 @@ jobs:
       - name: cargo clippy (full Windows workspace)
         run: cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings
 
-  windows-test:
-    name: Windows workspace tests (x64)
+  windows-test-core:
+    name: Windows core tests (x64)
     # Pinned rather than `windows-latest` so the toolchain and SDK under test do
     # not move without a commit, matching the macos-14 pin above.
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
       RUSTUP_TOOLCHAIN: "1.96"
@@ -714,10 +714,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: windows-2022-1.96-test
-          # The full workspace used 19m58s before post-job work. Restore here;
-          # the shorter native assertion shard owns saves for this key.
-          save-if: false
+          shared-key: windows-2022-1.96-test-core
+          save-if: true
+          cache-on-failure: true
 
       - name: Confirm OpenSSL's Perl
         shell: pwsh
@@ -725,8 +724,82 @@ jobs:
           & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
           if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
 
-      - name: cargo test (full Windows workspace)
-        run: cargo +1.96 test --workspace --locked
+      - name: cargo test (core storage and rules)
+        run: >-
+          cargo +1.96 test --locked
+          -p copypaste-core
+          -p copypaste-sensitive-rules
+
+  windows-test-services:
+    name: Windows service tests (x64)
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96-test-services
+          save-if: true
+          cache-on-failure: true
+
+      - name: Confirm OpenSSL's Perl
+        shell: pwsh
+        run: |
+          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
+          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
+
+      - name: cargo test (network and daemon services)
+        run: >-
+          cargo +1.96 test --locked
+          -p copypaste-p2p
+          -p copypaste-cloud
+          -p copypaste-daemon
+
+  windows-test-apps:
+    name: Windows application and utility tests (x64)
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96-test-apps
+          save-if: true
+          cache-on-failure: true
+
+      - name: Confirm OpenSSL's Perl
+        shell: pwsh
+        run: |
+          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
+          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
+
+      - name: cargo test (applications and utilities)
+        run: >-
+          cargo +1.96 test --locked
+          -p copypaste-ui
+          -p copypaste-cli
+          -p copypaste-ipc
+          -p copypaste-runtime-log
+          -p copypaste-fs
+          -p copypaste-clock
 
   windows-native-test:
     name: Windows native assertions (x64)
@@ -742,8 +815,9 @@ jobs:
           toolchain: "1.96"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: windows-2022-1.96-test
+          shared-key: windows-2022-1.96-native-test
           save-if: true
+          cache-on-failure: true
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
