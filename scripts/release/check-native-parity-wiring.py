@@ -231,24 +231,27 @@ def contract_errors(release, nightly, ci):
 
     ci_jobs = ci.get("jobs") or {}
     ci_frontend = ci_jobs.get("frontend") or {}
-    ci_windows_test = ci_jobs.get("windows-test") or {}
+    ci_windows_tests = [
+        ci_jobs.get(name) or {}
+        for name in ("windows-test-core", "windows-test-services", "windows-test-apps")
+    ]
     ci_windows_native_test = ci_jobs.get("windows-native-test") or {}
     windows_parity = "npm run test:native-parity"
     windows_parity_steps = exact_command_occurrences(
         ci_windows_native_test, ("npm", "run", "test:native-parity")
     )
     windows_npm_ci_steps = exact_command_occurrences(ci_windows_native_test, ("npm", "ci"))
-    windows_test_timeout = ci_windows_test.get("timeout-minutes")
+    windows_test_timeouts = [job.get("timeout-minutes") for job in ci_windows_tests]
     windows_native_test_timeout = ci_windows_native_test.get("timeout-minutes")
     if (
-        not isinstance(windows_test_timeout, int)
-        or isinstance(windows_test_timeout, bool)
-        or not 0 < windows_test_timeout <= 20
+        len(ci_windows_tests) != 3
+        or any(not isinstance(timeout, int) or isinstance(timeout, bool) or not 0 < timeout <= 15
+               for timeout in windows_test_timeouts)
         or not isinstance(windows_native_test_timeout, int)
         or isinstance(windows_native_test_timeout, bool)
         or not 0 < windows_native_test_timeout <= 20
     ):
-        errors.append("CI Windows workspace tests must be bounded to at most 20 minutes")
+        errors.append("CI Windows workspace test shards must be bounded to at most 15 minutes")
     if (
         len(windows_parity_steps) != 1
         or len(windows_npm_ci_steps) != 1
@@ -612,8 +615,8 @@ def self_test(release, nightly, ci):
     )
     rejected_ci_mutation(
         "Windows test timeout above budget fails",
-        lambda value: value["jobs"]["windows-test"].update({"timeout-minutes": 21}),
-        "bounded to at most 20 minutes",
+        lambda value: value["jobs"]["windows-test-core"].update({"timeout-minutes": 16}),
+        "bounded to at most 15 minutes",
     )
     rejected_ci_mutation(
         "missing Linux frontend install fails",
