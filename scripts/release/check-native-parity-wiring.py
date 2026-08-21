@@ -30,6 +30,13 @@ def downloads(job):
     }
 
 
+def windows_signing_prepare(job):
+    return next(
+        (step for step in steps(job) if "-Operation Prepare" in str(step.get("run") or "")),
+        {},
+    )
+
+
 def requirements_ci_install_at(command):
     needle = "install --requirement requirements-ci.txt"
     at = command.find(needle)
@@ -110,11 +117,8 @@ def contract_errors(release, nightly, ci):
         "TAURI_UPDATER_ENDPOINT",
     }
     private_signing_env = {"TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"}
-    certificate_step = next(
-        (step for step in steps(windows) if step.get("name") == "Import Windows release certificate"),
-        {},
-    )
-    certificate_env = certificate_step.get("env") or {}
+    signing_prepare = windows_signing_prepare(windows)
+    certificate_env = signing_prepare.get("env") or {}
     signed_build = next(
         (step for step in steps(windows) if step.get("name") == "Build signed Windows release package"),
         {},
@@ -222,6 +226,11 @@ def self_test(release, nightly, ci):
         )
         release_step["run"] = release_step["run"].replace("dist/latest.json", "")
 
+    def remove_prepare_certificate(value):
+        windows_signing_prepare(value["jobs"]["windows"])["env"].pop(
+            "WINDOWS_SIGNING_CERTIFICATE_BASE64"
+        )
+
     def rejected(label, mutation, expected):
         nonlocal failures
         fixture = copy.deepcopy(release)
@@ -277,6 +286,11 @@ def self_test(release, nightly, ci):
         "missing signed-step Tauri private signing input fails",
         lambda value: next(step for step in value["jobs"]["windows"]["steps"] if step.get("name") == "Build signed Windows release package")["env"].pop("TAURI_SIGNING_PRIVATE_KEY_PASSWORD"),
         "scoped only to the signed Windows build step",
+    )
+    rejected(
+        "missing signing preparation certificate input fails",
+        remove_prepare_certificate,
+        "declare every certificate, updater, timestamp, and release URL input",
     )
     rejected(
         "missing requirements install fails",

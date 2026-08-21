@@ -467,6 +467,13 @@
           "expect": "FAIL|job-wide Tauri private signing input fails|"
         },
         {
+          "name": "missing-signing-certificate-accepted",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "        or not {\"WINDOWS_SIGNING_CERTIFICATE_BASE64\", \"WINDOWS_SIGNING_CERTIFICATE_PASSWORD\"} <= set(certificate_env)\n",
+          "replace": "        or False\n",
+          "expect": "FAIL|missing signing preparation certificate input fails|"
+        },
+        {
           "name": "quoted-venv-pip-not-counted",
           "file": "scripts/release/check-native-parity-wiring.py",
           "find": "    needle = \"install --requirement requirements-ci.txt\"",
