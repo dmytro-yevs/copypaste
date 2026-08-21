@@ -1,14 +1,19 @@
 $script:WindowsProcessTraceLimit = 128
 $script:WindowsProcessNames = @("copypaste-ui.exe", "copypaste-daemon.exe")
 
-function ConvertTo-WindowsProcessTraceLine([string]$Kind, $Record) {
+function ConvertTo-WindowsProcessTraceLine([string]$Kind, $Record, $StartedNames = @{}) {
     $name = [IO.Path]::GetFileName(([string]$Record.ProcessName)).ToLowerInvariant()
+    $processId = [uint32]$Record.ProcessID
+    if ($Kind -eq "stop" -and $name -notin $script:WindowsProcessNames -and
+        $StartedNames.ContainsKey($processId)) {
+        $name = $StartedNames[$processId]
+    }
     if ($name -notin $script:WindowsProcessNames) { return $null }
     $line = [ordered]@{
         time_100ns = [uint64]$Record.TIME_CREATED
         kind = $Kind
         executable = $name
-        pid = [uint32]$Record.ProcessID
+        pid = $processId
         parent_pid = [uint32]$Record.ParentProcessID
     }
     if ($Kind -eq "stop") {
@@ -31,7 +36,7 @@ function Start-WindowsProcessTrace(
             -Query "SELECT * FROM Win32_ProcessStartTrace WHERE $filter" `
             -SourceIdentifier $startId | Out-Null
         Register-CimIndicationEvent -Namespace root/cimv2 `
-            -Query "SELECT * FROM Win32_ProcessStopTrace WHERE $filter" `
+            -Query "SELECT * FROM Win32_ProcessStopTrace" `
             -SourceIdentifier $stopId | Out-Null
         return [pscustomobject]@{
             Path = $Path
@@ -71,14 +76,21 @@ function Stop-WindowsProcessTrace($Trace) {
                 }
             }
         }
-        $lines = @(
+        $startedNames = @{}
+        foreach ($record in @($records | Where-Object { $_.Kind -eq "start" })) {
+            $name = [IO.Path]::GetFileName(([string]$record.Record.ProcessName)).ToLowerInvariant()
+            if ($name -in $script:WindowsProcessNames) {
+                $startedNames[[uint32]$record.Record.ProcessID] = $name
+            }
+        }
+        $converted = @(
             $records |
                 Sort-Object { [uint64]$_.Record.TIME_CREATED }, Kind |
-                Select-Object -First $Trace.Limit |
-                ForEach-Object { ConvertTo-WindowsProcessTraceLine $_.Kind $_.Record } |
+                ForEach-Object { ConvertTo-WindowsProcessTraceLine $_.Kind $_.Record $startedNames } |
                 Where-Object { $null -ne $_ }
         )
-        if ($records.Count -gt $Trace.Limit) {
+        $lines = @($converted | Select-Object -First $Trace.Limit)
+        if ($converted.Count -gt $Trace.Limit) {
             $lines += ([ordered]@{ kind = "trace-truncated"; limit = $Trace.Limit } |
                 ConvertTo-Json -Compress)
         }
@@ -107,14 +119,17 @@ function Test-WindowsProcessTraceHelpers {
         throw "process trace start records lost process identity"
     }
 
+    $startedNames = @{}
+    $startedNames[[uint32]42] = "copypaste-daemon.exe"
     $stop = ConvertTo-WindowsProcessTraceLine "stop" ([pscustomobject]@{
         TIME_CREATED = 200
-        ProcessName = "copypaste-daemon.exe"
+        ProcessName = "copypaste-daem"
         ProcessID = 42
         ParentProcessID = 41
         ExitStatus = [uint32]3221225477
-    }) | ConvertFrom-Json
-    if ($stop.kind -ne "stop" -or $stop.exit_code -ne 3221225477) {
+    }) $startedNames | ConvertFrom-Json
+    if ($stop.kind -ne "stop" -or $stop.executable -ne "copypaste-daemon.exe" -or
+        $stop.exit_code -ne 3221225477) {
         throw "process trace stop records lost the exit code"
     }
 
