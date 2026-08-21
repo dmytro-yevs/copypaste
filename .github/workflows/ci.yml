@@ -47,6 +47,7 @@ jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -58,6 +59,7 @@ jobs:
   feature-ledger:
     name: product feature ledger
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Reject incomplete features and unproven performance credits
@@ -68,6 +70,7 @@ jobs:
   android-manifest:
     name: Android manifest guard
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: sh ./scripts/check-android-manifest.sh
@@ -75,7 +78,7 @@ jobs:
   android-kotlin:
     name: Android Kotlin unit tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     env:
       ANDROID_PLATFORM: "android-36"
       BUILD_TOOLS_VERSION: "36.0.0"
@@ -127,6 +130,7 @@ jobs:
   commit-messages:
     name: commit messages
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -161,6 +165,7 @@ jobs:
   comments:
     name: comment budget
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -175,6 +180,7 @@ jobs:
   documentation:
     name: documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: python3 scripts/check-docs.py
@@ -183,6 +189,7 @@ jobs:
   file-size:
     name: file-size budget
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -199,6 +206,7 @@ jobs:
   release-pipeline:
     name: release pipeline
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -253,6 +261,7 @@ jobs:
   supabase-schema:
     name: Supabase schema and RLS
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -268,6 +277,7 @@ jobs:
   design:
     name: design tokens
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: design
@@ -294,12 +304,12 @@ jobs:
       # file.
       - run: npm run check
 
-  # The Rust gate. Clippy and the test suite share one runner so SQLCipher and
-  # the dependency graph are compiled once, not twice.
+  # The Linux Rust gate. SQLCipher and the dependency graph are compiled once.
 
   rust:
     name: test + clippy (linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -378,6 +388,7 @@ jobs:
   demo:
     name: demo.sh + demo-p2p.sh
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       # Both demo scripts try to pin themselves with
       #   command -v cargo +1.96 >/dev/null && CARGO="cargo +1.96"
@@ -431,6 +442,7 @@ jobs:
   frontend:
     name: npm build + test (jsdom)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: crates/copypaste-ui
@@ -479,7 +491,7 @@ jobs:
     runs-on: macos-14
     # A macOS runner bills at ten times a Linux one, and the platform steps
     # start processes.
-    timeout-minutes: 60
+    timeout-minutes: 20
     env:
       RUSTUP_TOOLCHAIN: "1.96"
     steps:
@@ -649,22 +661,15 @@ jobs:
   # Windows owns the DPAPI and named-pipe assertions, then exercises the
   # installed product. Missing evidence or cleanup fails the job.
   #
-  # Split in two rather than one job: measured incident runs (31838263912,
-  # 31825408629) show clippy+test+frontend finish in ~10-11 minutes while
-  # "Build the complete current-user installer" alone takes ~22 minutes, all
-  # ahead of the evidence step that actually failed in both. One serial job
-  # put ~33 minutes in front of that assertion; two parallel jobs put at most
-  # the package job's own length in front of it. Distinct rust-cache
-  # `shared-key` values, same reason the `rust`/`demo` split above gives them
-  # one each: one entry shared across two profiles is an exact-key hit, so
-  # rust-cache never saves and the entry freezes with the wrong profile in it.
+  # Windows compilation, tests, and installed-product evidence run in parallel.
+  # Run 32481306538 measured clippy at 7m39s and tests plus native assertions at
+  # 11m20s, but their serial job took 20m06s. Distinct cache keys avoid
+  # concurrent writers freezing one exact-key entry with the wrong contents.
 
-  windows-test:
-    name: Windows workspace tests (x64)
-    # Pinned rather than `windows-latest` so the toolchain and SDK under test do
-    # not move without a commit, matching the macos-14 pin above.
+  windows-clippy:
+    name: Windows clippy (x64)
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 20
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
       RUSTUP_TOOLCHAIN: "1.96"
@@ -674,7 +679,38 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
-          components: clippy, rustfmt
+          components: clippy
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96-clippy
+          cache-on-failure: true
+
+      - name: Confirm OpenSSL's Perl
+        shell: pwsh
+        run: |
+          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
+          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
+
+      - name: cargo clippy (full Windows workspace)
+        run: cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings
+
+  windows-test:
+    name: Windows workspace tests (x64)
+    # Pinned rather than `windows-latest` so the toolchain and SDK under test do
+    # not move without a commit, matching the macos-14 pin above.
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
@@ -696,11 +732,6 @@ jobs:
         run: |
           & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
           if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
-
-      # `--all-targets` is what type-checks the DPAPI backend and its tests,
-      # which no other runner in this workflow can parse.
-      - name: cargo clippy (full Windows workspace)
-        run: cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings
 
       - name: cargo test (full Windows workspace)
         run: cargo +1.96 test --workspace --locked
@@ -770,7 +801,7 @@ jobs:
   windows-package:
     name: Windows installed product evidence (x64)
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
       RUSTUP_TOOLCHAIN: "1.96"

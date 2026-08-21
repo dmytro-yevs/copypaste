@@ -25,6 +25,7 @@ jobs:
   linux:
     name: mutation gate (bash and python self-tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -47,6 +48,7 @@ jobs:
   windows:
     name: mutation gate (PowerShell self-tests)
     runs-on: windows-2022
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
