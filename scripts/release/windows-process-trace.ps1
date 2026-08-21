@@ -92,12 +92,30 @@ function Start-WindowsProcessTrace(
 function Write-WindowsProcessTrace([array]$Records, $Trace) {
     $ownedByPid = @{}
     $seen = @{}
+    $position = 0
     $converted = @(
         $Records |
-            Sort-Object { [uint64]$_.Record.TIME_CREATED }, Kind |
+            ForEach-Object {
+                $sequenceProperty = $_.PSObject.Properties["Sequence"]
+                [pscustomobject]@{
+                    Kind = $_.Kind
+                    Record = $_.Record
+                    Sequence = if ($null -ne $sequenceProperty) {
+                        [uint64]$sequenceProperty.Value
+                    } else { [uint64]::MaxValue }
+                    Boundary = if ($_.Kind -eq "stop") { 0 } else { 1 }
+                    Position = $position++
+                }
+            } |
+            Sort-Object { [uint64]$_.Record.TIME_CREATED }, Sequence, Boundary, Position |
             Where-Object {
                 $record = $_.Record
-                $key = "{0}|{1}|{2}|{3}|{4}|{5}" -f $_.Kind,
+                $identity = if ($_.Sequence -ne [uint64]::MaxValue) {
+                    "sequence:$($_.Sequence)"
+                } else {
+                    "fields"
+                }
+                $key = "{0}|{1}|{2}|{3}|{4}|{5}|{6}" -f $identity, $_.Kind,
                     ([uint64]$record.TIME_CREATED), ([uint32]$record.ProcessID),
                     ([string]$record.ProcessName).ToLowerInvariant(),
                     ([uint32]$record.ParentProcessID), ([uint32]$record.ExitStatus)
@@ -134,6 +152,7 @@ function Stop-WindowsProcessTrace($Trace, [scriptblock]$ShutdownActivity = $null
                 $records += [pscustomobject]@{
                     Kind = $source.Kind
                     Record = $event.SourceEventArgs.NewEvent
+                    Sequence = [uint64]$event.EventIdentifier
                 }
             }
         }
@@ -211,30 +230,39 @@ function Test-WindowsProcessTraceHelpers {
             ProcessID = 51; ParentProcessID = 7; ExitStatus = 0 }
         $stopRecord = [pscustomobject]@{ TIME_CREATED = 200; ProcessName = "copypaste-ui";
             ProcessID = 51; ParentProcessID = 7; ExitStatus = 9 }
-        $reuseRecord = [pscustomobject]@{ TIME_CREATED = 300; ProcessName = "unrelated.exe";
+        $reuseRecord = [pscustomobject]@{ TIME_CREATED = 200; ProcessName = "copypaste-daemon.exe";
             ProcessID = 51; ParentProcessID = 1; ExitStatus = 0 }
+        $reuseStop = [pscustomobject]@{ TIME_CREATED = 300; ProcessName = "unrelated.exe";
+            ProcessID = 51; ParentProcessID = 1; ExitStatus = 4 }
         $secondStart = [pscustomobject]@{ TIME_CREATED = 400; ProcessName = "copypaste-daemon.exe";
             ProcessID = 52; ParentProcessID = 7; ExitStatus = 0 }
         $records = @(
-            [pscustomobject]@{ Kind = "stop"; Record = $reuseRecord },
-            [pscustomobject]@{ Kind = "stop"; Record = $stopRecord },
-            [pscustomobject]@{ Kind = "start"; Record = $startRecord },
-            [pscustomobject]@{ Kind = "start"; Record = $startRecord },
-            [pscustomobject]@{ Kind = "stop"; Record = $stopRecord },
-            [pscustomobject]@{ Kind = "start"; Record = $secondStart }
+            [pscustomobject]@{ Kind = "stop"; Record = $reuseStop; Sequence = 4 },
+            [pscustomobject]@{ Kind = "start"; Record = $reuseRecord; Sequence = 3 },
+            [pscustomobject]@{ Kind = "stop"; Record = $stopRecord; Sequence = 2 },
+            [pscustomobject]@{ Kind = "start"; Record = $startRecord; Sequence = 1 },
+            [pscustomobject]@{ Kind = "start"; Record = $startRecord; Sequence = 1 },
+            [pscustomobject]@{ Kind = "stop"; Record = $stopRecord; Sequence = 2 },
+            [pscustomobject]@{ Kind = "start"; Record = $secondStart; Sequence = 5 }
         )
-        Write-WindowsProcessTrace $records ([pscustomobject]@{ Path = $fixturePath; Limit = 2 })
+        Write-WindowsProcessTrace $records ([pscustomobject]@{ Path = $fixturePath; Limit = 3 })
         $fixture = @(Get-Content -LiteralPath $fixturePath | ForEach-Object { $_ | ConvertFrom-Json })
         $events = @($fixture | Where-Object { $_.kind -in @("start", "stop") })
-        if ($events.Count -ne 2 -or $events[0].kind -ne "start" -or $events[1].kind -ne "stop") {
+        if ($events.Count -ne 3 -or $events[0].kind -ne "start" -or
+            $events[1].kind -ne "stop" -or $events[2].kind -ne "start") {
             throw "process trace did not reorder and deduplicate causal events before truncation"
         }
         if (@($fixture | Where-Object { $_.kind -eq "trace-truncated" }).Count -ne 1) {
             throw "process trace fixture did not prove the unique-record bound"
         }
-        if (@($events | Where-Object { $_.pid -eq 51 }).Count -ne 2 -or
-            @($events | Where-Object { $_.pid -eq 51 -and $_.exit_code -eq 0 }).Count -ne 0) {
+        if ($events[0].executable -ne "copypaste-ui.exe" -or
+            $events[1].executable -ne "copypaste-ui.exe" -or
+            $events[1].exit_code -ne 9 -or
+            $events[2].executable -ne "copypaste-daemon.exe") {
             throw "process trace fixture attributed a reused PID"
+        }
+        if (($fixture | ConvertTo-Json -Compress) -match "unrelated|private-secret") {
+            throw "process trace fixture disclosed an unrelated executable"
         }
     } finally {
         Remove-Item -LiteralPath $fixturePath -Force -ErrorAction SilentlyContinue
