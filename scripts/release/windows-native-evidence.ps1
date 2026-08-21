@@ -89,6 +89,30 @@ function Get-CliProbeOutcome([string]$Failure) {
     return New-ProbeTransient "the CLI failed: $Failure"
 }
 
+function Get-InstalledSidecarOutcome([string]$DaemonExe, $Processes) {
+    $candidates = if ($null -eq $Processes) {
+        @(Get-Process -Name "copypaste-daemon" -ErrorAction SilentlyContinue)
+    } else {
+        @($Processes)
+    }
+    $matching = @()
+    $unobservable = 0
+    foreach ($candidate in $candidates) {
+        try { $path = $candidate.Path } catch { $path = $null }
+        if ([string]::IsNullOrEmpty($path)) {
+            $unobservable++
+        } elseif ($path -eq $DaemonExe) {
+            $matching += $candidate
+        }
+    }
+    if ($matching.Count -eq 1) { return New-ProbeReady $matching[0] }
+    if ($matching.Count -gt 1) { return New-ProbeInvariant "the installed sidecar count is $($matching.Count), not 1" }
+    if ($unobservable -gt 0) {
+        return New-ProbeTransient "$unobservable daemon process path(s) are not observable yet"
+    }
+    return New-ProbeNotReady "the installed sidecar count is 0, not 1"
+}
+
 function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, [string]$DaemonError) {
     $parts = @()
     if ($App) {
@@ -97,7 +121,8 @@ function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, 
         try { $parts += Get-UiaSummary $App } catch { $parts += "UIA: $($_.Exception.Message)" }
     }
     if (Test-Path -LiteralPath $DaemonError -PathType Leaf) {
-        $parts += "daemon stderr: $((Get-Content -Raw -LiteralPath $DaemonError).Trim())"
+        $stderr = [IO.File]::ReadAllText($DaemonError).Trim()
+        $parts += if ($stderr) { "daemon stderr: $stderr" } else { "daemon stderr: <empty>" }
     }
     $runtime = Get-ChildItem -LiteralPath (Join-Path $DataRoot "logs") -Filter "*.log" -ErrorAction SilentlyContinue |
         ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
@@ -126,6 +151,36 @@ function Invoke-SelfTest {
         $refusing = Join-Path $root "refusing.cmd"
         [IO.File]::WriteAllText($refusing, "@exit /b 1`r`n")
         Assert-Unreachable $refusing
+
+        $emptyError = Join-Path $root "empty-daemon.stderr.log"
+        [IO.File]::WriteAllText($emptyError, "")
+        $diagnostics = @(Get-InstalledDiagnostics $null $root $emptyError)
+        Assert-True ($diagnostics -contains "daemon stderr: <empty>") "empty daemon stderr broke diagnostics"
+
+        $seen = @{ probes = 0 }
+        $sidecar = Wait-Readiness "a transiently unobservable sidecar" {
+            $seen.probes++
+            $process = if ($seen.probes -eq 1) {
+                [pscustomobject]@{ Path = $null }
+            } else {
+                [pscustomobject]@{ Path = "C:\Program Files\CopyPaste\copypaste-daemon.exe" }
+            }
+            Get-InstalledSidecarOutcome "C:\Program Files\CopyPaste\copypaste-daemon.exe" @($process)
+        } { "fixture diagnostics" } 1000 2 1 250 250 { param($ms) }
+        Assert-True ($sidecar.Path -like "*copypaste-daemon.exe") "a transient process-path race did not recover"
+
+        $rejected = $false
+        try {
+            Wait-Readiness "a genuinely missing sidecar" {
+                Get-InstalledSidecarOutcome "C:\Program Files\CopyPaste\copypaste-daemon.exe" @(
+                    [pscustomobject]@{ Path = "C:\Other\copypaste-daemon.exe" }
+                )
+            } { "fixture diagnostics" } 1000 2 1 250 250 { param($ms) } | Out-Null
+        } catch {
+            $rejected = $_.Exception.Message -match "sidecar count is 0" -and
+                        $_.Exception.Message -notmatch "null-valued expression"
+        }
+        Assert-True $rejected "a genuinely missing sidecar did not remain a bounded failure"
 
         Test-WindowsUiEvidenceHelpers
         Write-Output "PASS: a broken installed sidecar package fails closed"
@@ -228,8 +283,8 @@ try {
         if ($app.HasExited) { return New-ProbeInvariant "the installed app exited with code $($app.ExitCode)" }
         $root = Get-AppAutomationRoot $app
         if ($null -eq $root) { return New-ProbeNotReady "the app has published no native window handle" }
-        $sidecars = @(Get-Process -Name "copypaste-daemon" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $daemonExe })
-        if ($sidecars.Count -ne 1) { return New-ProbeNotReady "the installed sidecar count is $($sidecars.Count), not 1" }
+        $sidecar = Get-InstalledSidecarOutcome $daemonExe $null
+        if ($sidecar.kind -ne "ready") { return $sidecar }
         try { Invoke-Json $cli @("status") | Out-Null }
         catch { return Get-CliProbeOutcome $_.Exception.Message }
         return New-ProbeReady $root
