@@ -97,19 +97,25 @@ function Get-InstalledSidecarOutcome([string]$DaemonExe, $Processes) {
     }
     $matching = @()
     $unobservable = 0
+    $wrongPath = 0
     foreach ($candidate in $candidates) {
         try { $path = $candidate.Path } catch { $path = $null }
         if ([string]::IsNullOrEmpty($path)) {
             $unobservable++
         } elseif ($path -eq $DaemonExe) {
             $matching += $candidate
+        } else {
+            $wrongPath++
         }
     }
-    if ($matching.Count -eq 1) { return New-ProbeReady $matching[0] }
+    if ($wrongPath -gt 0) {
+        return New-ProbeInvariant "$wrongPath daemon process(es) are running outside the installed sidecar path"
+    }
     if ($matching.Count -gt 1) { return New-ProbeInvariant "the installed sidecar count is $($matching.Count), not 1" }
     if ($unobservable -gt 0) {
         return New-ProbeTransient "$unobservable daemon process path(s) are not observable yet"
     }
+    if ($matching.Count -eq 1) { return New-ProbeReady $matching[0] }
     return New-ProbeNotReady "the installed sidecar count is 0, not 1"
 }
 
@@ -160,27 +166,44 @@ function Invoke-SelfTest {
         $seen = @{ probes = 0 }
         $sidecar = Wait-Readiness "a transiently unobservable sidecar" {
             $seen.probes++
-            $process = if ($seen.probes -eq 1) {
-                [pscustomobject]@{ Path = $null }
-            } else {
-                [pscustomobject]@{ Path = "C:\Program Files\CopyPaste\copypaste-daemon.exe" }
-            }
-            Get-InstalledSidecarOutcome "C:\Program Files\CopyPaste\copypaste-daemon.exe" @($process)
+            $processes = @([pscustomobject]@{ Path = "C:\Program Files\CopyPaste\copypaste-daemon.exe" })
+            if ($seen.probes -eq 1) { $processes += [pscustomobject]@{ Path = $null } }
+            Get-InstalledSidecarOutcome "C:\Program Files\CopyPaste\copypaste-daemon.exe" $processes
         } { "fixture diagnostics" } 1000 2 1 250 250 { param($ms) }
         Assert-True ($sidecar.Path -like "*copypaste-daemon.exe") "a transient process-path race did not recover"
+        Assert-True ($seen.probes -eq 2) "a correct sidecar hid an unobservable duplicate"
 
+        $seen.probes = 0
         $rejected = $false
         try {
-            Wait-Readiness "a genuinely missing sidecar" {
+            Wait-Readiness "a wrong-path sidecar" {
+                $seen.probes++
                 Get-InstalledSidecarOutcome "C:\Program Files\CopyPaste\copypaste-daemon.exe" @(
+                    [pscustomobject]@{ Path = "C:\Program Files\CopyPaste\copypaste-daemon.exe" },
                     [pscustomobject]@{ Path = "C:\Other\copypaste-daemon.exe" }
                 )
             } { "fixture diagnostics" } 1000 2 1 250 250 { param($ms) } | Out-Null
         } catch {
-            $rejected = $_.Exception.Message -match "sidecar count is 0" -and
-                        $_.Exception.Message -notmatch "null-valued expression"
+            $rejected = $_.Exception.Message -match "outside the installed sidecar path"
         }
-        Assert-True $rejected "a genuinely missing sidecar did not remain a bounded failure"
+        Assert-True ($rejected -and $seen.probes -eq 1) "a wrong-path duplicate did not fail closed immediately"
+
+        $duplicate = Get-InstalledSidecarOutcome "C:\Program Files\CopyPaste\copypaste-daemon.exe" @(
+            [pscustomobject]@{ Path = "C:\Program Files\CopyPaste\copypaste-daemon.exe" },
+            [pscustomobject]@{ Path = "c:\program files\copypaste\copypaste-daemon.exe" }
+        )
+        Assert-True ($duplicate.kind -eq "invariant") "duplicate correct sidecars were accepted"
+
+        $rejected = $false
+        try {
+            Wait-Readiness "a genuinely missing sidecar" {
+                Get-InstalledSidecarOutcome "C:\Program Files\CopyPaste\copypaste-daemon.exe" @()
+            } { "fixture diagnostics" } 1000 2 1 250 250 { param($ms) } | Out-Null
+        } catch {
+            $rejected = $_.Exception.Message -match "sidecar count is 0" -and
+                        $_.Exception.Message -match "fixture diagnostics"
+        }
+        Assert-True $rejected "a zero-sidecar candidate set did not remain a bounded failure"
 
         Test-WindowsUiEvidenceHelpers
         Write-Output "PASS: a broken installed sidecar package fails closed"
