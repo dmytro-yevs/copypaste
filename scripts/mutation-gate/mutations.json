@@ -437,6 +437,36 @@
       ]
     },
     {
+      "id": "android-abi-link-wiring",
+      "verifies": "the Android ABI link matrix exactly matches the shared linker and NDK target set",
+      "command": ["python3", "scripts/release/check-wiring.py", "--strict"],
+      "platforms": ["linux", "macos"],
+      "requires": ["python3"],
+      "mutations": [
+        {
+          "name": "abi-target-deleted",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "          - i686-linux-android\n          - x86_64-linux-android\n",
+          "replace": "          - i686-linux-android\n",
+          "expect": "FAIL|android-emulator.yml ABI link matrix matches NDK targets|"
+        },
+        {
+          "name": "abi-target-substituted",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "          - armv7-linux-androideabi\n",
+          "replace": "          - riscv64-linux-android\n",
+          "expect": "FAIL|android-emulator.yml ABI link matrix matches NDK targets|"
+        },
+        {
+          "name": "abi-target-duplicated",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "          - x86_64-linux-android\n",
+          "replace": "          - x86_64-linux-android\n          - x86_64-linux-android\n",
+          "expect": "FAIL|android-emulator.yml ABI link matrix matches NDK targets|"
+        }
+      ]
+    },
+    {
       "id": "check-feature-ledger",
       "verifies": "the ledger schema: every shipped Tauri command is classified and every platform recorded",
       "command": ["python3", "scripts/check-feature-ledger.py", "--self-test"],
