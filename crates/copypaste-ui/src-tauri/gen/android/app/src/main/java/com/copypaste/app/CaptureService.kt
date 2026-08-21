@@ -37,7 +37,7 @@ class CaptureService : Service() {
             return START_NOT_STICKY
         }
 
-        // The FGS notification is the user's visible evidence that a listener
+        // The FGS notification is the user's visible evidence that a reader
         // is alive. Never run an invisible service on Android 13+.
         if (!CaptureNotifications.canPost(this)) {
             clearState(this)

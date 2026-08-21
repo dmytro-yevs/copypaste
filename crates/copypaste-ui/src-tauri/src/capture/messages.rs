@@ -74,8 +74,8 @@ pub(super) fn detail(platform: Rung, health: CaptureHealth) -> Option<&'static s
                  you copy inside the app, share to it, or capture with the tile."
             }
             NotGrantedReason::NotRunning => {
-                "Shizuku isn't running. Android stops it on every restart, so this is expected \
-                 after a reboot — start it again to resume capturing from other apps."
+                "Shizuku isn't running yet. Start it once so CopyPaste can apply the background-\
+                 capture grants, then return here."
             }
             NotGrantedReason::NoPermission => {
                 "Shizuku is running but hasn't given CopyPaste permission yet."
@@ -86,15 +86,11 @@ pub(super) fn detail(platform: Rung, health: CaptureHealth) -> Option<&'static s
                 "Waiting for your first copy in another app to confirm it works."
             }
             NotWorkingReason::ReadRefused => {
-                "Shizuku is running, but reading the clipboard was refused. Only what you copy \
-                 inside the app is being saved."
+                "CopyPaste couldn't confirm background clipboard reads from other apps. Only what \
+                 you copy inside the app is being saved."
             }
-            // Not LOST_BODY. A lost arm is what a reboot does, and the
-            // sibling NotRunning sentence says so; sharing the notification's
-            // wording made the routine case read as a fault.
             NotWorkingReason::NotArmed => {
-                "Background capture stops whenever Shizuku does, which Android does on every \
-                 restart. Turning it back on takes one tap."
+                "Background capture is set up but not running. Turning it back on takes one tap."
             }
         },
     })
