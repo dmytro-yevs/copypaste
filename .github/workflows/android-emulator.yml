@@ -144,7 +144,7 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Link all four ABIs. No emulator, no Gradle, no APK.
+  # Link all four ABIs in parallel. No emulator, no Gradle, no APK.
   #
   # Only the universal APK links armv7, i686 and aarch64, and only release.yml
   # builds it, only on a pushed tag — so v2.0.0-alpha.5 failed twice in public
@@ -157,22 +157,30 @@ jobs:
   # audit, so it spends runner-minutes rather than wall-clock.
   # ---------------------------------------------------------------------------
   link-abis:
-    name: Link all four Android ABIs
+    name: Link Android ABI (${{ matrix.triple }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        triple:
+          - aarch64-linux-android
+          - armv7-linux-androideabi
+          - i686-linux-android
+          - x86_64-linux-android
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: ${{ matrix.triple }}
 
-      # Its own key: this job compiles four target triples, and sharing a key
-      # with a single-ABI job would have them overwrite each other's save.
+      # Each target owns its cache so concurrent saves cannot overwrite one
+      # another.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: android-link-abis
+          shared-key: android-link-${{ matrix.triple }}
           save-if: "true"
 
       - name: Install the pinned NDK
@@ -196,10 +204,10 @@ jobs:
 
           echo "NDK_HOME=${ndk}" >> "$GITHUB_ENV"
 
-      - name: Link every ABI the release links
+      - name: Link the release ABI
         run: |
           set -euo pipefail
-          ./scripts/release/android-link-abis.sh
+          ./scripts/release/android-link-abis.sh "${{ matrix.triple }}"
 
   # A debug APK, x86_64 only.
   #
