@@ -14,7 +14,7 @@ import android.util.Log
  * The probe carries this value and the probe rides on every drain, so an
  * uncached read is a ContentResolver query 86,400 times a day. Another app or
  * the user can change it, which is what the observer is for; our own write goes
- * through the shell uid and calls [invalidate] before reporting, because a
+ * through the Shizuku user service and calls [invalidate] before reporting, because a
  * suppression we only assumed happened is the same class of lie as reporting
  * capture that is not running.
  */

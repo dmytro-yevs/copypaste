@@ -1,6 +1,6 @@
 /**
  * The switch is bound to the probe, not to what the user just asked for: the
- * write goes through the shell uid and can fail, and a switch that showed "off"
+ * write goes through the Shizuku user service and can fail, and a switch that showed "off"
  * for a notice still appearing would be the same class of lie as reporting
  * capture that is not running.
  */

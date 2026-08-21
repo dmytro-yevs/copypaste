@@ -354,7 +354,6 @@ for f in settings.gradle build.gradle.kts gradlew app/build.gradle.kts \
          app/src/main/AndroidManifest.xml \
          app/src/main/res/xml/backup_rules.xml \
          app/src/main/res/xml/data_extraction_rules.xml \
-         app/src/main/aidl/android/content/IOnPrimaryClipChangedListener.aidl \
          buildSrc/src/main/java/com/copypaste/app/kotlin/BuildTask.kt; do
     if git ls-files --error-unmatch "$GEN/$f" >/dev/null 2>&1; then
         ok "$f is committed"
@@ -365,7 +364,7 @@ done
 # The capture feature. An APK that builds, installs and captures nothing is a
 # worse outcome than a failed build, and it is invisible in the artefact.
 for k in CapturePlugin IntakeActivity CaptureTileService ShizukuClipboard \
-         ClipListener CaptureService CaptureNotifications ClipQueue; do
+         ClipCascadeCapture CaptureService CaptureNotifications ClipQueue; do
     if git ls-files --error-unmatch "$GEN/app/src/main/java/com/copypaste/app/$k.kt" >/dev/null 2>&1; then
         ok "$k.kt is committed"
     else
