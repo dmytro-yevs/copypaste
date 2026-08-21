@@ -233,7 +233,7 @@ function Add-TemporarySelfSignedTrust(
     $issuer = [Convert]::ToHexString($Certificate.IssuerName.RawData)
     if ($subject -cne $issuer) { return $null }
     $store = [Security.Cryptography.X509Certificates.X509Store]::new(
-        [Security.Cryptography.X509Certificates.StoreName]::Root,
+        [Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
         [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
     try {
         $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
