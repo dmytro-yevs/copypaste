@@ -41,7 +41,7 @@ class ClipboardNoticeSettingTest {
     }
 
     /**
-     * Our own write goes through the shell uid and the observer arrives after
+     * Our own write goes through the Shizuku user service and the observer arrives after
      * we have already answered. Reporting a suppression that did not happen is
      * the same class of lie as reporting capture that is not running.
      */

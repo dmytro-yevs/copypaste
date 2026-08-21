@@ -12,9 +12,9 @@
 //! [`CaptureModel::record_read`] — there is no setter, no constructor and no
 //! deserialiser that can produce it. A permission being present is not
 //! evidence that a read succeeds, and v1 shipped the opposite (`CopyPaste-qzhu`
-//! removed an optimistic `working = true`). Losing the binder clears the
+//! removed an optimistic `working = true`). Losing the reader clears the
 //! evidence as well as the grant, so a re-arm cannot inherit a claim made
-//! before a reboot.
+//! before a restart.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +36,7 @@ pub enum Rung {
     /// Rung 0 — in-app copies, the share sheet, the text-selection action, the
     /// Quick Settings tile, and the Mac's history over sync.
     InApp,
-    /// Rung 2 — background capture from every app, as the shell uid.
+    /// Rung 2 — background capture from every app after one-shot setup grants.
     Shizuku,
 }
 
@@ -61,7 +61,7 @@ pub enum CaptureSource {
     /// The Quick Settings tile: the user tapped, our activity took focus, and
     /// the read was legal because of it.
     Tile,
-    /// Read in the background as the shell uid.
+    /// Read in the background by CopyPaste's own ClipCascade path.
     Background,
 }
 
@@ -75,8 +75,7 @@ pub enum NotGrantedReason {
     /// itself, so rung 2 there would need a computer. We do not offer it.
     Unsupported,
     NotInstalled,
-    /// The expected state after every restart: pairing is once, starting is
-    /// every boot.
+    /// Shizuku is not running yet, so CopyPaste cannot apply its setup grants.
     NotRunning,
     NoPermission,
 }
@@ -89,10 +88,10 @@ pub enum NotGrantedReason {
 pub enum NotWorkingReason {
     /// Everything is in place but nothing has been read yet. Not a fault.
     AwaitingFirstCopy,
-    /// A read was attempted as the shell uid and refused. This is the state
+    /// A background read was attempted and refused. This is the state
     /// the whole design is unverified against.
     ReadRefused,
-    /// The listener is not registered — the user has not armed it, or arming
+    /// The reader is not running — the user has not armed it, or arming
     /// failed.
     NotArmed,
 }
@@ -136,7 +135,7 @@ pub enum NextStep {
     StartShizuku,
     /// Ask Shizuku for our permission.
     GrantPermission,
-    /// Register the listener.
+    /// Start the background reader.
     Arm,
 }
 
@@ -150,8 +149,8 @@ pub struct ShizukuProbe {
     /// phone itself, with no computer.
     pub supported: bool,
     pub installed: bool,
-    /// `Shizuku.pingBinder()`. False after every reboot until the user starts
-    /// it again.
+    /// `Shizuku.pingBinder()`. False until the user starts Shizuku to apply the
+    /// setup grants.
     pub running: bool,
     pub permission: bool,
     pub enabled: bool,
@@ -262,7 +261,8 @@ impl CaptureModel {
     }
 
     pub fn set_probe(&mut self, probe: ShizukuProbe) {
-        // Losing the binder between two probes is a loss like any other, and
+        // Losing the reader's setup state between two probes is a loss like
+        // any other, and
         // must clear the evidence rather than leave a stale "working".
         if self.probe.running && !probe.running {
             self.record_loss();
@@ -281,7 +281,7 @@ impl CaptureModel {
         }
     }
 
-    /// The listener registered. Note what this does **not** do: it does not
+    /// The reader started. Note what this does **not** do: it does not
     /// claim the thing works.
     pub fn record_armed(&mut self, armed: bool) {
         self.armed = armed;

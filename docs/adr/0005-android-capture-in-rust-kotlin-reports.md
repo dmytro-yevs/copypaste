@@ -41,11 +41,10 @@ doorways — the share sheet (`ACTION_SEND`), the text-selection action
 (`copypaste_core::ingest`). The tile's tap is what gives `IntakeActivity` focus,
 and focus is the clipboard exemption we can reach with no permission at all.
 
-**Rung 2 written, unverified.** `ShizukuClipboard` obtains the clipboard binder
-through `ShizukuBinderWrapper` and calls it as `com.android.shell`.
-`ShizukuSettingsService` persists only app-ops, standby, and the optional toast
-setting; it does not transfer the shell clipboard exemption into CopyPaste's
-own uid.
+**Rung 2 written, partially verified.** `ShizukuSettingsService` is only the
+setup bridge: it applies the ClipCascade-style grants, standby relaxations and
+the optional toast setting. The live reader is app-owned
+(`ClipCascadeCapture` + `ClipboardFloatingActivity` + `CaptureService`).
 
 **Rungs 1 and 3 are not built** and are not represented in the state model. An
 overlay bubble and becoming the default IME are both in the specification's
@@ -62,23 +61,19 @@ the setup screen green at the exact moment it knows least. This is
 `CopyPaste-qzhu` in a subtler costume than the one v1 shipped, and
 `record_read` takes a `focused` flag because of it.
 
-**`IClipboard` is called reflectively, and only its callback is AIDL.** Its
-signatures have gained parameters repeatedly — `attributionTag` in API 30,
-`deviceId` in 34 — so a compiled-in AIDL is a guess that breaks on the next
-release. `ShizukuClipboard.invoke` fills the argument vector from the method's
-own parameter types. The single exception is
-`IOnPrimaryClipChangedListener`, declared as AIDL because a Binder stub cannot
-be produced by reflection; it has been one no-argument callback since it was
-introduced.
+**Kotlin owns the device-only runtime.** The app-owned reader (`ClipCascadeCapture`
+plus `ClipboardFloatingActivity`) depends on logcat, overlay focus and Android
+service rules that Rust cannot exercise on this host. Rust therefore receives
+facts and clips, not callbacks into its own process.
 
 **Kotlin queues and Rust drains once a second.** This is not clipboard polling:
-the clipboard signal is the listener's push, and the drain only moves already
-captured text between two halves of one process. The alternative was a JNI
-callback, which needs `unsafe` in a crate that forbids it. The cost is up to a
-second of latency to storage and a loss window if the process dies with clips
-queued — `Buffer` counts what it loses and the count is surfaced, because a copy
-that was not saved is precisely what the user must not have to discover for
-themselves.
+the clipboard signal is produced on the Kotlin side, and the drain only moves
+already captured text between two halves of one process. The alternative was a
+JNI callback, which needs `unsafe` in a crate that forbids it. The cost is up
+to a second of latency to storage and a loss window if the process dies with
+clips queued — `Buffer` counts what it loses and the count is surfaced, because
+a copy that was not saved is precisely what the user must not have to discover
+for themselves.
 
 ## What this creates for other people
 

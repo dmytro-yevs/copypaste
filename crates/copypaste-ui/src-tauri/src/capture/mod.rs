@@ -36,8 +36,8 @@ pub trait CaptureControl: Send + Sync + 'static {
     /// the app is in the background, which is the whole subject of this module.
     fn refresh(&self) -> CaptureSnapshot;
 
-    /// Ask for the permission if it is missing, otherwise register the clip
-    /// listener and try one read.
+    /// Ask for the permission if it is missing, otherwise start the background
+    /// reader and try one read.
     ///
     /// Both steps behind one call, so the setup screen and the loss
     /// notification have one button between them whatever state they find. The
@@ -48,7 +48,7 @@ pub trait CaptureControl: Send + Sync + 'static {
     /// See [`model::CaptureModel::record_read`].
     fn arm(&self) -> Result<CaptureSnapshot>;
 
-    /// Unregister and stop. Does not revoke anything — Shizuku's permission is
+    /// Stop. Does not revoke anything — Shizuku's permission is
     /// the user's to withdraw.
     fn disarm(&self) -> Result<CaptureSnapshot>;
 

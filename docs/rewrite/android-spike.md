@@ -71,10 +71,8 @@ Two things that were reported as dead ends and are not:
 
 What is still **not** settled, and why:
 
-* **The Shizuku transport.** `ShizukuBinderWrapper`, `IClipboard$Stub.asInterface`
-  by reflection, the `IOnPrimaryClipChangedListener` descriptor and whether the
-  listener ever fires are items 2, 3 and 8 and need a pairing done by hand.
-  What is settled is everything the proxy is transparent to.
+* **The Shizuku setup bridge.** Pairing, one-shot grant application and the
+  optional toast-setting write still need a phone with Shizuku paired by hand.
 * **R8.** The APK is the debug one because every filesystem assertion goes
   through `run-as`, so the minified release build's plugin reflection is
   untested.
@@ -112,11 +110,9 @@ moved on an emulator; what is left is the Shizuku transport and the hardware.
 2. **`Shizuku.newProcess` is not reachable by reflection** in the version of
    the API library resolved. Only the toast-suppression opt-in depends on it;
    everything else fails independently.
-3. **`addPrimaryClipChangedListener` registers and never fires.** The fallback
-   is already written and documented: poll `getPrimaryClip` over the same proxy
-   on a timer. `ShizukuClipboard.pollOnce` is that call; what is missing is the
-   timer, and the state model needs no change because a polled read reports the
-   same `ReadOutcome`.
+3. **The app-owned ClipCascade path still needs real device proof.** The
+   runtime path is `READ_LOGS` + overlay focus + foreground service; what is
+   missing is proof on actual OEM builds, not another Shizuku-side fallback.
 4. ~~**The argument vector is wrong on this API level.**~~ Settled on API 36:
    `(String callingPackage, String attributionTag, int userId, int deviceId)`
    is the order, which is what `invoke` builds. Still open on other API levels,
@@ -144,4 +140,5 @@ moved on an emulator; what is left is the Shizuku transport and the hardware.
 * Does the tile save the clipboard in one tap, and how visible is
   `IntakeActivity` while it does?
 * Is `Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS` readable by the app
-  without the shell uid? `ShizukuClipboard.isToastSuppressed` assumes it is.
+  without the Shizuku user service? `ShizukuClipboard.isToastSuppressed`
+  assumes it is.

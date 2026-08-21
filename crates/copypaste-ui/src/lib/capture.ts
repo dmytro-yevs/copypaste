@@ -5,9 +5,9 @@
  */
 import type { CaptureHealth, CaptureNextStep, CaptureSnapshot } from "@/lib/ipc";
 
-/** Presentation weight, not severity. The states a reboot produces are
- *  `attention`, not `fault`: Shizuku stops on every restart and re-arming is
- *  routine. `fault` is reserved for a read that was refused. */
+/** Presentation weight, not severity. Setup and restart prompts are
+ *  `attention`, not `fault`: they are actionable setup states, not breakage.
+ *  `fault` is reserved for a read that was refused. */
 export type CaptureTone = "ok" | "info" | "attention" | "fault" | "off";
 
 export function toneOf(health: CaptureHealth): CaptureTone {
@@ -61,7 +61,7 @@ export interface LadderRung {
 
 /** Every `done` comes from a field the platform reported. `armed` is the one
  *  derivation: the snapshot carries no `armed` flag, and `not_armed` is the
- *  health the model reports when the listener is not registered. */
+ *  health the model reports when the reader is not running. */
 export function ladderOf(snapshot: CaptureSnapshot): readonly LadderRung[] {
   const { shizuku, health, nextStep } = snapshot;
   const current = STEP_FOR[nextStep];

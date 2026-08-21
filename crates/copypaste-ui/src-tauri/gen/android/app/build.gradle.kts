@@ -82,10 +82,9 @@ dependencies {
     // it in Rust; 1.9.0 is the maintained line built for Kotlin 2.2.
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 
-    // Rung 2. AGENTS.md rule 1: the maintained client library, not a
-    // hand-rolled binder proxy — `ShizukuBinderWrapper` and
-    // `SystemServiceHelper` are exactly the two pieces we would otherwise be
-    // reimplementing against a hidden API. MIT, from RikkaApps.
+    // Rung 2 setup. AGENTS.md rule 1: the maintained client library, not a
+    // hand-rolled permission bridge to Shizuku's user service. MIT, from
+    // RikkaApps.
     //
     // The tradeoff to state: both repos have been quiet since mid-2025, so our
     // best background-capture path depends on a third-party app with one

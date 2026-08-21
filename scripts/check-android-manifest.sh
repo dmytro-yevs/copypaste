@@ -68,8 +68,9 @@ if grep -E 'return[[:space:]]+START_STICKY([^_]|$)' crates/copypaste-ui/src-taur
     printf 'FAIL: CaptureService uses START_STICKY; OEM kills must fail closed\n' >&2
     exit 1
 fi
-if ! grep -q 'ShizukuBinderWrapper' crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/com/copypaste/app/ShizukuClipboard.kt; then
-    printf 'FAIL: ShizukuClipboard no longer uses ShizukuBinderWrapper\n' >&2
+if rg -n 'ShizukuBinderWrapper|IClipboard\\$Stub|addPrimaryClipChangedListener|OnPrimaryClipChangedListener' \
+    crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/com/copypaste/app >/dev/null; then
+    printf 'FAIL: live Shizuku clipboard reading reappeared in shipping Kotlin\n' >&2
     exit 1
 fi
 printf 'PASS: Android capture-ladder static contracts\n'

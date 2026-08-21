@@ -22,7 +22,7 @@ use tauri::Manager as _;
 ///
 /// `clipboard_backend` is surfaced so a demo cannot be mistaken for the real
 /// thing: on Android it reads `android-inprocess`; its background-capture
-/// field is derived from the Android listener rather than from the embedded
+/// field is derived from the Android reader rather than from the embedded
 /// store, which cannot know whether Kotlin is still receiving clipboard events.
 #[tauri::command]
 pub async fn status(
@@ -61,7 +61,7 @@ mod tests {
     use crate::capture::model::{CaptureModel, ReadOutcome, ShizukuProbe};
 
     #[test]
-    fn android_status_only_reports_background_capture_after_a_real_listener_read() {
+    fn android_status_only_reports_background_capture_after_a_real_reader_read() {
         let mut model = CaptureModel::android();
         assert!(!android_capture_running(&model.snapshot()));
 

@@ -39,7 +39,7 @@ pub fn capture_refresh(app: AppHandle, capture: State<'_, SelectedCapture>) -> C
     emit(&app, capture.refresh())
 }
 
-/// Register the background listener and try one read.
+/// Start the background reader and try one focused read.
 ///
 /// The one tap behind the "background capture stopped" notification, and the
 /// last step of the rung 2 setup screen.
