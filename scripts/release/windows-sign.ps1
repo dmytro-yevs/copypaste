@@ -603,38 +603,38 @@ function Invoke-SelfTest {
         $policyCases = @(
             @{
                 Name = "missing timestamp"
-                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
-                    "2.16.840.1.101.3.4.2.1"
+                Cms = (New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1")
                 Error = $null
             },
             @{
                 Name = "invalid timestamp"
-                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
-                    "2.16.840.1.101.3.4.2.1" -Timestamp -InvalidTimestamp
+                Cms = (New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1" -Timestamp -InvalidTimestamp)
                 Error = "Authenticode RFC 3161 timestamp is invalid"
             },
             @{
                 Name = "SHA-1 signer digest"
-                Cms = New-SelfTestCms $certificate "1.3.14.3.2.26" `
-                    "2.16.840.1.101.3.4.2.1" -Timestamp
+                Cms = (New-SelfTestCms $certificate "1.3.14.3.2.26" `
+                    "2.16.840.1.101.3.4.2.1" -Timestamp)
                 Error = "Authenticode signature does not use SHA-256"
             },
             @{
                 Name = "SHA-1 timestamp signer digest"
-                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
-                    "2.16.840.1.101.3.4.2.1" -Timestamp -TimestampSignerDigestOid "1.3.14.3.2.26"
+                Cms = (New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1" -Timestamp -TimestampSignerDigestOid "1.3.14.3.2.26")
                 Error = "Authenticode RFC 3161 timestamp signature does not use SHA-256"
             },
             @{
                 Name = "SHA-1 timestamp imprint"
-                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
-                    "1.3.14.3.2.26" -Timestamp
+                Cms = (New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "1.3.14.3.2.26" -Timestamp)
                 Error = "Authenticode RFC 3161 message imprint does not use SHA-256"
             },
             @{
                 Name = "SHA-256 timestamp imprint"
-                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
-                    "2.16.840.1.101.3.4.2.1" -Timestamp
+                Cms = (New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1" -Timestamp)
                 Error = $null
             }
         )
@@ -649,7 +649,7 @@ function Invoke-SelfTest {
             }
             if ($case.Name -eq "missing timestamp") {
                 if ($errorMessage -or $null -ne $validated.TimeStamperCertificate) {
-                    throw "missing timestamp fixture self-test failed"
+                    throw "missing timestamp fixture self-test failed: $errorMessage"
                 }
             } elseif ($errorMessage -cne $case.Error) {
                 throw "$($case.Name) fixture self-test failed: $errorMessage"
@@ -872,6 +872,15 @@ function Invoke-SelfTest {
                 }
                 if (-not $missingTimestampRejected) {
                     throw "Invoke-WindowsSign missing timestamp self-test failed"
+                }
+                if ($runnerCalls.Count -ne 3 -or
+                    $runnerCalls[1].Phase -cne "SignTool signing" -or
+                    $runnerCalls[1].Timeout -ne 120000 -or
+                    $runnerCalls[2].Phase -cne "SignTool embedded verification" -or
+                    $runnerCalls[2].Timeout -ne 120000 -or
+                    [string]::Join(" ", $runnerCalls[2].Arguments) -cne
+                        "verify /pa /all /tw $routingTarget") {
+                    throw "Invoke-WindowsSign missing timestamp routing self-test failed"
                 }
             } finally {
                 Remove-Item -LiteralPath $routingTarget -Force -ErrorAction SilentlyContinue
