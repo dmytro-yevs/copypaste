@@ -1,5 +1,28 @@
 $script:WindowsProcessTraceLimit = 128
 $script:WindowsProcessNames = @("copypaste-ui.exe", "copypaste-daemon.exe")
+$script:WindowsProcessTraceCleanupMilliseconds = 2000
+
+function Clear-WindowsProcessTraceSubscriptions([array]$SourceIds) {
+    foreach ($sourceId in $SourceIds) {
+        Unregister-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue
+    }
+    $wait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        foreach ($sourceId in $SourceIds) {
+            Get-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue |
+                Remove-Event -ErrorAction SilentlyContinue
+        }
+        $subscribers = @($SourceIds | Where-Object {
+            @(Get-EventSubscriber -SourceIdentifier $_ -ErrorAction SilentlyContinue).Count -ne 0
+        })
+        $events = @($SourceIds | Where-Object {
+            @(Get-Event -SourceIdentifier $_ -ErrorAction SilentlyContinue).Count -ne 0
+        })
+        if ($subscribers.Count -eq 0 -and $events.Count -eq 0) { return }
+        Start-Sleep -Milliseconds 25
+    } while ($wait.ElapsedMilliseconds -lt $script:WindowsProcessTraceCleanupMilliseconds)
+    throw "process trace cleanup did not settle"
+}
 
 function ConvertTo-WindowsProcessTraceLine([string]$Kind, $Record, $OwnedByPid = @{}) {
     $name = [IO.Path]::GetFileName(([string]$Record.ProcessName)).ToLowerInvariant()
@@ -53,8 +76,7 @@ function Start-WindowsProcessTrace(
             Limit = $Limit
         }
     } catch {
-        Unregister-Event -SourceIdentifier $startId -ErrorAction SilentlyContinue
-        Unregister-Event -SourceIdentifier $stopId -ErrorAction SilentlyContinue
+        Clear-WindowsProcessTraceSubscriptions @($startId, $stopId)
         '{"kind":"trace-unavailable","reason":"subscription-failed"}' |
             Set-Content -LiteralPath $Path -Encoding utf8
         return [pscustomobject]@{
@@ -95,10 +117,14 @@ function Write-WindowsProcessTrace([array]$Records, $Trace) {
     $lines | Set-Content -LiteralPath $Trace.Path -Encoding utf8
 }
 
-function Stop-WindowsProcessTrace($Trace) {
+function Stop-WindowsProcessTrace($Trace, [scriptblock]$ShutdownActivity = $null) {
     if ($null -eq $Trace -or -not $Trace.Available) { return }
     try {
         Start-Sleep -Milliseconds 300
+        foreach ($sourceId in @($Trace.StartId, $Trace.StopId)) {
+            Unregister-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue
+        }
+        if ($null -ne $ShutdownActivity) { & $ShutdownActivity }
         $records = @()
         foreach ($source in @(
             @{ Id = $Trace.StartId; Kind = "start" },
@@ -113,11 +139,7 @@ function Stop-WindowsProcessTrace($Trace) {
         }
         Write-WindowsProcessTrace $records $Trace
     } finally {
-        foreach ($sourceId in @($Trace.StartId, $Trace.StopId)) {
-            Get-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue |
-                Remove-Event -ErrorAction SilentlyContinue
-            Unregister-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue
-        }
+        Clear-WindowsProcessTraceSubscriptions @($Trace.StartId, $Trace.StopId)
     }
 }
 
@@ -261,7 +283,15 @@ function Test-WindowsProcessTraceCollector {
         if ($observedPairs.Count -ne $fixturePids.Count) {
             throw "real process trace did not receive a start and stop for every fixture"
         }
-        Stop-WindowsProcessTrace $trace
+        $shutdown = [pscustomobject]@{ Pid = [uint32]0 }
+        Stop-WindowsProcessTrace $trace {
+            $shutdownProcess = Start-Process -FilePath $ui `
+                -ArgumentList "/d", "/c", "exit 29" -Wait -PassThru
+            if ($shutdownProcess.ExitCode -ne 29) {
+                throw "shutdown activity fixture exited unexpectedly"
+            }
+            $shutdown.Pid = [uint32]$shutdownProcess.Id
+        }
         $completedTrace = $trace
         $trace = $null
 
@@ -291,6 +321,9 @@ function Test-WindowsProcessTraceCollector {
                 @(Get-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue).Count -ne 0) {
                 throw "real process trace did not unregister and drain its subscription"
             }
+        }
+        if (@($events | Where-Object { $_.pid -eq $shutdown.Pid }).Count -ne 0) {
+            throw "real process trace queued activity after shutdown began"
         }
     } finally {
         if ($null -ne $trace) {
