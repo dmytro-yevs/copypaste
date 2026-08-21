@@ -259,6 +259,22 @@ def runner_image_checks(workflows):
 for check in runner_image_checks(docs):
     rec(*check)
 
+# --- job execution budgets --------------------------------------------------
+def job_timeout_checks(workflows, maximum=20):
+    for wf, doc in workflows.items():
+        for jn, job in (doc.get("jobs") or {}).items():
+            if "runs-on" not in job:
+                continue
+            timeout = job.get("timeout-minutes")
+            yield (isinstance(timeout, int) and not isinstance(timeout, bool)
+                   and 0 < timeout <= maximum,
+                   "{}: {} is bounded to at most {} minutes".format(wf, jn, maximum),
+                   "timeout-minutes is {!r}".format(timeout))
+
+
+for check in job_timeout_checks(docs):
+    rec(*check)
+
 # --- one ref per action, across every workflow ------------------------------
 refs = {}
 for wf, doc in docs.items():
@@ -605,16 +621,22 @@ release_android = release_jobs.get("android") or {}
 release_android_uploads = [str((step.get("with") or {}).get("name", ""))
                            for step in steps(release_android)
                            if (step.get("uses") or "").startswith("actions/upload-artifact")]
+release_upgrade = release_jobs.get("android-upgrade-fixture") or {}
+release_upgrade_uploads = [str((step.get("with") or {}).get("name", ""))
+                           for step in steps(release_upgrade)
+                           if (step.get("uses") or "").startswith("actions/upload-artifact")]
 release_smoke_downloads = [str((step.get("with") or {}).get("name", ""))
                            for step in steps(release_smoke)
                            if (step.get("uses") or "").startswith("actions/download-artifact")]
-release_android_body = "\n".join(step.get("run") or "" for step in steps(release_android))
-rec("android-upgrade-fixture" in release_android_uploads
+release_upgrade_body = "\n".join(step.get("run") or "" for step in steps(release_upgrade))
+rec("android-upgrade-fixture" in release_upgrade_uploads
     and "android-upgrade-fixture" in release_smoke_downloads
+    and "android-upgrade-fixture" in closure(release_jobs, "android-smoke")
     and release_env.get("PREVIOUS_APK") == "upgrade-dist/copypaste-previous-release.apk"
-    and "--write-overlay" in release_android_body,
+    and "--write-overlay" in release_upgrade_body
+    and "--target x86_64" in release_upgrade_body,
     "release.yml tests a separately signed previous-version APK",
-    "the publish workflow must build, sign, upload, download and install its own upgrade fixture")
+    "the publish workflow must build one emulator ABI, sign, upload, download and install its own upgrade fixture")
 rec("android-storage-transfer.sh" in release_script,
     "release.yml runs storage transfer against the signed Android artifact",
     "the release evidence must come from the APK that publish consumes")
@@ -641,6 +663,17 @@ rec(bool(re.search(r"^\s*npm run tauri -- android build --apk\s*$", release_andr
 rec(bool(re.search(r"^\s*npm run tauri -- android build --apk --target x86_64\s*$",
                    emulator_android_workflow, re.M)),
     "android-emulator.yml rebuilds the shipped APK without cloud evidence configuration")
+
+release_windows = release_jobs.get("windows") or {}
+windows_body = "\n".join(step.get("run") or "" for step in steps(release_windows))
+windows_downloads = [str((step.get("with") or {}).get("name", ""))
+                     for step in steps(release_windows)
+                     if (step.get("uses") or "").startswith("actions/download-artifact")]
+rec("windows-sidecars" in closure(release_jobs, "windows")
+    and "windows-release-sidecars" in windows_downloads
+    and "-PrebuiltSidecarsDirectory artifacts/windows-sidecars" in windows_body,
+    "release.yml builds Windows sidecars in parallel with the app",
+    "the installer job must depend on, download and pass the prebuilt sidecar artifact")
 
 ui_cargo = pathlib.Path("crates/copypaste-ui/src-tauri/Cargo.toml").read_text()
 embedded_cloud = pathlib.Path("crates/copypaste-ui/src-tauri/src/backend/embedded/cloud.rs").read_text()
@@ -810,6 +843,26 @@ if SELF_TEST:
         ("an empty matrix is not", not probe_matrix()),
     ):
         emit(held, "self-test: {}".format(desc), "the detector did not behave as stated")
+
+    def timeout_probe(timeout, reusable=False):
+        job = {"uses": "./.github/workflows/other.yml"} if reusable else {
+            "runs-on": "ubuntu-latest"
+        }
+        if timeout is not None:
+            job["timeout-minutes"] = timeout
+        return all(cond for cond, _, _ in
+                   job_timeout_checks({"probe.yml": {"jobs": {"job": job}}}))
+
+    for desc, held in (
+        ("a 20-minute job budget is accepted", timeout_probe(20)),
+        ("a shorter job budget is accepted", timeout_probe(7)),
+        ("a missing job budget is rejected", not timeout_probe(None)),
+        ("a 21-minute job budget is rejected", not timeout_probe(21)),
+        ("a string job budget is rejected", not timeout_probe("20")),
+        ("a reusable-workflow call is owned by its callee", timeout_probe(None, reusable=True)),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the job timeout detector did not behave as stated")
 
     def components_probe(components, run="cargo +1.96 test --workspace --locked"):
         setup = {"uses": "dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c"}

@@ -2,6 +2,7 @@ param(
     [switch]$Unsigned,
     [switch]$SelfTest,
     [string]$OutputDirectory,
+    [string]$PrebuiltSidecarsDirectory,
     [ValidateSet("x86_64")]
     [string]$Architecture = "x86_64"
 )
@@ -125,17 +126,27 @@ try {
         $config = "src-tauri/tauri.windows.signed.generated.json"
     }
 
-    Push-Location $repoRoot
-    try {
-        Invoke-Checked cargo @("build", "--release", "--locked", "-p", "copypaste-cli", "-p", "copypaste-daemon")
-    } finally {
-        Pop-Location
+    if ($PrebuiltSidecarsDirectory) {
+        $sidecarSource = [IO.Path]::GetFullPath($PrebuiltSidecarsDirectory)
+        foreach ($binary in @("copypaste.exe", "copypaste-daemon.exe")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $sidecarSource $binary) -PathType Leaf)) {
+                throw "Prebuilt sidecar artifact is incomplete"
+            }
+        }
+    } else {
+        Push-Location $repoRoot
+        try {
+            Invoke-Checked cargo @("build", "--release", "--locked", "-p", "copypaste-cli", "-p", "copypaste-daemon")
+        } finally {
+            Pop-Location
+        }
+        $sidecarSource = Join-Path $repoRoot "target/release"
     }
 
     $binaryDirectory = Join-Path $tauriRoot "binaries"
     [IO.Directory]::CreateDirectory($binaryDirectory) | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repoRoot "target/release/copypaste.exe") -Destination (Join-Path $binaryDirectory "copypaste-$targetTriple.exe") -Force
-    Copy-Item -LiteralPath (Join-Path $repoRoot "target/release/copypaste-daemon.exe") -Destination (Join-Path $binaryDirectory "copypaste-daemon-$targetTriple.exe") -Force
+    Copy-Item -LiteralPath (Join-Path $sidecarSource "copypaste.exe") -Destination (Join-Path $binaryDirectory "copypaste-$targetTriple.exe") -Force
+    Copy-Item -LiteralPath (Join-Path $sidecarSource "copypaste-daemon.exe") -Destination (Join-Path $binaryDirectory "copypaste-daemon-$targetTriple.exe") -Force
 
     Push-Location $uiRoot
     try {

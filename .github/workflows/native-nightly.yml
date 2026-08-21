@@ -17,6 +17,7 @@ permissions:
 jobs:
   ledger:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: python3 scripts/check-feature-ledger.py
@@ -52,7 +53,7 @@ jobs:
       matrix:
         runner: [macos-14, macos-15]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -77,7 +78,7 @@ jobs:
     name: Windows installed-release evidence (requested)
     if: github.event_name == 'workflow_dispatch' && inputs.windows_evidence
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       RUSTUP_TOOLCHAIN: "1.96"
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'

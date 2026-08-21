@@ -159,7 +159,7 @@ jobs:
   link-abis:
     name: Link all four Android ABIs
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -215,7 +215,7 @@ jobs:
   apk:
     name: Build the debug APK (x86_64)
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -394,7 +394,7 @@ jobs:
     name: Launch, capture, and read back (API ${{ matrix.api-level }})
     needs: apk
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -488,7 +488,7 @@ jobs:
   release-apk:
     name: Build the release APK (x86_64, minified)
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -705,7 +705,7 @@ jobs:
     name: Launch the shipped build
     needs: release-apk
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -779,7 +779,7 @@ jobs:
     name: Launch the shipped build (API 33)
     needs: release-apk
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
