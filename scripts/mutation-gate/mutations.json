@@ -419,6 +419,20 @@
           "find": "            yield (isinstance(timeout, int) and not isinstance(timeout, bool)\n                   and 0 < timeout <= maximum,",
           "replace": "            yield (True,",
           "expect": "FAIL|self-test: a missing job budget is rejected|"
+        },
+        {
+          "name": "runner-local-android-settings-transfer-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "                if token in detail:\n",
+          "replace": "                if False:\n",
+          "expect": "FAIL|self-test: runner-local Android settings are rejected as artifacts|"
+        },
+        {
+          "name": "generated-android-tree-transfer-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "            if \"src-tauri/gen/android\" in path and \"jniLibs/\" not in path:\n",
+          "replace": "            if False:\n",
+          "expect": "FAIL|self-test: an opaque generated Android tree artifact is rejected|"
         }
       ]
     },

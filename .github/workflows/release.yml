@@ -388,9 +388,6 @@ jobs:
           - target: i686
             triple: i686-linux-android
             abi: x86
-          - target: x86_64
-            triple: x86_64-linux-android
-            abi: x86_64
     env:
       # See the macOS job: rust-toolchain.toml outranks `rustup default`, so
       # without this the Rust half of the Gradle build runs under stable — for
@@ -574,44 +571,31 @@ jobs:
           path: ${{ runner.temp }}/android-native/libcopypaste_ui_lib.so
           if-no-files-found: error
           retention-days: 7
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: matrix.target == 'x86_64'
-        with:
-          name: android-native-x86_64
-          path: ${{ runner.temp }}/android-native/libcopypaste_ui_lib.so
-          if-no-files-found: error
-          retention-days: 7
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: matrix.target == 'x86_64'
-        with:
-          name: android-release-scaffold
-          path: |
-            crates/copypaste-ui/src-tauri/gen/android/tauri.settings.gradle
-            crates/copypaste-ui/src-tauri/gen/android/app/tauri.build.gradle.kts
-            crates/copypaste-ui/src-tauri/gen/android/app/tauri.properties
-            crates/copypaste-ui/src-tauri/gen/android/app/proguard-tauri.pro
-            crates/copypaste-ui/src-tauri/gen/android/app/src/main/**/generated/**
-            crates/copypaste-ui/src-tauri/gen/android/app/src/main/assets/tauri.conf.json
-          if-no-files-found: error
-          retention-days: 7
-
   android:
     name: Assemble and sign Android universal APK
     needs: [version, android-abi]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
+      RUSTUP_TOOLCHAIN: "1.96"
+      NDK_VERSION: "27.2.12479018"
       ANDROID_PLATFORM: "android-36"
       BUILD_TOOLS_VERSION: "36.0.0"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+          targets: x86_64-linux-android
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: android-release-x86_64-assembly
+          save-if: "true"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
-      - run: npm ci --prefix crates/copypaste-ui --ignore-scripts
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
@@ -625,12 +609,37 @@ jobs:
           set -euo pipefail
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$sdkmanager" --install \
+            "ndk;${NDK_VERSION}" \
             "platforms;${ANDROID_PLATFORM}" \
             "build-tools;${BUILD_TOOLS_VERSION}"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: android-release-scaffold
-          path: crates/copypaste-ui/src-tauri/gen/android
+          ndk="${ANDROID_HOME}/ndk/${NDK_VERSION}"
+          [[ -d "$ndk" ]] || { echo "::error::the pinned Android NDK is missing"; exit 1; }
+          {
+            echo "NDK_HOME=${ndk}"
+            echo "ANDROID_NDK_HOME=${ndk}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_HOME}"
+          } >> "$GITHUB_ENV"
+      - name: Point the Android build at NDK binutils
+        run: |
+          set -euo pipefail
+          ./scripts/release/android-ndk-env.sh "$NDK_HOME" | tee -a "$GITHUB_ENV"
+      - name: Generate runner-local Tauri Gradle settings
+        run: |
+          set -euo pipefail
+          for tool in perl make; do
+            command -v "$tool" >/dev/null 2>&1 \
+              || { echo "::error::$tool is required to build OpenSSL for Android"; exit 1; }
+          done
+          cd crates/copypaste-ui
+          npm ci
+          npm run tauri -- android build --apk --target x86_64
+          for generated in \
+            src-tauri/gen/android/tauri.settings.gradle \
+            src-tauri/gen/android/app/tauri.build.gradle.kts \
+            src-tauri/gen/android/app/tauri.properties \
+            src-tauri/gen/android/app/src/main/jniLibs/x86_64/libcopypaste_ui_lib.so; do
+            [[ -f "$generated" ]] || { echo "::error::Tauri did not generate $generated"; exit 1; }
+          done
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android-native-aarch64
@@ -643,15 +652,12 @@ jobs:
         with:
           name: android-native-i686
           path: crates/copypaste-ui/src-tauri/gen/android/app/src/main/jniLibs/x86
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: android-native-x86_64
-          path: crates/copypaste-ui/src-tauri/gen/android/app/src/main/jniLibs/x86_64
       - name: Assemble the prelinked universal APK
         run: |
           set -euo pipefail
           cd crates/copypaste-ui/src-tauri/gen/android
           ./gradlew --no-daemon \
+            clean \
             assembleUniversalRelease \
             -PabiList=arm64-v8a,armeabi-v7a,x86,x86_64 \
             -ParchList=arm64,arm,x86,x86_64 \
