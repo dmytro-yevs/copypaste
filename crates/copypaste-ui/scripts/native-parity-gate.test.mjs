@@ -26,10 +26,14 @@ const RECEIPT_VALUES = {
   macos: {
     environment: "hosted-runner",
     scenario: { name: "native-launch", elapsed_ms: 10, budget_ms: 3000 },
-    assertions: ["installed app launched", "native accessibility tree is non-empty"],
+    assertions: [
+      "installed app launched",
+      "native accessibility tree is non-empty",
+      "native accessibility surface exposes a menu bar and named elements",
+    ],
   },
   android: {
-    environment: "physical-device",
+    environment: "emulator",
     scenario: { name: "release-webview-ready", elapsed_ms: 10, budget_ms: 115000 },
     assertions: [
       "signed release app launched",
@@ -157,7 +161,7 @@ async function withRoot(run) {
   }
 }
 
-test("accepts exact macOS, Android, and Windows release evidence", () => withRoot(async (root) => {
+test("accepts alpha.29 macOS, emulator Android, and Windows release evidence", () => withRoot(async (root) => {
   const evidence = await Promise.all([
     fixture(root, "macos"),
     fixture(root, "android"),
@@ -402,10 +406,10 @@ test("rejects Windows accessibility evidence mapped to another feature", () => w
   );
 }));
 
-test("rejects an emulator receipt in the physical Android release slot", () => withRoot(async (root) => {
+test("rejects a physical-device receipt in the emulator Android release slot", () => withRoot(async (root) => {
   const evidence = [
     await fixture(root, "macos"),
-    await fixture(root, "android", { environment: "emulator" }),
+    await fixture(root, "android", { environment: "physical-device" }),
   ];
   await assert.rejects(
     validateEvidence({
@@ -414,7 +418,26 @@ test("rejects an emulator receipt in the physical Android release slot", () => w
       required: new Set(["macos", "android"]),
       runId: RUN_ID,
     }),
-    /invalid android environment/,
+    /violates the schema/,
+  );
+}));
+
+test("rejects a known assertion assigned to the wrong platform", () => withRoot(async (root) => {
+  const evidence = [await fixture(root, "macos", {
+    assertions: [
+      "installed app launched",
+      "native accessibility tree is non-empty",
+      "release smoke assertions passed",
+    ],
+  })];
+  await assert.rejects(
+    validateEvidence({
+      commit: COMMIT,
+      evidence,
+      required: new Set(["macos"]),
+      runId: RUN_ID,
+    }),
+    /violates the schema/,
   );
 }));
 

@@ -54,6 +54,7 @@
         "enum": [
           "installed app launched",
           "native accessibility tree is non-empty",
+          "native accessibility surface exposes a menu bar and named elements",
           "signed release app launched",
           "WebView accessibility content painted",
           "release smoke assertions passed",
@@ -114,11 +115,12 @@
           },
           "assertions": {
             "type": "array",
-            "minItems": 2,
-            "maxItems": 2,
+            "minItems": 3,
+            "maxItems": 3,
             "allOf": [
               { "contains": { "const": "installed app launched" } },
-              { "contains": { "const": "native accessibility tree is non-empty" } }
+              { "contains": { "const": "native accessibility tree is non-empty" } },
+              { "contains": { "const": "native accessibility surface exposes a menu bar and named elements" } }
             ]
           }
         }
@@ -129,6 +131,7 @@
       "then": {
         "type": "object",
         "properties": {
+          "environment": { "const": "emulator" },
           "scenario": {
             "type": "object",
             "properties": {
