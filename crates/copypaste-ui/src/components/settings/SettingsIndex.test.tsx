@@ -69,7 +69,7 @@ describe("the compact settings ladder", () => {
 
     await user.click(screen.getByRole("button", { name: "Storage" }));
 
-    expect(screen.getByRole("heading", { name: "Storage", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Storage", level: 1 })).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Export…" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Appearance" })).toBeNull();
   });
@@ -123,7 +123,7 @@ describe("the compact settings ladder", () => {
 
     for (const section of sections) {
       await user.click(screen.getByRole("button", { name: section }));
-      expect(screen.getByRole("heading", { name: section, level: 2 })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: section, level: 1 })).toBeTruthy();
       await user.click(screen.getByRole("button", { name: "All settings" }));
       await waitFor(() =>
         expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeTruthy(),
@@ -137,7 +137,7 @@ describe("the compact settings ladder", () => {
     withClient(<SettingsView />);
 
     expect(
-      await screen.findByRole("heading", { name: "Diagnostics", level: 2 }),
+      await screen.findByRole("heading", { name: "Diagnostics", level: 1 }),
     ).toBeTruthy();
     expect(useUi.getState().settingsTab).toBeNull();
   });
@@ -145,12 +145,30 @@ describe("the compact settings ladder", () => {
   it("opens the section a search result belongs to", async () => {
     setViewportWidth(PHONE);
     const { user } = withUser(<SettingsView />);
-    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "screenshots");
+    await user.click(screen.getByRole("button", { name: "Search settings" }));
+    await user.type(
+      await screen.findByRole("searchbox", { name: "Search settings" }),
+      "screenshots",
+    );
 
     await user.click(await screen.findByRole("button", { name: /Allow screenshots/i }));
 
     expect(await screen.findByRole("switch", { name: "Allow screenshots" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "List", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "List", level: 1 })).toBeTruthy();
+  });
+
+  it("keeps every subpage Back control in the standard header slot", async () => {
+    setViewportWidth(PHONE);
+    const { user } = withUser(<SettingsView />);
+
+    for (const section of ["Storage", "About"]) {
+      await user.click(screen.getByRole("button", { name: section }));
+      const back = screen.getByRole("button", { name: "All settings" });
+      expect(back.parentElement?.tagName).toBe("HEADER");
+      expect(back).toBe(back.parentElement?.firstElementChild);
+      await user.click(back);
+      await screen.findByRole("navigation", { name: "Settings sections" });
+    }
   });
 
   /**
@@ -190,4 +208,3 @@ describe("the compact settings ladder", () => {
     );
   });
 });
-

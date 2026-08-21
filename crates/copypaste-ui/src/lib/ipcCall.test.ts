@@ -43,6 +43,15 @@ function setWebBridge(): void {
   vi.stubEnv("VITE_COPYPASTE_WEB_BRIDGE_TOKEN", "test-token");
 }
 
+function setRuntimeWebBridge(): void {
+  setTauriBridge(false);
+  vi.stubEnv("DEV", true);
+  window.__COPYPASTE_WEB_BRIDGE__ = {
+    url: "http://127.0.0.1:43123",
+    token: "test-token",
+  };
+}
+
 beforeEach(() => {
   invoke.mockReset();
   fetchMock.mockReset();
@@ -55,6 +64,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   globalThis.fetch = originalFetch;
+  delete window.__COPYPASTE_WEB_BRIDGE__;
   setTauriBridge(false);
 });
 
@@ -216,6 +226,24 @@ describe("IPC call lifecycle", () => {
       json: () => Promise.resolve({ item_count: 3 }),
     } as Response);
     await expect(call("status")).resolves.toEqual({ item_count: 3 });
+  });
+
+  it("uses the runtime bridge file without restarting Vite", async () => {
+    setRuntimeWebBridge();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ item_count: 3 }),
+    } as Response);
+
+    await expect(call("status")).resolves.toEqual({ item_count: 3 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:43123/v1/call",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-token",
+        }),
+      }),
+    );
   });
 
   it("classifies a missing or unreachable bridge as offline", async () => {

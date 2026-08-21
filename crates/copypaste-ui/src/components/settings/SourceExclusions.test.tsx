@@ -17,6 +17,7 @@ import { items, page, withUser } from "@/test/harness";
 
 const listItems = vi.fn();
 const listInstalledSourceApps = vi.fn();
+const getSourceAppIcon = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -25,6 +26,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     listItems: (...args: unknown[]) => listItems(...args),
     getStatus: () => Promise.resolve(null),
     listInstalledSourceApps: () => listInstalledSourceApps(),
+    getSourceAppIcon: (...args: unknown[]) => getSourceAppIcon(...args),
   };
 });
 
@@ -33,9 +35,11 @@ beforeEach(() => {
     page(items(3, { source_app_bundle_id: "com.example.editor" })),
   );
   listInstalledSourceApps.mockReset().mockResolvedValue([]);
+  getSourceAppIcon.mockReset().mockResolvedValue(null);
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -46,6 +50,11 @@ function onWindows() {
 
 function onMac() {
   vi.spyOn(platform, "isAndroidPlatform").mockReturnValue(false);
+  vi.spyOn(platform, "isWindowsPlatform").mockReturnValue(false);
+}
+
+function onAndroid() {
+  vi.spyOn(platform, "isAndroidPlatform").mockReturnValue(true);
   vi.spyOn(platform, "isWindowsPlatform").mockReturnValue(false);
 }
 
@@ -158,6 +167,39 @@ describe("everywhere else", () => {
     await user.keyboard("{Enter}");
     expect(onChange).toHaveBeenCalledWith(["com.apple.Passwords"]);
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("on Android", () => {
+  it("opens the picker before the installed-app query starts", async () => {
+    onAndroid();
+    listInstalledSourceApps.mockResolvedValue([
+      { package_id: "com.example.first", label: "First" },
+    ]);
+
+    withUser(<SourceExclusions ids={[]} onChange={() => {}} />);
+
+    expect(screen.getByLabelText("Search installed apps")).toBeTruthy();
+    expect(screen.getByText("Reading the service's settings…")).toBeTruthy();
+    expect(listInstalledSourceApps).toHaveBeenCalledTimes(0);
+
+    await waitFor(() => expect(listInstalledSourceApps).toHaveBeenCalledTimes(1));
+  });
+
+  it("virtualizes the installed-app list instead of mounting every row", async () => {
+    onAndroid();
+    listInstalledSourceApps.mockResolvedValue(
+      Array.from({ length: 200 }, (_, index) => ({
+        package_id: `com.example.${index}`,
+        label: `App ${index}`,
+      })),
+    );
+
+    withUser(<SourceExclusions ids={[]} onChange={() => {}} />);
+
+    expect(await screen.findByText("App 0")).toBeTruthy();
+    expect(screen.queryByText("App 199")).toBeNull();
+    await waitFor(() => expect(getSourceAppIcon.mock.calls.length).toBeLessThan(200));
   });
 });
 

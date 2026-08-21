@@ -5,7 +5,15 @@
  * leaves no row because the wire exposes no distinct revoked-list state.
  */
 import { useState } from "react";
-import { Laptop, Link2, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import {
+  Laptop,
+  Link2,
+  LoaderCircle,
+  QrCode,
+  RefreshCw,
+  ScanLine,
+  TriangleAlert,
+} from "lucide-react";
 
 import {
   AlertDialog,
@@ -23,8 +31,13 @@ import { EmptyState } from "@/components/EmptyState";
 import { StateNotice } from "@/components/StateNotice";
 import { PeerRow } from "@/components/devices/PeerRow";
 import { PairingPanel } from "@/components/devices/PairingPanel";
+import {
+  PairingInviteDialog,
+  PairingJoinDialog,
+} from "@/components/devices/PairingPreviewDialogs";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
 import { DeviceNameField } from "@/components/devices/DeviceNameField";
+import { usePairing } from "@/hooks/usePairing";
 import {
   MAX_PAIRINGS,
   type PeerHealthMap,
@@ -56,10 +69,12 @@ export function DevicesView() {
   const discovered = useDiscovered();
   const rescan = useRescan();
   const own = useStatus(statusOwnDevice);
+  const pairing = usePairing();
 
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
   const [health, setHealth] = useState<PeerHealthMap>({});
+  const [joinOpen, setJoinOpen] = useState(false);
 
   const errorKind = peers.error ? classifyError(peers.error) : null;
   const ownErrorKind = own.error ? classifyError(own.error) : null;
@@ -76,6 +91,11 @@ export function DevicesView() {
   const nearby = discovered.data ?? [];
   const full = atPairingCap(list.length);
   const online = list.filter((peer) => peer.online).length;
+  const pairingState = pairing.ceremony?.state ?? "idle";
+  const pairingActive =
+    pairingState === "waiting_for_peer" ||
+    pairingState === "handshaking" ||
+    pairingState === "awaiting_confirmation";
 
   const runSync = (pairingId: string | undefined) =>
     sync.mutate(pairingId, {
@@ -92,6 +112,58 @@ export function DevicesView() {
       <header className="chrome flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider px-s-3 py-s-2">
         <h1 className="mr-auto text-sm font-semibold">{t("devices.title")}</h1>
 
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          disabled={full || pairingActive || pairing.isPending}
+          aria-label={t("devices.pairing.create")}
+          title={
+            full
+              ? t("devices.cap.hint")
+              : t(
+                  pairing.webPreview
+                    ? "devices.pairing.createHintWeb"
+                    : "devices.pairing.createHint",
+                )
+          }
+          onClick={() =>
+            pairing.webPreview ? pairing.startPreviewCreate() : pairing.run("create")
+          }
+        >
+          {pairing.pendingAction === "create" ? (
+            <LoaderCircle
+              className="animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          ) : (
+            <QrCode aria-hidden="true" />
+          )}
+        </Button>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          disabled={full || pairingActive || pairing.isPending}
+          aria-label={t("devices.pairing.join")}
+          title={
+            full
+              ? t("devices.cap.hint")
+              : t(
+                  pairing.webPreview
+                    ? "devices.pairing.joinHintWeb"
+                    : "devices.pairing.joinHint",
+                )
+          }
+          onClick={() => (pairing.webPreview ? setJoinOpen(true) : pairing.run("join"))}
+        >
+          {pairing.pendingAction === "join" ? (
+            <LoaderCircle
+              className="animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          ) : (
+            <ScanLine aria-hidden="true" />
+          )}
+        </Button>
         <Button
           size="sm"
           variant="ghost"
@@ -127,10 +199,8 @@ export function DevicesView() {
                   <p className="text-sm font-medium">
                     {own.data?.device_name || t("devices.own.name")}
                   </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {t("devices.own.description")}
-                  </p>
                 </div>
+                <DeviceNameField />
                 <Badge
                   variant={
                     ownErrorKind !== null
@@ -194,13 +264,10 @@ export function DevicesView() {
                   </div>
                 </dl>
               ) : null}
-              <div className="mt-s-3 border-t border-divider pt-s-3">
-                <DeviceNameField />
-              </div>
             </div>
           </section>
 
-          <PairingPanel disabled={full} />
+          <PairingPanel pairing={pairing} hideIdle showEntryActions={false} />
 
           <section aria-labelledby="paired-devices-heading" className="flex flex-col gap-s-2">
             <div className="flex flex-wrap items-baseline justify-between gap-s-2">
@@ -426,6 +493,22 @@ export function DevicesView() {
         onConfirm={(peer) => {
           revoke.mutate(peer);
           setConfirmRevoke(null);
+        }}
+      />
+      <PairingInviteDialog
+        invite={pairing.previewInvite}
+        onCancel={() => {
+          pairing.clearPreviewInvite();
+          pairing.run("cancel");
+        }}
+      />
+      <PairingJoinDialog
+        open={joinOpen}
+        pending={pairing.pendingAction === "join" && pairing.isPending}
+        onOpenChange={setJoinOpen}
+        onSubmit={async (code, addr) => {
+          await pairing.submitPreviewJoin(code, addr);
+          setJoinOpen(false);
         }}
       />
     </div>

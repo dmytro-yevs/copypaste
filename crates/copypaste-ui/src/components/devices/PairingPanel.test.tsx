@@ -7,18 +7,25 @@ import type { PairingCeremony } from "@/lib/ipc";
 import { testClient, withUser } from "@/test/harness";
 
 const createPairingInvite = vi.fn();
+const createPreviewPairingInvite = vi.fn();
+const joinPreviewPairingInvite = vi.fn();
 const scanPairingInvite = vi.fn();
 const getPairingProgress = vi.fn();
 const presentPairing = vi.fn();
 const confirmPairing = vi.fn();
 const rejectPairing = vi.fn();
 const cancelPairing = vi.fn();
+const hasWebBridge = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
   return {
     ...actual,
+    hasWebBridge: () => hasWebBridge(),
     createPairingInvite: () => createPairingInvite(),
+    createPreviewPairingInvite: () => createPreviewPairingInvite(),
+    joinPreviewPairingInvite: (code: string, addr: string) =>
+      joinPreviewPairingInvite(code, addr),
     scanPairingInvite: () => scanPairingInvite(),
     getPairingProgress: () => getPairingProgress(),
     presentPairing: () => presentPairing(),
@@ -42,7 +49,16 @@ function ceremony(over: Partial<PairingCeremony> = {}): PairingCeremony {
 
 beforeEach(() => {
   const idle = ceremony();
+  hasWebBridge.mockReset().mockReturnValue(false);
   createPairingInvite.mockReset().mockResolvedValue(idle);
+  createPreviewPairingInvite.mockReset().mockResolvedValue({
+    ceremony: idle,
+    code: "ABCD-EFGH-IJKL-MNOP",
+    listen_addr: "192.0.2.10:47654",
+    expires_in_secs: 120,
+    qr_svg: "<svg></svg>",
+  });
+  joinPreviewPairingInvite.mockReset().mockResolvedValue(idle);
   scanPairingInvite.mockReset().mockResolvedValue(idle);
   getPairingProgress.mockReset().mockResolvedValue(idle);
   presentPairing.mockReset().mockResolvedValue(idle);

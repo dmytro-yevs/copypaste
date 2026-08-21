@@ -19,14 +19,20 @@ use axum::http::{header, HeaderMap, HeaderValue, Method as HttpMethod, StatusCod
 use axum::routing::post;
 use axum::{Json, Router};
 use copypaste_ipc::ConfigPatch;
+use copypaste_ipc::{ErrorCode, PairingInviteData};
+use qrcode::render::svg;
+use qrcode::QrCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
-use crate::backend::{daemon::DaemonBackend, Backend, BackendError};
+use crate::backend::{daemon::DaemonBackend, Backend, BackendError, PairingBackend};
+use crate::commands::pairing::PairingCeremony;
 use crate::model::{UiImagePreview, UiItem, UiPage, UiSyncResult};
+use crate::pairing_presentation::invite::encode_native_invite;
+use crate::pairing_presentation::PairingPresentationState;
 use crate::service::{diagnostics::Diagnostics, ServiceState};
 use crate::source_app_icon::SourceAppIconCache;
 
@@ -113,6 +119,21 @@ struct DeviceNameArgs {
     name: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PreviewJoinArgs {
+    code: String,
+    addr: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PreviewPairingInvite {
+    ceremony: PairingCeremony,
+    code: String,
+    listen_addr: String,
+    expires_in_secs: u64,
+    qr_svg: String,
+}
+
 fn failure(error: BackendError) -> (StatusCode, Json<Failure>) {
     let ui = error.ui_error();
     (
@@ -157,6 +178,36 @@ fn value(value: impl Serialize) -> BridgeResponse {
                 retryable: true,
             }),
         )
+    })
+}
+
+fn preview_invite(
+    invite: PairingInviteData,
+    ceremony: PairingCeremony,
+) -> Result<PreviewPairingInvite, BackendError> {
+    let listen_addr = invite.listen_addr.clone().ok_or_else(|| {
+        BackendError::from_code(
+            Some(ErrorCode::PairingAddress),
+            None,
+            Some("This device does not have a reachable pairing address yet."),
+        )
+    })?;
+    let payload = encode_native_invite(&invite)
+        .ok_or_else(|| BackendError::internal("The pairing invite couldn't be encoded."))?;
+    let qr = QrCode::new(payload.as_bytes())
+        .map_err(|_| BackendError::internal("The pairing invite QR code couldn't be rendered."))?;
+    let qr_svg = qr
+        .render::<svg::Color<'_>>()
+        .min_dimensions(240, 240)
+        .dark_color(svg::Color("#0f172a"))
+        .light_color(svg::Color("#ffffff"))
+        .build();
+    Ok(PreviewPairingInvite {
+        ceremony,
+        code: invite.code,
+        listen_addr,
+        expires_in_secs: invite.expires_in_secs,
+        qr_svg,
     })
 }
 
@@ -322,6 +373,60 @@ async fn call(
                 .and_then(value)
         }
         "peers" => backend.peers().await.map_err(failure).and_then(value),
+        "pair_progress" => backend
+            .pair_progress()
+            .await
+            .map(|progress| {
+                PairingCeremony::from_progress(progress, PairingPresentationState::Presented)
+            })
+            .map_err(failure)
+            .and_then(value),
+        "pair_cancel" => backend
+            .pair_cancel()
+            .await
+            .map(|progress| {
+                PairingCeremony::from_progress(progress, PairingPresentationState::Unavailable)
+            })
+            .map_err(failure)
+            .and_then(value),
+        "pair_confirm" => backend
+            .pair_confirm(true)
+            .await
+            .map(|progress| {
+                PairingCeremony::from_progress(progress, PairingPresentationState::Presented)
+            })
+            .map_err(failure)
+            .and_then(value),
+        "pair_reject" => backend
+            .pair_confirm(false)
+            .await
+            .map(|progress| {
+                PairingCeremony::from_progress(progress, PairingPresentationState::Presented)
+            })
+            .map_err(failure)
+            .and_then(value),
+        "pair_preview_invite" => {
+            let invite = backend.pair_create_invite().await.map_err(failure)?;
+            let progress = backend.pair_progress().await.map_err(failure)?;
+            match preview_invite(
+                invite,
+                PairingCeremony::from_progress(progress, PairingPresentationState::Presented),
+            ) {
+                Ok(invite) => value(invite),
+                Err(error) => Err(failure(error)),
+            }
+        }
+        "pair_preview_join" => {
+            let args: PreviewJoinArgs = parse(request.args)?;
+            backend
+                .pair_join(&args.code, &args.addr)
+                .await
+                .map(|progress| {
+                    PairingCeremony::from_progress(progress, PairingPresentationState::Presented)
+                })
+                .map_err(failure)
+                .and_then(value)
+        }
         "unpair" => {
             let args: PairingIdArgs = parse(request.args)?;
             backend
@@ -439,6 +544,12 @@ mod tests {
             "get_config",
             "set_config",
             "peers",
+            "pair_progress",
+            "pair_cancel",
+            "pair_confirm",
+            "pair_reject",
+            "pair_preview_invite",
+            "pair_preview_join",
             "unpair",
             "revoke",
             "sync_now",
@@ -449,14 +560,11 @@ mod tests {
         .collect::<BTreeSet<_>>();
         assert!(!allowed.contains("reveal_item"));
         assert!(!allowed.contains("read_pairing_text"));
-        // ADR-0015: the bridge is a product surface, so it must not name the
-        // pairing verbs either. The CLI reaches the daemon directly.
         assert!(!allowed.contains("pair_create"));
         assert!(!allowed.contains("pair_accept"));
         assert!(!allowed.contains("scan_pairing_qr"));
         assert!(!allowed.contains("pair_create_invite"));
         assert!(!allowed.contains("pair_scan_invite"));
-        assert!(!allowed.contains("pair_confirm"));
         assert!(!allowed.contains("export_history"));
     }
 

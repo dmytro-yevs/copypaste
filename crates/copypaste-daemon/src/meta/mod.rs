@@ -193,6 +193,8 @@ mod tests {
                 content: "from the phone".into(),
                 binary_content: Vec::new(),
                 payload_metadata: None,
+                source_app_bundle_id: None,
+                source_app_name: None,
                 content_type: "text".into(),
                 created_at: 1_000,
                 deleted: false,

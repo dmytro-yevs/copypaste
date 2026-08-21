@@ -40,21 +40,33 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+async function openDesktopSearch(user: ReturnType<typeof withUser>["user"]) {
+  await user.click(screen.getByRole("button", { name: "Search settings" }));
+  return await screen.findByRole<HTMLInputElement>("searchbox", { name: "Search settings" });
+}
+
 describe("the settings navigation", () => {
-  it("is a tablist of tabs with a selected one", () => {
-    withClient(<SettingsView />);
+  it("is a tablist of tabs with a selected one", async () => {
+    const { user } = withUser(<SettingsView />);
     const tabs = screen.getAllByRole("tab");
     expect(tabs.length).toBeGreaterThanOrEqual(6);
     expect(tabs.filter((tab) => tab.getAttribute("aria-selected") === "true")).toHaveLength(1);
     expect(screen.getByRole("tablist", { name: "Settings sections" })).toBeTruthy();
-    const search = screen.getByRole("searchbox", { name: "Search settings" })
+    const search = screen.getByRole("button", { name: "Search settings" })
       .closest<HTMLElement>('[role="search"]')!;
-    expect(search.className).toContain("w-full");
     expect(search.className).toContain("relative");
-    expect(search.className).not.toContain("max-w");
+    expect(search.dataset.searchOpen).toBe("false");
+
+    await openDesktopSearch(user);
+
+    expect(search.className).toContain("w-full");
+    expect(search.dataset.searchOpen).toBe("true");
 
     const header = search.closest<HTMLElement>("header")!;
     expect(header.className).toContain("chrome");
+    expect(search.parentElement?.className).toContain("w-full");
+    expect(screen.getByRole("heading", { name: "Settings", level: 1 }).className)
+      .toContain("sr-only");
   });
 
   it("pairs each pane with its tab", async () => {
@@ -138,7 +150,7 @@ describe("the settings navigation", () => {
 
   it("shows a compact search dropdown without replacing the current settings pane", async () => {
     const { user } = withUser(<SettingsView />);
-    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "storage quota");
+    await user.type(await openDesktopSearch(user), "storage quota");
 
     expect(await screen.findByText("Storage quota")).toBeTruthy();
     expect(screen.getByText("Service · What gets kept")).toBeTruthy();
@@ -155,7 +167,7 @@ describe("the settings navigation", () => {
 
   it("keeps focus in the search field while the popover opens", async () => {
     const { user } = withUser(<SettingsView />);
-    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    const search = await openDesktopSearch(user);
 
     await user.type(search, "privacy");
 
@@ -165,7 +177,7 @@ describe("the settings navigation", () => {
 
   it("moves between the search field and results without clearing the popover", async () => {
     const { user } = withUser(<SettingsView />);
-    const search = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search settings" });
+    const search = await openDesktopSearch(user);
     await user.type(search, "storage quota");
 
     await user.keyboard("{ArrowDown}");
@@ -179,7 +191,7 @@ describe("the settings navigation", () => {
 
   it("keeps the popover open for anchor and focus interactions", async () => {
     const { user } = withUser(<SettingsView />);
-    const search = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search settings" });
+    const search = await openDesktopSearch(user);
     await user.type(search, "privacy");
 
     await user.click(search);
@@ -191,7 +203,7 @@ describe("the settings navigation", () => {
 
   it("dismisses the search popover on Escape or an outside pointer", async () => {
     const { user } = withUser(<SettingsView />);
-    const search = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search settings" });
+    const search = await openDesktopSearch(user);
     await user.type(search, "privacy");
     await user.keyboard("{Escape}");
 
@@ -207,7 +219,7 @@ describe("the settings navigation", () => {
 
   it("clears a search and restores the settings navigation", async () => {
     const { user } = withUser(<SettingsView />);
-    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "privacy");
+    await user.type(await openDesktopSearch(user), "privacy");
     await user.click(screen.getByRole("button", { name: "Clear search" }));
 
     expect(screen.getByRole("tablist", { name: "Settings sections" })).toBeTruthy();
@@ -215,7 +227,7 @@ describe("the settings navigation", () => {
 
   it("opens the result's tab and its matching setting", async () => {
     const { user } = withUser(<SettingsView />);
-    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "screenshots");
+    await user.type(await openDesktopSearch(user), "screenshots");
     await user.click(await screen.findByRole("button", { name: /Allow screenshots/i }));
 
     expect(await screen.findByRole("switch", { name: "Allow screenshots" })).toBeTruthy();
@@ -243,10 +255,11 @@ describe("the settings navigation", () => {
     expect(useUi.getState().settingsTab).toBeNull();
   });
 
-  it("keeps search useful on Android, including the persistent Service controls", async () => {
+  it("keeps collapsed search useful on Android, including the persistent Service controls", async () => {
     setUserAgent("Mozilla/5.0 (Linux; Android 15)");
     const { user } = withUser(<SettingsView />);
-    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    await user.click(screen.getByRole("button", { name: "Search settings" }));
+    const search = await screen.findByRole<HTMLInputElement>("searchbox", { name: "Search settings" });
     await user.type(search, "Capture from other apps");
     expect(await screen.findByText("Capture from other apps")).toBeTruthy();
 

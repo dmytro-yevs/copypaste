@@ -11,7 +11,7 @@ import rikka.shizuku.SystemServiceHelper
  * Rung 2: read the clipboard as the shell uid.
  *
  * `com.android.shell` is platform-signed and declares
- * `READ_CLIPBOARD_IN_BACKGROUND`, which is `signature|role` and so cannot be
+ * `READ_CLIPBOARD_IN_BACKGROUND`, which is `signature` and so cannot be
  * granted to us by `pm grant`. Shizuku runs a server as uid 2000 and hands back
  * a binder proxy, so `Binder.getCallingUid()` in `system_server` is 2000 and
  * `ClipboardService.clipboardAccessAllowed()` passes on its first condition —
@@ -285,4 +285,3 @@ object ShizukuClipboard {
     /** The first text item of a `ClipData`, or null when it holds none. */
     private fun asText(clip: Any): String? = ClipSensitivity.asText(clip)
 }
-

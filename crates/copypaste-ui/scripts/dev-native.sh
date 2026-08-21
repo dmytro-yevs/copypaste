@@ -8,6 +8,7 @@ cli_bin="$repo_dir/target/debug/copypaste"
 log_dir="${COPYPASTE_DEV_LOG_DIR:-$repo_dir/target/copypaste-dev}"
 log_file="$log_dir/daemon-$(date +%Y%m%d-%H%M%S).jsonl"
 bridge_env=$(mktemp "${TMPDIR:-/tmp}/copypaste-web-bridge.XXXXXX")
+bridge_runtime="$ui_dir/public/copypaste-web-bridge.js"
 daemon_owned=false
 
 mkdir -p "$log_dir"
@@ -54,6 +55,7 @@ fi
 # window use the same Vite server and the same daemon.
 . "$bridge_env"
 export VITE_COPYPASTE_WEB_BRIDGE_URL VITE_COPYPASTE_WEB_BRIDGE_TOKEN
+write_bridge_runtime
 
 cleanup() {
   kill "${bridge_pid:-}" 2>/dev/null || true
@@ -62,9 +64,20 @@ cleanup() {
     kill "${daemon_pid:-}" 2>/dev/null || true
     wait "${daemon_pid:-}" 2>/dev/null || true
   fi
+  clear_bridge_runtime
   rm -f "$bridge_env"
 }
 trap cleanup EXIT INT TERM
 
 cd "$ui_dir"
 COPYPASTE_DAEMON_BIN="$daemon_bin" npm run tauri -- dev
+write_bridge_runtime() {
+  printf 'window.__COPYPASTE_WEB_BRIDGE__ = %s;\n' \
+    "$(printf '{"url":"%s","token":"%s"}' \
+      "$VITE_COPYPASTE_WEB_BRIDGE_URL" \
+      "$VITE_COPYPASTE_WEB_BRIDGE_TOKEN")" >"$bridge_runtime"
+}
+
+clear_bridge_runtime() {
+  printf 'window.__COPYPASTE_WEB_BRIDGE__ = null;\n' >"$bridge_runtime"
+}
