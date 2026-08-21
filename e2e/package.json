@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "test": "node scripts/verify-dmy-45-tests.self-test.mjs && node scripts/verify-dmy-45-tests.mjs && xvfb-run -a -s \"-screen 0 1280x900x24\" vitest run",
     "test:dmy-45:self-test": "node scripts/verify-dmy-45-tests.self-test.mjs",

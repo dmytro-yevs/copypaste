@@ -64,7 +64,7 @@ jobs:
           components: rustfmt
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
       - run: cargo +1.96 test --workspace --locked
@@ -91,7 +91,7 @@ jobs:
           shared-key: windows-2022-1.96-native-nightly
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
       - name: Install native evidence Python dependencies

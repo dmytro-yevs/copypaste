@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "test": "vitest run",
     "test:harness": "vitest run --config vitest.harness.config.ts"
