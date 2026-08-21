@@ -557,6 +557,7 @@ mod tests {
         let signed: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.windows.signed.conf.template.json"))
                 .expect("the signed Windows release template is valid JSON");
+        let signer = include_str!("../../../../scripts/release/windows-sign.ps1");
         let hooks = include_str!("../windows/hooks.nsh");
 
         assert_eq!(config["bundle"]["targets"], serde_json::json!(["nsis"]));
@@ -593,8 +594,26 @@ mod tests {
             signed["bundle"]["externalBin"],
             serde_json::json!(["binaries/copypaste", "binaries/copypaste-daemon"])
         );
-        assert_eq!(signed["bundle"]["windows"]["digestAlgorithm"], "sha256");
-        assert_eq!(signed["bundle"]["windows"]["tsp"], true);
+        assert_eq!(
+            signed["bundle"]["windows"]["signCommand"]["args"],
+            serde_json::json!([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "__WINDOWS_SIGN_SCRIPT__",
+                "-Operation",
+                "Sign",
+                "-File",
+                "%1"
+            ])
+        );
+        assert_eq!(
+            signed["bundle"]["windows"]["signCommand"]["cmd"],
+            "powershell.exe"
+        );
+        assert!(signer.contains("sign /fd sha256"));
+        assert!(signer.contains("/tr $state.TimestampUrl /td sha256 $Target"));
         assert_eq!(
             signed["plugins"]["updater"]["pubkey"],
             "__TAURI_UPDATER_PUBLIC_KEY__"
