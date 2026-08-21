@@ -110,11 +110,16 @@ def contract_errors(release, nightly, ci):
         "TAURI_UPDATER_ENDPOINT",
     }
     private_signing_env = {"TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"}
-    certificate_step = next(
-        (step for step in steps(windows) if step.get("name") == "Import Windows release certificate"),
+    prepare_step = next(
+        (step for step in steps(windows) if step.get("name") == "Prepare Windows release signing"),
         {},
     )
-    certificate_env = certificate_step.get("env") or {}
+    prepare_env = prepare_step.get("env") or {}
+    prepare_commands = str(prepare_step.get("run") or "")
+    cleanup_step = next(
+        (step for step in steps(windows) if step.get("name") == "Remove Windows signing material"),
+        {},
+    )
     signed_build = next(
         (step for step in steps(windows) if step.get("name") == "Build signed Windows release package"),
         {},
@@ -125,10 +130,21 @@ def contract_errors(release, nightly, ci):
     )
     if (
         not signing_env <= set(windows_env)
-        or not {"WINDOWS_SIGNING_CERTIFICATE_BASE64", "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"} <= set(certificate_env)
+        or not {"WINDOWS_SIGNING_CERTIFICATE_BASE64", "WINDOWS_SIGNING_CERTIFICATE_PASSWORD"} <= set(prepare_env)
         or "releases/download/v${{ needs.version.outputs.version }}" not in str(windows_env.get("WINDOWS_RELEASE_BASE_URL") or "")
     ):
         errors.append("signed Windows publication must declare every certificate, updater, timestamp, and release URL input")
+    if (
+        "windows-sign.ps1" not in prepare_commands
+        or "-Operation Prepare" not in prepare_commands
+        or "-PersistEnvironment" not in prepare_commands
+        or "-SmokeSign" not in prepare_commands
+        or cleanup_step.get("if") != "always() && needs.version.outputs.publish == 'true'"
+        or "-Operation Cleanup" not in str(cleanup_step.get("run") or "")
+        or "Import-PfxCertificate" in windows_commands
+        or "Cert:\\" in windows_commands
+    ):
+        errors.append("Windows signing must use the shared prepare, smoke, and cleanup lifecycle without certificate stores")
     if (
         private_signing_env & set(windows_env)
         or not private_signing_env <= set(signed_build.get("env") or {})
