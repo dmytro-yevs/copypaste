@@ -124,13 +124,7 @@ function Invoke-BoundedProcess(
     [string]$Target
 ) {
     if ($TimeoutMilliseconds -le 0) { throw "Process timeout must be positive" }
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $Executable
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    foreach ($argument in $Arguments) { [void]$start.ArgumentList.Add($argument) }
+    $start = New-InheritedProcessStartInfo $Executable $Arguments
 
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
@@ -138,64 +132,47 @@ function Invoke-BoundedProcess(
         try {
             if (-not $process.Start()) { throw "process did not start" }
         } catch {
-            $detail = Format-ProcessDiagnostic $Phase $Executable $Target $null $null
-            $startError = Format-DiagnosticText $_.Exception.Message
-            throw "$detail; start error=$startError"
+            throw (Format-ProcessDiagnostic $Phase $Executable $Target "start failed")
         }
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutMilliseconds)) {
-            $killError = $null
-            try { $process.Kill($true) } catch { $killError = $_.Exception.Message }
+            $killFailed = $false
+            try { $process.Kill($true) } catch { $killFailed = $true }
             $terminated = $process.WaitForExit(5000)
-            $detail = Format-ProcessDiagnostic $Phase $Executable $Target $stdout $stderr
             if (-not $terminated) {
-                throw "$detail timed out after $TimeoutMilliseconds ms and could not be terminated"
+                throw (Format-ProcessDiagnostic $Phase $Executable $Target `
+                    "timed out after $TimeoutMilliseconds ms; termination unconfirmed")
             }
-            if ($killError) {
-                $safeKillError = Format-DiagnosticText $killError
-                throw "$detail timed out after $TimeoutMilliseconds ms; process-tree kill failed: $safeKillError"
+            if ($killFailed) {
+                throw (Format-ProcessDiagnostic $Phase $Executable $Target `
+                    "timed out after $TimeoutMilliseconds ms; process-tree kill failed")
             }
-            throw "$detail timed out after $TimeoutMilliseconds ms"
+            throw (Format-ProcessDiagnostic $Phase $Executable $Target `
+                "timed out after $TimeoutMilliseconds ms")
         }
-        return [pscustomobject]@{
-            ExitCode = $process.ExitCode
-            StandardOutput = Get-BoundedTaskOutput $stdout
-            StandardError = Get-BoundedTaskOutput $stderr
-        }
+        return [pscustomobject]@{ ExitCode = $process.ExitCode }
     } finally {
         $process.Dispose()
     }
 }
 
-function Get-BoundedTaskOutput([Threading.Tasks.Task[string]]$Task) {
-    if (-not $Task.Wait(1000)) { return "<output unavailable>" }
-    return $Task.Result
-}
-
-function Format-DiagnosticText([string]$Text) {
-    if ([string]::IsNullOrEmpty($Text)) { return "<empty>" }
-    $safe = [regex]::Replace($Text, "[\p{C}-[`r`n`t]]", "?")
-    if ($safe.Length -le 4096) { return $safe.Trim() }
-    return $safe.Substring(0, 4096).Trim() + "...<truncated>"
+function New-InheritedProcessStartInfo([string]$Executable, [string[]]$Arguments) {
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    foreach ($argument in $Arguments) { [void]$start.ArgumentList.Add($argument) }
+    return $start
 }
 
 function Format-ProcessDiagnostic(
     [string]$Phase,
     [string]$Executable,
     [string]$Target,
-    [Threading.Tasks.Task[string]]$StandardOutput,
-    [Threading.Tasks.Task[string]]$StandardError
+    [string]$Status
 ) {
     $executableName = [IO.Path]::GetFileName($Executable)
     $targetName = [IO.Path]::GetFileName($Target)
-    $stdout = if ($null -ne $StandardOutput) {
-        Format-DiagnosticText (Get-BoundedTaskOutput $StandardOutput)
-    } else { "<output unavailable>" }
-    $stderr = if ($null -ne $StandardError) {
-        Format-DiagnosticText (Get-BoundedTaskOutput $StandardError)
-    } else { "<output unavailable>" }
-    return "$Phase failed (executable=$executableName, target=$targetName); stdout=$stdout; stderr=$stderr"
+    return "$Phase failed (executable=$executableName, target=$targetName, status=$Status)"
 }
 
 function Normalize-CertificateThumbprint([string]$Thumbprint) {
@@ -250,15 +227,9 @@ function Invoke-WindowsSign(
         $signtool = & $SignToolFinder
         $arguments = Get-SignToolArguments $state $Target
         $result = & $ProcessRunner $signtool $arguments 120000 "SignTool signing" $Target
-        if (-not [string]::IsNullOrWhiteSpace($result.StandardOutput)) {
-            Write-Host $result.StandardOutput.TrimEnd()
-        }
         if ($result.ExitCode -ne 0) {
-            $stdout = Format-DiagnosticText $result.StandardOutput
-            $stderr = Format-DiagnosticText $result.StandardError
-            $executableName = [IO.Path]::GetFileName($signtool)
-            $targetName = [IO.Path]::GetFileName($Target)
-            throw "SignTool signing failed (executable=$executableName, target=$targetName, exit=$($result.ExitCode)); stdout=$stdout; stderr=$stderr"
+            throw (Format-ProcessDiagnostic "SignTool signing" $signtool $Target `
+                "exit $($result.ExitCode)")
         }
 
         $signature = & $SignatureReader $Target
@@ -351,20 +322,24 @@ function Invoke-SelfTest {
 
     Write-Host "PHASE: bounded external processes"
     $pwsh = (Get-Process -Id $PID).Path
+    $routing = New-InheritedProcessStartInfo $pwsh @("-NoProfile", "-Command", "exit 0")
+    if ($routing.RedirectStandardOutput -or $routing.RedirectStandardError -or
+        $routing.UseShellExecute -or -not $routing.CreateNoWindow) {
+        throw "bounded process output routing self-test failed"
+    }
     $failed = Invoke-BoundedProcess $pwsh @("-NoProfile", "-Command", "exit 23") `
         10000 "bounded runner self-test" "failure-probe"
     if ($failed.ExitCode -ne 23) { throw "bounded process failure self-test failed" }
     $timedOut = $false
     try {
         Invoke-BoundedProcess $pwsh @("-NoProfile", "-Command", `
-            "[Console]::Out.Write('probe-out'); [Console]::Error.Write('probe-err'); Start-Sleep 30") `
+            "Start-Sleep 30") `
             250 "bounded runner self-test" "timeout-probe"
     } catch {
         $message = $_.Exception.Message
         if ($message -cnotmatch "^bounded runner self-test failed " -or
             $message -cnotmatch "executable=.*pwsh.*target=timeout-probe" -or
-            $message -cnotmatch "stdout=probe-out" -or $message -cnotmatch "stderr=probe-err" -or
-            $message -cnotmatch "timed out after 250 ms$") { throw }
+            $message -cnotmatch "status=timed out after 250 ms\)$") { throw }
         $timedOut = $true
     }
     if (-not $timedOut) { throw "bounded process timeout self-test failed" }
@@ -514,7 +489,7 @@ function Invoke-SelfTest {
                     Executable = $Exe; Arguments = @($RunnerArguments); Timeout = $Timeout
                     Phase = $Phase; Target = $RunnerTarget
                 })
-                [pscustomobject]@{ ExitCode = 0; StandardOutput = ""; StandardError = "" }
+                [pscustomobject]@{ ExitCode = 0 }
             }.GetNewClosure()
             $fakeSignature = [pscustomobject]@{
                 Status = "Valid"
