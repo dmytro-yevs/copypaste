@@ -124,6 +124,7 @@ pub fn run() {
                 &runtime_log_dir,
                 copypaste_runtime_log::Process::App,
             )?);
+            service::startup_diagnostics::app_started();
             app.manage(make_backend(app)?);
             app.manage(source_app_icon::SourceAppIconCache::default());
             app.manage(commands::transfer::PendingImportState::default());
@@ -321,6 +322,7 @@ pub fn run() {
             // and a cancelled quit that had already killed the daemon would
             // leave a running app with no history.
             if matches!(event, tauri::RunEvent::Exit) {
+                service::startup_diagnostics::app_stopping();
                 if let Some(push) = app.try_state::<service::push::PushMonitor>() {
                     push.stop();
                 }

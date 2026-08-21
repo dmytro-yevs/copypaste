@@ -36,8 +36,9 @@ pub mod diagnostics;
 pub mod locate;
 pub mod push;
 mod spawn;
+pub(crate) mod startup_diagnostics;
 
-use child::{end_child, ChildProcess, FORCED_STOP_BUDGET};
+use child::{end_child, ChildProcess, ChildState, FORCED_STOP_BUDGET};
 use spawn::spawn_process;
 
 /// The version this app expects the daemon to report. Both come from the
@@ -180,10 +181,23 @@ impl Supervisor {
         S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
     {
         let state = self.service_state_with(backend, locate).await;
+        startup_diagnostics::initial_state(&state);
         match state {
-            ServiceState::NotInstalled => return Err(BackendError::Unsupported(MSG_NOT_INSTALLED)),
-            ServiceState::Stopped => {}
-            live => return Ok(live),
+            ServiceState::NotInstalled => {
+                startup_diagnostics::branch(startup_diagnostics::StartBranch::RejectMissing);
+                return Err(BackendError::Unsupported(MSG_NOT_INSTALLED));
+            }
+            ServiceState::Stopped => {
+                startup_diagnostics::branch(startup_diagnostics::StartBranch::Spawn);
+            }
+            live @ ServiceState::Running { .. } => {
+                startup_diagnostics::branch(startup_diagnostics::StartBranch::UseRunning);
+                return Ok(live);
+            }
+            live @ ServiceState::Unhealthy => {
+                startup_diagnostics::branch(startup_diagnostics::StartBranch::ReturnUnhealthy);
+                return Ok(live);
+            }
         }
 
         self.stop();
@@ -343,9 +357,10 @@ impl Supervisor {
     /// Whether we hold a child that is still alive, reaping it if it is not.
     fn holds_child(&self) -> bool {
         let mut slot = self.child_slot();
-        match slot.as_mut().map(|child| child.reap_if_exited()) {
-            Some(Ok(false)) => true,
-            Some(Ok(true)) => {
+        match slot.as_mut().map(|child| child.state()) {
+            Some(Ok(ChildState::Running)) => true,
+            Some(Ok(ChildState::Exited(code))) => {
+                startup_diagnostics::child_exited(code);
                 *slot = None;
                 false
             }
@@ -356,14 +371,13 @@ impl Supervisor {
 
     fn child_exited(&self) -> bool {
         let mut slot = self.child_slot();
-        let exited = matches!(
-            slot.as_mut().map(|child| child.reap_if_exited()),
-            Some(Ok(true))
-        );
-        if exited {
+        if let Some(Ok(ChildState::Exited(code))) = slot.as_mut().map(|child| child.state()) {
+            startup_diagnostics::child_exited(code);
             *slot = None;
+            true
+        } else {
+            false
         }
-        exited
     }
 
     async fn reap_child(&self) {
@@ -561,12 +575,13 @@ mod tests {
     }
 
     impl ChildProcess for FakeChild {
-        fn reap_if_exited(&mut self) -> std::io::Result<bool> {
+        fn state(&mut self) -> std::io::Result<ChildState> {
             let exited = self.probe.exited.load(Ordering::SeqCst);
             if exited {
                 assert_eq!(self.probe.reaps.fetch_add(1, Ordering::SeqCst), 0);
+                return Ok(ChildState::Exited(Some(23)));
             }
-            Ok(exited)
+            Ok(ChildState::Running)
         }
 
         fn kill(&mut self) -> std::io::Result<()> {
@@ -588,8 +603,8 @@ mod tests {
     }
 
     impl ChildProcess for StuckChild {
-        fn reap_if_exited(&mut self) -> std::io::Result<bool> {
-            Ok(false)
+        fn state(&mut self) -> std::io::Result<ChildState> {
+            Ok(ChildState::Running)
         }
 
         fn kill(&mut self) -> std::io::Result<()> {

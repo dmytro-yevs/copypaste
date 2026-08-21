@@ -7,6 +7,11 @@
 use std::process::Child;
 use std::time::Duration;
 
+pub(super) enum ChildState {
+    Running,
+    Exited(Option<i32>),
+}
+
 /// The slice of [`super::SHUTDOWN_BUDGET`] held back for ending the child.
 ///
 /// `kill` can fail and `reap` is a blocking wait with no timeout of its own. If
@@ -16,14 +21,17 @@ use std::time::Duration;
 pub(super) const FORCED_STOP_BUDGET: Duration = Duration::from_secs(3);
 
 pub(super) trait ChildProcess: Send {
-    fn reap_if_exited(&mut self) -> std::io::Result<bool>;
+    fn state(&mut self) -> std::io::Result<ChildState>;
     fn kill(&mut self) -> std::io::Result<()>;
     fn reap(&mut self) -> std::io::Result<()>;
 }
 
 impl ChildProcess for Child {
-    fn reap_if_exited(&mut self) -> std::io::Result<bool> {
-        self.try_wait().map(|status| status.is_some())
+    fn state(&mut self) -> std::io::Result<ChildState> {
+        self.try_wait().map(|status| match status {
+            Some(status) => ChildState::Exited(status.code()),
+            None => ChildState::Running,
+        })
     }
 
     fn kill(&mut self) -> std::io::Result<()> {

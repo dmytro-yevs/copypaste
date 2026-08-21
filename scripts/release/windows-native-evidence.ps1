@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "windows-native-ui-evidence.ps1")
+. (Join-Path $PSScriptRoot "windows-process-trace.ps1")
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -119,6 +120,38 @@ function Get-InstalledSidecarOutcome([string]$DaemonExe, $Processes) {
     return New-ProbeNotReady "the installed sidecar count is 0, not 1"
 }
 
+function Get-BoundedRuntimeLog([string]$DataRoot, [string]$Process, [int]$MaxChars = 65536) {
+    $logDirectory = Join-Path $DataRoot "logs"
+    $lines = @(
+        Get-ChildItem -LiteralPath $logDirectory -Filter "$Process.*.log" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc |
+            ForEach-Object { Get-Content -LiteralPath $_.FullName -Tail 2000 -ErrorAction SilentlyContinue }
+    )
+    if ($lines.Count -eq 0) { return "<no $Process runtime events>" }
+    $text = $lines -join "`n"
+    if ($text.Length -gt $MaxChars) {
+        $prefix = "<truncated>`n"
+        $bodyChars = [Math]::Max(0, $MaxChars - $prefix.Length)
+        $text = $prefix + $text.Substring($text.Length - $bodyChars)
+    }
+    return $text
+}
+
+function Save-WindowsFailureDiagnostics([string]$DataRoot, [string]$TracePath, [string]$EvidencePath) {
+    $failureDirectory = Join-Path $EvidencePath "failure-diagnostics"
+    [IO.Directory]::CreateDirectory($failureDirectory) | Out-Null
+    Get-BoundedRuntimeLog $DataRoot "app" 262144 |
+        Set-Content -LiteralPath (Join-Path $failureDirectory "app.log") -Encoding utf8
+    Get-BoundedRuntimeLog $DataRoot "daemon" 262144 |
+        Set-Content -LiteralPath (Join-Path $failureDirectory "daemon.log") -Encoding utf8
+    if (Test-Path -LiteralPath $TracePath -PathType Leaf) {
+        Copy-Item -LiteralPath $TracePath -Destination (Join-Path $failureDirectory "process-trace.jsonl") -Force
+    } else {
+        '{"kind":"trace-unavailable","reason":"file-missing"}' |
+            Set-Content -LiteralPath (Join-Path $failureDirectory "process-trace.jsonl") -Encoding utf8
+    }
+}
+
 function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, [string]$DaemonError) {
     $parts = @()
     if ($App) {
@@ -128,11 +161,10 @@ function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, 
     }
     if (Test-Path -LiteralPath $DaemonError -PathType Leaf) {
         $stderr = [IO.File]::ReadAllText($DaemonError).Trim()
-        $parts += if ($stderr) { "daemon stderr: $stderr" } else { "daemon stderr: <empty>" }
+        $parts += if ($stderr) { "daemon stderr: <present; content omitted>" } else { "daemon stderr: <empty>" }
     }
-    $runtime = Get-ChildItem -LiteralPath (Join-Path $DataRoot "logs") -Filter "*.log" -ErrorAction SilentlyContinue |
-        ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
-    if ($runtime) { $parts += "app runtime log: $($runtime -join "`n")" }
+    $parts += "app runtime log: $(Get-BoundedRuntimeLog $DataRoot "app")"
+    $parts += "daemon runtime log: $(Get-BoundedRuntimeLog $DataRoot "daemon")"
     return $parts
 }
 
@@ -141,6 +173,20 @@ function Invoke-SelfTest {
     [IO.Directory]::CreateDirectory($root) | Out-Null
     try {
         Test-WindowsReadinessHelpers
+        Test-WindowsProcessTraceHelpers
+
+        $logs = Join-Path $root "logs"
+        [IO.Directory]::CreateDirectory($logs) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $logs "app.fixture.log"), ("a" * 300000))
+        [IO.File]::WriteAllText((Join-Path $logs "daemon.fixture.log"), "daemon lifecycle")
+        $traceFixture = Join-Path $root "process-trace.jsonl"
+        [IO.File]::WriteAllText($traceFixture, '{"kind":"start","pid":41}')
+        Save-WindowsFailureDiagnostics $root $traceFixture $root
+        $failureFixture = Join-Path $root "failure-diagnostics"
+        $boundedApp = [IO.File]::ReadAllText((Join-Path $failureFixture "app.log"))
+        Assert-True ($boundedApp.Length -le 262150) "failure app log was not bounded"
+        Assert-True (Test-Path -LiteralPath (Join-Path $failureFixture "daemon.log")) "failure daemon log was not separate"
+        Assert-True (Test-Path -LiteralPath (Join-Path $failureFixture "process-trace.jsonl")) "failure process trace was not preserved"
 
         foreach ($name in @("copypaste-ui.exe", "copypaste.exe", "uninstall.exe")) {
             [IO.File]::WriteAllText((Join-Path $root $name), "fixture")
@@ -164,6 +210,9 @@ function Invoke-SelfTest {
         [IO.File]::WriteAllText($emptyError, "")
         $diagnostics = @(Get-InstalledDiagnostics $null $root $emptyError)
         Assert-True ($diagnostics -contains "daemon stderr: <empty>") "empty daemon stderr broke diagnostics"
+        [IO.File]::WriteAllText($emptyError, "C:\Users\private\secret.db")
+        $diagnostics = @(Get-InstalledDiagnostics $null $root $emptyError)
+        Assert-True (-not (($diagnostics -join "`n") -match "private|secret.db")) "daemon stderr exposed a path"
 
         $seen = @{ probes = 0 }
         $sidecar = Wait-Readiness "a transiently unobservable sidecar" {
@@ -221,6 +270,17 @@ if ($SelfTest) {
 }
 if (-not $Installer) { throw "Installer is required" }
 
+$evidencePath = $null
+if ($EvidenceDirectory) {
+    $evidencePath = [IO.Path]::GetFullPath($EvidenceDirectory)
+    $failureDirectory = Join-Path $evidencePath "failure-diagnostics"
+    [IO.Directory]::CreateDirectory($failureDirectory) | Out-Null
+    "<no app runtime events>" | Set-Content -LiteralPath (Join-Path $failureDirectory "app.log") -Encoding utf8
+    "<no daemon runtime events>" | Set-Content -LiteralPath (Join-Path $failureDirectory "daemon.log") -Encoding utf8
+    '{"kind":"trace-unavailable","reason":"not-started"}' |
+        Set-Content -LiteralPath (Join-Path $failureDirectory "process-trace.jsonl") -Encoding utf8
+}
+
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
 $packagePath = if ($PackageDirectory) {
     (Resolve-Path -LiteralPath $PackageDirectory).Path
@@ -252,16 +312,15 @@ $daemonErr = Join-Path $runRoot "daemon.stderr.log"
 $oldDataDir = $env:COPYPASTE_DATA_DIR
 $oldSocket = $env:COPYPASTE_SOCKET
 $logPath = $null
-$evidencePath = $null
-if ($EvidenceDirectory) {
-    $evidencePath = [IO.Path]::GetFullPath($EvidenceDirectory)
-    [IO.Directory]::CreateDirectory($evidencePath) | Out-Null
-}
+$failed = $false
+$processTrace = $null
+$processTracePath = Join-Path $runRoot "process-trace.jsonl"
 
 try {
     $install = Start-Process -FilePath $installerPath -ArgumentList "/S", "/D=$installDir" -Wait -PassThru
     Assert-True ($install.ExitCode -eq 0) "installer exited $($install.ExitCode)"
     Assert-InstalledLayout $installDir
+    $processTrace = Start-WindowsProcessTrace $processTracePath
 
     $ui = Join-Path $installDir "copypaste-ui.exe"
     $cli = Join-Path $installDir "copypaste.exe"
@@ -412,12 +471,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "native evidence writer failed" }
     }
 
+    if ($evidencePath) {
+        Remove-Item -LiteralPath (Join-Path $evidencePath "failure-diagnostics") -Recurse -Force
+    }
     Write-Output "PASS: $ExpectedSignature current-user install, integrity, installed sidecar, in-place update, update feed contract and uninstall"
 } catch {
     # `finally` deletes $runRoot, so without this the daemon's stderr and the
     # app's runtime log are gone before anyone reads the failure. Only the three
     # `Wait-Observed` probes attached them; run 31825408629 failed at a bare CLI
     # call and reported one line, "cannot reach the CopyPaste daemon".
+    $failed = $true
     $failure = $_
     $detail = try {
         (Get-InstalledDiagnostics $app $dataRoot $daemonErr) -join "`n"
@@ -428,6 +491,15 @@ try {
 } finally {
     if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }
+    try {
+        Stop-WindowsProcessTrace $processTrace
+    } catch {
+        '{"kind":"trace-unavailable","reason":"collection-failed"}' |
+            Set-Content -LiteralPath $processTracePath -Encoding utf8
+    }
+    if ($failed -and $evidencePath) {
+        Save-WindowsFailureDiagnostics $dataRoot $processTracePath $evidencePath
+    }
     if (Test-Path -LiteralPath (Join-Path $installDir "uninstall.exe")) {
         Start-Process -FilePath (Join-Path $installDir "uninstall.exe") -ArgumentList "/S" -Wait | Out-Null
     }
