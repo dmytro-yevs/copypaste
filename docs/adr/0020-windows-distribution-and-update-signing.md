@@ -26,6 +26,9 @@ persists its path plus the normalised timestamp URL; `Validate` fails before a
 long build when that state is unusable; `Sign` is the sole bounded SignTool
 entry point; `Cleanup` removes the PFX; and `SelfTest` exercises preparation and
 signer validation with an ephemeral certificate without changing trust stores.
+Verification invokes SignTool's embedded-signature policy without catalog
+lookup, then uses the .NET PE and CMS libraries to inspect the embedded signer,
+digest algorithm, and RFC 3161 timestamp without parsing localized tool output.
 
 Updater metadata uses Tauri's separate minisign-compatible key. A signed build
 fails unless every certificate, key, endpoint, and release URL input is
@@ -44,6 +47,11 @@ release filename, or hosting URL. The narrow PowerShell layer stages those
 inputs and writes checksums and static metadata; it does not implement an
 installer, Authenticode, or updater cryptography.
 
+The same exemption covers the narrow composition of .NET's maintained PE and
+CMS APIs: neither exposes one call returning all release-policy fields, while
+PowerShell's path cmdlet deliberately prefers a catalog signature over an
+embedded signature.
+
 ## Consequences
 
 Unsigned builds are explicit evidence artifacts, not releasable substitutes.
@@ -54,3 +62,6 @@ configuration; release infrastructure supplies them at execution time.
 
 - [Tauri v2 Windows code signing](https://v2.tauri.app/distribute/sign/windows/)
 - [Microsoft SignTool options](https://learn.microsoft.com/windows/win32/seccrypto/signtool)
+- [Get-AuthenticodeSignature catalog precedence](https://learn.microsoft.com/powershell/module/microsoft.powershell.security/get-authenticodesignature)
+- [.NET PEReader](https://learn.microsoft.com/dotnet/api/system.reflection.portableexecutable.pereader)
+- [.NET SignedCms](https://learn.microsoft.com/dotnet/api/system.security.cryptography.pkcs.signedcms)
