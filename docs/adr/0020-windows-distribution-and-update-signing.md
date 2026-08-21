@@ -29,6 +29,8 @@ signer validation with an ephemeral certificate without changing trust stores.
 Verification invokes SignTool's embedded-signature policy without catalog
 lookup, then uses the .NET PE and CMS libraries to inspect the embedded signer,
 digest algorithm, and RFC 3161 timestamp without parsing localized tool output.
+Embedded PE certificate data is limited to 16 MiB before allocation; installers
+remain streamed from disk.
 
 Updater metadata uses Tauri's separate minisign-compatible key. A signed build
 fails unless every certificate, key, endpoint, and release URL input is
@@ -65,3 +67,4 @@ configuration; release infrastructure supplies them at execution time.
 - [Get-AuthenticodeSignature catalog precedence](https://learn.microsoft.com/powershell/module/microsoft.powershell.security/get-authenticodesignature)
 - [.NET PEReader](https://learn.microsoft.com/dotnet/api/system.reflection.portableexecutable.pereader)
 - [.NET SignedCms](https://learn.microsoft.com/dotnet/api/system.security.cryptography.pkcs.signedcms)
+- [.NET AsnReader](https://learn.microsoft.com/dotnet/api/system.formats.asn1.asnreader)

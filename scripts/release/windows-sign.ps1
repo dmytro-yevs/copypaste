@@ -206,6 +206,18 @@ function Assert-AuthenticodeSigner(
     }
 }
 
+# 16 MiB is well above normal Authenticode chains while bounding hostile PE allocation.
+$script:MaximumEmbeddedSignatureBytes = 16MB
+
+function Read-Exactly([IO.Stream]$Stream, [byte[]]$Buffer) {
+    $offset = 0
+    while ($offset -lt $Buffer.Length) {
+        $read = $Stream.Read($Buffer, $offset, $Buffer.Length - $offset)
+        if ($read -eq 0) { throw "Embedded Authenticode signature is truncated" }
+        $offset += $read
+    }
+}
+
 function Read-EmbeddedSignatureCms([string]$Target) {
     Add-Type -AssemblyName System.Reflection.Metadata
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs
@@ -218,20 +230,22 @@ function Read-EmbeddedSignatureCms([string]$Target) {
             if ($directory.RelativeVirtualAddress -le 0 -or $directory.Size -lt 8) {
                 throw "Signed file did not expose an embedded Authenticode signature"
             }
+            if ($directory.Size -gt $script:MaximumEmbeddedSignatureBytes -or
+                [int64]$directory.RelativeVirtualAddress + [int64]$directory.Size -gt $stream.Length) {
+                throw "Embedded Authenticode signature has an invalid size"
+            }
             $stream.Position = $directory.RelativeVirtualAddress
             $header = [byte[]]::new(8)
-            if ($stream.Read($header, 0, $header.Length) -ne $header.Length) {
-                throw "Embedded Authenticode signature is truncated"
-            }
+            Read-Exactly $stream $header
             $length = [BitConverter]::ToUInt32($header, 0)
             $certificateType = [BitConverter]::ToUInt16($header, 6)
-            if ($length -lt 8 -or $length -gt $directory.Size -or $certificateType -ne 2) {
+            if ($length -lt 8 -or $length -gt $directory.Size -or
+                $length -gt $script:MaximumEmbeddedSignatureBytes -or $certificateType -ne 2) {
                 throw "Signed file did not expose an embedded Authenticode signature"
             }
-            $encoded = [byte[]]::new($length - 8)
-            if ($stream.Read($encoded, 0, $encoded.Length) -ne $encoded.Length) {
-                throw "Embedded Authenticode signature is truncated"
-            }
+            $payloadLength = [int]($length - 8)
+            $encoded = [byte[]]::new($payloadLength)
+            Read-Exactly $stream $encoded
             $cms = [Security.Cryptography.Pkcs.SignedCms]::new()
             $cms.Decode($encoded)
             return $cms
@@ -243,10 +257,138 @@ function Read-EmbeddedSignatureCms([string]$Target) {
     }
 }
 
+function Assert-Sha256AlgorithmIdentifier([Formats.Asn1.AsnReader]$Reader, [string]$Error) {
+    $algorithm = $Reader.ReadSequence()
+    if ($algorithm.ReadObjectIdentifier() -cne "2.16.840.1.101.3.4.2.1") { throw $Error }
+    if ($algorithm.HasData) { $algorithm.ReadNull() }
+    if ($algorithm.HasData) { throw "Embedded Authenticode signature contains malformed ASN.1" }
+}
+
+function Get-Rfc3161TimestampCertificate(
+    [Security.Cryptography.Pkcs.SignerInfo]$Signer
+) {
+    $timestampAttribute = $Signer.UnsignedAttributes |
+        Where-Object { $_.Oid.Value -eq "1.3.6.1.4.1.311.3.3.1" } |
+        Select-Object -First 1
+    if ($null -eq $timestampAttribute -or $timestampAttribute.Values.Count -lt 1) { return $null }
+
+    $timestampCms = [Security.Cryptography.Pkcs.SignedCms]::new()
+    $timestampCms.Decode($timestampAttribute.Values[0].RawData)
+    if ($timestampCms.ContentInfo.ContentType.Value -cne "1.2.840.113549.1.9.16.1.4" -or
+        $timestampCms.SignerInfos.Count -lt 1) {
+        throw "Authenticode RFC 3161 timestamp is invalid"
+    }
+    if ($timestampCms.SignerInfos[0].DigestAlgorithm.Value -cne "2.16.840.1.101.3.4.2.1") {
+        throw "Authenticode RFC 3161 timestamp signature does not use SHA-256"
+    }
+    $tstInfoReader = [Formats.Asn1.AsnReader]::new(
+        $timestampCms.ContentInfo.Content, [Formats.Asn1.AsnEncodingRules]::DER)
+    $tstInfo = $tstInfoReader.ReadSequence()
+    [void]$tstInfo.ReadInteger()
+    [void]$tstInfo.ReadObjectIdentifier()
+    $messageImprint = $tstInfo.ReadSequence()
+    Assert-Sha256AlgorithmIdentifier $messageImprint `
+        "Authenticode RFC 3161 message imprint does not use SHA-256"
+    [void]$messageImprint.ReadOctetString()
+    if ($messageImprint.HasData) {
+        throw "Authenticode RFC 3161 timestamp is invalid"
+    }
+    [void]$tstInfo.ReadInteger()
+    [void]$tstInfo.ReadGeneralizedTime()
+    while ($tstInfo.HasData) { [void]$tstInfo.ReadEncodedValue() }
+    if ($tstInfoReader.HasData) { throw "Authenticode RFC 3161 timestamp is invalid" }
+    return $timestampCms.SignerInfos[0].Certificate
+}
+
+function New-SelfTestCms(
+    [Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
+    [string]$SignerDigestOid,
+    [string]$ImprintDigestOid,
+    [switch]$Timestamp,
+    [switch]$InvalidTimestamp,
+    [string]$TimestampSignerDigestOid = "2.16.840.1.101.3.4.2.1"
+) {
+    $indirectWriter = [Formats.Asn1.AsnWriter]::new([Formats.Asn1.AsnEncodingRules]::DER)
+    $indirectWriter.PushSequence()
+    $indirectWriter.PushSequence()
+    $indirectWriter.WriteObjectIdentifier("1.3.6.1.4.1.311.2.1.15")
+    $indirectWriter.PopSequence()
+    $indirectWriter.PushSequence()
+    $indirectWriter.PushSequence()
+    $indirectWriter.WriteObjectIdentifier("2.16.840.1.101.3.4.2.1")
+    $indirectWriter.WriteNull()
+    $indirectWriter.PopSequence()
+    $indirectWriter.WriteOctetString([byte[]]::new(32))
+    $indirectWriter.PopSequence()
+    $indirectWriter.PopSequence()
+    $content = [Security.Cryptography.Pkcs.ContentInfo]::new(
+        [Security.Cryptography.Oid]::new("1.3.6.1.4.1.311.2.1.4"), $indirectWriter.Encode())
+    $cms = [Security.Cryptography.Pkcs.SignedCms]::new($content, $false)
+    $cmsSigner = [Security.Cryptography.Pkcs.CmsSigner]::new($Certificate)
+    $cmsSigner.DigestAlgorithm = [Security.Cryptography.Oid]::new($SignerDigestOid)
+    $cms.ComputeSignature($cmsSigner)
+    if (-not $Timestamp) { return $cms }
+
+    $tstWriter = [Formats.Asn1.AsnWriter]::new([Formats.Asn1.AsnEncodingRules]::DER)
+    $tstWriter.PushSequence()
+    $tstWriter.WriteInteger(1)
+    $tstWriter.WriteObjectIdentifier("1.2.3.4")
+    $tstWriter.PushSequence()
+    $tstWriter.PushSequence()
+    $tstWriter.WriteObjectIdentifier($ImprintDigestOid)
+    $tstWriter.WriteNull()
+    $tstWriter.PopSequence()
+    $tstWriter.WriteOctetString([byte[]]::new(32))
+    $tstWriter.PopSequence()
+    $tstWriter.WriteInteger(1)
+    $tstWriter.WriteGeneralizedTime([DateTimeOffset]::UtcNow)
+    $tstWriter.PopSequence()
+    $tstBytes = if ($InvalidTimestamp) { [byte[]]@(1, 2, 3) } else { $tstWriter.Encode() }
+    $tstContent = [Security.Cryptography.Pkcs.ContentInfo]::new(
+        [Security.Cryptography.Oid]::new("1.2.840.113549.1.9.16.1.4"), $tstBytes)
+    $timestampCms = [Security.Cryptography.Pkcs.SignedCms]::new($tstContent, $false)
+    $timestampSigner = [Security.Cryptography.Pkcs.CmsSigner]::new($Certificate)
+    $timestampSigner.DigestAlgorithm = [Security.Cryptography.Oid]::new($TimestampSignerDigestOid)
+    $timestampCms.ComputeSignature($timestampSigner)
+    $values = [Security.Cryptography.AsnEncodedDataCollection]::new()
+    [void]$values.Add([Security.Cryptography.AsnEncodedData]::new($timestampCms.Encode()))
+    $attribute = [Security.Cryptography.CryptographicAttributeObject]::new(
+        [Security.Cryptography.Oid]::new("1.3.6.1.4.1.311.3.3.1"), $values)
+    $cms.SignerInfos[0].AddUnsignedAttribute($attribute)
+    return $cms
+}
+
+function Convert-EmbeddedSignatureCms([Security.Cryptography.Pkcs.SignedCms]$Cms) {
+    if ($Cms.SignerInfos.Count -lt 1) {
+        throw "Signed file did not expose an embedded Authenticode signature"
+    }
+    $signer = $Cms.SignerInfos[0]
+    $authenticode = [Formats.Asn1.AsnReader]::new(
+        $Cms.ContentInfo.Content, [Formats.Asn1.AsnEncodingRules]::DER)
+    $indirectData = $authenticode.ReadSequence()
+    [void]$indirectData.ReadEncodedValue()
+    $digestInfo = $indirectData.ReadSequence()
+    Assert-Sha256AlgorithmIdentifier $digestInfo "Authenticode file digest does not use SHA-256"
+    [void]$digestInfo.ReadOctetString()
+    if ($digestInfo.HasData -or $indirectData.HasData -or $authenticode.HasData) {
+        throw "Embedded Authenticode signature contains malformed ASN.1"
+    }
+    if ($signer.DigestAlgorithm.Value -cne "2.16.840.1.101.3.4.2.1") {
+        throw "Authenticode signature does not use SHA-256"
+    }
+    return [pscustomobject]@{
+        Status = "Valid"
+        SignatureType = "Authenticode"
+        SignerCertificate = $signer.Certificate
+        TimeStamperCertificate = Get-Rfc3161TimestampCertificate $signer
+    }
+}
+
 function Get-EmbeddedAuthenticodeSignature(
     [string]$Target,
     [string]$SignTool,
-    [scriptblock]$ProcessRunner
+    [scriptblock]$ProcessRunner,
+    [scriptblock]$CmsReader = { param($Path) Read-EmbeddedSignatureCms $Path }
 ) {
     $verification = & $ProcessRunner $SignTool @("verify", "/pa", "/all", "/tw", $Target) `
         120000 "SignTool embedded verification" $Target
@@ -255,43 +397,7 @@ function Get-EmbeddedAuthenticodeSignature(
             "exit $($verification.ExitCode)")
     }
 
-    $cms = Read-EmbeddedSignatureCms $Target
-    if ($cms.SignerInfos.Count -lt 1) {
-        throw "Signed file did not expose an embedded Authenticode signature"
-    }
-    $signer = $cms.SignerInfos[0]
-    $authenticode = [Formats.Asn1.AsnReader]::new(
-        $cms.ContentInfo.Content, [Formats.Asn1.AsnEncodingRules]::DER)
-    $indirectData = $authenticode.ReadSequence()
-    [void]$indirectData.ReadEncodedValue()
-    $digestInfo = $indirectData.ReadSequence()
-    $digestAlgorithm = $digestInfo.ReadSequence().ReadObjectIdentifier()
-    if ($digestAlgorithm -cne "2.16.840.1.101.3.4.2.1") {
-        throw "Authenticode file digest does not use SHA-256"
-    }
-    if ($signer.DigestAlgorithm.Value -cne "2.16.840.1.101.3.4.2.1") {
-        throw "Authenticode signature does not use SHA-256"
-    }
-    $timestampAttribute = $signer.UnsignedAttributes |
-        Where-Object { $_.Oid.Value -eq "1.3.6.1.4.1.311.3.3.1" } |
-        Select-Object -First 1
-    if ($null -eq $timestampAttribute -or $timestampAttribute.Values.Count -lt 1) {
-        $timestampCertificate = $null
-    } else {
-        $timestampCms = [Security.Cryptography.Pkcs.SignedCms]::new()
-        $timestampCms.Decode($timestampAttribute.Values[0].RawData)
-        if ($timestampCms.SignerInfos.Count -lt 1 -or
-            $timestampCms.SignerInfos[0].DigestAlgorithm.Value -cne "2.16.840.1.101.3.4.2.1") {
-            throw "Authenticode RFC 3161 timestamp does not use SHA-256"
-        }
-        $timestampCertificate = $timestampCms.SignerInfos[0].Certificate
-    }
-    return [pscustomobject]@{
-        Status = "Valid"
-        SignatureType = "Authenticode"
-        SignerCertificate = $signer.Certificate
-        TimeStamperCertificate = $timestampCertificate
-    }
+    return Convert-EmbeddedSignatureCms (& $CmsReader $Target)
 }
 
 function Invoke-WindowsSign(
@@ -384,6 +490,8 @@ function Prepare-WindowsSigning {
 }
 
 function Invoke-SelfTest {
+    Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+    Add-Type -AssemblyName System.Formats.Asn1
     Write-Host "PHASE: Windows signing contracts"
     $cases = @(
         @{ In = "https://timestamp.digicert.com"; Out = "http://timestamp.digicert.com" },
@@ -469,6 +577,82 @@ function Invoke-SelfTest {
             [DateTimeOffset]::UtcNow.AddMinutes(-1),
             [DateTimeOffset]::UtcNow.AddMinutes(5)
         )
+        Write-Host "PHASE: offline embedded-signature policy"
+        $acceptVerification = {
+            param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
+            [pscustomobject]@{ ExitCode = 0 }
+        }
+        $rejectVerification = {
+            param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
+            [pscustomobject]@{ ExitCode = 17 }
+        }
+        $verifyRejected = $false
+        try {
+            Get-EmbeddedAuthenticodeSignature "fixture.exe" "signtool.exe" `
+                $rejectVerification { throw "CMS reader must not run after verify failure" }
+        } catch {
+            if ($_.Exception.Message -cnotmatch "status=exit 17") { throw }
+            $verifyRejected = $true
+        }
+        if (-not $verifyRejected) { throw "SignTool verify failure self-test failed" }
+
+        $policyCases = @(
+            @{
+                Name = "missing timestamp"
+                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1"
+                Error = $null
+            },
+            @{
+                Name = "invalid timestamp"
+                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1" -Timestamp -InvalidTimestamp
+                Error = "Authenticode RFC 3161 timestamp is invalid"
+            },
+            @{
+                Name = "SHA-1 signer digest"
+                Cms = New-SelfTestCms $certificate "1.3.14.3.2.26" `
+                    "2.16.840.1.101.3.4.2.1" -Timestamp
+                Error = "Authenticode signature does not use SHA-256"
+            },
+            @{
+                Name = "SHA-1 timestamp signer digest"
+                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1" -Timestamp -TimestampSignerDigestOid "1.3.14.3.2.26"
+                Error = "Authenticode RFC 3161 timestamp signature does not use SHA-256"
+            },
+            @{
+                Name = "SHA-1 timestamp imprint"
+                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "1.3.14.3.2.26" -Timestamp
+                Error = "Authenticode RFC 3161 message imprint does not use SHA-256"
+            },
+            @{
+                Name = "SHA-256 timestamp imprint"
+                Cms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1" -Timestamp
+                Error = $null
+            }
+        )
+        foreach ($case in $policyCases) {
+            $cmsReader = { $case.Cms }.GetNewClosure()
+            $errorMessage = $null
+            try {
+                $validated = Get-EmbeddedAuthenticodeSignature "fixture.exe" "signtool.exe" `
+                    $acceptVerification $cmsReader
+            } catch {
+                $errorMessage = $_.Exception.Message
+            }
+            if ($case.Name -eq "missing timestamp") {
+                if ($errorMessage -or $null -ne $validated.TimeStamperCertificate) {
+                    throw "missing timestamp fixture self-test failed"
+                }
+            } elseif ($errorMessage -cne $case.Error) {
+                throw "$($case.Name) fixture self-test failed: $errorMessage"
+            } elseif ($null -eq $case.Error -and $null -eq $validated.TimeStamperCertificate) {
+                throw "$($case.Name) fixture self-test failed"
+            }
+        }
         $password = "self-test-password"
         [IO.File]::WriteAllBytes($testPfx, $certificate.Export(
                 [Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password))
