@@ -110,6 +110,10 @@ function Write-WindowsProcessTrace([array]$Records, $Trace) {
             Sort-Object { [uint64]$_.Record.TIME_CREATED }, Sequence, Boundary, Position |
             Where-Object {
                 $record = $_.Record
+                $exitStatusProperty = $record.PSObject.Properties["ExitStatus"]
+                $exitStatus = if ($null -ne $exitStatusProperty) {
+                    [uint32]$exitStatusProperty.Value
+                } else { "" }
                 $identity = if ($_.Sequence -ne [uint64]::MaxValue) {
                     "sequence:$($_.Sequence)"
                 } else {
@@ -118,7 +122,7 @@ function Write-WindowsProcessTrace([array]$Records, $Trace) {
                 $key = "{0}|{1}|{2}|{3}|{4}|{5}|{6}" -f $identity, $_.Kind,
                     ([uint64]$record.TIME_CREATED), ([uint32]$record.ProcessID),
                     ([string]$record.ProcessName).ToLowerInvariant(),
-                    ([uint32]$record.ParentProcessID), ([uint32]$record.ExitStatus)
+                    ([uint32]$record.ParentProcessID), $exitStatus
                 if ($seen.ContainsKey($key)) { return $false }
                 $seen[$key] = $true
                 return $true
@@ -227,7 +231,7 @@ function Test-WindowsProcessTraceHelpers {
     $fixturePath = Join-Path ([IO.Path]::GetTempPath()) "copypaste-process-trace-fixture-$([guid]::NewGuid()).jsonl"
     try {
         $startRecord = [pscustomobject]@{ TIME_CREATED = 100; ProcessName = "copypaste-ui.exe";
-            ProcessID = 51; ParentProcessID = 7; ExitStatus = 0 }
+            ProcessID = 51; ParentProcessID = 7 }
         $stopRecord = [pscustomobject]@{ TIME_CREATED = 200; ProcessName = "copypaste-ui";
             ProcessID = 51; ParentProcessID = 7; ExitStatus = 9 }
         $reuseRecord = [pscustomobject]@{ TIME_CREATED = 200; ProcessName = "copypaste-daemon.exe";
@@ -336,7 +340,10 @@ function Test-WindowsProcessTraceCollector {
         }
         if (@($events | Where-Object { $_.kind -eq "start" }).Count -eq 0 -or
             @($events | Where-Object { $_.kind -eq "stop" }).Count -eq 0 -or
-            @($events | Where-Object { $_.exit_code -eq 23 }).Count -eq 0) {
+            @($events | Where-Object {
+                $exitCodeProperty = $_.PSObject.Properties["exit_code"]
+                $null -ne $exitCodeProperty -and [uint32]$exitCodeProperty.Value -eq 23
+            }).Count -eq 0) {
             throw "real process trace did not retrieve start and stop events"
         }
         foreach ($name in $script:WindowsProcessNames) {
