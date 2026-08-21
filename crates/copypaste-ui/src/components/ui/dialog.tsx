@@ -4,6 +4,15 @@ import { XIcon } from "lucide-react";
 
 import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
+import {
+  modalDescriptionClass,
+  modalFooterClass,
+  modalFrameVariants,
+  modalHeaderClass,
+  modalOverlayClass,
+  modalTitleClass,
+  type ModalFrameProps,
+} from "@/components/ui/modal-shell";
 
 /**
  * A11Y-4 and INV-19 come from Radix, not from us. v1 hand-wrote the focus trap
@@ -25,10 +34,7 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
-      className={cn(
-        "fixed inset-0 z-[var(--z-scrim)] bg-scrim [backdrop-filter:var(--scrim-blur)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
-        className,
-      )}
+      className={cn(modalOverlayClass, className)}
       {...props}
     />
   );
@@ -38,20 +44,17 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  presentation,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
-}) {
+} & ModalFrameProps) {
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
-        className={cn(
-          "fixed top-1/2 right-[calc(var(--inset-right)+var(--s-4))] left-[calc(var(--inset-left)+var(--s-4))] z-[var(--z-dialog)] mx-auto grid max-h-[calc(100dvh-var(--inset-top)-var(--inset-bottom)-var(--s-8))] w-auto max-w-[var(--modal-w)] translate-y-[-50%] gap-4 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-3 duration-[var(--dur)]",
-          "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
-          className,
-        )}
+        className={cn(modalFrameVariants({ presentation }), className)}
         {...props}
       >
         {children}
@@ -73,7 +76,7 @@ function DialogHeader({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-left", className)}
+      className={cn(modalHeaderClass, className)}
       {...props}
     />
   );
@@ -83,10 +86,7 @@ function DialogFooter({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-footer"
-      className={cn(
-        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
-        className,
-      )}
+      className={cn(modalFooterClass, className)}
       {...props}
     />
   );
@@ -99,7 +99,7 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-lg leading-none font-semibold", className)}
+      className={cn(modalTitleClass, className)}
       {...props}
     />
   );
@@ -112,7 +112,7 @@ function DialogDescription({
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
-      className={cn("text-sm text-muted-foreground", className)}
+      className={cn(modalDescriptionClass, className)}
       {...props}
     />
   );

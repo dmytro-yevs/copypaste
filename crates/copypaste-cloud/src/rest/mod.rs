@@ -171,7 +171,7 @@ pub const TABLE: &str = "clipboard_items";
 /// Explicit column list. Naming the columns rather than `select=*` means a
 /// column added to the table later cannot change what this client parses.
 pub const SELECT_COLUMNS: &str =
-    "item_id,ciphertext,nonce,content_type,payload_metadata,created_at,deleted,origin_device_id,signature";
+    "item_id,ciphertext,nonce,content_type,payload_metadata,source_app_bundle_id,source_app_name,created_at,deleted,origin_device_id,signature";
 
 /// Upper bound on a page, whatever the caller asks for.
 ///

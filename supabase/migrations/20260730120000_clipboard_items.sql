@@ -36,6 +36,8 @@ create table public.clipboard_items (
     nonce             text,
 
     content_type      text not null,
+    source_app_bundle_id text,
+    source_app_name   text,
 
     -- Version wall clock, ms since epoch, client-supplied. This is the value
     -- the poll cursor pages on, so every writer restamps it on every mutation
@@ -111,6 +113,12 @@ create table public.clipboard_items (
         check (length(content_type) between 1 and 128),
     constraint clipboard_items_origin_device_id_bounded
         check (length(origin_device_id) between 1 and 128),
+    constraint clipboard_items_source_app_bundle_id_bounded
+        check (source_app_bundle_id is null or length(source_app_bundle_id) between 1 and 255),
+    constraint clipboard_items_source_app_name_bounded
+        check (source_app_name is null or length(source_app_name) between 1 and 120),
+    constraint clipboard_items_tombstone_has_no_source_app
+        check (not deleted or (source_app_bundle_id is null and source_app_name is null)),
 
     -- Base64 and bounded. 44 characters today (32 bytes of HMAC-SHA256); the
     -- bound is looser than that so a longer MAC is a client change rather than

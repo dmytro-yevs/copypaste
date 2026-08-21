@@ -55,7 +55,7 @@ export const onboarding = {
 
   capture: {
     title: "Capture from other apps",
-    body: "CopyPaste already saves what you copy in this app, share to it, or capture with a Quick Settings tile. Background capture from every app is optional and can wait.",
+    body: "CopyPaste already saves what you copy in this app, share to it, or capture with a Quick Settings tile. Background capture from every app is optional and can be turned on from this phone without a PC.",
     action: "Continue",
     saveNow: "Save the clipboard now",
     addTile: "Add Quick Settings tile",

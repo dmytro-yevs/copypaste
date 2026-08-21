@@ -185,11 +185,13 @@ describe("binding search, device, and display preferences", () => {
     const filter = await screen.findByRole("combobox", {
       name: "Filter by device",
     });
-    await user.selectOptions(filter, "phone-id");
+    await user.click(filter);
+    await user.click(await screen.findByRole("option", { name: "Phone" }));
     expect(screen.queryByText("from mac")).toBeNull();
     expect(screen.getByText("from phone")).toBeTruthy();
 
-    await user.selectOptions(filter, "all");
+    await user.click(await screen.findByRole("combobox", { name: "Filter by device" }));
+    await user.click(await screen.findByRole("option", { name: "All devices" }));
     await user.click(
       screen.getByRole("button", {
         name: "Group clipboard items by device",

@@ -462,7 +462,9 @@ describe("Android row actions", () => {
     expect(onCopy).toHaveBeenLastCalledWith(clip);
 
     await user.click(screen.getByRole("button", { name: "Item actions" }));
-    expect(screen.getByRole("dialog", { name: "Item actions" })).toBeTruthy();
+    const actions = screen.getByRole("dialog", { name: "Item actions" });
+    expect(actions.className).toContain("bottom-[calc(var(--inset-bottom)+var(--s-2))]");
+    expect(actions.className).toContain("bg-card");
     await user.click(screen.getByRole("button", { name: "Copy to clipboard" }));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(onCopy).toHaveBeenCalledTimes(2);

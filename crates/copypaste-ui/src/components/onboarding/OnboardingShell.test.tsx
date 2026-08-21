@@ -64,7 +64,24 @@ describe("first-run onboarding", () => {
 
     expect(screen.getByRole("heading", { name: "Welcome to CopyPaste" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Get started" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.getByRole("list", { name: "Step 1 of 5" })).toBeTruthy();
+    expect(document.querySelectorAll("[data-onboarding-progress] [data-step]")).toHaveLength(5);
+    expect(document.querySelector('[data-onboarding-progress] [data-step="welcome"]')?.textContent).toContain("Next");
+    expect(screen.queryByText("Saved on this device")).toBeNull();
+    expect(screen.queryByText("Private by default")).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
+  });
+
+  it("offers back only after leaving the first welcome screen", async () => {
+    const { user } = withUser(<App />);
+
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Get started" }));
+
+    expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+    expect(document.querySelector('[data-onboarding-progress] [data-step="welcome"]')?.textContent).toContain("Done");
+    expect(document.querySelector('[data-onboarding-progress] [data-step="permissions"]')?.textContent).toContain("Next");
   });
 
   it("skips the wizard once setup has been completed", () => {

@@ -58,6 +58,8 @@ pub struct IncomingItem<'a> {
     pub deleted: bool,
     pub is_sensitive: bool,
     pub origin_device_id: &'a str,
+    pub app_bundle_id: Option<&'a str>,
+    pub app_name: Option<&'a str>,
     /// P2P pin state. `None` is the explicit unpinned order.
     pub pinned: bool,
     pub pin_order: Option<f64>,
@@ -442,9 +444,9 @@ pub(super) fn upsert_in_tx(
     let written = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, payload_metadata, \
-                  fts_rowid, content_bytes) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
+                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, app_bundle_id, app_name, \
+                  payload_metadata, fts_rowid, content_bytes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
                      LENGTH(COALESCE(?2, X''))) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
@@ -456,7 +458,8 @@ pub(super) fn upsert_in_tx(
                  created_at         = excluded.created_at, \
                  deleted            = excluded.deleted, \
                  origin_device_id   = excluded.origin_device_id, \
-                 app_bundle_id      = NULL, \
+                 app_bundle_id      = excluded.app_bundle_id, \
+                 app_name           = excluded.app_name, \
                  payload_metadata   = excluded.payload_metadata, \
                  pinned             = excluded.pinned, \
                  pin_order          = excluded.pin_order, \
@@ -475,6 +478,8 @@ pub(super) fn upsert_in_tx(
                 incoming.created_at,
                 incoming.deleted,
                 incoming.origin_device_id,
+                incoming.app_bundle_id,
+                incoming.app_name,
                 incoming.payload_metadata,
                 fts_rowid,
             ],
@@ -508,6 +513,8 @@ mod tests {
             deleted: false,
             is_sensitive: false,
             origin_device_id: "device-a",
+            app_bundle_id: None,
+            app_name: None,
             pinned: false,
             pin_order: None,
             pin_updated_at: 0,

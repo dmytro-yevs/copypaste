@@ -307,6 +307,8 @@ mod tests {
             nonce,
             content_type: "text".into(),
             payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             created_at: 0,
             deleted: false,
             origin_device_id: "other-device".into(),

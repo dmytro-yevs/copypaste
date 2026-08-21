@@ -339,7 +339,8 @@ describe("filtering", () => {
     const { user } = withUser(<HistoryView />);
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
 
-    await user.selectOptions(screen.getByLabelText(/filter by kind/i), "url");
+    await user.click(screen.getByRole("combobox", { name: /filter by kind/i }));
+    await user.click(await screen.findByRole("option", { name: "Links" }));
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
     // AT-68: the badge switches to the visible count the moment a filter is on.
     expect(screen.getByText("1 item")).toBeTruthy();
@@ -349,7 +350,8 @@ describe("filtering", () => {
     const { user } = withUser(<HistoryView />);
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
 
-    await user.selectOptions(screen.getByLabelText(/filter by kind/i), "color");
+    await user.click(screen.getByRole("combobox", { name: /filter by kind/i }));
+    await user.click(await screen.findByRole("option", { name: "Colors" }));
     await waitFor(() =>
       expect(screen.getByText("Nothing matches this filter")).toBeTruthy(),
     );

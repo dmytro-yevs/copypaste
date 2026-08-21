@@ -12,7 +12,7 @@
  * assertions here are about what the control says as well as what it stores.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { ServiceTab } from "@/components/settings/ServiceTab";
 import { IpcFailure } from "@/lib/errors";
@@ -88,6 +88,23 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
+async function chooseOption(
+  user: ReturnType<typeof withUser>["user"],
+  name: string,
+  label: string,
+) {
+  await user.click(await screen.findByRole("combobox", { name }));
+  await user.click(await screen.findByRole("option", { name: label }));
+}
+
+async function optionValues(name: string): Promise<string[]> {
+  const control = await screen.findByRole("combobox", { name });
+  await control.click();
+  const values = screen.getAllByRole("option").map((option) => option.getAttribute("data-value") ?? "");
+  fireEvent.keyDown(screen.getAllByRole("option")[0]!, { key: "Escape" });
+  return values;
+}
+
 describe("reading the service's settings", () => {
   it("shows the live capture state in Service", async () => {
     withUser(<ServiceTab />);
@@ -100,7 +117,7 @@ describe("reading the service's settings", () => {
     const poll = await screen.findByRole("combobox", {
       name: "Check the clipboard every",
     });
-    expect((poll as HTMLSelectElement).value).toBe("2000");
+    expect(poll.getAttribute("data-value")).toBe("2000");
   });
 
   /**
@@ -114,7 +131,7 @@ describe("reading the service's settings", () => {
     const poll = await screen.findByRole("combobox", {
       name: "Check the clipboard every",
     });
-    expect((poll as HTMLSelectElement).value).toBe("1500");
+    expect(poll.getAttribute("data-value")).toBe("1500");
   });
 
   it("shows every binding payload default", async () => {
@@ -127,7 +144,7 @@ describe("reading the service's settings", () => {
     ] as const;
     for (const [name, value] of expected) {
       const control = await screen.findByRole("combobox", { name });
-      expect((control as HTMLSelectElement).value).toBe(String(value));
+      expect(control.getAttribute("data-value")).toBe(String(value));
     }
   });
 
@@ -188,10 +205,7 @@ describe("writing one", () => {
 
   it("sends a patch naming only the field that changed", async () => {
     const { user } = withUser(<ServiceTab />);
-    const dedup = await screen.findByRole("combobox", {
-      name: "Treat a repeat as the same item for",
-    });
-    await user.selectOptions(dedup, "60");
+    await chooseOption(user, "Treat a repeat as the same item for", "1 minute");
 
     await waitFor(() => expect(setConfig).toHaveBeenCalledTimes(1));
     // Exactly one key: a patch that carried the rest of the record is how two
@@ -209,8 +223,7 @@ describe("writing one", () => {
 
   it("sends the configured storage quota as its own patch", async () => {
     const { user } = withUser(<ServiceTab />);
-    const quota = await screen.findByRole("combobox", { name: "Storage quota" });
-    await user.selectOptions(quota, String(5 * 1_073_741_824));
+    await chooseOption(user, "Storage quota", "5 GB");
 
     await waitFor(() =>
       expect(setConfig).toHaveBeenCalledWith({ storage_quota_bytes: 5 * 1_073_741_824 }),
@@ -224,8 +237,12 @@ describe("writing one", () => {
     ["Decoded image memory limit", "100", { max_decoded_image_mb: 100 }],
   ])("patches only %s", async (name, value, patch) => {
     const { user } = withUser(<ServiceTab />);
-    const control = await screen.findByRole("combobox", { name });
-    await user.selectOptions(control, value);
+    const labelByValue: Record<string, string> = {
+      [String(2 * 1_048_576)]: "2 MB",
+      [String(1 * 1_048_576)]: "1 MB",
+      "100": "100 MB",
+    };
+    await chooseOption(user, name, labelByValue[value]!);
 
     await waitFor(() => expect(setConfig).toHaveBeenCalledTimes(1));
     expect(setConfig.mock.calls[0]![0]).toEqual(patch);
@@ -278,16 +295,11 @@ describe("writing one", () => {
 describe("payload-limit validation", () => {
   it("offers the exact 64 KiB, 1 MiB, 4 MiB, and 5000 ms boundaries", async () => {
     withUser(<ServiceTab />);
-    const values = async (name: string) =>
-      [...((await screen.findByRole("combobox", { name })) as HTMLSelectElement).options].map(
-        (option) => option.value,
-      );
-
-    expect(await values("Check the clipboard every")).toContain("5000");
-    expect(await values("Ignore text larger than")).toContain(String(64 * 1_024));
-    expect(await values("Ignore images larger than")).toContain(String(1_048_576));
-    expect(await values("Ignore files larger than")).toContain(String(4 * 1_048_576));
-    expect(await values("Decoded image memory limit")).toContain("1");
+    expect(await optionValues("Check the clipboard every")).toContain("5000");
+    expect(await optionValues("Ignore text larger than")).toContain(String(64 * 1_024));
+    expect(await optionValues("Ignore images larger than")).toContain(String(1_048_576));
+    expect(await optionValues("Ignore files larger than")).toContain(String(4 * 1_048_576));
+    expect(await optionValues("Decoded image memory limit")).toContain("1");
   });
 
   it("announces an out-of-range service value accessibly", async () => {
@@ -343,7 +355,7 @@ describe("the sensitive-content sweep", () => {
     const ttl = await screen.findByRole("combobox", {
       name: "Delete detected secrets after",
     });
-    expect((ttl as HTMLSelectElement).value).toBe("30");
+    expect(ttl.getAttribute("data-value")).toBe("30");
     expect(
       screen.getByText(/deleted without asking and cannot be recovered/i),
     ).toBeTruthy();
@@ -375,12 +387,7 @@ describe("the sensitive-content sweep", () => {
    *  closed. */
   it("offers the 30 seconds the manifests name", async () => {
     withUser(<ServiceTab />);
-    const ttl = await screen.findByRole("combobox", {
-      name: "Delete detected secrets after",
-    });
-    expect(
-      [...(ttl as HTMLSelectElement).options].map((option) => option.value),
-    ).toContain("30");
+    expect(await optionValues("Delete detected secrets after")).toContain("30");
   });
 });
 

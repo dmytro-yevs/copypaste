@@ -71,6 +71,15 @@ export const capture = {
     lastSaved: "Last saved {{age}}",
   },
 
+  help: {
+    title: "Phone-only setup",
+    body:
+      "No PC or USB is required. On Android 11 or later, Shizuku can be started on this phone from Developer options with Wireless debugging. Android stops Shizuku after each reboot, so start it again there and then return to CopyPaste.",
+    openShizuku: "Open Shizuku",
+    openDeveloperOptions: "Open Developer options",
+    requestBattery: "Allow unrestricted battery use",
+  },
+
   toast: {
     row: {
       title: "Hide Android's clipboard notice",

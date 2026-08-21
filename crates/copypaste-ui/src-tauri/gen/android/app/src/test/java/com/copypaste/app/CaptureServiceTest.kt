@@ -25,14 +25,7 @@ class CaptureServiceTest {
     fun isArmedIsFalseUntilStartPersistsState() {
         val context = org.robolectric.RuntimeEnvironment.getApplication()
         assertFalse(CaptureService.isArmed(context))
-        CaptureService.start(context, "Capturing from every app.", "stopped", "body")
-        val started = Robolectric.buildService(
-            CaptureService::class.java,
-            Intent(context, CaptureService::class.java).putExtra("text", "Capturing from every app."),
-        ).create().get()
-        assertEquals(
-            android.app.Service.START_NOT_STICKY,
-            started.onStartCommand(null, 0, 1),
-        )
+        assertFalse(CaptureService.start(context, "Capturing from every app.", "stopped", "body"))
+        assertFalse(CaptureService.isArmed(context))
     }
 }

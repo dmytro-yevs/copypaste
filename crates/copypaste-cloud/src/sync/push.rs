@@ -116,6 +116,8 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 nonce,
                 content_type: item.content_type,
                 payload_metadata: item.payload_metadata,
+                source_app_bundle_id: item.source_app_bundle_id,
+                source_app_name: item.source_app_name,
                 created_at: item.created_at,
                 // Always explicit, never left to the column default (T-5).
                 deleted: false,

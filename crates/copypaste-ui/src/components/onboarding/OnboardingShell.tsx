@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Check, Circle, Dot } from "lucide-react";
 
 import { DoneStep } from "@/components/onboarding/DoneStep";
 import { OnboardingStepLayout } from "@/components/onboarding/OnboardingStepLayout";
@@ -8,6 +9,7 @@ import {
 } from "@/components/onboarding/registry";
 import { WelcomeStep } from "@/components/onboarding/WelcomeStep";
 import { Button } from "@/components/ui/button";
+import { Stepper, type StepperItem } from "@/components/ui/stepper";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { usePrefs } from "@/store/prefs";
@@ -19,6 +21,31 @@ export function OnboardingShell() {
   const steps = useMemo(() => stepsForPlatform(platform), [platform]);
   const total = steps.length + 2;
   const [index, setIndex] = useState(0);
+  const stepperItems = useMemo<StepperItem[]>(
+    () =>
+      [
+        { id: "welcome", label: t("onboarding.welcome.title") },
+        ...steps.map((step) => ({
+          id: step.id,
+          label: t(`onboarding.${step.id}.title` as const),
+        })),
+        { id: "done", label: t("onboarding.done.title") },
+      ].map((item, itemIndex) => ({
+        id: item.id,
+        label: item.label,
+        icon: itemIndex < index ? Check : itemIndex === index ? Dot : Circle,
+        stateLabel: t(
+          itemIndex < index
+            ? "capture.setup.ladder.done"
+            : itemIndex === index
+              ? "capture.setup.ladder.next"
+              : "capture.setup.ladder.todo",
+        ),
+        done: itemIndex < index,
+        current: itemIndex === index,
+      })),
+    [index, steps, t],
+  );
 
   const finish = () => {
     usePrefs.getState().set("onboardingComplete", true);
@@ -45,17 +72,25 @@ export function OnboardingShell() {
       className="flex h-full min-h-0 flex-1 flex-col"
     >
       <header className="flex items-center gap-s-2 px-s-3 py-s-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={index === 0}
-          onClick={() => setIndex((current) => Math.max(0, current - 1))}
-        >
-          {t("onboarding.back")}
-        </Button>
-        <p className="min-w-0 flex-1 text-center text-xs text-muted-foreground" role="status">
-          {t("onboarding.progress", { current: index + 1, total })}
-        </p>
+        {index > 0 ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIndex((current) => Math.max(0, current - 1))}
+          >
+            {t("onboarding.back")}
+          </Button>
+        ) : (
+          <span className="inline-block min-w-[4.5rem]" aria-hidden="true" />
+        )}
+        <div className="flex min-w-0 flex-1 justify-center">
+          <div data-onboarding-progress="" className="w-full max-w-[20rem]">
+            <Stepper
+              label={t("onboarding.progress", { current: index + 1, total })}
+              items={stepperItems}
+            />
+          </div>
+        </div>
         <span className="inline-block min-w-[4.5rem]" aria-hidden="true" />
       </header>
 

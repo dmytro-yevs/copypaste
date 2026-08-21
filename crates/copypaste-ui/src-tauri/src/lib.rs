@@ -267,6 +267,9 @@ pub fn run() {
             commands::capture::capture_now,
             commands::capture::capture_toast_explanation,
             commands::capture::capture_set_toast_suppressed,
+            commands::capture::capture_open_shizuku,
+            commands::capture::capture_open_developer_options,
+            commands::capture::capture_request_battery_exemption,
             // the background service, and the window
             commands::service::service_state,
             commands::service::start_service,
@@ -317,6 +320,17 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("could not start CopyPaste")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(
+                event,
+                tauri::RunEvent::Reopen {
+                    has_visible_windows: false,
+                    ..
+                }
+            ) {
+                shell::window::show_main(app);
+            }
+
             // ADR-0004: quitting the app stops the service it started. `Exit`
             // rather than `ExitRequested` because the latter can be cancelled,
             // and a cancelled quit that had already killed the daemon would
@@ -528,6 +542,18 @@ mod tests {
     }
 
     #[test]
+    fn macos_reopen_reveals_the_main_window_when_none_are_visible() {
+        let compact_source = production_source().split_whitespace().collect::<String>();
+
+        assert!(
+            compact_source.contains("tauri::RunEvent::Reopen{")
+                && compact_source.contains("has_visible_windows:false")
+                && compact_source.contains("shell::window::show_main(app);"),
+            "the macOS reopen event must show the main window when the app is still running"
+        );
+    }
+
+    #[test]
     fn macos_main_window_preserves_defaults_at_binding_minimum() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.macos.conf.json"))
@@ -541,6 +567,8 @@ mod tests {
         assert_eq!(main["minWidth"], 720);
         assert_eq!(main["minHeight"], 460);
         assert_eq!(main["skipTaskbar"], false);
+        assert_eq!(main["titleBarStyle"], "Overlay");
+        assert_eq!(main["hiddenTitle"], true);
         assert_eq!(main["transparent"], true);
     }
 

@@ -28,7 +28,7 @@ pub struct PairedDevice {
 }
 
 impl PairingCeremony {
-    fn from_progress(
+    pub(crate) fn from_progress(
         progress: PairingProgressData,
         presentation: PairingPresentationState,
     ) -> Self {
@@ -53,7 +53,7 @@ impl PairingCeremony {
         }
     }
 
-    fn unavailable() -> Self {
+    pub(crate) fn unavailable() -> Self {
         Self {
             ceremony_id: None,
             role: None,

@@ -66,5 +66,7 @@ pub(super) fn version<'a>(
         deleted: false,
         content_hash: None,
         origin_device_id: "device-a",
+        app_bundle_id: None,
+        app_name: None,
     }
 }

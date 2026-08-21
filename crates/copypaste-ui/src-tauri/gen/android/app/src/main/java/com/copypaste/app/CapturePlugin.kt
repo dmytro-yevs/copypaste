@@ -1,7 +1,6 @@
 package com.copypaste.app
 
 import android.app.Activity
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,9 +8,14 @@ import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
+import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Base64
+import android.util.Log
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
@@ -21,6 +25,7 @@ import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import rikka.shizuku.Shizuku
 
 /**
@@ -34,6 +39,7 @@ import rikka.shizuku.Shizuku
  */
 @TauriPlugin
 class CapturePlugin(private val activity: Activity) : Plugin(activity) {
+    private val tag = "CopyPasteCapture"
     /**
      * The arm request waiting on each permission dialog.
      *
@@ -91,7 +97,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     fun probe(invoke: Invoke) {
         invoke.resolve(CaptureBridgeJson.objectOf(
             ProbeResult.serializer(),
-            ProbeResult(probePayload(), captureEnabled(), ShizukuClipboard.isListening()),
+            ProbeResult(probePayload(), captureEnabled(), ClipCascadeCapture.isListening()),
         ))
     }
 
@@ -115,31 +121,81 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun installedSourceApps(invoke: Invoke) {
-        val packageManager = activity.packageManager
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val apps = packageManager.queryIntentActivities(intent, 0)
-            .asSequence()
-            .mapNotNull { info -> installedApp(info) }
-            .filter { app -> app.packageId != activity.packageName }
-            .distinctBy { app -> app.packageId }
-            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { app -> app.label })
-            .toList()
+        thread(name = "capture-installed-source-apps") {
+            try {
+                val packageManager = activity.applicationContext.packageManager
+                val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                val apps = packageManager.queryIntentActivities(intent, 0)
+                    .asSequence()
+                    .mapNotNull { info -> installedApp(packageManager, info) }
+                    .filter { app -> app.packageId != activity.packageName }
+                    .distinctBy { app -> app.packageId }
+                    .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { app -> app.label })
+                    .toList()
 
-        val result = JSArray()
-        apps.forEach { app ->
-            result.put(JSObject().put("packageId", app.packageId).put("label", app.label))
+                val result = JSArray()
+                apps.forEach { app ->
+                    result.put(JSObject().put("packageId", app.packageId).put("label", app.label))
+                }
+                activity.runOnUiThread {
+                    invoke.resolve(JSObject().put("apps", result))
+                }
+            } catch (_: Exception) {
+                activity.runOnUiThread {
+                    invoke.reject("Installed applications could not be listed.")
+                }
+            }
         }
-        invoke.resolve(JSObject().put("apps", result))
     }
 
-    private fun installedApp(info: ResolveInfo): InstalledApp? {
+    private fun installedApp(packageManager: PackageManager, info: ResolveInfo): InstalledApp? {
         val activityInfo = info.activityInfo ?: return null
         val packageId = activityInfo.packageName.takeIf { it.isNotBlank() } ?: return null
-        val label = info.loadLabel(activity.packageManager).toString().trim().ifBlank { packageId }
+        val label = info.loadLabel(packageManager).toString().trim().ifBlank { packageId }
         return InstalledApp(packageId, label)
     }
 
     private data class InstalledApp(val packageId: String, val label: String)
+
+    @Command
+    fun openShizuku(invoke: Invoke) {
+        val packageManager = activity.applicationContext.packageManager
+        val intent = packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
+        if (intent == null || !launch(intent)) {
+            invoke.reject("Shizuku could not be opened on this device.")
+            return
+        }
+        invoke.resolve(JSObject())
+    }
+
+    @Command
+    fun openDeveloperOptions(invoke: Invoke) {
+        if (!launch(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))) {
+            invoke.reject("Developer options could not be opened on this device.")
+            return
+        }
+        invoke.resolve(JSObject())
+    }
+
+    @Command
+    fun requestBatteryExemption(invoke: Invoke) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            invoke.resolve(JSObject())
+            return
+        }
+        val power = activity.getSystemService(PowerManager::class.java)
+        val intent = if (power?.isIgnoringBatteryOptimizations(activity.packageName) == true) {
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        } else {
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(Uri.parse("package:${activity.packageName}"))
+        }
+        if (!launch(intent)) {
+            invoke.reject("Battery settings could not be opened on this device.")
+            return
+        }
+        invoke.resolve(JSObject())
+    }
 
     private fun iconPng(drawable: Drawable): JSObject? {
         val density = activity.resources.displayMetrics.density
@@ -156,6 +212,18 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             .put("pngBase64", Base64.encodeToString(bytes, Base64.NO_WRAP))
             .put("width", edge)
             .put("height", edge)
+    }
+
+    private fun launch(intent: Intent): Boolean = try {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (intent.resolveActivity(activity.packageManager) == null) {
+            false
+        } else {
+            activity.startActivity(intent)
+            true
+        }
+    } catch (_: Exception) {
+        false
     }
 
     @Command
@@ -177,6 +245,14 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun finishArm(invoke: Invoke, title: String, body: String) {
+        if (ClipCascadeCapture.isSetupComplete(activity)) {
+            resolveArm(
+                invoke,
+                CaptureService.start(activity, "Capturing from every app.", title, body),
+            )
+            return
+        }
+
         if (ShizukuClipboard.isRunning() && !ShizukuClipboard.hasPermission()) {
             active = this@CapturePlugin
             val pending = ArmRequest(invoke, title, body)
@@ -201,29 +277,29 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             )
             return
         }
-        val listening = ShizukuClipboard.arm(activity) {
-            CaptureService.lost(activity, title, body)
+        if (!ShizukuClipboard.isRunning()) {
+            resolveArm(invoke, false)
+            return
         }
-        abandon(pendingShizukuArm.getAndSet(null))
-        if (pendingArm.get() == null) active = null
-        if (listening) {
-            CaptureService.start(activity, "Capturing from every app.", title, body)
-        } else {
-            // A failed re-arm replaces any old listener. Its persisted state
-            // must go too: otherwise a later probe advertises capture that no
-            // longer has a live path into Rust's ingest loop.
-            CaptureService.stop(activity)
-        }
+        ShizukuSettings.preparePersistentCaptureState(activity.packageName) { prepared ->
+            if (!prepared) {
+                Log.w(tag, "the shizuku persisted process state could not be applied")
+            }
+            if (prepared) {
+                ClipCascadeCapture.markSetupComplete(activity)
+            }
+            abandon(pendingShizukuArm.getAndSet(null))
+            if (pendingArm.get() == null) active = null
+            val listening = prepared &&
+                CaptureService.start(activity, "Capturing from every app.", title, body)
+            if (!listening) CaptureService.stop(activity)
 
-        resolveArm(invoke, listening)
+            resolveArm(invoke, listening)
+        }
     }
 
     private fun resolveArm(invoke: Invoke, listening: Boolean) {
-        val outcome = if (listening) {
-            ShizukuClipboard.readOutcome()
-        } else {
-            ReadOutcome.REFUSED
-        }
+        val outcome = if (listening) clipboardOutcome(activity) else ReadOutcome.REFUSED
         invoke.resolve(CaptureBridgeJson.objectOf(
             ArmResult.serializer(),
             ArmResult(
@@ -265,7 +341,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun disarm(invoke: Invoke) {
-        ShizukuClipboard.disarm()
         CaptureService.stop(activity)
         invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
     }
@@ -279,24 +354,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun readNow(invoke: Invoke) {
-        val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val primary = clipboard.primaryClip
-        val text = when {
-            primary == null -> null
-            ClipSensitivity.isSensitive(primary) -> null
-            else -> primary
-                .takeIf { it.itemCount > 0 }
-                ?.getItemAt(0)
-                ?.coerceToText(activity)
-                ?.toString()
-        }
-
-        val outcome = when {
-            !text.isNullOrBlank() -> ReadOutcome.SUCCEEDED
-            primary != null && ClipSensitivity.isSensitive(primary) -> ReadOutcome.EMPTY
-            clipboard.hasPrimaryClip() -> ReadOutcome.REFUSED
-            else -> ReadOutcome.EMPTY
-        }
+        val text = clipboardText(activity)
+        val outcome = clipboardOutcome(activity)
         invoke.resolve(CaptureBridgeJson.objectOf(
             ReadResult.serializer(),
             ReadResult(outcome, text, System.currentTimeMillis(), focused = true),
@@ -326,20 +385,23 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         ShizukuClipboard.setToastSuppressed(suppressed) {
             invoke.resolve(CaptureBridgeJson.objectOf(
                 ProbeResult.serializer(),
-                ProbeResult(probePayload(), captureEnabled(), ShizukuClipboard.isListening()),
+                ProbeResult(probePayload(), captureEnabled(), ClipCascadeCapture.isListening()),
             ))
         }
     }
 
-    private fun probePayload(): ShizukuProbe = ShizukuProbe(
-        ShizukuClipboard.isSupported(),
-        isShizukuInstalled(),
-        ShizukuClipboard.isRunning(),
-        ShizukuClipboard.hasPermission(),
-        CaptureService.isArmed(activity),
-        ShizukuClipboard.isToastSuppressed(activity),
-        takeRearmRequest(),
-    )
+    private fun probePayload(): ShizukuProbe {
+        val setupComplete = ClipCascadeCapture.isSetupComplete(activity)
+        return ShizukuProbe(
+            ShizukuClipboard.isSupported(),
+            isShizukuInstalled() || setupComplete,
+            ShizukuClipboard.isRunning() || setupComplete,
+            ShizukuClipboard.hasPermission() || setupComplete,
+            CaptureService.isArmed(activity),
+            ShizukuClipboard.isToastSuppressed(activity),
+            takeRearmRequest(),
+        )
+    }
 
     /**
      * `CaptureState` is a request to run, not proof that the listener survived.
@@ -347,7 +409,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      * can still hand clips to its drain task.
      */
     private fun captureEnabled(): Boolean =
-        CaptureService.isArmed(activity) && ShizukuClipboard.isListening()
+        CaptureService.isArmed(activity) && ClipCascadeCapture.isListening()
 
     /**
      * Without this the loss notification is dropped by the system, which would
@@ -388,7 +450,24 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     private fun onShizukuPermissionResult(granted: Boolean) {
         val pending = pendingShizukuArm.getAndSet(null) ?: return
         if (granted) {
-            finishArm(pending.invoke, pending.title, pending.body)
+            ShizukuSettings.refreshClipCascadeSetup(activity.packageName) { refreshed ->
+                if (!refreshed) {
+                    Log.w(tag, "the ClipCascade-style grant setup could not be applied")
+                    resolveArm(pending.invoke, false)
+                    return@refreshClipCascadeSetup
+                }
+                ClipCascadeCapture.markSetupComplete(activity)
+                active = null
+                resolveArm(
+                    pending.invoke,
+                    CaptureService.start(
+                        activity,
+                        "Capturing from every app.",
+                        pending.title,
+                        pending.body,
+                    ),
+                )
+            }
             return
         }
         active = null

@@ -10,6 +10,8 @@ export const history = {
     label: "Search clipboard history",
     placeholder: "Search clipboard history",
     hint: "Search (⌘F) · ↓ to move into the list · ⌘A select all",
+    open: "Search clipboard history",
+    close: "Close search",
     clear: "Clear search",
     filterKind: "Filter by kind",
     filterDevice: "Filter by device",
@@ -199,7 +201,8 @@ export const history = {
     cleared_other: "Cleared {{count}} items — pinned items kept",
     // The count is only known once `delete_all` has run, and this is shown
     // while it is still undoable.
-    clearing: "Clearing history — pinned items kept. Not deleted until the undo window closes.",
+    clearing:
+      "Clearing history — pinned items kept. Not deleted until the undo window closes.",
     deleted: "Deleted",
     undo: "Undo",
     undoIn_one: "{{count}}s left",
@@ -223,6 +226,7 @@ export const history = {
     // "Copied 8 items" over a selection of ten reads as a success.
     bulkCopiedPartial:
       "Copied {{done}} of {{total}} — {{skipped}} left out as sensitive or an image",
-    bulkCopyNothing: "Nothing was copied — every selected item is sensitive or an image",
+    bulkCopyNothing:
+      "Nothing was copied — every selected item is sensitive or an image",
   },
 } as const;

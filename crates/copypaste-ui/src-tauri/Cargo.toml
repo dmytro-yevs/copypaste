@@ -117,7 +117,7 @@ objc2-user-notifications = { version = "0.2.2", features = [
 block2 = "=0.5.1"
 # Maintained encoder/rendering crates own the QR matrix and PNG; pairing code
 # must not grow another handwritten QR implementation.
-qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
+qrcode = { version = "0.14.1", default-features = false, features = ["image", "svg"] }
 image.workspace = true
 # Tauri's tray hook exposes tray-icon's objc2 0.6 AppKit objects. Keep this
 # narrow alias beside the older capture bindings until they can move together.
@@ -132,7 +132,7 @@ copypaste-core = { path = "../../copypaste-core" }
 [target.'cfg(target_os = "windows")'.dependencies]
 # Pairing stays in native controls, including their UI Automation behavior.
 winsafe = { version = "0.0.28", features = ["gui", "gdi"] }
-qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
+qrcode = { version = "0.14.1", default-features = false, features = ["image", "svg"] }
 image.workspace = true
 # Source-app icon resolution: App Paths registry lookup, SHGetFileInfoW for the
 # icon, GDI to extract the bitmap. The path is transient and never stored (I-9).

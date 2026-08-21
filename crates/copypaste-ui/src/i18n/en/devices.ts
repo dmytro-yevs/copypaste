@@ -3,12 +3,12 @@ export const devices = {
 
   pairing: {
     heading: "Add a device",
-    description:
-      "Pairing details and security codes stay in CopyPaste's protected native view.",
     create: "Show pairing code",
     createHint: "Create and show a new pairing code in the native view",
+    createHintWeb: "Create and show a new pairing code in this preview",
     join: "Scan pairing code",
     joinHint: "Scan a pairing code with this device",
+    joinHintWeb: "Enter the pairing code shown by the other device",
     checking: "Checking for an active pairing…",
     presentationUnavailable:
       "The protected pairing view didn't open. Try Show details, or cancel and start again.",
@@ -24,6 +24,18 @@ export const devices = {
     confirm: "Codes match",
     confirming: "Confirming…",
     confirmLabel: "Codes match — confirm pairing in the native view",
+    inviteTitle: "Pair a new device",
+    inviteBody: "Scan this QR code from CopyPaste on the other device, or enter the code and address there.",
+    reveal: "Click to reveal",
+    revealLabel: "Click to reveal QR code",
+    expires: "Expires in {{count}} seconds",
+    codeLabel: "Pairing code",
+    addressLabel: "Pairing address",
+    joinTitle: "Enter pairing code",
+    joinBody: "Use the code and address shown by the other device.",
+    joinCode: "Pairing code",
+    joinAddress: "Pairing address",
+    joinAction: "Start pairing",
     state: {
       idle: {
         title: "Ready to pair",
@@ -78,7 +90,6 @@ export const devices = {
   own: {
     heading: "This device",
     name: "This device",
-    description: "The CopyPaste app and clipboard service on this device.",
     loading: "Checking this device…",
     checking: "Checking",
     unavailableLabel: "Unavailable",
@@ -94,6 +105,8 @@ export const devices = {
     clipboard: "Clipboard connection",
     clipboardConnected: "Connected through the background service",
     rename: {
+      open: "Rename device",
+      title: "Rename this device",
       label: "Device name",
       description: "Used to identify this device during sync and network discovery.",
       action: "Rename",

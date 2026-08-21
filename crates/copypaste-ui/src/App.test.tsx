@@ -50,6 +50,14 @@ describe("desktop shell", () => {
     expect(container.firstElementChild?.classList.contains("app-surface--desktop")).toBe(true);
   });
 
+  it("keeps a drag region in the desktop sidebar once the native title is hidden", () => {
+    withUser(<App />);
+
+    expect(
+      screen.getByRole("navigation", { name: "Primary" }).querySelector("[data-tauri-drag-region]"),
+    ).not.toBeNull();
+  });
+
   it("keeps desktop navigation items in a compact group", () => {
     withUser(<App />);
 

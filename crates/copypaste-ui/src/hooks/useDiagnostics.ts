@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
-import { copyText, hasBridge } from "@/lib/ipc";
+import { copyText, hasBridge, hasWebBridge } from "@/lib/ipc";
 import { EVENT_CHANGED, type ChangePayload } from "@/hooks/usePush";
 import {
   exportSupportBundle,
@@ -67,7 +67,7 @@ export function useSweepNotices() {
   const qc = useQueryClient();
 
   useEffect(() => {
-    if (!hasBridge()) return;
+    if (!hasBridge() || hasWebBridge()) return;
 
     let cancelled = false;
     let unlisten: (() => void) | undefined;

@@ -73,12 +73,19 @@ describe("the toolbar", () => {
     const before = await rowBoxes(app.browser);
     expect(before.length).toBe(4);
 
-    await app.browser.execute(function () {
-      const select = document.querySelector(
+    await app.browser.executeAsync(function (done: () => void) {
+      const trigger = document.querySelector(
         '[aria-label="Filter by kind"]',
-      ) as HTMLSelectElement;
-      select.value = "url";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      ) as HTMLButtonElement | null;
+      trigger?.click();
+      requestAnimationFrame(() => {
+        (
+          document.querySelector(
+            '[role="option"][data-value="url"]',
+          ) as HTMLElement | null
+        )?.click();
+        done();
+      });
     });
 
     await app.browser.waitUntil(
@@ -87,12 +94,19 @@ describe("the toolbar", () => {
     );
 
     // Put it back for the tests after this one.
-    await app.browser.execute(function () {
-      const select = document.querySelector(
+    await app.browser.executeAsync(function (done: () => void) {
+      const trigger = document.querySelector(
         '[aria-label="Filter by kind"]',
-      ) as HTMLSelectElement;
-      select.value = "all";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      ) as HTMLButtonElement | null;
+      trigger?.click();
+      requestAnimationFrame(() => {
+        (
+          document.querySelector(
+            '[role="option"][data-value="all"]',
+          ) as HTMLElement | null
+        )?.click();
+        done();
+      });
     });
     await app.browser.waitUntil(
       async () => (await rowBoxes(app.browser)).length === 4,

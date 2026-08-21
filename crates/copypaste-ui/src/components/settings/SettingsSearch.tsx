@@ -1,8 +1,9 @@
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Search, X } from "lucide-react";
-import { useRef } from "react";
+import { useRef, type RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
+import { ExpandableSearch } from "@/components/ui/expandable-search";
 import { Input } from "@/components/ui/input";
 import { useTranslation } from "@/i18n";
 import { rankFuzzy } from "@/lib/fuzzy";
@@ -21,6 +22,9 @@ interface SettingsSearchFieldProps {
   onQueryChange: (value: string) => void;
   results: readonly ResolvedSettingsSearchItem[];
   onSelect: (item: ResolvedSettingsSearchItem) => void;
+  inputRef: RefObject<HTMLInputElement | null>;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 }
 
 interface SettingsSearchResultsProps {
@@ -33,13 +37,16 @@ export function SettingsSearchField({
   onQueryChange,
   results,
   onSelect,
+  inputRef,
+  expanded,
+  onExpandedChange,
 }: SettingsSearchFieldProps) {
   const { t } = useTranslation();
   const hasQuery = query.trim().length > 0;
   const anchorRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const resultIds = results.map((_, index) => `settings-search-result-${index}`);
+  const open = expanded || hasQuery;
 
   const focusResult = (index: number) => {
     document.getElementById(resultIds[index])?.focus();
@@ -53,55 +60,70 @@ export function SettingsSearchField({
       }}
     >
       <PopoverPrimitive.Anchor asChild>
-        <div
+        <ExpandableSearch
           ref={anchorRef}
-          role="search"
-          className="relative w-full min-w-0 flex-1 basis-full"
+          expanded={open}
+          label={t("settings.search.label")}
+          onExpandedChange={(next) => {
+            onExpandedChange(next || hasQuery);
+            if (next) {
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }
+          }}
+          className="relative"
         >
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 left-s-3 my-auto size-4 text-muted-foreground"
-          />
-          <Input
-            ref={inputRef}
-            type="text"
-            role="searchbox"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            aria-label={t("settings.search.label")}
-            aria-controls="settings-search-results"
-            aria-expanded={hasQuery}
-            aria-autocomplete="list"
-            placeholder={t("settings.search.placeholder")}
-            className="pr-11 pl-9"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                if (hasQuery) {
+          <div className="relative w-full min-w-0 flex-1 basis-full">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-s-3 my-auto size-4 text-muted-foreground"
+            />
+            <Input
+              ref={inputRef}
+              type="text"
+              role="searchbox"
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              aria-label={t("settings.search.label")}
+              aria-controls="settings-search-results"
+              aria-expanded={hasQuery}
+              aria-autocomplete="list"
+              placeholder={t("settings.search.placeholder")}
+              className="pr-11 pl-9"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
                   event.preventDefault();
-                  onQueryChange("");
+                  if (hasQuery) {
+                    onQueryChange("");
+                    return;
+                  }
+                  onExpandedChange(false);
+                } else if (event.key === "ArrowDown" && hasQuery && resultIds.length > 0) {
+                  event.preventDefault();
+                  focusResult(0);
+                } else if (event.key === "ArrowUp" && hasQuery && resultIds.length > 0) {
+                  event.preventDefault();
+                  focusResult(resultIds.length - 1);
                 }
-              } else if (event.key === "ArrowDown" && hasQuery && resultIds.length > 0) {
-                event.preventDefault();
-                focusResult(0);
-              } else if (event.key === "ArrowUp" && hasQuery && resultIds.length > 0) {
-                event.preventDefault();
-                focusResult(resultIds.length - 1);
-              }
-            }}
-          />
-          {hasQuery && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("settings.search.clear")}
-              onClick={() => onQueryChange("")}
-              className="absolute inset-y-0 right-0 my-auto"
-            >
-              <X aria-hidden="true" />
-            </Button>
-          )}
-        </div>
+              }}
+            />
+            {open && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t(hasQuery ? "settings.search.clear" : "common.close")}
+                title={t(hasQuery ? "settings.search.clear" : "common.close")}
+                onClick={() => {
+                  if (hasQuery) onQueryChange("");
+                  else onExpandedChange(false);
+                }}
+                className="absolute inset-y-0 right-0 my-auto"
+              >
+                <X aria-hidden="true" />
+              </Button>
+            )}
+          </div>
+        </ExpandableSearch>
       </PopoverPrimitive.Anchor>
       {hasQuery && (
         <SettingsSearchResults

@@ -135,6 +135,8 @@ mod tests {
             content: zeroize::Zeroizing::new(b"%PDF-binary".to_vec()),
             content_type: "file".into(),
             payload_metadata: Some(metadata.into()),
+            source_app_bundle_id: None,
+            source_app_name: None,
             created_at: 1_000,
             deleted: false,
             origin_device_id: "device-a".into(),

@@ -63,6 +63,7 @@ const PLUGIN_CLASS: &str = "CapturePlugin";
 const MSG_BRIDGE: &str = "CopyPaste couldn't reach the Android side of capture.";
 const MSG_ARM: &str = "Background capture couldn't be started. Check that Shizuku is running.";
 const MSG_TOAST: &str = "Android's clipboard notice couldn't be changed.";
+const MSG_OPEN: &str = "CopyPaste couldn't open that Android screen.";
 
 /// Register the Kotlin plugin and publish the control it wraps.
 pub fn init() -> TauriPlugin<Wry> {
@@ -152,6 +153,11 @@ impl AndroidCapture {
     pub fn installed_source_apps(&self) -> Result<Vec<AndroidInstalledSourceApp>> {
         self.call::<_, AndroidInstalledSourceApps>("installedSourceApps", (), MSG_BRIDGE)
             .map(|response| response.apps)
+    }
+
+    fn open(&self, command: &'static str) -> Result<()> {
+        self.call::<_, AndroidEmptyResult>(command, (), MSG_OPEN)
+            .map(|_| ())
     }
 }
 
@@ -270,6 +276,18 @@ impl CaptureControl for AndroidCapture {
             model.set_probe(result.probe);
             model.snapshot()
         }))
+    }
+
+    fn open_shizuku(&self) -> Result<()> {
+        self.open("openShizuku")
+    }
+
+    fn open_developer_options(&self) -> Result<()> {
+        self.open("openDeveloperOptions")
+    }
+
+    fn request_battery_exemption(&self) -> Result<()> {
+        self.open("requestBatteryExemption")
     }
 
     fn note_stored(&self, at_ms: i64) {

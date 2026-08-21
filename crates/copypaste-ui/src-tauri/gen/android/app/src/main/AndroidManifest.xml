@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -8,16 +9,19 @@
       The capture ladder (docs/rewrite/android-clipboard-access.md).
 
       What is deliberately NOT here:
-      * READ_CLIPBOARD_IN_BACKGROUND — signature|role. `pm grant` cannot give
+      * READ_CLIPBOARD_IN_BACKGROUND — signature. `pm grant` cannot give
         it to us; the shell uid holds it and that is the whole of rung 2.
-      * READ_LOGS — v1's route. Structurally dead since Android 13's
-        LogcatManagerService denies background apps automatically.
       * BIND_ACCESSIBILITY_SERVICE — an accessibility service is not a
         clipboard exemption. It appears nowhere in clipboardAccessAllowed().
     -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission
+        android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <queries>
@@ -90,6 +94,15 @@
 
         <activity
             android:name=".ClipboardCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/capture_action"
+            android:theme="@style/Theme.CopyPaste.Invisible" />
+
+        <activity
+            android:name=".ClipboardFloatingActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:noHistory="true"

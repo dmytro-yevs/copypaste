@@ -1,3 +1,4 @@
+import { CapturePhoneOnlyHelp } from "@/components/capture/CapturePhoneOnlyHelp";
 import { Smartphone } from "lucide-react";
 
 import { OnboardingStepLayout } from "@/components/onboarding/OnboardingStepLayout";
@@ -58,14 +59,17 @@ export function CaptureStep({ continue: onContinue, skip, optional }: Onboarding
           </Button>
         ) : null}
         {showBackground ? (
-          <Button
-            className="w-full"
-            variant="outline"
-            disabled={busy}
-            onClick={() => arm.mutate(() => captureArm())}
-          >
-            {t("onboarding.capture.background")}
-          </Button>
+          <>
+            <Button
+              className="w-full"
+              variant="outline"
+              disabled={busy}
+              onClick={() => arm.mutate(() => captureArm())}
+            >
+              {t("onboarding.capture.background")}
+            </Button>
+            {capture.data ? <CapturePhoneOnlyHelp snapshot={capture.data} disabled={busy} /> : null}
+          </>
         ) : null}
       </div>
     </OnboardingStepLayout>

@@ -5,7 +5,7 @@
  * wrapping the strip only traded that for a row of chrome taller than the pane
  * below it (A11Y-15).
  */
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { useTranslation } from "@/i18n";
@@ -15,12 +15,10 @@ export function SettingsIndex({
   groups,
   open,
   onOpen,
-  onBack,
 }: {
   groups: readonly SettingsGroup[];
   open: SettingsTab | null;
   onOpen: (value: SettingsTab["value"]) => void;
-  onBack: () => void;
 }) {
   const { t } = useTranslation();
   const rows = useRef(new Map<string, HTMLButtonElement>());
@@ -41,20 +39,7 @@ export function SettingsIndex({
 
   if (open !== null) {
     return (
-      <section aria-labelledby="settings-subpage-title" className="flex flex-col gap-s-3">
-        <div className="flex items-center gap-s-2">
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex min-h-[var(--tap-min)] items-center gap-s-1 rounded-md px-s-2 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"
-          >
-            <ChevronLeft size={18} aria-hidden="true" className="shrink-0" />
-            {t("settings.index.back")}
-          </button>
-        </div>
-        <h2 id="settings-subpage-title" className="px-s-2 text-lg font-semibold">
-          {t(open.label)}
-        </h2>
+      <section aria-labelledby="settings-page-title" className="flex flex-col gap-s-3">
         {open.render()}
       </section>
     );

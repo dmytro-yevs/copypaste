@@ -27,11 +27,14 @@ const syncNow = vi.fn();
 const setDeviceName = vi.fn();
 const getPairingProgress = vi.fn();
 const createPairingInvite = vi.fn();
+const createPreviewPairingInvite = vi.fn();
+const joinPreviewPairingInvite = vi.fn();
 const scanPairingInvite = vi.fn();
 const presentPairing = vi.fn();
 const confirmPairing = vi.fn();
 const rejectPairing = vi.fn();
 const cancelPairing = vi.fn();
+const hasWebBridge = vi.fn();
 
 configure({ asyncUtilTimeout: 15_000 });
 vi.setConfig({ testTimeout: 20_000 });
@@ -48,8 +51,12 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     revokeDevice: (pairingId: string) => revokeDevice(pairingId),
     syncNow: (pairingId?: string) => syncNow(pairingId),
     setDeviceName: (name: string) => setDeviceName(name),
+    hasWebBridge: () => hasWebBridge(),
     getPairingProgress: () => getPairingProgress(),
     createPairingInvite: () => createPairingInvite(),
+    createPreviewPairingInvite: () => createPreviewPairingInvite(),
+    joinPreviewPairingInvite: (code: string, addr: string) =>
+      joinPreviewPairingInvite(code, addr),
     scanPairingInvite: () => scanPairingInvite(),
     presentPairing: () => presentPairing(),
     confirmPairing: () => confirmPairing(),
@@ -61,7 +68,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
 const PHONE = peer({ pairing_id: "pair-9", name: "Lost Phone" });
 
 beforeEach(() => {
-  getStatus.mockReset().mockResolvedValue(status());
+  getStatus.mockReset().mockResolvedValue(status({ device_name: "Pixel 9 Pro" }));
   listPeers.mockReset().mockResolvedValue([PHONE]);
   listDiscovered.mockReset().mockResolvedValue([]);
   rescanDiscovered.mockReset().mockResolvedValue([]);
@@ -69,6 +76,7 @@ beforeEach(() => {
   revokeDevice.mockReset().mockResolvedValue(undefined);
   syncNow.mockReset().mockResolvedValue([]);
   setDeviceName.mockReset().mockResolvedValue(undefined);
+  hasWebBridge.mockReset().mockReturnValue(false);
   const idlePairing = {
     ceremony_id: null,
     role: null,
@@ -79,6 +87,26 @@ beforeEach(() => {
   };
   getPairingProgress.mockReset().mockResolvedValue(idlePairing);
   createPairingInvite.mockReset().mockResolvedValue(idlePairing);
+  createPreviewPairingInvite.mockReset().mockResolvedValue({
+    ceremony: {
+      ...idlePairing,
+      ceremony_id: "preview-1",
+      role: "responder",
+      state: "waiting_for_peer",
+      presentation: "presented",
+    },
+    code: "ABCD-EFGH-IJKL-MNOP",
+    listen_addr: "192.0.2.10:47654",
+    expires_in_secs: 120,
+    qr_svg: "<svg><rect width='10' height='10'/></svg>",
+  });
+  joinPreviewPairingInvite.mockReset().mockResolvedValue({
+    ...idlePairing,
+    ceremony_id: "preview-join",
+    role: "initiator",
+    state: "handshaking",
+    presentation: "presented",
+  });
   scanPairingInvite.mockReset().mockResolvedValue(idlePairing);
   presentPairing.mockReset().mockResolvedValue(idlePairing);
   confirmPairing.mockReset().mockResolvedValue(idlePairing);
@@ -163,12 +191,19 @@ describe("cutting a device off", () => {
 });
 
 describe("native-safe pairing entry points", () => {
-  it("offers create and scan without a credential field or copy action", async () => {
+  it("offers create and scan from the shared header without a credential field or copy action", async () => {
     withUser(<DevicesView />);
     await screen.findByText("Lost Phone");
 
-    expect(screen.getByRole("button", { name: "Show pairing code" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Scan pairing code" })).toBeTruthy();
+    const header = screen.getByRole("heading", { name: "Devices" }).closest("header");
+    expect(header).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Show pairing code" }).closest("header"),
+    ).toBe(header);
+    expect(
+      screen.getByRole("button", { name: "Scan pairing code" }).closest("header"),
+    ).toBe(header);
+    expect(screen.queryByText("Ready to pair")).toBeNull();
     expect(document.querySelector("svg[role='img']")).toBeNull();
     expect(document.querySelector("canvas")).toBeNull();
     expect(screen.queryByRole("button", { name: /copy pairing details/i })).toBeNull();
@@ -181,11 +216,43 @@ describe("native-safe pairing entry points", () => {
       await screen.findByLabelText(/lost phone\. name reported by the device itself — not verified/i),
     ).toBeTruthy();
   });
+
+  it("shows the QR and pairing code in a web-preview dialog", async () => {
+    hasWebBridge.mockReturnValue(true);
+    const { user } = withUser(<DevicesView />);
+
+    await user.click(await screen.findByRole("button", { name: "Show pairing code" }));
+
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(createPreviewPairingInvite).toHaveBeenCalledOnce();
+    expect(await screen.findByText("ABCD-EFGH-IJKL-MNOP")).toBeTruthy();
+    expect(screen.getByText("192.0.2.10:47654")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Click to reveal QR code" })).toBeTruthy();
+    expect(screen.queryByText("Ready to pair")).toBeNull();
+  });
+
+  it("submits the web-preview join dialog through code and address", async () => {
+    hasWebBridge.mockReturnValue(true);
+    const { user } = withUser(<DevicesView />);
+
+    await user.click(await screen.findByRole("button", { name: "Scan pairing code" }));
+    await user.type(await screen.findByLabelText("Pairing code"), "CODE-1234");
+    await user.type(await screen.findByLabelText("Pairing address"), "192.0.2.44:47654");
+    await user.click(screen.getByRole("button", { name: "Start pairing" }));
+
+    await waitFor(() =>
+      expect(joinPreviewPairingInvite).toHaveBeenCalledWith(
+        "CODE-1234",
+        "192.0.2.44:47654",
+      ),
+    );
+  });
 });
 
 describe("renaming this device", () => {
-  it("saves a trimmed name through the shared status contract", async () => {
+  it("opens rename behind a pencil action and saves a trimmed name through the shared status contract", async () => {
     const { user } = withUser(<DevicesView />);
+    await user.click(await screen.findByRole("button", { name: "Rename device" }));
     const input = await screen.findByRole("textbox", { name: "Device name" });
     await waitFor(() => expect(input).toHaveProperty("disabled", false));
 
@@ -200,6 +267,7 @@ describe("renaming this device", () => {
   it("restores the persisted name when saving fails", async () => {
     setDeviceName.mockRejectedValue({ code: "internal", retryable: true });
     const { user } = withUser(<DevicesView />);
+    await user.click(await screen.findByRole("button", { name: "Rename device" }));
     const input = await screen.findByRole("textbox", { name: "Device name" });
     await waitFor(() => expect(input).toHaveProperty("disabled", false));
 
@@ -207,7 +275,7 @@ describe("renaming this device", () => {
     await user.type(input, "Temporary name");
     await user.click(screen.getByRole("button", { name: "Rename" }));
 
-    await waitFor(() => expect(input).toHaveProperty("value", "This device"));
+    await waitFor(() => expect(input).toHaveProperty("value", "Pixel 9 Pro"));
   });
 });
 
@@ -241,10 +309,14 @@ describe("the supported device surfaces", () => {
     withUser(<DevicesView />);
 
     expect(await screen.findByRole("heading", { name: "This device" })).toBeTruthy();
+    expect(await screen.findByText("Pixel 9 Pro")).toBeTruthy();
     expect(await screen.findByText("App version")).toBeTruthy();
     expect(screen.getByText("2.0.0-alpha.1")).toBeTruthy();
     expect(screen.getByText("3 items")).toBeTruthy();
     expect(screen.getAllByText("Recording").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(/copyPaste app and clipboard service on this device/i),
+    ).toBeNull();
   });
 
   /** DMY-48: the Android Devices leg asserted "Nearby devices", a string this

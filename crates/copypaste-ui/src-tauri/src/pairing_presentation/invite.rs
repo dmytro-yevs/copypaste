@@ -25,7 +25,7 @@ struct NativeInvite {
     listen_addr: String,
 }
 
-pub(super) fn encode_native_invite(invite: &PairingInviteData) -> Option<Zeroizing<String>> {
+pub(crate) fn encode_native_invite(invite: &PairingInviteData) -> Option<Zeroizing<String>> {
     let listen_addr = invite.listen_addr.as_deref()?;
     if !valid_field(&invite.code, MAX_CODE_BYTES)
         || !valid_field(listen_addr, MAX_LISTEN_ADDR_BYTES)

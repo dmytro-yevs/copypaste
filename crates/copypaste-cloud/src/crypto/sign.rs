@@ -115,6 +115,8 @@ pub struct RowMetadata<'a> {
     pub nonce: &'a str,
     pub content_type: &'a str,
     pub payload_metadata: Option<&'a str>,
+    pub source_app_bundle_id: Option<&'a str>,
+    pub source_app_name: Option<&'a str>,
     pub created_at: i64,
     pub deleted: bool,
     pub origin_device_id: &'a str,
@@ -188,11 +190,19 @@ fn signing_input(meta: &RowMetadata<'_>) -> Vec<u8> {
     let created_at = meta.created_at.to_string();
     let metadata_marker = meta.payload_metadata.map_or("0", |_| "1");
     let metadata = meta.payload_metadata.unwrap_or("");
-    let fields: [&[u8]; 9] = [
+    let app_bundle_marker = meta.source_app_bundle_id.map_or("0", |_| "1");
+    let app_bundle = meta.source_app_bundle_id.unwrap_or("");
+    let app_name_marker = meta.source_app_name.map_or("0", |_| "1");
+    let app_name = meta.source_app_name.unwrap_or("");
+    let fields: [&[u8]; 13] = [
         meta.item_id.as_bytes(),
         meta.content_type.as_bytes(),
         metadata_marker.as_bytes(),
         metadata.as_bytes(),
+        app_bundle_marker.as_bytes(),
+        app_bundle.as_bytes(),
+        app_name_marker.as_bytes(),
+        app_name.as_bytes(),
         meta.origin_device_id.as_bytes(),
         created_at.as_bytes(),
         deleted.as_bytes(),
@@ -230,6 +240,8 @@ mod tests {
             nonce: "bm9uY2U=",
             content_type: "text",
             payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             created_at: 1_700_000_000_000,
             deleted: false,
             origin_device_id: "device-a",
@@ -434,6 +446,8 @@ mod tests {
             nonce: "bm8=",
             content_type: "text",
             payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             created_at: 7,
             deleted: true,
             origin_device_id: "dev",

@@ -9,11 +9,14 @@ import android.os.IBinder
 /**
  * Keeps the process alive while rung 2 is armed.
  *
- * The clip listener is a callback into *this* process, so if the process is
- * reclaimed the listener goes with it and copies stop being saved. A foreground
- * service is the only thing Android offers that says "keep me". It does no work
- * itself; it exists so that [ShizukuClipboard]'s listener and the Rust store
- * are both still there when someone copies in another app.
+ * The logcat reader is a callback path into *this* process, so if the process
+ * is reclaimed the reader goes with it and copies stop being saved. A
+ * foreground service is the only thing Android offers that says "keep me".
+ * It does no work itself; it exists so the reader and the Rust store are both
+ * still there when someone copies in another app.
+ *
+ * CopyPaste's ClipCascade path is app-owned after setup: Shizuku only applies
+ * the one-shot grants. This service keeps the logcat reader alive and visible.
  *
  * The ongoing notification is not an apology for the service — it is the
  * android doc's §5 rule 1 outside the app: capture state is visible wherever
@@ -24,13 +27,9 @@ class CaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val state = state(this)
-        // A sticky restart has no Rust runtime or in-memory hand-off queue.
-        // Re-registering the shell listener here would collect plaintext that
-        // cannot reach ingest, while the foreground notification claims the
-        // opposite. Clear the remembered request and say capture stopped.
-        if (intent == null || !state.enabled || !ShizukuClipboard.isListening()) {
+        if (intent == null || !state.enabled) {
             clearState(this)
-            ShizukuClipboard.disarm()
+            ClipCascadeCapture.disarm()
             if (state.enabled) {
                 CaptureNotifications.postLost(this, state.lostTitle, state.lostBody)
             }
@@ -42,13 +41,20 @@ class CaptureService : Service() {
         // is alive. Never run an invisible service on Android 13+.
         if (!CaptureNotifications.canPost(this)) {
             clearState(this)
-            ShizukuClipboard.disarm()
+            ClipCascadeCapture.disarm()
             stopSelf(startId)
             return START_NOT_STICKY
         }
         CaptureNotifications.ensureChannels(this)
         val text = intent.getStringExtra(EXTRA_TEXT) ?: state.text
         startForeground(CaptureNotifications.ONGOING_ID, CaptureNotifications.ongoing(this, text))
+        if (!ClipCascadeCapture.arm(this, {
+                lost(this, state.lostTitle, state.lostBody)
+            })) {
+            clearState(this)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         // OEM process death must not resurrect this service with a null intent.
         return START_NOT_STICKY
     }
@@ -58,7 +64,7 @@ class CaptureService : Service() {
         // unexpected teardown cannot leave a persisted green state behind.
         val state = state(this)
         clearState(this)
-        ShizukuClipboard.disarm()
+        ClipCascadeCapture.disarm()
         if (state.enabled) {
             CaptureNotifications.postLost(this, state.lostTitle, state.lostBody)
         }
@@ -75,7 +81,13 @@ class CaptureService : Service() {
         private const val KEY_LOST_TITLE = "lostTitle"
         private const val KEY_LOST_BODY = "lostBody"
 
-        fun start(context: Context, text: String, lostTitle: String, lostBody: String) {
+        fun start(context: Context, text: String, lostTitle: String, lostBody: String): Boolean {
+            if (!ClipCascadeCapture.arm(context, {
+                    lost(context, lostTitle, lostBody)
+                })) {
+                clearState(context)
+                return false
+            }
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(KEY_ENABLED, true)
@@ -92,15 +104,18 @@ class CaptureService : Service() {
             } else {
                 context.startService(intent)
             }
+            return true
         }
 
         fun stop(context: Context) {
             clearState(context)
+            ClipCascadeCapture.disarm()
             context.stopService(Intent(context, CaptureService::class.java))
         }
 
         fun lost(context: Context, title: String, body: String) {
             clearState(context)
+            ClipCascadeCapture.disarm()
             CaptureNotifications.postLost(context, title, body)
             context.stopService(Intent(context, CaptureService::class.java))
         }

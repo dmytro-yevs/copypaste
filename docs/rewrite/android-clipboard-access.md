@@ -50,8 +50,11 @@ access to the primary clip is granted only if the caller:
 
 …and then the `OP_READ_CLIPBOARD` app-op must be allowed, and the device must
 be unlocked (`isDeviceLocked` → `getPrimaryClip` returns `null` on the lock
-screen). Source: [`ClipboardService.java`](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/clipboard/ClipboardService.java),
-`clipboardAccessAllowed`, AOSP `main` as of 2026-07-30.
+screen). Crucially, that app-op check is only the first gate: an
+`appops set <pkg> READ_CLIPBOARD allow` does not replace the later
+`READ_CLIPBOARD_IN_BACKGROUND` / IME / focus test. Source:
+[`ClipboardService.java`](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android10-release/services/core/java/com/android/server/clipboard/ClipboardService.java),
+`clipboardAccessAllowed`, Android 10 (`android10-release`).
 
 Three consequences that are widely got wrong and that decide this document:
 
@@ -66,7 +69,7 @@ Three consequences that are widely got wrong and that decide this document:
   so `OnPrimaryClipChangedListener` is silent in the background. So is
   `getPrimaryClipDescription()`. This is the whole reason v1 was reduced to
   reading logcat: there is no legitimate change signal at all.
-- **`READ_CLIPBOARD_IN_BACKGROUND` is `signature|role`** — so `adb shell pm grant`
+- **`READ_CLIPBOARD_IN_BACKGROUND` is `signature`** — so `adb shell pm grant`
   cannot grant it to us. *But* `com.android.shell` declares it
   (`packages/Shell/AndroidManifest.xml`) and is platform-signed, so it holds it.
   **A binder call made as the shell UID with `callingPackage = "com.android.shell"`
@@ -174,6 +177,19 @@ Because `com.android.shell` holds `READ_CLIPBOARD_IN_BACKGROUND` (§1), we can:
 No logcat, no denial-line parsing, no overlay activity, no focus stealing, no
 polling. This is strictly better than v1 and it is the reason this rung is worth
 building rather than just documenting.
+
+What Shizuku can persist for us is narrower than "background clipboard access".
+Its user-service may set app-ops and standby state:
+
+- `cmd appops set <pkg> RUN_IN_BACKGROUND allow`
+- `cmd appops set <pkg> RUN_ANY_IN_BACKGROUND allow`
+- `am set-inactive <pkg> false`
+- `am set-standby-bucket <pkg> active`
+
+It may also write the clipboard-toast setting. None of that changes the
+clipboard gate above. `READ_CLIPBOARD_IN_BACKGROUND` stays with
+`com.android.shell`; CopyPaste does not inherit it after a one-shot command. If
+Shizuku stops, rung 2 stops with it.
 
 > **Half verified.** The platform half has been run: on API 36 a `getPrimaryClip`
 > as uid 2000 with `callingPackage = "com.android.shell"` returns another app's

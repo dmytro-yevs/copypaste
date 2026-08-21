@@ -40,6 +40,8 @@ pub struct LocalItem {
     /// restamped with the forwarding device, or the ordering's final tie-break
     /// stops being stable.
     pub origin_device_id: String,
+    pub source_app_bundle_id: Option<String>,
+    pub source_app_name: Option<String>,
 }
 
 /// What [`CloudSource::apply_remote`] did with the version it was given.

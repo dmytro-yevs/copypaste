@@ -6,13 +6,17 @@ export const NAVIGATION_READY = '[data-navigation-ready="true"]';
 export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
 export const ROW = `${HISTORY_LIST} [role="listitem"]`;
 export const SEARCH = '[aria-label="Search clipboard history"]';
-export const MASKED_ROW = '[aria-label="Sensitive item, hidden — activate to reveal"]';
+export const MASKED_ROW =
+  '[aria-label="Sensitive item, hidden — activate to reveal"]';
 
 export async function visibleText(app: AndroidApp): Promise<string> {
   return app.withPage((page) => page.evaluate(() => document.body.innerText));
 }
 
-export async function count(app: AndroidApp, selector: string): Promise<number> {
+export async function count(
+  app: AndroidApp,
+  selector: string,
+): Promise<number> {
   return app.withPage((page) =>
     page.evaluate((query) => document.querySelectorAll(query).length, selector),
   );
@@ -136,7 +140,10 @@ export async function topRowIsMasked(app: AndroidApp): Promise<boolean> {
     page.evaluate(
       (row, masked) => {
         const first = document.querySelector(row);
-        return !!first && (first.matches(masked) || first.querySelector(masked) !== null);
+        return (
+          !!first &&
+          (first.matches(masked) || first.querySelector(masked) !== null)
+        );
       },
       ROW,
       MASKED_ROW,
@@ -154,15 +161,26 @@ export interface LabelledBox {
 /** Every element carrying this accessible name, with the box it was laid out
  *  at — so "present" and "rendered" are told apart. The query ignores CSS, so a
  *  control hidden with `display: none` is still counted. */
-export async function byLabel(app: AndroidApp, label: string): Promise<LabelledBox[]> {
+export async function byLabel(
+  app: AndroidApp,
+  label: string,
+): Promise<LabelledBox[]> {
   return app.withPage((page) =>
     page.evaluate(
       (name: string) =>
-        Array.from(document.querySelectorAll(`[aria-label="${name}"]`), (node) => {
-          const el = node as HTMLElement;
-          const rect = el.getBoundingClientRect();
-          return { tag: el.tagName, width: rect.width, height: rect.height, text: el.innerText };
-        }),
+        Array.from(
+          document.querySelectorAll(`[aria-label="${name}"]`),
+          (node) => {
+            const el = node as HTMLElement;
+            const rect = el.getBoundingClientRect();
+            return {
+              tag: el.tagName,
+              width: rect.width,
+              height: rect.height,
+              text: el.innerText,
+            };
+          },
+        ),
       label,
     ),
   );
@@ -184,14 +202,24 @@ async function tapWhere(
 ): Promise<boolean> {
   return app.withPage(async (page) => {
     const point = await page.evaluate(
-      (root: string | null, query: string, name: string | null, nth: number) => {
+      (
+        root: string | null,
+        query: string,
+        name: string | null,
+        nth: number,
+      ) => {
         const within = root ? document.querySelector(root) : document;
         if (!within) return null;
-        const matches = Array.from(within.querySelectorAll(query)).filter((node) => {
-          if (name === null) return true;
-          const el = node as HTMLElement;
-          return el.textContent?.trim() === name || el.getAttribute("aria-label") === name;
-        });
+        const matches = Array.from(within.querySelectorAll(query)).filter(
+          (node) => {
+            if (name === null) return true;
+            const el = node as HTMLElement;
+            return (
+              el.textContent?.trim() === name ||
+              el.getAttribute("aria-label") === name
+            );
+          },
+        );
         // A negative index means "the first one a tap can actually reach":
         // the list is virtualised, so its first row in document order may be
         // scrolled under the toolbar while four identical controls below it
@@ -252,7 +280,10 @@ export async function tapNth(
   );
 }
 
-export async function fieldValue(app: AndroidApp, selector: string): Promise<string> {
+export async function fieldValue(
+  app: AndroidApp,
+  selector: string,
+): Promise<string> {
   return app.withPage((page) =>
     page.evaluate((query) => {
       const node = document.querySelector(query) as HTMLInputElement | null;
@@ -279,13 +310,17 @@ export async function typeInto(
  * on some engines and the whole value on others, and the difference is a
  * half-cleared filter that the next assertion reads as a missing item.
  */
-export async function clearField(app: AndroidApp, selector: string): Promise<void> {
+export async function clearField(
+  app: AndroidApp,
+  selector: string,
+): Promise<void> {
   const current = await fieldValue(app, selector);
   if (!current) return;
   await app.withPage(async (page) => {
     await page.click(selector);
     await page.keyboard.press("End");
-    for (let i = 0; i < current.length; i++) await page.keyboard.press("Backspace");
+    for (let i = 0; i < current.length; i++)
+      await page.keyboard.press("Backspace");
   });
   await waitFor(
     async () => (await fieldValue(app, selector)) === "",
@@ -295,20 +330,36 @@ export async function clearField(app: AndroidApp, selector: string): Promise<voi
 
 /** Restore the toolbar state a shared device may retain between files or runs. */
 export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
-  await clearField(app, SEARCH);
   await app.withPage((page) =>
-    page.evaluate(() => {
-      for (const label of ["Filter by kind", "Sort order"]) {
-        const select = document.querySelector(
+    page.evaluate(async () => {
+      for (const [label, first] of [
+        ["Filter by kind", "all"],
+        ["Sort order", "newest"],
+      ] as const) {
+        const trigger = document.querySelector(
           `[aria-label="${label}"]`,
-        ) as HTMLSelectElement | null;
-        const first = select?.options[0]?.value;
-        if (!select || first === undefined || select.value === first) continue;
-        select.value = first;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
+        ) as HTMLButtonElement | null;
+        if (!trigger || trigger.dataset.value === first) continue;
+        trigger.click();
+        await new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        );
+        (
+          document.querySelector(
+            `[role="option"][data-value="${first}"]`,
+          ) as HTMLElement | null
+        )?.click();
       }
     }),
   );
+  const searchControl = await byLabel(app, "Search clipboard history");
+  if (searchControl[0]?.tag === "BUTTON") {
+    await tapButton(app, "Search clipboard history");
+  }
+  await clearField(app, SEARCH);
+  if ((await byLabel(app, "Close search")).length > 0) {
+    await tapButton(app, "Close search");
+  }
 }
 
 /**
@@ -321,6 +372,7 @@ export async function filterHistoryTo(
   expectedText: string,
 ): Promise<void> {
   await resetHistoryFilters(app);
+  await tapButton(app, "Search clipboard history");
   await typeInto(app, SEARCH, query);
   await waitFor(
     async () =>

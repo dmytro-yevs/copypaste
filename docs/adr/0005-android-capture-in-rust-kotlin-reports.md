@@ -43,6 +43,9 @@ and focus is the clipboard exemption we can reach with no permission at all.
 
 **Rung 2 written, unverified.** `ShizukuClipboard` obtains the clipboard binder
 through `ShizukuBinderWrapper` and calls it as `com.android.shell`.
+`ShizukuSettingsService` persists only app-ops, standby, and the optional toast
+setting; it does not transfer the shell clipboard exemption into CopyPaste's
+own uid.
 
 **Rungs 1 and 3 are not built** and are not represented in the state model. An
 overlay bubble and becoming the default IME are both in the specification's

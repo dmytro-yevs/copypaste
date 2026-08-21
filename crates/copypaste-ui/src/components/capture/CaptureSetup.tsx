@@ -13,11 +13,13 @@
 import { ClipboardPlus, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { CaptureLadder } from "@/components/capture/CaptureLadder";
+import { CapturePhoneOnlyHelp } from "@/components/capture/CapturePhoneOnlyHelp";
 import { ToastNotice } from "@/components/capture/ToastNotice";
 import { EmptyState } from "@/components/EmptyState";
 import { Row } from "@/components/settings/Row";
 import { SourceExclusions } from "@/components/settings/SourceExclusions";
 import { Button } from "@/components/ui/button";
+import { PaneHeader, PaneHeaderTitle } from "@/components/ui/pane-header";
 import { Switch } from "@/components/ui/switch";
 import {
   useCaptureMutation,
@@ -76,9 +78,9 @@ export function CaptureSetup() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="chrome flex shrink-0 items-center border-b border-divider px-s-3 py-s-2">
-        <h1 className="text-sm font-semibold">{t("capture.title")}</h1>
-      </header>
+      <PaneHeader>
+        <PaneHeaderTitle>{t("capture.title")}</PaneHeaderTitle>
+      </PaneHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-s-3">
         <div className="flex w-full flex-col gap-s-4">
@@ -90,6 +92,7 @@ export function CaptureSetup() {
 
           {managed && snapshot.shizuku.supported && (
             <>
+              <CapturePhoneOnlyHelp snapshot={snapshot} />
               <CaptureLadder rungs={ladderOf(snapshot)} />
               <EnableRow enabled={snapshot.health.state !== "disabled"} />
             </>

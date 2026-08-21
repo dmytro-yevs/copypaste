@@ -498,6 +498,8 @@ mod tests {
             deleted: false,
             is_sensitive: false,
             origin_device_id: "peer",
+            app_bundle_id: None,
+            app_name: None,
             pinned: false,
             pin_order: None,
             pin_updated_at: 0,

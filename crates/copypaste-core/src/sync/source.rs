@@ -261,6 +261,8 @@ impl StoreSource {
             content,
             binary_content,
             payload_metadata: row.payload_metadata,
+            source_app_bundle_id: row.app_bundle_id,
+            source_app_name: row.app_name,
             content_type: row.content_type,
             created_at: row.created_at,
             deleted: row.deleted,
@@ -362,6 +364,8 @@ impl SyncSource for StoreSource {
                     deleted: item.deleted,
                     content_hash: Some(&item.content_hash),
                     origin_device_id: &item.origin_device_id,
+                    app_bundle_id: item.source_app_bundle_id.as_deref(),
+                    app_name: item.source_app_name.as_deref(),
                 })
                 .collect();
             let pins: Vec<P2pPin> = items
@@ -466,6 +470,8 @@ mod tests {
             content: content.into(),
             binary_content: Vec::new(),
             payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             content_type: "text".into(),
             created_at,
             deleted: false,
@@ -583,6 +589,24 @@ mod tests {
     }
 
     #[test]
+    fn an_applied_item_keeps_the_capturing_apps_identity() {
+        let f = fixture_named("beta");
+        let source = f.source();
+        let mut item = peer_item("peer-item", "from the other device", 1_700_000_000_000);
+        item.source_app_bundle_id = Some("com.todesktop.230313mzl4w4u92".into());
+        item.source_app_name = Some("Cursor".into());
+
+        assert!(source.apply(item).unwrap());
+
+        let row = f.store.get("peer-item").unwrap().expect("stored");
+        assert_eq!(
+            row.app_bundle_id.as_deref(),
+            Some("com.todesktop.230313mzl4w4u92")
+        );
+        assert_eq!(row.app_name.as_deref(), Some("Cursor"));
+    }
+
+    #[test]
     fn applying_the_same_version_twice_is_a_no_op() {
         let f = fixture_named("beta");
         let source = f.source();
@@ -686,6 +710,8 @@ mod tests {
                 content: String::new(),
                 binary_content: Vec::new(),
                 payload_metadata: None,
+                source_app_bundle_id: None,
+                source_app_name: None,
                 content_type: "text".into(),
                 created_at: 4_000,
                 deleted: true,

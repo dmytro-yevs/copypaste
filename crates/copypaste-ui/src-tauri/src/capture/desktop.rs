@@ -76,6 +76,18 @@ impl CaptureControl for DesktopCapture {
         Err(BackendError::Unsupported(MSG_NO_LADDER))
     }
 
+    fn open_shizuku(&self) -> Result<()> {
+        Err(BackendError::Unsupported(MSG_NO_LADDER))
+    }
+
+    fn open_developer_options(&self) -> Result<()> {
+        Err(BackendError::Unsupported(MSG_NO_LADDER))
+    }
+
+    fn request_battery_exemption(&self) -> Result<()> {
+        Err(BackendError::Unsupported(MSG_NO_LADDER))
+    }
+
     fn note_stored(&self, at_ms: i64) {
         self.model
             .lock()
