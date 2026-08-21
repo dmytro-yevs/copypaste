@@ -968,7 +968,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-cli"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "backon",
  "clap",
@@ -984,11 +984,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 
 [[package]]
 name = "copypaste-cloud"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "argon2",
  "backon",
@@ -1020,7 +1020,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "android-native-keyring-store",
  "card-validate",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "anyhow",
  "backon",
@@ -1102,14 +1102,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-fs"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "copypaste-ipc"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "directories",
  "hex",
@@ -1126,7 +1126,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "copypaste-clock",
  "copypaste-fs",
@@ -1154,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-runtime-log"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "anyhow",
  "copypaste-clock",
@@ -1169,7 +1169,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sensitive-rules"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "anyhow",
  "copypaste-fs",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ui"
-version = "2.0.0-alpha.27"
+version = "2.0.0-alpha.28"
 dependencies = [
  "axum",
  "backon",
