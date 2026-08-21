@@ -1,12 +1,15 @@
 $script:WindowsProcessTraceLimit = 128
 $script:WindowsProcessNames = @("copypaste-ui.exe", "copypaste-daemon.exe")
 
-function ConvertTo-WindowsProcessTraceLine([string]$Kind, $Record, $StartedNames = @{}) {
+function ConvertTo-WindowsProcessTraceLine([string]$Kind, $Record, $StartsByPid = @{}) {
     $name = [IO.Path]::GetFileName(([string]$Record.ProcessName)).ToLowerInvariant()
     $processId = [uint32]$Record.ProcessID
     if ($Kind -eq "stop" -and $name -notin $script:WindowsProcessNames -and
-        $StartedNames.ContainsKey($processId)) {
-        $name = $StartedNames[$processId]
+        $StartsByPid.ContainsKey($processId)) {
+        $stopTime = [uint64]$Record.TIME_CREATED
+        $start = @($StartsByPid[$processId] | Where-Object { $_.Time -le $stopTime } |
+            Sort-Object Time -Descending | Select-Object -First 1)
+        if ($start.Count -eq 1) { $name = $start[0].Name }
     }
     if ($name -notin $script:WindowsProcessNames) { return $null }
     $line = [ordered]@{
@@ -76,17 +79,22 @@ function Stop-WindowsProcessTrace($Trace) {
                 }
             }
         }
-        $startedNames = @{}
+        $startsByPid = @{}
         foreach ($record in @($records | Where-Object { $_.Kind -eq "start" })) {
             $name = [IO.Path]::GetFileName(([string]$record.Record.ProcessName)).ToLowerInvariant()
             if ($name -in $script:WindowsProcessNames) {
-                $startedNames[[uint32]$record.Record.ProcessID] = $name
+                $processPid = [uint32]$record.Record.ProcessID
+                if (-not $startsByPid.ContainsKey($processPid)) { $startsByPid[$processPid] = @() }
+                $startsByPid[$processPid] += [pscustomobject]@{
+                    Time = [uint64]$record.Record.TIME_CREATED
+                    Name = $name
+                }
             }
         }
         $converted = @(
             $records |
                 Sort-Object { [uint64]$_.Record.TIME_CREATED }, Kind |
-                ForEach-Object { ConvertTo-WindowsProcessTraceLine $_.Kind $_.Record $startedNames } |
+                ForEach-Object { ConvertTo-WindowsProcessTraceLine $_.Kind $_.Record $startsByPid } |
                 Where-Object { $null -ne $_ }
         )
         $lines = @($converted | Select-Object -First $Trace.Limit)
@@ -119,19 +127,28 @@ function Test-WindowsProcessTraceHelpers {
         throw "process trace start records lost process identity"
     }
 
-    $startedNames = @{}
-    $startedNames[[uint32]42] = "copypaste-daemon.exe"
+    $startsByPid = @{}
+    $startsByPid[[uint32]42] = @([pscustomobject]@{ Time = [uint64]100; Name = "copypaste-daemon.exe" })
     $stop = ConvertTo-WindowsProcessTraceLine "stop" ([pscustomobject]@{
         TIME_CREATED = 200
         ProcessName = "copypaste-daem"
         ProcessID = 42
         ParentProcessID = 41
         ExitStatus = [uint32]3221225477
-    }) $startedNames | ConvertFrom-Json
+    }) $startsByPid | ConvertFrom-Json
     if ($stop.kind -ne "stop" -or $stop.executable -ne "copypaste-daemon.exe" -or
         $stop.exit_code -ne 3221225477) {
         throw "process trace stop records lost the exit code"
     }
+
+    $reused = ConvertTo-WindowsProcessTraceLine "stop" ([pscustomobject]@{
+        TIME_CREATED = 50
+        ProcessName = "unrelated.exe"
+        ProcessID = 42
+        ParentProcessID = 1
+        ExitStatus = 0
+    }) $startsByPid
+    if ($null -ne $reused) { throw "process trace correlated a stop before its target start" }
 
     $ignored = ConvertTo-WindowsProcessTraceLine "start" ([pscustomobject]@{
         TIME_CREATED = 300
@@ -161,22 +178,31 @@ function Test-WindowsProcessTraceCollector {
                 throw "real process trace subscription was not registered"
             }
         }
+        $fixturePids = @()
         foreach ($executable in @($ui, $daemon)) {
             $process = Start-Process -FilePath $executable `
                 -ArgumentList "/d", "/c", "exit 23" -Wait -PassThru
             if ($process.ExitCode -ne 23) { throw "process trace fixture exited unexpectedly" }
-            Start-Sleep -Milliseconds 250
+            $fixturePids += [uint32]$process.Id
         }
         $wait = [Diagnostics.Stopwatch]::StartNew()
         do {
-            $observed = @(
-                @($trace.StartId, $trace.StopId) |
-                    ForEach-Object { Get-Event -SourceIdentifier $_ -ErrorAction SilentlyContinue }
-            ).Count
-            if ($observed -ge 4) { break }
+            $observedPairs = @($fixturePids | Where-Object {
+                $fixturePid = $_
+                @(@($trace.StartId, $trace.StopId) | Where-Object {
+                    $sourceId = $_
+                    @(Get-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue |
+                        Where-Object {
+                            [uint32]$_.SourceEventArgs.NewEvent.ProcessID -eq $fixturePid
+                        }).Count -ge 1
+                }).Count -eq 2
+            })
+            if ($observedPairs.Count -eq $fixturePids.Count) { break }
             Start-Sleep -Milliseconds 100
-        } while ($wait.ElapsedMilliseconds -lt 5000)
-        if ($observed -lt 4) { throw "real process trace did not receive every fixture event" }
+        } while ($wait.ElapsedMilliseconds -lt 10000)
+        if ($observedPairs.Count -ne $fixturePids.Count) {
+            throw "real process trace did not receive a start and stop for every fixture"
+        }
         Stop-WindowsProcessTrace $trace
         $completedTrace = $trace
         $trace = $null
