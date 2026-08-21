@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { CaptureStatus } from "@/components/capture/CaptureStatus";
@@ -54,7 +54,9 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [bulkCopying, setBulkCopying] = useState(false);
-  const [optimisticPinned, setOptimisticPinned] = useState<readonly string[] | null>(null);
+  const [optimisticPinned, setOptimisticPinned] = useState<
+    readonly string[] | null
+  >(null);
 
   const selection = bulk.selection;
   const items = useMemo(() => {
@@ -67,7 +69,9 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
         (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER),
     );
     let nextPinned = 0;
-    return history.items.map((item) => (item.pinned ? pinned[nextPinned++]! : item));
+    return history.items.map((item) =>
+      item.pinned ? pinned[nextPinned++]! : item,
+    );
   }, [history.items, optimisticPinned]);
 
   const reorderPinned = useCallback(
@@ -101,19 +105,6 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
     },
     [setActiveId],
   );
-
-  // ⌘F / Ctrl+F focuses the field and selects what is in it (§3.1.4).
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   /** Copy first, hide afterwards (INV-26): hiding first swallows the failure —
    *  the toast renders into a window nobody can see — and leaves the user

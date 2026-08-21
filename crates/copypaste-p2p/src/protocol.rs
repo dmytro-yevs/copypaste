@@ -154,6 +154,10 @@ pub struct SyncItem {
     /// with the bytes so a receiving device can materialise a safe paste URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload_metadata: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_app_bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_app_name: Option<String>,
     pub content_type: String,
     pub created_at: i64,
     pub deleted: bool,
@@ -517,6 +521,8 @@ mod tests {
             content: content.into(),
             binary_content: Vec::new(),
             payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             content_type: "text".into(),
             created_at: 1_000,
             deleted: false,
@@ -539,6 +545,8 @@ mod tests {
                 payload_metadata: Some(
                     r#"{\"filename\":\"image.png\",\"mime_type\":\"image/png\"}"#.into(),
                 ),
+                source_app_bundle_id: None,
+                source_app_name: None,
                 content_type: "image/png".into(),
                 created_at: 1,
                 deleted: false,

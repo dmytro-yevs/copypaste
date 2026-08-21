@@ -38,12 +38,13 @@ pub enum RestoreError {
 /// never a fallback to an unkeyed read (AGENTS.md rule 4).
 ///
 pub fn open_validated(path: &Path, db_key: &[u8; 32]) -> Result<Connection, StoreError> {
-    let conn = Connection::open_with_flags(
+    let mut conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     apply_key(&conn, db_key)?;
     validate_key(&conn)?;
+    super::schema_upgrade::upgrade_if_legacy_v2(&mut conn)?;
     verify_schema(&conn)?;
     apply_connection_pragmas(&conn)?;
     Ok(conn)

@@ -45,6 +45,10 @@ pub struct CloudItem {
     /// content, and is authenticated with the rest of this row.
     #[serde(default)]
     pub payload_metadata: Option<String>,
+    #[serde(default)]
+    pub source_app_bundle_id: Option<String>,
+    #[serde(default)]
+    pub source_app_name: Option<String>,
     /// Version wall clock, ms since epoch. **Not the row's birth time**: it is
     /// the timestamp the poll cursor pages on, so a writer must restamp it on
     /// every mutation. A tombstone that kept the original creation time would
@@ -86,6 +90,8 @@ impl CloudItem {
             nonce: BASE64.encode(nonce),
             content_type: content_type.into(),
             payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             created_at,
             deleted: false,
             origin_device_id: origin_device_id.into(),
@@ -113,6 +119,8 @@ impl CloudItem {
             nonce: nonce_b64.into(),
             content_type: content_type.into(),
             payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             created_at,
             deleted: false,
             origin_device_id: origin_device_id.into(),
@@ -137,6 +145,8 @@ impl CloudItem {
             nonce: String::new(),
             content_type: content_type.into(),
             payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             created_at,
             deleted: true,
             origin_device_id: origin_device_id.into(),
@@ -183,6 +193,8 @@ impl CloudItem {
             nonce: &self.nonce,
             content_type: &self.content_type,
             payload_metadata: self.payload_metadata.as_deref(),
+            source_app_bundle_id: self.source_app_bundle_id.as_deref(),
+            source_app_name: self.source_app_name.as_deref(),
             created_at: self.created_at,
             deleted: self.deleted,
             origin_device_id: &self.origin_device_id,
@@ -208,6 +220,11 @@ impl CloudItem {
         if self.deleted && self.payload_metadata.is_some() {
             return Err(RestError::InvalidItem {
                 reason: "a tombstone must not carry payload metadata",
+            });
+        }
+        if self.deleted && (self.source_app_bundle_id.is_some() || self.source_app_name.is_some()) {
+            return Err(RestError::InvalidItem {
+                reason: "a tombstone must not carry source app metadata",
             });
         }
         if self.content_type == "file" && !self.deleted && self.payload_metadata.is_none() {

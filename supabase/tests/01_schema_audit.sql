@@ -20,7 +20,8 @@ do $$
 declare
     expected text[] := array[
         'ciphertext', 'content_type', 'created_at', 'deleted',
-        'item_id', 'nonce', 'origin_device_id', 'payload_metadata', 'signature'
+        'item_id', 'nonce', 'origin_device_id', 'payload_metadata', 'signature',
+        'source_app_bundle_id', 'source_app_name'
     ];
     found text[];
 begin

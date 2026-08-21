@@ -1,11 +1,21 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ClipboardCopy, LoaderCircle, Pause, Radio, RefreshCw } from "lucide-react";
+import {
+  AppWindow,
+  ClipboardCopy,
+  ListChecks,
+  LoaderCircle,
+  Pause,
+  Radio,
+  RefreshCw,
+  Search,
+  TriangleAlert,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
+import { Select, type SelectItem } from "@/components/ui/select";
 import { useRuntimeLog } from "@/components/diagnostics/useRuntimeLog";
 import { copyText } from "@/lib/ipc";
 import { t } from "@/i18n";
@@ -20,6 +30,19 @@ const LEVELS: readonly (RuntimeLogLevel | "all")[] = [
   "debug",
   "trace",
 ];
+const LEVEL_ICON = {
+  all: ListChecks,
+  error: TriangleAlert,
+  warn: TriangleAlert,
+  info: Radio,
+  debug: Search,
+  trace: Search,
+} as const;
+const PROCESS_ICON = {
+  all: ListChecks,
+  app: AppWindow,
+  daemon: Radio,
+} as const;
 
 function timeLabel(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -56,6 +79,16 @@ export function RuntimeLogViewer() {
   );
   const logs = useRuntimeLog(filters, follow);
   const { events, loadOlder, rows } = logs;
+  const levelItems: readonly SelectItem[] = LEVELS.map((option) => ({
+    value: option,
+    label: t(`runtimeLog.level.${option}`),
+    icon: LEVEL_ICON[option],
+  }));
+  const processItems: readonly SelectItem[] = [
+    { value: "all", label: t("runtimeLog.process.all"), icon: PROCESS_ICON.all },
+    { value: "app", label: t("runtimeLog.process.app"), icon: PROCESS_ICON.app },
+    { value: "daemon", label: t("runtimeLog.process.daemon"), icon: PROCESS_ICON.daemon },
+  ];
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -125,33 +158,25 @@ export function RuntimeLogViewer() {
         <label className="sr-only" htmlFor="runtime-log-level">
           {t("runtimeLog.level.label")}
         </label>
-        <NativeSelect
+        <Select
           id="runtime-log-level"
           value={level}
-          onChange={(event) => setLevel(event.target.value as RuntimeLogLevel | "all")}
+          items={levelItems}
+          onValueChange={(next) => setLevel(next as RuntimeLogLevel | "all")}
           className="w-36"
-        >
-          {LEVELS.map((option) => (
-            <option key={option} value={option}>
-              {t(`runtimeLog.level.${option}`)}
-            </option>
-          ))}
-        </NativeSelect>
+        />
         {!android && (
           <>
             <label className="sr-only" htmlFor="runtime-log-process">
               {t("runtimeLog.process.label")}
             </label>
-            <NativeSelect
+            <Select
               id="runtime-log-process"
               value={process}
-              onChange={(event) => setProcess(event.target.value as RuntimeLogProcess | "all")}
+              items={processItems}
+              onValueChange={(next) => setProcess(next as RuntimeLogProcess | "all")}
               className="w-42"
-            >
-              <option value="all">{t("runtimeLog.process.all")}</option>
-              <option value="app">{t("runtimeLog.process.app")}</option>
-              <option value="daemon">{t("runtimeLog.process.daemon")}</option>
-            </NativeSelect>
+            />
           </>
         )}
         <Button

@@ -18,6 +18,9 @@ const captureState = vi.fn();
 const captureArm = vi.fn();
 const captureRefresh = vi.fn();
 const captureSetEnabled = vi.fn();
+const captureOpenShizuku = vi.fn();
+const captureOpenDeveloperOptions = vi.fn();
+const captureRequestBatteryExemption = vi.fn();
 const getConfig = vi.fn();
 const listInstalledSourceApps = vi.fn();
 
@@ -29,6 +32,9 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     captureArm: () => captureArm(),
     captureRefresh: () => captureRefresh(),
     captureSetEnabled: (enabled: boolean) => captureSetEnabled(enabled),
+    captureOpenShizuku: () => captureOpenShizuku(),
+    captureOpenDeveloperOptions: () => captureOpenDeveloperOptions(),
+    captureRequestBatteryExemption: () => captureRequestBatteryExemption(),
     getConfig: () => getConfig(),
     listInstalledSourceApps: () => listInstalledSourceApps(),
     listItems: () => Promise.resolve({
@@ -68,6 +74,9 @@ beforeEach(() => {
   captureArm.mockReset().mockResolvedValue(captureSnapshot());
   captureRefresh.mockReset().mockResolvedValue(captureSnapshot());
   captureSetEnabled.mockReset().mockResolvedValue(captureSnapshot());
+  captureOpenShizuku.mockReset().mockResolvedValue(undefined);
+  captureOpenDeveloperOptions.mockReset().mockResolvedValue(undefined);
+  captureRequestBatteryExemption.mockReset().mockResolvedValue(undefined);
   getConfig.mockReset().mockResolvedValue({
     config: { excluded_app_bundle_ids: [] },
     restart_required: [],
@@ -137,6 +146,20 @@ describe("a restart is not a failure", () => {
     // Not by colour alone: the step says where it stands in words (A11Y-10).
     expect(step?.textContent).toContain("Next");
     expect(container.querySelector('[data-step="install"]')?.textContent).toContain("Done");
+  });
+
+  it("keeps the phone-only helper actions in front of the user", async () => {
+    const { user } = await show(SHIZUKU_STOPPED);
+    expect(screen.getByText(/No PC or USB is required/i)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Open Shizuku" }));
+    expect(captureOpenShizuku).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Open Developer options" }));
+    expect(captureOpenDeveloperOptions).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Allow unrestricted battery use" }));
+    expect(captureRequestBatteryExemption).toHaveBeenCalledTimes(1);
   });
 });
 

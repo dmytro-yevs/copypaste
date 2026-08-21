@@ -63,7 +63,9 @@ async function controlBoxes() {
     page.evaluate(
       (labels: string[]) =>
         labels.map((label) => {
-          const el = document.querySelector(`[aria-label="${label}"]`) as HTMLElement | null;
+          const el = document.querySelector(
+            `[aria-label="${label}"]`,
+          ) as HTMLElement | null;
           const rect = el?.getBoundingClientRect();
           return {
             label,
@@ -78,16 +80,22 @@ async function controlBoxes() {
   );
 }
 
-/** Set a `<select>` and tell React about it. A tap would open the platform
- *  picker, which is native chrome CDP cannot see or dismiss. */
+/** Use the authored listbox rather than reaching through the control. */
 async function chooseKind(value: string): Promise<void> {
   await app.withPage((page) =>
-    page.evaluate((kind: string) => {
-      const select = document.querySelector(
+    page.evaluate(async (kind: string) => {
+      const trigger = document.querySelector(
         '[aria-label="Filter by kind"]',
-      ) as HTMLSelectElement;
-      select.value = kind;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      ) as HTMLButtonElement | null;
+      trigger?.click();
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      (
+        document.querySelector(
+          `[role="option"][data-value="${kind}"]`,
+        ) as HTMLElement | null
+      )?.click();
     }, value),
   );
 }
@@ -108,6 +116,33 @@ describe("the toolbar", () => {
     }
   });
 
+  test("search replaces the control row at full width", async () => {
+    await tapButton(app, "Search clipboard history");
+    const state = await app.withPage((page) =>
+      page.evaluate((searchSelector) => {
+        const toolbar = document.querySelector(
+          '[data-slot="history-toolbar"]',
+        ) as HTMLElement;
+        const search = document.querySelector(searchSelector) as HTMLElement;
+        const toolbarRect = toolbar.getBoundingClientRect();
+        const searchRect = search.getBoundingClientRect();
+        return {
+          expanded: toolbar.dataset.searchOpen,
+          searchWidth: searchRect.width,
+          toolbarWidth: toolbarRect.width,
+          filterPresent: Boolean(
+            document.querySelector('[aria-label="Filter by kind"]'),
+          ),
+        };
+      }, SEARCH),
+    );
+
+    expect(state.expanded).toBe("true");
+    expect(state.filterPresent).toBe(false);
+    expect(state.searchWidth).toBeGreaterThan(state.toolbarWidth - 80);
+    await tapButton(app, "Close search");
+  });
+
   test("every control meets the touch target the tokens promise", async () => {
     // `--tap-min`, 44px. A pointer-sized control is the failure this catches
     // on a phone and cannot catch on a desktop engine.
@@ -123,7 +158,10 @@ describe("the toolbar", () => {
     await chooseKind("url");
     await waitFor(async () => {
       const rows = await rowBoxes(app);
-      return rows.length > 0 && rows.every((row) => row.text.includes("https://example.com"));
+      return (
+        rows.length > 0 &&
+        rows.every((row) => row.text.includes("https://example.com"))
+      );
     }, "the kind filter left rows that are not links on screen");
 
     await chooseKind("all");

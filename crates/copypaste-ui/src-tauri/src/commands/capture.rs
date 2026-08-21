@@ -108,6 +108,21 @@ pub fn capture_set_toast_suppressed(
     ))
 }
 
+#[tauri::command]
+pub fn capture_open_shizuku(capture: State<'_, SelectedCapture>) -> Result<()> {
+    capture.open_shizuku()
+}
+
+#[tauri::command]
+pub fn capture_open_developer_options(capture: State<'_, SelectedCapture>) -> Result<()> {
+    capture.open_developer_options()
+}
+
+#[tauri::command]
+pub fn capture_request_battery_exemption(capture: State<'_, SelectedCapture>) -> Result<()> {
+    capture.request_battery_exemption()
+}
+
 fn emit(app: &AppHandle, snapshot: CaptureSnapshot) -> CaptureSnapshot {
     let _ = app.emit(TauriEventName::CaptureState.as_str(), snapshot.clone());
     snapshot

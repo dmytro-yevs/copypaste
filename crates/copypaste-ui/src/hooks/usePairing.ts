@@ -9,11 +9,15 @@ import {
   cancelPairing,
   confirmPairing,
   createPairingInvite,
+  createPreviewPairingInvite,
   getPairingProgress,
   hasBridge,
+  hasWebBridge,
+  joinPreviewPairingInvite,
   type PairingCeremony,
   type PairingPresentationState,
   type PairingState,
+  type PreviewPairingInvite,
   presentPairing,
   rejectPairing,
   scanPairingInvite,
@@ -72,6 +76,7 @@ export function usePairing() {
   const [lastAttempt, setLastAttempt] = useState<PairingAction | null>(null);
   const [presentation, setPresentation] =
     useState<PairingPresentationState | null>(null);
+  const [previewInvite, setPreviewInvite] = useState<PreviewPairingInvite | null>(null);
   const [decisionSubmitted, setDecisionSubmitted] =
     useState<"confirm" | "reject" | null>(null);
   const refreshedCeremony = useRef<string | null>(null);
@@ -79,6 +84,64 @@ export function usePairing() {
   const scopeRef = useRef(scope);
   const mutationEpoch = useRef(0);
   const mounted = useRef(true);
+  const webPreview = hasWebBridge();
+
+  const commitCeremony = (
+    ceremony: PairingCeremony,
+    action: PairingAction,
+    context: PairingMutationContext,
+  ) => {
+    if (!mounted.current || context.epoch !== mutationEpoch.current) return;
+    const startsCeremony = action === "create" || action === "join";
+    if (
+      !startsCeremony &&
+      context.ceremonyId !== null &&
+      ceremony.ceremony_id !== null &&
+      ceremony.ceremony_id !== context.ceremonyId
+    ) {
+      return;
+    }
+
+    const nextScope = ceremony.ceremony_id
+      ? `ceremony:${ceremony.ceremony_id}:${context.epoch}`
+      : `result:${context.epoch}`;
+    scopeRef.current = nextScope;
+    ceremonyRef.current = ceremony;
+    queryClient.setQueryData(pairingKey(sessionId, nextScope), ceremony);
+    setScope(nextScope);
+    if (action !== "cancel" && action !== "reject") {
+      setPresentation(ceremony.presentation);
+    }
+    if (action === "confirm" || action === "reject") {
+      setDecisionSubmitted(
+        ceremony.state === "awaiting_confirmation" &&
+          (action === "reject" || ceremony.presentation === "presented")
+          ? action
+          : null,
+      );
+    } else if (ceremony.state !== "awaiting_confirmation") {
+      setDecisionSubmitted(null);
+    }
+  };
+
+  const beginMutation = async (action: PairingAction) => {
+    const epoch = ++mutationEpoch.current;
+    const nextScope = `mutation:${epoch}`;
+    const context = {
+      ceremonyId: ceremonyRef.current?.ceremony_id ?? null,
+      epoch,
+    };
+    scopeRef.current = nextScope;
+    setScope(nextScope);
+    await queryClient.cancelQueries({ queryKey: [...PAIRING_KEY, sessionId] });
+    setLastAttempt(action);
+    if (action === "create" || action === "join") {
+      setLastStart(action);
+      setPresentation(null);
+      setDecisionSubmitted(null);
+    }
+    return context;
+  };
 
   const command = useMutation<
     PairingCeremony,
@@ -87,58 +150,53 @@ export function usePairing() {
     PairingMutationContext
   >({
     mutationFn: (action) => COMMANDS[action](),
-    onMutate: async (action) => {
-      const epoch = ++mutationEpoch.current;
-      const nextScope = `mutation:${epoch}`;
-      const context = {
-        ceremonyId: ceremonyRef.current?.ceremony_id ?? null,
-        epoch,
-      };
-      scopeRef.current = nextScope;
-      setScope(nextScope);
-      await queryClient.cancelQueries({ queryKey: [...PAIRING_KEY, sessionId] });
-      setLastAttempt(action);
-      if (action === "create" || action === "join") {
-        setLastStart(action);
-        setPresentation(null);
-        setDecisionSubmitted(null);
-      }
-      return context;
-    },
-    onSuccess: (ceremony, action, context) => {
-      if (!mounted.current || context.epoch !== mutationEpoch.current) return;
-      const startsCeremony = action === "create" || action === "join";
-      if (
-        !startsCeremony &&
-        context.ceremonyId !== null &&
-        ceremony.ceremony_id !== null &&
-        ceremony.ceremony_id !== context.ceremonyId
-      ) {
-        return;
-      }
+    onMutate: beginMutation,
+    onSuccess: (ceremony, action, context) => commitCeremony(ceremony, action, context),
+  });
 
-      const nextScope = ceremony.ceremony_id
-        ? `ceremony:${ceremony.ceremony_id}:${context.epoch}`
-        : `result:${context.epoch}`;
-      scopeRef.current = nextScope;
-      ceremonyRef.current = ceremony;
-      queryClient.setQueryData(pairingKey(sessionId, nextScope), ceremony);
-      setScope(nextScope);
-      if (action !== "cancel" && action !== "reject") {
-        setPresentation(ceremony.presentation);
-      }
-      if (action === "confirm" || action === "reject") {
-        setDecisionSubmitted(
-          ceremony.state === "awaiting_confirmation" &&
-            (action === "reject" || ceremony.presentation === "presented")
-            ? action
-            : null,
-        );
-      } else if (ceremony.state !== "awaiting_confirmation") {
-        setDecisionSubmitted(null);
-      }
+  const previewCreate = useMutation<
+    PreviewPairingInvite,
+    unknown,
+    void,
+    PairingMutationContext
+  >({
+    mutationFn: createPreviewPairingInvite,
+    onMutate: async () => {
+      setPreviewInvite(null);
+      return beginMutation("create");
+    },
+    onSuccess: (invite, _unused, context) => {
+      if (!mounted.current || context.epoch !== mutationEpoch.current) return;
+      setPreviewInvite(invite);
+      commitCeremony(invite.ceremony, "create", context);
     },
   });
+
+  const previewJoin = useMutation<
+    PairingCeremony,
+    unknown,
+    { code: string; addr: string },
+    PairingMutationContext
+  >({
+    mutationFn: ({ code, addr }) => joinPreviewPairingInvite(code, addr),
+    onMutate: () => beginMutation("join"),
+    onSuccess: (ceremony, _values, context) => {
+      if (!mounted.current || context.epoch !== mutationEpoch.current) return;
+      setPreviewInvite(null);
+      commitCeremony(ceremony, "join", context);
+    },
+  });
+
+  const mutating =
+    command.isPending || previewCreate.isPending || previewJoin.isPending;
+  const pendingAction =
+    command.isPending
+      ? command.variables
+      : previewCreate.isPending
+        ? "create"
+        : previewJoin.isPending
+          ? "join"
+          : undefined;
 
   const progress = useQuery<PairingCeremony>({
     queryKey: pairingKey(sessionId, scope),
@@ -158,7 +216,7 @@ export function usePairing() {
       }
       return ceremony;
     },
-    enabled: !command.isPending,
+    enabled: !mutating,
     retry: false,
     staleTime: PAIRING_POLL_MS,
     refetchInterval: (query) =>
@@ -168,6 +226,7 @@ export function usePairing() {
   const ceremony = progress.data;
   useEffect(() => {
     ceremonyRef.current = ceremony;
+    if (ceremony?.state !== "waiting_for_peer") setPreviewInvite(null);
     if (ceremony?.state !== "awaiting_confirmation") {
       setDecisionSubmitted(null);
     }
@@ -193,8 +252,18 @@ export function usePairing() {
     };
   }, [queryClient, sessionId]);
 
-  const run = (action: PairingAction) => command.mutate(action);
+  const run = (action: PairingAction) => {
+    if (webPreview && action === "create") {
+      previewCreate.mutate();
+      return;
+    }
+    command.mutate(action);
+  };
   const retry = () => {
+    if (previewCreate.error !== null) {
+      previewCreate.mutate();
+      return;
+    }
     if (command.error !== null && lastAttempt !== null) {
       command.mutate(lastAttempt);
       return;
@@ -208,19 +277,27 @@ export function usePairing() {
   };
 
   return {
+    webPreview,
     ceremony,
-    error: command.error ?? progress.error,
+    error: previewCreate.error ?? previewJoin.error ?? command.error ?? progress.error,
     isChecking: progress.isPending,
-    isPending: command.isPending,
-    pendingAction: command.variables,
+    isPending: mutating,
+    pendingAction,
     lastAttempt,
     presentation,
+    previewInvite,
     decisionSubmitted,
     canRetry:
+      previewCreate.error !== null ||
+      previewJoin.error !== null ||
       command.error !== null ||
       progress.error !== null ||
       lastStart !== null ||
       inferredStart(ceremony) !== null,
+    clearPreviewInvite: () => setPreviewInvite(null),
+    startPreviewCreate: () => previewCreate.mutate(),
+    submitPreviewJoin: (code: string, addr: string) =>
+      previewJoin.mutateAsync({ code, addr }),
     run,
     retry,
   };

@@ -1,7 +1,6 @@
 package com.copypaste.app
 
 import android.app.Activity
-import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
 
@@ -13,17 +12,7 @@ class ClipboardCaptureActivity : Activity() {
         if (!hasFocus || handled) return
 
         handled = true
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val primary = clipboard.primaryClip
-        val text = when {
-            primary == null -> null
-            ClipSensitivity.isSensitive(primary) -> null
-            else -> primary
-                .takeIf { it.itemCount > 0 }
-                ?.getItemAt(0)
-                ?.coerceToText(this)
-                ?.toString()
-        }
+        val text = clipboardText(this)
         if (!text.isNullOrBlank()) queueClip(text, CaptureSource.TILE)
         finish()
     }

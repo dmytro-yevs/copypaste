@@ -176,6 +176,8 @@ async fn real_supabase_contract() {
         content: zeroize::Zeroizing::new(b"must never leave this device".to_vec()),
         content_type: "text".into(),
         payload_metadata: None,
+        source_app_bundle_id: None,
+        source_app_name: None,
         created_at: created_at + 3,
         deleted: false,
         origin_device_id: "device-a".into(),

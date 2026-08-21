@@ -61,6 +61,8 @@ pub(super) fn item(id: &str, created_at: i64, content: &str) -> LocalItem {
         created_at,
         deleted: false,
         origin_device_id: DEVICE.into(),
+        source_app_bundle_id: None,
+        source_app_name: None,
     }
 }
 
@@ -73,6 +75,8 @@ pub(super) fn tombstone(id: &str, created_at: i64) -> LocalItem {
         created_at,
         deleted: true,
         origin_device_id: DEVICE.into(),
+        source_app_bundle_id: None,
+        source_app_name: None,
     }
 }
 
@@ -87,6 +91,8 @@ pub(super) fn cloud_row(id: &str, created_at: i64, content: &str) -> CloudItem {
         nonce,
         content_type: "text".into(),
         payload_metadata: None,
+        source_app_bundle_id: None,
+        source_app_name: None,
         created_at,
         deleted: false,
         origin_device_id: "device-b".into(),

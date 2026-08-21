@@ -59,7 +59,15 @@ export type {
 /** Stable UI name retained for the Rust `ImportData` response DTO. */
 export type ImportReport = ImportData;
 
-export { hasBridge };
+export { hasBridge, hasWebBridge };
+
+export interface PreviewPairingInvite {
+  ceremony: PairingCeremony;
+  code: string;
+  listen_addr: string;
+  expires_in_secs: number;
+  qr_svg: string;
+}
 
 /** The IPC protocol version this build speaks. A daemon reporting anything
  *  else raises the mismatch banner (INV-17) rather than degrading silently. */
@@ -229,8 +237,19 @@ export function createPairingInvite(): Promise<PairingCeremony> {
   return call<PairingCeremony>("pair_create_invite");
 }
 
+export function createPreviewPairingInvite(): Promise<PreviewPairingInvite> {
+  return call<PreviewPairingInvite>("pair_preview_invite");
+}
+
 export function scanPairingInvite(): Promise<PairingCeremony> {
   return call<PairingCeremony>("pair_scan_invite");
+}
+
+export function joinPreviewPairingInvite(
+  code: string,
+  addr: string,
+): Promise<PairingCeremony> {
+  return call<PairingCeremony>("pair_preview_join", { code, addr });
 }
 
 export function getPairingProgress(): Promise<PairingCeremony> {
@@ -296,6 +315,7 @@ export function openSettingsFromQuickPaste(): Promise<void> {
 /** INV-35. The window is created protected on both platforms, so this only
  *  carries the user's opt-out across; a rejection can be logged and dropped. */
 export function setAllowScreenshots(allow: boolean): Promise<void> {
+  if (hasWebBridge()) return Promise.resolve();
   return call<void>("set_allow_screenshots", { allow });
 }
 
@@ -314,7 +334,10 @@ export {
   captureArm,
   captureDisarm,
   captureNow,
+  captureOpenDeveloperOptions,
+  captureOpenShizuku,
   captureRefresh,
+  captureRequestBatteryExemption,
   captureSetEnabled,
   captureSetToastSuppressed,
   captureState,
@@ -401,6 +424,7 @@ export function setShortcut(accelerator: string): Promise<void> {
 }
 
 export function getOpenAtLogin(): Promise<boolean> {
+  if (hasWebBridge()) return Promise.resolve(false);
   return call<boolean>("get_open_at_login");
 }
 
@@ -408,5 +432,6 @@ export function getOpenAtLogin(): Promise<boolean> {
  *  for — Windows can accept the registry write while Task Manager's Startup
  *  list still holds the app off. */
 export function setOpenAtLogin(enabled: boolean): Promise<boolean> {
+  if (hasWebBridge()) return Promise.resolve(enabled);
   return call<boolean>("set_open_at_login", { enabled });
 }
