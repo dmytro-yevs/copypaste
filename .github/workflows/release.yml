@@ -1013,6 +1013,9 @@ jobs:
           # alpha.27: raw /tr on https:// TSA secrets → SignTool "Invalid Timestamp URL".
           $pfx = Join-Path $env:RUNNER_TEMP "copypaste-release.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64))
+          # GITHUB_ENV applies to later steps only; smoke runs in this process
+          # (alpha.28 failed with WINDOWS_CERTIFICATE_PFX_PATH is required).
+          $env:WINDOWS_CERTIFICATE_PFX_PATH = $pfx
           "WINDOWS_CERTIFICATE_PFX_PATH=$pfx" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
           # Same script Tauri signCommand runs (includes TSA https→http rewrite).
