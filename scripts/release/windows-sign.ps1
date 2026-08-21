@@ -840,6 +840,35 @@ function Invoke-SelfTest {
                     $runnerCalls[0].Arguments[-1] -cne $routingTarget) {
                     throw "Invoke-WindowsSign bounded-runner routing self-test failed"
                 }
+
+                $untimestampedCms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
+                    "2.16.840.1.101.3.4.2.1"
+                $untimestampedState = [pscustomobject]@{
+                    Pfx = "untimestamped-test.pfx"
+                    Password = "untimestamped-password"
+                    TimestampUrl = "http://tsa.invalid.test"
+                    Certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                        $certificate.Export(
+                            [Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+                }
+                $untimestampedStateReader = { $untimestampedState }.GetNewClosure()
+                $untimestampedCmsReader = { $untimestampedCms }.GetNewClosure()
+                $untimestampedSignatureReader = {
+                    param($Path, $Tool, $Runner)
+                    Get-EmbeddedAuthenticodeSignature $Path $Tool $Runner $untimestampedCmsReader
+                }.GetNewClosure()
+                $missingTimestampRejected = $false
+                try {
+                    Invoke-WindowsSign $routingTarget $fakeRunner $untimestampedStateReader `
+                        { "fake-signtool.exe" } $untimestampedSignatureReader
+                } catch {
+                    if ($_.Exception.Message -cne
+                        "Authenticode signature is missing its RFC 3161 timestamp") { throw }
+                    $missingTimestampRejected = $true
+                }
+                if (-not $missingTimestampRejected) {
+                    throw "Invoke-WindowsSign missing timestamp self-test failed"
+                }
             } finally {
                 Remove-Item -LiteralPath $routingTarget -Force -ErrorAction SilentlyContinue
             }
