@@ -15,11 +15,12 @@ const PLATFORM_REQUIREMENTS = {
     assertions: new Set([
       "installed app launched",
       "native accessibility tree is non-empty",
+      "native accessibility surface exposes a menu bar and named elements",
     ]),
     artifacts: new Set(["screenshot", "accessibility", "measurement"]),
   },
   android: {
-    environment: "physical-device",
+    environment: "emulator",
     scenario: "release-webview-ready",
     budgetMs: 115000,
     assertions: new Set([
