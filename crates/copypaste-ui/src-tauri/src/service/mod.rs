@@ -469,6 +469,7 @@ impl Drop for Supervisor {
 
 #[cfg(test)]
 mod tests {
+    use super::child::ChildExitCode;
     use super::*;
     use crate::backend::testing::FakeBackend;
     use copypaste_ipc::{DiagnosticCounters, StatusData, PROTOCOL_VERSION};
@@ -579,7 +580,7 @@ mod tests {
             let exited = self.probe.exited.load(Ordering::SeqCst);
             if exited {
                 assert_eq!(self.probe.reaps.fetch_add(1, Ordering::SeqCst), 0);
-                return Ok(ChildState::Exited(Some(23)));
+                return Ok(ChildState::Exited(ChildExitCode::from_test_code(23)));
             }
             Ok(ChildState::Running)
         }

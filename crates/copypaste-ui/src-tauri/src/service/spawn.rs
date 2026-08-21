@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
 #[cfg(windows)]
-use super::child::ChildState;
+use super::child::{ChildExitCode, ChildState};
 use super::startup_diagnostics;
 #[cfg(windows)]
 use super::startup_diagnostics::JobStage;
@@ -96,7 +96,7 @@ where
             tracing::warn!(%error, "the background service could not be bound to this process");
             let _ = child.kill();
             if let Ok(status) = child.wait() {
-                startup_diagnostics::child_exited(status.code());
+                startup_diagnostics::child_exited(ChildExitCode::from_status(status));
             }
             Err(BackendError::Internal(MSG_START_FAILED.into()))
         }
@@ -131,7 +131,7 @@ struct JobBoundChild {
 impl ChildProcess for JobBoundChild {
     fn state(&mut self) -> std::io::Result<ChildState> {
         self.child.try_wait().map(|status| match status {
-            Some(status) => ChildState::Exited(status.code()),
+            Some(status) => ChildState::Exited(ChildExitCode::from_status(status)),
             None => ChildState::Running,
         })
     }

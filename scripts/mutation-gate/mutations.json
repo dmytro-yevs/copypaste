@@ -562,9 +562,23 @@
         {
           "name": "windows-launch-diagnostic-contract-disabled",
           "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "        if (\n            diagnostic_upload.get(\"if\")\n",
-          "replace": "        if False and (\n            diagnostic_upload.get(\"if\")\n",
+          "find": "        if (\n            diagnostic_upload.get(\"uses\")\n",
+          "replace": "        if False and (\n            diagnostic_upload.get(\"uses\")\n",
           "expect": "FAIL|always-uploaded Windows launch diagnostics fail|"
+        },
+        {
+          "name": "unpinned-windows-launch-diagnostics-accepted",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "            != \"actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\"\n",
+          "replace": "            != diagnostic_upload.get(\"uses\")\n",
+          "expect": "FAIL|unpinned Windows launch diagnostics action fails|"
+        },
+        {
+          "name": "windows-launch-diagnostic-retention-ignored",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "            or diagnostic_with.get(\"retention-days\") != 7\n",
+          "replace": "            or False\n",
+          "expect": "FAIL|wrong Windows launch diagnostics retention fails|"
         }
       ]
     },
@@ -651,7 +665,7 @@
     },
     {
       "id": "windows-native-evidence",
-      "verifies": "bounded Windows readiness, its typed probe outcomes, and complete UIA snapshots",
+      "verifies": "bounded Windows readiness, real process tracing, failure preservation, and complete UIA snapshots",
       "command": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/release/windows-native-evidence.ps1", "-SelfTest"],
       "platforms": ["windows"],
       "requires": ["powershell"],

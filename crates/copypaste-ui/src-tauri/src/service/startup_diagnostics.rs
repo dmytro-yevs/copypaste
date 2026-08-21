@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use super::child::ChildExitCode;
 use super::ServiceState;
 
 const TARGET: &str = "copypaste_ui::service::startup";
@@ -52,8 +53,8 @@ pub(super) fn child_spawn_failed(error: &std::io::Error) {
     ));
 }
 
-pub(super) fn child_exited(code: Option<i32>) {
-    emit(child_exit_message(code));
+pub(super) fn child_exited(code: ChildExitCode) {
+    emit(child_exit_message(&code));
 }
 
 #[cfg(windows)]
@@ -81,8 +82,8 @@ fn child_started_message(binary: &Path, pid: u32, parent_pid: u32) -> String {
     )
 }
 
-fn child_exit_message(code: Option<i32>) -> String {
-    format!("daemon-exit exit_code={}", exit_code(code))
+fn child_exit_message(code: &ChildExitCode) -> String {
+    format!("daemon-exit exit_code={}", code.log_value())
 }
 
 fn branch_name(branch: StartBranch) -> &'static str {
@@ -138,10 +139,6 @@ fn executable_identity(binary: &Path) -> &'static str {
     } else {
         "override"
     }
-}
-
-fn exit_code(code: Option<i32>) -> String {
-    code.map_or_else(|| "unavailable".to_owned(), |value| value.to_string())
 }
 
 fn os_code(code: Option<i32>) -> String {
@@ -218,11 +215,10 @@ mod tests {
 
     #[test]
     fn child_exit_distinguishes_numeric_and_unavailable_codes() {
-        assert_eq!(exit_code(Some(23)), "23");
-        assert_eq!(exit_code(None), "unavailable");
-        assert_eq!(child_exit_message(Some(23)), "daemon-exit exit_code=23");
+        let code = ChildExitCode::from_test_code(23);
+        assert_eq!(child_exit_message(&code), "daemon-exit exit_code=23");
         assert_eq!(
-            child_exit_message(None),
+            child_exit_message(&ChildExitCode::unavailable()),
             "daemon-exit exit_code=unavailable"
         );
     }

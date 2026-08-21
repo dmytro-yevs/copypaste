@@ -300,14 +300,17 @@ def contract_errors(release, nightly, ci):
         diagnostic_upload = launch_diagnostic_uploads[0]
         diagnostic_with = diagnostic_upload.get("with") or {}
         if (
-            diagnostic_upload.get("if")
+            diagnostic_upload.get("uses")
+            != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+            or diagnostic_upload.get("if")
             != "failure() && steps.installed-evidence.outcome == 'failure'"
             or diagnostic_with.get("path")
             != "artifacts/windows-ci-native/failure-diagnostics"
             or diagnostic_with.get("if-no-files-found") != "error"
+            or diagnostic_with.get("retention-days") != 7
         ):
             errors.append(
-                "CI Windows launch diagnostics must be failure-only and fail closed"
+                "CI Windows launch diagnostics must be pinned, retained seven days, failure-only, and fail closed"
             )
     if not prebuilt_sidecar_contract(
         jobs, "windows", "windows-sidecars", "windows-release-sidecars"
@@ -669,7 +672,7 @@ def self_test(release, nightly, ci):
             if (step.get("with") or {}).get("name")
             == "windows-ci-launch-failure-diagnostics"
         ).update({"if": "always()"}),
-        "must be failure-only and fail closed",
+        "must be pinned, retained seven days, failure-only, and fail closed",
     )
     rejected_ci_mutation(
         "broad Windows launch diagnostics path fails",
@@ -679,7 +682,27 @@ def self_test(release, nightly, ci):
             if (step.get("with") or {}).get("name")
             == "windows-ci-launch-failure-diagnostics"
         )["with"].update({"path": "artifacts"}),
-        "must be failure-only and fail closed",
+        "must be pinned, retained seven days, failure-only, and fail closed",
+    )
+    rejected_ci_mutation(
+        "unpinned Windows launch diagnostics action fails",
+        lambda value: next(
+            step
+            for step in value["jobs"]["windows-package"]["steps"]
+            if (step.get("with") or {}).get("name")
+            == "windows-ci-launch-failure-diagnostics"
+        ).update({"uses": "actions/upload-artifact@v4"}),
+        "must be pinned, retained seven days, failure-only, and fail closed",
+    )
+    rejected_ci_mutation(
+        "wrong Windows launch diagnostics retention fails",
+        lambda value: next(
+            step
+            for step in value["jobs"]["windows-package"]["steps"]
+            if (step.get("with") or {}).get("name")
+            == "windows-ci-launch-failure-diagnostics"
+        )["with"].update({"retention-days": 8}),
+        "must be pinned, retained seven days, failure-only, and fail closed",
     )
     rejected_ci_dropped(
         "a CI Windows job that vanished fails",

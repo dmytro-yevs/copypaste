@@ -9,7 +9,47 @@ use std::time::Duration;
 
 pub(super) enum ChildState {
     Running,
-    Exited(Option<i32>),
+    Exited(ChildExitCode),
+}
+
+pub(super) struct ChildExitCode {
+    #[cfg(windows)]
+    code: Option<u32>,
+    #[cfg(not(windows))]
+    code: Option<i32>,
+}
+
+impl ChildExitCode {
+    pub(super) fn from_status(status: std::process::ExitStatus) -> Self {
+        let code = status.code();
+        #[cfg(windows)]
+        let code = code.map(windows_exit_code);
+        Self { code }
+    }
+
+    pub(super) fn log_value(&self) -> String {
+        self.code
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string())
+    }
+
+    #[cfg(test)]
+    pub(super) fn from_test_code(code: i32) -> Self {
+        #[cfg(windows)]
+        let code = Some(windows_exit_code(code));
+        #[cfg(not(windows))]
+        let code = Some(code);
+        Self { code }
+    }
+
+    #[cfg(test)]
+    pub(super) fn unavailable() -> Self {
+        Self { code: None }
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_exit_code(code: i32) -> u32 {
+    u32::from_ne_bytes(code.to_ne_bytes())
 }
 
 /// The slice of [`super::SHUTDOWN_BUDGET`] held back for ending the child.
@@ -29,7 +69,7 @@ pub(super) trait ChildProcess: Send {
 impl ChildProcess for Child {
     fn state(&mut self) -> std::io::Result<ChildState> {
         self.try_wait().map(|status| match status {
-            Some(status) => ChildState::Exited(status.code()),
+            Some(status) => ChildState::Exited(ChildExitCode::from_status(status)),
             None => ChildState::Running,
         })
     }
@@ -40,6 +80,33 @@ impl ChildProcess for Child {
 
     fn reap(&mut self) -> std::io::Result<()> {
         self.wait().map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_crash_status_keeps_all_dword_bits() {
+        let signed = i32::from_ne_bytes(0xC000_0005_u32.to_ne_bytes());
+        assert_eq!(windows_exit_code(signed), 0xC000_0005);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn non_windows_exit_codes_keep_signed_semantics() {
+        assert_eq!(ChildExitCode::from_test_code(-1).log_value(), "-1");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_exit_codes_are_logged_as_unsigned_dwords() {
+        let signed = i32::from_ne_bytes(0xC000_0005_u32.to_ne_bytes());
+        assert_eq!(
+            ChildExitCode::from_test_code(signed).log_value(),
+            "3221225477"
+        );
     }
 }
 

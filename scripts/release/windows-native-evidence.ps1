@@ -152,6 +152,32 @@ function Save-WindowsFailureDiagnostics([string]$DataRoot, [string]$TracePath, [
     }
 }
 
+function Invoke-FailureDiagnosticPersistence {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [System.Management.Automation.ErrorRecord]$PendingFailure,
+        [ValidateSet("process-trace", "artifact-save")]
+        [string]$Operation,
+        [scriptblock]$Action
+    )
+    try {
+        & $Action
+    } catch {
+        if ($null -ne $PendingFailure) {
+            $key = "CopyPaste.DiagnosticsPersistence"
+            $previous = [string]$PendingFailure.Exception.Data[$key]
+            $annotations = @($previous, $Operation) |
+                Where-Object { $_ } |
+                Select-Object -Unique
+            $PendingFailure.Exception.Data[$key] = $annotations -join ","
+            Write-Warning "Failure diagnostics $Operation failed; preserving the original failure."
+        } else {
+            Write-Warning "Failure diagnostics $Operation failed."
+        }
+    }
+}
+
 function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, [string]$DaemonError) {
     $parts = @()
     if ($App) {
@@ -174,6 +200,7 @@ function Invoke-SelfTest {
     try {
         Test-WindowsReadinessHelpers
         Test-WindowsProcessTraceHelpers
+        Test-WindowsProcessTraceCollector
 
         $logs = Join-Path $root "logs"
         [IO.Directory]::CreateDirectory($logs) | Out-Null
@@ -187,6 +214,16 @@ function Invoke-SelfTest {
         Assert-True ($boundedApp.Length -le 262150) "failure app log was not bounded"
         Assert-True (Test-Path -LiteralPath (Join-Path $failureFixture "daemon.log")) "failure daemon log was not separate"
         Assert-True (Test-Path -LiteralPath (Join-Path $failureFixture "process-trace.jsonl")) "failure process trace was not preserved"
+
+        $pending = try { throw "original pending failure" } catch { $_ }
+        $warnings = @()
+        Invoke-FailureDiagnosticPersistence $pending "artifact-save" {
+            throw "C:\Users\private\diagnostic-copy-failed"
+        } -WarningVariable +warnings
+        $rethrown = try { throw $pending } catch { $_ }
+        Assert-True ($rethrown.Exception.Message -eq "original pending failure") "diagnostic save replaced the pending failure"
+        Assert-True ($pending.Exception.Data["CopyPaste.DiagnosticsPersistence"] -eq "artifact-save") "diagnostic save failure was not annotated"
+        Assert-True (-not (($warnings -join "`n") -match "private|diagnostic-copy-failed")) "diagnostic save warning exposed its error"
 
         foreach ($name in @("copypaste-ui.exe", "copypaste.exe", "uninstall.exe")) {
             [IO.File]::WriteAllText((Join-Path $root $name), "fixture")
@@ -312,7 +349,7 @@ $daemonErr = Join-Path $runRoot "daemon.stderr.log"
 $oldDataDir = $env:COPYPASTE_DATA_DIR
 $oldSocket = $env:COPYPASTE_SOCKET
 $logPath = $null
-$failed = $false
+$failure = $null
 $processTrace = $null
 $processTracePath = Join-Path $runRoot "process-trace.jsonl"
 
@@ -476,29 +513,18 @@ try {
     }
     Write-Output "PASS: $ExpectedSignature current-user install, integrity, installed sidecar, in-place update, update feed contract and uninstall"
 } catch {
-    # `finally` deletes $runRoot, so without this the daemon's stderr and the
-    # app's runtime log are gone before anyone reads the failure. Only the three
-    # `Wait-Observed` probes attached them; run 31825408629 failed at a bare CLI
-    # call and reported one line, "cannot reach the CopyPaste daemon".
-    $failed = $true
+    # Rethrown after persistence so a diagnostic copy failure cannot replace it.
     $failure = $_
-    $detail = try {
-        (Get-InstalledDiagnostics $app $dataRoot $daemonErr) -join "`n"
-    } catch {
-        $_.Exception.Message
-    }
-    throw "$($failure.Exception.Message)`nDiagnostics:`n$detail"
 } finally {
     if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }
-    try {
+    Invoke-FailureDiagnosticPersistence $failure "process-trace" {
         Stop-WindowsProcessTrace $processTrace
-    } catch {
-        '{"kind":"trace-unavailable","reason":"collection-failed"}' |
-            Set-Content -LiteralPath $processTracePath -Encoding utf8
     }
-    if ($failed -and $evidencePath) {
-        Save-WindowsFailureDiagnostics $dataRoot $processTracePath $evidencePath
+    if ($null -ne $failure -and $evidencePath) {
+        Invoke-FailureDiagnosticPersistence $failure "artifact-save" {
+            Save-WindowsFailureDiagnostics $dataRoot $processTracePath $evidencePath
+        }
     }
     if (Test-Path -LiteralPath (Join-Path $installDir "uninstall.exe")) {
         Start-Process -FilePath (Join-Path $installDir "uninstall.exe") -ArgumentList "/S" -Wait | Out-Null
@@ -507,3 +533,4 @@ try {
     if ($null -eq $oldSocket) { Remove-Item Env:COPYPASTE_SOCKET -ErrorAction SilentlyContinue } else { $env:COPYPASTE_SOCKET = $oldSocket }
     Remove-Item -LiteralPath $runRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
+if ($null -ne $failure) { throw $failure }
