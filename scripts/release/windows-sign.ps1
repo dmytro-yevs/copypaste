@@ -205,11 +205,13 @@ function Invoke-SelfTest {
             "WINDOWS_SIGNING_CERTIFICATE_PASSWORD",
             "WINDOWS_TIMESTAMP_URL",
             "WINDOWS_CERTIFICATE_PFX_PATH",
-            "WINDOWS_SIGNING_TIMESTAMP_URL"
+            "WINDOWS_SIGNING_TIMESTAMP_URL",
+            "GITHUB_ENV"
         )) {
         $old[$name] = [Environment]::GetEnvironmentVariable($name)
     }
     $testPfx = Join-Path ([IO.Path]::GetTempPath()) "copypaste-signing-self-test-$PID.pfx"
+    $testEnvironment = "$testPfx.env"
     $rsa = [Security.Cryptography.RSA]::Create(2048)
     $certificate = $null
     try {
@@ -234,12 +236,19 @@ function Invoke-SelfTest {
         )
         $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD = $password
         $env:WINDOWS_TIMESTAMP_URL = "https://timestamp.digicert.com"
+        $env:GITHUB_ENV = $testEnvironment
         $script:OutputPfxPath = $testPfx
+        $script:PersistEnvironment = $true
         Prepare-WindowsSigning
         $state = Get-PreparedSigningState
         $state.Certificate.Dispose()
         if ($state.TimestampUrl -ne "http://timestamp.digicert.com") {
             throw "prepared timestamp self-test failed"
+        }
+        $persisted = @(Get-Content -LiteralPath $testEnvironment)
+        if ($persisted -notcontains "WINDOWS_CERTIFICATE_PFX_PATH=$testPfx" -or
+            $persisted -notcontains "WINDOWS_SIGNING_TIMESTAMP_URL=http://timestamp.digicert.com") {
+            throw "GitHub environment persistence self-test failed"
         }
         if ($env:OS -eq "Windows_NT") {
             $smoke = Join-Path ([IO.Path]::GetTempPath()) "copypaste-signing-self-test-$PID.exe"
@@ -252,6 +261,7 @@ function Invoke-SelfTest {
         }
     } finally {
         Remove-Item -LiteralPath $testPfx -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $testEnvironment -Force -ErrorAction SilentlyContinue
         if ($certificate) { $certificate.Dispose() }
         $rsa.Dispose()
         foreach ($name in $old.Keys) {
