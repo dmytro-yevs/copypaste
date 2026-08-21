@@ -1,5 +1,6 @@
 //! The handle a caller holds, and the lifetime of the task behind it.
 
+use backon::Retryable;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -7,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use super::channel::{jwt_subject, open_channel};
 use super::event::{RealtimeError, RealtimeEvent};
 use super::socket::run;
-use crate::CloudConfig;
+use crate::{auth::transient_backoff, CloudConfig};
 
 /// Bounded queue between the socket task and [`RealtimeSubscription::next_event`].
 ///
@@ -68,7 +69,11 @@ impl RealtimeSubscription {
         let anon_key = config.anon_key().to_owned();
         let token = access_token.to_owned();
 
-        let stream = open_channel(endpoint.clone(), &anon_key, &token, &user_id).await?;
+        let open = || open_channel(endpoint.clone(), &anon_key, &token, &user_id);
+        let stream = open
+            .retry(transient_backoff())
+            .when(|error| matches!(error, RealtimeError::Connect(_)))
+            .await?;
 
         let (tx, events) = mpsc::channel(EVENT_QUEUE);
         let (token_tx, token_rx) = watch::channel(token);

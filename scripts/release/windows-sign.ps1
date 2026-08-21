@@ -134,6 +134,8 @@ function Invoke-BoundedProcess(
         } catch {
             throw (Format-ProcessDiagnostic $Phase $Executable $Target "start failed")
         }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutMilliseconds)) {
             $killFailed = $false
             try { $process.Kill($true) } catch { $killFailed = $true }
@@ -149,7 +151,11 @@ function Invoke-BoundedProcess(
             throw (Format-ProcessDiagnostic $Phase $Executable $Target `
                 "timed out after $TimeoutMilliseconds ms")
         }
-        return [pscustomobject]@{ ExitCode = $process.ExitCode }
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Stdout = $stdoutTask.GetAwaiter().GetResult()
+            Stderr = $stderrTask.GetAwaiter().GetResult()
+        }
     } finally {
         $process.Dispose()
     }
@@ -160,6 +166,8 @@ function New-InheritedProcessStartInfo([string]$Executable, [string[]]$Arguments
     $start.FileName = $Executable
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
     foreach ($argument in $Arguments) { [void]$start.ArgumentList.Add($argument) }
     return $start
 }
@@ -168,11 +176,23 @@ function Format-ProcessDiagnostic(
     [string]$Phase,
     [string]$Executable,
     [string]$Target,
-    [string]$Status
+    [string]$Status,
+    [object]$Result = $null
 ) {
     $executableName = [IO.Path]::GetFileName($Executable)
     $targetName = [IO.Path]::GetFileName($Target)
-    return "$Phase failed (executable=$executableName, target=$targetName, status=$Status)"
+    $message = "$Phase failed (executable=$executableName, target=$targetName, status=$Status)"
+    if ($null -eq $Result) { return $message }
+    foreach ($stream in @("Stdout", "Stderr")) {
+        $property = $Result.PSObject.Properties[$stream]
+        if ($null -eq $property) { continue }
+        $text = [string]$property.Value
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        $text = $text.Replace($Executable, $executableName).Replace($Target, $targetName).Trim()
+        if ($text.Length -gt 4000) { $text = $text.Substring(0, 4000) + "…" }
+        $message += "`n$($stream.ToLowerInvariant()): $text"
+    }
+    return $message
 }
 
 function Normalize-CertificateThumbprint([string]$Thumbprint) {
@@ -203,6 +223,31 @@ function Assert-AuthenticodeSigner(
     $expectedThumbprint = Normalize-CertificateThumbprint $ExpectedCertificate.Thumbprint
     if ($actualThumbprint -cne $expectedThumbprint) {
         throw "Authenticode signer does not match the prepared PFX"
+    }
+}
+
+function Add-TemporarySelfSignedTrust(
+    [Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+) {
+    $subject = [Convert]::ToHexString($Certificate.SubjectName.RawData)
+    $issuer = [Convert]::ToHexString($Certificate.IssuerName.RawData)
+    if ($subject -cne $issuer) { return $null }
+    $store = [Security.Cryptography.X509Certificates.X509Store]::new(
+        [Security.Cryptography.X509Certificates.StoreName]::Root,
+        [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+    try {
+        $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        if ($store.Certificates.Find(
+                [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $Certificate.Thumbprint, $false).Count -gt 0) {
+            $store.Dispose()
+            return $null
+        }
+        $store.Add($Certificate)
+        return $store
+    } catch {
+        $store.Dispose()
+        throw
     }
 }
 
@@ -398,7 +443,7 @@ function Get-EmbeddedAuthenticodeSignature(
         120000 "SignTool embedded verification" $Target
     if ($verification.ExitCode -ne 0) {
         throw (Format-ProcessDiagnostic "SignTool embedded verification" $SignTool $Target `
-            "exit $($verification.ExitCode)")
+            "exit $($verification.ExitCode)" $verification)
     }
 
     return Convert-EmbeddedSignatureCms (& $CmsReader $Target)
@@ -413,6 +458,9 @@ function Invoke-WindowsSign(
     [scriptblock]$SignToolFinder = { Find-SignTool },
     [scriptblock]$SignatureReader = {
         param($Path, $Tool, $Runner) Get-EmbeddedAuthenticodeSignature $Path $Tool $Runner
+    },
+    [scriptblock]$TrustAnchorInstaller = { param($Certificate)
+        Add-TemporarySelfSignedTrust $Certificate
     }
 ) {
     if ($env:OS -ne "Windows_NT") { throw "Authenticode signing must run on Windows" }
@@ -422,6 +470,7 @@ function Invoke-WindowsSign(
     }
 
     $state = $null
+    $trustStore = $null
     try {
         $state = & $SigningStateReader
         $signtool = & $SignToolFinder
@@ -429,15 +478,21 @@ function Invoke-WindowsSign(
         $result = & $ProcessRunner $signtool $arguments 120000 "SignTool signing" $Target
         if ($result.ExitCode -ne 0) {
             throw (Format-ProcessDiagnostic "SignTool signing" $signtool $Target `
-                "exit $($result.ExitCode)")
+                "exit $($result.ExitCode)" $result)
         }
 
+        # Project-generated alpha certificates are self-signed. SignTool /pa
+        # still verifies them under Windows policy, with this explicit anchor.
+        $trustStore = & $TrustAnchorInstaller $state.Certificate
         $signature = & $SignatureReader $Target $signtool $ProcessRunner
         Assert-AuthenticodeSigner $signature $state.Certificate
         if ($null -eq $signature.TimeStamperCertificate) {
             throw "Authenticode signature is missing its RFC 3161 timestamp"
         }
     } finally {
+        if ($trustStore) {
+            try { $trustStore.Remove($state.Certificate) } finally { $trustStore.Dispose() }
+        }
         if ($state -and $state.Certificate) { $state.Certificate.Dispose() }
     }
 }
@@ -525,7 +580,7 @@ function Invoke-SelfTest {
     Write-Host "PHASE: bounded external processes"
     $pwsh = (Get-Process -Id $PID).Path
     $routing = New-InheritedProcessStartInfo $pwsh @("-NoProfile", "-Command", "exit 0")
-    if ($routing.RedirectStandardOutput -or $routing.RedirectStandardError -or
+    if (-not $routing.RedirectStandardOutput -or -not $routing.RedirectStandardError -or
         $routing.UseShellExecute -or -not $routing.CreateNoWindow) {
         throw "bounded process output routing self-test failed"
     }
@@ -581,6 +636,10 @@ function Invoke-SelfTest {
             [DateTimeOffset]::UtcNow.AddMinutes(-1),
             [DateTimeOffset]::UtcNow.AddMinutes(5)
         )
+        if ([Convert]::ToHexString($certificate.SubjectName.RawData) -cne
+            [Convert]::ToHexString($certificate.IssuerName.RawData)) {
+            throw "self-signed trust classification self-test failed"
+        }
         Write-Host "PHASE: offline embedded-signature policy"
         $acceptVerification = {
             param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
@@ -841,7 +900,7 @@ function Invoke-SelfTest {
                 $fakeStateReader = { $routingState }.GetNewClosure()
                 $fakeSignatureReader = { param($Path) $fakeSignature }.GetNewClosure()
                 Invoke-WindowsSign $routingTarget $fakeRunner $fakeStateReader `
-                    { "fake-signtool.exe" } $fakeSignatureReader
+                    { "fake-signtool.exe" } $fakeSignatureReader { $null }
                 if ($runnerCalls.Count -ne 1 -or
                     $runnerCalls[0].Executable -cne "fake-signtool.exe" -or
                     $runnerCalls[0].Timeout -ne 120000 -or
@@ -875,7 +934,7 @@ function Invoke-SelfTest {
                 $missingTimestampRejected = $false
                 try {
                     Invoke-WindowsSign $routingTarget $fakeRunner $untimestampedStateReader `
-                        { "fake-signtool.exe" } $untimestampedSignatureReader
+                        { "fake-signtool.exe" } $untimestampedSignatureReader { $null }
                 } catch {
                     if ($_.Exception.Message -cne
                         "Authenticode signature is missing its RFC 3161 timestamp") { throw }
@@ -891,7 +950,10 @@ function Invoke-SelfTest {
                     $runnerCalls[2].Timeout -ne 120000 -or
                     [string]::Join(" ", $runnerCalls[2].Arguments) -cne
                         "verify /pa /all /tw $routingTarget") {
-                    throw "Invoke-WindowsSign missing timestamp routing self-test failed"
+                    throw "Invoke-WindowsSign missing timestamp routing self-test failed: " +
+                        ([string]::Join(" | ", @($runnerCalls | ForEach-Object {
+                            "$($_.Phase):$([string]::Join(' ', $_.Arguments))"
+                        })))
                 }
             } finally {
                 Remove-Item -LiteralPath $routingTarget -Force -ErrorAction SilentlyContinue

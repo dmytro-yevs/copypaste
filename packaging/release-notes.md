@@ -2,7 +2,10 @@
 
 - Hardens Windows installer signing: validates the release certificate before
   the build, bounds SignTool execution, verifies the signer and RFC 3161
-  timestamp, and removes temporary signing material afterward.
+  timestamp, reports SignTool output on failure, and verifies project-generated
+  certificates under an explicit temporary trust anchor.
+- Retries transient initial Supabase Realtime connections within the existing
+  bounded cloud backoff budget.
 - Strengthens release evidence for signed Windows installers and in-place
   updates, including signer identity, updater artifacts, and failure states.
 - Adds bounded Windows sidecar launch diagnostics that correlate process start
