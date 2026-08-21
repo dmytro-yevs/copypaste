@@ -861,6 +861,10 @@ function Invoke-SelfTest {
                         $certificate.Export(
                             [Security.Cryptography.X509Certificates.X509ContentType]::Cert))
                 }
+                if ($null -eq $untimestampedCms -or
+                    $untimestampedCms.GetType() -ne [Security.Cryptography.Pkcs.SignedCms]) {
+                    throw "untimestamped signing fixture did not produce exactly one SignedCms"
+                }
                 $untimestampedStateReader = { $untimestampedState }.GetNewClosure()
                 $untimestampedCmsReader = { $untimestampedCms }.GetNewClosure()
                 $untimestampedSignatureReader = {
