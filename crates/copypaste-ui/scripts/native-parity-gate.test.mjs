@@ -18,6 +18,7 @@ const WINDOWS_STATES = new Map([
   ["capture", { state: "service-capture-status", name: "Background capture", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGMUW+zFwMDAAKEAEOcCCBlQdmcAAAAASUVORK5CYII=" }],
   ["devices", { state: "ready-to-pair", name: "Ready to pair", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGNUTX7NwMDAxMDAcGuOCAAUogMBx1ZqEgAAAABJRU5ErkJggg==" }],
   ["settings-and-service", { state: "appearance", name: "Theme", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGOcbPyKgYGBiYGBIX2mNgAWpQLf2/uWLgAAAABJRU5ErkJggg==" }],
+  ["settings-and-service/updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8DAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==" }],
   ["cloud-account", { state: "not-configured", name: "Not configured", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPkmLiJgYGBiYGBQWz9XwARoQMR3PtkxgAAAABJRU5ErkJggg==" }],
 ]);
 const PNG = Buffer.from(WINDOWS_STATES.get("history").png, "base64");
@@ -68,11 +69,12 @@ async function fixture(root, platform, overrides = {}) {
 
   if (platform === "windows") {
     const states = [];
-    for (const [feature, expected] of WINDOWS_STATES) {
-      const featureDirectory = path.join(directory, feature);
+    for (const [evidenceDirectory, expected] of WINDOWS_STATES) {
+      const feature = expected.feature ?? evidenceDirectory;
+      const featureDirectory = path.join(directory, evidenceDirectory);
       await mkdir(featureDirectory, { recursive: true });
-      const screenshotPath = `${feature}/screenshot.png`;
-      const accessibilityPath = `${feature}/accessibility.json`;
+      const screenshotPath = `${evidenceDirectory}/screenshot.png`;
+      const accessibilityPath = `${evidenceDirectory}/accessibility.json`;
       const screenshot = Buffer.from(expected.png, "base64");
       const accessibility = `${JSON.stringify({
         schema_version: 2,
@@ -108,10 +110,12 @@ async function fixture(root, platform, overrides = {}) {
           bytes: Buffer.byteLength(accessibility),
         },
       });
-      artifacts.push(
-        { kind: "screenshot", ...states.at(-1).screenshot },
-        { kind: "accessibility", ...states.at(-1).accessibility },
-      );
+      if (expected.state !== "updater-configured") {
+        artifacts.push(
+          { kind: "screenshot", ...states.at(-1).screenshot },
+          { kind: "accessibility", ...states.at(-1).accessibility },
+        );
+      }
     }
     const manifest = `${JSON.stringify({ schema_version: 1, states }, null, 2)}\n`;
     await writeFile(path.join(directory, "feature-states.json"), manifest);
@@ -202,11 +206,11 @@ test("fails closed when Windows release evidence is absent", () => withRoot(asyn
   );
 }));
 
-test("rejects a missing Windows feature state", () => withRoot(async (root) => {
+test("rejects a missing Windows updater state", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "windows");
   const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  manifest.states.pop();
+  manifest.states = manifest.states.filter((state) => state.state !== "updater-configured");
   const contents = `${JSON.stringify(manifest, null, 2)}\n`;
   await writeFile(manifestPath, contents);
   const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
@@ -216,7 +220,45 @@ test("rejects a missing Windows feature state", () => withRoot(async (root) => {
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
-    /exactly five Windows feature states/,
+    /exact Windows feature state set/,
+  );
+}));
+
+test("rejects an unknown Windows feature state", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const updater = manifest.states.find((state) => state.state === "updater-configured");
+  updater.state = "updater-unknown";
+  const contents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, contents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(contents).digest("hex");
+  index.bytes = Buffer.byteLength(contents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /unknown or wrong Windows feature state settings-and-service\/updater-unknown/,
+  );
+}));
+
+test("rejects a duplicate Windows feature state", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.states.at(-1).feature = "settings-and-service";
+  manifest.states.at(-1).state = "updater-configured";
+  const contents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, contents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(contents).digest("hex");
+  index.bytes = Buffer.byteLength(contents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /invalid or duplicate Windows feature state/,
   );
 }));
 

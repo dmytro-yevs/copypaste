@@ -3,11 +3,12 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 const EXPECTED = new Map([
-  ["history", { state: "populated", name: "Clipboard history" }],
-  ["capture", { state: "service-capture-status", name: "Background capture" }],
-  ["devices", { state: "ready-to-pair", name: "Ready to pair" }],
-  ["settings-and-service", { state: "appearance", name: "Theme" }],
-  ["cloud-account", { state: "not-configured", name: "Not configured" }],
+  ["history/populated", { feature: "history", state: "populated", name: "Clipboard history", directory: "history", direct: true }],
+  ["capture/service-capture-status", { feature: "capture", state: "service-capture-status", name: "Background capture", directory: "capture", direct: true }],
+  ["devices/ready-to-pair", { feature: "devices", state: "ready-to-pair", name: "Ready to pair", directory: "devices", direct: true }],
+  ["settings-and-service/appearance", { feature: "settings-and-service", state: "appearance", name: "Theme", directory: "settings-and-service", direct: true }],
+  ["settings-and-service/updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", directory: "settings-and-service/updater-configured", direct: false }],
+  ["cloud-account/not-configured", { feature: "cloud-account", state: "not-configured", name: "Not configured", directory: "cloud-account", direct: true }],
 ]);
 
 const RECORD_KEYS = ["bytes", "path", "sha256"];
@@ -59,24 +60,25 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) 
   if (!exactKeys(manifest, ["schema_version", "states"]) || manifest.schema_version !== 1 || !Array.isArray(manifest.states)) {
     throw new Error(`${label} feature evidence has an invalid envelope`);
   }
-  if (manifest.states.length !== EXPECTED.size) throw new Error(`${label} must capture exactly five Windows feature states`);
+  if (manifest.states.length !== EXPECTED.size) throw new Error(`${label} must capture the exact Windows feature state set`);
 
   const root = await realpath(path.dirname(receiptPath));
   const observed = new Set();
   const screenshotIdentities = new Set();
   for (const state of manifest.states) {
-    if (!exactKeys(state, STATE_KEYS) || observed.has(state.feature)) {
+    const identity = `${state?.feature}/${state?.state}`;
+    if (!exactKeys(state, STATE_KEYS) || observed.has(identity)) {
       throw new Error(`${label} contains an invalid or duplicate Windows feature state`);
     }
-    observed.add(state.feature);
-    const expected = EXPECTED.get(state.feature);
-    if (!expected || state.state !== expected.state || state.expected_name !== expected.name) {
-      throw new Error(`${label} contains the wrong state for ${state.feature}`);
+    observed.add(identity);
+    const expected = EXPECTED.get(identity);
+    if (!expected || state.expected_name !== expected.name) {
+      throw new Error(`${label} contains an unknown or wrong Windows feature state ${identity}`);
     }
-    const prefix = `${state.feature}/`;
+    const prefix = `${expected.directory}/`;
     for (const [kind, record] of [["screenshot", state.screenshot], ["accessibility", state.accessibility]]) {
       const declared = receipt.artifacts.find((artifact) => artifact.kind === kind && artifact.path === record.path);
-      if (!declared || declared.sha256 !== record.sha256 || declared.bytes !== record.bytes) {
+      if (expected.direct && (!declared || declared.sha256 !== record.sha256 || declared.bytes !== record.bytes)) {
         throw new Error(`${label} does not directly register ${state.feature} ${kind} evidence`);
       }
     }
@@ -154,7 +156,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) 
       throw new Error(`${label} ${state.feature} accessibility does not prove its expected UI state`);
     }
   }
-  if ([...EXPECTED.keys()].some((feature) => !observed.has(feature))) {
+  if ([...EXPECTED.keys()].some((identity) => !observed.has(identity))) {
     throw new Error(`${label} omits a Windows feature state`);
   }
 }
