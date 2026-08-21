@@ -8,7 +8,7 @@
     ],
     "windows": {
       "signCommand": {
-        "cmd": "powershell.exe",
+        "cmd": "pwsh.exe",
         "args": [
           "-NoProfile",
           "-ExecutionPolicy",
