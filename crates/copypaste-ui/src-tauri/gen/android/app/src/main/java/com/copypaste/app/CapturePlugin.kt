@@ -324,7 +324,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         // A grant can be revoked in Settings after a successful arm. Do not
         // leave the persisted foreground-service intent claiming it can
         // restart without the notification that makes it visible.
-        ShizukuClipboard.disarm()
         CaptureService.stop(activity)
         pending.invoke.resolve(CaptureBridgeJson.objectOf(
             ArmResult.serializer(),
@@ -404,8 +403,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `CaptureState` is a request to run, not proof that the listener survived.
-     * The Rust model must only receive `enabled` when the in-process listener
+     * `CaptureState` is a request to run, not proof that the reader survived.
+     * The Rust model must only receive `enabled` when the in-process reader
      * can still hand clips to its drain task.
      */
     private fun captureEnabled(): Boolean =

@@ -369,9 +369,9 @@ rung_receipt "$RECEIPTS" tile run "API $sdk; the tile was added, bound and click
 
 group "3. The background capture service"
 # The service exists to keep the process alive while rung 2 is armed. With
-# Shizuku absent nothing may arm, and the failure this guards against is a
+# setup absent nothing may arm, and the failure this guards against is a
 # service that runs anyway: an ongoing "Capturing from every app." notification
-# over a listener that is not there. CopyPaste-qzhu is the v1 bug of the same
+# over a reader that is not there. CopyPaste-qzhu is the v1 bug of the same
 # shape — reporting working because a permission was present.
 
 start_out="$(sh_ am start-foreground-service -n "$PKG/$APP_NAMESPACE.CaptureService")"
@@ -379,7 +379,7 @@ if grep -q 'not exported' <<<"$start_out"; then
     ok "no other app can start the capture service"
 else
     bad "no other app can start the capture service" \
-        "the shell uid started it: ${start_out} — any app could raise a notification claiming CopyPaste is capturing"
+        "the shell started it: ${start_out} — any app could raise a notification claiming CopyPaste is capturing"
 fi
 
 # The state the service reads on a sticky restart, written directly so the
@@ -410,10 +410,10 @@ sleep "$SETTLE_SECS"
 
 sh_ dumpsys activity services "$PKG" > "$OUT/services.txt" 2>/dev/null
 if service_is_running "$OUT/services.txt" "CaptureService"; then
-    bad "no capture service runs when nothing is listening" \
-        "CaptureService is up with Shizuku absent — the process is being kept alive for a listener that does not exist"
+    bad "no capture service runs when nothing is reading" \
+        "CaptureService is up with setup absent — the process is being kept alive for a reader that does not exist"
 else
-    ok "no capture service runs when nothing is listening"
+    ok "no capture service runs when nothing is reading"
 fi
 
 sh_ dumpsys notification --noredact > "$OUT/notifications-armed.txt" 2>/dev/null \
@@ -429,7 +429,7 @@ if dump_hierarchy_retry "$OUT/ui-armed.xml"; then
     strings="$(ui_strings "$OUT/ui-armed.xml")"
     if grep -qxF "Capturing from every app." <<<"$strings"; then
         bad "the UI does not claim background capture either" \
-            "a persisted enabled flag reached the headline without a live listener — capture::model must only see enabled when ShizukuClipboard.isListening()"
+            "a persisted enabled flag reached the headline without a live reader — capture::model must only see enabled when ClipCascadeCapture.isListening()"
     else
         ok "the UI does not claim background capture either"
     fi

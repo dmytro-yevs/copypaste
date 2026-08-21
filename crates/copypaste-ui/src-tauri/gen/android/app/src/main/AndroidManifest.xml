@@ -10,7 +10,8 @@
 
       What is deliberately NOT here:
       * READ_CLIPBOARD_IN_BACKGROUND — signature. `pm grant` cannot give
-        it to us; the shell uid holds it and that is the whole of rung 2.
+        it to us; CopyPaste uses its own logcat+overlay path after one-shot
+        setup grants instead.
       * BIND_ACCESSIBILITY_SERVICE — an accessibility service is not a
         clipboard exemption. It appears nowhere in clipboardAccessAllowed().
     -->
@@ -126,18 +127,19 @@
         </service>
 
         <!--
-          Keeps the process alive while rung 2 is armed: the clip listener is a
-          callback into this process, so a reclaimed process stops capturing.
-          `specialUse` because none of the defined types describes "hold a
-          binder callback open"; the subtype below is what Play review reads.
+          Keeps the process alive while rung 2 is armed: the logcat reader and
+          overlay hand-off live in this process, so a reclaimed process stops
+          capturing. `specialUse` because none of the defined types describes
+          "hold an app-owned clipboard reader open"; the subtype below is what
+          Play review reads.
         -->
         <service
             android:name=".CaptureService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Keeps the clipboard change listener alive so copies made in other apps are saved to the user's own history on this device." />
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps CopyPaste's app-owned background clipboard reader alive so copies made in other apps are saved to the user's own history on this device." />
         </service>
 
         <!-- Required by the Shizuku client library to request its permission. -->

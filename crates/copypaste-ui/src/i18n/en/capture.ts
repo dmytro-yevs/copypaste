@@ -74,7 +74,7 @@ export const capture = {
   help: {
     title: "Phone-only setup",
     body:
-      "No PC or USB is required. On Android 11 or later, Shizuku can be started on this phone from Developer options with Wireless debugging. Android stops Shizuku after each reboot, so start it again there and then return to CopyPaste.",
+      "No PC or USB is required. On Android 11 or later, start Shizuku from this phone through Developer options and Wireless debugging, let it apply CopyPaste's setup grants once, and then return here. After setup, CopyPaste captures as itself and Shizuku can quit.",
     openShizuku: "Open Shizuku",
     openDeveloperOptions: "Open Developer options",
     requestBattery: "Allow unrestricted battery use",

@@ -1,10 +1,9 @@
 /**
  * The states a user can get stuck in.
  *
- * The one this file exists for is the reboot: Shizuku is stopped by every
- * restart, so "start it again" happens for as long as the user keeps rung 2. It
- * has to read as a routine prompt with one tap behind it — not as a failure,
- * and not as something to be interrupted about.
+ * The one this file exists for is the setup/restart path. It has to read as a
+ * routine prompt with one tap behind it — not as a failure, and not as
+ * something to be interrupted about.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
@@ -56,16 +55,16 @@ const SHIZUKU_STOPPED: CaptureSnapshot = captureSnapshot({
   nextStep: "start_shizuku",
   headline: "Background capture isn't set up.",
   detail:
-    "Shizuku isn't running. Android stops it on every restart, so this is expected after a reboot — start it again to resume capturing from other apps.",
+    "Shizuku isn't running yet. Start it once so CopyPaste can apply the background-capture grants, then return here.",
   lastReadOkAt: null,
 });
 
-const LISTENER_LOST: CaptureSnapshot = captureSnapshot({
+const READER_STOPPED: CaptureSnapshot = captureSnapshot({
   rung: "in_app",
   health: { state: "granted_not_working", reason: "not_armed" },
   nextStep: "arm",
-  headline: "Background capture stopped.",
-  detail: "CopyPaste is only saving what you copy inside the app. Tap to restart.",
+  headline: "Background capture needs turning back on.",
+  detail: "Background capture is set up but not running. Turning it back on takes one tap.",
   lastReadOkAt: null,
 });
 
@@ -98,7 +97,7 @@ async function show(snapshot: CaptureSnapshot) {
 describe("a restart is not a failure", () => {
   it.each([
     ["shizuku stopped by the reboot", SHIZUKU_STOPPED],
-    ["the listener gone with the binder", LISTENER_LOST],
+    ["the background reader is stopped", READER_STOPPED],
   ])("states %s without interrupting and without the fault tone", async (_name, snapshot) => {
     const { container } = await show(snapshot);
 
@@ -112,7 +111,7 @@ describe("a restart is not a failure", () => {
 
   it.each([
     ["shizuku stopped by the reboot", SHIZUKU_STOPPED, /check again/i],
-    ["the listener gone with the binder", LISTENER_LOST, /turn on background capture/i],
+    ["the background reader is stopped", READER_STOPPED, /turn on background capture/i],
   ])("leaves one tap in front of the user (%s)", async (_name, snapshot, label) => {
     await show(snapshot);
     expect(screen.getByRole("button", { name: label })).toBeTruthy();
@@ -132,10 +131,10 @@ describe("a restart is not a failure", () => {
     expect(captureArm).not.toHaveBeenCalled();
   });
 
-  /** One command covers both asking for the permission and registering the
-   *  listener, so the button is the same one either way. */
-  it("arms with the single command when the listener is what is missing", async () => {
-    const { user } = await show(LISTENER_LOST);
+  /** One command covers both asking for the permission and starting the
+   *  reader, so the button is the same one either way. */
+  it("arms with the single command when the reader is what is missing", async () => {
+    const { user } = await show(READER_STOPPED);
     await user.click(screen.getByRole("button", { name: /turn on background capture/i }));
     expect(captureArm).toHaveBeenCalledTimes(1);
   });
@@ -170,7 +169,7 @@ describe("a refused read", () => {
     nextStep: "none",
     headline: "Background capture isn't working.",
     detail:
-      "Shizuku is running, but reading the clipboard was refused. Only what you copy inside the app is being saved.",
+      "CopyPaste couldn't confirm background clipboard reads from other apps. Only what you copy inside the app is being saved.",
     lastReadOkAt: null,
   });
 
@@ -238,7 +237,7 @@ describe("copies that were taken and not saved", () => {
 describe("in every state", () => {
   it.each([
     ["stopped", SHIZUKU_STOPPED],
-    ["lost", LISTENER_LOST],
+    ["stopped", READER_STOPPED],
     ["working", captureSnapshot({ rung: "in_app" })],
   ])("never renders a filesystem path (%s)", async (_name, snapshot) => {
     const { container } = await show(snapshot);
