@@ -206,6 +206,94 @@ function Assert-AuthenticodeSigner(
     }
 }
 
+function Read-EmbeddedSignatureCms([string]$Target) {
+    Add-Type -AssemblyName System.Reflection.Metadata
+    Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+    Add-Type -AssemblyName System.Formats.Asn1
+    $stream = [IO.File]::OpenRead($Target)
+    try {
+        $reader = [Reflection.PortableExecutable.PEReader]::new($stream)
+        try {
+            $directory = $reader.PEHeaders.PEHeader.CertificateTableDirectory
+            if ($directory.RelativeVirtualAddress -le 0 -or $directory.Size -lt 8) {
+                throw "Signed file did not expose an embedded Authenticode signature"
+            }
+            $stream.Position = $directory.RelativeVirtualAddress
+            $header = [byte[]]::new(8)
+            if ($stream.Read($header, 0, $header.Length) -ne $header.Length) {
+                throw "Embedded Authenticode signature is truncated"
+            }
+            $length = [BitConverter]::ToUInt32($header, 0)
+            $certificateType = [BitConverter]::ToUInt16($header, 6)
+            if ($length -lt 8 -or $length -gt $directory.Size -or $certificateType -ne 2) {
+                throw "Signed file did not expose an embedded Authenticode signature"
+            }
+            $encoded = [byte[]]::new($length - 8)
+            if ($stream.Read($encoded, 0, $encoded.Length) -ne $encoded.Length) {
+                throw "Embedded Authenticode signature is truncated"
+            }
+            $cms = [Security.Cryptography.Pkcs.SignedCms]::new()
+            $cms.Decode($encoded)
+            return $cms
+        } finally {
+            $reader.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Get-EmbeddedAuthenticodeSignature(
+    [string]$Target,
+    [string]$SignTool,
+    [scriptblock]$ProcessRunner
+) {
+    $verification = & $ProcessRunner $SignTool @("verify", "/pa", "/all", "/tw", $Target) `
+        120000 "SignTool embedded verification" $Target
+    if ($verification.ExitCode -ne 0) {
+        throw (Format-ProcessDiagnostic "SignTool embedded verification" $SignTool $Target `
+            "exit $($verification.ExitCode)")
+    }
+
+    $cms = Read-EmbeddedSignatureCms $Target
+    if ($cms.SignerInfos.Count -lt 1) {
+        throw "Signed file did not expose an embedded Authenticode signature"
+    }
+    $signer = $cms.SignerInfos[0]
+    $authenticode = [Formats.Asn1.AsnReader]::new(
+        $cms.ContentInfo.Content, [Formats.Asn1.AsnEncodingRules]::DER)
+    $indirectData = $authenticode.ReadSequence()
+    [void]$indirectData.ReadEncodedValue()
+    $digestInfo = $indirectData.ReadSequence()
+    $digestAlgorithm = $digestInfo.ReadSequence().ReadObjectIdentifier()
+    if ($digestAlgorithm -cne "2.16.840.1.101.3.4.2.1") {
+        throw "Authenticode file digest does not use SHA-256"
+    }
+    if ($signer.DigestAlgorithm.Value -cne "2.16.840.1.101.3.4.2.1") {
+        throw "Authenticode signature does not use SHA-256"
+    }
+    $timestampAttribute = $signer.UnsignedAttributes |
+        Where-Object { $_.Oid.Value -eq "1.3.6.1.4.1.311.3.3.1" } |
+        Select-Object -First 1
+    if ($null -eq $timestampAttribute -or $timestampAttribute.Values.Count -lt 1) {
+        $timestampCertificate = $null
+    } else {
+        $timestampCms = [Security.Cryptography.Pkcs.SignedCms]::new()
+        $timestampCms.Decode($timestampAttribute.Values[0].RawData)
+        if ($timestampCms.SignerInfos.Count -lt 1 -or
+            $timestampCms.SignerInfos[0].DigestAlgorithm.Value -cne "2.16.840.1.101.3.4.2.1") {
+            throw "Authenticode RFC 3161 timestamp does not use SHA-256"
+        }
+        $timestampCertificate = $timestampCms.SignerInfos[0].Certificate
+    }
+    return [pscustomobject]@{
+        Status = "Valid"
+        SignatureType = "Authenticode"
+        SignerCertificate = $signer.Certificate
+        TimeStamperCertificate = $timestampCertificate
+    }
+}
+
 function Invoke-WindowsSign(
     [string]$Target,
     [scriptblock]$ProcessRunner = { param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
@@ -213,7 +301,9 @@ function Invoke-WindowsSign(
     },
     [scriptblock]$SigningStateReader = { Get-PreparedSigningState },
     [scriptblock]$SignToolFinder = { Find-SignTool },
-    [scriptblock]$SignatureReader = { param($Path) Get-AuthenticodeSignature -LiteralPath $Path }
+    [scriptblock]$SignatureReader = {
+        param($Path, $Tool, $Runner) Get-EmbeddedAuthenticodeSignature $Path $Tool $Runner
+    }
 ) {
     if ($env:OS -ne "Windows_NT") { throw "Authenticode signing must run on Windows" }
     if ([string]::IsNullOrWhiteSpace($Target) -or
@@ -232,7 +322,7 @@ function Invoke-WindowsSign(
                 "exit $($result.ExitCode)")
         }
 
-        $signature = & $SignatureReader $Target
+        $signature = & $SignatureReader $Target $signtool $ProcessRunner
         Assert-AuthenticodeSigner $signature $state.Certificate
         if ($null -eq $signature.TimeStamperCertificate) {
             throw "Authenticode signature is missing its RFC 3161 timestamp"
@@ -359,6 +449,8 @@ function Invoke-SelfTest {
     }
     $testPfx = Join-Path ([IO.Path]::GetTempPath()) "copypaste-signing-self-test-$PID.pfx"
     $testEnvironment = "$testPfx.env"
+    $catalogTarget = "$testPfx.catalog.exe"
+    $sha1Target = "$testPfx.sha1.exe"
     $rsa = [Security.Cryptography.RSA]::Create(2048)
     $certificate = $null
     try {
@@ -377,6 +469,59 @@ function Invoke-SelfTest {
             [DateTimeOffset]::UtcNow.AddMinutes(-1),
             [DateTimeOffset]::UtcNow.AddMinutes(5)
         )
+        $password = "self-test-password"
+        [IO.File]::WriteAllBytes($testPfx, $certificate.Export(
+                [Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password))
+        if ($env:OS -eq "Windows_NT") {
+            $signtool = Find-SignTool
+            Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $catalogTarget
+            $catalogBefore = Get-AuthenticodeSignature -LiteralPath $catalogTarget
+            if ($catalogBefore.SignatureType -ne "Catalog") {
+                throw "catalog precedence self-test source is not catalog signed"
+            }
+            $signResult = Invoke-BoundedProcess $signtool @(
+                "sign", "/fd", "sha256", "/f", $testPfx, "/p", $password, $catalogTarget
+            ) 120000 "embedded signature self-test" $catalogTarget
+            if ($signResult.ExitCode -ne 0) { throw "embedded signature self-test signing failed" }
+            $catalogAfter = Get-AuthenticodeSignature -LiteralPath $catalogTarget
+            if ($catalogAfter.SignatureType -ne "Catalog") {
+                throw "catalog precedence self-test did not reproduce catalog selection"
+            }
+            $verificationCalls = [Collections.Generic.List[object]]::new()
+            $acceptVerification = {
+                param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
+                $verificationCalls.Add([pscustomobject]@{
+                    Executable = $Exe; Arguments = @($RunnerArguments); Timeout = $Timeout
+                    Phase = $Phase; Target = $RunnerTarget
+                })
+                [pscustomobject]@{ ExitCode = 0 }
+            }.GetNewClosure()
+            $embedded = Get-EmbeddedAuthenticodeSignature $catalogTarget $signtool $acceptVerification
+            Assert-AuthenticodeSigner $embedded $certificate
+            if ($null -ne $embedded.TimeStamperCertificate) {
+                throw "untimestamped embedded signature self-test exposed a timestamp"
+            }
+            if ($verificationCalls.Count -ne 1 -or
+                [string]::Join(" ", $verificationCalls[0].Arguments) -cne
+                    "verify /pa /all /tw $catalogTarget" -or
+                $verificationCalls[0].Timeout -ne 120000) {
+                throw "embedded verification mode self-test failed"
+            }
+
+            Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $sha1Target
+            $sha1Result = Invoke-BoundedProcess $signtool @(
+                "sign", "/fd", "sha1", "/f", $testPfx, "/p", $password, $sha1Target
+            ) 120000 "SHA-1 rejection self-test" $sha1Target
+            if ($sha1Result.ExitCode -ne 0) { throw "SHA-1 rejection self-test signing failed" }
+            $sha1Rejected = $false
+            try {
+                Get-EmbeddedAuthenticodeSignature $sha1Target $signtool $acceptVerification
+            } catch {
+                if ($_.Exception.Message -cne "Authenticode file digest does not use SHA-256") { throw }
+                $sha1Rejected = $true
+            }
+            if (-not $sha1Rejected) { throw "SHA-1 embedded signature self-test failed" }
+        }
         $otherCertificate = $request.CreateSelfSigned(
             [DateTimeOffset]::UtcNow.AddMinutes(-1),
             [DateTimeOffset]::UtcNow.AddMinutes(4)
@@ -517,7 +662,6 @@ function Invoke-SelfTest {
         } finally {
             $otherCertificate.Dispose()
         }
-        $password = "self-test-password"
         $env:WINDOWS_SIGNING_CERTIFICATE_BASE64 = [Convert]::ToBase64String(
             $certificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password)
         )
@@ -540,6 +684,8 @@ function Invoke-SelfTest {
     } finally {
         Remove-Item -LiteralPath $testPfx -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $testEnvironment -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $catalogTarget -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $sha1Target -Force -ErrorAction SilentlyContinue
         if ($certificate) { $certificate.Dispose() }
         $rsa.Dispose()
         foreach ($name in $old.Keys) {
