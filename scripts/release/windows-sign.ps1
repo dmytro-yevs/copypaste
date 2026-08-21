@@ -116,6 +116,34 @@ function Get-SignToolArguments([object]$State, [string]$Target) {
     )
 }
 
+function Normalize-CertificateThumbprint([string]$Thumbprint) {
+    if ([string]::IsNullOrWhiteSpace($Thumbprint)) {
+        throw "Certificate thumbprint is missing"
+    }
+    $normalized = [regex]::Replace($Thumbprint, "[\s:]", "").ToUpperInvariant()
+    if ($normalized -cnotmatch "^[0-9A-F]{40}$") {
+        throw "Certificate thumbprint is not a SHA-1 hexadecimal value"
+    }
+    return $normalized
+}
+
+function Assert-AuthenticodeSigner(
+    [object]$Signature,
+    [Security.Cryptography.X509Certificates.X509Certificate2]$ExpectedCertificate
+) {
+    if ($Signature.SignatureType -ne "Authenticode") {
+        throw "Signed file did not expose an embedded Authenticode signature"
+    }
+    if ($null -eq $Signature.SignerCertificate) {
+        throw "Authenticode signer does not match the prepared PFX"
+    }
+    $actualThumbprint = Normalize-CertificateThumbprint $Signature.SignerCertificate.Thumbprint
+    $expectedThumbprint = Normalize-CertificateThumbprint $ExpectedCertificate.Thumbprint
+    if ($actualThumbprint -cne $expectedThumbprint) {
+        throw "Authenticode signer does not match the prepared PFX"
+    }
+}
+
 function Invoke-WindowsSign([string]$Target) {
     if ($env:OS -ne "Windows_NT") { throw "Authenticode signing must run on Windows" }
     if ([string]::IsNullOrWhiteSpace($Target) -or
@@ -132,10 +160,7 @@ function Invoke-WindowsSign([string]$Target) {
         if ($LASTEXITCODE -ne 0) { throw "signtool sign exited $LASTEXITCODE" }
 
         $signature = Get-AuthenticodeSignature -LiteralPath $Target
-        if ($null -eq $signature.SignerCertificate -or
-            $signature.SignerCertificate.Thumbprint -ne $state.Certificate.Thumbprint) {
-            throw "Authenticode signer does not match the prepared PFX"
-        }
+        Assert-AuthenticodeSigner $signature $state.Certificate
         if ($null -eq $signature.TimeStamperCertificate) {
             throw "Authenticode signature is missing its RFC 3161 timestamp"
         }
@@ -252,6 +277,31 @@ function Invoke-SelfTest {
             [DateTimeOffset]::UtcNow.AddMinutes(-1),
             [DateTimeOffset]::UtcNow.AddMinutes(5)
         )
+        $otherCertificate = $request.CreateSelfSigned(
+            [DateTimeOffset]::UtcNow.AddMinutes(-1),
+            [DateTimeOffset]::UtcNow.AddMinutes(4)
+        )
+        try {
+            $normalized = Normalize-CertificateThumbprint (
+                "  " + ($certificate.Thumbprint -replace "(.{2})", '$1:') + "  "
+            )
+            if ($normalized -cne $certificate.Thumbprint.ToUpperInvariant()) {
+                throw "certificate thumbprint normalization self-test failed"
+            }
+            $wrongSigner = [pscustomobject]@{
+                SignatureType = "Authenticode"
+                SignerCertificate = $otherCertificate
+            }
+            $rejected = $false
+            try {
+                Assert-AuthenticodeSigner $wrongSigner $certificate
+            } catch {
+                $rejected = $true
+            }
+            if (-not $rejected) { throw "distinct same-subject signer self-test failed" }
+        } finally {
+            $otherCertificate.Dispose()
+        }
         $password = "self-test-password"
         $env:WINDOWS_SIGNING_CERTIFICATE_BASE64 = [Convert]::ToBase64String(
             $certificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password)
@@ -275,7 +325,13 @@ function Invoke-SelfTest {
         if ($env:OS -eq "Windows_NT") {
             $smoke = Join-Path ([IO.Path]::GetTempPath()) "copypaste-signing-self-test-$PID.exe"
             try {
-                Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $smoke -Force
+                # Get-AuthenticodeSignature prefers a catalog signature over an embedded one.
+                # Generate an unsigned PE so the smoke test observes the signature just added.
+                Add-Type -TypeDefinition @"
+public static class SigningSelfTest {
+    public static int Main() { return 0; }
+}
+"@ -Language CSharp -OutputAssembly $smoke -OutputType ConsoleApplication
                 Invoke-WindowsSign $smoke
             } finally {
                 Remove-Item -LiteralPath $smoke -Force -ErrorAction SilentlyContinue
