@@ -867,9 +867,10 @@ function Invoke-SelfTest {
                 }
                 $untimestampedStateReader = { $untimestampedState }.GetNewClosure()
                 $untimestampedCmsReader = { $untimestampedCms }.GetNewClosure()
+                $embeddedSignatureReader = ${function:Get-EmbeddedAuthenticodeSignature}
                 $untimestampedSignatureReader = {
                     param($Path, $Tool, $Runner)
-                    Get-EmbeddedAuthenticodeSignature $Path $Tool $Runner $untimestampedCmsReader
+                    & $embeddedSignatureReader $Path $Tool $Runner $untimestampedCmsReader
                 }.GetNewClosure()
                 $missingTimestampRejected = $false
                 try {
