@@ -343,17 +343,21 @@ function New-SelfTestCms(
     $tstWriter.WriteInteger(1)
     $tstWriter.WriteGeneralizedTime([DateTimeOffset]::UtcNow)
     $tstWriter.PopSequence()
-    $tstBytes = if ($InvalidTimestamp) { [byte[]]@(1, 2, 3) } else { $tstWriter.Encode() }
+    $tstBytes = $tstWriter.Encode()
+    $tstContentOid = if ($InvalidTimestamp) {
+        "1.2.840.113549.1.7.1"
+    } else {
+        "1.2.840.113549.1.9.16.1.4"
+    }
     $tstContent = [Security.Cryptography.Pkcs.ContentInfo]::new(
-        [Security.Cryptography.Oid]::new("1.2.840.113549.1.9.16.1.4"), $tstBytes)
+        [Security.Cryptography.Oid]::new($tstContentOid), $tstBytes)
     $timestampCms = [Security.Cryptography.Pkcs.SignedCms]::new($tstContent, $false)
     $timestampSigner = [Security.Cryptography.Pkcs.CmsSigner]::new($Certificate)
     $timestampSigner.DigestAlgorithm = [Security.Cryptography.Oid]::new($TimestampSignerDigestOid)
     $timestampCms.ComputeSignature($timestampSigner)
-    $values = [Security.Cryptography.AsnEncodedDataCollection]::new()
-    [void]$values.Add([Security.Cryptography.AsnEncodedData]::new($timestampCms.Encode()))
-    $attribute = [Security.Cryptography.CryptographicAttributeObject]::new(
-        [Security.Cryptography.Oid]::new("1.3.6.1.4.1.311.3.3.1"), $values)
+    $attributeOid = [Security.Cryptography.Oid]::new("1.3.6.1.4.1.311.3.3.1")
+    $attribute = [Security.Cryptography.AsnEncodedData]::new(
+        $attributeOid, $timestampCms.Encode())
     $cms.SignerInfos[0].AddUnsignedAttribute($attribute)
     return $cms
 }
