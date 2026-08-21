@@ -10,6 +10,7 @@
 import json, pathlib, re, shlex, sys, yaml
 
 SELF_TEST = "--self-test" in sys.argv
+STRICT = "--strict" in sys.argv
 
 WF = pathlib.Path(".github/workflows")
 
@@ -111,6 +112,49 @@ def calls_emulator(job, event):
 
 def job_matrix(job):
     return ((job or {}).get("strategy") or {}).get("matrix") or {}
+
+
+def shell_array(source, name):
+    match = re.search(r"^{}=\(([^)]*)\)".format(re.escape(name)), source, re.M)
+    return shlex.split(match.group(1)) if match else []
+
+
+def android_link_abi_matrix_holds(job, link_source, ndk_source):
+    matrix = job_matrix(job)
+    triples = matrix.get("triple")
+    if not isinstance(triples, list):
+        return False
+    defaults = shell_array(link_source, "TRIPLES")
+    mappings = shell_array(ndk_source, "TRIPLES")
+    required, actual = set(defaults), set(triples)
+    commands = [
+        line.strip()
+        for step in steps(job)
+        for line in (step.get("run") or "").splitlines()
+        if "android-link-abis.sh" in line and not line.lstrip().startswith("#")
+    ]
+    targets = [
+        str((step.get("with") or {}).get("targets", ""))
+        for step in steps(job)
+        if str(step.get("uses") or "").startswith("dtolnay/rust-toolchain")
+    ]
+    cache_keys = [
+        str((step.get("with") or {}).get("shared-key", ""))
+        for step in steps(job)
+        if str(step.get("uses") or "").startswith("Swatinem/rust-cache")
+    ]
+    return (
+        set(matrix) == {"triple"}
+        and defaults
+        and defaults == mappings
+        and len(defaults) == len(required)
+        and not (required - actual)
+        and not (actual - required)
+        and len(triples) == len(actual)
+        and targets == ["${{ matrix.triple }}"]
+        and cache_keys == ["android-link-${{ matrix.triple }}"]
+        and commands == ['./scripts/release/android-link-abis.sh "${{ matrix.triple }}"']
+    )
 
 
 def scheduled_sweep_is_single(jobs):
@@ -569,6 +613,14 @@ if emu:
     rec("[24,29,33,34,36]" in api_matrix,
         "android-emulator.yml schedules the representative API matrix",
         "expected 24, 29, 33, 34 and 36 in the scheduled matrix: {!r}".format(api_matrix))
+    abi_link = ejobs.get("link-abis") or {}
+    abi_link_defaults = pathlib.Path("scripts/release/android-link-abis.sh").read_text()
+    ndk_mappings = pathlib.Path("scripts/release/android-ndk-env.sh").read_text()
+    rec(android_link_abi_matrix_holds(abi_link, abi_link_defaults, ndk_mappings),
+        "android-emulator.yml ABI link matrix matches NDK targets",
+        "expected one isolated job for every shared android-link-abis/NDK target: {!r}".format(
+            job_matrix(abi_link).get("triple")
+        ))
 
     # Both legs, and the build flag that separates them. The debug leg must
     # stay debuggable or it loses run-as and every filesystem assertion with
@@ -1016,6 +1068,48 @@ if SELF_TEST:
         emit(held, "self-test: {}".format(desc),
              "the nightly Android call detector did not behave as stated")
 
+    abi_defaults = (
+        "TRIPLES=(aarch64-linux-android armv7-linux-androideabi "
+        "i686-linux-android x86_64-linux-android)\n"
+    )
+
+    def abi_link_probe(triples, ndk_source=abi_defaults, command=None):
+        command = command or './scripts/release/android-link-abis.sh "${{ matrix.triple }}"'
+        return android_link_abi_matrix_holds(
+            {
+                "strategy": {"matrix": {"triple": triples}},
+                "steps": [
+                    {
+                        "uses": "dtolnay/rust-toolchain@fixture",
+                        "with": {"targets": "${{ matrix.triple }}"},
+                    },
+                    {
+                        "uses": "Swatinem/rust-cache@fixture",
+                        "with": {"shared-key": "android-link-${{ matrix.triple }}"},
+                    },
+                    {"run": command},
+                ],
+            },
+            abi_defaults,
+            ndk_source,
+        )
+
+    abi_targets = shell_array(abi_defaults, "TRIPLES")
+    for desc, held in (
+        ("the exact Android ABI link matrix is accepted", abi_link_probe(abi_targets)),
+        ("an ABI matrix deletion is rejected", not abi_link_probe(abi_targets[:-1])),
+        ("an ABI matrix substitution is rejected",
+         not abi_link_probe(abi_targets[:-1] + ["riscv64-linux-android"])),
+        ("an ABI matrix duplication is rejected",
+         not abi_link_probe(abi_targets + [abi_targets[-1]])),
+        ("a batched ABI link invocation is rejected",
+         not abi_link_probe(abi_targets, command="./scripts/release/android-link-abis.sh")),
+        ("NDK mappings cannot diverge from link defaults",
+         not abi_link_probe(abi_targets, ndk_source="TRIPLES=(aarch64-linux-android)\n")),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the Android ABI link matrix detector did not behave as stated")
+
     unsafe_android_transfer = {
         "shard": {
             "steps": [{
@@ -1102,6 +1196,4 @@ targeted_adb "$serial" shell dumpsys power
         emit(held, "self-test: {}".format(desc), "the adb structure detector did not reject the fixture")
 
 # The plain run stays exit 0 so check.sh can enumerate every PASS|FAIL line.
-# --self-test emits only its own verdicts, and a self-test that cannot fail its
-# own process is the defect scripts/mutation-gate exists to catch.
-sys.exit(1 if SELF_TEST and SELF_TEST_FAILURES else 0)
+sys.exit(1 if (SELF_TEST or STRICT) and SELF_TEST_FAILURES else 0)
