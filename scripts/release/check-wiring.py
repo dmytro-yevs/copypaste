@@ -36,6 +36,31 @@ def steps(job):
     return job.get("steps") or []
 
 
+def windows_workspace_shards_hold(jobs):
+    names = ("windows-clippy", "windows-test", "windows-native-test")
+    shards = [jobs.get(name) or {} for name in names]
+    bodies = ["\n".join(step.get("run") or "" for step in steps(job)) for job in shards]
+    caches = [
+        [step for step in steps(job)
+         if str(step.get("uses") or "").startswith("Swatinem/rust-cache")]
+        for job in shards
+    ]
+    return (
+        all(job.get("timeout-minutes") == 20 for job in shards)
+        and all(len(cache) == 1 for cache in caches)
+        and (caches[1][0].get("with") or {}).get("save-if") is False
+        and (caches[2][0].get("with") or {}).get("save-if") is True
+        and (caches[1][0].get("with") or {}).get("shared-key")
+            == (caches[2][0].get("with") or {}).get("shared-key")
+        and "cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings" in bodies[0]
+        and "cargo +1.96 test --workspace --locked" in bodies[1]
+        and "pairing_presentation::windows::refusal_tests" in bodies[2]
+        and "crypto::keystore::" in bodies[2]
+        and "test:native-parity" in bodies[2]
+        and all("cargo +1.96 test --workspace --locked" not in body for body in (bodies[0], bodies[2]))
+    )
+
+
 def android_runner_local_artifact_transfers(jobs):
     tokens = (
         "android-release-scaffold",
@@ -209,6 +234,9 @@ rec("macos-cloud-evidence.sh artifacts/release-macos-cloud" in macos_smoke,
     "macOS smoke captures the cloud account lifecycle from the installed app")
 
 ci_jobs = docs["ci.yml"].get("jobs") or {}
+rec(windows_workspace_shards_hold(ci_jobs),
+    "ci.yml shards Windows checks and gives cache saves to the shorter producer",
+    "full tests must restore only while native assertions refresh their shared cache")
 documentation = ci_jobs.get("documentation") or {}
 documentation_body = "\n".join(step.get("run") or "" for step in steps(documentation))
 rec("check-docs.py" in documentation_body,
@@ -967,6 +995,50 @@ rec("check-feature-ledger.py" in release_ledger_body,
 
 # --- self-test: prove the runner-image detector fails when it should --------
 if SELF_TEST:
+    def windows_shard_fixture():
+        def job(command):
+            return {
+                "timeout-minutes": 20,
+                "steps": [
+                    {"uses": "Swatinem/rust-cache@fixture", "with": {"save-if": False}},
+                    {"run": command},
+                ],
+            }
+        return {
+            "windows-clippy": job(
+                "cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings"),
+            "windows-test": job("cargo +1.96 test --workspace --locked"),
+            "windows-native-test": job(
+                "pairing_presentation::windows::refusal_tests\n"
+                "crypto::keystore::\ntest:native-parity"),
+        }
+
+    windows_fixture = windows_shard_fixture()
+    windows_fixture["windows-native-test"]["steps"][0]["with"]["save-if"] = True
+    windows_save_fixture = windows_shard_fixture()
+    windows_save_fixture["windows-native-test"]["steps"][0]["with"]["save-if"] = True
+    windows_save_fixture["windows-test"]["steps"][0]["with"]["save-if"] = True
+    windows_no_producer_fixture = windows_shard_fixture()
+    windows_coverage_fixture = windows_shard_fixture()
+    windows_coverage_fixture["windows-test"]["steps"][1]["run"] = "cargo test -p copypaste-core"
+    windows_combined_fixture = windows_shard_fixture()
+    windows_combined_fixture["windows-native-test"]["steps"][1]["run"] += \
+        "\ncargo +1.96 test --workspace --locked"
+    for desc, held in (
+        ("bounded Windows shards with one cache producer are accepted",
+         windows_workspace_shards_hold(windows_fixture)),
+        ("a Windows post-job cache save is rejected",
+         not windows_workspace_shards_hold(windows_save_fixture)),
+        ("a missing Windows cache producer is rejected",
+         not windows_workspace_shards_hold(windows_no_producer_fixture)),
+        ("reduced Windows workspace coverage is rejected",
+         not windows_workspace_shards_hold(windows_coverage_fixture)),
+        ("recombined Windows workspace work is rejected",
+         not windows_workspace_shards_hold(windows_combined_fixture)),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the Windows workspace shard detector did not behave as stated")
+
     def probe(*runs_on):
         jobs = {"j{}".format(i): {"runs-on": r} for i, r in enumerate(runs_on)}
         return all(cond for cond, _, _ in runner_image_checks({"probe.yml": {"jobs": jobs}}))
