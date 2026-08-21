@@ -20,6 +20,7 @@
 - Map Windows Authenticode TSA secrets to SignTool-compatible http:// RFC 3161 URLs.
 - Speed release CI: reuse published Android upgrade fixtures, parallel cloud-evidence APK, cache tauri-driver.
 - Cut alpha.28 on the TSA http:// SignTool rewrite after alpha.27 Windows smoke failed.
+- Cut alpha.29 so Windows smoke sets WINDOWS_CERTIFICATE_PFX_PATH in-process (GITHUB_ENV is later-step only).
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
   OEM-sticky capture restarts.
 
