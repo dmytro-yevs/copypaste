@@ -325,35 +325,111 @@ def self_test(release, nightly, ci):
 
     def rejected_ci_mutation(label, mutation, expected):
         nonlocal failures
-        fixture = copy.deepcopy(ci)
-        mutation(fixture)
-        held = any(expected in error for error in contract_errors(release, nightly, fixture))
-        print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
+        held = True
+        detail = ""
+        for fixture_factory in (
+            lambda: copy.deepcopy(ci),
+            lambda: combined_frontend_fixture(ci),
+        ):
+            try:
+                fixture = fixture_factory()
+                mutation(fixture)
+                rejected = any(
+                    expected in error
+                    for error in contract_errors(release, nightly, fixture)
+                )
+            except Exception as error:
+                rejected = False
+                detail = f"fixture mutation failed: {error}"
+            if not rejected:
+                held = False
+                detail = detail or "fixture passed unexpectedly"
+                break
+        print(f"{'PASS' if held else 'FAIL'}|{label}|{detail}")
         failures += 0 if held else 1
 
-    def frontend_step(value, command):
-        return next(
-            step
-            for step in value["jobs"]["frontend"]["steps"]
-            if str(step.get("run") or "").strip() == command
-        )
+    def frontend_command(value, command):
+        job = value["jobs"]["frontend"]
+        occurrences = exact_command_occurrences(job, tuple(shlex.split(command)))
+        if len(occurrences) != 1:
+            raise ValueError(
+                f"expected one parsed {command!r} command, found {len(occurrences)}"
+            )
+        return occurrences[0]
+
+    def edit_frontend_lines(value, step_index, edit):
+        step = value["jobs"]["frontend"]["steps"][step_index]
+        run = str(step.get("run") or "")
+        lines = run.splitlines()
+        edit(lines)
+        step["run"] = "\n".join(lines) + ("\n" if run.endswith("\n") else "")
 
     def delete_frontend_command(value, command):
-        value["jobs"]["frontend"]["steps"].remove(frontend_step(value, command))
+        step_index, line_index = frontend_command(value, command)
+        edit_frontend_lines(value, step_index, lambda lines: lines.pop(line_index))
 
     def duplicate_frontend_command(value, command):
-        job_steps = value["jobs"]["frontend"]["steps"]
-        original = frontend_step(value, command)
-        job_steps.insert(job_steps.index(original) + 1, copy.deepcopy(original))
+        step_index, line_index = frontend_command(value, command)
+        edit_frontend_lines(
+            value,
+            step_index,
+            lambda lines: lines.insert(line_index + 1, lines[line_index]),
+        )
+
+    def replace_frontend_command(value, command, replacement):
+        step_index, line_index = frontend_command(value, command)
+
+        def replace(lines):
+            indentation = lines[line_index][:-len(lines[line_index].lstrip())]
+            lines[line_index] = indentation + replacement
+
+        edit_frontend_lines(value, step_index, replace)
 
     def swap_frontend_commands(value, first, second):
         job_steps = value["jobs"]["frontend"]["steps"]
-        first_index = job_steps.index(frontend_step(value, first))
-        second_index = job_steps.index(frontend_step(value, second))
-        job_steps[first_index], job_steps[second_index] = (
-            job_steps[second_index],
-            job_steps[first_index],
+        first_step, first_line = frontend_command(value, first)
+        second_step, second_line = frontend_command(value, second)
+        if first_step == second_step:
+            def swap(lines):
+                lines[first_line], lines[second_line] = (
+                    lines[second_line],
+                    lines[first_line],
+                )
+
+            edit_frontend_lines(value, first_step, swap)
+            return
+        first_lines = str(job_steps[first_step].get("run") or "").splitlines()
+        second_lines = str(job_steps[second_step].get("run") or "").splitlines()
+        first_lines[first_line], second_lines[second_line] = (
+            second_lines[second_line],
+            first_lines[first_line],
         )
+        job_steps[first_step]["run"] = "\n".join(first_lines)
+        job_steps[second_step]["run"] = "\n".join(second_lines)
+
+    def combined_frontend_fixture(value):
+        fixture = copy.deepcopy(value)
+        for command in reversed(("npm ci", "npm run build", "npm test")):
+            delete_frontend_command(fixture, command)
+        fixture["jobs"]["frontend"]["steps"].append(
+            {"run": "npm ci\nnpm run build\nnpm test"}
+        )
+        return fixture
+
+    try:
+        combined = combined_frontend_fixture(ci)
+        combined_errors = contract_errors(release, nightly, combined)
+        combined_held = not combined_errors
+        combined_detail = "; ".join(combined_errors)
+    except Exception as error:
+        combined_held = False
+        combined_detail = f"fixture setup failed: {error}"
+    print(
+        f"{'PASS' if combined_held else 'FAIL'}|"
+        "combined multiline Linux frontend commands pass|"
+        f"{combined_detail}"
+    )
+    failures += 0 if combined_held else 1
 
     rejected(
         "missing Windows platform dependency fails",
@@ -456,12 +532,14 @@ def self_test(release, nightly, ci):
     )
     rejected_ci_mutation(
         "renamed Linux frontend build fails",
-        lambda value: frontend_step(value, "npm run build").update({"run": "npm run bundle"}),
+        lambda value: replace_frontend_command(value, "npm run build", "npm run bundle"),
         "must run exactly one npm ci, npm run build, and full npm test",
     )
     rejected_ci_mutation(
         "narrowed Linux frontend test fails",
-        lambda value: frontend_step(value, "npm test").update({"run": "npm test -- src/App.test.tsx"}),
+        lambda value: replace_frontend_command(
+            value, "npm test", "npm test -- src/App.test.tsx"
+        ),
         "must run exactly one npm ci, npm run build, and full npm test",
     )
     rejected_ci_mutation(
