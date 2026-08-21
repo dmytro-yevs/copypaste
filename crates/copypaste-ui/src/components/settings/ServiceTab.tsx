@@ -3,7 +3,18 @@
  * ships at 30 seconds and can be turned off from this control.
  */
 import { useState } from "react";
-import { LoaderCircle, RotateCw, TriangleAlert } from "lucide-react";
+import {
+  ClipboardCopy,
+  File,
+  FileImage,
+  FileText,
+  Folder,
+  ListChecks,
+  LoaderCircle,
+  RotateCw,
+  ShieldAlert,
+  TriangleAlert,
+} from "lucide-react";
 
 import { StateNotice } from "@/components/StateNotice";
 import { Badge } from "@/components/ui/badge";
@@ -150,6 +161,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.poll.title")}
           description={t("settings.service.poll.description")}
+          icon={RotateCw}
           choices={POLL_INTERVAL_MS}
           value={data.poll_interval_ms}
           disabled={busy}
@@ -164,6 +176,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.dedup.title")}
           description={t("settings.service.dedup.description")}
+          icon={ClipboardCopy}
           choices={DEDUP_WINDOW_SECS}
           value={data.dedup_window_secs}
           disabled={busy}
@@ -173,6 +186,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.maxText.title")}
           description={t("settings.service.maxText.description")}
+          icon={FileText}
           choices={MAX_TEXT_SIZE_BYTES}
           value={data.max_text_size_bytes}
           disabled={busy}
@@ -187,6 +201,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.maxImage.title")}
           description={t("settings.service.maxImage.description")}
+          icon={FileImage}
           choices={MAX_IMAGE_SIZE_BYTES}
           value={data.max_image_size_bytes}
           disabled={busy}
@@ -201,6 +216,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.maxFile.title")}
           description={t("settings.service.maxFile.description")}
+          icon={File}
           choices={MAX_FILE_SIZE_BYTES}
           value={data.max_file_size_bytes}
           disabled={busy}
@@ -215,6 +231,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.maxDecodedImage.title")}
           description={t("settings.service.maxDecodedImage.description")}
+          icon={FileImage}
           choices={MAX_DECODED_IMAGE_MB}
           value={data.max_decoded_image_mb}
           disabled={busy}
@@ -236,6 +253,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.historyLimit.title")}
           description={t("settings.service.historyLimit.description")}
+          icon={ListChecks}
           choices={HISTORY_LIMIT}
           value={data.history_limit}
           disabled={busy}
@@ -245,6 +263,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.storageQuota.title")}
           description={t("settings.service.storageQuota.description")}
+          icon={Folder}
           choices={STORAGE_QUOTA_BYTES}
           value={data.storage_quota_bytes}
           disabled={busy}
@@ -254,6 +273,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.retention.title")}
           description={t("settings.service.retention.description")}
+          icon={RotateCw}
           choices={RETENTION_DAYS}
           value={data.retention_days}
           disabled={busy}
@@ -263,6 +283,7 @@ export function ServiceTab() {
         <ChoiceRow
           title={t("settings.service.sensitive.title")}
           description={t("settings.service.sensitive.description")}
+          icon={ShieldAlert}
           note={
             <span
               className={

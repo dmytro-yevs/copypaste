@@ -18,8 +18,11 @@ import { classifyError, friendlyError } from "@/lib/errors";
 import type { PairingCeremony, PairingState } from "@/lib/ipc";
 
 interface PairingPanelProps {
-  disabled: boolean;
+  pairing?: ReturnType<typeof usePairing>;
+  disabled?: boolean;
   hideIntro?: boolean;
+  showEntryActions?: boolean;
+  hideIdle?: boolean;
   onConfirmed?: () => void;
 }
 
@@ -83,9 +86,17 @@ function stateCopy(
   }
 }
 
-export function PairingPanel({ disabled, hideIntro, onConfirmed }: PairingPanelProps) {
+export function PairingPanel({
+  pairing: pairingProp,
+  disabled = false,
+  hideIntro = false,
+  showEntryActions = true,
+  hideIdle = false,
+  onConfirmed,
+}: PairingPanelProps) {
   const { t } = useTranslation();
-  const pairing = usePairing();
+  const ownPairing = usePairing();
+  const pairing = pairingProp ?? ownPairing;
   const state = pairing.ceremony?.state ?? "idle";
   const active =
     state === "waiting_for_peer" ||
@@ -106,6 +117,15 @@ export function PairingPanel({ disabled, hideIntro, onConfirmed }: PairingPanelP
     if (state === "confirmed") onConfirmed?.();
   }, [onConfirmed, state]);
 
+  if (
+    hideIdle &&
+    state === "idle" &&
+    !pairing.isPending &&
+    pairing.error === null
+  ) {
+    return null;
+  }
+
   return (
     <section
       aria-labelledby={hideIntro ? undefined : "pair-device-heading"}
@@ -113,60 +133,52 @@ export function PairingPanel({ disabled, hideIntro, onConfirmed }: PairingPanelP
       aria-busy={pairing.isPending || undefined}
       className="flex flex-col gap-s-2"
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-s-2">
-        {hideIntro ? null : (
-          <div>
-            <h2 id="pair-device-heading" className="text-sm font-semibold">
-              {t("devices.pairing.heading")}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t("devices.pairing.description")}
-            </p>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-s-2">
+      {!hideIntro && (
+        <div>
+          <h2 id="pair-device-heading" className="text-sm font-semibold">
+            {t("devices.pairing.heading")}
+          </h2>
+        </div>
+      )}
+      {showEntryActions && (
+        <div className="flex flex-wrap justify-end gap-s-2">
           <Button
             size="sm"
             variant="outline"
             disabled={disabled || active || pairing.isPending}
-            title={
-              disabled
-                ? t("devices.cap.hint")
-                : t("devices.pairing.createHint")
-            }
+            title={disabled ? t("devices.cap.hint") : t("devices.pairing.createHint")}
             onClick={() => pairing.run("create")}
           >
-            {pending === "create" ? (
-              <LoaderCircle
-                className="animate-spin motion-reduce:animate-none"
-                aria-hidden="true"
-              />
-            ) : (
-              <QrCode aria-hidden="true" />
-            )}
+            <LoaderCircle
+              className={
+                pending === "create"
+                  ? "animate-spin motion-reduce:animate-none"
+                  : "hidden"
+              }
+              aria-hidden="true"
+            />
+            {pending === "create" ? null : <QrCode aria-hidden="true" />}
             {t("devices.pairing.create")}
           </Button>
           <Button
             size="sm"
             disabled={disabled || active || pairing.isPending}
-            title={
-              disabled ? t("devices.cap.hint") : t("devices.pairing.joinHint")
-            }
+            title={disabled ? t("devices.cap.hint") : t("devices.pairing.joinHint")}
             onClick={() => pairing.run("join")}
           >
-            {pending === "join" ? (
-              <LoaderCircle
-                className="animate-spin motion-reduce:animate-none"
-                aria-hidden="true"
-              />
-            ) : (
-              <ScanLine aria-hidden="true" />
-            )}
+            <LoaderCircle
+              className={
+                pending === "join"
+                  ? "animate-spin motion-reduce:animate-none"
+                  : "hidden"
+              }
+              aria-hidden="true"
+            />
+            {pending === "join" ? null : <ScanLine aria-hidden="true" />}
             {t("devices.pairing.join")}
           </Button>
         </div>
-      </div>
-
+      )}
       <div className="rounded-xl border border-border bg-card p-s-3 shadow-sm">
         {pairing.isChecking ? (
           <div

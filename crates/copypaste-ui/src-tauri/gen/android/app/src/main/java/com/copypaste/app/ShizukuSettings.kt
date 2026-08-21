@@ -53,10 +53,33 @@ object ShizukuSettings {
         .version(BuildConfig.VERSION_CODE)
 
     fun setClipboardAccessNotifications(suppressed: Boolean, completion: (Boolean) -> Unit) {
-        mainHandler.post { bindClipboardAccessNotifications(suppressed, completion) }
+        mainHandler.post {
+            bindUserService(completion) { service ->
+                service.setClipboardAccessNotifications(suppressed)
+            }
+        }
     }
 
-    private fun bindClipboardAccessNotifications(suppressed: Boolean, completion: (Boolean) -> Unit) {
+    fun preparePersistentCaptureState(packageName: String, completion: (Boolean) -> Unit) {
+        mainHandler.post {
+            bindUserService(completion) { service ->
+                service.preparePersistentCaptureState(packageName)
+            }
+        }
+    }
+
+    fun refreshClipCascadeSetup(packageName: String, completion: (Boolean) -> Unit) {
+        mainHandler.post {
+            bindUserService(completion) { service ->
+                service.refreshClipCascadeSetup(packageName)
+            }
+        }
+    }
+
+    private fun bindUserService(
+        completion: (Boolean) -> Unit,
+        operation: (IShizukuSettingsService) -> Boolean,
+    ) {
         if (!hasPermission()) {
             completion(false)
             return
@@ -84,7 +107,8 @@ object ShizukuSettings {
                 val service = binder?.let(IShizukuSettingsService.Stub::asInterface)
                 val changed = try {
                     binder?.pingBinder() == true &&
-                        service?.setClipboardAccessNotifications(suppressed) == true
+                        service != null &&
+                        operation(service)
                 } catch (_: Exception) {
                     false
                 }

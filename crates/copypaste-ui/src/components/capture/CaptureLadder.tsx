@@ -3,8 +3,8 @@
  *  not readable to everyone (A11Y-10). */
 import { Check, Circle, Dot } from "lucide-react";
 
+import { Stepper, type StepperItem } from "@/components/ui/stepper";
 import { useTranslation } from "@/i18n";
-import { cn } from "@/lib/cn";
 import type { LadderRung, LadderStep } from "@/lib/capture";
 
 const LABEL = {
@@ -16,6 +16,20 @@ const LABEL = {
 
 export function CaptureLadder({ rungs }: { rungs: readonly LadderRung[] }) {
   const { t } = useTranslation();
+  const items: StepperItem[] = rungs.map((rung) => ({
+    id: rung.id,
+    icon: rung.done ? Check : rung.current ? Dot : Circle,
+    label: t(LABEL[rung.id]),
+    stateLabel: t(
+      rung.done
+        ? "capture.setup.ladder.done"
+        : rung.current
+          ? "capture.setup.ladder.next"
+          : "capture.setup.ladder.todo",
+    ),
+    done: rung.done,
+    current: rung.current,
+  }));
 
   return (
     <section
@@ -24,42 +38,7 @@ export function CaptureLadder({ rungs }: { rungs: readonly LadderRung[] }) {
     >
       <h2 className="text-sm font-medium">{t("capture.setup.ladder.title")}</h2>
 
-      <ol
-        aria-label={t("capture.setup.ladder.label")}
-        className="flex flex-col gap-s-1"
-      >
-        {rungs.map((rung) => {
-          const Icon = rung.done ? Check : rung.current ? Dot : Circle;
-          return (
-            <li
-              key={rung.id}
-              data-step={rung.id}
-              className="flex flex-wrap items-center gap-s-2 border-b border-divider py-s-2 text-sm last:border-b-0"
-            >
-              <Icon
-                size={15}
-                aria-hidden="true"
-                className={cn(
-                  "shrink-0",
-                  rung.done ? "text-ok-strong" : "text-muted-foreground",
-                )}
-              />
-              <span className={cn("min-w-0 flex-1", rung.current && "font-medium")}>
-                {t(LABEL[rung.id])}
-              </span>
-              <span className="shrink-0 text-xs text-muted-foreground">
-                {t(
-                  rung.done
-                    ? "capture.setup.ladder.done"
-                    : rung.current
-                      ? "capture.setup.ladder.next"
-                      : "capture.setup.ladder.todo",
-                )}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
+      <Stepper label={t("capture.setup.ladder.label")} items={items} />
     </section>
   );
 }

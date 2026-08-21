@@ -9,11 +9,12 @@ pub type NativeAbort = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg(any(
     test,
+    feature = "dev-web-bridge",
     target_os = "android",
     target_os = "macos",
     target_os = "windows"
 ))]
-mod invite;
+pub(crate) mod invite;
 
 #[cfg(target_os = "android")]
 pub(crate) mod android;

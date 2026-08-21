@@ -17,7 +17,7 @@ import {
 import { PEERS_KEY } from "@/hooks/useDevices";
 import { CONFIG_KEY, PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import { OPEN_AT_LOGIN_KEY } from "@/hooks/useOpenAtLogin";
-import { hasBridge, type PrivateModeData } from "@/lib/ipc";
+import { hasBridge, hasWebBridge, type PrivateModeData } from "@/lib/ipc";
 import {
   EVENT_AUTOSTART_CHANGED,
   EVENT_CHANGED,
@@ -50,7 +50,7 @@ export function usePush(): boolean {
   const [live, setLive] = useState(false);
 
   useEffect(() => {
-    if (!hasBridge()) return;
+    if (!hasBridge() || hasWebBridge()) return;
 
     // `listen` resolves to an unlisten function. Both are awaited in a
     // cancelled-aware way: an effect that unmounts before the promise settles

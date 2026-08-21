@@ -1,5 +1,6 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, Search, Trash2 } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { clipSourceMetadata } from "@/components/history/clipMetadata";
@@ -107,14 +108,23 @@ function ExclusionsEditor({
   const { t } = useTranslation();
   const history = useHistory("");
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [validation, setValidation] = useState<string | null>(null);
   const [normalizedNotice, setNormalizedNotice] = useState<string | null>(null);
+  const [loadInstalledApps, setLoadInstalledApps] = useState(!android);
   const validationId = useId();
   const noticeId = useId();
+
+  useEffect(() => {
+    if (!android) return;
+    const timer = window.setTimeout(() => setLoadInstalledApps(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [android]);
+
   const installedApps = useQuery({
     queryKey: ["installed-source-apps"],
     queryFn: listInstalledSourceApps,
-    enabled: android,
+    enabled: android && loadInstalledApps,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -136,15 +146,16 @@ function ExclusionsEditor({
   );
   const selectedIds = useMemo(() => new Set(ids), [ids]);
   const normalized = query.trim();
+  const deferredNormalized = deferredQuery.trim();
   const visibleKnownIds = knownIds.filter((id) =>
     id.toLocaleLowerCase().includes(normalized.toLocaleLowerCase()),
   );
   const visibleInstalledApps = useMemo(() => {
-    const needle = normalized.toLocaleLowerCase();
+    const needle = deferredNormalized.toLocaleLowerCase();
     return (installedApps.data ?? []).filter((app) =>
       !needle || app.label.toLocaleLowerCase().includes(needle) || app.package_id.toLocaleLowerCase().includes(needle),
     );
-  }, [installedApps.data, normalized]);
+  }, [deferredNormalized, installedApps.data]);
   const installedById = useMemo(
     () => new Map((installedApps.data ?? []).map((app) => [app.package_id, app])),
     [installedApps.data],
@@ -183,7 +194,7 @@ function ExclusionsEditor({
           selectedIds={selectedIds}
           query={query}
           disabled={disabled}
-          loading={installedApps.isLoading}
+          loading={!loadInstalledApps || installedApps.isLoading}
           failed={installedApps.isError}
           onQueryChange={setQuery}
           onAdd={add}
@@ -322,6 +333,15 @@ function AndroidExclusionPicker({
 }: AndroidExclusionPickerProps) {
   const { t } = useTranslation();
   const searchLabel = t("settings.service.exclusions.searchInstalled");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: apps.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 52,
+    getItemKey: (index) => apps[index]?.package_id ?? index,
+    overscan: 8,
+    useFlushSync: false,
+  });
   return (
     <div className="flex flex-col gap-s-2">
       <label htmlFor="android-exclusion-search" className="sr-only">
@@ -335,7 +355,10 @@ function AndroidExclusionPicker({
         placeholder={searchLabel}
         onChange={(event) => onQueryChange(event.target.value)}
       />
-      <div className="flex max-h-56 flex-col overflow-y-auto rounded-md border border-divider">
+      <div
+        ref={scrollRef}
+        className="max-h-56 overflow-y-auto rounded-md border border-divider"
+      >
         {loading ? (
           <p className="px-s-2 py-s-2 text-xs text-muted-foreground">{t("settings.service.loading")}</p>
         ) : failed ? (
@@ -347,21 +370,33 @@ function AndroidExclusionPicker({
             {t("settings.service.exclusions.noInstalledMatches")}
           </p>
         ) : (
-          apps.map((app) => (
-            <button
-              key={app.package_id}
-              type="button"
-              disabled={disabled || selectedIds.has(app.package_id)}
-              className="flex min-h-11 items-center gap-s-2 px-s-2 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={() => onAdd(app.package_id)}
-            >
-              <SourceAppIcon bundleId={app.package_id} Fallback={Search} className="size-5 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{app.label}</span>
-                <span className="block truncate font-mono text-xs text-muted-foreground">{app.package_id}</span>
-              </span>
-            </button>
-          ))
+          <div
+            className="relative w-full"
+            style={{ height: virtualizer.getTotalSize() }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const app = apps[virtualRow.index];
+              if (!app) return null;
+              return (
+                <button
+                  key={virtualRow.key}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  type="button"
+                  disabled={disabled || selectedIds.has(app.package_id)}
+                  className="absolute left-0 top-0 flex min-h-11 w-full items-center gap-s-2 px-s-2 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  onClick={() => onAdd(app.package_id)}
+                >
+                  <SourceAppIcon bundleId={app.package_id} Fallback={Search} className="size-5 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm">{app.label}</span>
+                    <span className="block truncate font-mono text-xs text-muted-foreground">{app.package_id}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

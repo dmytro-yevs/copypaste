@@ -15,6 +15,12 @@ interface WebBridgeConfig {
   readonly token: string;
 }
 
+declare global {
+  interface Window {
+    __COPYPASTE_WEB_BRIDGE__?: WebBridgeConfig | null;
+  }
+}
+
 export interface IpcCallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
@@ -86,10 +92,19 @@ function bounded<T>(
 
 /**
  * Browser previews have no Tauri bridge. A local adapter is available only
- * from `npm run dev:web:daemon`; both values are injected by that script and
- * Vite erases this branch from a production build.
+ * from `npm run dev:web:daemon`; both values are either loaded at page time
+ * from `/copypaste-web-bridge.js` or injected before Vite starts.
  */
 function webBridge(): WebBridgeConfig | null {
+  const runtime = window.__COPYPASTE_WEB_BRIDGE__;
+  if (
+    typeof runtime?.url === "string" &&
+    typeof runtime.token === "string" &&
+    runtime.url.length > 0 &&
+    runtime.token.length > 0
+  ) {
+    return runtime;
+  }
   if (!import.meta.env.DEV) return null;
   const url = import.meta.env.VITE_COPYPASTE_WEB_BRIDGE_URL;
   const token = import.meta.env.VITE_COPYPASTE_WEB_BRIDGE_TOKEN;

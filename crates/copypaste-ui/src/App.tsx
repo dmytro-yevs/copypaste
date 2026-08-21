@@ -18,7 +18,7 @@ import { usePush } from "@/hooks/usePush";
 import { useSizeClass } from "@/hooks/useSizeClass";
 import { useTranslation } from "@/i18n";
 import { classifyError } from "@/lib/errors";
-import { hasBridge, setAllowScreenshots } from "@/lib/ipc";
+import { hasBridge, hasWebBridge, setAllowScreenshots } from "@/lib/ipc";
 import { cn } from "@/lib/cn";
 import { isAndroidPlatform } from "@/lib/platform";
 import { EVENT_OPEN_SETTINGS } from "@/lib/tauriEvents";
@@ -89,7 +89,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!hasBridge()) return;
+    if (!hasBridge() || hasWebBridge()) return;
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     void listen(EVENT_OPEN_SETTINGS, () => useUi.getState().setView("settings")).then((detach) => {

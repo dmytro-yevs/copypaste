@@ -1113,6 +1113,8 @@ mod tests {
                 deleted: false,
                 content_hash: None,
                 origin_device_id: "device-b",
+                app_bundle_id: None,
+                app_name: None,
             })
             .expect("the merge must take an unknown item");
 

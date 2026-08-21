@@ -60,6 +60,32 @@ describe("the primary navigation", () => {
     expect(nav().dataset.sizeClass).toBe("compact");
     expect(nav().className).toContain("--tabbar-h");
     expect(nav().className).not.toContain("border-r");
+    const group = screen.getByRole("list");
+    expect(group.className).toContain("w-fit");
+    expect(group.className).toContain("mx-auto");
+    expect(group.className).not.toContain("flex-1");
+    expect(group.className).toContain("gap-1");
+  });
+
+  it("keeps compact tabs equal-sized whether active or inactive", async () => {
+    setUserAgent(MACOS);
+    setViewportWidth(360);
+    const { user } = withUser(<Sidebar />);
+
+    const history = screen.getByRole("button", { name: "History" });
+    const devices = screen.getByRole("button", { name: "Devices" });
+
+    for (const button of [history, devices]) {
+      expect(button.className).toContain("h-[var(--tap-min)]");
+      expect(button.className).toContain("w-[5.25rem]");
+      expect(button.className).toContain("rounded-xl");
+    }
+
+    await user.click(devices);
+
+    expect(history.className).toContain("w-[5.25rem]");
+    expect(devices.className).toContain("w-[5.25rem]");
+    expect(devices.className).toContain("shadow-xs");
   });
 
   it("crosses the boundary on a rotation without a remount", () => {

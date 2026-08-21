@@ -328,6 +328,8 @@ impl StoreView {
             payload_metadata: row.payload_metadata.clone(),
             created_at: row.created_at,
             deleted: row.deleted,
+            source_app_bundle_id: row.app_bundle_id.clone(),
+            source_app_name: row.app_name.clone(),
         })
     }
 }
@@ -376,6 +378,8 @@ fn remote_version<'a>(item: &'a LocalItem, text: Option<&'a str>) -> RemoteVersi
         // The cloud row carries no hash — see `RemoteVersion`.
         content_hash: None,
         origin_device_id: &item.origin_device_id,
+        app_bundle_id: item.source_app_bundle_id.as_deref(),
+        app_name: item.source_app_name.as_deref(),
     }
 }
 
@@ -460,6 +464,8 @@ mod tests {
                     deleted: false,
                     is_sensitive: false,
                     origin_device_id: "",
+                    app_bundle_id: None,
+                    app_name: None,
                     pinned: false,
                     pin_order: None,
                     pin_updated_at: 0,
@@ -738,5 +744,33 @@ mod tests {
                 item_id: None,
             }
         );
+    }
+
+    #[test]
+    fn applying_a_cloud_page_preserves_the_capturing_app_metadata() {
+        let device = device();
+        let view = device.view();
+
+        let applied = view
+            .apply_page(vec![LocalItem {
+                item_id: "cloud-item".into(),
+                content: Zeroizing::new(b"shared text".to_vec()),
+                content_type: "text".into(),
+                payload_metadata: None,
+                created_at: 1_700_000_000_000,
+                deleted: false,
+                origin_device_id: "device-b".into(),
+                source_app_bundle_id: Some("com.todesktop.230313mzl4w4u92".into()),
+                source_app_name: Some("Cursor".into()),
+            }])
+            .unwrap();
+
+        assert_eq!(applied, [Applied::Merged]);
+        let stored = device.store.get("cloud-item").unwrap().unwrap();
+        assert_eq!(
+            stored.app_bundle_id.as_deref(),
+            Some("com.todesktop.230313mzl4w4u92")
+        );
+        assert_eq!(stored.app_name.as_deref(), Some("Cursor"));
     }
 }

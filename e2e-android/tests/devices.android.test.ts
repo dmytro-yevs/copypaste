@@ -16,13 +16,13 @@ import {
 } from "../src/harness/leaks.js";
 import { count, gotoView, visibleText, waitFor } from "../src/harness/ui.js";
 
-const PAIRING = 'section[aria-labelledby="pair-device-heading"]';
 /** DMY-48: this leg asserted the string "Nearby devices", which the screen has
  *  never rendered — its heading reads "Discovered on your network". The region
  *  is anchored on the heading that labels it and asserted against the copy the
  *  screen actually shows — see DevicesView.test.tsx, which pins both. */
 const DISCOVERED = 'section[aria-labelledby="discovered-devices-heading"]';
 const DISCOVERED_HEADING = "Discovered on your network";
+const HEADER = "header.chrome";
 const PAIRING_CODE = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}\b/;
 const SECURITY_CODE = /\b[0-9A-F]{6}\b/;
 const ACTIONS = ["Show pairing code", "Scan pairing code"];
@@ -56,7 +56,7 @@ async function actionBoxes() {
         const root = document.querySelector(scope);
         return labels.map((label) => {
           const button = Array.from(root?.querySelectorAll("button") ?? []).find(
-            (node) => node.textContent?.trim() === label,
+            (node) => node.getAttribute("aria-label") === label,
           );
           const rect = button?.getBoundingClientRect();
           return {
@@ -68,7 +68,7 @@ async function actionBoxes() {
           };
         });
       },
-      PAIRING,
+      HEADER,
       ACTIONS,
     ),
   );
@@ -87,8 +87,23 @@ describe("the screen", () => {
 
   test("offers both native pairing ceremonies", async () => {
     const text = await visibleText(app);
-    for (const action of ACTIONS) expect(text).toContain(action);
-    expect(text).toContain("Ready to pair");
+    const surface = await app.withPage((page) =>
+      page.evaluate(
+        (scope: string, labels: string[]) => {
+          const root = document.querySelector(scope);
+          return labels.every((label) =>
+            Array.from(root?.querySelectorAll("button") ?? []).some(
+              (node) => node.getAttribute("aria-label") === label,
+            ),
+          );
+        },
+        HEADER,
+        ACTIONS,
+      ),
+    );
+
+    expect(surface).toBe(true);
+    expect(text).not.toContain("Ready to pair");
   });
 
   test("lays both pairing controls out as reachable touch targets", async () => {
@@ -114,10 +129,9 @@ describe("the native security boundary", () => {
           credentialNodes:
             root?.querySelectorAll("input, output, canvas, [data-pairing-secret]").length ?? 0,
         };
-      }, PAIRING),
+      }, HEADER),
     );
 
-    expect(surface.text).toContain("protected native view");
     expect(surface.text).not.toMatch(PAIRING_CODE);
     expect(surface.text).not.toMatch(SECURITY_CODE);
     expect(surface.credentialNodes).toBe(0);

@@ -77,6 +77,15 @@ pub trait CaptureControl: Send + Sync + 'static {
     fn set_toast_suppressed(&self, suppressed: bool, acknowledged: bool)
         -> Result<CaptureSnapshot>;
 
+    /// Open Shizuku's app surface on Android.
+    fn open_shizuku(&self) -> Result<()>;
+
+    /// Open Android's Developer options so the user can reach Wireless debugging.
+    fn open_developer_options(&self) -> Result<()>;
+
+    /// Request Android's battery-optimization exemption for this app.
+    fn request_battery_exemption(&self) -> Result<()>;
+
     /// Note that a clip reached the database, for the "last captured" line.
     fn note_stored(&self, at_ms: i64);
 

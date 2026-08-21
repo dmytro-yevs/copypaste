@@ -42,17 +42,24 @@ export function Sidebar({ navigationReady = true }: { navigationReady?: boolean 
           : "w-[var(--sidebar-w)] flex-col gap-s-1 border-r border-sidebar-border bg-transparent p-s-2",
       )}
     >
+      {!compact && (
+        <div
+          data-tauri-drag-region
+          className="min-h-[calc(var(--s-3)+var(--inset-top))] shrink-0 rounded-lg"
+        />
+      )}
+
       <ul className={cn(
         "flex",
         compact
-          ? "flex-1 rounded-xl border border-sidebar-border bg-sidebar p-1 shadow-sm"
+          ? "mx-auto w-fit max-w-full items-center gap-1 rounded-2xl border border-sidebar-border bg-sidebar p-1 shadow-sm"
           : "shrink-0 flex-col gap-s-1",
       )}>
         {ITEMS.map(({ view: id, label: key, icon: Icon }) => {
           const active = view === id;
           const label = t(key);
           return (
-            <li key={id} className={compact ? "flex-1" : undefined}>
+            <li key={id}>
               <button
                 type="button"
                 disabled={!navigationReady}
@@ -60,12 +67,12 @@ export function Sidebar({ navigationReady = true }: { navigationReady?: boolean 
                 aria-current={active ? "page" : undefined}
                 title={label}
                 className={cn(
-                  "flex w-full items-center rounded-md px-s-2 py-s-2 font-medium outline-none transition-colors duration-[var(--dur-fast)] focus-visible:ring-[3px] focus-visible:ring-ring",
+                  "flex w-full items-center font-medium outline-none transition-colors duration-[var(--dur-fast)] focus-visible:ring-[3px] focus-visible:ring-ring",
                   compact
-                    ? "min-h-[var(--tap-min)] flex-col justify-center gap-0.5 text-center text-xs"
+                    ? "h-[var(--tap-min)] w-[5.25rem] shrink-0 flex-col justify-center gap-1 rounded-xl px-s-2 py-1.5 text-center text-[11px] leading-tight"
                     : "min-h-[var(--tap-min)] flex-row justify-start gap-s-2 text-sm",
                   active
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-xs"
                     : "text-sidebar-foreground hover:bg-accent hover:text-accent-foreground",
                 )}
               >
