@@ -1,19 +1,23 @@
 $script:WindowsProcessTraceLimit = 128
 $script:WindowsProcessNames = @("copypaste-ui.exe", "copypaste-daemon.exe")
 
-function ConvertTo-WindowsProcessTraceLine([string]$Kind, $Record, $StartsByPid = @{}) {
+function ConvertTo-WindowsProcessTraceLine([string]$Kind, $Record, $OwnedByPid = @{}) {
     $name = [IO.Path]::GetFileName(([string]$Record.ProcessName)).ToLowerInvariant()
     $processId = [uint32]$Record.ProcessID
-    if ($Kind -eq "stop" -and $name -notin $script:WindowsProcessNames -and
-        $StartsByPid.ContainsKey($processId)) {
-        $stopTime = [uint64]$Record.TIME_CREATED
-        $start = @($StartsByPid[$processId] | Where-Object { $_.Time -le $stopTime } |
-            Sort-Object Time -Descending | Select-Object -First 1)
-        if ($start.Count -eq 1) { $name = $start[0].Name }
+    $time = [uint64]$Record.TIME_CREATED
+    if ($Kind -eq "start") {
+        if ($name -notin $script:WindowsProcessNames) { return $null }
+        $OwnedByPid[$processId] = [pscustomobject]@{ Time = $time; Name = $name }
+    } else {
+        if ($name -notin $script:WindowsProcessNames -and $OwnedByPid.ContainsKey($processId) -and
+            $OwnedByPid[$processId].Time -le $time) {
+            $name = $OwnedByPid[$processId].Name
+        }
+        $OwnedByPid.Remove($processId)
     }
     if ($name -notin $script:WindowsProcessNames) { return $null }
     $line = [ordered]@{
-        time_100ns = [uint64]$Record.TIME_CREATED
+        time_100ns = $time
         kind = $Kind
         executable = $name
         pid = $processId
@@ -63,6 +67,34 @@ function Start-WindowsProcessTrace(
     }
 }
 
+function Write-WindowsProcessTrace([array]$Records, $Trace) {
+    $ownedByPid = @{}
+    $seen = @{}
+    $converted = @(
+        $Records |
+            Sort-Object { [uint64]$_.Record.TIME_CREATED }, Kind |
+            Where-Object {
+                $record = $_.Record
+                $key = "{0}|{1}|{2}|{3}|{4}|{5}" -f $_.Kind,
+                    ([uint64]$record.TIME_CREATED), ([uint32]$record.ProcessID),
+                    ([string]$record.ProcessName).ToLowerInvariant(),
+                    ([uint32]$record.ParentProcessID), ([uint32]$record.ExitStatus)
+                if ($seen.ContainsKey($key)) { return $false }
+                $seen[$key] = $true
+                return $true
+            } |
+            ForEach-Object { ConvertTo-WindowsProcessTraceLine $_.Kind $_.Record $ownedByPid } |
+            Where-Object { $null -ne $_ }
+    )
+    $lines = @($converted | Select-Object -First $Trace.Limit)
+    if ($converted.Count -gt $Trace.Limit) {
+        $lines += ([ordered]@{ kind = "trace-truncated"; limit = $Trace.Limit } |
+            ConvertTo-Json -Compress)
+    }
+    if ($lines.Count -eq 0) { $lines = @('{"kind":"trace-empty"}') }
+    $lines | Set-Content -LiteralPath $Trace.Path -Encoding utf8
+}
+
 function Stop-WindowsProcessTrace($Trace) {
     if ($null -eq $Trace -or -not $Trace.Available) { return }
     try {
@@ -79,33 +111,7 @@ function Stop-WindowsProcessTrace($Trace) {
                 }
             }
         }
-        $startsByPid = @{}
-        foreach ($record in @($records | Where-Object { $_.Kind -eq "start" })) {
-            $name = [IO.Path]::GetFileName(([string]$record.Record.ProcessName)).ToLowerInvariant()
-            if ($name -in $script:WindowsProcessNames) {
-                $processPid = [uint32]$record.Record.ProcessID
-                if (-not $startsByPid.ContainsKey($processPid)) { $startsByPid[$processPid] = @() }
-                $startsByPid[$processPid] += [pscustomobject]@{
-                    Time = [uint64]$record.Record.TIME_CREATED
-                    Name = $name
-                }
-            }
-        }
-        $converted = @(
-            $records |
-                Sort-Object { [uint64]$_.Record.TIME_CREATED }, Kind |
-                ForEach-Object { ConvertTo-WindowsProcessTraceLine $_.Kind $_.Record $startsByPid } |
-                Where-Object { $null -ne $_ }
-        )
-        $lines = @($converted | Select-Object -First $Trace.Limit)
-        if ($converted.Count -gt $Trace.Limit) {
-            $lines += ([ordered]@{ kind = "trace-truncated"; limit = $Trace.Limit } |
-                ConvertTo-Json -Compress)
-        }
-        if ($lines.Count -eq 0) {
-            $lines = @('{"kind":"trace-empty"}')
-        }
-        $lines | Set-Content -LiteralPath $Trace.Path -Encoding utf8
+        Write-WindowsProcessTrace $records $Trace
     } finally {
         foreach ($sourceId in @($Trace.StartId, $Trace.StopId)) {
             Get-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue |
@@ -127,15 +133,15 @@ function Test-WindowsProcessTraceHelpers {
         throw "process trace start records lost process identity"
     }
 
-    $startsByPid = @{}
-    $startsByPid[[uint32]42] = @([pscustomobject]@{ Time = [uint64]100; Name = "copypaste-daemon.exe" })
+    $ownedByPid = @{}
+    $ownedByPid[[uint32]42] = [pscustomobject]@{ Time = [uint64]100; Name = "copypaste-daemon.exe" }
     $stop = ConvertTo-WindowsProcessTraceLine "stop" ([pscustomobject]@{
         TIME_CREATED = 200
         ProcessName = "copypaste-daem"
         ProcessID = 42
         ParentProcessID = 41
         ExitStatus = [uint32]3221225477
-    }) $startsByPid | ConvertFrom-Json
+    }) $ownedByPid | ConvertFrom-Json
     if ($stop.kind -ne "stop" -or $stop.executable -ne "copypaste-daemon.exe" -or
         $stop.exit_code -ne 3221225477) {
         throw "process trace stop records lost the exit code"
@@ -147,8 +153,25 @@ function Test-WindowsProcessTraceHelpers {
         ProcessID = 42
         ParentProcessID = 1
         ExitStatus = 0
-    }) $startsByPid
+    }) $ownedByPid
     if ($null -ne $reused) { throw "process trace correlated a stop before its target start" }
+
+    $ownedByPid[[uint32]42] = [pscustomobject]@{ Time = [uint64]100; Name = "copypaste-daemon.exe" }
+    $null = ConvertTo-WindowsProcessTraceLine "stop" ([pscustomobject]@{
+        TIME_CREATED = 200
+        ProcessName = "copypaste-daem"
+        ProcessID = 42
+        ParentProcessID = 41
+        ExitStatus = 0
+    }) $ownedByPid
+    $pidReuse = ConvertTo-WindowsProcessTraceLine "stop" ([pscustomobject]@{
+        TIME_CREATED = 300
+        ProcessName = "unrelated.exe"
+        ProcessID = 42
+        ParentProcessID = 1
+        ExitStatus = 0
+    }) $ownedByPid
+    if ($null -ne $pidReuse) { throw "process trace retained ownership after a matching stop" }
 
     $ignored = ConvertTo-WindowsProcessTraceLine "start" ([pscustomobject]@{
         TIME_CREATED = 300
@@ -158,6 +181,41 @@ function Test-WindowsProcessTraceHelpers {
     })
     if ($null -ne $ignored) {
         throw "process trace accepted an unrelated executable identity"
+    }
+
+    $fixturePath = Join-Path ([IO.Path]::GetTempPath()) "copypaste-process-trace-fixture-$([guid]::NewGuid()).jsonl"
+    try {
+        $startRecord = [pscustomobject]@{ TIME_CREATED = 100; ProcessName = "copypaste-ui.exe";
+            ProcessID = 51; ParentProcessID = 7; ExitStatus = 0 }
+        $stopRecord = [pscustomobject]@{ TIME_CREATED = 200; ProcessName = "copypaste-ui";
+            ProcessID = 51; ParentProcessID = 7; ExitStatus = 9 }
+        $reuseRecord = [pscustomobject]@{ TIME_CREATED = 300; ProcessName = "unrelated.exe";
+            ProcessID = 51; ParentProcessID = 1; ExitStatus = 0 }
+        $secondStart = [pscustomobject]@{ TIME_CREATED = 400; ProcessName = "copypaste-daemon.exe";
+            ProcessID = 52; ParentProcessID = 7; ExitStatus = 0 }
+        $records = @(
+            [pscustomobject]@{ Kind = "stop"; Record = $reuseRecord },
+            [pscustomobject]@{ Kind = "stop"; Record = $stopRecord },
+            [pscustomobject]@{ Kind = "start"; Record = $startRecord },
+            [pscustomobject]@{ Kind = "start"; Record = $startRecord },
+            [pscustomobject]@{ Kind = "stop"; Record = $stopRecord },
+            [pscustomobject]@{ Kind = "start"; Record = $secondStart }
+        )
+        Write-WindowsProcessTrace $records ([pscustomobject]@{ Path = $fixturePath; Limit = 2 })
+        $fixture = @(Get-Content -LiteralPath $fixturePath | ForEach-Object { $_ | ConvertFrom-Json })
+        $events = @($fixture | Where-Object { $_.kind -in @("start", "stop") })
+        if ($events.Count -ne 2 -or $events[0].kind -ne "start" -or $events[1].kind -ne "stop") {
+            throw "process trace did not reorder and deduplicate causal events before truncation"
+        }
+        if (@($fixture | Where-Object { $_.kind -eq "trace-truncated" }).Count -ne 1) {
+            throw "process trace fixture did not prove the unique-record bound"
+        }
+        if (@($events | Where-Object { $_.pid -eq 51 }).Count -ne 2 -or
+            @($events | Where-Object { $_.pid -eq 51 -and $_.exit_code -eq 0 }).Count -ne 0) {
+            throw "process trace fixture attributed a reused PID"
+        }
+    } finally {
+        Remove-Item -LiteralPath $fixturePath -Force -ErrorAction SilentlyContinue
     }
 }
 

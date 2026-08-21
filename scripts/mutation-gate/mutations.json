@@ -774,6 +774,20 @@
           "find": "    Assert-True ($LASTEXITCODE -eq 1) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"",
           "replace": "    Assert-True ($LASTEXITCODE -ge 0) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"",
           "expect": "a sidecar still answering was accepted as a stopped one"
+        },
+        {
+          "name": "process-ownership-not-retired",
+          "file": "scripts/release/windows-process-trace.ps1",
+          "find": "        $OwnedByPid.Remove($processId)",
+          "replace": "        $processId = $processId",
+          "expect": "process trace retained ownership after a matching stop"
+        },
+        {
+          "name": "duplicate-process-events-not-removed",
+          "file": "scripts/release/windows-process-trace.ps1",
+          "find": "                if ($seen.ContainsKey($key)) { return $false }",
+          "replace": "                if ($false) { return $false }",
+          "expect": "process trace did not reorder and deduplicate causal events before truncation"
         }
       ]
     }
