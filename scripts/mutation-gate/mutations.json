@@ -500,6 +500,20 @@
           "find": "    elif [positions[0] for positions in frontend_positions] != sorted(\n        positions[0] for positions in frontend_positions\n    ):",
           "replace": "    elif False:",
           "expect": "FAIL|Linux frontend build before install fails|"
+        },
+        {
+          "name": "windows-test-over-budget-accepted",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "        or not 0 < windows_test_timeout <= 20\n",
+          "replace": "        or not 0 < windows_test_timeout <= 25\n",
+          "expect": "FAIL|Windows test timeout above budget fails|"
+        },
+        {
+          "name": "prebuilt-sidecar-contract-disabled",
+          "file": "scripts/release/check-native-parity-wiring.py",
+          "find": "    return (\n        sidecar_job in needs(package)\n",
+          "replace": "    return True or (\n        sidecar_job in needs(package)\n",
+          "expect": "FAIL|missing CI Windows sidecar shard fails|"
         }
       ]
     },

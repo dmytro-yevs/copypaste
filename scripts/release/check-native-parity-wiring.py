@@ -31,6 +31,34 @@ def downloads(job):
     }
 
 
+def uploads(job):
+    return {
+        (step.get("with") or {}).get("name")
+        for step in steps(job)
+        if str(step.get("uses") or "").startswith("actions/upload-artifact")
+    }
+
+
+def needs(job):
+    value = job.get("needs") or []
+    return {value} if isinstance(value, str) else set(value)
+
+
+def prebuilt_sidecar_contract(jobs, package_job, sidecar_job, artifact):
+    package = jobs.get(package_job) or {}
+    sidecars = jobs.get(sidecar_job) or {}
+    sidecar_commands = commands(sidecars)
+    package_commands = commands(package)
+    return (
+        sidecar_job in needs(package)
+        and artifact in uploads(sidecars)
+        and artifact in downloads(package)
+        and "--target x86_64-pc-windows-msvc -p copypaste-cli -p copypaste-daemon" in sidecar_commands
+        and 'architecture = "x86_64"' in sidecar_commands
+        and "-PrebuiltSidecarsDirectory artifacts/windows-sidecars" in package_commands
+    )
+
+
 def windows_signing_prepare(job):
     return next(
         (step for step in steps(job) if "-Operation Prepare" in str(step.get("run") or "")),
@@ -190,11 +218,16 @@ def contract_errors(release, nightly, ci):
         errors.append("nightly Windows evidence must remain an explicit manual option")
     if (
         "inputs.windows_evidence" not in str(nightly_windows.get("if") or "")
-        or "build-windows.ps1 -Unsigned" not in nightly_commands
+        or "build-windows.ps1" not in nightly_commands
+        or "-Unsigned" not in nightly_commands
         or "windows-native-evidence.ps1" not in nightly_commands
         or "--require windows" not in nightly_commands
     ):
         errors.append("requested nightly Windows evidence must exercise and gate an installed package")
+    if not prebuilt_sidecar_contract(
+        nightly_jobs, "windows", "windows-sidecars", "windows-nightly-sidecars"
+    ):
+        errors.append("nightly Windows packaging must consume an x86_64 prebuilt sidecar artifact")
 
     ci_jobs = ci.get("jobs") or {}
     ci_frontend = ci_jobs.get("frontend") or {}
@@ -204,8 +237,13 @@ def contract_errors(release, nightly, ci):
         ci_windows_test, ("npm", "run", "test:native-parity")
     )
     windows_npm_ci_steps = exact_command_occurrences(ci_windows_test, ("npm", "ci"))
-    if ci_windows_test.get("timeout-minutes") != 25:
-        errors.append("CI Windows workspace tests must use the measured 25-minute timeout")
+    windows_test_timeout = ci_windows_test.get("timeout-minutes")
+    if (
+        not isinstance(windows_test_timeout, int)
+        or isinstance(windows_test_timeout, bool)
+        or not 0 < windows_test_timeout <= 20
+    ):
+        errors.append("CI Windows workspace tests must be bounded to at most 20 minutes")
     if (
         len(windows_parity_steps) != 1
         or len(windows_npm_ci_steps) != 1
@@ -239,6 +277,14 @@ def contract_errors(release, nightly, ci):
     }
     if any(argv not in allowed_windows_npm for argv in windows_npm_commands):
         errors.append("CI Windows tests must own only explicit native-parity frontend coverage")
+    if not prebuilt_sidecar_contract(
+        ci_jobs, "windows-package", "windows-sidecars", "windows-ci-sidecars"
+    ):
+        errors.append("CI Windows packaging must consume an x86_64 prebuilt sidecar artifact")
+    if not prebuilt_sidecar_contract(
+        jobs, "windows", "windows-sidecars", "windows-release-sidecars"
+    ):
+        errors.append("release Windows packaging must consume an x86_64 prebuilt sidecar artifact")
     requirements_producers = (
         (jobs.get("macos") or {}, "smoke-macos-dmg.sh", "release macOS evidence"),
         (jobs.get("android-smoke") or {}, "android-release-emulator-legs.sh", "release Android API 36 evidence"),
@@ -320,6 +366,14 @@ def self_test(release, nightly, ci):
         fixture = copy.deepcopy(ci)
         fixture["jobs"].pop(job_name)
         held = any(expected in error for error in contract_errors(release, nightly, fixture))
+        print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
+        failures += 0 if held else 1
+
+    def rejected_nightly_dropped(label, job_name, expected):
+        nonlocal failures
+        fixture = copy.deepcopy(nightly)
+        fixture["jobs"].pop(job_name)
+        held = any(expected in error for error in contract_errors(release, fixture, ci))
         print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
         failures += 0 if held else 1
 
@@ -521,6 +575,11 @@ def self_test(release, nightly, ci):
         "must run exactly once after npm ci",
     )
     rejected_ci_mutation(
+        "Windows test timeout above budget fails",
+        lambda value: value["jobs"]["windows-test"].update({"timeout-minutes": 21}),
+        "bounded to at most 20 minutes",
+    )
+    rejected_ci_mutation(
         "missing Linux frontend install fails",
         lambda value: delete_frontend_command(value, "npm ci"),
         "must run exactly one npm ci, npm run build, and full npm test",
@@ -556,6 +615,21 @@ def self_test(release, nightly, ci):
         "a CI Windows job that vanished fails",
         "windows-package",
         "CI Windows evidence must install requirements-ci.txt",
+    )
+    rejected_ci_dropped(
+        "missing CI Windows sidecar shard fails",
+        "windows-sidecars",
+        "CI Windows packaging must consume an x86_64 prebuilt sidecar artifact",
+    )
+    rejected_nightly_dropped(
+        "missing nightly Windows sidecar shard fails",
+        "windows-sidecars",
+        "nightly Windows packaging must consume an x86_64 prebuilt sidecar artifact",
+    )
+    rejected(
+        "missing release Windows sidecar shard fails",
+        lambda value: value["jobs"].pop("windows-sidecars"),
+        "release Windows packaging must consume an x86_64 prebuilt sidecar artifact",
     )
     return failures
 
