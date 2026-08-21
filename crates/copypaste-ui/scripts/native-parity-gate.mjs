@@ -63,17 +63,19 @@ function parseArguments(argv) {
   const required = new Set();
   let commit;
   let runId;
+  let windowsUpdaterState = "updater-configured";
 
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
     const value = argv[index + 1];
-    if (!["--evidence", "--require", "--commit", "--run-id"].includes(option) || value === undefined) {
+    if (!["--evidence", "--require", "--commit", "--run-id", "--windows-updater-state"].includes(option) || value === undefined) {
       throw new Error("invalid command-line arguments");
     }
     index += 1;
     if (option === "--evidence") evidence.push(value);
     if (option === "--commit") commit = value;
     if (option === "--run-id") runId = value;
+    if (option === "--windows-updater-state") windowsUpdaterState = value;
     if (option === "--require") {
       for (const platform of value.split(",").filter(Boolean)) required.add(platform);
     }
@@ -88,7 +90,10 @@ function parseArguments(argv) {
     throw new Error("--commit must be a lowercase 40-character Git SHA");
   }
   if (!RUN_ID_PATTERN.test(runId ?? "")) throw new Error("--run-id is required and must be valid");
-  return { commit, evidence, required, runId };
+  if (!["updater-configured", "updater-unconfigured"].includes(windowsUpdaterState)) {
+    throw new Error("--windows-updater-state must be updater-configured or updater-unconfigured");
+  }
+  return { commit, evidence, required, runId, windowsUpdaterState };
 }
 
 function schemaErrors() {
@@ -201,7 +206,7 @@ async function verifyArtifacts(receiptPath, receipt, label) {
   if (missing.length > 0) throw new Error(`${label} lacks ${missing.join(", ")} evidence`);
 }
 
-export async function validateEvidence({ commit, evidence, required, runId }) {
+export async function validateEvidence({ commit, evidence, required, runId, windowsUpdaterState = "updater-configured" }) {
   if (!RUN_ID_PATTERN.test(runId ?? "")) throw new Error("expected workflow run ID is required");
   const receipts = new Map();
   let observedCommit = commit;
@@ -235,7 +240,7 @@ export async function validateEvidence({ commit, evidence, required, runId }) {
     if (receipt.source.run_id !== runId) throw new Error(`${label} belongs to another workflow run`);
     await verifyArtifacts(receiptPath, receipt, label);
     if (receipt.platform === "windows") {
-      await verifyWindowsFeatureEvidence(receiptPath, receipt, label);
+      await verifyWindowsFeatureEvidence(receiptPath, receipt, label, windowsUpdaterState);
     }
     receipts.set(receipt.platform, receipt);
   }

@@ -7,8 +7,12 @@ const EXPECTED = new Map([
   ["capture/service-capture-status", { feature: "capture", state: "service-capture-status", name: "Background capture", directory: "capture", direct: true }],
   ["devices/ready-to-pair", { feature: "devices", state: "ready-to-pair", name: "Ready to pair", directory: "devices", direct: true }],
   ["settings-and-service/appearance", { feature: "settings-and-service", state: "appearance", name: "Theme", directory: "settings-and-service", direct: true }],
-  ["settings-and-service/updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", directory: "settings-and-service/updater-configured", direct: false }],
   ["cloud-account/not-configured", { feature: "cloud-account", state: "not-configured", name: "Not configured", directory: "cloud-account", direct: true }],
+]);
+
+const UPDATER_STATES = new Map([
+  ["updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", directory: "settings-and-service/updater-configured", direct: false }],
+  ["updater-unconfigured", { feature: "settings-and-service", state: "updater-unconfigured", name: "Updates aren't configured in this build.", directory: "settings-and-service/updater-unconfigured", direct: false }],
 ]);
 
 const RECORD_KEYS = ["bytes", "path", "sha256"];
@@ -48,7 +52,11 @@ async function verifyFile(root, record, expectedPath, label) {
   return bytes;
 }
 
-export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) {
+export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, updaterState) {
+  const expected = new Map(EXPECTED);
+  const expectedUpdater = UPDATER_STATES.get(updaterState);
+  if (!expectedUpdater) throw new Error(`${label} has an invalid expected Windows updater state`);
+  expected.set(`settings-and-service/${updaterState}`, expectedUpdater);
   const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
   if (!index) throw new Error(`${label} lacks Windows feature evidence`);
   let manifest;
@@ -60,7 +68,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) 
   if (!exactKeys(manifest, ["schema_version", "states"]) || manifest.schema_version !== 1 || !Array.isArray(manifest.states)) {
     throw new Error(`${label} feature evidence has an invalid envelope`);
   }
-  if (manifest.states.length !== EXPECTED.size) throw new Error(`${label} must capture the exact Windows feature state set`);
+  if (manifest.states.length !== expected.size) throw new Error(`${label} must capture the exact Windows feature state set`);
 
   const root = await realpath(path.dirname(receiptPath));
   const observed = new Set();
@@ -71,14 +79,14 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) 
       throw new Error(`${label} contains an invalid or duplicate Windows feature state`);
     }
     observed.add(identity);
-    const expected = EXPECTED.get(identity);
-    if (!expected || state.expected_name !== expected.name) {
+    const expectedState = expected.get(identity);
+    if (!expectedState || state.expected_name !== expectedState.name) {
       throw new Error(`${label} contains an unknown or wrong Windows feature state ${identity}`);
     }
-    const prefix = `${expected.directory}/`;
+    const prefix = `${expectedState.directory}/`;
     for (const [kind, record] of [["screenshot", state.screenshot], ["accessibility", state.accessibility]]) {
       const declared = receipt.artifacts.find((artifact) => artifact.kind === kind && artifact.path === record.path);
-      if (expected.direct && (!declared || declared.sha256 !== record.sha256 || declared.bytes !== record.bytes)) {
+      if (expectedState.direct && (!declared || declared.sha256 !== record.sha256 || declared.bytes !== record.bytes)) {
         throw new Error(`${label} does not directly register ${state.feature} ${kind} evidence`);
       }
     }
@@ -143,7 +151,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) 
     }
     const marker = Array.isArray(accessibility.nodes)
       ? accessibility.nodes.find((node) => (
-        node?.name === expected.name
+        node?.name === expectedState.name
         && node.enabled === true
         && node.offscreen === false
         && Number.isFinite(node.bounds?.width)
@@ -156,7 +164,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label) 
       throw new Error(`${label} ${state.feature} accessibility does not prove its expected UI state`);
     }
   }
-  if ([...EXPECTED.keys()].some((identity) => !observed.has(identity))) {
+  if ([...expected.keys()].some((identity) => !observed.has(identity))) {
     throw new Error(`${label} omits a Windows feature state`);
   }
 }
