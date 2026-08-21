@@ -249,6 +249,12 @@ check "Cargo product metadata derivatives are current" \
     node scripts/release/android-metadata.mjs --check
 check "Android artifact identity checks fail closed" \
     bash scripts/release/android-artifact-check.sh --self-test
+if command -v pwsh >/dev/null 2>&1; then
+    check "generated Windows signing configuration self-test" \
+        pwsh -NoProfile -File scripts/release/build-windows.ps1 -SelfTest
+    check "Windows signing argument self-test" \
+        pwsh -NoProfile -File scripts/release/windows-sign.ps1 -Operation SelfTest
+fi
 if grep -Fq '"debugApplicationIdSuffix":' crates/copypaste-ui/src-tauri/tauri.android.conf.json \
         && grep -Fq '"versionCode":' crates/copypaste-ui/src-tauri/tauri.android.conf.json \
         && grep -Fq 'val tauriProperties = Properties().apply' crates/copypaste-ui/src-tauri/gen/android/app/build.gradle.kts \

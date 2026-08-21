@@ -995,6 +995,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           ./scripts/release/test-package-windows.ps1
           ./scripts/release/windows-native-evidence.ps1 -SelfTest
+          ./scripts/release/build-windows.ps1 -SelfTest
           ./scripts/release/windows-sign.ps1 -Operation SelfTest
       - name: Prepare Windows release signing
         if: needs.version.outputs.publish == 'true'

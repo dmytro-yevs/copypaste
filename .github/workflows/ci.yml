@@ -808,6 +808,8 @@ jobs:
         run: |
           ./scripts/release/test-package-windows.ps1
           ./scripts/release/windows-native-evidence.ps1 -SelfTest
+          ./scripts/release/build-windows.ps1 -SelfTest
+          ./scripts/release/windows-sign.ps1 -Operation SelfTest
 
       - name: Build the complete current-user installer
         shell: pwsh

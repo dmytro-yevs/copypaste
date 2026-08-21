@@ -1,5 +1,6 @@
 param(
     [switch]$Unsigned,
+    [switch]$SelfTest,
     [string]$OutputDirectory,
     [ValidateSet("x86_64")]
     [string]$Architecture = "x86_64"
@@ -23,6 +24,64 @@ function Require-Command([string]$Name) {
 function Invoke-Checked([string]$Command, [string[]]$Arguments) {
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Command exited $LASTEXITCODE" }
+}
+
+function Write-SignedConfig(
+    [string]$TemplatePath,
+    [string]$DestinationPath,
+    [string]$SignScript,
+    [string]$PublicKey,
+    [string]$Endpoint
+) {
+    $config = Get-Content -Raw -LiteralPath $TemplatePath | ConvertFrom-Json
+    $config.bundle.windows.signCommand.cmd = "powershell.exe"
+    $config.bundle.windows.signCommand.args = @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        $SignScript,
+        "-Operation",
+        "Sign",
+        "-File",
+        "%1"
+    )
+    $config.plugins.updater.pubkey = $PublicKey
+    $config.plugins.updater.endpoints[0] = $Endpoint
+    $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $DestinationPath -Encoding utf8
+}
+
+function Invoke-SelfTest {
+    $root = Join-Path ([IO.Path]::GetTempPath()) "copypaste-windows-config-self-test-$PID"
+    [IO.Directory]::CreateDirectory($root) | Out-Null
+    try {
+        $destination = Join-Path $root "signed.json"
+        $signScript = Join-Path $root "windows-sign.ps1"
+        Write-SignedConfig `
+            (Join-Path $PSScriptRoot "../../crates/copypaste-ui/src-tauri/tauri.windows.signed.conf.template.json") `
+            $destination $signScript "self-test-public-key" "https://updates.example.test/latest.json"
+        $config = Get-Content -Raw -LiteralPath $destination | ConvertFrom-Json
+        $expected = @(
+            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $signScript,
+            "-Operation", "Sign", "-File", "%1"
+        )
+        if ($config.bundle.windows.signCommand.cmd -ne "powershell.exe" -or
+            [string]::Join("`n", $config.bundle.windows.signCommand.args) -cne [string]::Join("`n", $expected)) {
+            throw "generated signCommand self-test failed"
+        }
+        if ($config.plugins.updater.pubkey -ne "self-test-public-key" -or
+            $config.plugins.updater.endpoints[0] -ne "https://updates.example.test/latest.json") {
+            throw "generated updater configuration self-test failed"
+        }
+    } finally {
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "PASS: generated Windows signing configuration contract"
+}
+
+if ($SelfTest) {
+    Invoke-SelfTest
+    exit 0
 }
 
 if ($env:OS -ne "Windows_NT") { throw "Windows release builds must run on Windows" }
@@ -60,23 +119,9 @@ try {
             if (-not $url.StartsWith("https://")) { throw "Release URLs must use HTTPS" }
         }
 
-        $template = Get-Content -Raw -LiteralPath (Join-Path $tauriRoot "tauri.windows.signed.conf.template.json") |
-            ConvertFrom-Json
-        $template.bundle.windows.signCommand.cmd = "powershell.exe"
-        $template.bundle.windows.signCommand.args = @(
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            $signScript,
-            "-Operation",
-            "Sign",
-            "-File",
-            "%1"
-        )
-        $template.plugins.updater.pubkey = $publicKey
-        $template.plugins.updater.endpoints[0] = $endpoint
-        $template | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $generatedConfig -Encoding utf8
+        Write-SignedConfig `
+            (Join-Path $tauriRoot "tauri.windows.signed.conf.template.json") `
+            $generatedConfig $signScript $publicKey $endpoint
         $config = "src-tauri/tauri.windows.signed.generated.json"
     }
 
