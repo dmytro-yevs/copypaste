@@ -19,6 +19,7 @@
 - Sign Windows via Tauri signCommand with SignTool /f PFX + /p (no Root trust).
 - Map Windows Authenticode TSA secrets to SignTool-compatible http:// RFC 3161 URLs.
 - Speed release CI: reuse published Android upgrade fixtures, parallel cloud-evidence APK, cache tauri-driver.
+- Cut alpha.28 on the TSA http:// SignTool rewrite after alpha.27 Windows smoke failed.
 - Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
   OEM-sticky capture restarts.
 
