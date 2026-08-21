@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import copy
 import pathlib
+import shlex
 import sys
 
 import yaml
@@ -68,11 +69,26 @@ def installs_requirements_before(job, marker):
     return False
 
 
-def command_occurrences(job, marker):
+def parsed_commands(job):
+    parsed = []
+    for step_index, step in enumerate(steps(job)):
+        for line_index, line in enumerate(str(step.get("run") or "").splitlines()):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                argv = tuple(shlex.split(line, posix=True))
+            except ValueError:
+                continue
+            parsed.append((step_index, line_index, argv))
+    return parsed
+
+
+def exact_command_occurrences(job, expected):
     return [
-        (index, str(step.get("run") or "").find(marker))
-        for index, step in enumerate(steps(job))
-        if marker in str(step.get("run") or "")
+        (step_index, line_index)
+        for step_index, line_index, argv in parsed_commands(job)
+        if argv == expected
     ]
 
 
@@ -181,11 +197,13 @@ def contract_errors(release, nightly, ci):
         errors.append("requested nightly Windows evidence must exercise and gate an installed package")
 
     ci_jobs = ci.get("jobs") or {}
+    ci_frontend = ci_jobs.get("frontend") or {}
     ci_windows_test = ci_jobs.get("windows-test") or {}
     windows_parity = "npm run test:native-parity"
-    windows_parity_steps = command_occurrences(ci_windows_test, windows_parity)
-    windows_npm_ci_steps = command_occurrences(ci_windows_test, "npm ci")
-    windows_test_commands = commands(ci_windows_test)
+    windows_parity_steps = exact_command_occurrences(
+        ci_windows_test, ("npm", "run", "test:native-parity")
+    )
+    windows_npm_ci_steps = exact_command_occurrences(ci_windows_test, ("npm", "ci"))
     if ci_windows_test.get("timeout-minutes") != 25:
         errors.append("CI Windows workspace tests must use the measured 25-minute timeout")
     if (
@@ -194,15 +212,40 @@ def contract_errors(release, nightly, ci):
         or windows_npm_ci_steps[0] > windows_parity_steps[0]
     ):
         errors.append("CI Windows native-parity tests must run exactly once after npm ci")
-    if "npm test" in windows_test_commands or "npm run build" in windows_test_commands:
-        errors.append("CI Windows tests must leave portable full frontend test and build to Linux")
+    frontend_contract = (
+        ("npm ci", ("npm", "ci")),
+        ("npm run build", ("npm", "run", "build")),
+        ("npm test", ("npm", "test")),
+    )
+    frontend_positions = [
+        exact_command_occurrences(ci_frontend, expected)
+        for _, expected in frontend_contract
+    ]
+    if any(len(positions) != 1 for positions in frontend_positions):
+        errors.append("CI Linux frontend must run exactly one npm ci, npm run build, and full npm test")
+    elif [positions[0] for positions in frontend_positions] != sorted(
+        positions[0] for positions in frontend_positions
+    ):
+        errors.append("CI Linux frontend must run npm ci, npm run build, and npm test in dependency order")
+
+    windows_npm_commands = [
+        argv
+        for _, _, argv in parsed_commands(ci_windows_test)
+        if argv[:1] == ("npm",)
+    ]
+    allowed_windows_npm = {
+        ("npm", "ci"),
+        ("npm", "run", "test:native-parity"),
+    }
+    if any(argv not in allowed_windows_npm for argv in windows_npm_commands):
+        errors.append("CI Windows tests must own only explicit native-parity frontend coverage")
     requirements_producers = (
         (jobs.get("macos") or {}, "smoke-macos-dmg.sh", "release macOS evidence"),
         (jobs.get("android-smoke") or {}, "android-release-emulator-legs.sh", "release Android API 36 evidence"),
         (jobs.get("android-smoke-api33") or {}, "android-smoke-release.sh", "release Android API 33 evidence"),
         (windows, "windows-native-evidence.ps1", "release Windows evidence"),
         (nightly_windows, "windows-native-evidence.ps1", "nightly Windows evidence"),
-        (ci_jobs.get("frontend") or {}, "npm test", "CI frontend tests"),
+        (ci_frontend, "npm test", "CI frontend tests"),
         (ci_windows_test, windows_parity, "CI Windows native-parity tests"),
         (ci_jobs.get("windows-package") or {}, "windows-native-evidence.ps1", "CI Windows evidence"),
         (ci_jobs.get("release-pipeline") or {}, "scripts/release/check.sh", "CI release self-tests"),
@@ -287,6 +330,30 @@ def self_test(release, nightly, ci):
         held = any(expected in error for error in contract_errors(release, nightly, fixture))
         print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
         failures += 0 if held else 1
+
+    def frontend_step(value, command):
+        return next(
+            step
+            for step in value["jobs"]["frontend"]["steps"]
+            if str(step.get("run") or "").strip() == command
+        )
+
+    def delete_frontend_command(value, command):
+        value["jobs"]["frontend"]["steps"].remove(frontend_step(value, command))
+
+    def duplicate_frontend_command(value, command):
+        job_steps = value["jobs"]["frontend"]["steps"]
+        original = frontend_step(value, command)
+        job_steps.insert(job_steps.index(original) + 1, copy.deepcopy(original))
+
+    def swap_frontend_commands(value, first, second):
+        job_steps = value["jobs"]["frontend"]["steps"]
+        first_index = job_steps.index(frontend_step(value, first))
+        second_index = job_steps.index(frontend_step(value, second))
+        job_steps[first_index], job_steps[second_index] = (
+            job_steps[second_index],
+            job_steps[first_index],
+        )
 
     rejected(
         "missing Windows platform dependency fails",
@@ -376,6 +443,36 @@ def self_test(release, nightly, ci):
             if "npm run test:native-parity" in str(step.get("run") or "")
         ).update({"run": "npm run test:native-parity\nnpm ci"}),
         "must run exactly once after npm ci",
+    )
+    rejected_ci_mutation(
+        "missing Linux frontend install fails",
+        lambda value: delete_frontend_command(value, "npm ci"),
+        "must run exactly one npm ci, npm run build, and full npm test",
+    )
+    rejected_ci_mutation(
+        "duplicate Linux frontend test fails",
+        lambda value: duplicate_frontend_command(value, "npm test"),
+        "must run exactly one npm ci, npm run build, and full npm test",
+    )
+    rejected_ci_mutation(
+        "renamed Linux frontend build fails",
+        lambda value: frontend_step(value, "npm run build").update({"run": "npm run bundle"}),
+        "must run exactly one npm ci, npm run build, and full npm test",
+    )
+    rejected_ci_mutation(
+        "narrowed Linux frontend test fails",
+        lambda value: frontend_step(value, "npm test").update({"run": "npm test -- src/App.test.tsx"}),
+        "must run exactly one npm ci, npm run build, and full npm test",
+    )
+    rejected_ci_mutation(
+        "Linux frontend build before install fails",
+        lambda value: swap_frontend_commands(value, "npm ci", "npm run build"),
+        "in dependency order",
+    )
+    rejected_ci_mutation(
+        "Linux frontend test before build fails",
+        lambda value: swap_frontend_commands(value, "npm run build", "npm test"),
+        "in dependency order",
     )
     rejected_ci_dropped(
         "a CI Windows job that vanished fails",
