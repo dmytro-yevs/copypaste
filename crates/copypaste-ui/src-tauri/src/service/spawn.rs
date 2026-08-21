@@ -7,6 +7,11 @@
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+#[cfg(windows)]
+use super::child::ChildState;
+use super::startup_diagnostics;
+#[cfg(windows)]
+use super::startup_diagnostics::JobStage;
 use super::{ChildProcess, MSG_START_FAILED};
 use crate::backend::{BackendError, Result};
 
@@ -20,11 +25,13 @@ pub(super) fn spawn_process(binary: &Path) -> Result<Box<dyn ChildProcess>> {
         .stderr(Stdio::null());
     platform(&mut command);
 
-    command
-        .spawn()
+    let child = command.spawn().map_err(|error| {
+        startup_diagnostics::child_spawn_failed(&error);
         // The OS error can contain the binary path and local username.
-        .map_err(|_| BackendError::Internal(MSG_START_FAILED.into()))
-        .and_then(adopt)
+        BackendError::Internal(MSG_START_FAILED.into())
+    })?;
+    startup_diagnostics::child_started(binary, child.id());
+    adopt(child)
 }
 
 #[cfg(not(windows))]
@@ -79,13 +86,31 @@ where
     B: Fn(&Child) -> std::result::Result<win32job::Job, win32job::JobError>,
 {
     match bind(&child) {
-        Ok(job) => Ok(Box::new(JobBoundChild::new(child, job))),
+        Ok(job) => {
+            startup_diagnostics::job_adopted();
+            Ok(Box::new(JobBoundChild::new(child, job)))
+        }
         Err(error) => {
+            let (stage, code) = job_error_identity(&error);
+            startup_diagnostics::job_adoption_failed(stage, code);
             tracing::warn!(%error, "the background service could not be bound to this process");
             let _ = child.kill();
-            let _ = child.wait();
+            if let Ok(status) = child.wait() {
+                startup_diagnostics::child_exited(status.code());
+            }
             Err(BackendError::Internal(MSG_START_FAILED.into()))
         }
+    }
+}
+
+#[cfg(windows)]
+fn job_error_identity(error: &win32job::JobError) -> (JobStage, Option<i32>) {
+    match error {
+        win32job::JobError::CreateFailed(error) => (JobStage::Create, error.raw_os_error()),
+        win32job::JobError::GetInfoFailed(error) => (JobStage::Query, error.raw_os_error()),
+        win32job::JobError::SetInfoFailed(error) => (JobStage::Configure, error.raw_os_error()),
+        win32job::JobError::AssignFailed(error) => (JobStage::Assign, error.raw_os_error()),
+        _ => (JobStage::Unknown, None),
     }
 }
 
@@ -104,8 +129,11 @@ struct JobBoundChild {
 
 #[cfg(windows)]
 impl ChildProcess for JobBoundChild {
-    fn reap_if_exited(&mut self) -> std::io::Result<bool> {
-        self.child.try_wait().map(|status| status.is_some())
+    fn state(&mut self) -> std::io::Result<ChildState> {
+        self.child.try_wait().map(|status| match status {
+            Some(status) => ChildState::Exited(status.code()),
+            None => ChildState::Running,
+        })
     }
 
     fn kill(&mut self) -> std::io::Result<()> {
@@ -154,6 +182,34 @@ mod tests {
             windows_sys::Win32::System::Threading::CREATE_NO_WINDOW,
             0x0800_0000
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn every_job_error_keeps_its_stage_and_numeric_code() {
+        let errors = [
+            (
+                win32job::JobError::CreateFailed(std::io::Error::from_raw_os_error(5)),
+                "create",
+            ),
+            (
+                win32job::JobError::GetInfoFailed(std::io::Error::from_raw_os_error(5)),
+                "query",
+            ),
+            (
+                win32job::JobError::SetInfoFailed(std::io::Error::from_raw_os_error(5)),
+                "configure",
+            ),
+            (
+                win32job::JobError::AssignFailed(std::io::Error::from_raw_os_error(5)),
+                "assign",
+            ),
+        ];
+        for (error, expected_stage) in errors {
+            let (stage, code) = job_error_identity(&error);
+            assert_eq!(startup_diagnostics::job_stage_name(stage), expected_stage);
+            assert_eq!(code, Some(5));
+        }
     }
 
     #[cfg(windows)]

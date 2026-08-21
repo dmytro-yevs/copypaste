@@ -893,6 +893,7 @@ jobs:
           -OutputDirectory artifacts/windows-ci-package
 
       - name: Installer, sidecar, pipe, clipboard and transfer evidence
+        id: installed-evidence
         shell: pwsh
         run: |
           $installer = @(Get-ChildItem artifacts/windows-ci-package/*-setup.exe)
@@ -904,3 +905,12 @@ jobs:
             -ExpectedSignature NotSigned `
             -Commit '${{ github.sha }}' `
             -RunId '${{ github.run_id }}'
+
+      - name: Upload installed launch failure diagnostics
+        if: failure() && steps.installed-evidence.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-ci-launch-failure-diagnostics
+          path: artifacts/windows-ci-native/failure-diagnostics
+          if-no-files-found: error
+          retention-days: 7
