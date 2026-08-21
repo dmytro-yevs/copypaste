@@ -50,22 +50,8 @@ $releaseBaseUrl = $null
 
 try {
     if (-not $Unsigned) {
-        $pfxPath = Require-Environment "WINDOWS_CERTIFICATE_PFX_PATH"
-        if (-not (Test-Path -LiteralPath $pfxPath -PathType Leaf)) {
-            throw "WINDOWS_CERTIFICATE_PFX_PATH does not point at a PFX file"
-        }
-        Require-Environment "WINDOWS_SIGNING_CERTIFICATE_PASSWORD" | Out-Null
-        $timestampUrl = Require-Environment "WINDOWS_TIMESTAMP_URL"
-        # SignTool /tr needs an RFC 3161 TSA. Public TSAs are http://; do not
-        # force https here (alpha.27: https DigiCert → "Invalid Timestamp URL").
-        try {
-            $timestampUri = [Uri]::new($timestampUrl.Trim())
-        } catch {
-            throw "WINDOWS_TIMESTAMP_URL is not a valid URI"
-        }
-        if ($timestampUri.Scheme -notin @("http", "https") -or [string]::IsNullOrWhiteSpace($timestampUri.Host)) {
-            throw "WINDOWS_TIMESTAMP_URL must be an http(s) URL with a host"
-        }
+        $signScript = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "windows-sign.ps1")).Path
+        & $signScript -Operation Validate
         $publicKey = Require-Environment "TAURI_UPDATER_PUBLIC_KEY"
         $endpoint = Require-Environment "TAURI_UPDATER_ENDPOINT"
         $releaseBaseUrl = Require-Environment "WINDOWS_RELEASE_BASE_URL"
@@ -74,7 +60,6 @@ try {
             if (-not $url.StartsWith("https://")) { throw "Release URLs must use HTTPS" }
         }
 
-        $signScript = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "windows-sign.ps1")).Path
         $template = Get-Content -Raw -LiteralPath (Join-Path $tauriRoot "tauri.windows.signed.conf.template.json") |
             ConvertFrom-Json
         $template.bundle.windows.signCommand.cmd = "powershell.exe"
@@ -84,6 +69,9 @@ try {
             "Bypass",
             "-File",
             $signScript,
+            "-Operation",
+            "Sign",
+            "-File",
             "%1"
         )
         $template.plugins.updater.pubkey = $publicKey
