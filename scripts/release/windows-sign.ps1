@@ -119,7 +119,9 @@ function Get-SignToolArguments([object]$State, [string]$Target) {
 function Invoke-BoundedProcess(
     [string]$Executable,
     [string[]]$Arguments,
-    [int]$TimeoutMilliseconds
+    [int]$TimeoutMilliseconds,
+    [string]$Phase,
+    [string]$Target
 ) {
     if ($TimeoutMilliseconds -le 0) { throw "Process timeout must be positive" }
     $start = [Diagnostics.ProcessStartInfo]::new()
@@ -133,22 +135,67 @@ function Invoke-BoundedProcess(
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     try {
-        if (-not $process.Start()) { throw "Failed to start external process" }
+        try {
+            if (-not $process.Start()) { throw "process did not start" }
+        } catch {
+            $detail = Format-ProcessDiagnostic $Phase $Executable $Target $null $null
+            $startError = Format-DiagnosticText $_.Exception.Message
+            throw "$detail; start error=$startError"
+        }
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutMilliseconds)) {
-            $process.Kill($true)
-            $process.WaitForExit()
-            throw "External process timed out after $TimeoutMilliseconds ms"
+            $killError = $null
+            try { $process.Kill($true) } catch { $killError = $_.Exception.Message }
+            $terminated = $process.WaitForExit(5000)
+            $detail = Format-ProcessDiagnostic $Phase $Executable $Target $stdout $stderr
+            if (-not $terminated) {
+                throw "$detail timed out after $TimeoutMilliseconds ms and could not be terminated"
+            }
+            if ($killError) {
+                $safeKillError = Format-DiagnosticText $killError
+                throw "$detail timed out after $TimeoutMilliseconds ms; process-tree kill failed: $safeKillError"
+            }
+            throw "$detail timed out after $TimeoutMilliseconds ms"
         }
         return [pscustomobject]@{
             ExitCode = $process.ExitCode
-            StandardOutput = $stdout.GetAwaiter().GetResult()
-            StandardError = $stderr.GetAwaiter().GetResult()
+            StandardOutput = Get-BoundedTaskOutput $stdout
+            StandardError = Get-BoundedTaskOutput $stderr
         }
     } finally {
         $process.Dispose()
     }
+}
+
+function Get-BoundedTaskOutput([Threading.Tasks.Task[string]]$Task) {
+    if (-not $Task.Wait(1000)) { return "<output unavailable>" }
+    return $Task.Result
+}
+
+function Format-DiagnosticText([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) { return "<empty>" }
+    $safe = [regex]::Replace($Text, "[\p{C}-[`r`n`t]]", "?")
+    if ($safe.Length -le 4096) { return $safe.Trim() }
+    return $safe.Substring(0, 4096).Trim() + "...<truncated>"
+}
+
+function Format-ProcessDiagnostic(
+    [string]$Phase,
+    [string]$Executable,
+    [string]$Target,
+    [Threading.Tasks.Task[string]]$StandardOutput,
+    [Threading.Tasks.Task[string]]$StandardError
+) {
+    $executableName = [IO.Path]::GetFileName($Executable)
+    $targetName = [IO.Path]::GetFileName($Target)
+    $stdout = if ($null -ne $StandardOutput) {
+        Format-DiagnosticText (Get-BoundedTaskOutput $StandardOutput)
+    } else { "<output unavailable>" }
+    $stderr = if ($null -ne $StandardError) {
+        Format-DiagnosticText (Get-BoundedTaskOutput $StandardError)
+    } else { "<output unavailable>" }
+    return "$Phase failed (executable=$executableName, target=$targetName); stdout=$stdout; stderr=$stderr"
 }
 
 function Normalize-CertificateThumbprint([string]$Thumbprint) {
@@ -182,7 +229,15 @@ function Assert-AuthenticodeSigner(
     }
 }
 
-function Invoke-WindowsSign([string]$Target) {
+function Invoke-WindowsSign(
+    [string]$Target,
+    [scriptblock]$ProcessRunner = { param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
+        Invoke-BoundedProcess $Exe $RunnerArguments $Timeout $Phase $RunnerTarget
+    },
+    [scriptblock]$SigningStateReader = { Get-PreparedSigningState },
+    [scriptblock]$SignToolFinder = { Find-SignTool },
+    [scriptblock]$SignatureReader = { param($Path) Get-AuthenticodeSignature -LiteralPath $Path }
+) {
     if ($env:OS -ne "Windows_NT") { throw "Authenticode signing must run on Windows" }
     if ([string]::IsNullOrWhiteSpace($Target) -or
         -not (Test-Path -LiteralPath $Target -PathType Leaf)) {
@@ -191,18 +246,22 @@ function Invoke-WindowsSign([string]$Target) {
 
     $state = $null
     try {
-        $state = Get-PreparedSigningState
-        $signtool = Find-SignTool
+        $state = & $SigningStateReader
+        $signtool = & $SignToolFinder
         $arguments = Get-SignToolArguments $state $Target
-        $result = Invoke-BoundedProcess $signtool $arguments 120000
+        $result = & $ProcessRunner $signtool $arguments 120000 "SignTool signing" $Target
         if (-not [string]::IsNullOrWhiteSpace($result.StandardOutput)) {
             Write-Host $result.StandardOutput.TrimEnd()
         }
         if ($result.ExitCode -ne 0) {
-            throw "signtool sign exited $($result.ExitCode): $($result.StandardError.Trim())"
+            $stdout = Format-DiagnosticText $result.StandardOutput
+            $stderr = Format-DiagnosticText $result.StandardError
+            $executableName = [IO.Path]::GetFileName($signtool)
+            $targetName = [IO.Path]::GetFileName($Target)
+            throw "SignTool signing failed (executable=$executableName, target=$targetName, exit=$($result.ExitCode)); stdout=$stdout; stderr=$stderr"
         }
 
-        $signature = Get-AuthenticodeSignature -LiteralPath $Target
+        $signature = & $SignatureReader $Target
         Assert-AuthenticodeSigner $signature $state.Certificate
         if ($null -eq $signature.TimeStamperCertificate) {
             throw "Authenticode signature is missing its RFC 3161 timestamp"
@@ -292,13 +351,20 @@ function Invoke-SelfTest {
 
     Write-Host "PHASE: bounded external processes"
     $pwsh = (Get-Process -Id $PID).Path
-    $failed = Invoke-BoundedProcess $pwsh @("-NoProfile", "-Command", "exit 23") 10000
+    $failed = Invoke-BoundedProcess $pwsh @("-NoProfile", "-Command", "exit 23") `
+        10000 "bounded runner self-test" "failure-probe"
     if ($failed.ExitCode -ne 23) { throw "bounded process failure self-test failed" }
     $timedOut = $false
     try {
-        Invoke-BoundedProcess $pwsh @("-NoProfile", "-Command", "Start-Sleep -Seconds 30") 250
+        Invoke-BoundedProcess $pwsh @("-NoProfile", "-Command", `
+            "[Console]::Out.Write('probe-out'); [Console]::Error.Write('probe-err'); Start-Sleep 30") `
+            250 "bounded runner self-test" "timeout-probe"
     } catch {
-        if ($_.Exception.Message -cne "External process timed out after 250 ms") { throw }
+        $message = $_.Exception.Message
+        if ($message -cnotmatch "^bounded runner self-test failed " -or
+            $message -cnotmatch "executable=.*pwsh.*target=timeout-probe" -or
+            $message -cnotmatch "stdout=probe-out" -or $message -cnotmatch "stderr=probe-err" -or
+            $message -cnotmatch "timed out after 250 ms$") { throw }
         $timedOut = $true
     }
     if (-not $timedOut) { throw "bounded process timeout self-test failed" }
@@ -311,7 +377,8 @@ function Invoke-SelfTest {
             "WINDOWS_TIMESTAMP_URL",
             "WINDOWS_CERTIFICATE_PFX_PATH",
             "WINDOWS_SIGNING_TIMESTAMP_URL",
-            "GITHUB_ENV"
+            "GITHUB_ENV",
+            "OS"
         )) {
         $old[$name] = [Environment]::GetEnvironmentVariable($name)
     }
@@ -428,6 +495,50 @@ function Invoke-SelfTest {
                 SignerCertificate = $certificate
             }
             Assert-AuthenticodeSigner $validSignature $certificate
+
+            $routingTarget = Join-Path ([IO.Path]::GetTempPath()) "signing-routing-$PID.exe"
+            [IO.File]::WriteAllBytes($routingTarget, [byte[]]@(0))
+            $runnerCalls = [Collections.Generic.List[object]]::new()
+            $routingCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                $certificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+            )
+            $routingState = [pscustomobject]@{
+                Pfx = "routing-test.pfx"
+                Password = "routing-password"
+                TimestampUrl = "http://tsa.invalid.test"
+                Certificate = $routingCertificate
+            }
+            $fakeRunner = {
+                param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
+                $runnerCalls.Add([pscustomobject]@{
+                    Executable = $Exe; Arguments = @($RunnerArguments); Timeout = $Timeout
+                    Phase = $Phase; Target = $RunnerTarget
+                })
+                [pscustomobject]@{ ExitCode = 0; StandardOutput = ""; StandardError = "" }
+            }.GetNewClosure()
+            $fakeSignature = [pscustomobject]@{
+                Status = "Valid"
+                SignatureType = "Authenticode"
+                SignerCertificate = $routingCertificate
+                TimeStamperCertificate = $certificate
+            }
+            try {
+                $env:OS = "Windows_NT"
+                $fakeStateReader = { $routingState }.GetNewClosure()
+                $fakeSignatureReader = { param($Path) $fakeSignature }.GetNewClosure()
+                Invoke-WindowsSign $routingTarget $fakeRunner $fakeStateReader `
+                    { "fake-signtool.exe" } $fakeSignatureReader
+                if ($runnerCalls.Count -ne 1 -or
+                    $runnerCalls[0].Executable -cne "fake-signtool.exe" -or
+                    $runnerCalls[0].Timeout -ne 120000 -or
+                    $runnerCalls[0].Phase -cne "SignTool signing" -or
+                    $runnerCalls[0].Target -cne $routingTarget -or
+                    $runnerCalls[0].Arguments[-1] -cne $routingTarget) {
+                    throw "Invoke-WindowsSign bounded-runner routing self-test failed"
+                }
+            } finally {
+                Remove-Item -LiteralPath $routingTarget -Force -ErrorAction SilentlyContinue
+            }
         } finally {
             $otherCertificate.Dispose()
         }
