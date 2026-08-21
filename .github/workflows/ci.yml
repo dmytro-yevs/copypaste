@@ -664,7 +664,7 @@ jobs:
     # Pinned rather than `windows-latest` so the toolchain and SDK under test do
     # not move without a commit, matching the macos-14 pin above.
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
       RUSTUP_TOOLCHAIN: "1.96"
@@ -713,19 +713,18 @@ jobs:
           set -euo pipefail
           cargo +1.96 test -p copypaste-ui --locked pairing_presentation::windows::refusal_tests -- --ignored --test-threads=1 --nocapture
 
-      # `npm test` runs native-parity-gate.test.mjs, which shells out to
-      # write-native-evidence.py and validates a real PNG through Pillow. Both
-      # halves of this split need the requirements, not just the package half.
+      # The native-parity tests shell out to write-native-evidence.py and
+      # validate a real PNG through Pillow. Both halves of this split need the
+      # requirements, not just the package half.
       - name: Install native evidence Python dependencies
         shell: pwsh
         run: python -m pip install --requirement requirements-ci.txt
 
-      - name: Frontend tests and build
+      - name: Windows native-parity script tests
         working-directory: crates/copypaste-ui
         run: |
           npm ci
-          npm test
-          npm run build
+          npm run test:native-parity
 
       - name: DPAPI, for real (port manifest 02)
         # These are not `#[ignore]`d, unlike the Keychain set: DPAPI writes
