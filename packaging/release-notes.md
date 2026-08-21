@@ -5,8 +5,10 @@
   timestamp, and removes temporary signing material afterward.
 - Strengthens release evidence for signed Windows installers and in-place
   updates, including signer identity, updater artifacts, and failure states.
+- Adds bounded Windows sidecar launch diagnostics that correlate process start
+  and stop events without leaking local paths into user-visible errors.
 - Pins the frontend toolchain consistently across release and platform CI to
-  reduce toolchain drift and make packaged builds more consistent.
+  reduce toolchain drift and shards expensive checks to keep CI bounded.
 
 ## Not verified on this host
 
