@@ -116,6 +116,41 @@ function Get-SignToolArguments([object]$State, [string]$Target) {
     )
 }
 
+function Invoke-BoundedProcess(
+    [string]$Executable,
+    [string[]]$Arguments,
+    [int]$TimeoutMilliseconds
+) {
+    if ($TimeoutMilliseconds -le 0) { throw "Process timeout must be positive" }
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { [void]$start.ArgumentList.Add($argument) }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw "Failed to start external process" }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            $process.Kill($true)
+            $process.WaitForExit()
+            throw "External process timed out after $TimeoutMilliseconds ms"
+        }
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StandardOutput = $stdout.GetAwaiter().GetResult()
+            StandardError = $stderr.GetAwaiter().GetResult()
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 function Normalize-CertificateThumbprint([string]$Thumbprint) {
     if ([string]::IsNullOrWhiteSpace($Thumbprint)) {
         throw "Certificate thumbprint is missing"
@@ -159,8 +194,13 @@ function Invoke-WindowsSign([string]$Target) {
         $state = Get-PreparedSigningState
         $signtool = Find-SignTool
         $arguments = Get-SignToolArguments $state $Target
-        & $signtool @arguments
-        if ($LASTEXITCODE -ne 0) { throw "signtool sign exited $LASTEXITCODE" }
+        $result = Invoke-BoundedProcess $signtool $arguments 120000
+        if (-not [string]::IsNullOrWhiteSpace($result.StandardOutput)) {
+            Write-Host $result.StandardOutput.TrimEnd()
+        }
+        if ($result.ExitCode -ne 0) {
+            throw "signtool sign exited $($result.ExitCode): $($result.StandardError.Trim())"
+        }
 
         $signature = Get-AuthenticodeSignature -LiteralPath $Target
         Assert-AuthenticodeSigner $signature $state.Certificate
@@ -224,6 +264,7 @@ function Prepare-WindowsSigning {
 }
 
 function Invoke-SelfTest {
+    Write-Host "PHASE: Windows signing contracts"
     $cases = @(
         @{ In = "https://timestamp.digicert.com"; Out = "http://timestamp.digicert.com" },
         @{ In = " HTTP://tsa.example.test/rfc3161 "; Out = "http://tsa.example.test/rfc3161" },
@@ -249,6 +290,20 @@ function Invoke-SelfTest {
         throw "SignTool argument contract self-test failed"
     }
 
+    Write-Host "PHASE: bounded external processes"
+    $pwsh = (Get-Process -Id $PID).Path
+    $failed = Invoke-BoundedProcess $pwsh @("-NoProfile", "-Command", "exit 23") 10000
+    if ($failed.ExitCode -ne 23) { throw "bounded process failure self-test failed" }
+    $timedOut = $false
+    try {
+        Invoke-BoundedProcess $pwsh @("-NoProfile", "-Command", "Start-Sleep -Seconds 30") 250
+    } catch {
+        if ($_.Exception.Message -cne "External process timed out after 250 ms") { throw }
+        $timedOut = $true
+    }
+    if (-not $timedOut) { throw "bounded process timeout self-test failed" }
+
+    Write-Host "PHASE: certificate preparation and signer validation"
     $old = @{}
     foreach ($name in @(
             "WINDOWS_SIGNING_CERTIFICATE_BASE64",
@@ -395,38 +450,6 @@ function Invoke-SelfTest {
         if ($persisted -notcontains "WINDOWS_CERTIFICATE_PFX_PATH=$testPfx" -or
             $persisted -notcontains "WINDOWS_SIGNING_TIMESTAMP_URL=http://timestamp.digicert.com") {
             throw "GitHub environment persistence self-test failed"
-        }
-        if ($env:OS -eq "Windows_NT") {
-            $smoke = Join-Path ([IO.Path]::GetTempPath()) "copypaste-signing-self-test-$PID.exe"
-            $rootStore = [Security.Cryptography.X509Certificates.X509Store]::new(
-                [Security.Cryptography.X509Certificates.StoreName]::Root,
-                [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-            )
-            $trustedForTest = $false
-            try {
-                $rootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                $alreadyTrusted = $rootStore.Certificates.Find(
-                    [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                    $certificate.Thumbprint,
-                    $false
-                )
-                if ($alreadyTrusted.Count -eq 0) {
-                    $rootStore.Add($certificate)
-                    $trustedForTest = $true
-                }
-                # Get-AuthenticodeSignature prefers a catalog signature over an embedded one.
-                # Generate an unsigned PE so the smoke test observes the signature just added.
-                Add-Type -TypeDefinition @"
-public static class SigningSelfTest {
-    public static int Main() { return 0; }
-}
-"@ -Language CSharp -OutputAssembly $smoke -OutputType ConsoleApplication
-                Invoke-WindowsSign $smoke
-            } finally {
-                if ($trustedForTest) { $rootStore.Remove($certificate) }
-                $rootStore.Dispose()
-                Remove-Item -LiteralPath $smoke -Force -ErrorAction SilentlyContinue
-            }
         }
     } finally {
         Remove-Item -LiteralPath $testPfx -Force -ErrorAction SilentlyContinue

@@ -34,7 +34,7 @@ function Write-SignedConfig(
     [string]$Endpoint
 ) {
     $config = Get-Content -Raw -LiteralPath $TemplatePath | ConvertFrom-Json
-    $config.bundle.windows.signCommand.cmd = "powershell.exe"
+    $config.bundle.windows.signCommand.cmd = "pwsh.exe"
     $config.bundle.windows.signCommand.args = @(
         "-NoProfile",
         "-ExecutionPolicy",
@@ -65,7 +65,7 @@ function Invoke-SelfTest {
             "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $signScript,
             "-Operation", "Sign", "-File", "%1"
         )
-        if ($config.bundle.windows.signCommand.cmd -ne "powershell.exe" -or
+        if ($config.bundle.windows.signCommand.cmd -ne "pwsh.exe" -or
             [string]::Join("`n", $config.bundle.windows.signCommand.args) -cne [string]::Join("`n", $expected)) {
             throw "generated signCommand self-test failed"
         }

@@ -10,7 +10,7 @@ preserve the launch-at-login choice. Uninstall removes both the Run entry and
 Windows' `StartupApproved` override.
 
 Tauri owns installer generation and updater artifact signing. Its custom
-`signCommand` delegates every Authenticode operation to
+`signCommand` uses PowerShell 7 and delegates every Authenticode operation to
 `scripts/release/windows-sign.ps1`, using the release PFX directly rather than
 importing certificates into Windows stores. The same script prepares and
 validates the PFX, normalises the RFC 3161 timestamp URL for SignTool, performs
@@ -23,9 +23,9 @@ file and timestamp digests. The workflow never imports into `Root` or
 
 The script exposes five operations: `Prepare` decodes and validates the PFX and
 persists its path plus the normalised timestamp URL; `Validate` fails before a
-long build when that state is unusable; `Sign` is the sole SignTool entry point;
-`Cleanup` removes the PFX; and `SelfTest` exercises preparation with an
-ephemeral code-signing certificate, including a real signature on Windows.
+long build when that state is unusable; `Sign` is the sole bounded SignTool
+entry point; `Cleanup` removes the PFX; and `SelfTest` exercises preparation and
+signer validation with an ephemeral certificate without changing trust stores.
 
 Updater metadata uses Tauri's separate minisign-compatible key. A signed build
 fails unless every certificate, key, endpoint, and release URL input is
