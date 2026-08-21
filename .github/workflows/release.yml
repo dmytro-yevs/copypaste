@@ -370,11 +370,27 @@ jobs:
   # signed with a per-run key cannot upgrade an existing install. All four
   # release-key secrets are therefore required; their absence fails this job
   # before any Android artifact is uploaded or published.
-  android:
-    name: Build Android (universal APK)
+  android-abi:
+    name: Build Android native shard (${{ matrix.target }})
     needs: version
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64
+            triple: aarch64-linux-android
+            abi: arm64-v8a
+          - target: armv7
+            triple: armv7-linux-androideabi
+            abi: armeabi-v7a
+          - target: i686
+            triple: i686-linux-android
+            abi: x86
+          - target: x86_64
+            triple: x86_64-linux-android
+            abi: x86_64
     env:
       # See the macOS job: rust-toolchain.toml outranks `rustup default`, so
       # without this the Rust half of the Gradle build runs under stable — for
@@ -393,11 +409,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: ${{ matrix.triple }}
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: android-release
+          shared-key: android-release-${{ matrix.target }}
           save-if: "true"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -527,14 +543,128 @@ jobs:
             exit 1
           }
 
-          npm run tauri -- android build --apk
+          npm run tauri -- android build --apk --target "${{ matrix.target }}"
 
           outputs="src-tauri/gen/android/app/build/outputs/apk"
+          shard="$(find "$outputs" -name '*release*.apk' -print -quit)"
+          [[ -n "$shard" ]] || { echo "::error::the ${{ matrix.target }} release APK was not produced"; exit 1; }
+          native="src-tauri/gen/android/app/src/main/jniLibs/${{ matrix.abi }}/libcopypaste_ui_lib.so"
+          [[ -f "$native" ]] || { echo "::error::the ${{ matrix.abi }} native library was not produced"; exit 1; }
+          mkdir -p "${RUNNER_TEMP}/android-native"
+          cp "$native" "${RUNNER_TEMP}/android-native/"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.target == 'aarch64'
+        with:
+          name: android-native-aarch64
+          path: ${{ runner.temp }}/android-native/libcopypaste_ui_lib.so
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.target == 'armv7'
+        with:
+          name: android-native-armv7
+          path: ${{ runner.temp }}/android-native/libcopypaste_ui_lib.so
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.target == 'i686'
+        with:
+          name: android-native-i686
+          path: ${{ runner.temp }}/android-native/libcopypaste_ui_lib.so
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.target == 'x86_64'
+        with:
+          name: android-native-x86_64
+          path: ${{ runner.temp }}/android-native/libcopypaste_ui_lib.so
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.target == 'x86_64'
+        with:
+          name: android-release-scaffold
+          path: |
+            crates/copypaste-ui/src-tauri/gen/android/tauri.settings.gradle
+            crates/copypaste-ui/src-tauri/gen/android/app/tauri.build.gradle.kts
+            crates/copypaste-ui/src-tauri/gen/android/app/tauri.properties
+            crates/copypaste-ui/src-tauri/gen/android/app/proguard-tauri.pro
+            crates/copypaste-ui/src-tauri/gen/android/app/src/main/**/generated/**
+            crates/copypaste-ui/src-tauri/gen/android/app/src/main/assets/tauri.conf.json
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    name: Assemble and sign Android universal APK
+    needs: [version, android-abi]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ANDROID_PLATFORM: "android-36"
+      BUILD_TOOLS_VERSION: "36.0.0"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - run: npm ci --prefix crates/copypaste-ui --ignore-scripts
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            crates/copypaste-ui/src-tauri/gen/android/**/*.gradle*
+            crates/copypaste-ui/src-tauri/gen/android/**/gradle-wrapper.properties
+      - name: Install Android packaging tools
+        run: |
+          set -euo pipefail
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$sdkmanager" --install \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS_VERSION}"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-release-scaffold
+          path: crates/copypaste-ui/src-tauri/gen/android
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-native-aarch64
+          path: crates/copypaste-ui/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-native-armv7
+          path: crates/copypaste-ui/src-tauri/gen/android/app/src/main/jniLibs/armeabi-v7a
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-native-i686
+          path: crates/copypaste-ui/src-tauri/gen/android/app/src/main/jniLibs/x86
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-native-x86_64
+          path: crates/copypaste-ui/src-tauri/gen/android/app/src/main/jniLibs/x86_64
+      - name: Assemble the prelinked universal APK
+        run: |
+          set -euo pipefail
+          cd crates/copypaste-ui/src-tauri/gen/android
+          ./gradlew --no-daemon \
+            assembleUniversalRelease \
+            -PabiList=arm64-v8a,armeabi-v7a,x86,x86_64 \
+            -ParchList=arm64,arm,x86,x86_64 \
+            -PtargetList=aarch64,armv7,i686,x86_64 \
+            -x rustBuildUniversalRelease \
+            -x rustBuildArm64Release \
+            -x rustBuildArmRelease \
+            -x rustBuildX86Release \
+            -x rustBuildX86_64Release
+          outputs="app/build/outputs/apk"
           published="$(find "$outputs" -name '*universal*release*.apk' -print -quit)"
-          [[ -n "$published" ]] || { echo "::error::the universal release APK was not produced"; exit 1; }
+          [[ -n "$published" ]] || { echo "::error::the universal release APK was not assembled"; exit 1; }
           cp "$published" "${RUNNER_TEMP}/copypaste-release-unsigned.apk"
-          find "$outputs" -type f -name '*.apk' -delete
-          # cloud-evidence APK builds in parallel job android-cloud-evidence
 
       - name: Locate and sign the APK
         env:
@@ -548,6 +678,11 @@ jobs:
           unsigned="${RUNNER_TEMP}/copypaste-release-unsigned.apk"
           [[ -f "$unsigned" ]] || { echo "::error::the staged release APK is missing"; exit 1; }
           echo "Built: $unsigned"
+          libs="$(unzip -l "$unsigned")"
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            grep -q "lib/${abi}/libcopypaste_ui_lib.so" <<<"$libs" \
+              || { echo "::error::the universal APK is missing ${abi}"; exit 1; }
+          done
 
           tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
           mkdir -p dist
@@ -1079,9 +1214,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cargo +1.96 build --release --locked -p copypaste-cli -p copypaste-daemon
+          cargo +1.96 build --release --locked --target x86_64-pc-windows-msvc -p copypaste-cli -p copypaste-daemon
           New-Item -ItemType Directory -Force artifacts/windows-sidecars | Out-Null
-          Copy-Item target/release/copypaste.exe,target/release/copypaste-daemon.exe artifacts/windows-sidecars
+          Copy-Item target/x86_64-pc-windows-msvc/release/copypaste.exe,target/x86_64-pc-windows-msvc/release/copypaste-daemon.exe artifacts/windows-sidecars
+          @{ architecture = "x86_64" } | ConvertTo-Json |
+            Set-Content artifacts/windows-sidecars/sidecars.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-release-sidecars
