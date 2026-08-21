@@ -102,6 +102,8 @@ jobs:
         run: |
           ./scripts/release/test-package-windows.ps1
           ./scripts/release/windows-native-evidence.ps1 -SelfTest
+          ./scripts/release/build-windows.ps1 -SelfTest
+          ./scripts/release/windows-sign.ps1 -Operation SelfTest
       - name: Build unsigned Windows release package
         shell: pwsh
         run: ./scripts/release/build-windows.ps1 -Unsigned -OutputDirectory artifacts/windows-nightly-package
