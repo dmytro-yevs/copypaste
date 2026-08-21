@@ -109,6 +109,13 @@ function Find-SignTool {
     return $tool.FullName
 }
 
+function Get-SignToolArguments([object]$State, [string]$Target) {
+    return @(
+        "sign", "/fd", "sha256", "/f", $State.Pfx, "/p", $State.Password,
+        "/tr", $State.TimestampUrl, "/td", "sha256", $Target
+    )
+}
+
 function Invoke-WindowsSign([string]$Target) {
     if ($env:OS -ne "Windows_NT") { throw "Authenticode signing must run on Windows" }
     if ([string]::IsNullOrWhiteSpace($Target) -or
@@ -120,8 +127,8 @@ function Invoke-WindowsSign([string]$Target) {
     try {
         $state = Get-PreparedSigningState
         $signtool = Find-SignTool
-        & $signtool sign /fd sha256 /f $state.Pfx /p $state.Password `
-            /tr $state.TimestampUrl /td sha256 $Target
+        $arguments = Get-SignToolArguments $state $Target
+        & $signtool @arguments
         if ($LASTEXITCODE -ne 0) { throw "signtool sign exited $LASTEXITCODE" }
 
         $signature = Get-AuthenticodeSignature -LiteralPath $Target
@@ -197,6 +204,21 @@ function Invoke-SelfTest {
     foreach ($case in $cases) {
         $actual = Resolve-SignToolTimestampUrl $case.In
         if ($actual -ne $case.Out) { throw "timestamp normalization self-test failed" }
+    }
+
+    $argumentState = [pscustomobject]@{
+        Pfx = "prepared.pfx"
+        Password = "prepared-password"
+        TimestampUrl = "http://tsa.example.test/rfc3161"
+    }
+    $target = "target with spaces.exe"
+    $arguments = @(Get-SignToolArguments $argumentState $target)
+    $expectedArguments = @(
+        "sign", "/fd", "sha256", "/f", "prepared.pfx", "/p", "prepared-password",
+        "/tr", "http://tsa.example.test/rfc3161", "/td", "sha256", $target
+    )
+    if ([string]::Join("`n", $arguments) -cne [string]::Join("`n", $expectedArguments)) {
+        throw "SignTool argument contract self-test failed"
     }
 
     $old = @{}
