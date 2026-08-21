@@ -68,6 +68,14 @@ def installs_requirements_before(job, marker):
     return False
 
 
+def command_occurrences(job, marker):
+    return [
+        (index, str(step.get("run") or "").find(marker))
+        for index, step in enumerate(steps(job))
+        if marker in str(step.get("run") or "")
+    ]
+
+
 def contract_errors(release, nightly, ci):
     errors = []
     jobs = release.get("jobs") or {}
@@ -173,6 +181,21 @@ def contract_errors(release, nightly, ci):
         errors.append("requested nightly Windows evidence must exercise and gate an installed package")
 
     ci_jobs = ci.get("jobs") or {}
+    ci_windows_test = ci_jobs.get("windows-test") or {}
+    windows_parity = "npm run test:native-parity"
+    windows_parity_steps = command_occurrences(ci_windows_test, windows_parity)
+    windows_npm_ci_steps = command_occurrences(ci_windows_test, "npm ci")
+    windows_test_commands = commands(ci_windows_test)
+    if ci_windows_test.get("timeout-minutes") != 25:
+        errors.append("CI Windows workspace tests must use the measured 25-minute timeout")
+    if (
+        len(windows_parity_steps) != 1
+        or len(windows_npm_ci_steps) != 1
+        or windows_npm_ci_steps[0] > windows_parity_steps[0]
+    ):
+        errors.append("CI Windows native-parity tests must run exactly once after npm ci")
+    if "npm test" in windows_test_commands or "npm run build" in windows_test_commands:
+        errors.append("CI Windows tests must leave portable full frontend test and build to Linux")
     requirements_producers = (
         (jobs.get("macos") or {}, "smoke-macos-dmg.sh", "release macOS evidence"),
         (jobs.get("android-smoke") or {}, "android-release-emulator-legs.sh", "release Android API 36 evidence"),
@@ -180,7 +203,7 @@ def contract_errors(release, nightly, ci):
         (windows, "windows-native-evidence.ps1", "release Windows evidence"),
         (nightly_windows, "windows-native-evidence.ps1", "nightly Windows evidence"),
         (ci_jobs.get("frontend") or {}, "npm test", "CI frontend tests"),
-        (ci_jobs.get("windows-test") or {}, "npm test", "CI Windows frontend tests"),
+        (ci_windows_test, windows_parity, "CI Windows native-parity tests"),
         (ci_jobs.get("windows-package") or {}, "windows-native-evidence.ps1", "CI Windows evidence"),
         (ci_jobs.get("release-pipeline") or {}, "scripts/release/check.sh", "CI release self-tests"),
     )
@@ -201,13 +224,13 @@ def contract_errors(release, nightly, ci):
 def self_test(release, nightly, ci):
     failures = 0
 
-    def move_install_after_test(value, job_name):
+    def move_install_after_test(value, job_name, marker):
         job_steps = value["jobs"][job_name]["steps"]
         install = next(step for step in job_steps if step_installs_requirements(step))
         job_steps.remove(install)
         test_index = next(
             index for index, step in enumerate(job_steps)
-            if "npm test" in str(step.get("run") or "")
+            if marker in str(step.get("run") or "")
         )
         job_steps.insert(test_index + 1, install)
 
@@ -239,10 +262,10 @@ def self_test(release, nightly, ci):
         print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
         failures += 0 if held else 1
 
-    def rejected_ci(label, job_name, expected):
+    def rejected_ci(label, job_name, marker, expected):
         nonlocal failures
         fixture = copy.deepcopy(ci)
-        move_install_after_test(fixture, job_name)
+        move_install_after_test(fixture, job_name, marker)
         held = any(expected in error for error in contract_errors(release, nightly, fixture))
         print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
         failures += 0 if held else 1
@@ -253,6 +276,14 @@ def self_test(release, nightly, ci):
         nonlocal failures
         fixture = copy.deepcopy(ci)
         fixture["jobs"].pop(job_name)
+        held = any(expected in error for error in contract_errors(release, nightly, fixture))
+        print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
+        failures += 0 if held else 1
+
+    def rejected_ci_mutation(label, mutation, expected):
+        nonlocal failures
+        fixture = copy.deepcopy(ci)
+        mutation(fixture)
         held = any(expected in error for error in contract_errors(release, nightly, fixture))
         print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
         failures += 0 if held else 1
@@ -319,12 +350,32 @@ def self_test(release, nightly, ci):
     rejected_ci(
         "frontend test before requirements install fails",
         "frontend",
+        "npm test",
         "CI frontend tests must install requirements-ci.txt",
     )
     rejected_ci(
-        "Windows frontend test before requirements install fails",
+        "Windows parity test before requirements install fails",
         "windows-test",
-        "CI Windows frontend tests must install requirements-ci.txt",
+        "npm run test:native-parity",
+        "CI Windows native-parity tests must install requirements-ci.txt",
+    )
+    rejected_ci_mutation(
+        "missing Windows parity command fails",
+        lambda value: next(
+            step
+            for step in value["jobs"]["windows-test"]["steps"]
+            if "npm run test:native-parity" in str(step.get("run") or "")
+        ).update({"run": "npm ci"}),
+        "must run exactly once after npm ci",
+    )
+    rejected_ci_mutation(
+        "Windows parity command before npm ci fails",
+        lambda value: next(
+            step
+            for step in value["jobs"]["windows-test"]["steps"]
+            if "npm run test:native-parity" in str(step.get("run") or "")
+        ).update({"run": "npm run test:native-parity\nnpm ci"}),
+        "must run exactly once after npm ci",
     )
     rejected_ci_dropped(
         "a CI Windows job that vanished fails",
