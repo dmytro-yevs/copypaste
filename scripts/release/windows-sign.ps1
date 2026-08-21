@@ -309,40 +309,40 @@ function New-SelfTestCms(
     [string]$TimestampSignerDigestOid = "2.16.840.1.101.3.4.2.1"
 ) {
     $indirectWriter = [Formats.Asn1.AsnWriter]::new([Formats.Asn1.AsnEncodingRules]::DER)
-    $indirectWriter.PushSequence()
-    $indirectWriter.PushSequence()
-    $indirectWriter.WriteObjectIdentifier("1.3.6.1.4.1.311.2.1.15")
-    $indirectWriter.PopSequence()
-    $indirectWriter.PushSequence()
-    $indirectWriter.PushSequence()
-    $indirectWriter.WriteObjectIdentifier("2.16.840.1.101.3.4.2.1")
-    $indirectWriter.WriteNull()
-    $indirectWriter.PopSequence()
-    $indirectWriter.WriteOctetString([byte[]]::new(32))
-    $indirectWriter.PopSequence()
-    $indirectWriter.PopSequence()
+    [void]$indirectWriter.PushSequence()
+    [void]$indirectWriter.PushSequence()
+    [void]$indirectWriter.WriteObjectIdentifier("1.3.6.1.4.1.311.2.1.15")
+    [void]$indirectWriter.PopSequence()
+    [void]$indirectWriter.PushSequence()
+    [void]$indirectWriter.PushSequence()
+    [void]$indirectWriter.WriteObjectIdentifier("2.16.840.1.101.3.4.2.1")
+    [void]$indirectWriter.WriteNull()
+    [void]$indirectWriter.PopSequence()
+    [void]$indirectWriter.WriteOctetString([byte[]]::new(32))
+    [void]$indirectWriter.PopSequence()
+    [void]$indirectWriter.PopSequence()
     $content = [Security.Cryptography.Pkcs.ContentInfo]::new(
         [Security.Cryptography.Oid]::new("1.3.6.1.4.1.311.2.1.4"), $indirectWriter.Encode())
     $cms = [Security.Cryptography.Pkcs.SignedCms]::new($content, $false)
     $cmsSigner = [Security.Cryptography.Pkcs.CmsSigner]::new($Certificate)
     $cmsSigner.DigestAlgorithm = [Security.Cryptography.Oid]::new($SignerDigestOid)
-    $cms.ComputeSignature($cmsSigner)
+    [void]$cms.ComputeSignature($cmsSigner)
     if (-not $Timestamp) { return $cms }
 
     $tstWriter = [Formats.Asn1.AsnWriter]::new([Formats.Asn1.AsnEncodingRules]::DER)
-    $tstWriter.PushSequence()
-    $tstWriter.WriteInteger(1)
-    $tstWriter.WriteObjectIdentifier("1.2.3.4")
-    $tstWriter.PushSequence()
-    $tstWriter.PushSequence()
-    $tstWriter.WriteObjectIdentifier($ImprintDigestOid)
-    $tstWriter.WriteNull()
-    $tstWriter.PopSequence()
-    $tstWriter.WriteOctetString([byte[]]::new(32))
-    $tstWriter.PopSequence()
-    $tstWriter.WriteInteger(1)
-    $tstWriter.WriteGeneralizedTime([DateTimeOffset]::UtcNow)
-    $tstWriter.PopSequence()
+    [void]$tstWriter.PushSequence()
+    [void]$tstWriter.WriteInteger(1)
+    [void]$tstWriter.WriteObjectIdentifier("1.2.3.4")
+    [void]$tstWriter.PushSequence()
+    [void]$tstWriter.PushSequence()
+    [void]$tstWriter.WriteObjectIdentifier($ImprintDigestOid)
+    [void]$tstWriter.WriteNull()
+    [void]$tstWriter.PopSequence()
+    [void]$tstWriter.WriteOctetString([byte[]]::new(32))
+    [void]$tstWriter.PopSequence()
+    [void]$tstWriter.WriteInteger(1)
+    [void]$tstWriter.WriteGeneralizedTime([DateTimeOffset]::UtcNow)
+    [void]$tstWriter.PopSequence()
     $tstBytes = $tstWriter.Encode()
     $tstContentOid = if ($InvalidTimestamp) {
         "1.2.840.113549.1.7.1"
@@ -354,11 +354,11 @@ function New-SelfTestCms(
     $timestampCms = [Security.Cryptography.Pkcs.SignedCms]::new($tstContent, $false)
     $timestampSigner = [Security.Cryptography.Pkcs.CmsSigner]::new($Certificate)
     $timestampSigner.DigestAlgorithm = [Security.Cryptography.Oid]::new($TimestampSignerDigestOid)
-    $timestampCms.ComputeSignature($timestampSigner)
+    [void]$timestampCms.ComputeSignature($timestampSigner)
     $attributeOid = [Security.Cryptography.Oid]::new("1.3.6.1.4.1.311.3.3.1")
     $attribute = [Security.Cryptography.AsnEncodedData]::new(
         $attributeOid, $timestampCms.Encode())
-    $cms.SignerInfos[0].AddUnsignedAttribute($attribute)
+    [void]$cms.SignerInfos[0].AddUnsignedAttribute($attribute)
     return $cms
 }
 
@@ -638,6 +638,12 @@ function Invoke-SelfTest {
                 Error = $null
             }
         )
+        foreach ($case in $policyCases) {
+            if ($null -eq $case.Cms -or
+                $case.Cms.GetType() -ne [Security.Cryptography.Pkcs.SignedCms]) {
+                throw "$($case.Name) fixture did not produce exactly one SignedCms"
+            }
+        }
         foreach ($case in $policyCases) {
             $cmsReader = { $case.Cms }.GetNewClosure()
             $errorMessage = $null
