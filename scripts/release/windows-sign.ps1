@@ -131,6 +131,9 @@ function Assert-AuthenticodeSigner(
     [object]$Signature,
     [Security.Cryptography.X509Certificates.X509Certificate2]$ExpectedCertificate
 ) {
+    if ($Signature.Status -ne "Valid") {
+        throw "Authenticode signature status is not valid"
+    }
     if ($Signature.SignatureType -ne "Authenticode") {
         throw "Signed file did not expose an embedded Authenticode signature"
     }
@@ -288,17 +291,88 @@ function Invoke-SelfTest {
             if ($normalized -cne $certificate.Thumbprint.ToUpperInvariant()) {
                 throw "certificate thumbprint normalization self-test failed"
             }
-            $wrongSigner = [pscustomobject]@{
+
+            $invalidStatuses = @(
+                "UnknownError",
+                "NotSigned",
+                "HashMismatch",
+                "NotTrusted",
+                "NotSupportedFileFormat",
+                "Incompatible"
+            )
+            foreach ($status in $invalidStatuses) {
+                $invalidSignature = [pscustomobject]@{
+                    Status = $status
+                    SignatureType = "Authenticode"
+                    SignerCertificate = $certificate
+                }
+                $rejected = $false
+                try {
+                    Assert-AuthenticodeSigner $invalidSignature $certificate
+                } catch {
+                    if ($_.Exception.Message -cne "Authenticode signature status is not valid") {
+                        throw
+                    }
+                    $rejected = $true
+                }
+                if (-not $rejected) { throw "$status signature status self-test failed" }
+            }
+
+            $identityCases = @(
+                @{
+                    Name = "missing signer"
+                    Error = "Authenticode signer does not match the prepared PFX"
+                    Signature = [pscustomobject]@{
+                        Status = "Valid"
+                        SignatureType = "Authenticode"
+                        SignerCertificate = $null
+                    }
+                },
+                @{
+                    Name = "non-Authenticode signature"
+                    Error = "Signed file did not expose an embedded Authenticode signature"
+                    Signature = [pscustomobject]@{
+                        Status = "Valid"
+                        SignatureType = "Catalog"
+                        SignerCertificate = $certificate
+                    }
+                },
+                @{
+                    Name = "malformed signer thumbprint"
+                    Error = "Certificate thumbprint is not a SHA-1 hexadecimal value"
+                    Signature = [pscustomobject]@{
+                        Status = "Valid"
+                        SignatureType = "Authenticode"
+                        SignerCertificate = [pscustomobject]@{ Thumbprint = "not-a-thumbprint" }
+                    }
+                },
+                @{
+                    Name = "mismatched signer thumbprint"
+                    Error = "Authenticode signer does not match the prepared PFX"
+                    Signature = [pscustomobject]@{
+                        Status = "Valid"
+                        SignatureType = "Authenticode"
+                        SignerCertificate = $otherCertificate
+                    }
+                }
+            )
+            foreach ($case in $identityCases) {
+                $rejected = $false
+                try {
+                    Assert-AuthenticodeSigner $case.Signature $certificate
+                } catch {
+                    if ($_.Exception.Message -cne $case.Error) { throw }
+                    $rejected = $true
+                }
+                if (-not $rejected) { throw "$($case.Name) self-test failed" }
+            }
+
+            $validSignature = [pscustomobject]@{
+                Status = "Valid"
                 SignatureType = "Authenticode"
-                SignerCertificate = $otherCertificate
+                SignerCertificate = $certificate
             }
-            $rejected = $false
-            try {
-                Assert-AuthenticodeSigner $wrongSigner $certificate
-            } catch {
-                $rejected = $true
-            }
-            if (-not $rejected) { throw "distinct same-subject signer self-test failed" }
+            Assert-AuthenticodeSigner $validSignature $certificate
         } finally {
             $otherCertificate.Dispose()
         }
@@ -324,7 +398,22 @@ function Invoke-SelfTest {
         }
         if ($env:OS -eq "Windows_NT") {
             $smoke = Join-Path ([IO.Path]::GetTempPath()) "copypaste-signing-self-test-$PID.exe"
+            $rootStore = [Security.Cryptography.X509Certificates.X509Store]::new(
+                [Security.Cryptography.X509Certificates.StoreName]::Root,
+                [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+            )
+            $trustedForTest = $false
             try {
+                $rootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                $alreadyTrusted = $rootStore.Certificates.Find(
+                    [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                    $certificate.Thumbprint,
+                    $false
+                )
+                if ($alreadyTrusted.Count -eq 0) {
+                    $rootStore.Add($certificate)
+                    $trustedForTest = $true
+                }
                 # Get-AuthenticodeSignature prefers a catalog signature over an embedded one.
                 # Generate an unsigned PE so the smoke test observes the signature just added.
                 Add-Type -TypeDefinition @"
@@ -334,6 +423,8 @@ public static class SigningSelfTest {
 "@ -Language CSharp -OutputAssembly $smoke -OutputType ConsoleApplication
                 Invoke-WindowsSign $smoke
             } finally {
+                if ($trustedForTest) { $rootStore.Remove($certificate) }
+                $rootStore.Dispose()
                 Remove-Item -LiteralPath $smoke -Force -ErrorAction SilentlyContinue
             }
         }
