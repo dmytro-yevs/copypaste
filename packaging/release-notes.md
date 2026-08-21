@@ -1,28 +1,15 @@
 ## Highlights
 
-- Turns sensitive auto-wipe on by default (30s TTL) with a 0.85 wipe floor so
-  generic/KV noise is withheld rather than deleted.
-- Zeroizes STREAM, binary-open and sync plaintext buffers.
-- Patches glib 0.18.5 in-tree for RUSTSEC-2024-0429 (VariantStrIter) and keeps
-  Dependabot on for remaining moderate advisories.
-- Adds a first-run setup wizard: permissions tap-to-prompt, pairing, hosted
-  Supabase as the easy cloud path, and Android-only capture. Skip never blocks
-  later setup.
-- Drops the physical arm64 Android self-hosted publish gate. Signed APK
-  smoke on GitHub-hosted emulators is the Android release evidence.
-- Unblocks release publish: authenticated clipboard column privileges,
-  Android upgrade-fixture metadata deps, and macOS cloud evidence launch.
-- Restores payload_metadata grants after the authenticated revoke and
-  hardens macOS cloud AX reach (ready wait, contains press, always-upload).
-- Opt-in COPYPASTE_EVIDENCE_AX so WKWebView publishes its AX tree on CI.
-- Report (do not enforce) macOS cloud UI AX on hosted runners; uncredit its p95.
-- Sign Windows via Tauri signCommand with SignTool /f PFX + /p (no Root trust).
-- Map Windows Authenticode TSA secrets to SignTool-compatible http:// RFC 3161 URLs.
-- Speed release CI: reuse published Android upgrade fixtures, parallel cloud-evidence APK, cache tauri-driver.
-- Cut alpha.28 on the TSA http:// SignTool rewrite after alpha.27 Windows smoke failed.
-- Cut alpha.29 so Windows smoke sets WINDOWS_CERTIFICATE_PFX_PATH in-process (GITHUB_ENV is later-step only).
-- Adds CI contracts for native pairing, Shizuku fail-closed, FLAG_SECURE and
-  OEM-sticky capture restarts.
+- Hardens Windows installer signing: validates the release certificate before
+  the build, bounds SignTool execution, verifies the signer and RFC 3161
+  timestamp, and removes temporary signing material afterward.
+- Keeps Windows update availability in a pending state until the installed
+  build's updater configuration has been resolved, avoiding a premature or
+  misleading settings message.
+- Strengthens release evidence for signed Windows installers and in-place
+  updates, including signer identity, updater artifacts, and failure states.
+- Pins the frontend toolchain consistently across release and platform CI to
+  make packaged builds reproducible.
 
 ## Not verified on this host
 
