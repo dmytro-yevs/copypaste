@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
+import { QUICK_PASTE_QUERY_KEY } from "@/components/quick-paste/useQuickPasteLifecycle";
 import { en } from "@/i18n";
 import { IpcFailure } from "@/lib/errors";
 import { rowHeight } from "@/lib/layout";
@@ -180,13 +181,16 @@ describe("Quick Paste", () => {
   });
 
   it("releases the warm popup cache when native hide invokes its memory hook", async () => {
-    withUser(<QuickPasteApp />);
+    const { client } = withUser(<QuickPasteApp />);
 
     await screen.findByRole("listitem");
     expect(window.__copypasteFreeMemory).toEqual(expect.any(Function));
-    window.__copypasteFreeMemory?.();
+    act(() => window.__copypasteFreeMemory?.());
 
-    await waitFor(() => expect(screen.queryByRole("listitem")).toBeNull());
+    await waitFor(() => {
+      expect(client.getQueryData(QUICK_PASTE_QUERY_KEY)).toBeUndefined();
+      expect(screen.queryByRole("listitem")).toBeNull();
+    });
   });
 
   it("ignores a delayed response after a newer focus refresh", async () => {
