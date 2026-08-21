@@ -240,7 +240,6 @@ function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) 
 }
 
 function Test-WindowsUiEvidenceHelpers {
-    Test-WindowsReadinessHelpers
     Test-UiaSnapshotHelpers
     Assert-True ((Get-UiaControlTypeName ([Windows.Automation.ControlType]::Button)) -eq "ControlType.Button") `
         "a registered control type was not read from the element"
