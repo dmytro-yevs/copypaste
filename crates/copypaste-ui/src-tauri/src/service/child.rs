@@ -83,6 +83,23 @@ impl ChildProcess for Child {
     }
 }
 
+/// Kill the child and reap it, giving up on the reap at the budget.
+///
+/// Reaped rather than left a zombie: the app may run for days after. But a
+/// `wait` that never returns is worse than a zombie, so it runs on a thread of
+/// its own and this call stops waiting.
+pub(super) fn end_child(mut child: Box<dyn ChildProcess>) {
+    let _ = child.kill();
+    let (done, reaped) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = child.reap();
+        let _ = done.send(());
+    });
+    if reaped.recv_timeout(FORCED_STOP_BUDGET).is_err() {
+        tracing::warn!("the background service could not be reaped");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,22 +124,5 @@ mod tests {
             ChildExitCode::from_test_code(signed).log_value(),
             "3221225477"
         );
-    }
-}
-
-/// Kill the child and reap it, giving up on the reap at the budget.
-///
-/// Reaped rather than left a zombie: the app may run for days after. But a
-/// `wait` that never returns is worse than a zombie, so it runs on a thread of
-/// its own and this call stops waiting.
-pub(super) fn end_child(mut child: Box<dyn ChildProcess>) {
-    let _ = child.kill();
-    let (done, reaped) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = child.reap();
-        let _ = done.send(());
-    });
-    if reaped.recv_timeout(FORCED_STOP_BUDGET).is_err() {
-        tracing::warn!("the background service could not be reaped");
     }
 }
