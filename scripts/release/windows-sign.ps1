@@ -226,29 +226,12 @@ function Assert-AuthenticodeSigner(
     }
 }
 
-function Add-TemporarySelfSignedTrust(
+function Test-SelfSignedCertificate(
     [Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
 ) {
     $subject = [Convert]::ToHexString($Certificate.SubjectName.RawData)
     $issuer = [Convert]::ToHexString($Certificate.IssuerName.RawData)
-    if ($subject -cne $issuer) { return $null }
-    $store = [Security.Cryptography.X509Certificates.X509Store]::new(
-        [Security.Cryptography.X509Certificates.StoreName]::Root,
-        [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-    try {
-        $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-        if ($store.Certificates.Find(
-                [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                $Certificate.Thumbprint, $false).Count -gt 0) {
-            $store.Dispose()
-            return $null
-        }
-        $store.Add($Certificate)
-        return $store
-    } catch {
-        $store.Dispose()
-        throw
-    }
+    return $subject -ceq $issuer
 }
 
 # 16 MiB is well above normal Authenticode chains while bounding hostile PE allocation.
@@ -319,6 +302,7 @@ function Get-Rfc3161TimestampCertificate(
 
     $timestampCms = [Security.Cryptography.Pkcs.SignedCms]::new()
     $timestampCms.Decode($timestampAttribute.Values[0].RawData)
+    $timestampCms.CheckSignature($true)
     if ($timestampCms.ContentInfo.ContentType.Value -cne "1.2.840.113549.1.9.16.1.4" -or
         $timestampCms.SignerInfos.Count -lt 1) {
         throw "Authenticode RFC 3161 timestamp is invalid"
@@ -411,6 +395,7 @@ function Convert-EmbeddedSignatureCms([Security.Cryptography.Pkcs.SignedCms]$Cms
     if ($Cms.SignerInfos.Count -lt 1) {
         throw "Signed file did not expose an embedded Authenticode signature"
     }
+    $Cms.CheckSignature($true)
     $signer = $Cms.SignerInfos[0]
     $authenticode = [Formats.Asn1.AsnReader]::new(
         $Cms.ContentInfo.Content, [Formats.Asn1.AsnEncodingRules]::DER)
@@ -437,13 +422,16 @@ function Get-EmbeddedAuthenticodeSignature(
     [string]$Target,
     [string]$SignTool,
     [scriptblock]$ProcessRunner,
-    [scriptblock]$CmsReader = { param($Path) Read-EmbeddedSignatureCms $Path }
+    [scriptblock]$CmsReader = { param($Path) Read-EmbeddedSignatureCms $Path },
+    [bool]$RequireTrustedChain = $true
 ) {
-    $verification = & $ProcessRunner $SignTool @("verify", "/pa", "/all", "/tw", $Target) `
-        120000 "SignTool embedded verification" $Target
-    if ($verification.ExitCode -ne 0) {
-        throw (Format-ProcessDiagnostic "SignTool embedded verification" $SignTool $Target `
-            "exit $($verification.ExitCode)" $verification)
+    if ($RequireTrustedChain) {
+        $verification = & $ProcessRunner $SignTool @("verify", "/pa", "/all", "/tw", $Target) `
+            120000 "SignTool embedded verification" $Target
+        if ($verification.ExitCode -ne 0) {
+            throw (Format-ProcessDiagnostic "SignTool embedded verification" $SignTool $Target `
+                "exit $($verification.ExitCode)" $verification)
+        }
     }
 
     return Convert-EmbeddedSignatureCms (& $CmsReader $Target)
@@ -457,10 +445,9 @@ function Invoke-WindowsSign(
     [scriptblock]$SigningStateReader = { Get-PreparedSigningState },
     [scriptblock]$SignToolFinder = { Find-SignTool },
     [scriptblock]$SignatureReader = {
-        param($Path, $Tool, $Runner) Get-EmbeddedAuthenticodeSignature $Path $Tool $Runner
-    },
-    [scriptblock]$TrustAnchorInstaller = { param($Certificate)
-        Add-TemporarySelfSignedTrust $Certificate
+        param($Path, $Tool, $Runner, $RequireTrustedChain)
+        Get-EmbeddedAuthenticodeSignature $Path $Tool $Runner `
+            -RequireTrustedChain $RequireTrustedChain
     }
 ) {
     if ($env:OS -ne "Windows_NT") { throw "Authenticode signing must run on Windows" }
@@ -470,7 +457,6 @@ function Invoke-WindowsSign(
     }
 
     $state = $null
-    $trustStore = $null
     try {
         $state = & $SigningStateReader
         $signtool = & $SignToolFinder
@@ -481,18 +467,14 @@ function Invoke-WindowsSign(
                 "exit $($result.ExitCode)" $result)
         }
 
-        # Project-generated alpha certificates are self-signed. SignTool /pa
-        # still verifies them under Windows policy, with this explicit anchor.
-        $trustStore = & $TrustAnchorInstaller $state.Certificate
-        $signature = & $SignatureReader $Target $signtool $ProcessRunner
+        # /pa proves Windows policy trust only for CA-backed release certificates.
+        $requireTrustedChain = -not (Test-SelfSignedCertificate $state.Certificate)
+        $signature = & $SignatureReader $Target $signtool $ProcessRunner $requireTrustedChain
         Assert-AuthenticodeSigner $signature $state.Certificate
         if ($null -eq $signature.TimeStamperCertificate) {
             throw "Authenticode signature is missing its RFC 3161 timestamp"
         }
     } finally {
-        if ($trustStore) {
-            try { $trustStore.Remove($state.Certificate) } finally { $trustStore.Dispose() }
-        }
         if ($state -and $state.Certificate) { $state.Certificate.Dispose() }
     }
 }
@@ -749,11 +731,16 @@ function Invoke-SelfTest {
                 })
                 [pscustomobject]@{ ExitCode = 0 }
             }.GetNewClosure()
-            $embedded = Get-EmbeddedAuthenticodeSignature $catalogTarget $signtool $acceptVerification
+            $rejectSmokeVerification = {
+                throw "self-signed smoke verification called SignTool verify"
+            }
+            $embedded = Get-EmbeddedAuthenticodeSignature $catalogTarget $signtool `
+                $rejectSmokeVerification -RequireTrustedChain $false
             Assert-AuthenticodeSigner $embedded $certificate
             if ($null -ne $embedded.TimeStamperCertificate) {
                 throw "untimestamped embedded signature self-test exposed a timestamp"
             }
+            [void](Get-EmbeddedAuthenticodeSignature $catalogTarget $signtool $acceptVerification)
             if ($verificationCalls.Count -ne 1 -or
                 [string]::Join(" ", $verificationCalls[0].Arguments) -cne
                     "verify /pa /all /tw $catalogTarget" -or
@@ -898,10 +885,16 @@ function Invoke-SelfTest {
             try {
                 $env:OS = "Windows_NT"
                 $fakeStateReader = { $routingState }.GetNewClosure()
-                $fakeSignatureReader = { param($Path) $fakeSignature }.GetNewClosure()
+                $trustedChainChecks = [Collections.Generic.List[bool]]::new()
+                $fakeSignatureReader = {
+                    param($Path, $Tool, $Runner, $RequireTrustedChain)
+                    $trustedChainChecks.Add($RequireTrustedChain)
+                    $fakeSignature
+                }.GetNewClosure()
                 Invoke-WindowsSign $routingTarget $fakeRunner $fakeStateReader `
-                    { "fake-signtool.exe" } $fakeSignatureReader { $null }
+                    { "fake-signtool.exe" } $fakeSignatureReader
                 if ($runnerCalls.Count -ne 1 -or
+                    $trustedChainChecks.Count -ne 1 -or $trustedChainChecks[0] -or
                     $runnerCalls[0].Executable -cne "fake-signtool.exe" -or
                     $runnerCalls[0].Timeout -ne 120000 -or
                     $runnerCalls[0].Phase -cne "SignTool signing" -or
@@ -928,13 +921,14 @@ function Invoke-SelfTest {
                 $untimestampedCmsReader = { $untimestampedCms }.GetNewClosure()
                 $embeddedSignatureReader = ${function:Get-EmbeddedAuthenticodeSignature}
                 $untimestampedSignatureReader = {
-                    param($Path, $Tool, $Runner)
-                    & $embeddedSignatureReader $Path $Tool $Runner $untimestampedCmsReader
+                    param($Path, $Tool, $Runner, $RequireTrustedChain)
+                    & $embeddedSignatureReader $Path $Tool $Runner $untimestampedCmsReader `
+                        $RequireTrustedChain
                 }.GetNewClosure()
                 $missingTimestampRejected = $false
                 try {
                     Invoke-WindowsSign $routingTarget $fakeRunner $untimestampedStateReader `
-                        { "fake-signtool.exe" } $untimestampedSignatureReader { $null }
+                        { "fake-signtool.exe" } $untimestampedSignatureReader
                 } catch {
                     if ($_.Exception.Message -cne
                         "Authenticode signature is missing its RFC 3161 timestamp") { throw }
@@ -943,13 +937,10 @@ function Invoke-SelfTest {
                 if (-not $missingTimestampRejected) {
                     throw "Invoke-WindowsSign missing timestamp self-test failed"
                 }
-                if ($runnerCalls.Count -ne 3 -or
+                if ($runnerCalls.Count -ne 2 -or
                     $runnerCalls[1].Phase -cne "SignTool signing" -or
                     $runnerCalls[1].Timeout -ne 120000 -or
-                    $runnerCalls[2].Phase -cne "SignTool embedded verification" -or
-                    $runnerCalls[2].Timeout -ne 120000 -or
-                    [string]::Join(" ", $runnerCalls[2].Arguments) -cne
-                        "verify /pa /all /tw $routingTarget") {
+                    $trustedChainChecks.Count -ne 1 -or $trustedChainChecks[0]) {
                     throw "Invoke-WindowsSign missing timestamp routing self-test failed: " +
                         ([string]::Join(" | ", @($runnerCalls | ForEach-Object {
                             "$($_.Phase):$([string]::Join(' ', $_.Arguments))"
