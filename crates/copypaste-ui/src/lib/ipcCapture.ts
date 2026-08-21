@@ -59,7 +59,7 @@ export function captureRefresh(): Promise<CaptureSnapshot> {
 }
 
 /** One call for two steps: it asks for the permission when that is what is
- *  missing, and registers the listener when it is not. */
+ *  missing, and starts the background reader when it is not. */
 export function captureArm(): Promise<CaptureSnapshot> {
   return call<CaptureSnapshot>("capture_arm");
 }
