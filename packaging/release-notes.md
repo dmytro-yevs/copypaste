@@ -3,13 +3,10 @@
 - Hardens Windows installer signing: validates the release certificate before
   the build, bounds SignTool execution, verifies the signer and RFC 3161
   timestamp, and removes temporary signing material afterward.
-- Keeps Windows update availability in a pending state until the installed
-  build's updater configuration has been resolved, avoiding a premature or
-  misleading settings message.
 - Strengthens release evidence for signed Windows installers and in-place
   updates, including signer identity, updater artifacts, and failure states.
 - Pins the frontend toolchain consistently across release and platform CI to
-  make packaged builds reproducible.
+  reduce toolchain drift and make packaged builds more consistent.
 
 ## Not verified on this host
 
