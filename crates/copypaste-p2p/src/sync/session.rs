@@ -1341,6 +1341,8 @@ mod tests {
                 content: String::new(),
                 binary_content: bytes.clone(),
                 payload_metadata: None,
+                source_app_bundle_id: None,
+                source_app_name: None,
                 content_type: "image/png".into(),
                 created_at: 1,
                 deleted: false,

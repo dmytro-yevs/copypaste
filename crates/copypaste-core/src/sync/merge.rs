@@ -128,6 +128,8 @@ pub struct RemoteVersion<'a> {
     pub content_hash: Option<&'a str>,
     /// The device that produced *this version*, preserved across hops.
     pub origin_device_id: &'a str,
+    pub app_bundle_id: Option<&'a str>,
+    pub app_name: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -454,6 +456,8 @@ mod tests {
             deleted: false,
             content_hash: None,
             origin_device_id: "device-a",
+            app_bundle_id: None,
+            app_name: None,
         };
 
         assert!(!f.apply(&incoming));
@@ -648,6 +652,8 @@ mod tests {
             deleted: false,
             content_hash: None,
             origin_device_id: "device-a",
+            app_bundle_id: None,
+            app_name: None,
         };
         assert!(f.apply(&local));
 
@@ -661,6 +667,8 @@ mod tests {
             deleted: false,
             content_hash: None,
             origin_device_id: "device-b",
+            app_bundle_id: None,
+            app_name: None,
         };
         let outcome = apply_remote_p2p_version_with_pin_stamp(
             &f.store,

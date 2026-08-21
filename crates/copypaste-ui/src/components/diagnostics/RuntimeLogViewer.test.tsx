@@ -84,19 +84,20 @@ describe("RuntimeLogViewer", () => {
    *  service's own failure sentence. */
   it("reads its filters and its failure state from the catalogue", async () => {
     getRuntimeLogEvents.mockRejectedValue(new Error("no log"));
-    withUser(<RuntimeLogViewer />);
+    const { user } = withUser(<RuntimeLogViewer />);
+    expect(
+      screen.getByRole("combobox", { name: en.runtimeLog.process.label }),
+    ).not.toBeNull();
 
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
       en.runtimeLog.loadFailed,
     );
+    await user.click(screen.getByRole("combobox", { name: en.runtimeLog.level.label }));
     for (const label of Object.values(en.runtimeLog.level)) {
       if (label === en.runtimeLog.level.label) continue;
       expect(screen.getByRole("option", { name: label })).not.toBeNull();
     }
-    expect(
-      screen.getByRole("combobox", { name: en.runtimeLog.process.label }),
-    ).not.toBeNull();
   });
 });
 

@@ -23,6 +23,7 @@ import {
   captureState,
   captureToastExplanation,
   hasBridge,
+  hasWebBridge,
 } from "@/lib/ipc";
 import { EVENT_CAPTURED, EVENT_CAPTURE_STATE } from "@/lib/tauriEvents";
 import { useUi } from "@/store/ui";
@@ -66,7 +67,7 @@ export function useCaptureSync() {
   const snapshot = useCaptureState().data;
 
   useEffect(() => {
-    if (!hasBridge()) return;
+    if (!hasBridge() || hasWebBridge()) return;
 
     let cancelled = false;
     const detach: Array<() => void> = [];

@@ -11,7 +11,7 @@ import type {
 } from "@/generated/ipc";
 import type { ReadonlyDeep } from "type-fest";
 import type { Item } from "./ipc";
-import { call, type IpcCallOptions } from "./ipcCall";
+import { call, hasWebBridge, type IpcCallOptions } from "./ipcCall";
 
 export type CapturedPayload = ReadonlyDeep<GeneratedCapturedPayload>;
 export type CaptureHealth = ReadonlyDeep<GeneratedCaptureHealth>;
@@ -23,13 +23,38 @@ export type NotGrantedReason = GeneratedNotGrantedReason;
 export type NotWorkingReason = GeneratedNotWorkingReason;
 export type ShizukuProbe = ReadonlyDeep<GeneratedShizukuProbe>;
 
+const WEB_BRIDGE_CAPTURE_SNAPSHOT: CaptureSnapshot = {
+  rung: "desktop",
+  health: { state: "working" },
+  shizuku: {
+    supported: false,
+    installed: false,
+    running: false,
+    permission: false,
+    enabled: false,
+    toastSuppressed: false,
+    rearmRequested: false,
+  },
+  nextStep: "none",
+  headline: "Clipboard capture is running.",
+  detail: null,
+  lastReadOkAt: null,
+  lastCaptureAt: null,
+  droppedClips: 0,
+  toastSuppressed: false,
+  toastAcknowledged: true,
+  rearmRequested: false,
+};
+
 export function captureState(options?: IpcCallOptions): Promise<CaptureSnapshot> {
+  if (hasWebBridge()) return Promise.resolve(WEB_BRIDGE_CAPTURE_SNAPSHOT);
   return call<CaptureSnapshot>("capture_state", undefined, options);
 }
 
 /** Called on every resume, not only at startup: a grant can lapse while the app
  *  is backgrounded, and a reboot is the ordinary case. */
 export function captureRefresh(): Promise<CaptureSnapshot> {
+  if (hasWebBridge()) return Promise.resolve(WEB_BRIDGE_CAPTURE_SNAPSHOT);
   return call<CaptureSnapshot>("capture_refresh");
 }
 
@@ -71,4 +96,19 @@ export function captureSetToastSuppressed(
     suppressed,
     acknowledged,
   });
+}
+
+export function captureOpenShizuku(): Promise<void> {
+  if (hasWebBridge()) return Promise.resolve();
+  return call<void>("capture_open_shizuku");
+}
+
+export function captureOpenDeveloperOptions(): Promise<void> {
+  if (hasWebBridge()) return Promise.resolve();
+  return call<void>("capture_open_developer_options");
+}
+
+export function captureRequestBatteryExemption(): Promise<void> {
+  if (hasWebBridge()) return Promise.resolve();
+  return call<void>("capture_request_battery_exemption");
 }
