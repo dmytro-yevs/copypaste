@@ -485,10 +485,14 @@ jobs:
   # there is no ad-hoc equivalent. Its generated key is limited to this
   # never-published emulator fixture; ADR-0006 requires the release workflow to
   # fail closed rather than use such a key for a published artifact.
-  release-apk:
-    name: Build the release APK (x86_64, minified)
+  release-apk-shard:
+    name: Build release APK shard (${{ matrix.variant }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [shipped, upgrade, cloud]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -502,7 +506,7 @@ jobs:
       # other's save every night.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: android-emulator-release
+          shared-key: android-emulator-release-${{ matrix.variant }}
           save-if: "true"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -562,63 +566,102 @@ jobs:
           set -euo pipefail
           cd crates/copypaste-ui
           npm ci
-          previous="$(node ../../scripts/release/android-metadata.mjs --previous-fixture)"
-          previous_config="${RUNNER_TEMP}/copypaste-previous-tauri.json"
-          COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 \
-            node ../../scripts/release/android-metadata.mjs \
-              --version "$previous" --write-overlay "$previous_config"
-          GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.daemon=false" \
-            npm run tauri -- android build --apk --target x86_64 --config "$previous_config"
+          case "${{ matrix.variant }}" in
+            shipped)
+              npm run tauri -- android build --apk --target x86_64
+              ;;
+            upgrade)
+              previous="$(node ../../scripts/release/android-metadata.mjs --previous-fixture)"
+              previous_config="${RUNNER_TEMP}/copypaste-previous-tauri.json"
+              COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 \
+                node ../../scripts/release/android-metadata.mjs \
+                  --version "$previous" --write-overlay "$previous_config"
+              npm run tauri -- android build --apk --target x86_64 --config "$previous_config"
+              ;;
+            cloud)
+              COPYPASTE_CLOUD_URL=http://127.0.0.1:47800 \
+              COPYPASTE_CLOUD_ANON_KEY=native-evidence \
+                npm run tauri -- android build --apk --target x86_64 --features cloud-evidence
+              ;;
+          esac
           outputs="src-tauri/gen/android/app/build/outputs/apk"
-          previous_apk="$(find "$outputs" -name '*release*.apk' -print -quit)"
-          [[ -n "$previous_apk" ]] || { echo "::error::the upgrade fixture APK was not produced"; exit 1; }
-          cp "$previous_apk" "${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
-          find "$outputs" -type f -name '*.apk' -delete
-          # No --debug: this is the build type R8 runs on, which is the whole
-          # reason this job exists.
-          COPYPASTE_CLOUD_URL=http://127.0.0.1:47800 \
-          COPYPASTE_CLOUD_ANON_KEY=native-evidence \
-            npm run tauri -- android build --apk --target x86_64 --features cloud-evidence
-          cloud_apk="$(find "$outputs" -name '*release*.apk' -print -quit)"
-          cloud_mapping="$(find src-tauri/gen/android/app/build/outputs/mapping -name 'mapping.txt' -print -quit)"
-          [[ -n "$cloud_apk" && -n "$cloud_mapping" ]] \
-            || { echo "::error::the configured cloud evidence build is incomplete"; exit 1; }
-          cp "$cloud_apk" "${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
-          cp "$cloud_mapping" "${RUNNER_TEMP}/copypaste-cloud-evidence-mapping.txt"
+          apk="$(find "$outputs" -name '*release*.apk' -print -quit)"
+          [[ -n "$apk" ]] || { echo "::error::the ${{ matrix.variant }} release APK was not produced"; exit 1; }
+          mkdir -p shard
+          cp "$apk" "shard/${{ matrix.variant }}.apk"
+          if [[ "${{ matrix.variant }}" != "upgrade" ]]; then
+            mapping="$(find src-tauri/gen/android/app/build/outputs/mapping -name 'mapping.txt' -print -quit)"
+            [[ -n "$mapping" ]] || { echo "::error::R8 produced no mapping for ${{ matrix.variant }}"; exit 1; }
+            cp "$mapping" "shard/${{ matrix.variant }}-mapping.txt"
+          fi
 
-          find "$outputs" -type f -name '*.apk' -delete
-          cargo clean --manifest-path src-tauri/Cargo.toml -p copypaste-ui --release
-          npm run tauri -- android build --apk --target x86_64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.variant == 'shipped'
+        with:
+          name: android-release-unsigned
+          path: crates/copypaste-ui/shard
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.variant == 'upgrade'
+        with:
+          name: android-upgrade-unsigned
+          path: crates/copypaste-ui/shard
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.variant == 'cloud'
+        with:
+          name: android-cloud-unsigned
+          path: crates/copypaste-ui/shard
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Prove R8 ran, then sign it so it can be installed
+  release-apk:
+    name: Sign release emulator APKs
+    needs: release-apk-shard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - run: npm ci --prefix crates/copypaste-ui --ignore-scripts
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Android packaging tools
         run: |
           set -euo pipefail
-          gen="crates/copypaste-ui/src-tauri/gen/android/app/build"
-          outputs="$gen/outputs/apk"
-          [[ -d "$outputs" ]] || { echo "::error::the Gradle build produced no APK directory"; exit 1; }
-
-          unsigned="$(find "$outputs" -name '*release*.apk' -print -quit)"
-          if [[ -z "$unsigned" ]]; then
-            echo "::error::no release APK under $outputs. Found:"
-            find "$outputs" -name '*.apk' | sed 's/^/::error::  /'
-            exit 1
-          fi
-          echo "Built: $unsigned"
-          previous_unsigned="${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
-          [[ -f "$previous_unsigned" ]] || { echo "::error::the upgrade fixture APK is missing"; exit 1; }
-          cloud_unsigned="${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
-          cloud_mapping="${RUNNER_TEMP}/copypaste-cloud-evidence-mapping.txt"
-          [[ -f "$cloud_unsigned" && -f "$cloud_mapping" ]] \
-            || { echo "::error::the cloud evidence APK or mapping is missing"; exit 1; }
-
-          # R8 writes a mapping file and only when it runs. Asserted, because a
-          # release APK that was somehow not minified would make this whole leg
-          # a slower copy of the debug one.
-          mapping="$(find "$gen/outputs/mapping" -name 'mapping.txt' -print -quit 2>/dev/null || true)"
-          [[ -n "$mapping" ]] \
-            || { echo "::error::no R8 mapping.txt under $gen/outputs/mapping — minification did not run, so this leg would prove nothing"; exit 1; }
-          echo "R8 mapping: $mapping ($(wc -l < "$mapping") lines)"
-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "build-tools;${BUILD_TOOLS_VERSION}"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-release-unsigned
+          path: unsigned/shipped
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-upgrade-unsigned
+          path: unsigned/upgrade
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-cloud-unsigned
+          path: unsigned/cloud
+      - name: Prove R8 ran, then sign the APKs
+        run: |
+          set -euo pipefail
+          unsigned="unsigned/shipped/shipped.apk"
+          previous_unsigned="unsigned/upgrade/upgrade.apk"
+          cloud_unsigned="unsigned/cloud/cloud.apk"
+          mapping="unsigned/shipped/shipped-mapping.txt"
+          cloud_mapping="unsigned/cloud/cloud-mapping.txt"
+          for file in "$unsigned" "$previous_unsigned" "$cloud_unsigned" "$mapping" "$cloud_mapping"; do
+            [[ -f "$file" ]] || { echo "::error::missing release shard $file"; exit 1; }
+          done
           tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
           badging="$("${tools}/aapt2" dump badging "$unsigned")"
           grep -q "application-debuggable" <<<"$badging" \

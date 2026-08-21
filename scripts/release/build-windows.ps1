@@ -27,6 +27,24 @@ function Invoke-Checked([string]$Command, [string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "$Command exited $LASTEXITCODE" }
 }
 
+function Resolve-PrebuiltSidecars([string]$Directory, [string]$Architecture) {
+    $source = [IO.Path]::GetFullPath($Directory)
+    $manifestPath = Join-Path $source "sidecars.json"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Prebuilt sidecar artifact has no architecture manifest"
+    }
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    if ($manifest.architecture -ne $Architecture) {
+        throw "Prebuilt sidecar architecture does not match $Architecture"
+    }
+    foreach ($binary in @("copypaste.exe", "copypaste-daemon.exe")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $source $binary) -PathType Leaf)) {
+            throw "Prebuilt sidecar artifact is incomplete"
+        }
+    }
+    return $source
+}
+
 function Write-SignedConfig(
     [string]$TemplatePath,
     [string]$DestinationPath,
@@ -73,6 +91,45 @@ function Invoke-SelfTest {
         if ($config.plugins.updater.pubkey -ne "self-test-public-key" -or
             $config.plugins.updater.endpoints[0] -ne "https://updates.example.test/latest.json") {
             throw "generated updater configuration self-test failed"
+        }
+
+        $valid = Join-Path $root "valid"
+        [IO.Directory]::CreateDirectory($valid) | Out-Null
+        Set-Content -LiteralPath (Join-Path $valid "copypaste.exe") -Value "cli"
+        Set-Content -LiteralPath (Join-Path $valid "copypaste-daemon.exe") -Value "daemon"
+        @{ architecture = "x86_64" } | ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $valid "sidecars.json")
+        if ((Resolve-PrebuiltSidecars $valid "x86_64") -ne [IO.Path]::GetFullPath($valid)) {
+            throw "valid prebuilt sidecar artifact was not resolved"
+        }
+
+        $missing = Join-Path $root "missing"
+        Copy-Item -LiteralPath $valid -Destination $missing -Recurse
+        Remove-Item -LiteralPath (Join-Path $missing "copypaste-daemon.exe")
+        try {
+            Resolve-PrebuiltSidecars $missing "x86_64" | Out-Null
+            throw "unexpected acceptance"
+        } catch {
+            if ($_.Exception.Message -notlike "*incomplete*") { throw }
+        }
+
+        $wrongArchitecture = Join-Path $root "wrong-architecture"
+        Copy-Item -LiteralPath $valid -Destination $wrongArchitecture -Recurse
+        @{ architecture = "aarch64" } | ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $wrongArchitecture "sidecars.json")
+        try {
+            Resolve-PrebuiltSidecars $wrongArchitecture "x86_64" | Out-Null
+            throw "unexpected acceptance"
+        } catch {
+            if ($_.Exception.Message -notlike "*architecture*") { throw }
+        }
+
+        Remove-Item -LiteralPath (Join-Path $valid "sidecars.json")
+        try {
+            Resolve-PrebuiltSidecars $valid "x86_64" | Out-Null
+            throw "unexpected acceptance"
+        } catch {
+            if ($_.Exception.Message -notlike "*manifest*") { throw }
         }
     } finally {
         Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
@@ -127,12 +184,7 @@ try {
     }
 
     if ($PrebuiltSidecarsDirectory) {
-        $sidecarSource = [IO.Path]::GetFullPath($PrebuiltSidecarsDirectory)
-        foreach ($binary in @("copypaste.exe", "copypaste-daemon.exe")) {
-            if (-not (Test-Path -LiteralPath (Join-Path $sidecarSource $binary) -PathType Leaf)) {
-                throw "Prebuilt sidecar artifact is incomplete"
-            }
-        }
+        $sidecarSource = Resolve-PrebuiltSidecars $PrebuiltSidecarsDirectory $Architecture
     } else {
         Push-Location $repoRoot
         try {

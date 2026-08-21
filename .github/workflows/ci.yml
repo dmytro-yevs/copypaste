@@ -798,8 +798,41 @@ jobs:
           }
           Write-Output "no CopyPaste entry in the Credential Manager, as designed"
 
+  windows-sidecars:
+    name: Windows package sidecars (x64)
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96-package-sidecars
+          cache-on-failure: true
+      - name: Build package sidecars
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo +1.96 build --release --locked --target x86_64-pc-windows-msvc -p copypaste-cli -p copypaste-daemon
+          New-Item -ItemType Directory -Force artifacts/windows-sidecars | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/copypaste.exe,target/x86_64-pc-windows-msvc/release/copypaste-daemon.exe artifacts/windows-sidecars
+          @{ architecture = "x86_64" } | ConvertTo-Json |
+            Set-Content artifacts/windows-sidecars/sidecars.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-ci-sidecars
+          path: artifacts/windows-sidecars
+          if-no-files-found: error
+          retention-days: 7
+
   windows-package:
     name: Windows installed product evidence (x64)
+    needs: windows-sidecars
     runs-on: windows-2022
     timeout-minutes: 20
     env:
@@ -822,6 +855,11 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-ci-sidecars
+          path: artifacts/windows-sidecars
 
       - name: Confirm OpenSSL's Perl
         shell: pwsh
@@ -848,7 +886,11 @@ jobs:
 
       - name: Build the complete current-user installer
         shell: pwsh
-        run: ./scripts/release/build-windows.ps1 -Unsigned -OutputDirectory artifacts/windows-ci-package
+        run: >-
+          ./scripts/release/build-windows.ps1
+          -Unsigned
+          -PrebuiltSidecarsDirectory artifacts/windows-sidecars
+          -OutputDirectory artifacts/windows-ci-package
 
       - name: Installer, sidecar, pipe, clipboard and transfer evidence
         shell: pwsh
