@@ -35,6 +35,32 @@ def steps(job):
     return job.get("steps") or []
 
 
+def android_runner_local_artifact_transfers(jobs):
+    tokens = (
+        "android-release-scaffold",
+        "tauri.settings.gradle",
+        "tauri.build.gradle.kts",
+        "tauri.properties",
+        "proguard-tauri.pro",
+        "local.properties",
+    )
+    violations = []
+    for job_name, job in jobs.items():
+        for step in steps(job):
+            action = str(step.get("uses") or "")
+            if not action.startswith(("actions/upload-artifact", "actions/download-artifact")):
+                continue
+            settings = step.get("with") or {}
+            path = str(settings.get("path", ""))
+            detail = "{}\n{}".format(settings.get("name", ""), path)
+            for token in tokens:
+                if token in detail:
+                    violations.append((job_name, token))
+            if "src-tauri/gen/android" in path and "jniLibs/" not in path:
+                violations.append((job_name, "generated Android tree"))
+    return violations
+
+
 def as_list(v):
     return [v] if isinstance(v, str) else (v or [])
 
@@ -418,7 +444,8 @@ for check in toolchain_component_checks(docs, TEST_SPAWNED_COMPONENTS):
 # exports RANLIB_<triple>. android-ndk-env.sh exports it, per triple, so its
 # list and the list of targets the job installs have to stay the same set: a
 # target it misses fails only after several minutes of OpenSSL build.
-android = (docs["release.yml"].get("jobs") or {}).get("android-abi") or {}
+android_jobs = docs["release.yml"].get("jobs") or {}
+android = android_jobs.get("android-abi") or {}
 wiring = [s for s in steps(android) if "android-ndk-env.sh" in (s.get("run") or "")]
 rec(len(wiring) == 1, "release.yml: android-abi runs android-ndk-env.sh exactly once",
     "found {} steps invoking it".format(len(wiring)))
@@ -429,6 +456,13 @@ installed = {
     entry.get("triple")
     for entry in (((android.get("strategy") or {}).get("matrix") or {}).get("include") or [])
 }
+for setup in steps(android_jobs.get("android") or {}):
+    if (setup.get("uses") or "").startswith("dtolnay/rust-toolchain"):
+        installed |= {
+            target.strip()
+            for target in str((setup.get("with") or {}).get("targets", "")).split(",")
+            if target.strip()
+        }
 script = pathlib.Path("scripts/release/android-ndk-env.sh")
 m = re.search(r"TRIPLES=\(([^)]*)\)", script.read_text()) if script.is_file() else None
 listed = set((m.group(1) if m else "").split())
@@ -667,20 +701,36 @@ release_android_downloads = {
     for step in steps(release_android)
     if (step.get("uses") or "").startswith("actions/download-artifact")
 }
-rec(release_abi_targets == {"aarch64", "armv7", "i686", "x86_64"}
+local_settings_step = next(
+    (index for index, step in enumerate(steps(release_android))
+     if step.get("name") == "Generate runner-local Tauri Gradle settings"),
+    -1,
+)
+native_download_steps = [
+    index
+    for index, step in enumerate(steps(release_android))
+    if (step.get("uses") or "").startswith("actions/download-artifact")
+]
+rec(release_abi_targets == {"aarch64", "armv7", "i686"}
     and "android-abi" in closure(release_jobs, "android")
     and {
-        "android-release-scaffold",
         "android-native-aarch64",
         "android-native-armv7",
         "android-native-i686",
-        "android-native-x86_64",
     } <= release_android_downloads
+    and "npm run tauri -- android build --apk --target x86_64" in release_android_body
+    and local_settings_step >= 0
+    and native_download_steps
+    and all(local_settings_step < index for index in native_download_steps)
     and "assembleUniversalRelease" in release_android_body
     and "-x rustBuildUniversalRelease" in release_android_body
     and "for abi in arm64-v8a armeabi-v7a x86 x86_64" in release_android_body,
     "release.yml shards and reassembles the published universal APK",
-    "all four native shards must feed one Gradle universal package without relinking")
+    "three remote shards and one runner-local x86_64 build must feed the universal package")
+local_android_transfers = android_runner_local_artifact_transfers(release_jobs)
+rec(not local_android_transfers,
+    "release.yml regenerates machine-local Android settings on the assembly runner",
+    "runner-local generated settings crossed an artifact boundary: {!r}".format(local_android_transfers))
 rec(bool(re.search(r"^\s*npm run tauri -- android build --apk --target x86_64\s*$",
                    emulator_android_workflow, re.M)),
     "android-emulator.yml rebuilds the shipped APK without cloud evidence configuration")
@@ -965,6 +1015,50 @@ if SELF_TEST:
     ):
         emit(held, "self-test: {}".format(desc),
              "the nightly Android call detector did not behave as stated")
+
+    unsafe_android_transfer = {
+        "shard": {
+            "steps": [{
+                "uses": "actions/upload-artifact@fixture",
+                "with": {
+                    "name": "android-release-scaffold",
+                    "path": "gen/android/tauri.settings.gradle",
+                },
+            }]
+        }
+    }
+    safe_android_transfer = {
+        "shard": {
+            "steps": [{
+                "uses": "actions/upload-artifact@fixture",
+                "with": {
+                    "name": "android-native-aarch64",
+                    "path": "libcopypaste_ui_lib.so",
+                },
+            }]
+        }
+    }
+    opaque_android_transfer = {
+        "shard": {
+            "steps": [{
+                "uses": "actions/upload-artifact@fixture",
+                "with": {
+                    "name": "android-generated",
+                    "path": "crates/copypaste-ui/src-tauri/gen/android",
+                },
+            }]
+        }
+    }
+    for desc, held in (
+        ("runner-local Android settings are rejected as artifacts",
+         bool(android_runner_local_artifact_transfers(unsafe_android_transfer))),
+        ("an opaque generated Android tree artifact is rejected",
+         bool(android_runner_local_artifact_transfers(opaque_android_transfer))),
+        ("Android native libraries remain transferable",
+         not android_runner_local_artifact_transfers(safe_android_transfer)),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the Android machine-local artifact detector did not behave as stated")
 
     fixture = yaml.safe_load(
         "jobs:\n  build: {}\n  smoke:\n    needs: build\n  publish:\n    needs: [smoke]\n"
