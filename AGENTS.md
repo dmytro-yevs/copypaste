@@ -651,3 +651,40 @@ do not convert absence into a skipped green check.
 At the end of each run, record lead time, review wait, integration wait,
 rework, duplicate dispatches, peak WIP, and failed or cancelled CI runs. Change
 the WIP limit from evidence, not from the number of available agents.
+
+## Cursor Cloud specific instructions
+
+The Cloud VM is Linux — a test surface only, never a shipped target (rule 7).
+On Linux the clipboard source is a fake (`fake-memory`); `copypaste status`
+always names the live backend, so the capture→encrypt→store→search→paste
+pipeline runs without a Mac. System build deps (WebKitGTK 4.1, GTK3, rsvg,
+soup-3.0, ayatana-appindicator3, xdo), `webkit2gtk-driver`, `xvfb`,
+`tauri-driver` 2.0.6, and the Rust/Node toolchains are pre-installed in the
+snapshot; the startup update script only refreshes deps (`cargo fetch`,
+`npm ci` for `crates/copypaste-ui` and `e2e`). Standard build/run/test commands
+live in `README.md` ("Build and run"), `e2e/README.md`, and `docs/development.md`.
+
+Non-obvious caveats:
+
+- **`libssl-dev` is required** for `rusqlite`'s `bundled-sqlcipher`, beyond the
+  package list in `README.md`/`browser-webkitgtk.yml`. Without OpenSSL headers
+  the very first C compile of SQLCipher fails with `openssl/crypto.h not found`.
+  It is already installed here.
+- **Node.** The default `node` on `PATH` (`/exec-daemon/node`) is v22.14.0,
+  below the frontend's `engines` floor (`crates/copypaste-ui` wants `>=24`, e2e
+  `>=22.19`). `~/.bashrc` prepends nvm's v22.22.2, which Vite and the e2e suite
+  run on cleanly; interactive shells pick it up automatically. `npm ci` works on
+  either (engine mismatch is only a warning).
+- **Browser preview vs. a real daemon:** `npm --prefix crates/copypaste-ui run
+  dev:web:daemon` serves the app on `http://localhost:1420`. The script waits
+  only ~10s for the dev web bridge, which is shorter than a cold compile of
+  `copypaste-web-bridge`, so pre-build it once
+  (`cargo build -p copypaste-ui --features dev-web-bridge --bin copypaste-web-bridge`)
+  or it exits with "browser bridge did not start". Populate history for a demo
+  with `target/debug/copypaste add "..."` against the same daemon.
+- **e2e port guard:** `e2e` global-setup refuses to start if anything already
+  serves `:1420` ("something is already serving http://localhost:1420"). Stop
+  `dev:web:daemon` before running `npm test` in `e2e/`.
+- **e2e known-red:** `daemon-config` › "patches over different fields all
+  survive" fails by design — a daemon defect documented in `e2e/README.md`, not
+  an environment problem.
