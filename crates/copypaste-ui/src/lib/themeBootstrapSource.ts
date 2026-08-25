@@ -1,8 +1,8 @@
 import {
   APPEARANCE_SERIALIZATION,
   parseAppearanceFields,
+  readCurrentPrefsState,
   translucencyAttribute,
-  unwrapPersistedPrefs,
 } from "./appearancePrefs.ts";
 
 /**
@@ -20,7 +20,7 @@ export function themeBootstrapSource(): string {
   "use strict";
 
   var contract = ${JSON.stringify(APPEARANCE_SERIALIZATION)};
-  var unwrapPersistedPrefs = ${unwrapPersistedPrefs.toString()};
+  var readCurrentPrefsState = ${readCurrentPrefsState.toString()};
   var parseAppearanceFields = ${parseAppearanceFields.toString()};
   var translucencyAttribute = ${translucencyAttribute.toString()};
   var appearance = Object.assign({}, contract.defaults);
@@ -28,11 +28,10 @@ export function themeBootstrapSource(): string {
   try {
     var stored = localStorage.getItem(contract.storageKey);
     if (stored !== null) {
-      appearance = parseAppearanceFields(
-        unwrapPersistedPrefs(JSON.parse(stored)),
-        contract,
-        function () {},
-      );
+      var state = readCurrentPrefsState(JSON.parse(stored), contract);
+      if (state !== undefined) {
+        appearance = parseAppearanceFields(state, contract, function () {});
+      }
     }
   } catch (_) {}
 
