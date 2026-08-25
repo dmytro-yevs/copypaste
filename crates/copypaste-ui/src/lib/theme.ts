@@ -34,14 +34,14 @@ export function resolveTheme(pref: ThemePref): ResolvedTheme {
 export function applyAppearance(prefs: {
   theme: ThemePref;
   colorTheme: ColorTheme;
-  translucency: Translucency | 0;
+  translucency: Translucency;
 }): void {
   const root = document.documentElement;
   const colorScheme = resolveTheme(prefs.theme);
   root.dataset.colorScheme = colorScheme;
   root.dataset.mode = prefs.theme;
   root.dataset.theme = prefs.colorTheme;
-  root.dataset.translucency = translucencyAttribute(Boolean(prefs.translucency));
+  root.dataset.translucency = translucencyAttribute(prefs.translucency);
   applyNativeAppearance(colorScheme);
 }
 

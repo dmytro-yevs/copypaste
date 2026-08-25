@@ -2,7 +2,7 @@
 (function () {
   "use strict";
 
-  var contract = {"storageKey":"copypaste.prefs","themes":["system","dark","light"],"colorThemes":["midnight","aurora","ember","graphite"],"defaults":{"theme":"system","colorTheme":"midnight","translucency":false},"systemThemeQuery":"(prefers-color-scheme: dark)","systemThemeFallback":"dark"};
+  var contract = {"storageKey":"copypaste.prefs","fields":["theme","colorTheme","translucency"],"themes":["system","dark","light"],"colorThemes":["midnight","aurora","ember","graphite"],"defaults":{"theme":"system","colorTheme":"midnight","translucency":false},"systemThemeQuery":"(prefers-color-scheme: dark)","systemThemeFallback":"dark"};
   var unwrapPersistedPrefs = function unwrapPersistedPrefs(
   raw,
 ) {
@@ -34,33 +34,11 @@
       } else {
         onInvalid("colorTheme");
       }
-    } else if (Object.prototype.hasOwnProperty.call(raw, "accent")) {
-      const legacyAccent = Reflect.get(raw, "accent");
-      if (legacyAccent === "teal" || legacyAccent === "green") {
-        appearance.colorTheme = "aurora";
-      } else if (legacyAccent === "amber" || legacyAccent === "rose") {
-        appearance.colorTheme = "ember";
-      } else if (
-        legacyAccent === "system" ||
-        legacyAccent === "indigo" ||
-        legacyAccent === "blue"
-      ) {
-        appearance.colorTheme = "midnight";
-      }
     }
     if (Object.prototype.hasOwnProperty.call(raw, "translucency")) {
       const translucency = Reflect.get(raw, "translucency");
       if (typeof translucency === "boolean") {
         appearance.translucency = translucency;
-      } else if (
-        typeof translucency === "number" &&
-        Number.isFinite(translucency) &&
-        translucency >= 0 &&
-        translucency <= 100
-      ) {
-        // The intensity control was never a distinct visual system: every
-        // non-zero legacy value maps to the maintained frosted token set.
-        appearance.translucency = translucency > 0;
       } else {
         onInvalid("translucency");
       }

@@ -128,14 +128,6 @@ export function parsePrefs(raw: unknown): Prefs {
 
   for (const key of Object.keys(FIELD) as Array<keyof typeof FIELD>) {
     if (!(key in source)) {
-      if (key === "onboardingComplete") {
-        // An existing prefs blob is not a first launch.
-        out.onboardingComplete = Object.keys(source).some(
-          (stored) =>
-            stored !== "onboardingComplete" &&
-            Object.prototype.hasOwnProperty.call(DEFAULT_PREFS, stored),
-        );
-      }
       continue;
     }
     const result = FIELD[key].safeParse(source[key]);

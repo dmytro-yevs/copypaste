@@ -75,7 +75,7 @@ export default function App() {
     const apply = () =>
       applyAppearance({
         ...usePrefs.getState(),
-        translucency: isAndroidPlatform() ? 0 : usePrefs.getState().translucency,
+        translucency: isAndroidPlatform() ? false : usePrefs.getState().translucency,
       });
     apply();
     return subscribeSystemTheme(apply);
