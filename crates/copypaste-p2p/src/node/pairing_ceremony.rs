@@ -167,6 +167,7 @@ impl Node {
             Err(_) => (PairingPhase::TimedOut, None),
             Ok(Err(DecisionEnd::Rejected)) => (PairingPhase::Rejected, None),
             Ok(Err(DecisionEnd::Cancelled)) => (PairingPhase::Cancelled, None),
+            Ok(Err(DecisionEnd::TimedOut)) => (PairingPhase::TimedOut, None),
             Ok(Err(DecisionEnd::Failed)) => (PairingPhase::Failed, Some(NodeError::Session)),
             Ok(Ok(())) if !self.pairing.begin_commit(&pairing_id) => {
                 (PairingPhase::Cancelled, None)
@@ -270,6 +271,7 @@ async fn establish(
 enum DecisionEnd {
     Rejected,
     Cancelled,
+    TimedOut,
     Failed,
 }
 
@@ -303,6 +305,7 @@ async fn exchange_decisions(
                         let _ = session.send(&PairingMessage::Decision { accept: false }).await;
                         return Err(DecisionEnd::Cancelled);
                     }
+                    LocalDecision::Expire => return Err(DecisionEnd::TimedOut),
                 }
             }
             message = session.recv::<PairingMessage>() => {

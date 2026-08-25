@@ -135,7 +135,9 @@ class PairingDialogControllerTest {
     fun sasIsInertAccessibleAndEveryDecisionHasATouchTarget() {
         val decisions = mutableListOf<String>()
         val dialogs = PairingDialogController(activity)
-        assertTrue(dialogs.confirm("123456", "Unverified Phone", "responder", decisions::add))
+        assertTrue(
+            dialogs.confirm("123456", "Unverified Phone", "responder", 60_000, decisions::add),
+        )
         val dialog = latestDialog()
         val sas = dialog.findViewById<LinearLayout>(R.id.pairing_sas)!!
         assertEquals("Security code: 123456", sas.contentDescription)
@@ -160,29 +162,65 @@ class PairingDialogControllerTest {
     }
 
     @Test
-    fun mismatchCancelAndTimeoutAreExplicitAndMutuallyExclusive() {
-        val dialogs = PairingDialogController(activity, confirmTimeoutMs = 100)
+    fun mismatchCancelAndDeadlineRefreshAreExplicitAndMutuallyExclusive() {
+        val dialogs = PairingDialogController(activity)
         val decisions = mutableListOf<String>()
 
-        dialogs.confirm("123456", null, "initiator", decisions::add)
+        dialogs.confirm("123456", null, "initiator", 60_000, decisions::add)
         latestDialog().getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(listOf("reject"), decisions)
 
-        dialogs.confirm("123456", null, "initiator", decisions::add)
+        dialogs.confirm("123456", null, "initiator", 60_000, decisions::add)
         latestDialog().getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(listOf("reject", "cancel"), decisions)
 
-        dialogs.confirm("123456", null, "initiator", decisions::add)
+        dialogs.confirm("123456", null, "initiator", 100, decisions::add)
         val confirmation = latestDialog()
         shadowOf(Looper.getMainLooper()).idleFor(100, TimeUnit.MILLISECONDS)
-        assertEquals(listOf("reject", "cancel", "cancel"), decisions)
+        assertEquals(listOf("reject", "cancel", "refresh"), decisions)
         assertFalse(confirmation.isShowing)
+        assertNull(confirmation.findViewById<LinearLayout>(R.id.pairing_sas)?.contentDescription)
+        assertEquals(0, confirmation.findViewById<LinearLayout>(R.id.pairing_sas)?.childCount)
+        assertTrue(confirmation.getButton(AlertDialog.BUTTON_POSITIVE).visibility != View.VISIBLE)
+        assertTrue(confirmation.getButton(AlertDialog.BUTTON_NEGATIVE).visibility != View.VISIBLE)
+
+        dialogs.presentProgress("timed_out")
         val timedOut = latestDialog()
         assertTrue(allText(timedOut.window!!.decorView).contains("Pairing timed out."))
         assertNull(timedOut.findViewById<View>(R.id.pairing_sas))
         assertTrue(timedOut.getButton(AlertDialog.BUTTON_POSITIVE)?.visibility != View.VISIBLE)
+    }
+
+    @Test
+    fun inviteDeadlineErasesQrAndRequestsAuthoritativeRefresh() {
+        var qr: Bitmap? = null
+        var aborted = 0
+        var refreshed = 0
+        val renderer = PairingQrRenderer { _, _ ->
+            Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).also { qr = it }
+        }
+        val dialogs = PairingDialogController(activity, renderer)
+        dialogs.presentInvite(
+            "payload",
+            "code",
+            1,
+            onRefresh = { refreshed += 1 },
+            onAbort = { aborted += 1 },
+        )
+        val invite = latestDialog()
+        invite.findViewById<View>(R.id.pairing_reveal)!!.performClick()
+
+        shadowOf(Looper.getMainLooper()).idleFor(1, TimeUnit.SECONDS)
+
+        assertEquals(0, aborted)
+        assertEquals(1, refreshed)
+        assertTrue(invite.isShowing)
+        assertTrue(qr!!.isRecycled)
+        assertTrue(invite.findViewById<View>(R.id.pairing_reveal)!!.visibility != View.VISIBLE)
+        assertTrue(invite.findViewById<View>(R.id.pairing_qr)!!.visibility != View.VISIBLE)
+        assertTrue(allText(invite.window!!.decorView).contains("Checking pairing status…"))
     }
 
     @Test
@@ -196,7 +234,7 @@ class PairingDialogControllerTest {
         latestDialog().findViewById<View>(R.id.pairing_reveal)!!.performClick()
 
         val decisions = mutableListOf<String>()
-        dialogs.confirm("654321", null, null, decisions::add)
+        dialogs.confirm("654321", null, null, 60_000, decisions::add)
         val confirmation = latestDialog()
         dialogs.destroy()
 
