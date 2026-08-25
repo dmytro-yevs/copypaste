@@ -42,10 +42,14 @@ deliberately omit updater metadata.
 
 Incomplete records fail validation. Do not encode completion with TODOs,
 waivers, placeholders, skipped assertions, or green jobs that lack evidence.
-`evidence_status: verified` is a runtime claim, not ledger prose. Its receipt
-must list every credited state as `{feature_id, state}` under `feature_states`;
-the receipt's outer `source.commit` and `source.run_id` bind those states to the
-publication run. Missing, additional, or duplicate states fail publication.
+`evidence_status: verified` is a runtime claim, not ledger prose. Android and
+macOS receipts must bind every credited state to screenshot and accessibility
+records containing `path`, `sha256`, and `bytes` under `feature_states`. Those
+records must name declared receipt artifacts, match the ledger paths, and have
+distinct screenshot identities. Windows keeps its stricter feature-evidence
+manifest. The receipt's outer `source.commit` and `source.run_id` bind every
+state and artifact to the publication run. Missing, additional, duplicate, or
+label-only states fail publication.
 `python3 scripts/check-feature-ledger.py --receipt-expectations` prints the
 exact `platform:feature=state` arguments expected by the receipt gate.
 

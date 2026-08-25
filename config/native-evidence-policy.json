@@ -23,8 +23,9 @@
       "artifacts": {
         "required": ["screenshot", "accessibility", "measurement"],
         "optional": [],
-        "repeatable": []
+        "repeatable": ["screenshot", "accessibility"]
       },
+      "feature_state_artifacts": ["screenshot", "accessibility"],
       "release_artifact": "release-macos-native-evidence"
     },
     "android": {
@@ -39,8 +40,9 @@
       "artifacts": {
         "required": ["screenshot", "accessibility", "measurement"],
         "optional": ["diagnostic-log"],
-        "repeatable": []
+        "repeatable": ["screenshot", "accessibility"]
       },
+      "feature_state_artifacts": ["screenshot", "accessibility"],
       "release_artifact": "release-android-physical-evidence"
     },
     "windows": {
@@ -63,6 +65,7 @@
         "optional": [],
         "repeatable": ["screenshot", "accessibility"]
       },
+      "feature_state_artifacts": [],
       "release_artifact": "release-windows-native-evidence"
     }
   }
