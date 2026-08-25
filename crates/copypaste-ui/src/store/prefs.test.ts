@@ -40,24 +40,15 @@ describe("per-field recovery (AT-50)", () => {
     expect(prefs).toEqual({
       ...DEFAULT_PREFS,
       colorTheme: "ember",
-      onboardingComplete: true,
     });
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("migrates the retired translucency intensity to the maintained switch", () => {
-    expect(parsePrefs({ translucency: 45 }).translucency).toBe(true);
-    expect(parsePrefs({ translucency: 0 }).translucency).toBe(false);
+  it("accepts only the current translucency switch", () => {
     expect(parsePrefs({ translucency: true }).translucency).toBe(true);
     expect(parsePrefs({ translucency: false }).translucency).toBe(false);
-  });
-
-  it("maps a retired accent to the nearest complete theme", () => {
-    expect(parsePrefs({ accent: "teal" }).colorTheme).toBe("aurora");
-    expect(parsePrefs({ accent: "rose" }).colorTheme).toBe("ember");
-    expect(parsePrefs({ accent: "blue" }).colorTheme).toBe("midnight");
-    expect(parsePrefs({ colorTheme: "graphite", accent: "teal" }).colorTheme).toBe(
-      "graphite",
+    expect(parsePrefs({ translucency: 45 }).translucency).toBe(
+      DEFAULT_PREFS.translucency,
     );
   });
 
@@ -108,7 +99,6 @@ describe("unknown keys are dropped (AT-52)", () => {
     expect(prefs).toEqual({
       ...DEFAULT_PREFS,
       colorTheme: "graphite",
-      onboardingComplete: true,
     });
     expect(Object.keys(prefs).sort()).toEqual(Object.keys(DEFAULT_PREFS).sort());
   });
@@ -149,7 +139,7 @@ describe("reading what zustand persisted", () => {
     expect(prefs.colorTheme).toBe("aurora");
   });
 
-  it("also reads a bare object, so an older or hand-written blob still loads", () => {
+  it("also reads a bare object written by the current native store", () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ theme: "dark" }));
     expect(readPrefs().theme).toBe("dark");
   });
@@ -194,8 +184,8 @@ describe("first-run onboarding completion", () => {
     expect(parsePrefs({}).onboardingComplete).toBe(false);
   });
 
-  it("treats an existing preferences blob as already past first-run", () => {
-    expect(parsePrefs({ theme: "dark" }).onboardingComplete).toBe(true);
+  it("does not skip onboarding when a stored blob has no completion field", () => {
+    expect(parsePrefs({ theme: "dark" }).onboardingComplete).toBe(false);
   });
 
   it("honours an explicit stored flag", () => {
