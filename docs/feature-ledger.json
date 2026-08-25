@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "features": [
     {
       "id": "history",
@@ -68,8 +68,6 @@
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
           "evidence_status": "verified",
-          "screenshot": "artifacts/release-windows-native/history/screenshot.png",
-          "ax_log": "artifacts/release-windows-native/history/accessibility.json",
           "evidence_states": [
             "populated"
           ],
@@ -150,8 +148,6 @@
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
           "evidence_status": "verified",
-          "screenshot": "artifacts/release-windows-native/capture/screenshot.png",
-          "ax_log": "artifacts/release-windows-native/capture/accessibility.json",
           "evidence_states": [
             "service-capture-status",
             "copy-feedback-setting"
@@ -220,20 +216,24 @@
         "android": {
           "scenario": "./scripts/release/android-smoke-release.sh",
           "evidence_status": "verified",
-          "screenshot": "artifacts/release-android-physical/pairing-entry.png",
-          "ax_log": "artifacts/release-android-physical/pairing-entry.xml",
           "evidence_states": [
-            "scan-pairing-code"
+            {
+              "state": "scan-pairing-code",
+              "screenshot": "artifacts/release-android-physical/pairing-entry.png",
+              "accessibility": "artifacts/release-android-physical/pairing-entry.xml"
+            }
           ],
           "release_artifact": "release-android-physical-evidence"
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
           "evidence_status": "partial",
-          "screenshot": "artifacts/release-macos-native/screenshot.png",
-          "ax_log": "artifacts/release-macos-native/ax.log",
           "evidence_states": [
-            "native-shell"
+            {
+              "state": "native-shell",
+              "screenshot": "artifacts/release-macos-native/screenshot.png",
+              "accessibility": "artifacts/release-macos-native/ax.log"
+            }
           ],
           "unverified_states": [
             "desktop-pairing-entry",
@@ -244,8 +244,6 @@
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
           "evidence_status": "verified",
-          "screenshot": "artifacts/release-windows-native/devices/screenshot.png",
-          "ax_log": "artifacts/release-windows-native/devices/accessibility.json",
           "evidence_states": [
             "desktop-pairing-entry"
           ],
@@ -365,8 +363,6 @@
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
           "evidence_status": "partial",
-          "screenshot": "artifacts/release-windows-native/settings-and-service/screenshot.png",
-          "ax_log": "artifacts/release-windows-native/settings-and-service/accessibility.json",
           "evidence_states": [
             "appearance",
             "updater-configured"
@@ -456,8 +452,6 @@
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
           "evidence_status": "partial",
-          "screenshot": "artifacts/release-windows-native/cloud-account/screenshot.png",
-          "ax_log": "artifacts/release-windows-native/cloud-account/accessibility.json",
           "evidence_states": [
             "unconfigured"
           ],

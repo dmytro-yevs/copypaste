@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "features"],
   "properties": {
-    "schema_version": { "const": 3 },
+    "schema_version": { "const": 4 },
     "features": {
       "type": "array",
       "minItems": 1,
@@ -23,6 +23,22 @@
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/id" }
     },
+    "visualEvidenceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "screenshot", "accessibility"],
+      "properties": {
+        "state": { "$ref": "#/$defs/id" },
+        "screenshot": { "type": "string", "minLength": 1 },
+        "accessibility": { "type": "string", "minLength": 1 }
+      }
+    },
+    "visualEvidenceStateList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/visualEvidenceState" }
+    },
     "commandList": {
       "type": "array",
       "minItems": 1,
@@ -38,29 +54,25 @@
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 }
     },
-    "verifiedNative": {
+    "verifiedVisualNative": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scenario", "evidence_status", "screenshot", "ax_log", "evidence_states", "release_artifact"],
+      "required": ["scenario", "evidence_status", "evidence_states", "release_artifact"],
       "properties": {
         "scenario": { "type": "string", "minLength": 1 },
         "evidence_status": { "const": "verified" },
-        "screenshot": { "type": "string", "minLength": 1 },
-        "ax_log": { "type": "string", "minLength": 1 },
-        "evidence_states": { "$ref": "#/$defs/stateList" },
+        "evidence_states": { "$ref": "#/$defs/visualEvidenceStateList" },
         "release_artifact": { "$ref": "#/$defs/id" }
       }
     },
-    "partialNative": {
+    "partialVisualNative": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scenario", "evidence_status", "screenshot", "ax_log", "evidence_states", "unverified_states", "release_artifact"],
+      "required": ["scenario", "evidence_status", "evidence_states", "unverified_states", "release_artifact"],
       "properties": {
         "scenario": { "type": "string", "minLength": 1 },
         "evidence_status": { "const": "partial" },
-        "screenshot": { "type": "string", "minLength": 1 },
-        "ax_log": { "type": "string", "minLength": 1 },
-        "evidence_states": { "$ref": "#/$defs/stateList" },
+        "evidence_states": { "$ref": "#/$defs/visualEvidenceStateList" },
         "unverified_states": { "$ref": "#/$defs/stateList" },
         "release_artifact": { "$ref": "#/$defs/id" }
       }
@@ -75,10 +87,40 @@
         "unverified_states": { "$ref": "#/$defs/stateList" }
       }
     },
-    "nativeRecord": {
+    "visualNativeRecord": {
       "oneOf": [
-        { "$ref": "#/$defs/verifiedNative" },
-        { "$ref": "#/$defs/partialNative" },
+        { "$ref": "#/$defs/verifiedVisualNative" },
+        { "$ref": "#/$defs/partialVisualNative" },
+        { "$ref": "#/$defs/pendingNative" }
+      ]
+    },
+    "verifiedWindowsNative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario", "evidence_status", "evidence_states", "release_artifact"],
+      "properties": {
+        "scenario": { "type": "string", "minLength": 1 },
+        "evidence_status": { "const": "verified" },
+        "evidence_states": { "$ref": "#/$defs/stateList" },
+        "release_artifact": { "$ref": "#/$defs/id" }
+      }
+    },
+    "partialWindowsNative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario", "evidence_status", "evidence_states", "unverified_states", "release_artifact"],
+      "properties": {
+        "scenario": { "type": "string", "minLength": 1 },
+        "evidence_status": { "const": "partial" },
+        "evidence_states": { "$ref": "#/$defs/stateList" },
+        "unverified_states": { "$ref": "#/$defs/stateList" },
+        "release_artifact": { "$ref": "#/$defs/id" }
+      }
+    },
+    "windowsNativeRecord": {
+      "oneOf": [
+        { "$ref": "#/$defs/verifiedWindowsNative" },
+        { "$ref": "#/$defs/partialWindowsNative" },
         { "$ref": "#/$defs/pendingNative" }
       ]
     },
@@ -87,9 +129,9 @@
       "additionalProperties": false,
       "required": ["android", "macos", "windows"],
       "properties": {
-        "android": { "$ref": "#/$defs/nativeRecord" },
-        "macos": { "$ref": "#/$defs/nativeRecord" },
-        "windows": { "$ref": "#/$defs/nativeRecord" }
+        "android": { "$ref": "#/$defs/visualNativeRecord" },
+        "macos": { "$ref": "#/$defs/visualNativeRecord" },
+        "windows": { "$ref": "#/$defs/windowsNativeRecord" }
       }
     },
     "uncreditedPerformance": {

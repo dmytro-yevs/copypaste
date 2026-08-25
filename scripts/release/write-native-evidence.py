@@ -301,6 +301,34 @@ def self_test():
         )
         if result.returncode == 0 or label_only_receipt.exists():
             raise SystemExit("label-only Android feature state produced a receipt")
+        second = root / "second.png"
+        image = Image.new("RGB", (2, 2), (24, 120, 220))
+        image.putpixel((0, 1), (240, 180, 20))
+        image.save(second)
+        (root / "second-accessibility.txt").write_text("second named state\n")
+        multi_receipt = root / "multiple-states.json"
+        result = subprocess.run(
+            common + [
+                "--output", os.fspath(multi_receipt),
+                "--artifact", "screenshot=good.png",
+                "--artifact", "accessibility=accessibility.txt",
+                "--artifact", "screenshot=second.png",
+                "--artifact", "accessibility=second-accessibility.txt",
+                "--artifact", "measurement=measurement.json",
+                "--feature-state",
+                "devices=scan-pairing-code,screenshot=good.png,accessibility=accessibility.txt",
+                "--feature-state",
+                "history=populated,screenshot=second.png,accessibility=second-accessibility.txt",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not multi_receipt.is_file():
+            raise SystemExit(f"distinct feature-state artifacts failed: {result.stderr.strip()}")
+        emitted = json.loads(multi_receipt.read_text())
+        if len(emitted.get("feature_states", [])) != 2:
+            raise SystemExit("multiple feature states were not retained")
     print("native evidence writer self-test passed")
 
 
