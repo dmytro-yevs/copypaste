@@ -622,7 +622,12 @@ def self_test():
                 "id": "fixture",
                 "status": "product",
                 "native": {
-                    "android": {"evidence_states": ["ready"]},
+                    "android": {
+                        "screenshot": "artifacts/android/screenshot.png",
+                        "ax_log": "artifacts/android/ax.json",
+                        "evidence_states": ["ready"],
+                        "release_artifact": "android-evidence",
+                    },
                     "macos": {"unverified_states": ["ready"]},
                     "windows": {"evidence_states": ["ready", "offline"]},
                 },
@@ -632,8 +637,10 @@ def self_test():
     }
     checks.append((
         "receipt expectations contain only registered verified product states",
-        receipt_expectation_tokens(receipt_fixture) == [
-            "android:fixture=ready",
+        receipt_expectation_tokens(receipt_fixture, {
+            "android-evidence": [{"roots": [pathlib.PurePosixPath("artifacts/android")]}],
+        }) == [
+            "android:fixture=ready,screenshot=screenshot.png,accessibility=ax.json",
             "windows:fixture=offline",
             "windows:fixture=ready",
         ],
@@ -702,7 +709,7 @@ def main():
     if errors:
         return fail("\nfeature-ledger: ".join(errors))
     if "--receipt-expectations" in sys.argv:
-        for token in receipt_expectation_tokens(document):
+        for token in receipt_expectation_tokens(document, uploads):
             print(token)
         return 0
     if pending:

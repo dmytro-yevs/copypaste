@@ -15,19 +15,45 @@
     "artifacts"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "platform": { "enum": ["macos", "android", "windows"] },
-    "environment": {
-      "enum": ["hosted-runner", "emulator", "physical-device"]
+    "schema_version": {
+      "const": 1
     },
-    "os_version": { "type": "string", "minLength": 1, "maxLength": 160 },
-    "architecture": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "platform": {
+      "enum": [
+        "macos",
+        "android",
+        "windows"
+      ]
+    },
+    "environment": {
+      "enum": [
+        "hosted-runner",
+        "emulator",
+        "physical-device"
+      ]
+    },
+    "os_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "architecture": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["commit", "run_id"],
+      "required": [
+        "commit",
+        "run_id"
+      ],
       "properties": {
-        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
         "run_id": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"
@@ -37,13 +63,27 @@
     "scenario": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "elapsed_ms", "budget_ms"],
+      "required": [
+        "name",
+        "elapsed_ms",
+        "budget_ms"
+      ],
       "properties": {
         "name": {
-          "enum": ["native-launch", "release-webview-ready", "windows-installed-release"]
+          "enum": [
+            "native-launch",
+            "release-webview-ready",
+            "windows-installed-release"
+          ]
         },
-        "elapsed_ms": { "type": "integer", "minimum": 0 },
-        "budget_ms": { "type": "integer", "minimum": 1 }
+        "elapsed_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget_ms": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "assertions": {
@@ -75,7 +115,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "path", "sha256", "bytes"],
+        "required": [
+          "kind",
+          "path",
+          "sha256",
+          "bytes"
+        ],
         "properties": {
           "kind": {
             "enum": [
@@ -93,8 +138,14 @@
             "maxLength": 240,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
           },
-          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "bytes": { "type": "integer", "minimum": 1 }
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       }
     },
@@ -105,7 +156,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["feature_id", "state"],
+        "required": [
+          "feature_id",
+          "state"
+        ],
         "properties": {
           "feature_id": {
             "type": "string",
@@ -114,6 +168,56 @@
           "state": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9_-]*$"
+          },
+          "screenshot": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "accessibility": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
           }
         }
       }
@@ -121,16 +225,29 @@
   },
   "allOf": [
     {
-      "if": { "type": "object", "properties": { "platform": { "const": "macos" } } },
+      "if": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "const": "macos"
+          }
+        }
+      },
       "then": {
         "type": "object",
         "properties": {
-          "environment": { "const": "hosted-runner" },
+          "environment": {
+            "const": "hosted-runner"
+          },
           "scenario": {
             "type": "object",
             "properties": {
-              "name": { "const": "native-launch" },
-              "budget_ms": { "const": 3000 }
+              "name": {
+                "const": "native-launch"
+              },
+              "budget_ms": {
+                "const": 3000
+              }
             }
           },
           "assertions": {
@@ -138,9 +255,21 @@
             "minItems": 3,
             "maxItems": 3,
             "allOf": [
-              { "contains": { "const": "installed app launched" } },
-              { "contains": { "const": "native accessibility tree is non-empty" } },
-              { "contains": { "const": "native accessibility surface exposes a menu bar and named elements" } }
+              {
+                "contains": {
+                  "const": "installed app launched"
+                }
+              },
+              {
+                "contains": {
+                  "const": "native accessibility tree is non-empty"
+                }
+              },
+              {
+                "contains": {
+                  "const": "native accessibility surface exposes a menu bar and named elements"
+                }
+              }
             ]
           },
           "artifacts": {
@@ -148,7 +277,27 @@
             "items": {
               "type": "object",
               "properties": {
-                "kind": { "enum": ["screenshot", "accessibility", "measurement"] }
+                "kind": {
+                  "enum": [
+                    "screenshot",
+                    "accessibility",
+                    "measurement"
+                  ]
+                }
+              }
+            }
+          },
+          "feature_states": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "screenshot",
+                "accessibility"
+              ],
+              "properties": {
+                "screenshot": {},
+                "accessibility": {}
               }
             }
           }
@@ -156,16 +305,29 @@
       }
     },
     {
-      "if": { "type": "object", "properties": { "platform": { "const": "android" } } },
+      "if": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "const": "android"
+          }
+        }
+      },
       "then": {
         "type": "object",
         "properties": {
-          "environment": { "const": "physical-device" },
+          "environment": {
+            "const": "physical-device"
+          },
           "scenario": {
             "type": "object",
             "properties": {
-              "name": { "const": "release-webview-ready" },
-              "budget_ms": { "const": 115000 }
+              "name": {
+                "const": "release-webview-ready"
+              },
+              "budget_ms": {
+                "const": 115000
+              }
             }
           },
           "assertions": {
@@ -173,9 +335,21 @@
             "minItems": 3,
             "maxItems": 3,
             "allOf": [
-              { "contains": { "const": "signed release app launched" } },
-              { "contains": { "const": "WebView accessibility content painted" } },
-              { "contains": { "const": "release smoke assertions passed" } }
+              {
+                "contains": {
+                  "const": "signed release app launched"
+                }
+              },
+              {
+                "contains": {
+                  "const": "WebView accessibility content painted"
+                }
+              },
+              {
+                "contains": {
+                  "const": "release smoke assertions passed"
+                }
+              }
             ]
           },
           "artifacts": {
@@ -183,7 +357,28 @@
             "items": {
               "type": "object",
               "properties": {
-                "kind": { "enum": ["screenshot", "accessibility", "measurement", "diagnostic-log"] }
+                "kind": {
+                  "enum": [
+                    "screenshot",
+                    "accessibility",
+                    "measurement",
+                    "diagnostic-log"
+                  ]
+                }
+              }
+            }
+          },
+          "feature_states": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "screenshot",
+                "accessibility"
+              ],
+              "properties": {
+                "screenshot": {},
+                "accessibility": {}
               }
             }
           }
@@ -191,16 +386,29 @@
       }
     },
     {
-      "if": { "type": "object", "properties": { "platform": { "const": "windows" } } },
+      "if": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "const": "windows"
+          }
+        }
+      },
       "then": {
         "type": "object",
         "properties": {
-          "environment": { "const": "hosted-runner" },
+          "environment": {
+            "const": "hosted-runner"
+          },
           "scenario": {
             "type": "object",
             "properties": {
-              "name": { "const": "windows-installed-release" },
-              "budget_ms": { "const": 30000 }
+              "name": {
+                "const": "windows-installed-release"
+              },
+              "budget_ms": {
+                "const": 30000
+              }
             }
           },
           "assertions": {
@@ -208,15 +416,51 @@
             "minItems": 9,
             "maxItems": 9,
             "allOf": [
-              { "contains": { "const": "installer integrity passed" } },
-              { "contains": { "const": "installed app launched" } },
-              { "contains": { "const": "installed sidecar launched" } },
-              { "contains": { "const": "named-pipe and clipboard passed" } },
-              { "contains": { "const": "update feed contract matched signing mode" } },
-              { "contains": { "const": "in-place update passed" } },
-              { "contains": { "const": "feature-specific UI states captured" } },
-              { "contains": { "const": "screenshot protection restored" } },
-              { "contains": { "const": "uninstall passed" } }
+              {
+                "contains": {
+                  "const": "installer integrity passed"
+                }
+              },
+              {
+                "contains": {
+                  "const": "installed app launched"
+                }
+              },
+              {
+                "contains": {
+                  "const": "installed sidecar launched"
+                }
+              },
+              {
+                "contains": {
+                  "const": "named-pipe and clipboard passed"
+                }
+              },
+              {
+                "contains": {
+                  "const": "update feed contract matched signing mode"
+                }
+              },
+              {
+                "contains": {
+                  "const": "in-place update passed"
+                }
+              },
+              {
+                "contains": {
+                  "const": "feature-specific UI states captured"
+                }
+              },
+              {
+                "contains": {
+                  "const": "screenshot protection restored"
+                }
+              },
+              {
+                "contains": {
+                  "const": "uninstall passed"
+                }
+              }
             ]
           },
           "artifacts": {
@@ -224,7 +468,15 @@
             "items": {
               "type": "object",
               "properties": {
-                "kind": { "enum": ["screenshot", "accessibility", "test-log", "measurement", "feature-evidence"] }
+                "kind": {
+                  "enum": [
+                    "screenshot",
+                    "accessibility",
+                    "test-log",
+                    "measurement",
+                    "feature-evidence"
+                  ]
+                }
               }
             }
           }
