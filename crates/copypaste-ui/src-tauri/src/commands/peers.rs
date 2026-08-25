@@ -9,12 +9,6 @@
 //! | sync now, with per-device results | [`sync_now`] |
 //! | the devices on this network | [`discovered`] / [`rescan`] |
 //!
-//! **There is no row for adding one.** ADR-0015 keeps Pair and Add-device
-//! controls off every product surface until the wire derives a SAS from the
-//! handshake and binds both devices' confirmation before persistence.
-//! `PairCreate`/`PairAccept` stay on the daemon's IPC surface for the CLI; they
-//! are absent here and from `Backend`, so the WebView has no name to call.
-
 use tauri::State;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
