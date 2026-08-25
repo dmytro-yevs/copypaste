@@ -5,7 +5,7 @@
 #[cfg(target_os = "windows")]
 mod gdi;
 #[cfg(target_os = "windows")]
-mod registry;
+pub(crate) mod registry;
 #[cfg(target_os = "windows")]
 mod win_icon;
 
@@ -92,11 +92,6 @@ impl SourceAppIconCache {
         entries.push_front((key, entry));
         entries.truncate(MAX_CACHE_ENTRIES);
     }
-}
-
-#[cfg(target_os = "windows")]
-pub(crate) fn registered_executable(image_name: &str) -> Option<std::path::PathBuf> {
-    win_icon::find_executable(image_name)
 }
 
 fn cache_key(bundle_id: &str) -> String {
