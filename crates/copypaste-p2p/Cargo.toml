@@ -33,7 +33,7 @@ uuid.workspace = true
 tempfile.workspace = true
 # Local interface addresses: where a pairing tells a peer to dial, and which
 # advertisements on the wire are this device's own. `getifaddrs(3)` behind a
-# maintained crate; covers macOS and Android (CLAUDE.md rules 1 and 7).
+# maintained crate; covers every shipped platform (AGENTS.md rules 1 and 7).
 if-addrs = "0.15"
 
 [dev-dependencies]

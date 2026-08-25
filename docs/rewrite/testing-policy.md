@@ -25,7 +25,7 @@ The browser layer does execute Tauri commands through `wry` on Linux. That is
 useful and it is not verification: the shipped bridges are WKWebView and the
 Android WebView, and each command's behaviour belongs to its platform's layer.
 
-The CLI is a test surface, not a product surface (CLAUDE.md rule 6). A CLI
+The CLI is a test surface, not a product surface (AGENTS.md rule 6). A CLI
 assertion never satisfies a UI requirement.
 
 `e2e-android/` attaches to the debug APK's WebView over the Chrome DevTools

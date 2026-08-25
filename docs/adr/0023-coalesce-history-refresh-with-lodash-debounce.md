@@ -41,7 +41,7 @@ round trip; the guard serialises the next walk regardless.
 already in the lockfile and in the bundle, so the shipped size does not change.
 It has not been published since 2016. That is a completed package rather than an
 abandoned one — one function, no transitive surface, and the alternative on
-offer was a sixth hand-written scheduler (CLAUDE.md rule 1 lists five).
+offer was a sixth hand-written scheduler (AGENTS.md rule 1 lists five).
 `usehooks-ts` also depends on it, so the package is exercised by a larger
 consumer base. No open CVEs as of 2026-08.
 

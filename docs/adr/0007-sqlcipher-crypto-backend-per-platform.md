@@ -72,7 +72,7 @@ relying on the crate's absence.
 
 ## The cost, stated
 
-CLAUDE.md rule 1 asks for the cost written down rather than assumed either way.
+AGENTS.md rule 1 asks for the cost written down rather than assumed either way.
 This is not a second crypto stack arriving — SQLCipher already required
 OpenSSL, and the alternative was not "no OpenSSL" but "no Android build" — but
 vendoring one is still a decision that buys something and spends something.
@@ -145,7 +145,7 @@ outright, so a config entry would have been read past in silence.
 crate manifest change, so it was tempting. Rejected: it would move macOS off a
 free, OS-provided, Apple-maintained backend onto a several-minute build and a
 larger binary, for no user-visible gain, and would put a C OpenSSL build into
-the macOS product — the thing CLAUDE.md's third exemption is about.
+the macOS product — the thing AGENTS.md's third exemption is about.
 
 **Cross-compile OpenSSL in the workflow and point `OPENSSL_LIB_DIR` at it.**
 Rejected on rule 1: it is a hand-rolled reimplementation of `openssl-src`, in

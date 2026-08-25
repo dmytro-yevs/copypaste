@@ -41,7 +41,7 @@ machine with an Android NDK.
 
 Thirteen backend operations, plus `get`, chosen to match the CLI's verb set —
 because an operation the CLI can reach and the app cannot is a feature with no
-UI (CLAUDE.md rule 6), and pairing is the case that rule was written from.
+UI (AGENTS.md rule 6), and pairing is the case that rule was written from.
 
 Fourteen Tauri commands sit on top, named after `copypaste_ipc::Method` rather
 than as English verbs — `delete_all` for `DeleteAll`, `set_pinned` for
@@ -130,7 +130,7 @@ right content and would pass any test that only checked the value.
 does not own. The in-process Android backend already implements `get` properly,
 because there it is just a store read.
 
-## Dependencies taken (CLAUDE.md rule 1)
+## Dependencies taken (AGENTS.md rule 1)
 
 Checked before writing, not after. One JNI entry point is written here, and
 nothing else native — see the device secret below for why that one exists.
@@ -163,7 +163,7 @@ refusal, not an oversight.** `copypaste-daemon` is a binary crate with no
 `[lib]` target, so the logic behind `backup` and `restore` still lives somewhere
 Android cannot import: `server::dbadmin` owns the validate-then-swap that keeps
 a bad backup from replacing a working history. Approximating it is the second
-implementation CLAUDE.md rule 1 exists to stop, and a file copy that looks like
+implementation AGENTS.md rule 1 exists to stop, and a file copy that looks like
 a restore and is not would be data loss. `set_config` refuses because there is
 nowhere to put the answer: a setting that does not outlive the process is not a
 setting.
@@ -268,7 +268,7 @@ the first authorises a mint (I-20). The daemon and `EmbeddedBackend::open` each
 pass the one directory they already derived, so there is no second derivation
 to drift.
 
-### The dependency, and what was evaluated (CLAUDE.md rule 1)
+### The dependency, and what was evaluated (AGENTS.md rule 1)
 
 `android-native-keyring-store` 1.0, with `keyring-core` 1.0. It is the design
 above, already written: an `AndroidKeyStore` AES-GCM key wrapping values in

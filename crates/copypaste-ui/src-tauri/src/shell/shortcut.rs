@@ -97,7 +97,7 @@ fn read(path: &Path) -> Option<String> {
 fn write(path: &Path, value: &str) -> Result<(), BackendError> {
     let encoded = serde_json::to_vec(value).map_err(|_| save_error())?;
     // The error deliberately carries no path: the config directory discloses the
-    // local username (`CLAUDE.md` rule 4).
+    // local username (`AGENTS.md` rule 4).
     copypaste_fs::write_atomically(path, &encoded, Visibility::OwnerOnly).map_err(|_| save_error())
 }
 
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn a_failed_write_hides_the_path() {
         // The config directory discloses the local username, so no failure here
-        // may put it in a message a user sees (`CLAUDE.md` rule 4). Induced with
+        // may put it in a message a user sees (`AGENTS.md` rule 4). Induced with
         // a parent that is a regular file, so the directory cannot be created.
         let dir = tempfile::tempdir().unwrap();
         let blocked = dir.path().join("not-a-directory");

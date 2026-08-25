@@ -23,7 +23,7 @@ removal on drop, `persist` as `rename(2)`. What is written here is the policy
 on top of it: create the parent, narrow the mode *before* any bytes go in,
 `fsync` the file, rename, `fsync` the directory.
 
-## Why not a crate — CLAUDE.md rule 1, exemption 1
+## Why not a crate — AGENTS.md rule 1, exemption 1
 
 Both maintained candidates were evaluated and neither contracts the property
 this workspace needs, and each adds a second major version of a crate already

@@ -1,13 +1,13 @@
 # ADR-0013 — Windows as a third platform
 
-**Status:** accepted · 2026-08-07 · **amends CLAUDE.md rule 7**
+**Status:** accepted · 2026-08-07 · **codified in AGENTS.md rule 7**
 **Scope:** that Windows is a shipped target, and what the tree already says it
 will cost. No Windows code exists yet.
 
 ## Decision
 
-Windows ships, on the same footing as macOS and Android. CLAUDE.md rule 7 is
-amended in the same commit: a dependency must now work on all three, or sit
+Windows ships, on the same footing as macOS and Android. AGENTS.md rule 7
+requires a dependency to work on all three, or sit
 behind a platform cfg with **every** other side implemented.
 
 **Linux desktop is still not a shipped target.** It stays a test surface —

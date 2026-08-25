@@ -1,7 +1,7 @@
 # CopyPaste v2 — library-first architecture
 
 Which maintained crate does each job, and the short list of custom code that
-stays. The governing rule is [CLAUDE.md](../../CLAUDE.md) rule 1 and is not
+stays. The governing rule is [AGENTS.md](../../AGENTS.md) rule 1 and is not
 restated here.
 
 Where a row disagrees with the tree, the tree is right — this is the target, not

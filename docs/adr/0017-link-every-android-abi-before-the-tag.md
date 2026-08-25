@@ -92,7 +92,7 @@ OWASP audit, so it spends runner-minutes rather than wall-clock — and the same
 The rust-cache entry is its own key: four target triples sharing one with a
 single-ABI job would overwrite each other's save every night.
 
-Cost is a trade to state, not an exemption (CLAUDE.md rule 1). Four ABIs of Rust
+Cost is a trade to state, not an exemption (AGENTS.md rule 1). Four ABIs of Rust
 is the cheapest thing that can answer this question at all, it is far below four
 ABIs of APK, and it is far below a release that breaks in public.
 

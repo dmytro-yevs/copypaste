@@ -16,7 +16,7 @@ copypaste-ipc = { path = "../copypaste-ipc" }
 backon.workspace = true
 tokio.workspace = true
 # Framing is LinesCodec, the same codec the daemon uses — not a hand-rolled
-# byte-scanning read loop (CLAUDE.md rule 1).
+# byte-scanning read loop (AGENTS.md rule 1).
 tokio-util.workspace = true
 # `sink` is not in futures-util's default feature set; SinkExt::send needs it.
 futures-util = { workspace = true, features = ["sink"] }

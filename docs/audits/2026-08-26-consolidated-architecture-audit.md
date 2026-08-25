@@ -44,7 +44,7 @@ The current IPC also retains prior pairing verbs and their implementations:
 
 Source-compatibility residue also remains inside the current UI: `ClipKind`/`clipKind` are no-op aliases (`crates/copypaste-ui/src/features/history/model/clipKind.ts:1-7`), `InlineNotice.Icon` is a dead component-valued compatibility branch (`crates/copypaste-ui/src/components/shared/InlineNotice.tsx:8-46`), and `DefinitionList` duplicates the canonical `MetadataList` while active consumers remain (`docs/ui-architecture.md:232-239`; `crates/copypaste-ui/src/components/shared/DefinitionList.tsx:1-30`). These are not prior-product file readers, but the requested maximum cleanup includes them.
 
-**Canonical result:** one current storage schema; one current IPC method set; one current component API. Remove `schema_upgrade`, its open hook and fixtures; remove the legacy pairing variants, CLI/daemon/node handlers, dispatch arms, tests and prose; migrate remaining `DefinitionList` consumers; remove no-op aliases and old-path exports. Remove dead `v2-main` filters and references to deleted `CLAUDE.md` rules while touching their owners.
+**Canonical result:** one current storage schema; one current IPC method set; one current component API. Remove `schema_upgrade`, its open hook and fixtures; remove the legacy pairing variants, CLI/daemon/node handlers, dispatch arms, tests and prose; migrate remaining `DefinitionList` consumers; remove no-op aliases and old-path exports. Remove dead `v2-main` filters and retarget active rule citations to `AGENTS.md` while touching their owners.
 
 Historical format sections in the port manifests may be deleted only after their still-binding behavioural/security assertions and defect IDs are moved into maintained specifications/tests. A broad text search is not a deletion plan: `@vitejs/plugin-legacy` supports old **WebView engines**, not the prior product, and `openai_legacy` is a live sensitive-key rule. Neither belongs to this purge unless the supported-platform contract changes.
 
@@ -188,7 +188,7 @@ Cargo metadata, the Tauri plugin/capability/config, and Android manifest registe
 - Structurally compare Android push and pull-request path filters.
 - Generate or share the macOS `arm64/x86_64 -> Rust triple` map instead of copying it across four scripts.
 - Remove the mutation-manifest entry that knowingly invokes the ignored `check-docs.py --self-test` (`scripts/mutation-gate/mutations.json:39-46`).
-- Replace active references to deleted `CLAUDE.md` rules, including the comment gate and leak helpers (`scripts/check-comments.sh:171-179`; `e2e/src/harness/leaks.ts:56-59`).
+- Retarget active governance citations to `AGENTS.md`, including the comment gate and leak helpers (`scripts/check-comments.sh:171-179`; `e2e/src/harness/leaks.ts:56-59`).
 - Keep shrinking the 103-entry comment baseline; none is currently obsolete.
 
 ## Canonical source-of-truth matrix

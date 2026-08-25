@@ -79,14 +79,14 @@ confidence-threshold = 0.8
 [bans]
 # Duplicate detection. "warn" rather than "deny": in a tree with Tauri in it,
 # some duplication is imposed by upstream and a hard gate would be permanently
-# red. The value is the report — CLAUDE.md rule 1 is a rule about duplication,
+# red. The value is the report — AGENTS.md rule 1 is a rule about duplication,
 # and `--show-stats` in the CI job prints the count so it is visible whether it
 # is trending up or down.
 multiple-versions = "warn"
 wildcards = "allow"
 highlight = "all"
 
-# CLAUDE.md's third dependency exemption is "it would pull a second crypto or
+# AGENTS.md's third dependency exemption is "it would pull a second crypto or
 # TLS stack into the tree", and Cargo.toml states the intent directly: reqwest
 # and tokio-tungstenite are configured for rustls "so no OpenSSL C build enters
 # the tree". This is what stops a future `default-features = true` somewhere
@@ -106,7 +106,7 @@ highlight = "all"
 #
 # This is the cheap half of rule 1: a stated invariant that a machine checks.
 deny = [
-    { name = "openssl", reason = "second TLS stack; the workspace is rustls-only (CLAUDE.md rule 1, exemption 3)" },
+    { name = "openssl", reason = "second TLS stack; the workspace is rustls-only (AGENTS.md rule 1, exemption 3)" },
     { name = "openssl-sys", wrappers = ["libsqlite3-sys"], reason = "C OpenSSL build; permitted only as SQLCipher's Android crypto backend (ADR-0007)" },
     { name = "native-tls", reason = "delegates to the platform/OpenSSL TLS stack; use rustls" },
 ]

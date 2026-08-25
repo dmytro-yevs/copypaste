@@ -290,7 +290,7 @@ like it is running and is not. Concretely:
 - The Quick Settings tile is set up in onboarding, because it is the one action
   that makes rung 0 feel like a clipboard manager rather than a viewer.
 
-Per CLAUDE.md rule 6, none of that is a later phase: the rung-2 setup screen,
+Per AGENTS.md rule 6, none of that is a later phase: the rung-2 setup screen,
 the status surface, and the loss notification ship in the same stretch of work
 as the capture plumbing. Pairing is the example that rule was written from, and
 this is the same shape of feature.

@@ -81,7 +81,7 @@ respawning nothing, forever. v1 hand-wrote exactly this plist plus an
 which is where that job belongs.
 
 **`tauri-plugin-shell`'s sidecar mechanism.** It is the maintained way to ship a
-companion binary, and it was the first thing checked (CLAUDE.md rule 1). Two
+companion binary, and it was the first thing checked (AGENTS.md rule 1). Two
 reasons against: it expects the binary to be named with a target triple suffix
 and registered as `externalBin`, which conflicts with the injection the release
 script already does and with the per-binary `--identifier` signing that goes

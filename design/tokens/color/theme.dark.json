@@ -177,7 +177,7 @@
     "accent-away": { "$value": "#000000" },
     "withheld": {
       "$value": "{color.elevated}",
-      "$description": "Fill of the slot where a sensitive item's content would be. INV-10 / CLAUDE.md rule 4: the content is ABSENT — the bridge sends `content: null` — so this must read as an empty slot, not as text behind glass. There is deliberately no blur token; v1's --mask-blur:6px is the treatment the manifest README rules out, and re-adding one would make withheld content look present."
+      "$description": "Fill of the slot where a sensitive item's content would be. INV-10 / AGENTS.md rule 4: the content is ABSENT — the bridge sends `content: null` — so this must read as an empty slot, not as text behind glass. There is deliberately no blur token; v1's --mask-blur:6px is the treatment the manifest README rules out, and re-adding one would make withheld content look present."
     },
     "withheld-border": {
       "$value": "{color.border-strong}",

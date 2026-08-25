@@ -67,7 +67,7 @@ set. Cargo resolved these relevant paths:
 | Upstream plus `reqwest` 0.13 `rustls` | Keeps both `reqwest` 0.12.28 and 0.13.4 | `rustls` 0.23.43 unifies, but both `ring` 0.17.14 and `aws-lc-sys` 0.43.0 via `aws-lc-rs` 1.17.3 resolve. This direct-dependency workaround adds a second crypto provider. |
 
 Published 1.6.0 therefore meets the exact dependency exemption in
-[`CLAUDE.md`](../../CLAUDE.md): adopting it would pull a second TLS stack into
+[`AGENTS.md`](../../AGENTS.md): adopting it would pull a second TLS stack into
 the tree. Current upstream is not an adoptable alternative: it lacks TLS and a
 git dependency is rejected by [`deny.toml`](../../deny.toml), whose source
 policy allows crates.io and no git sources.

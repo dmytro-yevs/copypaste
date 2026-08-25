@@ -34,5 +34,5 @@
 
 | | |
 |---|---|
-| [CLAUDE.md](../CLAUDE.md) | The working rules. |
+| [AGENTS.md](../AGENTS.md) | The working rules. |
 | [port-manifest/README](rewrite/port-manifest/README.md) | Which manifest sections are current requirements and which are reference material. Behaviour binds; retired formats and visuals do not. |

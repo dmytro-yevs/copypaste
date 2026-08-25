@@ -95,7 +95,7 @@ has no pasteboard server, which would silently change the number. Record
 creates an ACL rather than consulting one, so minting never prompts however
 often the binary is rebuilt. Only available on a Mac with no CopyPaste history:
 deleting that item leaves an installed history permanently unopenable, the
-outcome CLAUDE.md rule 4 ranks worst. The script refuses unless the database is
+outcome AGENTS.md rule 4 ranks worst. The script refuses unless the database is
 absent *and* `NO_COPYPASTE_INSTALL=1` says so deliberately, and removes what it
 minted on the way out.
 

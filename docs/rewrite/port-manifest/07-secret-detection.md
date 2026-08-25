@@ -911,7 +911,7 @@ stamped wipe eligibility at capture. v2 re-scans the candidate row at wipe time
 and requires `Severity::HighConfidence` then, so a row is deleted only if it was
 flagged at capture *and* is still above the floor. Deleting on a flag written by
 a ruleset that has since changed is a decision nobody can review before it
-fires, and `CLAUDE.md` rule 4 ranks that above the cost of one AEAD per expired
+fires, and `AGENTS.md` rule 4 ranks that above the cost of one AEAD per expired
 candidate.
 
 **Consequence, stated rather than hidden:** changing the TTL re-dates every
