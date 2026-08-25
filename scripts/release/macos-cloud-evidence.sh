@@ -24,40 +24,65 @@ cleanup() {
     "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
 }
 
-seed_onboarding_complete() {
+seed_onboarding_complete() { # [preferences.json]
     # First-run wizard hides Settings. Seed the Tauri store the same way a
     # completed setup would, so cloud evidence can open the Sync row.
-    local prefs_dir="$HOME/Library/Application Support/com.copypaste.app"
-    mkdir -p "$prefs_dir"
-    python3 - "$prefs_dir/preferences.json" <<'PY'
-import json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-blob = {
-    "state": {
-        "theme": "system",
-        "accent": "indigo",
-        "translucency": 0,
-        "previewLines": 2,
-        "previewLinesPopup": 1,
-        "sortByDevice": False,
-        "historyDisplayLimit": 1000,
-        "warnBeforeReveal": True,
-        "allowScreenshots": True,
-        "onboardingComplete": True,
-    },
-    "version": 0,
+    local path="${1:-$HOME/Library/Application Support/com.copypaste.app/preferences.json}"
+    mkdir -p "$(dirname "$path")"
+    node --input-type=module - "$path" <<'JS'
+import { readFileSync, writeFileSync } from "node:fs";
+import {
+  DEFAULT_PREFS,
+  PREFERENCES_VERSION,
+  STORAGE_KEY,
+} from "./crates/copypaste-ui/src/lib/preferenceContract.ts";
+
+const path = process.argv[2];
+let store = {};
+try {
+  const parsed = JSON.parse(readFileSync(path, "utf8"));
+  if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    store = parsed;
+  }
+} catch {}
+const state = {
+  ...DEFAULT_PREFS,
+  allowScreenshots: true,
+  onboardingComplete: true,
+};
+store[STORAGE_KEY] = JSON.stringify({ state, version: PREFERENCES_VERSION });
+writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`);
+JS
 }
-store = {}
-if path.exists():
-    try:
-        store = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(store, dict):
-            store = {}
-    except (OSError, json.JSONDecodeError):
-        store = {}
-store["copypaste.prefs"] = json.dumps(blob, separators=(",", ":"))
-path.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
-PY
+
+preference_seed_self_test() { # <tmp-dir>
+    local path="$1/preferences.json"
+    printf '{"unrelated":"kept"}\n' > "$path"
+    if seed_onboarding_complete "$path" && node --input-type=module - "$path" <<'JS'
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import {
+  DEFAULT_PREFS,
+  PREFERENCES_VERSION,
+  STORAGE_KEY,
+} from "./crates/copypaste-ui/src/lib/preferenceContract.ts";
+
+const store = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const blob = JSON.parse(store[STORAGE_KEY]);
+assert.equal(store.unrelated, "kept");
+assert.deepEqual(Object.keys(blob).sort(), ["state", "version"]);
+assert.equal(blob.version, PREFERENCES_VERSION);
+assert.deepEqual(blob.state, {
+  ...DEFAULT_PREFS,
+  allowScreenshots: true,
+  onboardingComplete: true,
+});
+JS
+    then
+        ok "onboarding seed matches the current preference contract"
+    else
+        bad "onboarding seed matches the current preference contract"
+    fi
 }
 
 launch_app() { # <unconfigured|configured>
@@ -210,6 +235,7 @@ configured_scenario() {
 if [[ "${1:-}" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
+    preference_seed_self_test "$SELF_TEST_TMP"
     mac_ui_self_test "$SELF_TEST_TMP"
     cloud_evidence_self_test "$SELF_TEST_TMP"
     cloud_evidence_summary macOS
