@@ -6,11 +6,16 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { assertNoDeepLinks } from "./product-config.mjs";
+import { assertNoDeepLinks, projectNoDeepLinkConfigs } from "./product-config.mjs";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const uiPackagePath = join(repo, "crates/copypaste-ui/package.json");
 const requireFromUi = createRequire(pathToFileURL(uiPackagePath));
+const noDeepLinkPaths = {
+  tauri: join(repo, "crates/copypaste-ui/src-tauri/tauri.conf.json"),
+  capability: join(repo, "crates/copypaste-ui/src-tauri/capabilities/default.json"),
+  androidManifest: join(repo, "crates/copypaste-ui/src-tauri/gen/android/app/src/main/AndroidManifest.xml"),
+};
 
 function jsoncParser() {
   return requireFromUi("jsonc-parser");
@@ -18,6 +23,19 @@ function jsoncParser() {
 
 function semver() {
   return requireFromUi("semver");
+}
+
+function readNoDeepLinkConfigs() {
+  return Object.fromEntries(Object.entries(noDeepLinkPaths)
+    .map(([name, path]) => [name, readFileSync(path, "utf8")]));
+}
+
+function syncNoDeepLinkConfigs() {
+  const source = readNoDeepLinkConfigs();
+  const projected = projectNoDeepLinkConfigs(source);
+  for (const [name, updated] of Object.entries(projected)) {
+    if (source[name] !== updated) writeFileSync(noDeepLinkPaths[name], updated);
+  }
 }
 
 export function versionCodeFor(input) {
@@ -93,9 +111,7 @@ function repositoryProduct() {
     cargoMetadata: metadata,
     uiPackage: JSON.parse(readFileSync(uiPackagePath, "utf8")),
     uiLock: JSON.parse(readFileSync(join(repo, "crates/copypaste-ui/package-lock.json"), "utf8")),
-    tauri: readFileSync(join(repo, "crates/copypaste-ui/src-tauri/tauri.conf.json"), "utf8"),
-    capability: readFileSync(join(repo, "crates/copypaste-ui/src-tauri/capabilities/default.json"), "utf8"),
-    androidManifest: readFileSync(join(repo, "crates/copypaste-ui/src-tauri/gen/android/app/src/main/AndroidManifest.xml"), "utf8"),
+    ...readNoDeepLinkConfigs(),
   });
   return {
     versionName: ui.version,
@@ -184,6 +200,7 @@ export function resolveMetadata(versionOverride) {
 }
 
 function syncDerivatives() {
+  syncNoDeepLinkConfigs();
   const product = repositoryProduct();
   const versionName = product.versionName;
   const packagePath = uiPackagePath;
