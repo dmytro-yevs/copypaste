@@ -19,7 +19,7 @@ name: Supply chain
 
 on:
   push:
-    branches: [main, v2-main]
+    branches: [main]
   # No branch filter: a dependency change on a stacked or release branch has
   # the same advisory surface as one onto main.
   pull_request:

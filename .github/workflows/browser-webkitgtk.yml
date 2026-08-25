@@ -19,7 +19,7 @@ name: Browser (WebKitGTK, Linux)
 
 on:
   push:
-    branches: [main, v2-main]
+    branches: [main]
   # No branch filter: this layer owns shared React behaviour, and a pull
   # request onto a stacked or release branch changes the same code.
   pull_request:

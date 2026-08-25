@@ -122,6 +122,33 @@ def calls_emulator(job, event):
     )
 
 
+def matching_event_path_filters(workflow):
+    triggers = workflow.get(True) or workflow.get("on") or {}
+    push = triggers.get("push")
+    pull_request = triggers.get("pull_request")
+    if not isinstance(push, dict) or not isinstance(pull_request, dict):
+        return False
+    push_paths = push.get("paths")
+    pull_request_paths = pull_request.get("paths")
+    return (
+        isinstance(push_paths, list)
+        and isinstance(pull_request_paths, list)
+        and push_paths == pull_request_paths
+    )
+
+
+def retired_push_branch_violations(workflows, retired):
+    violations = []
+    for name, workflow in workflows.items():
+        triggers = workflow.get(True) or workflow.get("on") or {}
+        push = triggers.get("push")
+        if not isinstance(push, dict):
+            continue
+        if retired in as_list(push.get("branches")):
+            violations.append(name)
+    return violations
+
+
 def job_matrix(job):
     return ((job or {}).get("strategy") or {}).get("matrix") or {}
 
@@ -258,6 +285,10 @@ rec("check-docs.py" in documentation_body,
     "ci.yml gates documentation links and unfinished-work markers")
 rec("check-docs.test.py" in documentation_body,
     "ci.yml runs the protocol-version guard self-test")
+retired_branch_workflows = retired_push_branch_violations(docs, "v2-main")
+rec(not retired_branch_workflows,
+    "workflows do not target the retired v2-main branch",
+    "push filters still name v2-main: {}".format(retired_branch_workflows))
 
 
 # --- artifacts: names match, and the consumer depends on the producer --------
@@ -629,6 +660,9 @@ if emu:
     rec({"push", "pull_request"} <= set(triggers),
         "android-emulator.yml gates pushes and pull requests",
         "Android's authoritative layer has to run before the merge it would fail")
+    rec(matching_event_path_filters(emu),
+        "android-emulator.yml push and pull-request path filters match",
+        "the duplicated lists must stay structurally identical")
     for event in ("push", "pull_request"):
         paths = (triggers.get(event) or {}).get("paths") or []
         rec(any(p.startswith("crates/copypaste-ui/src/") for p in paths)
@@ -1216,6 +1250,34 @@ if SELF_TEST:
     ):
         emit(held, "self-test: {}".format(desc),
              "the nightly Android call detector did not behave as stated")
+
+    matching_paths = {
+        True: {
+            "push": {"paths": ["crates/copypaste-ui/src/**", "Cargo.toml"]},
+            "pull_request": {"paths": ["crates/copypaste-ui/src/**", "Cargo.toml"]},
+        }
+    }
+    reordered_paths = copy.deepcopy(matching_paths)
+    reordered_paths[True]["pull_request"]["paths"].reverse()
+    missing_paths = copy.deepcopy(matching_paths)
+    del missing_paths[True]["pull_request"]["paths"]
+    current_branch = {"ci.yml": {True: {"push": {"branches": ["main"]}}}}
+    retired_branch = copy.deepcopy(current_branch)
+    retired_branch["ci.yml"][True]["push"]["branches"].append("v2-main")
+    for desc, held in (
+        ("identical push and pull-request path filters are accepted",
+         matching_event_path_filters(matching_paths)),
+        ("reordered push and pull-request path filters are rejected",
+         not matching_event_path_filters(reordered_paths)),
+        ("a missing pull-request path filter is rejected",
+         not matching_event_path_filters(missing_paths)),
+        ("the current push branch is accepted",
+         not retired_push_branch_violations(current_branch, "v2-main")),
+        ("the retired push branch is rejected",
+         retired_push_branch_violations(retired_branch, "v2-main") == ["ci.yml"]),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the workflow path-filter detector did not behave as stated")
 
     abi_defaults = (
         "TRIPLES=(aarch64-linux-android armv7-linux-androideabi "

@@ -13,7 +13,7 @@ name: CI
 
 on:
   push:
-    branches: [main, v2-main]
+    branches: [main]
   # No branch filter, and no `paths`: this workflow carries the Rust layer and
   # the macOS layer (docs/rewrite/testing-policy.md), and a pull request onto a
   # stacked or release branch changes the same code.
