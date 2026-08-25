@@ -30,9 +30,6 @@ fn expected(method: &Method) -> Expected {
         Method::DeleteAll { .. } | Method::ReorderPinned { .. } | Method::HistoryCeiling => {
             Expected::Data(|data| matches!(data, ResponseData::Count(_)))
         }
-        Method::PairCreate { .. } => {
-            Expected::Data(|data| matches!(data, ResponseData::Pairing(_)))
-        }
         Method::PairCreateInvite => {
             Expected::Data(|data| matches!(data, ResponseData::PairingInvite(_)))
         }
@@ -65,7 +62,6 @@ fn expected(method: &Method) -> Expected {
         | Method::ImagePreview { .. }
         | Method::Delete { .. }
         | Method::Pin { .. } => Expected::Error(ErrorCode::NotFound),
-        Method::PairAccept { .. } => Expected::Error(ErrorCode::InvalidRequest),
         Method::PairConfirm { .. } => Expected::Error(ErrorCode::NotReady),
         Method::PairJoin { .. } => Expected::Error(ErrorCode::PairingCode),
         Method::Unpair { .. } => Expected::Error(ErrorCode::PeerNotFound),
@@ -116,13 +112,6 @@ fn cases(root: &Path) -> Vec<Method> {
             pinned: true,
         },
         Method::ReorderPinned { ids: Vec::new() },
-        Method::PairCreate {
-            name: "contract device".into(),
-        },
-        Method::PairAccept {
-            code: "malformed".into(),
-            addr: "127.0.0.1:1".into(),
-        },
         Method::PairCancel,
         Method::PairCreateInvite,
         Method::PairProgress,
@@ -248,7 +237,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        43,
+        41,
         "a Method has no contract case, or this count was not bumped with it"
     );
 
@@ -285,6 +274,39 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
         .expect("shutdown must stop the server")
         .expect("server task must not panic");
     assert!(*state.shutdown_rx().borrow());
+}
+
+#[tokio::test]
+async fn retired_pairing_methods_are_rejected_before_dispatch() {
+    let (mut client, state, _dir, server) = start("ipc-retired-pairing").await;
+    for (id, method, params) in [
+        (500, "pair_create", json!({"name":"device"})),
+        (
+            501,
+            "pair_accept",
+            json!({"code":"code","addr":"127.0.0.1:1"}),
+        ),
+    ] {
+        let response = client
+            .call_raw(
+                &json!({
+                    "id": id,
+                    "protocol_version": PROTOCOL_VERSION,
+                    "method": method,
+                    "params": params,
+                })
+                .to_string(),
+            )
+            .await;
+        assert_eq!(response.id, id);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+    }
+
+    state.request_shutdown();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .expect("server stops")
+        .expect("server task must not panic");
 }
 
 #[tokio::test]

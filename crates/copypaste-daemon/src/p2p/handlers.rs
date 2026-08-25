@@ -9,17 +9,15 @@
 //! they are `async` while every store handler in `server` is a blocking call on
 //! a worker thread.
 //!
-//! **The pairing code is a secret.** `pair_create` returns it once, in the
-//! response, and nothing here logs it — not at trace, not in an error, not in a
-//! `Debug`. `NewPairing`'s own `Debug` is redacted, and the pairing *id* is
-//! derived, non-secret and safe to log; it is what every message uses instead.
+//! **The pairing code is a secret.** It is returned once in the invitation,
+//! never logged, and redacted by the invitation's `Debug` implementation.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use copypaste_core::{now_ms, p2p_contract};
 use copypaste_ipc::{
-    DiscoveredData, ErrorCode, PairingData, PairingInviteData, Response, ResponseData, SyncResult,
+    DiscoveredData, ErrorCode, PairingInviteData, Response, ResponseData, SyncResult,
 };
 #[cfg(test)]
 use copypaste_ipc::{PairingProgressData, PeerInfo};
@@ -29,40 +27,6 @@ use tracing::{info, warn};
 
 use crate::sync::peer_source;
 use crate::AppState;
-
-/// Mint a pairing and hand back the code to read out to the other device.
-pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response {
-    if !state.settings.get().sync_enabled {
-        return sync_disabled(id);
-    }
-    let _ = name;
-    let pairing = match state.p2p.node().pair_create_invite() {
-        Ok(pairing) => pairing,
-        Err(e) => return failed(id, e),
-    };
-
-    info!(pairing_id = %pairing.pairing_id, "minted a pairing invitation");
-    Response::ok(
-        id,
-        ResponseData::Pairing(PairingData {
-            // The one and only rendering of the secret, straight into the
-            // response. Not logged, not stored, not retrievable again.
-            code: pairing.code,
-            pairing_id: pairing.pairing_id,
-            listen_addr: pairing.listen_addr,
-        }),
-    )
-}
-
-/// Refuse the legacy one-step operation, which cannot carry SAS confirmation.
-pub async fn pair_accept(state: &Arc<AppState>, id: u64, code: &str, addr: &str) -> Response {
-    let _ = (state, code, addr);
-    Response::err(
-        id,
-        ErrorCode::InvalidRequest,
-        "pair_accept requires the pairing confirmation API",
-    )
-}
 
 pub async fn pair_create_invite(state: &Arc<AppState>, id: u64) -> Response {
     if !state.settings.get().sync_enabled {

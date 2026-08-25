@@ -128,8 +128,6 @@ fn requires_ready(method: &Method) -> bool {
         | Method::SetDeviceName { .. }
         // Peer operations read and write the same history, and pairing needs
         // the device identity that comes out of the same database.
-        | Method::PairCreate { .. }
-        | Method::PairAccept { .. }
         | Method::PairCreateInvite
         | Method::PairJoin { .. }
         | Method::PairProgress
@@ -179,10 +177,6 @@ fn requires_ready(method: &Method) -> bool {
 pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) -> Response {
     let id = request.id;
     match request.method {
-        Method::PairCreate { name } => crate::p2p::handlers::pair_create(state, id, &name).await,
-        Method::PairAccept { code, addr } => {
-            crate::p2p::handlers::pair_accept(state, id, &code, &addr).await
-        }
         Method::PairCreateInvite => crate::p2p::handlers::pair_create_invite(state, id).await,
         Method::PairJoin { code, addr } => {
             crate::p2p::handlers::pair_join(state, id, &code, &addr).await
@@ -273,9 +267,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         // Unreachable: `dispatch` takes these first. Spelled out rather than
         // left to a `_` so that adding a method to the enum is still a compile
         // error here, which is the whole point of dispatching on a type.
-        Method::PairCreate { .. }
-        | Method::PairAccept { .. }
-        | Method::PairCreateInvite
+        Method::PairCreateInvite
         | Method::PairJoin { .. }
         | Method::PairProgress
         | Method::PairConfirm { .. }
@@ -330,11 +322,6 @@ mod tests {
     #[test]
     fn only_status_answers_before_readiness() {
         assert!(!requires_ready(&Method::Status));
-        assert!(requires_ready(&Method::PairCreate { name: "x".into() }));
-        assert!(requires_ready(&Method::PairAccept {
-            code: "x".into(),
-            addr: "127.0.0.1:1".into()
-        }));
         assert!(requires_ready(&Method::PairCreateInvite));
         assert!(requires_ready(&Method::PairJoin {
             code: "x".into(),

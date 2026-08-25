@@ -159,19 +159,6 @@ pub struct DiscoveredDevice {
     pub details: Option<DeviceDetails>,
 }
 
-/// A freshly minted pairing, returned once and never retrievable again.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PairingData {
-    /// The transferable form of the pre-shared key. Read this to the other
-    /// device. It is secret: anyone holding it can pair, so it must not be
-    /// logged, and the UI should treat it like a password.
-    pub code: String,
-    /// Non-secret identifier for the pairing. Safe to log and to display.
-    pub pairing_id: String,
-    /// Where the other device should connect, when it can be determined.
-    pub listen_addr: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]

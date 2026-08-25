@@ -102,7 +102,6 @@ crates/copypaste-ui/src-tauri/src/commands/clipboard.rs
 crates/copypaste-ui/src-tauri/src/commands/config.rs
 crates/copypaste-ui/src-tauri/src/commands/history.rs
 crates/copypaste-ui/src-tauri/src/commands/mod.rs
-crates/copypaste-ui/src-tauri/src/commands/peers.rs
 crates/copypaste-ui/src-tauri/src/commands/transfer.rs
 crates/copypaste-ui/src-tauri/src/lib.rs
 crates/copypaste-ui/src-tauri/src/model.rs

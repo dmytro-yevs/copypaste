@@ -19,8 +19,6 @@ fn wire_name(method: &Method) -> &'static str {
         Method::HistoryCeiling => "history_ceiling",
         Method::Pin { .. } => "pin",
         Method::ReorderPinned { .. } => "reorder_pinned",
-        Method::PairCreate { .. } => "pair_create",
-        Method::PairAccept { .. } => "pair_accept",
         Method::PairCreateInvite => "pair_create_invite",
         Method::PairJoin { .. } => "pair_join",
         Method::PairProgress => "pair_progress",
@@ -67,8 +65,6 @@ fn catalog() -> Vec<Value> {
         json!({"method":"history_ceiling"}),
         json!({"method":"pin","params":{"id":"item","pinned":true}}),
         json!({"method":"reorder_pinned","params":{"ids":["item"]}}),
-        json!({"method":"pair_create","params":{"name":"device"}}),
-        json!({"method":"pair_accept","params":{"code":"code","addr":"127.0.0.1:1"}}),
         json!({"method":"pair_create_invite"}),
         json!({"method":"pair_join","params":{"code":"code","addr":"127.0.0.1:1"}}),
         json!({"method":"pair_progress"}),
@@ -113,9 +109,19 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        43,
+        41,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
+}
+
+#[test]
+fn retired_pairing_methods_are_not_part_of_the_wire_contract() {
+    for method in [
+        json!({"method":"pair_create","params":{"name":"device"}}),
+        json!({"method":"pair_accept","params":{"code":"code","addr":"127.0.0.1:1"}}),
+    ] {
+        assert!(serde_json::from_value::<Method>(method).is_err());
+    }
 }
 
 #[test]
