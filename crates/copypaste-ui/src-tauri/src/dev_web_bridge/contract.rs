@@ -8,7 +8,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::backend::{daemon::DaemonBackend, BackendError};
+use crate::backend::{daemon::DaemonBackend, BackendError, UiBoundaryErrorCode};
+use crate::command_contract::UiCommandName;
 use crate::source_app_icon::SourceAppIconCache;
 
 pub(crate) const DEFAULT_VITE_ORIGIN: &str = "http://localhost:1420";
@@ -93,19 +94,15 @@ pub(crate) struct RuntimeLogArgs {
     pub(crate) query: copypaste_runtime_log::RuntimeLogQuery,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BridgeCommand {
     List,
     Search,
     CopyItem,
     CopyItemAsPlainText,
     GetItemBody,
-    #[serde(rename = "get_image_preview")]
     ImagePreview,
-    #[serde(rename = "get_source_app_icon")]
     SourceAppIcon,
-    #[serde(rename = "list_installed_source_apps")]
     InstalledSourceApps,
     DeleteItem,
     DeleteAll,
@@ -129,8 +126,37 @@ pub(crate) enum BridgeCommand {
 }
 
 impl BridgeCommand {
-    pub(crate) fn parse(command: &str) -> Option<Self> {
-        serde_json::from_value(Value::String(command.to_owned())).ok()
+    pub(crate) fn from_ui(command: UiCommandName) -> Option<Self> {
+        match command {
+            UiCommandName::List => Some(Self::List),
+            UiCommandName::Search => Some(Self::Search),
+            UiCommandName::CopyItem => Some(Self::CopyItem),
+            UiCommandName::CopyItemAsPlainText => Some(Self::CopyItemAsPlainText),
+            UiCommandName::GetItemBody => Some(Self::GetItemBody),
+            UiCommandName::GetImagePreview => Some(Self::ImagePreview),
+            UiCommandName::GetSourceAppIcon => Some(Self::SourceAppIcon),
+            UiCommandName::ListInstalledSourceApps => Some(Self::InstalledSourceApps),
+            UiCommandName::DeleteItem => Some(Self::DeleteItem),
+            UiCommandName::DeleteAll => Some(Self::DeleteAll),
+            UiCommandName::HistoryCeiling => Some(Self::HistoryCeiling),
+            UiCommandName::SetPinned => Some(Self::SetPinned),
+            UiCommandName::Status => Some(Self::Status),
+            UiCommandName::SetDeviceName => Some(Self::SetDeviceName),
+            UiCommandName::ServiceState => Some(Self::ServiceState),
+            UiCommandName::Diagnostics => Some(Self::Diagnostics),
+            UiCommandName::RuntimeLogEvents => Some(Self::RuntimeLogEvents),
+            UiCommandName::GetConfig => Some(Self::GetConfig),
+            UiCommandName::SetConfig => Some(Self::SetConfig),
+            UiCommandName::GetPrivateMode => Some(Self::GetPrivateMode),
+            UiCommandName::SetPrivateMode => Some(Self::SetPrivateMode),
+            UiCommandName::CloudStatus => Some(Self::CloudStatus),
+            UiCommandName::CloudSyncNow => Some(Self::CloudSyncNow),
+            UiCommandName::Peers => Some(Self::Peers),
+            UiCommandName::SyncNow => Some(Self::SyncNow),
+            UiCommandName::PairProgress => Some(Self::PairProgress),
+            UiCommandName::Discovered => Some(Self::Discovered),
+            _ => None,
+        }
     }
 }
 
@@ -149,8 +175,8 @@ pub(crate) fn unauthorized() -> (StatusCode, Json<Failure>) {
     (
         StatusCode::UNAUTHORIZED,
         Json(Failure {
-            code: "offline".into(),
-            retryable: true,
+            code: UiBoundaryErrorCode::Offline.as_str().into(),
+            retryable: UiBoundaryErrorCode::Offline.retryable(),
         }),
     )
 }
@@ -169,23 +195,23 @@ pub(crate) fn unavailable() -> (StatusCode, Json<Failure>) {
     (
         StatusCode::NOT_IMPLEMENTED,
         Json(Failure {
-            code: "unavailable".into(),
-            retryable: false,
+            code: UiBoundaryErrorCode::Unavailable.as_str().into(),
+            retryable: UiBoundaryErrorCode::Unavailable.retryable(),
         }),
     )
 }
 
-pub(crate) fn is_native_only(command: &str) -> bool {
+pub(crate) fn is_native_only(command: UiCommandName) -> bool {
     matches!(
         command,
-        "pair_create_invite"
-            | "pair_scan_invite"
-            | "pair_present"
-            | "pair_confirm"
-            | "pair_reject"
-            | "pair_cancel"
-            | "start_service"
-            | "restart_service"
+        UiCommandName::PairCreateInvite
+            | UiCommandName::PairScanInvite
+            | UiCommandName::PairPresent
+            | UiCommandName::PairConfirm
+            | UiCommandName::PairReject
+            | UiCommandName::PairCancel
+            | UiCommandName::StartService
+            | UiCommandName::RestartService
     )
 }
 
@@ -264,9 +290,14 @@ mod tests {
             "pair_progress",
             "discovered",
         ] {
-            assert!(BridgeCommand::parse(command).is_some(), "{command}");
+            let command = UiCommandName::parse(command).unwrap();
+            assert!(
+                BridgeCommand::from_ui(command).is_some(),
+                "{}",
+                command.as_str()
+            );
         }
-        assert!(BridgeCommand::parse("future_command").is_none());
+        assert!(UiCommandName::parse("future_command").is_none());
     }
 
     #[test]
@@ -288,8 +319,13 @@ mod tests {
             "restore_database",
             "set_shortcut",
         ] {
-            assert!(BridgeCommand::parse(command).is_none(), "{command}");
-            assert!(!is_native_only(command), "{command}");
+            let command = UiCommandName::parse(command).unwrap();
+            assert!(
+                BridgeCommand::from_ui(command).is_none(),
+                "{}",
+                command.as_str()
+            );
+            assert!(!is_native_only(command), "{}", command.as_str());
         }
     }
 
@@ -301,8 +337,13 @@ mod tests {
             "start_service",
             "restart_service",
         ] {
-            assert!(is_native_only(command), "{command}");
-            assert!(BridgeCommand::parse(command).is_none(), "{command}");
+            let command = UiCommandName::parse(command).unwrap();
+            assert!(is_native_only(command), "{}", command.as_str());
+            assert!(
+                BridgeCommand::from_ui(command).is_none(),
+                "{}",
+                command.as_str()
+            );
         }
         let (_, Json(failure)) = unavailable();
         assert_eq!(failure.code, "unavailable");

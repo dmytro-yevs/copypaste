@@ -4,23 +4,16 @@
  * Unknown future codes keep their retry flag while falling back to generic
  * copy, so adding a backend code does not break an older UI.
  */
-import type { ErrorCode, UiError } from "@/generated/ipc";
+import {
+  UI_BOUNDARY_ERROR_CODES,
+  type ErrorCode,
+  type UiBoundaryErrorCode,
+  type UiError,
+} from "@/generated/ipc";
 import { t } from "@/i18n";
 
 /** Rust error codes plus boundary conditions owned by the desktop app. */
-export type ErrorKind = ErrorCode
-  | "offline"
-  | "timeout"
-  | "unavailable"
-  | "update_busy"
-  | "update_unconfigured"
-  | "update_unsupported"
-  | "update_signature_invalid"
-  | "update_network_failed"
-  | "update_check_failed"
-  | "update_install_failed"
-  | "update_permission_required"
-  | "unknown";
+export type ErrorKind = ErrorCode | UiBoundaryErrorCode;
 
 const FRIENDLY = {
   offline: "errors.offline",
@@ -58,7 +51,7 @@ function safeCode(code: string): string {
     code.length <= 64 &&
     /^[a-z0-9_]+$/.test(code)
     ? code
-    : "unknown";
+    : UI_BOUNDARY_ERROR_CODES.unknown;
 }
 
 function errorKind(code: string): ErrorKind {
@@ -66,7 +59,7 @@ function errorKind(code: string): ErrorKind {
   // (`scripts/check-webview-baseline.mjs`).
   return Object.prototype.hasOwnProperty.call(FRIENDLY, code)
     ? (code as ErrorKind)
-    : "unknown";
+    : UI_BOUNDARY_ERROR_CODES.unknown;
 }
 
 function isUiError(raw: unknown): raw is UiError {
@@ -120,7 +113,7 @@ export function ipcFailure(raw: unknown): IpcFailure {
 
   // A malformed rejection has no trustworthy retry policy. Keeping the
   // historical unknown retry action is safe and does not reconstruct a code.
-  return new IpcFailure("unknown", true);
+  return new IpcFailure(UI_BOUNDARY_ERROR_CODES.unknown, true);
 }
 
 export function classifyError(raw: unknown): ErrorKind {

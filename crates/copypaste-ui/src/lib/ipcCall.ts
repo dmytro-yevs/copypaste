@@ -8,6 +8,10 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
+import {
+  UI_BOUNDARY_ERROR_CODES,
+  type UiCommandName,
+} from "@/generated/ipc";
 import { IpcFailure, ipcFailure } from "./errors";
 
 interface WebBridgeConfig {
@@ -221,7 +225,7 @@ export function hasBridge(): boolean {
 }
 
 export async function call<T>(
-  command: string,
+  command: UiCommandName,
   args?: Record<string, unknown>,
   options: IpcCallOptions = {},
 ): Promise<T> {
@@ -250,12 +254,12 @@ export async function call<T>(
       }, options, true);
     } catch (raw) {
       if (raw instanceof IpcFailure) throw raw;
-      throw new IpcFailure("offline", true);
+      throw new IpcFailure(UI_BOUNDARY_ERROR_CODES.offline, true);
     }
   }
 
   if (!hasNativeBridge()) {
-    throw new IpcFailure("offline", true);
+    throw new IpcFailure(UI_BOUNDARY_ERROR_CODES.offline, true);
   }
   try {
     // Tauri exposes no AbortSignal contract. Only this caller-facing promise
