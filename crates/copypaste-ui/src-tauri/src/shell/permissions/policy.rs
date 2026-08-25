@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub struct AndroidNotificationFacts {
     pub api_level: u32,
     pub granted: bool,
@@ -14,6 +15,7 @@ pub struct AndroidNotificationFacts {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub struct AndroidTileFacts {
     pub api_level: u32,
     pub last_add_result: Option<i32>,
