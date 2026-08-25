@@ -2,12 +2,28 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import { Button } from "@/components/ui";
 import {
   useOnboardingPermissions,
+  usePermissionOpenSettings,
   usePermissionRequest,
 } from "@/hooks/useOnboardingPermissions";
-import { useCaptureMutation, useCaptureNow, useCaptureState } from "@/hooks/useCapture";
+import {
+  useCaptureMutation,
+  useCaptureNow,
+  useCaptureState,
+} from "@/hooks/useCapture";
 import { useSetServiceConfig } from "@/hooks/useServiceConfig";
+import {
+  permissionPresentation,
+  type PermissionAction,
+  type PermissionExplanation,
+  type PermissionLabel,
+} from "@/features/onboarding/model/permissionPresentation";
 import { useTranslation } from "@/i18n";
-import { captureArm } from "@/lib/ipc";
+import {
+  captureArm,
+  type OnboardingPermissionId,
+  type OnboardingPermissions,
+  type OnboardingPermissionStatus,
+} from "@/lib/ipc";
 import styles from "./AndroidCaptureSetup.module.css";
 
 
@@ -15,6 +31,7 @@ export function AndroidCaptureSetup() {
   const { t } = useTranslation();
   const permissions = useOnboardingPermissions();
   const request = usePermissionRequest();
+  const openSettings = usePermissionOpenSettings();
   const save = useSetServiceConfig();
   const capture = useCaptureState();
   const now = useCaptureNow();
@@ -22,20 +39,41 @@ export function AndroidCaptureSetup() {
   const notificationStatus = permissions.data?.notifications.status;
   const tileStatus = permissions.data?.tile.status;
   const captureWorking = capture.data?.health.state === "working";
-  const busy = request.isPending || save.isPending || now.isPending || arm.isPending;
+  const busy =
+    permissions.isPending ||
+    request.isPending ||
+    openSettings.isPending ||
+    save.isPending ||
+    now.isPending ||
+    arm.isPending;
 
-  const askNotifications = () => {
-    request.mutate("notifications", {
-      onSuccess: (fresh) => {
-        if (["granted", "not_required"].includes(fresh.notifications.status)) {
-          save.mutate({ notify_on_copy: true });
-        }
-      },
-    });
+  const afterPermission = (id: OnboardingPermissionId) => ({
+    onSuccess: (fresh: OnboardingPermissions) => {
+      if (
+        id === "notifications" &&
+        (fresh.notifications.status === "granted" ||
+          fresh.notifications.status === "not_required")
+      ) {
+        save.mutate({ notify_on_copy: true });
+      }
+    },
+  });
+
+  const runPermission = (
+    id: OnboardingPermissionId,
+    action: PermissionAction,
+  ) => {
+    if (action === "request") request.mutate(id, afterPermission(id));
+    if (action === "open-settings") {
+      openSettings.mutate(id, afterPermission(id));
+    }
   };
 
   return (
-    <section className={styles.root} aria-label={t("onboarding.capture.androidSetupLabel")}>
+    <section
+      className={styles.root}
+      aria-label={t("onboarding.capture.androidSetupLabel")}
+    >
       <SetupAction
         icon="library"
         title={t("onboarding.capture.saveNow")}
@@ -44,25 +82,23 @@ export function AndroidCaptureSetup() {
         disabled={busy}
         onClick={() => now.mutate("in_app")}
       />
-      <SetupAction
+      <PermissionSetupAction
+        id="tile"
         icon="devices"
         title={t("onboarding.capture.addTile")}
-        detail={t("onboarding.capture.addTileDetail")}
-        label={tileStatus === "granted"
-          ? t("onboarding.capture.tileAdded")
-          : t("onboarding.capture.addTileAction")}
-        disabled={busy || tileStatus === "granted" || tileStatus === "unavailable"}
-        onClick={() => request.mutate("tile")}
+        defaultDetail={t("onboarding.capture.addTileDetail")}
+        status={tileStatus}
+        busy={busy}
+        onRun={runPermission}
       />
-      <SetupAction
+      <PermissionSetupAction
+        id="notifications"
         icon="alert"
         title={t("onboarding.capture.notifications")}
-        detail={t("onboarding.capture.notificationsDetail")}
-        label={notificationStatus === "granted"
-          ? t("onboarding.capture.notificationsAllowed")
-          : t("onboarding.capture.notificationsAction")}
-        disabled={busy || notificationStatus === "granted"}
-        onClick={askNotifications}
+        defaultDetail={t("onboarding.capture.notificationsDetail")}
+        status={notificationStatus}
+        busy={busy}
+        onRun={runPermission}
       />
       <SetupAction
         icon="play"
@@ -76,6 +112,79 @@ export function AndroidCaptureSetup() {
       />
     </section>
   );
+}
+
+function PermissionSetupAction({
+  id,
+  icon,
+  title,
+  defaultDetail,
+  status,
+  busy,
+  onRun,
+}: {
+  id: OnboardingPermissionId;
+  icon: IconName;
+  title: string;
+  defaultDetail: string;
+  status?: OnboardingPermissionStatus;
+  busy: boolean;
+  onRun: (id: OnboardingPermissionId, action: PermissionAction) => void;
+}) {
+  const { t } = useTranslation();
+  const presentation = permissionPresentation(status ?? "prompt");
+
+  const label = t(permissionLabelKey(id, presentation.label));
+  const detailKey = permissionDetailKey(presentation.explanation);
+  const detail = detailKey === null ? defaultDetail : t(detailKey);
+
+  return (
+    <SetupAction
+      icon={icon}
+      title={title}
+      detail={detail}
+      label={label}
+      disabled={busy || status === undefined || presentation.disabled}
+      onClick={() => onRun(id, presentation.action)}
+    />
+  );
+}
+
+function permissionLabelKey(
+  id: OnboardingPermissionId,
+  label: PermissionLabel,
+) {
+  switch (label) {
+    case "request":
+      return id === "tile"
+        ? "onboarding.capture.addTileAction"
+        : "onboarding.capture.notificationsAction";
+    case "granted":
+      return id === "tile"
+        ? "onboarding.capture.tileAdded"
+        : "onboarding.capture.notificationsAllowed";
+    case "open-settings":
+      return "onboarding.capture.permission.openSettings";
+    case "not-required":
+      return "onboarding.capture.permission.notRequired";
+    case "unavailable":
+      return "onboarding.capture.permission.unavailable";
+  }
+}
+
+function permissionDetailKey(
+  explanation: PermissionExplanation,
+) {
+  switch (explanation) {
+    case "default":
+      return null;
+    case "denied":
+      return "onboarding.capture.permission.deniedDetail";
+    case "not-required":
+      return "onboarding.capture.permission.notRequiredDetail";
+    case "unavailable":
+      return "onboarding.capture.permission.unavailableDetail";
+  }
 }
 
 function SetupAction({
