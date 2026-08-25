@@ -231,12 +231,9 @@ gesture cleanup.
 
 ## Compatibility shims
 
-Temporary source-compatible wrappers may exist only inside the owning layer
-while consumers migrate. They delegate all behavior and styling to the
-canonical foundation and are removed after the last consumer moves.
-`ControlShortcut` currently delegates to `ShortcutBadge`; `DefinitionList`
-remains until inspector/detail consumers move to `MetadataList`. Old-path
-re-exports across layers remain prohibited.
+Compatibility wrappers and old-path re-exports are prohibited. Consumers move
+directly to the canonical component and its finite API; obsolete wrappers are
+removed with their final consumer.
 
 ## Change checklist
 

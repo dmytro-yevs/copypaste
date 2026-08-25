@@ -4,10 +4,10 @@ import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui";
 import {
   ActionButton,
-  DefinitionList,
-  DefinitionRow,
-  DefinitionTerm,
-  DefinitionValue,
+  MetadataLabel,
+  MetadataList,
+  MetadataRow,
+  MetadataValue,
 } from "@/components/shared";
 import { DeviceKindIcon } from "@/features/devices/components/DeviceKindIcon";
 import { DeviceStatus } from "@/features/devices/components/DeviceStatus";
@@ -209,14 +209,14 @@ export function DeviceDetailPane({
       {target.kind === "discovered" ? (
         <DiscoveredDeviceDetails device={target.device} status={target.status} />
       ) : (
-        <DefinitionList className={styles.statList}>
+        <MetadataList className={styles.statList}>
           {stats.map(([term, value]) => (
-            <DefinitionRow key={term}>
-              <DefinitionTerm>{term}</DefinitionTerm>
-              <DefinitionValue>{value}</DefinitionValue>
-            </DefinitionRow>
+            <MetadataRow key={term}>
+              <MetadataLabel>{term}</MetadataLabel>
+              <MetadataValue>{value}</MetadataValue>
+            </MetadataRow>
           ))}
-        </DefinitionList>
+        </MetadataList>
       )}
 
       {target.kind === "peer" ? (

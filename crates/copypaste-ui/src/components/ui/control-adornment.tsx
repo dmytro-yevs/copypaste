@@ -3,7 +3,6 @@ import { type VariantProps, cva } from "class-variance-authority";
 
 import { cn } from "@/lib/cn";
 import styles from "./control-adornment.module.css";
-import { ShortcutBadge } from "./shortcut-badge";
 
 const adornmentVariants = cva(styles.root, {
   variants: {
@@ -30,22 +29,5 @@ export function ControlAdornment({
     >
       {children}
     </span>
-  );
-}
-
-export function ControlShortcut({
-  className,
-  size = "regular",
-  ...props
-}: Omit<ComponentProps<typeof ShortcutBadge>, "size"> & {
-  size?: NonNullable<AdornmentVariants["size"]>;
-}) {
-  return (
-    <ShortcutBadge
-      data-slot="control-shortcut"
-      size={size}
-      className={className}
-      {...props}
-    />
   );
 }

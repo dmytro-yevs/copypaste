@@ -1,8 +1,8 @@
 import {
-    DefinitionList,
-    DefinitionRow,
-    DefinitionTerm,
-    DefinitionValue,
+    MetadataLabel,
+    MetadataList,
+    MetadataRow,
+    MetadataValue,
 } from "@/components/shared";
 import { DeviceStatus } from "@/features/devices/components/DeviceStatus";
 import {
@@ -156,14 +156,14 @@ export function DiscoveredDeviceDetails({
             {groups.map((group) => (
                 <section key={group.label} className={styles.group}>
                     <h3>{group.label}</h3>
-                    <DefinitionList className={styles.list}>
+                    <MetadataList className={styles.list}>
                         {group.rows.map(([term, value]) => (
-                            <DefinitionRow key={term}>
-                                <DefinitionTerm>{term}</DefinitionTerm>
-                                <DefinitionValue>{value}</DefinitionValue>
-                            </DefinitionRow>
+                            <MetadataRow key={term}>
+                                <MetadataLabel>{term}</MetadataLabel>
+                                <MetadataValue>{value}</MetadataValue>
+                            </MetadataRow>
                         ))}
-                    </DefinitionList>
+                    </MetadataList>
                 </section>
             ))}
         </div>

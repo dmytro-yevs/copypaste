@@ -137,5 +137,15 @@ describe("device status presentation", () => {
     expect(container.textContent).toContain("2 sent · 1 received");
     expect(container.textContent).toContain("Not reported by peer");
     expect(container.textContent).toContain("Direct encrypted peer-to-peer");
+
+    const metadataLists = [...container.querySelectorAll('dl[data-slot="metadata-list"]')];
+    expect(metadataLists).not.toHaveLength(0);
+    for (const list of metadataLists) {
+      for (const row of list.children) {
+        expect(row.getAttribute("data-slot")).toBe("metadata-row");
+        expect(row.querySelector(':scope > dt[data-slot="metadata-label"]')).not.toBeNull();
+        expect(row.querySelector(':scope > dd[data-slot="metadata-value"]')).not.toBeNull();
+      }
+    }
   });
 });

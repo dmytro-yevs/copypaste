@@ -2,10 +2,10 @@ import { type ReactNode, useEffect, useId, useState } from "react";
 
 import {
   BrandMark,
-  DefinitionList,
-  DefinitionRow,
-  DefinitionTerm,
-  DefinitionValue,
+  MetadataLabel,
+  MetadataList,
+  MetadataRow,
+  MetadataValue,
   SkeletonText,
 } from "@/components/shared";
 import {
@@ -46,10 +46,10 @@ const LINKS = [
 
 function RuntimeRow({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <DefinitionRow data-settings-search-target={`row:${title}`}>
-      <DefinitionTerm>{title}</DefinitionTerm>
-      <DefinitionValue>{children}</DefinitionValue>
-    </DefinitionRow>
+    <MetadataRow data-settings-search-target={`row:${title}`}>
+      <MetadataLabel>{title}</MetadataLabel>
+      <MetadataValue>{children}</MetadataValue>
+    </MetadataRow>
   );
 }
 
@@ -105,7 +105,7 @@ export function AboutTab() {
         <h3 id="about-runtime-title" className={styles.sectionTitle}>
           {t("settings.about.runtime.title")}
         </h3>
-        <DefinitionList className={styles.runtimeList}>
+        <MetadataList className={styles.runtimeList}>
           <RuntimeRow title={t("settings.about.service.title")}>
             {status.error ? (
               <span className={styles.error}>
@@ -150,7 +150,7 @@ export function AboutTab() {
               </span>
             ) : <SkeletonText width="xs" />}
           </RuntimeRow>
-        </DefinitionList>
+        </MetadataList>
       </section>
 
       <section

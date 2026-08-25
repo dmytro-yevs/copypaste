@@ -18,8 +18,8 @@ chrome, and `Surface` owns cards and previews. Their canonical modifiers are:
   `compact | compactIcon | sm | md | lg | icon`, `normal | loading`.
 - ControlSurface: `compact | md | library`, `content | fill`,
   `normal | invalid | disabled`.
-- ControlAdornment and ControlShortcut: `compact | regular`, inherited or
-  muted tone.
+- ControlAdornment and ShortcutBadge: `compact | regular`, with inherited or
+  muted adornment tone.
 - SelectionControl: `compact | comfortable` hit target with one fixed visual
   checkbox.
 - Surface: elevation, border, radius and semantic tone.
