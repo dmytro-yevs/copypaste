@@ -17,6 +17,7 @@ import { PEERS_KEY } from "@/hooks/useDevices";
 import { CONFIG_KEY, PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import { OPEN_AT_LOGIN_KEY } from "@/hooks/useOpenAtLogin";
 import { type PrivateModeData } from "@/lib/ipc";
+import type { ChangePayload, PushStatePayload } from "@/generated/ipc";
 import { subscribeNativeEvent } from "@/lib/tauriEventRegistry";
 import {
   EVENT_AUTOSTART_CHANGED,
@@ -32,16 +33,7 @@ export {
   EVENT_PUSH_STATE,
 } from "@/lib/tauriEvents";
 
-/** What the bridge sends on a change. Carries no clipboard content: a
- *  subscriber re-reads through the ordinary commands. */
-export interface ChangePayload {
-  readonly topic: "items" | "peers";
-  readonly item_count: number;
-}
-
-export interface PushStatePayload {
-  readonly live: boolean;
-}
+export type { ChangePayload, PushStatePayload } from "@/generated/ipc";
 
 /** Mounted once, at the app root — not per screen. A second subscriber would
  *  invalidate the same queries twice for one change. */

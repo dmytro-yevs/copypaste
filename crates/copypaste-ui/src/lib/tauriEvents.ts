@@ -1,24 +1,18 @@
-import type { TauriEventName } from "@/generated/ipc";
+import {
+  TAURI_EVENTS,
+  TAURI_EVENT_NAMES,
+  type TauriEventName,
+} from "@/generated/ipc";
 
-export const EVENT_CHANGED = "copypaste://changed" satisfies TauriEventName;
-export const EVENT_PUSH_STATE = "copypaste://push-state" satisfies TauriEventName;
-export const EVENT_CAPTURED = "copypaste://captured" satisfies TauriEventName;
-export const EVENT_CAPTURE_STATE = "copypaste://capture-state" satisfies TauriEventName;
-export const EVENT_PRIVATE_MODE_CHANGED =
-  "private-mode-changed" satisfies TauriEventName;
-export const EVENT_AUTOSTART_CHANGED =
-  "autostart-changed" satisfies TauriEventName;
-export const EVENT_OPEN_SETTINGS = "open-settings" satisfies TauriEventName;
+export const EVENT_CHANGED = TAURI_EVENTS.COPYPASTE_CHANGED;
+export const EVENT_PUSH_STATE = TAURI_EVENTS.COPYPASTE_PUSH_STATE;
+export const EVENT_CAPTURED = TAURI_EVENTS.COPYPASTE_CAPTURED;
+export const EVENT_CAPTURE_STATE = TAURI_EVENTS.COPYPASTE_CAPTURE_STATE;
+export const EVENT_PRIVATE_MODE_CHANGED = TAURI_EVENTS.PRIVATE_MODE_CHANGED;
+export const EVENT_AUTOSTART_CHANGED = TAURI_EVENTS.AUTOSTART_CHANGED;
+export const EVENT_OPEN_SETTINGS = TAURI_EVENTS.OPEN_SETTINGS;
 
-export const TAURI_EVENT_NAMES = [
-  EVENT_CHANGED,
-  EVENT_PUSH_STATE,
-  EVENT_CAPTURED,
-  EVENT_CAPTURE_STATE,
-  EVENT_PRIVATE_MODE_CHANGED,
-  EVENT_AUTOSTART_CHANGED,
-  EVENT_OPEN_SETTINGS,
-] as const;
+export { TAURI_EVENT_NAMES };
 
 type AssertNever<T extends never> = T;
 export type TauriEventNamesAreComplete = AssertNever<

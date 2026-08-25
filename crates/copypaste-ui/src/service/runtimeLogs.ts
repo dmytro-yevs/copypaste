@@ -1,4 +1,5 @@
 import { call } from "@/lib/ipcCall";
+import { UI_COMMANDS } from "@/generated/ipc";
 
 export type RuntimeLogLevel = "error" | "warn" | "info" | "debug" | "trace";
 export type RuntimeLogProcess = "app" | "daemon";
@@ -25,5 +26,5 @@ export interface RuntimeLogQuery {
 }
 
 export function getRuntimeLogEvents(query: RuntimeLogQuery): Promise<RuntimeLogPage> {
-  return call<RuntimeLogPage>("runtime_log_events", { query });
+  return call<RuntimeLogPage>(UI_COMMANDS.runtime_log_events, { query });
 }
