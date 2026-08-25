@@ -191,7 +191,7 @@ mod tests {
                 name: "dialler".into(),
                 psk: token.psk(),
                 last_addr: None,
-                last_seen_ms: 0,
+                last_seen_ms: 1,
             })
             .unwrap();
         tokio::spawn(listen(
@@ -290,7 +290,7 @@ mod tests {
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
-                last_seen_ms: 0,
+                last_seen_ms: 1,
             })
             .unwrap();
         let b_peer = Peer {
@@ -298,7 +298,7 @@ mod tests {
             name: "desktop".into(),
             psk: token.psk(),
             last_addr: Some(addr),
-            last_seen_ms: 0,
+            last_seen_ms: 1,
         };
         b.peers().upsert(b_peer.clone()).unwrap();
         let outcome = b
@@ -306,8 +306,8 @@ mod tests {
             .await
             .expect("known peers must establish a session");
 
-        assert_eq!(a.peers().usable_count(), 1);
-        assert_eq!(b.peers().usable_count(), 1);
+        assert_eq!(a.peers().len(), 1);
+        assert_eq!(b.peers().len(), 1);
         assert_eq!(outcome.peer_device_id, "desktop");
         assert!(a_source
             .snapshot()
@@ -358,7 +358,7 @@ mod tests {
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
-                last_seen_ms: 0,
+                last_seen_ms: 1,
             })
             .unwrap();
         let b_peer = Peer {
@@ -366,7 +366,7 @@ mod tests {
             name: "desktop".into(),
             psk: token.psk(),
             last_addr: Some(addr),
-            last_seen_ms: 0,
+            last_seen_ms: 1,
         };
         b.peers().upsert(b_peer.clone()).unwrap();
         (b, b_peer)

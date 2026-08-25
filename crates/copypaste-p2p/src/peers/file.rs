@@ -27,16 +27,11 @@ use super::{Peer, PeerStoreError, MAX_REVOCATIONS};
 
 /// Everything the store holds, in memory and on disk.
 ///
-/// `pending` and `revoked` are keyed by pairing id and hold no key material, so
-/// they are ordinary maps beside the peers rather than fields on [`Peer`] —
-/// which also keeps `Peer`'s literal shape, and therefore its `Drop`-guarded
-/// PSK handling, unchanged.
+/// `revoked` is keyed by pairing id and holds no key material, so it is an
+/// ordinary map beside the peers rather than a field on [`Peer`].
 #[derive(Default)]
 pub(super) struct State {
     pub(super) peers: HashMap<String, Peer>,
-    /// Pairings whose code has never been redeemed, and the instant each stops
-    /// being redeemable.
-    pub(super) pending: BTreeMap<String, i64>,
     /// Pairing ids that were cut off, and when. Kept after the peer is gone: it
     /// is the audit trail, and it is what stops a revoked pairing being
     /// re-added by a code someone still has.
@@ -50,11 +45,9 @@ pub(super) struct State {
 
 /// On-disk envelope.
 #[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StoreFile {
     peers: Vec<Peer>,
-    #[serde(default)]
-    pending: BTreeMap<String, i64>,
-    #[serde(default)]
     revoked: BTreeMap<String, i64>,
 }
 
@@ -66,13 +59,6 @@ pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
         peer.validate().map_err(|_| PeerStoreError::Corrupt)?;
         peers.insert(peer.pairing_id.clone(), peer);
     }
-    // A deadline or a revocation for a pairing that is not here decides nothing
-    // about `pending`, but a stale `revoked` entry is load-bearing and is kept.
-    let pending = file
-        .pending
-        .into_iter()
-        .filter(|(id, _)| peers.contains_key(id))
-        .collect();
     // Refused rather than trimmed. Dropping a revocation is what lets a device
     // someone still holds a code for be re-added, so the two safe answers to an
     // implausible list are to keep all of it or to open none of it.
@@ -84,7 +70,6 @@ pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
     }
     Ok(State {
         peers,
-        pending,
         revoked: file.revoked,
         generations: HashMap::new(),
     })
@@ -109,7 +94,6 @@ fn write_now(path: &Path, state: &State) -> Result<(), PeerStoreError> {
     records.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
     let file = StoreFile {
         peers: records,
-        pending: state.pending.clone(),
         revoked: state.revoked.clone(),
     };
     // The serialised form contains every PSK in hex. Held in `Zeroizing` so the
@@ -124,10 +108,7 @@ pub(super) fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
     let Some(stored) = state.peers.get(&incoming.pairing_id) else {
         return false;
     };
-    stored.last_seen_ms > 0
-        && incoming.last_seen_ms > 0
-        && !state.pending.contains_key(&incoming.pairing_id)
-        && stored.name == incoming.name
+    stored.name == incoming.name
         && stored.last_addr == incoming.last_addr
         && stored.psk_matches(&incoming.psk)
 }
@@ -160,7 +141,13 @@ mod tests {
     use crate::transport::PairingToken;
 
     fn file_with_revocations(revoked: &str) -> Vec<u8> {
-        format!(r#"{{"peers":[],"pending":{{}},"revoked":{{{revoked}}}}}"#).into_bytes()
+        format!(r#"{{"peers":[],"revoked":{{{revoked}}}}}"#).into_bytes()
+    }
+
+    #[test]
+    fn a_retired_pending_field_is_refused() {
+        let file = br#"{"peers":[],"pending":{},"revoked":{}}"#;
+        assert!(matches!(parse(file), Err(PeerStoreError::Corrupt)));
     }
 
     /// The list is the thing that stops a revoked device coming back, so an
@@ -211,7 +198,7 @@ mod tests {
         for i in 0..12 {
             store.upsert(peer(&format!("device-{i}"))).expect("upsert");
             let reopened = PeerStore::open(&path).expect("file must always parse");
-            assert_eq!(reopened.usable_count(), i + 1);
+            assert_eq!(reopened.len(), i + 1);
         }
     }
 
@@ -228,7 +215,7 @@ mod tests {
             store.upsert(peer("Laptop")).expect("upsert");
             store.upsert(peer("Phone")).expect("upsert");
         });
-        assert_eq!(PeerStore::open(&path).expect("reopen").usable_count(), 2);
+        assert_eq!(PeerStore::open(&path).expect("reopen").len(), 2);
     }
 
     #[cfg(unix)]
@@ -262,8 +249,8 @@ mod tests {
             &b"not json at all"[..],
             &b""[..],
             br#"{"peers":"nope"}"#,
-            br#"{"peers":[{"pairing_id":"a","name":"n","psk":"ab","last_addr":null,"last_seen_ms":0}]}"#,
-            br#"{"peers":[{"pairing_id":"a","name":"n","psk":"zzzz","last_addr":null,"last_seen_ms":0}]}"#,
+            br#"{"peers":[{"pairing_id":"a","name":"n","psk":"ab","last_addr":null,"last_seen_ms":1}],"revoked":{}}"#,
+            br#"{"peers":[{"pairing_id":"a","name":"n","psk":"zzzz","last_addr":null,"last_seen_ms":1}],"revoked":{}}"#,
         ] {
             std::fs::write(&path, bad).expect("write");
             assert!(
@@ -309,6 +296,6 @@ mod tests {
         let store = PeerStore::open(&path).expect("open");
         store.upsert(peer("Laptop")).expect("upsert");
         assert!(path.exists());
-        assert_eq!(PeerStore::open(&path).expect("reopen").usable_count(), 1);
+        assert_eq!(PeerStore::open(&path).expect("reopen").len(), 1);
     }
 }

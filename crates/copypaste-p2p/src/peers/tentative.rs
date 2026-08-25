@@ -23,8 +23,6 @@ pub type Generation = u64;
 pub struct PeerSnapshot {
     pairing_id: String,
     previous: Option<Peer>,
-    /// Restoring a peer without its deadline makes an unredeemed code permanent.
-    pending_until: Option<i64>,
     /// What this ceremony last wrote, or what it read.
     generation: Generation,
 }
@@ -61,9 +59,7 @@ pub(super) fn bump(state: &mut State, pairing_id: &str) {
 }
 
 impl PeerStore {
-    /// Read a pairing slot with the generation it was read at. Unlike
-    /// [`PeerStore::get`] it does not hide an aged-out code: a rollback has to
-    /// put back exactly what was there, deadline included.
+    /// Read a pairing slot with the generation it was read at.
     #[must_use]
     pub fn snapshot(&self, pairing_id: &str) -> PeerSnapshot {
         let Ok(guard) = self.state.read() else {
@@ -71,14 +67,12 @@ impl PeerStore {
             return PeerSnapshot {
                 pairing_id: pairing_id.to_string(),
                 previous: None,
-                pending_until: None,
                 generation: 0,
             };
         };
         PeerSnapshot {
             pairing_id: pairing_id.to_string(),
             previous: guard.peers.get(pairing_id).cloned(),
-            pending_until: guard.pending.get(pairing_id).copied(),
             generation: generation(&guard, pairing_id),
         }
     }
@@ -119,7 +113,6 @@ impl PeerStore {
         let contended = generation(&guard, &id) != snapshot.generation;
         let revoked = guard.revoked.contains_key(&id);
 
-        guard.pending.remove(&id);
         let restored = match (&snapshot.previous, revoked) {
             (_, true) | (None, _) => None,
             // The other writer's observations are newer than the snapshot's
@@ -136,9 +129,6 @@ impl PeerStore {
         match restored {
             Some(peer) => {
                 guard.peers.insert(id.clone(), peer);
-                if let Some(deadline) = snapshot.pending_until {
-                    guard.pending.insert(id.clone(), deadline);
-                }
             }
             None => {
                 guard.peers.remove(&id);
@@ -160,7 +150,7 @@ impl PeerStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::peers::testutil::{peer, redeemed, store_path};
+    use crate::peers::testutil::{peer, store_path, with_last_seen};
     use crate::transport::PairingToken;
 
     fn replacement(pairing_id: &str) -> Peer {
@@ -265,7 +255,7 @@ mod tests {
 
         let mut snapshot = store.snapshot(&id);
         store
-            .upsert(redeemed(
+            .upsert(with_last_seen(
                 &store.get(&id).expect("present"),
                 1_754_000_000_001,
             ))

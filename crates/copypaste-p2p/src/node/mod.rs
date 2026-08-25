@@ -85,7 +85,7 @@ impl std::fmt::Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Node")
             .field("port", &self.port)
-            .field("peers", &self.peers.usable_count())
+            .field("peers", &self.peers.len())
             .finish_non_exhaustive()
     }
 }
@@ -196,12 +196,9 @@ impl Node {
         }
     }
 
-    /// `usable_count`, never `is_empty`: an unredeemed pairing code counts, so
-    /// the device that minted one keeps advertising until the other side
-    /// redeems it. See `PeerStore::usable_count`.
     fn wants_discovery(&self) -> bool {
         self.lan_visible.load(Ordering::Relaxed)
-            && (self.peers.usable_count() > 0
+            && (!self.peers.is_empty()
                 || self.pairing.is_active()
                 || crate::now_ms() < self.browse_until_ms.load(Ordering::Relaxed))
     }
@@ -393,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pairing_waiting_to_be_redeemed_keeps_this_device_discoverable() {
+    fn an_active_invite_keeps_this_device_discoverable() {
         let (node, _dir) = node_with_discovery();
         assert!(node.peers().list().is_empty());
         node.pair_create_invite().expect("mint a pairing");
@@ -485,7 +482,7 @@ mod tests {
         node.pair_cancel();
         let second = node.pair_create_invite().unwrap();
         assert_ne!(first.pairing_id, second.pairing_id);
-        assert_eq!(node.peers().usable_count(), 0);
+        assert_eq!(node.peers().len(), 0);
     }
 
     /// Security review F-13. At the cap the user gets a refusal naming the
@@ -517,7 +514,7 @@ mod tests {
         assert!(err.to_string().contains("unpair"), "{err}");
 
         // Nothing was taken to make room, and unpairing is what unblocks it.
-        assert_eq!(node.peers().usable_count(), crate::peers::MAX_PAIRINGS);
+        assert_eq!(node.peers().len(), crate::peers::MAX_PAIRINGS);
         let existing = node.peers().psks()[0].pairing_id.clone();
         assert!(node.unpair(&existing).unwrap());
         node.pair_create_invite()
