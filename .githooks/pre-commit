@@ -41,7 +41,7 @@ staged_src=$(git diff --cached --name-only --diff-filter=ACMR \
 if [ -n "$staged_src" ]; then
     # shellcheck disable=SC2086
     ./scripts/check-comments.sh $staged_src >/dev/null 2>&1 || {
-        printf 'Comment budget (CLAUDE.md rule 8):\n' >&2
+        printf 'Comment budget (AGENTS.md rule 8):\n' >&2
         # shellcheck disable=SC2086
         ./scripts/check-comments.sh $staged_src >&2
         exit 1

@@ -100,7 +100,7 @@ mint-fresh)
     [ "${NO_COPYPASTE_INSTALL:-0}" = 1 ] ||
         die "mint-fresh deletes the device-secret item. Set NO_COPYPASTE_INSTALL=1 only after the preflight has reported no history database."
     [ ! -f "$REAL_DATA_DIR/copypaste-v2.db" ] ||
-        die "a v2 history database is present: deleting its device secret would make it permanently unopenable (CLAUDE.md rule 4)"
+        die "a v2 history database is present: deleting its device secret would make it permanently unopenable (AGENTS.md rule 4)"
     note "route mint-fresh: removing the device-secret item so this run mints its own"
     if security delete-generic-password -s "$SERVICE" -a "$ACCOUNT" >/dev/null 2>&1; then
         note "  removed"
