@@ -7,12 +7,12 @@ export type { UpdateProgress, UpdateStatus };
 
 export function getUpdateStatus(): Promise<UpdateStatus> {
   if (!hasNativeBridge()) return Promise.resolve({ state: "unsupported" });
-  return call<UpdateStatus>(UI_COMMANDS.update_status);
+  return call(UI_COMMANDS.update_status);
 }
 
 export function checkForUpdate(): Promise<UpdateStatus> {
   if (!hasNativeBridge()) return Promise.resolve({ state: "unsupported" });
-  return call<UpdateStatus>(UI_COMMANDS.check_for_update);
+  return call(UI_COMMANDS.check_for_update);
 }
 
 export function installUpdate(
@@ -22,7 +22,7 @@ export function installUpdate(
   if (!hasNativeBridge()) return Promise.resolve({ state: "unsupported" });
   const progress = new Channel<UpdateProgress>();
   progress.onmessage = onProgress;
-  return call<UpdateStatus>(
+  return call(
     UI_COMMANDS.install_update,
     { expectedVersion, progress },
     { timeoutMs: 10 * 60_000 },

@@ -79,26 +79,26 @@ function webBridgeCaptureSnapshot(): CaptureSnapshot {
 
 export function captureState(options?: IpcCallOptions): Promise<CaptureSnapshot> {
   if (hasWebBridge()) return Promise.resolve(webBridgeCaptureSnapshot());
-  return call<CaptureSnapshot>(UI_COMMANDS.capture_state, undefined, options);
+  return call(UI_COMMANDS.capture_state, undefined, options);
 }
 
 /** Called on every resume, not only at startup: a grant can lapse while the app
  *  is backgrounded, and a reboot is the ordinary case. */
 export function captureRefresh(): Promise<CaptureSnapshot> {
   if (hasWebBridge()) return Promise.resolve(webBridgeCaptureSnapshot());
-  return call<CaptureSnapshot>(UI_COMMANDS.capture_refresh);
+  return call(UI_COMMANDS.capture_refresh);
 }
 
 /** One call for two steps: it asks for the permission when that is what is
  *  missing, and starts the background reader when it is not. */
 export function captureArm(): Promise<CaptureSnapshot> {
   if (hasWebBridge()) return Promise.resolve(webBridgeCaptureSnapshot());
-  return call<CaptureSnapshot>(UI_COMMANDS.capture_arm);
+  return call(UI_COMMANDS.capture_arm);
 }
 
 export function captureDisarm(): Promise<CaptureSnapshot> {
   if (hasWebBridge()) return Promise.resolve(webBridgeCaptureSnapshot());
-  return call<CaptureSnapshot>(UI_COMMANDS.capture_disarm);
+  return call(UI_COMMANDS.capture_disarm);
 }
 
 export function captureSetEnabled(enabled: boolean): Promise<CaptureSnapshot> {
@@ -110,14 +110,14 @@ export function captureSetEnabled(enabled: boolean): Promise<CaptureSnapshot> {
       shizuku: { ...snapshot.shizuku, enabled },
     });
   }
-  return call<CaptureSnapshot>(UI_COMMANDS.capture_set_enabled, { enabled });
+  return call(UI_COMMANDS.capture_set_enabled, { enabled });
 }
 
 /** Rung 0: save whatever is on the clipboard right now. `null` means there was
  *  nothing to save, which is not a failure. */
 export function captureNow(source: CaptureSource): Promise<Item | null> {
   if (hasWebBridge()) return Promise.resolve(null);
-  return call<Item | null>(UI_COMMANDS.capture_now, { source });
+  return call(UI_COMMANDS.capture_now, { source });
 }
 
 /** The exact text `authorise_toast` gates on. Fetched rather than copied into
@@ -128,7 +128,7 @@ export function captureToastExplanation(): Promise<string> {
       "Android shows a privacy notice when an app reads the clipboard. Hiding it affects the whole device, not only CopyPaste.",
     );
   }
-  return call<string>(UI_COMMANDS.capture_toast_explanation);
+  return call(UI_COMMANDS.capture_toast_explanation);
 }
 
 /** `acknowledged` may only be `true` when the user has read
@@ -148,7 +148,7 @@ export function captureSetToastSuppressed(
       shizuku: { ...snapshot.shizuku, toastSuppressed: suppressed },
     });
   }
-  return call<CaptureSnapshot>(UI_COMMANDS.capture_set_toast_suppressed, {
+  return call(UI_COMMANDS.capture_set_toast_suppressed, {
     suppressed,
     acknowledged,
   });
@@ -156,15 +156,15 @@ export function captureSetToastSuppressed(
 
 export function captureOpenShizuku(): Promise<void> {
   if (hasWebBridge()) return Promise.resolve();
-  return call<void>(UI_COMMANDS.capture_open_shizuku);
+  return call(UI_COMMANDS.capture_open_shizuku);
 }
 
 export function captureOpenDeveloperOptions(): Promise<void> {
   if (hasWebBridge()) return Promise.resolve();
-  return call<void>(UI_COMMANDS.capture_open_developer_options);
+  return call(UI_COMMANDS.capture_open_developer_options);
 }
 
 export function captureRequestBatteryExemption(): Promise<void> {
   if (hasWebBridge()) return Promise.resolve();
-  return call<void>(UI_COMMANDS.capture_request_battery_exemption);
+  return call(UI_COMMANDS.capture_request_battery_exemption);
 }
