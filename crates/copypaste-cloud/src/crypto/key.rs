@@ -4,10 +4,9 @@
 //!
 //! `m = 19456 KiB (19 MiB)`, `t = 2`, `p = 1`, `Version::V0x13`, 32-byte output.
 //!
-//! These are the OWASP "second choice" interactive-login parameters, which the
-//! v1 manifest already pinned as a **floor, not a suggestion**, and they are
-//! still current. The reasoning behind each, restated so a future change is a
-//! decision rather than a drift:
+//! These are the OWASP "second choice" interactive-login parameters and the
+//! manifest pins them as a **floor, not a suggestion**. The reasoning behind
+//! each, restated so a future change is a decision rather than a drift:
 //!
 //! * **`m = 19 MiB`** is the memory cost, and memory is what makes an ASIC or
 //!   GPU attack expensive. Raising it raises the attacker's cost linearly and

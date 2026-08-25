@@ -1,20 +1,13 @@
 -- ---------------------------------------------------------------------------
 -- Retention: the TTL and the per-account row cap.
 --
--- The v1 relay held at most 500 items per account for at most 24 hours
--- (manifest 05 §5.1 rows 4, 4a, 5 and §5.2). Those numbers were not a
--- limitation, they were the design: bounded storage, and a server that forgets.
--- Supabase as shipped keeps every row forever, so both properties have to be
--- rebuilt here or consciously abandoned. This file rebuilds them, with the v1
--- values as the defaults.
+-- The cloud table holds at most 500 items per account for at most 24 hours
+-- (manifest 05 §5.1 rows 4, 4a, 5 and §5.2): bounded storage, and a server that
+-- forgets.
 --
 -- Why the server and not the client: a device that has been offline for a month
 -- must not be the thing that decides what other devices still need. Client-side
 -- DELETEs would do exactly that (manifest 05 §5.2, explicit).
---
--- Why not `expires_at` + a partial index, which is what v1's schema had: that
--- column was never acted on by anything. A column nobody reads is worse than no
--- column, so v2 has none and the job reads `inserted_at` instead.
 -- ---------------------------------------------------------------------------
 
 create schema if not exists private;
@@ -117,11 +110,10 @@ begin
 
     if ttl_h is not null then
         -- `inserted_at`, never `created_at`. `created_at` is client-supplied,
-        -- and the relay learned the hard way that sorting eviction on a
-        -- client-supplied clock lets an intra-account writer forge a value,
-        -- escape eviction, and displace legitimate items (`CopyPaste-1uqb`,
-        -- manifest 05 §5.1 row 4a). `inserted_at` is defaulted by the server
-        -- and `authenticated` holds no column privilege on it.
+        -- so sorting eviction on it would let an intra-account writer forge a
+        -- value, escape eviction, and displace legitimate items
+        -- (`CopyPaste-1uqb`, manifest 05 §5.1 row 4a). `inserted_at` is
+        -- defaulted by the server and `authenticated` cannot write it.
         with gone as (
             delete from public.clipboard_items
              where inserted_at < now() - make_interval(hours => ttl_h)
