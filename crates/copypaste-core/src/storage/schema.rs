@@ -234,10 +234,16 @@ mod tests {
 
     #[test]
     fn source_has_one_schema_and_no_compatibility_ladder() {
-        let production = include_str!("schema.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap();
+        let production = [
+            include_str!("schema.rs"),
+            include_str!("dbfile.rs"),
+            include_str!("store.rs"),
+            include_str!("mod.rs"),
+        ]
+        .into_iter()
+        .map(|source| source.split("#[cfg(test)]").next().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
         for forbidden in [
             concat!("rusqlite", "_migration"),
             concat!("Migration", "s"),
@@ -246,6 +252,8 @@ mod tests {
             concat!("repair", "_early_v2_schema"),
             concat!("pragma_", "table_info"),
             concat!("user_", "version"),
+            concat!("schema_", "upgrade"),
+            concat!("looks_like_", "legacy"),
             "ALTER TABLE",
         ] {
             assert!(!production.contains(forbidden), "forbidden: {forbidden}");
