@@ -7,8 +7,8 @@ import { minifySync } from "vite";
 import {
   APPEARANCE_SERIALIZATION,
   parseAppearanceFields,
+  readCurrentPrefsState,
   translucencyAttribute,
-  unwrapPersistedPrefs,
 } from "@/lib/appearancePrefs";
 import { resolveTheme } from "@/lib/theme";
 import { themeBootstrapSource } from "@/lib/themeBootstrapSource";
@@ -62,6 +62,11 @@ function runBootstrap(stored?: unknown): DOMStringMap {
   window.eval(BOOTSTRAP_SOURCE);
   return root.dataset;
 }
+
+const currentEnvelope = (state: unknown) => ({
+  state,
+  version: APPEARANCE_SERIALIZATION.version,
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -122,7 +127,7 @@ describe("first-frame ordering (INV-22 / AT-49)", () => {
     setMatchMedia(false);
     const dataset = runBootstrap({
       state: { theme: "light", colorTheme: "ember", translucency: true },
-      version: 0,
+      version: APPEARANCE_SERIALIZATION.version,
     });
     expect(dataset).toMatchObject({
       colorScheme: "light",
@@ -139,20 +144,27 @@ describe("bootstrap/runtime schema parity", () => {
     setMatchMedia(false);
     const storedValues: unknown[] = [
       undefined,
-      ...APPEARANCE_SERIALIZATION.themes.map((theme) => ({ state: { theme }, version: 0 })),
-      ...APPEARANCE_SERIALIZATION.colorThemes.map((colorTheme) => ({ colorTheme })),
-      { translucency: 0 },
-      { translucency: 65 },
-      { translucency: true },
-      { translucency: false },
-      { state: { theme: "chartreuse", colorTheme: "aurora", translucency: 1 }, version: 0 },
+      ...APPEARANCE_SERIALIZATION.themes.map((theme) =>
+        currentEnvelope({ theme }),
+      ),
+      ...APPEARANCE_SERIALIZATION.colorThemes.map((colorTheme) =>
+        currentEnvelope({ colorTheme }),
+      ),
+      currentEnvelope({ translucency: 0 }),
+      currentEnvelope({ translucency: 65 }),
+      currentEnvelope({ translucency: true }),
+      currentEnvelope({ translucency: false }),
+      currentEnvelope({
+        theme: "chartreuse",
+        colorTheme: "aurora",
+        translucency: 1,
+      }),
     ];
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
     for (const stored of storedValues) {
-      const runtime = parsePrefs(
-        unwrapPersistedPrefs(stored === undefined ? undefined : stored),
-      );
+      const state = readCurrentPrefsState(stored, APPEARANCE_SERIALIZATION);
+      const runtime = state === undefined ? parsePrefs(undefined) : parsePrefs(state);
       const dataset = runBootstrap(stored);
       expect(
         {
@@ -171,17 +183,32 @@ describe("bootstrap/runtime schema parity", () => {
     }
   });
 
+  it("ignores old-version and bare appearance preferences", () => {
+    setMatchMedia(false);
+    const expected = {
+      colorScheme: "light",
+      mode: "system",
+      theme: "midnight",
+      translucency: "off",
+    };
+
+    expect(runBootstrap({ state: { theme: "light" }, version: 1 })).toMatchObject(
+      expected,
+    );
+    expect(runBootstrap({ theme: "light" })).toMatchObject(expected);
+  });
+
   it("selects token-backed translucency without writing inline design values", () => {
-    runBootstrap({ state: { translucency: true }, version: 0 });
+    runBootstrap(currentEnvelope({ translucency: true }));
     expect(document.documentElement.dataset.translucency).toBe("on");
     expect(document.documentElement.style.getPropertyValue("--translucency-blur")).toBe("");
   });
 
   it("resolves system appearance synchronously and survives unavailable state", () => {
     setMatchMedia(false);
-    expect(runBootstrap({ state: { theme: "system" }, version: 0 }).colorScheme).toBe("light");
+    expect(runBootstrap(currentEnvelope({ theme: "system" })).colorScheme).toBe("light");
     setMatchMedia(true);
-    expect(runBootstrap({ state: { theme: "system" }, version: 0 }).colorScheme).toBe("dark");
+    expect(runBootstrap(currentEnvelope({ theme: "system" })).colorScheme).toBe("dark");
 
     expect(() => runBootstrap("{not json")).not.toThrow();
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
