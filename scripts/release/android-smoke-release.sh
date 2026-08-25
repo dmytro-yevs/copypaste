@@ -306,13 +306,22 @@ note "rung 2 on the shipped build" \
 dump_logcat release-final
 
 if [[ $FAIL -eq 0 ]]; then
-    paint_budget_ms=$(((SETTLE_SECS + PAINT_TIMEOUT) * 1000))
-    python3 - "$OUT/latency.json" "$paint_elapsed_ms" "$paint_budget_ms" <<'PY'
+    configured_budget_ms=$(((SETTLE_SECS + PAINT_TIMEOUT) * 1000))
+    paint_budget_ms="$(python3 scripts/release/native_evidence_policy.py value --platform android --field budget_ms)"
+    scenario="$(python3 scripts/release/native_evidence_policy.py value --platform android --field scenario)"
+    if [[ "$configured_budget_ms" != "$paint_budget_ms" ]]; then
+        bad "release smoke timeout matches native evidence policy" \
+            "configured ${configured_budget_ms}ms, policy ${paint_budget_ms}ms"
+    fi
+fi
+
+if [[ $FAIL -eq 0 ]]; then
+    python3 - "$OUT/latency.json" "$scenario" "$paint_elapsed_ms" "$paint_budget_ms" <<'PY'
 import json, pathlib, sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
-    "scenario": "release-webview-ready",
-    "elapsed_ms": int(sys.argv[2]),
-    "budget_ms": int(sys.argv[3]),
+    "scenario": sys.argv[2],
+    "elapsed_ms": int(sys.argv[3]),
+    "budget_ms": int(sys.argv[4]),
 }) + "\n")
 PY
     receipt_route_log="$OUT/release-receipt-route.log"
@@ -325,6 +334,9 @@ PY
     if [[ -z "$environment" ]]; then
         bad "native evidence receipt was written" \
             "$(tail -n 4 "$receipt_route_log" | tr '\n' ' ')"
+    elif [[ "$environment" == "emulator" ]]; then
+        note "publication receipt" \
+            "emulator compatibility evidence cannot satisfy the physical-device release policy"
     elif python3 scripts/release/write-native-evidence.py \
         --output "$OUT/native-evidence.json" \
         --platform android \
@@ -333,12 +345,7 @@ PY
         --architecture "$abi" \
         --commit "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
         --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
-        --scenario release-webview-ready \
         --elapsed-ms "$paint_elapsed_ms" \
-        --budget-ms "$paint_budget_ms" \
-        --assertion "signed release app launched" \
-        --assertion "WebView accessibility content painted" \
-        --assertion "release smoke assertions passed" \
         --artifact screenshot=pairing-entry.png \
         --artifact accessibility=pairing-entry.xml \
         --artifact measurement=latency.json \
