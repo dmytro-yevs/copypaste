@@ -1,0 +1,115 @@
+.root {
+  min-block-size: 0;
+  overflow: hidden;
+}
+
+.skeleton {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--skeleton);
+}
+
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--skeleton-shine),
+    transparent
+  );
+  content: "";
+  transform: translateX(-100%);
+  animation: route-loading-shimmer var(--dur-progress) var(--ease-linear) infinite;
+}
+
+.eyebrow {
+  inline-size: calc(var(--s-9) * 2);
+  block-size: var(--s-2);
+}
+
+.description {
+  inline-size: min(100%, calc(var(--s-9) * 6));
+  block-size: var(--s-3);
+}
+
+.toolbar {
+  display: grid;
+  min-block-size: calc(var(--ctl-h-md) + var(--s-7));
+  margin-block-start: var(--s-4);
+  grid-template-columns: minmax(0, 1fr) var(--ctl-h-md) var(--ctl-h-md);
+  align-items: center;
+  gap: var(--s-2);
+  border-block: var(--stroke-1) solid var(--divider);
+}
+
+.search {
+  inline-size: min(100%, calc(var(--s-9) * 8));
+  block-size: var(--ctl-h-md);
+  border-radius: var(--r-input);
+}
+
+.control {
+  inline-size: var(--ctl-h-md);
+  block-size: var(--ctl-h-md);
+  border-radius: var(--r-ctl);
+}
+
+.list {
+  border-block-start: var(--stroke-1) solid var(--divider);
+}
+
+.row {
+  display: grid;
+  min-block-size: calc(var(--s-9) + var(--s-5));
+  padding-block: var(--s-3);
+  grid-template-columns: var(--s-7) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-3);
+  border-block-end: var(--stroke-1) solid var(--divider);
+}
+
+.rowIcon {
+  inline-size: var(--s-7);
+  block-size: var(--s-7);
+  border-radius: var(--r-row);
+}
+
+.rowCopy {
+  display: grid;
+  min-inline-size: 0;
+  gap: var(--s-2);
+}
+
+.rowTitle,
+.rowBody {
+  inline-size: min(100%, calc(var(--s-9) * 8));
+  block-size: var(--s-2);
+}
+
+.rowBody {
+  inline-size: min(100%, calc(var(--s-9) * 5));
+  block-size: var(--s-1);
+}
+
+.rowCopy[data-width="secondary"] .rowTitle {
+  inline-size: min(100%, calc(var(--s-9) * 6));
+}
+
+.rowCopy[data-width="short"] .rowTitle {
+  inline-size: min(100%, calc(var(--s-9) * 4));
+}
+
+@keyframes route-loading-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+  }
+}

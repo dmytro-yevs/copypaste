@@ -11,7 +11,7 @@ import {
   originLabel,
   originsOf,
   wontSync,
-} from "@/components/history/origin";
+} from "@/features/history/model/origin";
 import { item } from "@/test/harness";
 import type { Item } from "@/lib/ipc";
 
@@ -60,8 +60,8 @@ describe("which rows earn a device marker", () => {
       from("device-b", "Phone"),
     ];
     expect(originsOf(rows)).toEqual([
-      { id: "device-a", name: "Mac" },
-      { id: "device-b", name: "Phone" },
+      { id: "device-a", name: "Mac", kind: "unknown" },
+      { id: "device-b", name: "Phone", kind: "unknown" },
     ]);
   });
 });

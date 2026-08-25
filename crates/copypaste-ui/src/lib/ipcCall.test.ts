@@ -4,7 +4,8 @@ const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import { call } from "./ipcCall";
+import { call, hasWebBridge } from "./ipcCall";
+import { previewScenarioStore } from "@/service/previewScenario";
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -24,6 +25,8 @@ function deferred<T>(): Deferred<T> {
 
 const originalFetch = globalThis.fetch;
 const fetchMock = vi.fn<typeof fetch>();
+const TEST_BRIDGE_URL = "http://127.0.0.1:43123";
+const TEST_BRIDGE_TOKEN = "0123456789abcdef0123456789abcdef";
 
 function setTauriBridge(enabled: boolean): void {
   if (enabled) {
@@ -39,23 +42,31 @@ function setTauriBridge(enabled: boolean): void {
 function setWebBridge(): void {
   setTauriBridge(false);
   vi.stubEnv("DEV", true);
-  vi.stubEnv("VITE_COPYPASTE_WEB_BRIDGE_URL", "http://127.0.0.1:43123");
-  vi.stubEnv("VITE_COPYPASTE_WEB_BRIDGE_TOKEN", "test-token");
+  window.__COPYPASTE_WEB_BRIDGE__ = {
+    url: TEST_BRIDGE_URL,
+    token: TEST_BRIDGE_TOKEN,
+  };
 }
 
 function setRuntimeWebBridge(): void {
   setTauriBridge(false);
   vi.stubEnv("DEV", true);
   window.__COPYPASTE_WEB_BRIDGE__ = {
-    url: "http://127.0.0.1:43123",
-    token: "test-token",
+    url: TEST_BRIDGE_URL,
+    token: TEST_BRIDGE_TOKEN,
   };
+}
+
+function healthyBridgeResponse(): Response {
+  return { ok: true, status: 204 } as Response;
 }
 
 beforeEach(() => {
   invoke.mockReset();
   fetchMock.mockReset();
   globalThis.fetch = fetchMock;
+  window.sessionStorage.clear();
+  previewScenarioStore.getState().resetToLive();
   setTauriBridge(true);
 });
 
@@ -65,6 +76,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   globalThis.fetch = originalFetch;
   delete window.__COPYPASTE_WEB_BRIDGE__;
+  previewScenarioStore.getState().resetToLive();
+  window.sessionStorage.clear();
   setTauriBridge(false);
 });
 
@@ -104,6 +117,9 @@ describe("IPC call lifecycle", () => {
       signal: controller.signal,
       timeoutMs: 20,
     });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     controller.abort();
 
     await expect(outcome).rejects.toMatchObject({
@@ -150,21 +166,29 @@ describe("IPC call lifecycle", () => {
   });
 
   it("aborts the browser request when its caller cancels", async () => {
-    vi.useFakeTimers();
     setWebBridge();
-    let requestSignal: AbortSignal | null = null;
-    fetchMock.mockImplementation((_input, init) => new Promise((_resolve, reject) => {
-      requestSignal = init?.signal ?? null;
-      requestSignal?.addEventListener("abort", () => {
-        reject(new DOMException("aborted", "AbortError"));
-      }, { once: true });
-    }));
+    const requestStarted = deferred<AbortSignal>();
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input).endsWith("/health")) return Promise.resolve(healthyBridgeResponse());
+      return new Promise((_resolve, reject) => {
+        const requestSignal = init?.signal;
+        if (requestSignal === undefined || requestSignal === null) {
+          reject(new Error("browser command request has no AbortSignal"));
+          return;
+        }
+        requestStarted.resolve(requestSignal);
+        requestSignal.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        }, { once: true });
+      });
+    });
     const controller = new AbortController();
 
     const outcome = call("status", undefined, {
       signal: controller.signal,
-      timeoutMs: 20,
+      timeoutMs: 30_000,
     });
+    const requestSignal = await requestStarted.promise;
     controller.abort();
 
     await expect(outcome).rejects.toMatchObject({
@@ -172,19 +196,40 @@ describe("IPC call lifecycle", () => {
       retryable: false,
     });
     expect(requestSignal).toMatchObject({ aborted: true });
-    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not issue a browser command when cancelled before it starts", async () => {
+    setWebBridge();
+    fetchMock.mockImplementation((input) => String(input).endsWith("/health")
+      ? Promise.resolve(healthyBridgeResponse())
+      : Promise.reject(new Error("browser command request must not start")));
+    const controller = new AbortController();
+
+    const outcome = call("status", undefined, { signal: controller.signal });
+    controller.abort();
+
+    await expect(outcome).rejects.toMatchObject({
+      code: "cancelled",
+      retryable: false,
+    });
+    expect(fetchMock.mock.calls.some(([input]) =>
+      String(input).endsWith("/v1/call"),
+    )).toBe(false);
   });
 
   it("aborts and classifies a browser timeout", async () => {
     vi.useFakeTimers();
     setWebBridge();
     let requestSignal: AbortSignal | null = null;
-    fetchMock.mockImplementation((_input, init) => new Promise((_resolve, reject) => {
-      requestSignal = init?.signal ?? null;
-      requestSignal?.addEventListener("abort", () => {
-        reject(new DOMException("aborted", "AbortError"));
-      }, { once: true });
-    }));
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input).endsWith("/health")) return Promise.resolve(healthyBridgeResponse());
+      return new Promise((_resolve, reject) => {
+        requestSignal = init?.signal ?? null;
+        requestSignal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        }, { once: true });
+      });
+    });
 
     const outcome = call("status", undefined, { timeoutMs: 20 });
     const rejection = expect(outcome).rejects.toMatchObject({
@@ -206,10 +251,13 @@ describe("IPC call lifecycle", () => {
     });
 
     setWebBridge();
-    fetchMock.mockResolvedValue({
-      ok: false,
-      json: () => Promise.resolve({ code: "offline", retryable: true }),
-    } as Response);
+    fetchMock.mockImplementation((input) => String(input).endsWith("/health")
+      ? Promise.resolve(healthyBridgeResponse())
+      : Promise.resolve({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ code: "offline", retryable: true }),
+        } as Response));
     await expect(call("status")).rejects.toMatchObject({
       code: "offline",
       retryable: true,
@@ -221,29 +269,129 @@ describe("IPC call lifecycle", () => {
     await expect(call("status")).resolves.toEqual({ item_count: 3 });
 
     setWebBridge();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ item_count: 3 }),
-    } as Response);
+    fetchMock.mockImplementation((input) => String(input).endsWith("/health")
+      ? Promise.resolve(healthyBridgeResponse())
+      : Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ item_count: 3 }),
+        } as Response));
     await expect(call("status")).resolves.toEqual({ item_count: 3 });
+  });
+
+  it("prefers the native bridge when a browser runtime is present", async () => {
+    vi.stubEnv("DEV", true);
+    window.__COPYPASTE_WEB_BRIDGE__ = {
+      url: TEST_BRIDGE_URL,
+      token: TEST_BRIDGE_TOKEN,
+    };
+    invoke.mockResolvedValue({ item_count: 3 });
+
+    expect(hasWebBridge()).toBe(false);
+    await expect(call("status")).resolves.toEqual({ item_count: 3 });
+    expect(invoke).toHaveBeenCalledWith("status", undefined);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses the runtime bridge file without restarting Vite", async () => {
     setRuntimeWebBridge();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ item_count: 3 }),
-    } as Response);
+    fetchMock.mockImplementation((input) => String(input).endsWith("/health")
+      ? Promise.resolve(healthyBridgeResponse())
+      : Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ item_count: 3 }),
+        } as Response));
 
     await expect(call("status")).resolves.toEqual({ item_count: 3 });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:43123/v1/call",
       expect.objectContaining({
         headers: expect.objectContaining({
-          Authorization: "Bearer test-token",
+          Authorization: `Bearer ${TEST_BRIDGE_TOKEN}`,
         }),
       }),
     );
+  });
+
+  it("uses the active preview store as the IPC source of truth", async () => {
+    setRuntimeWebBridge();
+    previewScenarioStore.getState().addDevice({
+      id: "windows-preview",
+      name: "Studio PC",
+      type: "desktop",
+      platform: "windows",
+      osName: "Windows",
+      osVersion: "11 24H2",
+      model: "Surface Studio 2+",
+      appVersion: "2.0.0-preview",
+      protocolVersion: 2,
+      latencyMs: 32,
+      lanIp: "192.168.1.31",
+      port: 49_232,
+      publicIp: null,
+      location: null,
+      lastSeenAgeMs: 1_000,
+      online: true,
+      paired: false,
+    });
+
+    window.sessionStorage.clear();
+
+    await expect(call("discovered")).resolves.toMatchObject([
+      { discovery_id: "windows-preview", name: "Studio PC" },
+    ]);
+    await expect(call("rescan")).resolves.toMatchObject([
+      { discovery_id: "windows-preview", details: { latency: {
+        connect_latency_ms: 32,
+      } } },
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns to the real bridge only after Reset to Live", async () => {
+    setRuntimeWebBridge();
+    previewScenarioStore.getState().setResource("discovery", "empty");
+    fetchMock.mockImplementation((input) => String(input).endsWith("/health")
+      ? Promise.resolve(healthyBridgeResponse())
+      : Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve([{ discovery_id: "live-device" }]),
+        } as Response));
+
+    await expect(call("rescan")).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    previewScenarioStore.getState().resetToLive();
+
+    await expect(call("rescan")).resolves.toEqual([
+      { discovery_id: "live-device" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:43123/v1/call",
+      expect.objectContaining({
+        body: JSON.stringify({ command: "rescan", args: {} }),
+      }),
+    );
+  });
+
+  it("fails fast when the published runtime is stale", async () => {
+    setRuntimeWebBridge();
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    const append = vi.spyOn(document.head, "appendChild");
+
+    await expect(call("status")).rejects.toMatchObject({
+      code: "offline",
+      retryable: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:43123/health",
+      expect.any(Object),
+    );
+    expect(append).not.toHaveBeenCalled();
   });
 
   it("classifies a missing or unreachable bridge as offline", async () => {

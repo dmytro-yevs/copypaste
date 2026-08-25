@@ -1,0 +1,89 @@
+.root {
+    display: flex;
+    min-inline-size: 0;
+    flex-direction: column;
+}
+.section {
+    display: flex;
+    min-inline-size: 0;
+    flex-direction: column;
+}
+.sectionHeader {
+    min-inline-size: 0;
+    margin: var(--s-5) 0 var(--s-2);
+}
+.sectionHeaderLayout {
+    display: flex;
+    min-inline-size: 0;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.heading {
+    color: var(--dim);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-bold);
+    letter-spacing: var(--ls-wider);
+    text-transform: uppercase;
+}
+.section:first-child .sectionHeader {
+    margin-block-start: 0;
+}
+.count {
+    padding-inline-start: var(--s-2);
+    color: var(--dim);
+    font-size: var(--fs-xs);
+}
+.capacityNote {
+    margin-block-start: var(--s-3);
+    color: var(--dim);
+    font-size: var(--fs-xs);
+}
+.capacityLayout {
+    display: inline-flex;
+    align-items: center;
+}
+.capacityLayout > span {
+    padding-inline-start: var(--s-2);
+}
+.capacityNote strong {
+    color: var(--accent-2);
+}
+.discoveryAction {
+    inline-size: calc(var(--s-9) * 2 + var(--s-7));
+    margin-inline-start: auto;
+}
+.discoveryGrid > :nth-child(2) {
+    animation-delay: var(--dur-fast);
+}
+.discoveryGrid > :nth-child(n + 3) {
+    animation-delay: var(--dur);
+}
+
+@container (min-width: $cpRoster) {
+    .deviceGrid,
+    .discoveryGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--s-2); /* grid gap */
+    }
+}
+
+@container (min-width: $cpRosterWide) {
+    .deviceGrid,
+    .discoveryGrid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@container (max-width: $cpXs) {
+    .discoveryHeader {
+        align-items: stretch;
+    }
+    .discoveryHeader .heading {
+        flex-basis: 100%;
+    }
+    .discoveryAction {
+        inline-size: 100%;
+        margin-block-start: var(--s-2);
+        margin-inline-start: 0;
+    }
+}

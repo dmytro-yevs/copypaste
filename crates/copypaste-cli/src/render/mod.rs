@@ -529,6 +529,7 @@ mod tests {
             last_addr: Some("192.168.1.24:47654".into()),
             last_seen_ms: 0,
             online: false,
+            details: None,
         }
     }
 
@@ -571,6 +572,7 @@ mod tests {
             name: "phone".into(),
             sent: 3,
             received: 2,
+            duration_ms: Some(25),
             error: error.map(str::to_string),
             error_code: None,
         }

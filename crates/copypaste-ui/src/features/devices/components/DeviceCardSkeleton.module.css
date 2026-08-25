@@ -1,0 +1,72 @@
+.card {
+    display: grid;
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: calc(var(--ctl-h-lg) + var(--s-7));
+    padding: var(--s-3);
+    grid-template-columns: var(--sz-tile) minmax(0, 1fr) var(--s-5);
+    align-items: center;
+    gap: var(--s-3);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-card);
+    background: var(--card);
+    box-shadow: var(--sh1);
+}
+
+.identityWell {
+    display: grid;
+    inline-size: var(--sz-tile);
+    block-size: var(--sz-tile);
+    place-items: center;
+    border-radius: var(--r-row);
+    color: var(--dim);
+    background: var(--selected);
+}
+
+.copy {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--s-2);
+}
+
+.knownName {
+    min-inline-size: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.knownDetail {
+    display: flex;
+    min-inline-size: 0;
+    align-items: center;
+    gap: var(--s-1);
+    color: var(--dim);
+    font-size: var(--fs-xs);
+}
+
+.knownDetail > span:first-child {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.separator {
+    flex: none;
+}
+
+.chevron {
+    color: var(--faint);
+}
+
+@container (max-width: $cpXs) {
+    .card {
+        min-block-size: calc(var(--ctl-h-lg) + var(--s-6));
+        padding: var(--s-2) var(--s-3);
+        gap: var(--s-2); /* grid gap */
+    }
+}

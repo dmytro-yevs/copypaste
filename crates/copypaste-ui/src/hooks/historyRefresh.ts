@@ -5,7 +5,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 import debounce from "lodash.debounce";
 
-import { HISTORY_COALESCE_MAX_MS, HISTORY_COALESCE_MS } from "@/lib/layout";
+
+const HISTORY_COALESCE_MS = 200;
+const HISTORY_COALESCE_MAX_MS = 2_000;
 
 export const HISTORY_KEY = ["history"] as const;
 export const HISTORY_SEARCH_KEY = ["history-search"] as const;

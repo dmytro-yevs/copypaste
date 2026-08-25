@@ -281,7 +281,7 @@ pub(crate) enum ConfigAction {
         /// an unbundled background process cannot.
         #[arg(long)]
         notify_on_copy: Option<bool>,
-        /// Play a sound when something is captured. macOS only.
+        /// Play platform feedback after a successful capture or app-owned copy.
         #[arg(long)]
         sound_on_copy: Option<bool>,
     },

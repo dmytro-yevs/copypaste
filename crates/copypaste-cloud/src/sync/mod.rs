@@ -66,7 +66,7 @@ pub use cadence::{
 pub use driver::CloudSync;
 pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;
-pub use push::{MAX_BINARY_BYTES, MAX_TEXT_BYTES};
+pub use push::{too_large_to_sync, MAX_BINARY_BYTES, MAX_TEXT_BYTES};
 pub use source::{Applied, CloudSource, LocalItem, SensitiveGuard};
 pub use store::{floor_after_round, Offer, Scan, StoreView, UPLOAD_SCAN_LIMIT};
 pub use transport::{AuthApi, AuthFault, RestApi, TransportFault};

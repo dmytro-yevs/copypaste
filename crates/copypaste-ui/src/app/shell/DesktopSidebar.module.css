@@ -1,0 +1,22 @@
+.sidebar {
+  display: flex;
+  inline-size: var(--sidebar-w);
+  block-size: 100%;
+  min-block-size: 0;
+  padding: calc(var(--s-4) + var(--stroke-2)) var(--s-3) var(--s-3);
+  align-self: stretch;
+  flex: none;
+  flex-direction: column;
+  border-inline-end: var(--stroke-1) solid var(--border);
+  color: var(--text);
+  background: transparent;
+}
+.brand { padding: 0 var(--s-2) var(--s-5); }
+.navigation { display: grid; gap: calc(var(--s-1) + var(--stroke-1)); }
+
+@media (--cp-lg) and (max-width: $cpToolbar) {
+  .sidebar { inline-size: calc(var(--s-8) + var(--s-6)); padding: var(--s-4) var(--s-2) var(--s-3); overflow-y: auto; }
+  .brand { inline-size: var(--sz-iconbtn); padding-inline: 0; justify-content: center; }
+  .brand :global(span) { display: none; }
+  .navigation { inline-size: var(--sz-iconbtn); }
+}

@@ -1,0 +1,70 @@
+{
+  "themes": {
+    "$description": "Product themes resolved for light mode. Surface and brand values ship together as one palette.",
+    "$type": "color",
+    "midnight": {
+      "bg": { "$value": "#faf9ff" },
+      "panel": { "$value": "#f5f2fc" },
+      "elevated": { "$value": "#eeeafa" },
+      "card": { "$value": "rgb(255 255 255 / 72%)" },
+      "raised": { "$value": "#efeaf8" },
+      "raised-2": { "$value": "#ddd6ee" },
+      "border": { "$value": "#ddd7e8" },
+      "divider": { "$value": "#ece7f3" },
+      "accent": { "$value": "#6b52df" },
+      "accent-2": { "$value": "#553bc9" },
+      "on-accent": { "$value": "#ffffff" },
+      "accent-away": { "$value": "#000000" },
+      "selected-edge": { "$value": "var(--accent)", "$extensions": { "com.copypaste": { "platforms": ["css"] } } },
+      "shell-inspector-bg": { "$value": "rgb(248 246 253 / 92%)" }
+    },
+    "aurora": {
+      "bg": { "$value": "#f6fcfb" },
+      "panel": { "$value": "#eef9f7" },
+      "elevated": { "$value": "#e2f4f0" },
+      "card": { "$value": "rgb(255 255 255 / 72%)" },
+      "raised": { "$value": "#e6f4f1" },
+      "raised-2": { "$value": "#cee6e1" },
+      "border": { "$value": "#cde3de" },
+      "divider": { "$value": "#e0f0ed" },
+      "accent": { "$value": "#147f72" },
+      "accent-2": { "$value": "#09685e" },
+      "on-accent": { "$value": "#ffffff" },
+      "accent-away": { "$value": "#000000" },
+      "selected-edge": { "$value": "var(--accent)", "$extensions": { "com.copypaste": { "platforms": ["css"] } } },
+      "shell-inspector-bg": { "$value": "rgb(242 250 249 / 92%)" }
+    },
+    "ember": {
+      "bg": { "$value": "#fff9f7" },
+      "panel": { "$value": "#fdf1ed" },
+      "elevated": { "$value": "#f9e5df" },
+      "card": { "$value": "rgb(255 255 255 / 72%)" },
+      "raised": { "$value": "#fae8e2" },
+      "raised-2": { "$value": "#efd1c9" },
+      "border": { "$value": "#ead3cd" },
+      "divider": { "$value": "#f3e3df" },
+      "accent": { "$value": "#bd493e" },
+      "accent-2": { "$value": "#9e332c" },
+      "on-accent": { "$value": "#ffffff" },
+      "accent-away": { "$value": "#000000" },
+      "selected-edge": { "$value": "var(--accent)", "$extensions": { "com.copypaste": { "platforms": ["css"] } } },
+      "shell-inspector-bg": { "$value": "rgb(254 246 243 / 92%)" }
+    },
+    "graphite": {
+      "bg": { "$value": "#fafafa" },
+      "panel": { "$value": "#f4f4f5" },
+      "elevated": { "$value": "#ebebed" },
+      "card": { "$value": "rgb(255 255 255 / 74%)" },
+      "raised": { "$value": "#ededf0" },
+      "raised-2": { "$value": "#d9dade" },
+      "border": { "$value": "#d8d9dd" },
+      "divider": { "$value": "#e8e8ea" },
+      "accent": { "$value": "#626774" },
+      "accent-2": { "$value": "#4b4f59" },
+      "on-accent": { "$value": "#ffffff" },
+      "accent-away": { "$value": "#000000" },
+      "selected-edge": { "$value": "var(--accent)", "$extensions": { "com.copypaste": { "platforms": ["css"] } } },
+      "shell-inspector-bg": { "$value": "rgb(247 247 248 / 92%)" }
+    }
+  }
+}

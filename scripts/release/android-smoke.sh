@@ -46,7 +46,7 @@ abi="$(sh_ getprop ro.product.cpu.abi)"
 printf '  device: API %s, %s, %s\n' "$sdk" "$abi" "$(sh_ getprop ro.build.fingerprint)"
 
 [[ -f "$APK" ]] || { echo "  FATAL APK not found at '${APK:-<unset>}'"; exit 1; }
-printf '  apk: %s (%s bytes)\n' "$APK" "$(stat -c %s "$APK")"
+printf '  apk: %s (%s bytes)\n' "$APK" "$(android_file_size "$APK")"
 
 apk_libs="$(unzip -l "$APK")"
 if grep -q "lib/${abi}/libcopypaste_ui_lib.so" <<<"$apk_libs"; then

@@ -1,0 +1,18 @@
+.root {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.regular { font-size: var(--icon-md); }
+.compact { font-size: var(--icon-sm); }
+.inherit { color: inherit; }
+.muted { color: var(--dim); }
+
+.root > svg,
+.root > [aria-hidden="true"] {
+  inline-size: 1em;
+  block-size: 1em;
+}

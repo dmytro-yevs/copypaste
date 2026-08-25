@@ -16,10 +16,11 @@ const run = promisify(execFile);
 const WINDOWS_STATES = new Map([
   ["history", { state: "populated", name: "Clipboard history", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGO8o6bGwMDAxMDAoHzzJgARtAMB3qLZtwAAAABJRU5ErkJggg==" }],
   ["capture", { state: "service-capture-status", name: "Background capture", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGMUW+zFwMDAAKEAEOcCCBlQdmcAAAAASUVORK5CYII=" }],
-  ["devices", { state: "ready-to-pair", name: "Ready to pair", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGNUTX7NwMDAxMDAcGuOCAAUogMBx1ZqEgAAAABJRU5ErkJggg==" }],
+  ["capture/copy-feedback-setting", { feature: "capture", state: "copy-feedback-setting", name: "Copy feedback sound", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGMIqDgRUnOGIaLhQkzLFQArGgaJKbubPAAAAABJRU5ErkJggg==" }],
+  ["devices", { state: "desktop-pairing-entry", name: "Enter pairing code", requiredNames: ["Show pairing code", "Enter pairing code"], png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGNUTX7NwMDAxMDAcGuOCAAUogMBx1ZqEgAAAABJRU5ErkJggg==" }],
   ["settings-and-service", { state: "appearance", name: "Theme", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGOcbPyKgYGBiYGBIX2mNgAWpQLf2/uWLgAAAABJRU5ErkJggg==" }],
   ["settings-and-service/updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8DAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==" }],
-  ["cloud-account", { state: "not-configured", name: "Not configured", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPkmLiJgYGBiYGBQWz9XwARoQMR3PtkxgAAAABJRU5ErkJggg==" }],
+  ["cloud-account", { state: "unconfigured", name: "Cloud server configuration", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPkmLiJgYGBiYGBQWz9XwARoQMR3PtkxgAAAABJRU5ErkJggg==" }],
 ]);
 const WINDOWS_UNCONFIGURED_UPDATER = {
   feature: "settings-and-service",
@@ -88,6 +89,7 @@ async function fixture(root, platform, overrides = {}) {
       const screenshotPath = `${evidenceDirectory}/screenshot.png`;
       const accessibilityPath = `${evidenceDirectory}/accessibility.json`;
       const screenshot = Buffer.from(expected.png, "base64");
+      const nodeNames = expected.requiredNames ?? [expected.name];
       const accessibility = `${JSON.stringify({
         schema_version: 2,
         feature,
@@ -102,8 +104,8 @@ async function fixture(root, platform, overrides = {}) {
           display_affinity: 0,
           capture_bounds: { kind: "client", x: 0, y: 0, width: 1, height: 1 },
         },
-        node_read: { complete: true, read: 1, retried: [] },
-        nodes: [{ name: expected.name, enabled: true, offscreen: false, bounds: { x: 0, y: 0, width: 1, height: 1 } }],
+        node_read: { complete: true, read: nodeNames.length, retried: [] },
+        nodes: nodeNames.map((name) => ({ name, enabled: true, offscreen: false, bounds: { x: 0, y: 0, width: 1, height: 1 } })),
       }, null, 2)}\n`;
       await writeFile(path.join(directory, screenshotPath), screenshot);
       await writeFile(path.join(directory, accessibilityPath), accessibility);
@@ -363,11 +365,13 @@ test("rejects a Windows capture without foreground HWND proof", () => withRoot(a
   );
 }));
 
-async function restampAccessibility(receiptPath, mutate) {
+async function restampAccessibility(receiptPath, mutate, feature) {
   const directory = path.dirname(receiptPath);
   const manifestPath = path.join(directory, "feature-states.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  const state = manifest.states[0];
+  const state = feature
+    ? manifest.states.find((candidate) => candidate.feature === feature)
+    : manifest.states[0];
   const accessibilityPath = path.join(directory, state.accessibility.path);
   const accessibility = JSON.parse(await readFile(accessibilityPath, "utf8"));
   mutate(accessibility);
@@ -384,6 +388,18 @@ async function restampAccessibility(receiptPath, mutate) {
   index.bytes = Buffer.byteLength(manifestContents);
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
 }
+
+test("rejects Windows desktop pairing evidence without both entry paths", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  await restampAccessibility(receiptPath, (accessibility) => {
+    accessibility.nodes = accessibility.nodes.filter((node) => node.name !== "Show pairing code");
+    accessibility.node_read.read = accessibility.nodes.length;
+  }, "devices");
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /lacks Show pairing code/,
+  );
+}));
 
 // A node the capture could not read used to be dropped silently, so the file
 // claimed to be the app's accessibility tree while being a subset of it.

@@ -1,0 +1,214 @@
+.root {
+  container: illustrated-error / inline-size;
+  inline-size: min(100%, calc(var(--s-9) * 14));
+  margin: clamp(var(--s-4), 7vh, var(--s-8)) auto auto;
+}
+
+.layout {
+  display: grid;
+  min-block-size: calc(var(--s-9) * 4.5);
+  padding: var(--s-5) var(--s-3);
+  align-content: center;
+  gap: var(--s-4);
+}
+
+.artworkWell {
+  display: grid;
+  min-inline-size: 0;
+  place-items: center;
+}
+
+.artwork {
+  inline-size: min(100%, calc(var(--s-9) * 4.5));
+  block-size: auto;
+  overflow: visible;
+  color: var(--accent-2);
+}
+
+.halo {
+  fill: var(--selected);
+  stroke: var(--selected-edge);
+  stroke-width: var(--stroke-1);
+}
+
+.ground,
+.cable,
+.plugLeft,
+.plugRight,
+.bot,
+.signal {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: var(--stroke-2);
+}
+
+.ground {
+  color: var(--divider);
+  stroke-dasharray: var(--s-1) var(--s-2);
+}
+
+.cable,
+.plugLeft,
+.plugRight {
+  color: var(--dim);
+}
+
+.chassis {
+  fill: var(--panel);
+  stroke: var(--selected-edge);
+}
+
+.face {
+  fill: var(--selected);
+  stroke: var(--accent-2);
+}
+
+.eye {
+  fill: var(--accent-2);
+  stroke: none;
+}
+
+.mouth,
+.clipLines {
+  color: var(--dim);
+}
+
+.clipboard {
+  fill: var(--elevated);
+  stroke: var(--accent-2);
+}
+
+.clip {
+  fill: var(--panel);
+}
+
+.antenna {
+  transform-origin: 144px 42px;
+  animation: illustrated-error-antenna var(--dur-progress) var(--ease) infinite alternate;
+}
+
+.tool {
+  transform-origin: 84px 110px;
+  animation: illustrated-error-tool var(--dur-progress) var(--ease) infinite alternate;
+}
+
+.signal {
+  stroke-dasharray: var(--s-1) var(--s-2);
+  animation: illustrated-error-signal var(--dur-ambient) var(--ease-linear) infinite;
+}
+
+.errorSignal circle {
+  fill: var(--err-strong);
+}
+
+.errorSignal path {
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-linecap: round;
+  stroke-width: var(--stroke-2);
+}
+
+.content {
+  display: grid;
+  min-inline-size: 0;
+  align-content: center;
+  justify-items: start;
+  gap: var(--s-1);
+}
+
+.kicker {
+  color: var(--err-strong);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-wider);
+  text-transform: uppercase;
+}
+
+.title {
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+
+.body {
+  max-inline-size: calc(var(--s-9) * 7);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  margin-block-start: var(--s-3);
+}
+
+.actionLayout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.compact {
+  max-inline-size: calc(var(--s-9) * 9);
+  margin-block-start: var(--s-2);
+}
+
+.compact .layout {
+  min-block-size: calc(var(--s-9) * 3.75);
+  padding-block: var(--s-3);
+}
+
+.compact .artwork {
+  max-inline-size: calc(var(--s-9) * 3.5);
+}
+
+@keyframes illustrated-error-antenna {
+  to { transform: rotate(0.025turn); }
+}
+
+@keyframes illustrated-error-tool {
+  to { transform: rotate(-0.035turn) translateY(var(--s-1)); }
+}
+
+@keyframes illustrated-error-signal {
+  to { stroke-dashoffset: calc(var(--s-4) * -1); }
+}
+
+@container illustrated-error (min-width: $cpXs) {
+  .layout {
+    padding-inline: var(--s-5);
+    grid-template-columns: minmax(calc(var(--s-9) * 3), 4fr) minmax(0, 5fr);
+    align-items: center;
+    gap: var(--s-5);
+  }
+}
+
+@container illustrated-error (max-width: $cpXs) {
+  .layout {
+    min-block-size: 0;
+    padding-inline: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .artwork {
+    max-inline-size: calc(var(--s-9) * 3.25);
+  }
+
+  .actions,
+  .actionLayout,
+  .actionLayout > * {
+    inline-size: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .antenna,
+  .tool,
+  .signal {
+    animation: none;
+  }
+}

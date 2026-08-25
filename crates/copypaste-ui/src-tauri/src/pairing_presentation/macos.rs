@@ -21,7 +21,7 @@ use objc2_foundation::{MainThreadMarker, NSData, NSPoint, NSRect, NSSize, NSStri
 use qrcode::QrCode;
 use zeroize::Zeroizing;
 
-use super::invite::{decode_native_invite, encode_native_invite};
+use super::invite::{encode_native_invite, validate_native_invite_fields};
 use super::macos_model::{progress_copy, sas_digits};
 use super::{
     NativeAbort, NativePairingUi, PairingDecision, PairingPresentationState, ScannedPairing,
@@ -40,6 +40,13 @@ impl MacOsPairingUi {
 
 impl NativePairingUi for MacOsPairingUi {
     fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState {
+        let Some(listen_addr) = invite.listen_addr.as_deref() else {
+            show_message(
+                "Pair a new device",
+                "This Mac does not have a reachable pairing address yet. Check the network and try again.",
+            );
+            return PairingPresentationState::Unavailable;
+        };
         let Some(payload) = encode_native_invite(invite) else {
             show_message(
                 "Pair a new device",
@@ -55,6 +62,9 @@ impl NativePairingUi for MacOsPairingUi {
             return PairingPresentationState::Unavailable;
         };
         let expires = invite.expires_in_secs;
+        let code = Zeroizing::new(invite.code.clone());
+        let address = Zeroizing::new(listen_addr.to_owned());
+        let abort = self.abort.clone();
 
         on_main(move |mtm| unsafe {
             let reveal = alert(
@@ -66,22 +76,29 @@ impl NativePairingUi for MacOsPairingUi {
                 &["Reveal QR Code", "Cancel"],
             );
             if reveal.runModal() != NSAlertFirstButtonReturn {
+                abort();
                 return PairingPresentationState::Unavailable;
             }
 
-            let Some(qr_view) = qr_view(mtm, &png) else {
+            let Some((invite_view, code_value, address_value)) =
+                invite_view(mtm, &png, &code, &address)
+            else {
                 return PairingPresentationState::Unavailable;
             };
             let shown = alert(
                 mtm,
                 "Scan to pair",
-                "Scan this QR code with CopyPaste on the other device. The code cannot be copied.",
+                "Scan this QR code, or type the code and address on the other device. The values cannot be copied.",
                 &["Continue", "Cancel Pairing"],
             );
-            shown.setAccessoryView(Some(&qr_view));
-            if shown.runModal() == NSAlertFirstButtonReturn {
+            shown.setAccessoryView(Some(&invite_view));
+            let response = shown.runModal();
+            code_value.setStringValue(&NSString::from_str(""));
+            address_value.setStringValue(&NSString::from_str(""));
+            if response == NSAlertFirstButtonReturn {
                 PairingPresentationState::Presented
             } else {
+                abort();
                 PairingPresentationState::Unavailable
             }
         })
@@ -93,24 +110,30 @@ impl NativePairingUi for MacOsPairingUi {
                 let prompt = alert(
                     mtm,
                     "Join another device",
-                    "Enter the complete CopyPaste pairing payload shown by the other device. The credential remains in this native dialog.",
+                    "Enter the pairing code and address shown by CopyPaste on the other device. Both stay in this native dialog.",
                     &["Join", "Cancel"],
                 );
-                let (form, payload) = join_form(mtm);
+                let (form, code, address) = join_form(mtm);
                 prompt.setAccessoryView(Some(&form));
-                if prompt.runModal() != NSAlertFirstButtonReturn {
+                let response = prompt.runModal();
+                if response != NSAlertFirstButtonReturn {
+                    code.setStringValue(&NSString::from_str(""));
+                    address.setStringValue(&NSString::from_str(""));
                     return None;
                 }
 
-                let input = Zeroizing::new(payload.stringValue().to_string());
-                if let Some(scanned) = decode_native_invite(input) {
+                let code_value = Zeroizing::new(code.stringValue().to_string());
+                let address_value = Zeroizing::new(address.stringValue().to_string());
+                code.setStringValue(&NSString::from_str(""));
+                address.setStringValue(&NSString::from_str(""));
+                if let Some(scanned) = validate_native_invite_fields(code_value, address_value) {
                     return Some(scanned);
                 }
 
                 let invalid = alert(
                     mtm,
-                    "That pairing invite is not valid",
-                    "Enter the complete CopyPaste pairing payload produced on the other device.",
+                    "That code or address is not valid",
+                    "Check both values shown by CopyPaste on the other device and try again.",
                     &["Try Again", "Cancel"],
                 );
                 if invalid.runModal() != NSAlertFirstButtonReturn {
@@ -214,26 +237,92 @@ unsafe fn qr_view(mtm: MainThreadMarker, png: &[u8]) -> Option<objc2::rc::Retain
     Some(view)
 }
 
+unsafe fn invite_view(
+    mtm: MainThreadMarker,
+    png: &[u8],
+    code: &str,
+    address: &str,
+) -> Option<(
+    objc2::rc::Retained<NSView>,
+    objc2::rc::Retained<NSTextField>,
+    objc2::rc::Retained<NSTextField>,
+)> {
+    let container = NSView::initWithFrame(mtm.alloc::<NSView>(), rect(0.0, 0.0, 560.0, 344.0));
+    let qr = qr_view(mtm, png)?;
+    qr.setFrame(rect(152.0, 88.0, 256.0, 256.0));
+    container.addSubview(&qr);
+
+    let code_label = static_field(mtm, "Pairing code", 52.0, 100.0);
+    let code_value = protected_display_field(mtm, code, 52.0, 450.0);
+    code_value.setFrame(rect(110.0, 52.0, 450.0, 22.0));
+    code_value.setAccessibilityLabel(Some(&NSString::from_str("Pairing code")));
+    let address_label = static_field(mtm, "Pairing address", 16.0, 100.0);
+    let address_value = protected_display_field(mtm, address, 16.0, 450.0);
+    address_value.setFrame(rect(110.0, 16.0, 450.0, 22.0));
+    address_value.setAccessibilityLabel(Some(&NSString::from_str("Pairing address")));
+
+    for view in [&code_label, &code_value, &address_label, &address_value] {
+        container.addSubview(view);
+    }
+    Some((container, code_value, address_value))
+}
+
+unsafe fn static_field(
+    mtm: MainThreadMarker,
+    value: &str,
+    y: f64,
+    width: f64,
+) -> objc2::rc::Retained<NSTextField> {
+    let field = NSTextField::labelWithString(&NSString::from_str(value), mtm);
+    field.setFrame(rect(0.0, y, width, 22.0));
+    field.setSelectable(false);
+    field.setEditable(false);
+    field
+}
+
+unsafe fn protected_display_field(
+    mtm: MainThreadMarker,
+    value: &str,
+    y: f64,
+    width: f64,
+) -> objc2::rc::Retained<NSTextField> {
+    let field = static_field(mtm, value, y, width);
+    field.setAccessibilityProtectedContent(true);
+    field
+}
+
 unsafe fn join_form(
     mtm: MainThreadMarker,
 ) -> (
     objc2::rc::Retained<NSView>,
     objc2::rc::Retained<NSSecureTextField>,
+    objc2::rc::Retained<NSSecureTextField>,
 ) {
-    let form = NSView::initWithFrame(mtm.alloc::<NSView>(), rect(0.0, 0.0, 420.0, 52.0));
-    let payload_label = NSTextField::labelWithString(&NSString::from_str("Pairing payload"), mtm);
-    payload_label.setFrame(rect(0.0, 28.0, 420.0, 20.0));
-    let payload = NSSecureTextField::initWithFrame(
+    let form = NSView::initWithFrame(mtm.alloc::<NSView>(), rect(0.0, 0.0, 420.0, 104.0));
+    let code_label = NSTextField::labelWithString(&NSString::from_str("Pairing code"), mtm);
+    code_label.setFrame(rect(0.0, 80.0, 420.0, 20.0));
+    let code = NSSecureTextField::initWithFrame(
         mtm.alloc::<NSSecureTextField>(),
-        rect(0.0, 0.0, 420.0, 24.0),
+        rect(0.0, 54.0, 420.0, 24.0),
     );
-    payload.setPlaceholderString(Some(&NSString::from_str("Complete pairing payload")));
-    payload.setAccessibilityLabel(Some(&NSString::from_str("Pairing payload")));
-    payload.setAccessibilityProtectedContent(true);
+    code.setPlaceholderString(Some(&NSString::from_str("Pairing code")));
+    code.setAccessibilityLabel(Some(&NSString::from_str("Pairing code")));
+    code.setAccessibilityProtectedContent(true);
+    let address_label = NSTextField::labelWithString(&NSString::from_str("Pairing address"), mtm);
+    address_label.setFrame(rect(0.0, 28.0, 420.0, 20.0));
+    let address = NSSecureTextField::initWithFrame(
+        mtm.alloc::<NSSecureTextField>(),
+        rect(0.0, 2.0, 420.0, 24.0),
+    );
+    address.setPlaceholderString(Some(&NSString::from_str("Pairing address")));
+    address.setAccessibilityLabel(Some(&NSString::from_str("Pairing address")));
+    address.setAccessibilityProtectedContent(true);
 
-    form.addSubview(&payload_label);
-    form.addSubview(&payload);
-    (form, payload)
+    form.addSubview(&code_label);
+    form.addSubview(&code);
+    form.addSubview(&address_label);
+    form.addSubview(&address);
+    (form, code, address)
 }
 
 unsafe fn sas_view(mtm: MainThreadMarker, sas: &str) -> objc2::rc::Retained<NSView> {

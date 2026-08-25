@@ -1,0 +1,136 @@
+.root {
+  container: library-toolbar / inline-size;
+  display: flex;
+  min-inline-size: 0;
+  block-size: 100%;
+  min-block-size: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.toolbar {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.search {
+  min-inline-size: calc(var(--s-9) * 3);
+  flex: 1 1 calc(var(--s-9) * 4);
+}
+
+.levelError {
+  color: var(--err-strong);
+}
+
+.time,
+.process,
+.target,
+.levelMuted,
+.olderEvents {
+  color: var(--dim);
+}
+
+.log {
+  min-block-size: 0;
+  flex: 1;
+  overflow-y: auto;
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+}
+
+.logSkeleton {
+  min-block-size: 0;
+  flex: 1;
+  overflow: hidden;
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+}
+
+.skeletonRow {
+  position: static;
+  min-block-size: calc(var(--ctl-h-sm) + var(--s-2));
+}
+
+.virtualCanvas {
+  position: relative;
+  inline-size: 100%;
+}
+
+.row {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  display: flex;
+  inline-size: 100%;
+  align-items: flex-start;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  border-block-end: var(--stroke-1) solid var(--border);
+}
+
+.row:last-child {
+  border-block-end: 0;
+}
+
+.time {
+  inline-size: calc(var(--s-4) * 3.5);
+  flex: none;
+  padding-block-start: var(--stroke-1);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.rowContent {
+  min-inline-size: 0;
+  flex: 1;
+}
+
+.metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--s-1);
+  row-gap: var(--stroke-1);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+}
+
+.levelInfo {
+  color: var(--accent-2);
+}
+
+.levelWarning {
+  color: var(--warn-strong);
+}
+
+.target {
+  overflow: hidden;
+  font-family: var(--f-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message {
+  margin-block-start: var(--stroke-1);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  overflow-wrap: break-word;
+}
+
+.olderEvents {
+  position: absolute;
+  inset-inline: 0;
+  display: flex;
+  block-size: var(--ctl-h-sm);
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+}

@@ -1,0 +1,130 @@
+.root {
+  display: flex;
+  padding: var(--s-3);
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.summary {
+  display: flex;
+  min-inline-size: 0;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+
+.stateIcon {
+  display: flex;
+  inline-size: var(--sz-tile);
+  block-size: var(--sz-tile);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-ctl);
+  color: var(--dim);
+  background: var(--elevated);
+}
+
+.identity,
+.detail,
+.addressDetail {
+  min-inline-size: 0;
+}
+
+.identity { flex: 1; }
+
+.name {
+  display: block;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unverified {
+  display: block;
+  margin-block-start: calc(var(--s-1) / 2);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+
+.details {
+  display: grid;
+  column-gap: var(--s-4);
+  row-gap: var(--s-2);
+  font-size: var(--fs-xs);
+}
+
+.term { color: var(--dim); }
+
+.value,
+.address {
+  margin-block-start: calc(var(--s-1) / 2);
+}
+
+.value { font-weight: var(--fw-medium); }
+
+.address {
+  overflow: hidden;
+  font-family: var(--f-mono);
+  font-size: calc(var(--fs-xs) - var(--stroke-1));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  padding-block-start: var(--s-2);
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  border-block-start: var(--stroke-1) solid var(--divider);
+}
+
+.failureRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.failure {
+  min-inline-size: 0;
+  flex: 1;
+  color: var(--err-strong);
+  font-size: var(--fs-xs);
+}
+
+.hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+
+.hintIcon {
+  inline-size: var(--icon-sm);
+  block-size: var(--icon-sm);
+  margin-block-start: var(--stroke-1);
+  flex: none;
+}
+
+.lastRun {
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+
+.spinner { animation: peer-row-spin var(--dur) linear infinite; }
+
+@keyframes peer-row-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (--cp-lg) {
+  .details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .addressDetail { grid-column: span 2 / span 2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

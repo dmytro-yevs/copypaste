@@ -1,0 +1,16 @@
+.root {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex-direction: column;
+}
+
+.full {
+  block-size: 100%;
+  flex: 1;
+}
+
+.content {
+  block-size: auto;
+  flex: none;
+}

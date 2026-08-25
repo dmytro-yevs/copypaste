@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="copypaste_canvas">#090B10</color>
+    <color name="copypaste_panel">#0D0F16</color>
+    <color name="copypaste_surface">#171A23</color>
+    <color name="copypaste_surface_raised">#222634</color>
+    <color name="copypaste_border">#34394A</color>
+    <color name="copypaste_text">#F2EFF7</color>
+    <color name="copypaste_text_muted">#AAA5B2</color>
+    <color name="copypaste_accent">#765EE9</color>
+    <color name="copypaste_accent_pressed">#8F75FF</color>
+    <color name="copypaste_on_accent">#FFFFFFFF</color>
+    <color name="copypaste_selected">#28243B</color>
+    <color name="copypaste_success">#58D7B8</color>
+    <color name="copypaste_warning">#F4B55E</color>
+    <color name="copypaste_error">#F17878</color>
+    <color name="copypaste_qr_surface">#FFFFFFFF</color>
+</resources>

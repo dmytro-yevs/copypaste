@@ -15,8 +15,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
+import { UndoCountdown } from "@/components/shared";
 import { toFriendly } from "@/lib/errors";
-import { UNDO_WINDOW_MS } from "@/lib/layout";
 import { type Item, deleteAll, deleteItem, historyCeiling } from "@/lib/ipc";
 import {
   HISTORY_PAGES_KEY,
@@ -24,10 +24,10 @@ import {
   coalesceHistoryInvalidation,
   invalidateHistoryQueries,
 } from "@/hooks/historyRefresh";
-import { IMAGE_PREVIEW_KEY, imagePreviewKey } from "@/hooks/useHistoryMedia";
-import { UndoCountdown } from "@/components/history/UndoCountdown";
+import { IMAGE_PREVIEW_KEY, imagePreviewKey } from "@/features/history/model";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
+const UNDO_WINDOW_MS = 5_000;
 
 /** A clear-all hides rows this client has never loaded, so it cannot be
  *  expressed as a set of ids. `through` is the ceiling taken when the user

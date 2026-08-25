@@ -15,8 +15,8 @@
       "$description": "zinc-100. shadcn `muted`: fields, chips, badges."
     },
     "card": {
-      "$value": "oklch(1 0 0)",
-      "$description": "shadcn `card` and `popover`: white, separated by border and shadow rather than by fill."
+      "$value": "oklch(1 0 0 / 40%)",
+      "$description": "Translucent primary content surface for cards; border and shadow keep the boundary while the active theme ground remains visible beneath it. Overlays use the solid panel surface."
     },
     "raised": {
       "$value": "oklch(0.967 0.001 286.375)",
@@ -37,6 +37,14 @@
     "divider": {
       "$value": "oklch(0.94 0.004 286.32)",
       "$description": "One step lighter than --border so a region separator never reads as a control edge."
+    },
+    "skeleton": {
+      "$value": "oklch(0.141 0.005 285.823 / 8%)",
+      "$description": "Pending-content geometry. It is visible enough to preserve structure without reading as disabled content."
+    },
+    "skeleton-shine": {
+      "$value": "oklch(1 0 0 / 72%)",
+      "$description": "Moving highlight used only while content is pending. Reduced motion removes the animation and leaves --skeleton static."
     },
     "text": {
       "$value": "oklch(0.141 0.005 285.823)",
@@ -62,26 +70,10 @@
       "$value": "oklch(0 0 0 / 9%)",
       "$description": "Neutral pressed state layer."
     },
-    "accent-hover": {
-      "$value": "color-mix(in oklab, var(--accent) 88%, var(--accent-away))",
-      "$description": "See the dark theme's note for why the mix goes away from the ink rather than toward the surface. Every light fill takes white ink, so every accent darkens on hover; worst label 6.34 (rose), from 4.78 at rest.",
-      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
-    },
-    "selected": {
-      "$value": "color-mix(in oklab, var(--accent) 12%, transparent)",
-      "$description": "Accent-tinted selection fill. Light takes 12% where dark takes 18% — the same tint over white reads much stronger.",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
     "selected-edge": {
       "$value": "var(--accent)",
       "$extensions": { "com.copypaste": { "platforms": ["css"] } },
-      "$description": "The selection marker: a bar or border at full accent strength. Selection CANNOT be carried by --selected alone — the tinted fill differs from --bg by 1.19-1.27:1 across the six accents and from --hover by almost nothing, so a selected row and a hovered row look alike and neither is distinguishable at WCAG 1.4.11's 3:1. Raising the tint far enough to reach 3:1 makes every selected row a coloured block. The edge measures 3.77 worst against --selected and clears 3:1 against --bg by construction (it is the focus-ring colour). Do not use --border here; it is 1.27:1."
+      "$description": "The full-strength theme marker. Selection cannot rely on the low-contrast tint alone; the contrast gate measures this edge in every palette."
     },
     "alpha-selected": {
       "$type": "number",
@@ -107,11 +99,6 @@
     "on-err": {
       "$value": "oklch(0.985 0 0)",
       "$description": "Foreground on a solid --err fill: 4.71. White works here because light's --err is red-600; dark's red-400 needs dark ink."
-    },
-    "err-hover": {
-      "$value": "color-mix(in oklab, var(--err) 88%, oklch(0 0 0))",
-      "$description": "As dark's --err-hover, mirrored: the ink is white here, so the hover mixes toward black. 4.71 at rest, 6.23 on hover.",
-      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
     },
     "info": {
       "$value": "oklch(0.546 0.245 262.881)",
@@ -181,6 +168,13 @@
       "$value": "{color.c-text}",
       "$description": "The closed kind set ends in `unknown`; it falls back to the text-kind colour and never renders blank."
     },
+    "accent": {
+      "$value": "#6b52df",
+      "$description": "Midnight fallback before the product-theme selector is available."
+    },
+    "accent-2": { "$value": "#553bc9" },
+    "on-accent": { "$value": "#ffffff" },
+    "accent-away": { "$value": "#000000" },
     "withheld": {
       "$value": "{color.elevated}",
       "$description": "Fill of the slot where a sensitive item's content would be. See the dark theme's note: the content is absent, so this reads as an empty slot and there is deliberately no blur token."

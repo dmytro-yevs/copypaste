@@ -1,5 +1,5 @@
 /**
- * The four appearance axes on `<html>`, which every themed selector in
+ * The appearance axes on `<html>`, which every themed selector in
  * `design/dist/css` keys off.
  *
  * AT-53: the subscription is module-level and idempotent because v1
@@ -8,13 +8,12 @@
 import {
   APPEARANCE_SERIALIZATION,
   translucencyAttribute,
-  translucencyStyle,
-  type Accent,
+  type ColorTheme,
   type ThemePref,
   type Translucency,
 } from "@/lib/appearancePrefs";
 import type { Prefs } from "@/store/prefs";
-import { applyNativeAppearance, applySystemAccent } from "@/lib/nativeAppearance";
+import { applyNativeAppearance } from "@/lib/nativeAppearance";
 
 export type ResolvedTheme = "dark" | "light";
 
@@ -25,7 +24,7 @@ function systemTheme(): ResolvedTheme {
   if (typeof window === "undefined" || !window.matchMedia) {
     return APPEARANCE_SERIALIZATION.systemThemeFallback;
   }
-  return window.matchMedia(DARK_QUERY).matches ? "dark" : "light";
+  return systemThemeMedia()?.matches ? "dark" : "light";
 }
 
 export function resolveTheme(pref: ThemePref): ResolvedTheme {
@@ -34,50 +33,59 @@ export function resolveTheme(pref: ThemePref): ResolvedTheme {
 
 export function applyAppearance(prefs: {
   theme: ThemePref;
-  accent: Accent;
-  translucency: Translucency;
+  colorTheme: ColorTheme;
+  translucency: Translucency | 0;
 }): void {
   const root = document.documentElement;
-  const theme = resolveTheme(prefs.theme);
-  root.dataset.theme = theme;
-  root.dataset.themePref = prefs.theme;
-  root.dataset.accent = prefs.accent;
-  if (prefs.accent === "system") {
-    void applySystemAccent();
-  } else {
-    clearSystemAccent(root);
-  }
-  root.dataset.translucency = translucencyAttribute(prefs.translucency);
-  for (const [name, value] of Object.entries(translucencyStyle(prefs.translucency))) {
-    root.style.setProperty(name, value);
-  }
-  applyNativeAppearance(theme);
+  const colorScheme = resolveTheme(prefs.theme);
+  root.dataset.colorScheme = colorScheme;
+  root.dataset.mode = prefs.theme;
+  root.dataset.theme = prefs.colorTheme;
+  root.dataset.translucency = translucencyAttribute(Boolean(prefs.translucency));
+  applyNativeAppearance(colorScheme);
 }
 
-function clearSystemAccent(root: HTMLElement): void {
-  for (const name of [
-    "--accent",
-    "--accent-2",
-    "--on-accent",
-    "--accent-away",
-    "--system-accent-preview",
-    "--system-on-accent",
-  ]) {
-    root.style.removeProperty(name);
-  }
-}
-
+let media: MediaQueryList | null = null;
 let subscribed = false;
+const themeListeners = new Set<() => void>();
 
-export function subscribeSystemTheme(onChange: () => void): void {
-  if (subscribed || typeof window === "undefined" || !window.matchMedia) return;
-  subscribed = true;
-  window.matchMedia(DARK_QUERY).addEventListener("change", onChange);
+function systemThemeMedia(): MediaQueryList | null {
+  if (media) return media;
+  if (typeof window === "undefined" || !window.matchMedia) return null;
+  media = window.matchMedia(DARK_QUERY);
+  return media;
+}
+
+function notifySystemTheme(): void {
+  for (const listener of themeListeners) listener();
+}
+
+export function systemThemeSnapshot(): ResolvedTheme {
+  return systemTheme();
+}
+
+export function subscribeSystemTheme(onChange: () => void): () => void {
+  const query = systemThemeMedia();
+  themeListeners.add(onChange);
+  if (!subscribed && query) {
+    subscribed = true;
+    query.addEventListener("change", notifySystemTheme);
+  }
+  return () => {
+    themeListeners.delete(onChange);
+    if (themeListeners.size === 0 && subscribed && media) {
+      media.removeEventListener?.("change", notifySystemTheme);
+      subscribed = false;
+    }
+  };
 }
 
 /** Test seam: the guard above is process-wide. */
 export function _resetSystemThemeSubscription(): void {
+  media?.removeEventListener?.("change", notifySystemTheme);
+  media = null;
+  themeListeners.clear();
   subscribed = false;
 }
 
-export type Appearance = Pick<Prefs, "theme" | "accent" | "translucency">;
+export type Appearance = Pick<Prefs, "theme" | "colorTheme" | "translucency">;

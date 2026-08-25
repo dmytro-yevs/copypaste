@@ -1,0 +1,256 @@
+.root {
+  min-inline-size: 0;
+  container-type: inline-size;
+}
+
+.layout {
+  --about-section-gap: var(--s-7);
+
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+}
+
+.layout > * + * {
+  margin-block-start: var(--about-section-gap);
+}
+
+.identity {
+  display: grid;
+  min-inline-size: 0;
+  padding: var(--s-2) var(--s-1) var(--s-5);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-3);
+  border-block-end: var(--stroke-1) solid var(--divider);
+}
+
+.identityCopy {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+}
+
+.identityCopy > * + * {
+  margin-block-start: var(--s-1);
+}
+
+.identityCopy strong {
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-tight);
+}
+
+.identityCopy span,
+.tagline {
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+
+.tagline {
+  max-inline-size: calc(var(--s-9) * 4);
+  text-align: end;
+}
+
+.section {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+}
+
+.section > * + * {
+  margin-block-start: var(--s-2);
+}
+
+.sectionTitle {
+  margin: 0;
+  padding-inline: var(--s-1);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-wider);
+  text-transform: uppercase;
+}
+
+.runtimeList {
+  row-gap: 0;
+  /* grid gap */
+}
+
+.runtimeList > * {
+  min-block-size: var(--ctl-h-lg);
+  padding: var(--s-3) var(--s-1);
+  align-items: center;
+  border-block-end-color: var(--divider);
+}
+
+.runtimeList dd {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+
+.muted,
+.numeric {
+  color: var(--dim);
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.error {
+  color: var(--err-strong);
+}
+
+.valueBadge {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.openList {
+  min-inline-size: 0;
+  border-block: var(--stroke-1) solid var(--divider);
+}
+
+.openRow {
+  inline-size: 100%;
+  min-block-size: calc(var(--ctl-h-lg) + var(--s-4));
+  padding: var(--s-3) var(--s-1);
+  border: 0;
+  border-radius: 0;
+  line-height: var(--lh-normal);
+  text-align: start;
+  white-space: normal;
+}
+
+.openLayout {
+  display: grid;
+  inline-size: 100%;
+  min-inline-size: 0;
+  grid-template-columns: var(--s-6) minmax(0, 1fr) var(--s-5);
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.openRow:not(:last-child) {
+  border-block-end: var(--stroke-1) solid var(--divider);
+}
+
+.openIcon {
+  color: var(--accent-2);
+}
+
+.openCopy {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+}
+
+.openCopy > * + * {
+  margin-block-start: var(--s-1);
+}
+
+.openCopy strong {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.openCopy span {
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.openCaret {
+  justify-self: end;
+  color: var(--faint);
+}
+
+.resetSection {
+  display: grid;
+  min-inline-size: 0;
+  padding: var(--s-5) var(--s-1) 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-4);
+  border-block-start: var(--stroke-1) solid var(--divider);
+}
+
+.resetCopy {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+}
+
+.resetCopy > * + * {
+  margin-block-start: var(--s-1);
+}
+
+.resetCopy h3,
+.resetCopy p {
+  margin: 0;
+}
+
+.resetCopy h3 {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.resetCopy p {
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+@container (max-width: $cpSm) {
+  .root {
+    margin-inline: calc(var(--s-3) * -1);
+  }
+
+  .layout { --about-section-gap: var(--s-6); }
+
+  .identity {
+    padding-inline: var(--s-3);
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .tagline {
+    grid-column: 2;
+    max-inline-size: none;
+    text-align: start;
+  }
+
+  .sectionTitle,
+  .runtimeList > *,
+  .openRow,
+  .resetSection {
+    padding-inline: var(--s-3);
+  }
+}
+
+@container (max-width: $cpXs) {
+  .runtimeList > * {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-2);
+    /* grid gap */
+  }
+
+  .runtimeList dd {
+    justify-content: flex-start;
+    text-align: start;
+  }
+
+  .resetSection {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .resetAction {
+    inline-size: 100%;
+  }
+}

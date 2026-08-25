@@ -1,0 +1,35 @@
+.root {
+    display: flex;
+    min-inline-size: 0;
+    inline-size: 100%;
+    align-items: center;
+    gap: var(--s-2);
+    flex-wrap: wrap;
+}
+.summary,
+.actionsLayout {
+    min-inline-size: 0;
+    align-items: center;
+}
+
+.summary {
+    display: flex;
+    flex: 1;
+    gap: var(--s-2);
+}
+.summary strong {
+    overflow: hidden;
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.actions {
+    margin-inline-start: auto;
+}
+
+.actionsLayout {
+    display: flex;
+    inline-size: 100%;
+    gap: var(--s-2);
+}

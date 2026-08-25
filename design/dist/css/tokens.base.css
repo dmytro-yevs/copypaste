@@ -7,6 +7,8 @@
 
 :root {
   --alpha-tint: 0.15;
+  --alpha-ambient-min: 0.28;
+  --alpha-ambient-max: 0.72;
   --sh-focus: 0 0 0 3px var(--accent);
   --f-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
   --f-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
@@ -54,7 +56,14 @@
   --dur-fast: 150ms;
   --dur: 200ms;
   --dur-theme: 300ms;
+  --dur-progress: 800ms;
+  --dur-ambient: 2400ms;
+  --scale-breathe-min: 0.84;
+  --scale-breathe-max: 1.08;
+  --scale-pulse-start: 0.72;
+  --scale-pulse-end: 1.18;
   --ease: cubic-bezier(0, 0, 0.2, 1);
+  --ease-linear: cubic-bezier(0, 0, 1, 1);
   --icon-sm: 14px;
   --icon-md: 16px;
   --icon-lg: 20px;
@@ -78,8 +87,8 @@
   --main-min-w: 720px;
   --main-min-h: 460px;
   --popover-w: 380px;
-  --sidebar-w: 200px;
-  --sidebar-half-w: 100px;
+  --sidebar-w: 192px;
+  --sidebar-half-w: 96px;
   --tabbar-h: 56px;
   --content-max-width: 640px;
   --modal-w: 400px;
@@ -107,6 +116,8 @@
     --dur-fast: 0ms;
     --dur: 0ms;
     --dur-theme: 0ms;
+    --dur-progress: 0ms;
+    --dur-ambient: 0ms;
   }
 }
 
@@ -127,8 +138,8 @@
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   :root[data-translucency="on"] {
     --frost-filter: saturate(180%) blur(20px);
-    --chrome-bg: color-mix(in oklab, var(--panel) 72%, transparent);
-    --app-bg: color-mix(in oklab, var(--bg) 84%, transparent);
+    --chrome-bg: var(--chrome-frosted);
+    --app-bg: var(--app-frosted);
     --scrim-blur: blur(2px);
   }
 

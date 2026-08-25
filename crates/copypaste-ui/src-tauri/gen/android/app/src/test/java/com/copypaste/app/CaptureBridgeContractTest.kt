@@ -35,7 +35,10 @@ class CaptureBridgeContractTest {
         assertOptionality(ShizukuProbe.serializer())
         assertOptionality(ProbeResult.serializer())
         assertOptionality(ArmResult.serializer())
-        assertOptionality(ReadResult.serializer(), setOf("text"))
+        assertOptionality(
+            ReadResult.serializer(),
+            setOf("text", "sourceAppBundleId", "sourceAppName"),
+        )
         assertOptionality(EmptyResult.serializer())
         assertOptionality(
             CapturedClip.serializer(),
@@ -84,9 +87,16 @@ class CaptureBridgeContractTest {
                 )
             },
             listOf(
-                ReadResult(ReadOutcome.SUCCEEDED, "captured", 1_700_000_000_001, true),
-                ReadResult(ReadOutcome.EMPTY, null, 1_700_000_000_002, true),
-                ReadResult(ReadOutcome.REFUSED, null, 1_700_000_000_003, true),
+                ReadResult(
+                    ReadOutcome.SUCCEEDED,
+                    "captured",
+                    1_700_000_000_001,
+                    true,
+                    "com.example.writer",
+                    "Writer",
+                ),
+                ReadResult(ReadOutcome.EMPTY, null, 1_700_000_000_002, true, null, null),
+                ReadResult(ReadOutcome.REFUSED, null, 1_700_000_000_003, true, null, null),
             ),
             DrainResult(
                 CaptureSource.entries.mapIndexed { index, source ->

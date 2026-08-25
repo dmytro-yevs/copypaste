@@ -1,0 +1,8 @@
+.root {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: var(--s-2);
+}
+.expanded { inline-size: 100%; flex: 1 1 100%; }
+.collapsed { flex: none; }

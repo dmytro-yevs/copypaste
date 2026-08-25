@@ -28,25 +28,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use backon::{BackoffBuilder, ExponentialBuilder};
+use backon::BackoffBuilder;
 use copypaste_cloud::{RealtimeError, RealtimeEvent, RealtimeSubscription};
+use copypaste_retry::stream_reconnect_backoff;
 use tokio::sync::watch;
 use tracing::{debug, info};
 
 use crate::cloud::{Cloud, Driver};
 use crate::AppState;
-
-/// How long to wait before rebuilding a subscription that ended or refused.
-const RECONNECT_MIN: Duration = Duration::from_secs(5);
-const RECONNECT_MAX: Duration = Duration::from_secs(300);
-
-fn reconnect_policy() -> ExponentialBuilder {
-    // Jitter stays disabled so every client follows the required exact ladder.
-    ExponentialBuilder::new()
-        .with_min_delay(RECONNECT_MIN)
-        .with_max_delay(RECONNECT_MAX)
-        .without_max_times()
-}
 
 #[derive(Debug, Eq, PartialEq)]
 enum ReconnectWait {
@@ -81,7 +70,7 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
         return;
     }
 
-    let policy = reconnect_policy();
+    let policy = stream_reconnect_backoff();
     let mut schedule = policy.build();
     let mut session_updates = state.cloud.session_updates();
     loop {
@@ -289,30 +278,17 @@ mod tests {
     use crate::cloud::Cloud;
     use crate::testutil::{test_state, test_state_with_cloud};
 
-    #[test]
-    fn the_outer_reconnect_schedule_is_exact_and_bounded() {
-        let delays: Vec<_> = reconnect_policy().build().take(9).collect();
-        assert_eq!(
-            delays,
-            [5, 10, 20, 40, 80, 160, 300, 300, 300].map(Duration::from_secs)
-        );
-    }
-
-    #[test]
-    fn a_success_rebuilds_the_outer_schedule_at_its_floor() {
-        let mut failed = reconnect_policy().build();
-        assert_eq!(failed.nth(5), Some(Duration::from_secs(160)));
-
-        let mut after_success = reconnect_policy().build();
-        assert_eq!(after_success.next(), Some(RECONNECT_MIN));
-    }
-
     #[tokio::test]
     async fn shutdown_interrupts_the_longest_outer_reconnect_wait() {
         let (_session_tx, mut session_updates) = watch::channel(0_u64);
         let (shutdown_tx, mut shutdown) = watch::channel(false);
         let task = tokio::spawn(async move {
-            wait_to_reconnect(RECONNECT_MAX, &mut session_updates, &mut shutdown).await
+            wait_to_reconnect(
+                copypaste_retry::STREAM_RECONNECT_MAX,
+                &mut session_updates,
+                &mut shutdown,
+            )
+            .await
         });
         tokio::task::yield_now().await;
 

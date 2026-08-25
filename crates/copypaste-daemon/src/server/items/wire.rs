@@ -52,7 +52,8 @@ fn to_wire_with(
     // Measured on the plaintext bytes, because that is what the cloud path
     // measures: `LocalItem::content` is the opened payload, and the seal that
     // follows is a fixed overhead the cap does not count.
-    let too_large_to_sync = crate::cloud::too_large_to_sync(&row.content_type, plaintext.len());
+    let too_large_to_sync =
+        copypaste_cloud::sync::too_large_to_sync(&row.content_type, plaintext.len());
     let content = if copypaste_ipc::content_type::is_binary(&row.content_type) {
         format!(
             "[{}]",

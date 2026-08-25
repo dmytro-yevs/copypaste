@@ -67,7 +67,9 @@
       "outcome": "succeeded",
       "text": "captured",
       "atMs": 1700000000001,
-      "focused": true
+      "focused": true,
+      "sourceAppBundleId": "com.example.writer",
+      "sourceAppName": "Writer"
     },
     {
       "outcome": "empty",

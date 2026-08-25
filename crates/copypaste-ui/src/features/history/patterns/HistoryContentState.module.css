@@ -1,0 +1,53 @@
+.inlineState {
+    display: grid;
+    min-inline-size: 0;
+    padding: var(--s-3) 0;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s-3);
+    border-block-end: var(--stroke-1) solid var(--divider);
+}
+
+.inlineIcon {
+    display: grid;
+    inline-size: var(--s-8);
+    block-size: var(--s-8);
+    place-items: center;
+    border-radius: var(--r-row);
+    color: var(--accent-2);
+    background: var(--selected);
+}
+
+.inlineCopy {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--s-1);
+}
+
+.inlineCopy strong {
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.inlineCopy > span {
+    color: var(--dim);
+    font-size: var(--fs-xs);
+    overflow-wrap: anywhere;
+}
+
+.inlineActions {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+}
+
+@container (max-width: $cpXs) {
+    .inlineState {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .inlineActions {
+        grid-column: 1 / -1;
+    }
+}
