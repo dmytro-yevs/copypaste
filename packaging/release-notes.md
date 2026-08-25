@@ -32,19 +32,19 @@ brew install copypaste-cli        # the CLI and daemon
 ### Android
 
 On the [releases page](https://github.com/dmytro-yevs/copypaste/releases), open
-the newest v2 prerelease rather than GitHub's legacy **Latest** release. Download
-its `CopyPaste-…-android.apk` asset as `CopyPaste-android.apk` in the directory
-where you run `adb`, then install or update it with:
+the newest prerelease; GitHub's **Latest** link does not select prereleases.
+Download its `CopyPaste-…-android.apk` asset as `CopyPaste-android.apk` in the
+directory where you run `adb`, then install or update it with:
 
 ```sh
 adb install -r ./CopyPaste-android.apk
 ```
 
-This is a clean v2 install (`com.copypaste.app`). It starts with new history and
-pairings; it does not import or upgrade any prior product install.
+The release package is `com.copypaste.app` and starts with an empty history and
+no pairings.
 
-Only v2 alpha.1 or a local/debug APK installed as `com.copypaste.app` with an
-incompatible key needs a one-time uninstall. If installation reports
+Only an APK installed as `com.copypaste.app` with an incompatible signing key
+needs an uninstall. If installation reports
 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, inspect every Android user, including a
 work profile, before removing anything:
 
@@ -54,7 +54,7 @@ adb shell pm list packages --user 0 com.copypaste.app
 adb shell pm list packages --user 10 com.copypaste.app  # repeat for each listed ID
 ```
 
-**Uninstalling erases that v2 install's history, pairings and settings for all
+**Uninstalling erases the package's history, pairings and settings for all
 users and profiles.** Remove only the incompatibly signed `com.copypaste.app`
 package, then rerun the install command above:
 
