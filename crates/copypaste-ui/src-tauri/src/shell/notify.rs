@@ -12,7 +12,9 @@
 //! policy gate and Android's explicitly silent notification payload.
 
 use tauri::{AppHandle, Manager as _, Runtime};
-use tauri_plugin_notification::{NotificationExt as _, PermissionState};
+use tauri_plugin_notification::NotificationExt as _;
+#[cfg(not(target_os = "android"))]
+use tauri_plugin_notification::PermissionState;
 
 use super::window;
 use crate::backend::{Backend as _, SelectedBackend};
@@ -84,12 +86,26 @@ fn is_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
 }
 
 fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
-    let notifier = app.notification();
+    if !notification_granted(app) {
+        return;
+    }
+    if let Err(error) = show_silent(app, title, body) {
+        tracing::debug!(%error, "the capture notification was not posted");
+    }
+}
 
-    // Inert on the desktop, where both calls answer `Granted` — macOS decides at
-    // post time. It is Android 13's `POST_NOTIFICATIONS` that needs asking, and
-    // asking here rather than at startup means the prompt only appears for a
-    // user who has switched the setting on.
+#[cfg(target_os = "android")]
+fn notification_granted<R: Runtime>(app: &AppHandle<R>) -> bool {
+    matches!(
+        super::permissions::notification_status(app),
+        Ok(super::permissions::PermissionStatus::Granted)
+            | Ok(super::permissions::PermissionStatus::NotRequired)
+    )
+}
+
+#[cfg(not(target_os = "android"))]
+fn notification_granted<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let notifier = app.notification();
     let mut state = notifier
         .permission_state()
         .unwrap_or(PermissionState::Denied);
@@ -99,12 +115,9 @@ fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
             .unwrap_or(PermissionState::Denied);
     }
     if state != PermissionState::Granted {
-        return;
+        return false;
     }
-
-    if let Err(error) = show_silent(app, title, body) {
-        tracing::debug!(%error, "the capture notification was not posted");
-    }
+    true
 }
 
 #[cfg(target_os = "android")]
