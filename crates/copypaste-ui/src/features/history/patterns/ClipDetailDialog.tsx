@@ -11,13 +11,18 @@ import {
     Icon,
     VisuallyHidden,
 } from "@/components/ui";
-import { InlineNotice } from "@/components/shared";
+import { InlineNotice, PreviewSurface } from "@/components/shared";
 import {
     originName,
     wontSync,
     type OriginDevice,
 } from "@/features/history/model/origin";
 import { HighlightedCode } from "@/features/history/components/HighlightedCode";
+import {
+    clipCopyAction,
+    clipTypeMetadata,
+    resolveClipBodyPresentation,
+} from "@/features/history/model/clipPresentation";
 import { ClipImageLoader } from "@/features/history/patterns/ClipImageLoader";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { useViewportMetrics } from "@/hooks/useViewportMetrics";
@@ -26,7 +31,6 @@ import { cn } from "@/lib/cn";
 import { MONO_KINDS, absoluteTime, kindOf } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 import { EXPANDED_MIN_PX } from "@/lib/layoutBreakpoints";
-import { kindLabel } from "@/lib/view";
 import styles from "./ClipDetailDialog.module.css";
 
 interface ClipDetailDialogProps {
@@ -36,9 +40,8 @@ interface ClipDetailDialogProps {
     origin: OriginDevice | null;
     initialExpanded?: boolean;
     fullContent: string | null;
-    /** The whole-body read failed, so what is rendered is the row's truncated
-     *  preview and the view must say so rather than pass a fragment off as the
-     *  clipping. */
+    /** A failed whole-body read renders unavailable, never a preview fragment
+     *  presented as complete content. */
     fullContentFailed?: boolean;
     revealedContent: string | null;
     revealPending: boolean;
@@ -75,7 +78,6 @@ export function ClipDetailDialog({
     const [expanded, setExpanded] = useState(initialExpanded);
 
     const revealed = item !== null && revealedContent !== null;
-    const masked = item?.is_sensitive === true && !revealed;
     const potentialFinding =
         item !== null && !item.is_sensitive ? item.sensitive_finding : null;
     const [shownFinding, setShownFinding] =
@@ -86,21 +88,23 @@ export function ClipDetailDialog({
     }, [initialExpanded, item?.id]);
     const potentialRevealed =
         potentialFinding !== null && shownFinding === potentialFinding;
-    // Whole-item sensitive plaintext comes only from the reveal. This component
-    // keeps no copy, so INV-11's expiry re-masks the view by itself.
-    const body =
-        potentialFinding !== null && !potentialRevealed
-            ? potentialFinding.redacted_preview
-            : revealed
-              ? revealedContent
-              : (fullContent ?? item?.content ?? null);
-    const bodyIncomplete =
-        fullContentFailed === true && item?.truncated === true && !revealed;
     const kind = item ? kindOf(item) : "text";
-    const isImage = kind === "image";
+    // Revealed plaintext remains an ephemeral argument from useReveal; this
+    // pure resolver retains no copy outside the current render.
+    const body = item
+        ? resolveClipBodyPresentation({
+              item,
+              fullContent,
+              fullContentFailed: fullContentFailed === true,
+              revealedContent,
+              showPotentialSensitiveOriginal: potentialRevealed,
+          })
+        : null;
+    const content = body?.state === "content" ? body.content : "";
+    const copyAction = clipCopyAction(kind);
 
     const meta = item
-        ? [absoluteTime(item.created_at), kindLabel(kindOf(item))]
+        ? [absoluteTime(item.created_at), clipTypeMetadata(kind).label]
         : [];
     if (item && origin !== null) {
         meta.push(`${t("history.row.fromPrefix")} ${originName(origin)}`);
@@ -178,7 +182,7 @@ export function ClipDetailDialog({
                             </InlineNotice>
                         )}
 
-                        {masked ? (
+                        {body?.state === "masked" ? (
                             <Button
                                 type="button"
                                 variant="ghost"
@@ -204,16 +208,27 @@ export function ClipDetailDialog({
                                     />
                                 )}
                             </Button>
-                        ) : bodyIncomplete ? (
-                            <div role="status" className={styles.unavailable}>
+                        ) : body?.state === "unavailable" ? (
+                            <PreviewSurface
+                                role="status"
+                                className={styles.unavailable}
+                                elevation="flat"
+                                border="subtle"
+                                radius="md"
+                                padding="roomy"
+                            >
                                 {t("history.detail.fullBodyUnavailable")}
-                            </div>
-                        ) : isImage && item ? (
-                            <div
+                            </PreviewSurface>
+                        ) : kind === "image" && item ? (
+                            <PreviewSurface
                                 role="region"
                                 aria-label={t("history.detail.image")}
                                 tabIndex={0}
                                 className={styles.imageRegion}
+                                elevation="flat"
+                                border="strong"
+                                radius="md"
+                                padding="compact"
                             >
                                 <ClipImageLoader
                                     id={item.id}
@@ -226,9 +241,9 @@ export function ClipDetailDialog({
                                     )}
                                     title={t("history.detail.image")}
                                 />
-                            </div>
+                            </PreviewSurface>
                         ) : kind === "code" || kind === "json" ? (
-                            <div
+                            <PreviewSurface
                                 role="region"
                                 aria-label={t("history.detail.contents")}
                                 tabIndex={0}
@@ -236,20 +251,28 @@ export function ClipDetailDialog({
                                     styles.contentRegion,
                                     styles.codeRegion,
                                 )}
+                                elevation="flat"
+                                border="none"
+                                radius="md"
+                                padding="none"
                             >
                                 <HighlightedCode
-                                    content={body ?? ""}
+                                    content={content}
                                     kind={kind}
                                     mode="expanded"
                                     ariaLabel={t("history.detail.contents")}
                                 />
-                            </div>
+                            </PreviewSurface>
                         ) : (
-                            <div
+                            <PreviewSurface
                                 role="region"
                                 aria-label={t("history.detail.contents")}
                                 tabIndex={0}
                                 className={styles.contentRegion}
+                                elevation="flat"
+                                border="strong"
+                                radius="md"
+                                padding="compact"
                             >
                                 <p
                                     className={cn(
@@ -257,11 +280,11 @@ export function ClipDetailDialog({
                                         MONO_KINDS.has(kind) && styles.mono,
                                     )}
                                 >
-                                    {body === null || body === ""
+                                    {content === ""
                                         ? t("history.detail.empty")
-                                        : body}
+                                        : content}
                                 </p>
-                            </div>
+                            </PreviewSurface>
                         )}
 
                         <DialogFooter>
@@ -301,10 +324,8 @@ export function ClipDetailDialog({
                                     close();
                                 }}
                             >
-                                <Icon name={isImage ? "image" : "copy"} />
-                                {isImage
-                                    ? t("history.detail.copyImage")
-                                    : t("history.detail.copy")}
+                                <Icon name={copyAction.icon} />
+                                {copyAction.label}
                             </Button>
                         </DialogFooter>
                     </>

@@ -1,10 +1,11 @@
 import {
     clipTypeMetadata,
+    historyKindFilterLabel,
     type ClipPresentationIcon,
 } from "@/features/history/model/clipPresentation";
 import { type OriginDevice, originName } from "@/features/history/model/origin";
 import { t } from "@/i18n";
-import { FILTERABLE_KINDS, kindLabel, sortLabel } from "@/lib/view";
+import { FILTERABLE_KINDS, sortLabel } from "@/lib/view";
 
 type LibraryToolbarIcon =
     | ClipPresentationIcon
@@ -31,7 +32,7 @@ function deviceIcon(kind: OriginDevice["kind"]): LibraryToolbarIcon {
 export function historyKindOptions(): readonly LibraryToolbarOption[] {
     return FILTERABLE_KINDS.map((kind) => ({
         value: kind,
-        label: kindLabel(kind),
+        label: historyKindFilterLabel(kind),
         icon: clipTypeMetadata(kind).icon,
     }));
 }

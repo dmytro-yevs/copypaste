@@ -3,15 +3,11 @@ import type { ReactNode } from "react";
 import { ClipThumbnail } from "@/features/history/components/ClipThumbnail";
 import { ColorClipPreview } from "@/features/history/components/ColorClipPreview";
 import { HighlightedCode } from "@/features/history/components/HighlightedCode";
+import { fileDisplayName } from "@/features/history/model/clipPresentation";
 import { cn } from "@/lib/cn";
 import type { Kind } from "@/lib/format";
 import { previewLineCount } from "@/lib/previewDensity";
 import styles from "./ClipCardBody.module.css";
-
-function fileName(content: string) {
-  const parts = content.trim().replace(/\\/g, "/").split("/").filter(Boolean);
-  return parts[parts.length - 1] || content;
-}
 
 export function ClipCardBody({
   kind,
@@ -28,7 +24,7 @@ export function ClipCardBody({
 }) {
   const title =
     kind === "file" || kind === "path"
-      ? fileName(content)
+      ? fileDisplayName(content)
       : content;
 
   if (masked) {
