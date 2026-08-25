@@ -141,7 +141,7 @@ mod tests {
             name: "unreachable".into(),
             psk: [3u8; crate::transport::TOKEN_LEN],
             last_addr: None,
-            last_seen_ms: 0,
+            last_seen_ms: 1,
         };
 
         let err = node.sync_one(&peer, &source).await.expect_err("no address");

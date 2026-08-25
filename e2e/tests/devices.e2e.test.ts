@@ -235,7 +235,7 @@ describe("native-safe pairing", () => {
   test("renders no QR, credential field or pairing dialog", async () => {
     const artifacts = (await app.browser.execute(function () {
       return document.querySelectorAll(
-        'output, #accept-code, #accept-addr, #pairing-code, #pairing-address,' +
+        'output, #pairing-code, #pairing-address,' +
           ' #pairing-security-code, canvas, svg[role="img"], [role="dialog"]',
       ).length;
     })) as number;

@@ -31,11 +31,9 @@ pub struct Peer {
     /// *local* clock at the end of a session, never from anything the peer
     /// said, so peer clock skew cannot affect it.
     ///
-    /// **Zero is load-bearing.** It means this pairing has never been contacted,
-    /// which is what [`super::PeerStore`] reads as "the code is still
-    /// unredeemed" — the state that carries a deadline and that the first
-    /// session burns. Writing a placeholder timestamp here instead of `0` would
-    /// silently establish a pairing nobody has claimed.
+    /// Zero means no successful sync has been observed yet. Pairing persistence
+    /// itself is bilateral and records a real timestamp before this reaches the
+    /// store.
     pub last_seen_ms: i64,
 }
 

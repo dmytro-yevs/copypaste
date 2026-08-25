@@ -37,7 +37,7 @@ const PAIRING_PROTOCOL_VERSION: u32 = 1;
 
 impl Node {
     pub fn pair_create_invite(&self) -> Result<PairingInvite, NodeError> {
-        if self.peers.usable_count() >= MAX_PAIRINGS {
+        if self.peers.len() >= MAX_PAIRINGS {
             return Err(NodeError::TooManyPairings);
         }
         let invite = self.pairing.create_invite(self.listen_addr())?;
@@ -53,7 +53,7 @@ impl Node {
     ) -> Result<PairingStatus, NodeError> {
         let token = PairingToken::parse(code).map_err(|_| NodeError::BadCode)?;
         let pairing_id = token.pairing_id();
-        if self.peers.get(&pairing_id).is_none() && self.peers.usable_count() >= MAX_PAIRINGS {
+        if self.peers.get(&pairing_id).is_none() && self.peers.len() >= MAX_PAIRINGS {
             return Err(NodeError::TooManyPairings);
         }
         let addr = resolve(addr).await.ok_or(NodeError::BadAddress)?;

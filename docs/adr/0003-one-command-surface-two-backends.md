@@ -170,10 +170,10 @@ this build has no `Backend` route to it yet (parity finding 19).
 
 ### What has since been unblocked — the record of what it took
 
-This section listed `add`, `pair_create`, `pair_accept`, `sync`, `export` and
-`import` as blocked. All six now work, by the moves this ADR called for, and the
-shape of the fix is worth keeping because the next refusal above will be
-resolved the same way.
+This section previously treated add, pairing, sync, export and import as
+blocked. They now work through the moves this ADR called for, and the shape of
+the fix is worth keeping because the next refusal above will be resolved the
+same way.
 
 * **`add`** — `capture::ingest` moved down into `copypaste_core::ingest`. One
   implementation, four callers.
@@ -184,9 +184,9 @@ resolved the same way.
   cannot mark a credential clean (manifest 04, PG-26). The daemon's handler is
   now only the wire mapping — a pathless `Response`, and waking the two sync
   transports once something was written.
-* **`pair_create`, `pair_accept`, `sync`, and both discovery operations** — the
-  peer node moved up into `copypaste_p2p::node`, generic over `SyncSource`, and
-  then `SyncSource` itself moved down into `copypaste_core::sync::StoreSource`.
+* **Pairing, sync, and both discovery operations** — the peer node moved up into
+  `copypaste_p2p::node`, generic over `SyncSource`, and then `SyncSource` itself
+  moved down into `copypaste_core::sync::StoreSource`.
   The second half was the one that mattered: a node generic over a trait with
   exactly one implementation, and that implementation built on two
   daemon-private modules, is still a daemon-only node.

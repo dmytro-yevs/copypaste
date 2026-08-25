@@ -1,11 +1,9 @@
-//! Cutting a device off, and sweeping the codes nobody redeemed.
+//! Cutting a device off permanently.
 //!
-//! Both are refusals rather than deletions, and the difference from
-//! [`PeerStore::remove`] is the point: `remove` un-pairs and the same pairing
-//! id may be used again, while [`PeerStore::revoke`] records the id so a code
-//! someone wrote down, a stale backup of the file, or a peer that keeps
-//! re-announcing cannot bring the pairing back (`CopyPaste-gbo`). Pruning is
-//! neither — it is hygiene for credentials that were minted and never used.
+//! The difference from [`PeerStore::remove`] is the point: `remove` un-pairs
+//! and allows the id to be paired again, while [`PeerStore::revoke`] records the
+//! id so a retained credential or a peer that keeps re-announcing cannot bring
+//! the pairing back (`CopyPaste-gbo`).
 
 use super::peer::validate_pairing_id;
 use super::store::PeerStore;
@@ -33,7 +31,6 @@ impl PeerStore {
             return Err(PeerStoreError::TooManyRevocations);
         }
         let removed = guard.peers.remove(pairing_id);
-        let deadline = guard.pending.remove(pairing_id);
         let previous_revocation = guard.revoked.insert(pairing_id.to_string(), now_ms);
 
         match self.persist(&guard) {
@@ -45,9 +42,6 @@ impl PeerStore {
             Err(err) => {
                 if let Some(peer) = removed {
                     guard.peers.insert(pairing_id.to_string(), peer);
-                }
-                if let Some(deadline) = deadline {
-                    guard.pending.insert(pairing_id.to_string(), deadline);
                 }
                 match previous_revocation {
                     Some(at) => guard.revoked.insert(pairing_id.to_string(), at),
@@ -70,7 +64,6 @@ impl PeerStore {
             return Ok(0);
         }
         let peers = std::mem::take(&mut guard.peers);
-        let pending = std::mem::take(&mut guard.pending);
         for pairing_id in peers.keys() {
             guard.revoked.insert(pairing_id.clone(), now_ms);
         }
@@ -88,7 +81,6 @@ impl PeerStore {
                     guard.revoked.remove(pairing_id);
                 }
                 guard.peers = peers;
-                guard.pending = pending;
                 Err(err)
             }
         }
@@ -109,64 +101,12 @@ impl PeerStore {
             })
             .collect()
     }
-
-    /// Erase pairings whose codes were never redeemed and have aged out.
-    /// Returns how many went.
-    ///
-    /// Hygiene, not enforcement: an expired pairing is already refused by every
-    /// read path. Run it on a timer so a code that was minted and forgotten does
-    /// not sit in a file full of pre-shared keys.
-    ///
-    /// # Errors
-    ///
-    /// As [`PeerStore::remove`].
-    pub fn prune_expired(&self, now_ms: i64) -> Result<usize, PeerStoreError> {
-        let mut guard = self.state.write().map_err(|_| PeerStoreError::Poisoned)?;
-        let stale: Vec<String> = guard
-            .pending
-            .iter()
-            .filter(|(_, deadline)| **deadline <= now_ms)
-            .map(|(id, _)| id.clone())
-            .collect();
-        if stale.is_empty() {
-            return Ok(0);
-        }
-
-        let mut removed = Vec::with_capacity(stale.len());
-        for pairing_id in &stale {
-            let deadline = guard.pending.remove(pairing_id);
-            let peer = guard.peers.remove(pairing_id);
-            removed.push((pairing_id.clone(), peer, deadline));
-        }
-
-        match self.persist(&guard) {
-            Ok(()) => {
-                for pairing_id in &stale {
-                    tentative::bump(&mut guard, pairing_id);
-                }
-                tracing::info!(count = stale.len(), "dropped unredeemed pairing codes");
-                Ok(stale.len())
-            }
-            Err(err) => {
-                for (pairing_id, peer, deadline) in removed {
-                    if let Some(peer) = peer {
-                        guard.peers.insert(pairing_id.clone(), peer);
-                    }
-                    if let Some(deadline) = deadline {
-                        guard.pending.insert(pairing_id, deadline);
-                    }
-                }
-                Err(err)
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::now_ms;
-    use crate::peers::testutil::{age_out, peer, redeemed, store_path, unredeemed};
+    use crate::peers::testutil::{peer, store_path, with_last_seen};
     use crate::peers::Peer;
 
     /// The lazy path is for `last_seen_ms` and nothing else. A revocation that
@@ -180,7 +120,7 @@ mod tests {
 
         let lost = peer("stolen phone");
         let id = lost.pairing_id.clone();
-        let touched = redeemed(&lost, 1_753_999_999_999);
+        let touched = with_last_seen(&lost, 1_753_999_999_999);
         store.upsert(lost).expect("upsert");
         store.upsert(touched).expect("session");
 
@@ -193,36 +133,6 @@ mod tests {
         );
         assert!(reopened.psks().is_empty());
         assert_eq!(reopened.revoked().len(), 1);
-    }
-
-    #[test]
-    fn pruning_erases_only_the_pairings_that_aged_out() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
-
-        let stale = unredeemed("never claimed");
-        let stale_id = stale.pairing_id.clone();
-        let fresh = unredeemed("just minted");
-        let fresh_id = fresh.pairing_id.clone();
-        let live = peer("in use");
-        let live_id = live.pairing_id.clone();
-        store.upsert(stale).expect("upsert");
-        store.upsert(fresh).expect("upsert");
-        store.upsert(live).expect("upsert");
-
-        age_out(&path, &stale_id);
-        let store = PeerStore::open(&path).expect("reopen");
-        assert_eq!(store.prune_expired(now_ms()).expect("prune"), 1);
-        assert_eq!(store.prune_expired(now_ms()).expect("prune"), 0);
-
-        let reopened = PeerStore::open(&path).expect("reopen");
-        assert!(reopened.get(&stale_id).is_none());
-        assert!(reopened.get(&fresh_id).is_some());
-        assert!(reopened.get(&live_id).is_some());
-        // The PSK is gone from the file, not merely hidden.
-        let text = std::fs::read_to_string(&path).expect("read");
-        assert!(!text.contains(&stale_id));
     }
 
     /// Finding 7 / `CopyPaste-gbo`. `remove` un-pairs; `revoke` cuts a device
@@ -255,7 +165,7 @@ mod tests {
             name: "stolen phone".to_string(),
             psk,
             last_addr: None,
-            last_seen_ms: 0,
+            last_seen_ms: 1,
         };
         assert!(matches!(
             store.upsert(returning),
@@ -278,7 +188,7 @@ mod tests {
             name: again.name.clone(),
             psk: again.psk,
             last_addr: None,
-            last_seen_ms: 0,
+            last_seen_ms: 1,
         };
         reopened.upsert(ordinary).expect("upsert");
         reopened.remove(&ordinary_id).expect("remove");

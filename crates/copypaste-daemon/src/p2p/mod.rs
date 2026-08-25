@@ -214,7 +214,7 @@ mod tests {
                 name: "b".into(),
                 psk: token.psk(),
                 last_addr: None,
-                last_seen_ms: 0,
+                last_seen_ms: 1,
             })
             .expect("store the pairing on A");
         b.p2p
@@ -224,7 +224,7 @@ mod tests {
                 name: "a".into(),
                 psk: token.psk(),
                 last_addr: Some(addr),
-                last_seen_ms: 0,
+                last_seen_ms: 1,
             })
             .expect("store the pairing on B");
         (pairing_id, addr)
@@ -346,7 +346,7 @@ mod tests {
                 name: "stranger".into(),
                 psk: stranger.psk(),
                 last_addr: Some(addr),
-                last_seen_ms: 0,
+                last_seen_ms: 1,
             })
             .unwrap();
 

@@ -501,7 +501,7 @@ mod tests {
                     name: "stolen phone".into(),
                     psk: token.psk(),
                     last_addr: None,
-                    last_seen_ms: 0,
+                    last_seen_ms: 1,
                 })
                 .is_err(),
             "a revoked pairing id was enrolled anyway"
