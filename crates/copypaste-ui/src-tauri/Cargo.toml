@@ -194,7 +194,11 @@ interprocess.workspace = true
 embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:copypaste-cloud", "dep:jni", "dep:ndk-context"]
 # Only the separate Android evidence APK may admit loopback plaintext.
 cloud-evidence = ["copypaste-cloud/test-endpoints"]
-typescript = ["dep:ts-rs", "copypaste-ipc/typescript"]
+typescript = [
+    "dep:ts-rs",
+    "copypaste-ipc/typescript",
+    "copypaste-runtime-log/typescript",
+]
 # Never enabled by Tauri or Android builds. This exists solely for the local
 # browser preview, which cannot speak the daemon's private Unix socket.
 dev-web-bridge = ["dep:axum", "dep:tower-http"]

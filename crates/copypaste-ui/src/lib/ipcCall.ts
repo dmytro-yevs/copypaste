@@ -10,6 +10,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 import {
   UI_BOUNDARY_ERROR_CODES,
+  type CommandArgs,
+  type CommandResult,
   type UiCommandName,
 } from "@/generated/ipc";
 import { IpcFailure, ipcFailure } from "./errors";
@@ -224,15 +226,21 @@ export function hasBridge(): boolean {
     (typeof window !== "undefined" && hasWebBridge());
 }
 
-export async function call<T>(
-  command: UiCommandName,
-  args?: Record<string, unknown>,
-  options: IpcCallOptions = {},
-): Promise<T> {
+type CallParameters<C extends UiCommandName> = CommandArgs<C> extends undefined
+  ? [args?: undefined, options?: IpcCallOptions]
+  : [args: CommandArgs<C>, options?: IpcCallOptions];
+
+export async function call<C extends UiCommandName>(
+  command: C,
+  ...parameters: CallParameters<C>
+): Promise<CommandResult<C>> {
+  const args = parameters[0] as CommandArgs<C>;
+  const options = parameters[1] ?? {};
+  const serializedArgs = args as Record<string, unknown> | undefined;
   if (import.meta.env.DEV && !hasNativeBridge()) {
     const { interceptPreviewCall } = await import("@/service/previewIpc");
-    const preview = await interceptPreviewCall(command, args);
-    if (preview.handled) return preview.value as T;
+    const preview = await interceptPreviewCall(command, serializedArgs);
+    if (preview.handled) return preview.value as CommandResult<C>;
   }
   const bridge = await resolveWebBridge();
   if (bridge !== null) {
@@ -244,13 +252,13 @@ export async function call<T>(
             Authorization: `Bearer ${bridge.token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ command, args: args ?? {} }),
+          body: JSON.stringify({ command, args: serializedArgs ?? {} }),
           signal,
         });
 
         const body: unknown = await response.json().catch(() => null);
         if (!response.ok) throw ipcFailure(body);
-        return body as T;
+        return body as CommandResult<C>;
       }, options, true);
     } catch (raw) {
       if (raw instanceof IpcFailure) throw raw;
@@ -264,7 +272,11 @@ export async function call<T>(
   try {
     // Tauri exposes no AbortSignal contract. Only this caller-facing promise
     // stops; the native command is allowed to finish and is safely ignored.
-    return await bounded(() => invoke<T>(command, args), options, false);
+    return await bounded(
+      () => invoke<CommandResult<C>>(command, serializedArgs),
+      options,
+      false,
+    );
   } catch (raw) {
     throw ipcFailure(raw);
   }

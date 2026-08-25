@@ -31,6 +31,8 @@ mod reader;
 pub use query::list;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(rename = "RuntimeLogProcess"))]
 #[serde(rename_all = "snake_case")]
 pub enum Process {
     App,
@@ -43,6 +45,8 @@ pub enum Process {
 /// formatter's fixed four-column shape and bounds both bytes and rows before
 /// it serialises anything to UI code.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(rename = "RuntimeLogEvent"))]
 pub struct RuntimeEvent {
     pub timestamp_ms: u64,
     pub level: LogLevel,
@@ -52,6 +56,8 @@ pub struct RuntimeEvent {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(rename = "RuntimeLogLevel"))]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Error,
@@ -81,6 +87,7 @@ impl LogLevel {
 /// millisecond, so "older than the oldest row on screen" discards rows that
 /// were never shown.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeLogQuery {
     #[serde(default)]
@@ -100,6 +107,7 @@ fn default_page_size() -> usize {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 pub struct RuntimeLogPage {
     pub events: Vec<RuntimeEvent>,
     pub next_cursor: Option<String>,
