@@ -1,9 +1,7 @@
-//! The session: ten messages, no state machine.
+//! The authenticated message order for one complete peer sync session.
 //!
 //! One round trip of summaries, one request in each direction, items streamed
-//! back in bounded batches. v1 shipped a 5,000-line HELLO/HAVE/WANT
-//! anti-entropy engine the daemon never instantiated; everything here is on the
-//! path the daemon calls.
+//! back in bounded batches.
 //!
 //! ```text
 //! initiator                      responder
@@ -17,23 +15,13 @@
 //!   Items* Done        ->
 //! ```
 //!
-//! Both halves are generic over [`SyncChannel`], so the tests below drive a real
-//! session over an in-memory duplex and the daemon passes its Noise session.
-
-use std::collections::{HashMap, HashSet};
-
-use super::plan::{plan, Plan};
+use super::application::receive_items;
+use super::plan::plan;
+use super::summary::{exchange_initiator, exchange_responder, watermark};
+use super::transfer::{receive_request, serve_items};
 use super::{SyncChannel, SyncCursor, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::now_ms;
-use crate::protocol::{
-    ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
-    MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
-    PROTOCOL_VERSION,
-};
-
-#[cfg(test)]
-use crate::protocol::{content_hash, plaintext_content_hash};
-
+use crate::protocol::{SyncMessage, PROTOCOL_VERSION};
 /// Runs the initiating half of a session to completion.
 pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
@@ -48,7 +36,7 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
     };
 
     let (advertised, remote) =
-        exchange_summaries_initiator(chan, source, cursor.advertise_from(peer.4)).await?;
+        exchange_initiator(chan, source, cursor.advertise_from(peer.4)).await?;
 
     let mut stats = SyncStats::default();
     let planned = plan(&advertised, &remote, now_ms(), &mut stats);
@@ -59,7 +47,7 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
     .await?;
     let applied = receive_items(chan, source, &planned.wanted, &mut stats).await?;
 
-    let requested = recv_request(chan).await?;
+    let requested = receive_request(chan).await?;
     serve_items(chan, source, &advertised, requested, &mut stats).await?;
 
     Ok(SyncOutcome {
@@ -95,11 +83,11 @@ pub async fn run_responder<C: SyncChannel, S: SyncSource>(
     };
 
     let (advertised, remote) =
-        exchange_summaries_responder(chan, source, cursor.advertise_from(peer.4)).await?;
+        exchange_responder(chan, source, cursor.advertise_from(peer.4)).await?;
 
     let mut stats = SyncStats::default();
 
-    let requested = recv_request(chan).await?;
+    let requested = receive_request(chan).await?;
     serve_items(chan, source, &advertised, requested, &mut stats).await?;
 
     let planned = plan(&advertised, &remote, now_ms(), &mut stats);
@@ -184,340 +172,17 @@ async fn recv_hello<C: SyncChannel, S: SyncSource>(
     }
 }
 
-/// Reads exactly one authenticated summary page.
-async fn recv_summary_page<C: SyncChannel>(
-    chan: &mut C,
-) -> Result<(Vec<ItemSummary>, bool), SyncError> {
-    let msg = chan.recv().await?;
-    msg.validate()?;
-    match msg {
-        SyncMessage::Summary { items, more } => Ok((items, more)),
-        other => Err(SyncError::Unexpected {
-            expected: "summary",
-            got: other.kind(),
-        }),
-    }
-}
-
-struct Applied {
-    attempted: HashSet<String>,
-    floor: Option<i64>,
-}
-
-pub(super) fn summary_key(summary: &ItemSummary) -> i64 {
-    summary.created_at.max(summary.pin_updated_at)
-}
-
-fn watermark(
-    previous: i64,
-    remote: &[ItemSummary],
-    planned: &Plan,
-    attempted: &HashSet<String>,
-) -> i64 {
-    let mut reached = previous;
-    let mut blocked = i64::MAX;
-    for summary in remote {
-        let key = summary_key(summary);
-        let unresolved = planned.deferred.contains(&summary.item_id)
-            || (planned.wanted.contains_key(&summary.item_id)
-                && !attempted.contains(&summary.item_id));
-        if unresolved {
-            blocked = blocked.min(key);
-        } else {
-            reached = reached.max(key);
-        }
-    }
-    reached.min(blocked)
-}
-
-fn next_summary_page<S: SyncSource>(
-    source: &S,
-    since_ms: i64,
-    after_id: Option<&str>,
-) -> Result<(Vec<ItemSummary>, bool), SyncError> {
-    let mut items = source.summary_page(since_ms, after_id, MAX_SUMMARIES_PER_MESSAGE + 1)?;
-    let more = items.len() > MAX_SUMMARIES_PER_MESSAGE;
-    if more {
-        items.truncate(MAX_SUMMARIES_PER_MESSAGE);
-    }
-    Ok((items, more))
-}
-
-fn remember_page(advertised: &mut HashMap<String, ItemSummary>, items: &[ItemSummary]) {
-    for summary in items {
-        advertised.insert(summary.item_id.clone(), summary.clone());
-    }
-}
-
-/// Exchanges every summary page in lock-step. Each side reads one SQLite (or
-/// in-memory) page at a time so a catch-up round never holds the whole history
-/// in a single `Vec` before the first page is sent. A `more` marker makes the
-/// page boundary explicit, while the lock-step exchange keeps either side from
-/// filling a bounded channel before it reads the other side's history.
-async fn exchange_summaries_initiator<C: SyncChannel, S: SyncSource>(
-    chan: &mut C,
-    source: &S,
-    since_ms: i64,
-) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let mut advertised = HashMap::new();
-    let mut remote = Vec::new();
-    let mut after_id: Option<String> = None;
-    let mut cursor_ms = since_ms;
-    let mut page = 0;
-    loop {
-        if page >= MAX_SUMMARY_PAGES_PER_SESSION {
-            return Err(SyncError::TooManySummaryPages);
-        }
-        let (items, more) = next_summary_page(source, cursor_ms, after_id.as_deref())?;
-        if let Some(last) = items.last() {
-            cursor_ms = summary_key(last);
-            after_id = Some(last.item_id.clone());
-        }
-        remember_page(&mut advertised, &items);
-        chan.send(SyncMessage::Summary { items, more }).await?;
-        let (peer_items, peer_more) = recv_summary_page(chan).await?;
-        remote.extend(peer_items);
-        if !more && !peer_more {
-            return Ok((advertised, remote));
-        }
-        page += 1;
-    }
-}
-
-async fn exchange_summaries_responder<C: SyncChannel, S: SyncSource>(
-    chan: &mut C,
-    source: &S,
-    since_ms: i64,
-) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let mut advertised = HashMap::new();
-    let mut remote = Vec::new();
-    let mut after_id: Option<String> = None;
-    let mut cursor_ms = since_ms;
-    let mut page = 0;
-    loop {
-        if page >= MAX_SUMMARY_PAGES_PER_SESSION {
-            return Err(SyncError::TooManySummaryPages);
-        }
-        let (peer_items, peer_more) = recv_summary_page(chan).await?;
-        remote.extend(peer_items);
-        let (items, more) = next_summary_page(source, cursor_ms, after_id.as_deref())?;
-        if let Some(last) = items.last() {
-            cursor_ms = summary_key(last);
-            after_id = Some(last.item_id.clone());
-        }
-        remember_page(&mut advertised, &items);
-        chan.send(SyncMessage::Summary { items, more }).await?;
-        if !more && !peer_more {
-            return Ok((advertised, remote));
-        }
-        page += 1;
-    }
-}
-
-async fn recv_request<C: SyncChannel>(chan: &mut C) -> Result<Vec<String>, SyncError> {
-    let msg = chan.recv().await?;
-    msg.validate()?;
-    match msg {
-        SyncMessage::Request { item_ids } => Ok(item_ids),
-        other => Err(SyncError::Unexpected {
-            expected: "request",
-            got: other.kind(),
-        }),
-    }
-}
-
-/// Reads `Items` messages until `Done`, applying what was asked for. Everything
-/// unasked-for is dropped: the merge decision was made against the summary, so
-/// an item that does not match what it was promised as is not the item we
-/// agreed to take.
-async fn receive_items<C: SyncChannel, S: SyncSource>(
-    chan: &mut C,
-    source: &S,
-    wanted: &HashMap<String, ItemSummary>,
-    stats: &mut SyncStats,
-) -> Result<Applied, SyncError> {
-    // The byte cap can force every requested item into its own `Items` message.
-    // One extra frame lets an invalid item be dropped before `Done`; anything
-    // beyond one frame per requested id plus that allowance cannot be useful.
-    let mut budget = wanted.len().saturating_add(2);
-    let mut applied: HashSet<String> = HashSet::new();
-    let mut floor: Option<i64> = None;
-
-    loop {
-        if budget == 0 {
-            return Err(SyncError::PeerOverran);
-        }
-        budget -= 1;
-
-        let msg = chan.recv().await?;
-        msg.validate()?;
-        match msg {
-            SyncMessage::Items { items } => {
-                let mut batch = Vec::with_capacity(items.len());
-                let mut stamps = Vec::with_capacity(items.len());
-                for mut item in items {
-                    let Some(promised) = wanted.get(&item.item_id) else {
-                        tracing::warn!("peer sent an item that was not requested; dropping it");
-                        stats.skipped += 1;
-                        continue;
-                    };
-                    if item.summary() != *promised {
-                        tracing::warn!(
-                            "peer sent an item that does not match its summary; dropping it"
-                        );
-                        stats.skipped += 1;
-                        continue;
-                    }
-                    let payload = if item.binary_content.is_empty() {
-                        item.content.as_bytes()
-                    } else {
-                        &item.binary_content
-                    };
-                    if !item.deleted
-                        && crate::protocol::plaintext_content_hash(payload) != item.content_hash
-                    {
-                        // The peer's `content_hash` is comparator key 2. Taking
-                        // its word for it lets a hostile peer pick that key
-                        // freely — and collide with a targeted item's hash so
-                        // the version it names is refused. Recomputed here
-                        // rather than in `apply`, so every `SyncSource` gets it.
-                        // A tombstone is exempt: it carries the hash of the item
-                        // it deletes and no content to hash (rule T-4).
-                        tracing::warn!(
-                            "peer sent an item whose content does not match its hash; dropping it"
-                        );
-                        stats.skipped += 1;
-                        continue;
-                    }
-                    if !applied.insert(item.item_id.clone()) {
-                        // Within-session replay. Harmless — apply is idempotent —
-                        // but there is no reason to pay for it twice.
-                        stats.skipped += 1;
-                        continue;
-                    }
-                    if item.deleted {
-                        // A tombstone carries no content (manifest 05 rule T-4).
-                        // Clearing rather than refusing: the tombstone itself
-                        // must still land, or the delete is lost.
-                        item.content.clear();
-                    }
-                    stamps.push(summary_key(&item.summary()));
-                    batch.push(item);
-                }
-                if batch.is_empty() {
-                    continue;
-                }
-                let outcomes = source.apply_batch(batch)?;
-                for (stored, stamp) in outcomes.into_iter().zip(stamps) {
-                    if stored {
-                        stats.received += 1;
-                        floor = Some(floor.map_or(stamp, |low: i64| low.min(stamp)));
-                    } else {
-                        stats.skipped += 1;
-                    }
-                }
-            }
-            SyncMessage::Done => {
-                return Ok(Applied {
-                    attempted: applied,
-                    floor,
-                })
-            }
-            other => {
-                return Err(SyncError::Unexpected {
-                    expected: "items",
-                    got: other.kind(),
-                })
-            }
-        }
-    }
-}
-
-/// Answers a request, then closes the stream with `Done`. Only ids in our own
-/// advertised summary are served, which makes "a sensitive item never leaves the
-/// device" a property of the protocol and not only of the store: absent from
-/// `summaries()`, absent from `advertised`, unnameable by any request.
-async fn serve_items<C: SyncChannel, S: SyncSource>(
-    chan: &mut C,
-    source: &S,
-    advertised: &HashMap<String, ItemSummary>,
-    requested: Vec<String>,
-    stats: &mut SyncStats,
-) -> Result<(), SyncError> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let allowed: Vec<String> = requested
-        .into_iter()
-        .filter(|id| {
-            if !advertised.contains_key(id) {
-                tracing::warn!("peer requested an item that was never advertised; refusing it");
-                return false;
-            }
-            seen.insert(id.clone())
-        })
-        .collect();
-
-    let mut batch: Vec<SyncItem> = Vec::new();
-    let mut batch_bytes = 0usize;
-
-    // Fetched a batch at a time so the plaintext of a thousand items is never
-    // resident at once.
-    for chunk in allowed.chunks(MAX_ITEMS_PER_MESSAGE) {
-        for mut item in source.fetch(chunk)? {
-            if !advertised.contains_key(&item.item_id) {
-                // The source handed back something it was not asked for. Refuse
-                // it here too: this is the layer that promised not to leak.
-                tracing::warn!("source returned an item outside the advertised set; dropping it");
-                continue;
-            }
-            if item.deleted {
-                item.content.clear();
-            }
-            let payload_bytes = item.content.len().saturating_add(item.binary_content.len());
-            if payload_bytes > MAX_CONTENT_BYTES {
-                // Skip the one item rather than failing the session: the rest of
-                // the history is still worth syncing.
-                tracing::warn!(
-                    bytes = payload_bytes,
-                    max = MAX_CONTENT_BYTES,
-                    "item is too large to send; skipping it"
-                );
-                continue;
-            }
-
-            if !batch.is_empty()
-                && (batch.len() == MAX_ITEMS_PER_MESSAGE
-                    || batch_bytes.saturating_add(payload_bytes) > MAX_ITEM_BYTES_PER_MESSAGE)
-            {
-                stats.sent += batch.len();
-                chan.send(SyncMessage::Items {
-                    items: std::mem::take(&mut batch),
-                })
-                .await?;
-                batch_bytes = 0;
-            }
-
-            batch_bytes += payload_bytes;
-            batch.push(item);
-        }
-    }
-
-    if !batch.is_empty() {
-        stats.sent += batch.len();
-        chan.send(SyncMessage::Items { items: batch }).await?;
-    }
-
-    chan.send(SyncMessage::Done).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::{
-        ProtocolError, MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
+        content_hash, plaintext_content_hash, ItemSummary, ProtocolError, SyncItem,
+        MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE,
+        MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
     };
     use crate::sync::testutil::{
-        item, session, session_with, summary, tombstone, try_session,
-        try_session_with_listen_addresses, ScriptChannel, TestSource,
+        item, session, session_with, tombstone, try_session, try_session_with_listen_addresses,
+        ScriptChannel, TestSource,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -627,68 +292,6 @@ mod tests {
         assert_eq!(oa.cursor.since_ms, 1_199);
         assert_eq!(a.summaries(oa.cursor.since_ms).unwrap().len(), 1);
         assert_eq!(b.summaries(ob.cursor.since_ms).unwrap().len(), 1);
-    }
-
-    fn planned(wanted: &[&ItemSummary], deferred: &[&str]) -> Plan {
-        Plan {
-            wanted: wanted
-                .iter()
-                .map(|s| (s.item_id.clone(), (*s).clone()))
-                .collect(),
-            deferred: deferred.iter().map(|id| (*id).to_string()).collect(),
-        }
-    }
-
-    #[test]
-    fn the_watermark_stops_below_anything_the_session_did_not_finish() {
-        let remote = vec![
-            summary("a", 100, "h", false),
-            summary("b", 200, "h", false),
-            summary("c", 300, "h", false),
-        ];
-        let plan = planned(&[&remote[1]], &[]);
-
-        assert_eq!(
-            watermark(0, &remote, &plan, &HashSet::new()),
-            200,
-            "an item that was wanted but never arrived must be offered again"
-        );
-        let attempted: HashSet<String> = ["b".to_string()].into_iter().collect();
-        assert_eq!(watermark(0, &remote, &plan, &attempted), 300);
-    }
-
-    #[test]
-    fn the_watermark_never_moves_on_its_own() {
-        let plan = planned(&[], &[]);
-        assert_eq!(watermark(5_000, &[], &plan, &HashSet::new()), 5_000);
-    }
-
-    #[test]
-    fn a_deferred_want_pulls_the_watermark_back_below_it() {
-        let remote = vec![
-            summary("old", 100, "h", false),
-            summary("new", 900, "h", false),
-        ];
-        let plan = planned(&[], &["old"]);
-        assert_eq!(watermark(5_000, &remote, &plan, &HashSet::new()), 100);
-    }
-
-    #[test]
-    fn a_refused_future_stamp_cannot_drag_the_watermark_forward() {
-        let remote = vec![
-            summary("sane", 900, "h", false),
-            summary("forged", i64::MAX, "h", false),
-        ];
-        let plan = planned(&[], &["forged"]);
-        assert_eq!(watermark(0, &remote, &plan, &HashSet::new()), 900);
-    }
-
-    #[test]
-    fn the_pin_stamp_is_part_of_the_cursor_key() {
-        let mut pinned = summary("ancient", 800, "h", false);
-        pinned.pin_updated_at = 6_000;
-        assert_eq!(summary_key(&pinned), 6_000);
-        assert_eq!(summary_key(&summary("plain", 800, "h", false)), 800);
     }
 
     #[tokio::test]
@@ -1017,90 +620,6 @@ mod tests {
             from_b.unwrap().peer_listen_addr,
             Some("192.0.2.1:47654".parse().unwrap())
         );
-    }
-
-    #[tokio::test]
-    async fn an_item_that_was_never_advertised_cannot_be_requested_out() {
-        // The protocol-level layer of the same rule: even a peer that already
-        // knows the id — because it went sensitive after an earlier session —
-        // gets nothing back.
-        let a = TestSource::new("dev-a", vec![item("secret", 200, "hunter2", "dev-a")]);
-        a.mark_sensitive("secret");
-
-        let mut chan = ScriptChannel::new(vec![
-            SyncMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                device_id: "dev-b".into(),
-                device_name: "B".into(),
-                profile: None,
-                listen_addr: None,
-                since_ms: 0,
-            },
-            SyncMessage::Summary {
-                items: vec![],
-                more: false,
-            },
-            SyncMessage::Request {
-                item_ids: vec!["secret".into()],
-            },
-            SyncMessage::Done,
-        ]);
-
-        let outcome = run_responder(&mut chan, &a, None, SyncCursor::default())
-            .await
-            .unwrap();
-        assert_eq!(outcome.stats.sent, 0);
-        for msg in &chan.sent {
-            if let SyncMessage::Items { items } = msg {
-                assert!(items.is_empty(), "a sensitive item was put on the wire");
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn an_item_the_source_smuggles_in_is_not_sent() {
-        let a = TestSource::new("dev-a", vec![item("public", 100, "fine", "dev-a")]);
-        a.smuggle(item("secret", 200, "hunter2", "dev-a"));
-        a.mark_sensitive("secret");
-        let b = TestSource::new("dev-b", vec![]);
-
-        session(&a, &b).await;
-        assert!(
-            b.get("secret").is_none(),
-            "a smuggled item reached the peer"
-        );
-        assert!(b.get("public").is_some());
-    }
-
-    #[tokio::test]
-    async fn an_unrequested_item_is_not_applied() {
-        let a = TestSource::new("dev-a", vec![]);
-        let mut chan = ScriptChannel::new(vec![
-            SyncMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                device_id: "dev-b".into(),
-                device_name: "B".into(),
-                profile: None,
-                listen_addr: None,
-                since_ms: 0,
-            },
-            SyncMessage::Summary {
-                items: vec![],
-                more: false,
-            },
-            SyncMessage::Items {
-                items: vec![item("pushed", 100, "unasked for", "dev-b")],
-            },
-            SyncMessage::Done,
-            SyncMessage::Request { item_ids: vec![] },
-        ]);
-
-        let outcome = run_initiator(&mut chan, &a, None, SyncCursor::default())
-            .await
-            .unwrap();
-        assert!(a.get("pushed").is_none(), "an unrequested item was applied");
-        assert_eq!(outcome.stats.received, 0);
-        assert_eq!(outcome.stats.skipped, 1);
     }
 
     #[tokio::test]
@@ -1442,92 +961,6 @@ mod tests {
             "second apply stored again"
         );
         assert_eq!(store.snapshot().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn receive_items_applies_a_wire_batch_in_one_source_call() {
-        struct CountingSource {
-            inner: TestSource,
-            apply_calls: AtomicUsize,
-            batch_calls: AtomicUsize,
-            last_batch_len: AtomicUsize,
-        }
-
-        impl SyncSource for CountingSource {
-            fn device_id(&self) -> String {
-                self.inner.device_id()
-            }
-            fn device_name(&self) -> String {
-                self.inner.device_name()
-            }
-            fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
-                self.inner.summaries(since_ms)
-            }
-            fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
-                self.inner.fetch(ids)
-            }
-            fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
-                self.apply_calls.fetch_add(1, Ordering::SeqCst);
-                self.inner.apply(item)
-            }
-            fn apply_batch(&self, items: Vec<SyncItem>) -> Result<Vec<bool>, SyncError> {
-                self.batch_calls.fetch_add(1, Ordering::SeqCst);
-                self.last_batch_len.store(items.len(), Ordering::SeqCst);
-                items
-                    .into_iter()
-                    .map(|item| self.inner.apply(item))
-                    .collect()
-            }
-        }
-
-        let a = CountingSource {
-            inner: TestSource::new("dev-a", vec![]),
-            apply_calls: AtomicUsize::new(0),
-            batch_calls: AtomicUsize::new(0),
-            last_batch_len: AtomicUsize::new(0),
-        };
-        let batch = vec![
-            item("one", 100, "a", "dev-b"),
-            item("two", 200, "b", "dev-b"),
-            item("three", 300, "c", "dev-b"),
-        ];
-        let promised: Vec<_> = batch.iter().map(SyncItem::summary).collect();
-        let mut chan = ScriptChannel::new(vec![
-            SyncMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                device_id: "dev-b".into(),
-                device_name: "B".into(),
-                profile: None,
-                listen_addr: None,
-                since_ms: 0,
-            },
-            SyncMessage::Summary {
-                items: promised,
-                more: false,
-            },
-            SyncMessage::Items { items: batch },
-            SyncMessage::Done,
-            SyncMessage::Request { item_ids: vec![] },
-        ]);
-
-        let outcome = run_initiator(&mut chan, &a, None, SyncCursor::default())
-            .await
-            .unwrap();
-        assert_eq!(outcome.stats.received, 3);
-        assert_eq!(
-            a.batch_calls.load(Ordering::SeqCst),
-            1,
-            "a wire Items frame must land as one apply_batch"
-        );
-        assert_eq!(a.last_batch_len.load(Ordering::SeqCst), 3);
-        assert_eq!(
-            a.apply_calls.load(Ordering::SeqCst),
-            0,
-            "receive_items must not fall back to per-item apply"
-        );
-        assert!(a.inner.get("one").is_some());
-        assert!(a.inner.get("two").is_some());
-        assert!(a.inner.get("three").is_some());
     }
 
     #[tokio::test]

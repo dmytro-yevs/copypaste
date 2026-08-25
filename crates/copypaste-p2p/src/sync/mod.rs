@@ -8,11 +8,14 @@
 //! the planning half and the applying half reaching different answers
 //! (manifest 05 INV-C2).
 
+mod application;
 mod error;
 mod merge;
 mod plan;
 mod session;
 mod source;
+mod summary;
+mod transfer;
 
 #[cfg(test)]
 pub(crate) mod testutil;
