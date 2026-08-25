@@ -20,17 +20,16 @@ pub const MIN_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Idle poll interval ceiling **while the push channel is confirmed**.
 ///
 /// A device whose clipboard nobody has touched should not wake the radio every
-/// few seconds — on a phone that is measurable battery, and it is the reason
-/// v1's cadence grew from five seconds toward five minutes rather than staying
-/// fixed. Five minutes is only defensible because [`crate::realtime`] is
-/// carrying the latency: the poll is the correctness backstop, and a backstop
-/// can be slow *when there is something in front of it*.
+/// few seconds — on a phone that is measurable battery. Five minutes is only
+/// defensible because [`crate::realtime`] is carrying the latency: the poll is
+/// the correctness backstop, and a backstop can be slow *when there is something
+/// in front of it*.
 ///
 /// Manifest 05 §4.8 puts this at 60 s rather than 300 s. The deviation is
-/// recorded there, and it rests on two things v1 did not have: a `Resubscribed`
-/// event that forces a round the moment a dropped channel comes back, so the
-/// window this interval bounds is "an event the server never sent" rather than
-/// "every event since the socket died", and the fallback below.
+/// recorded there. A `Resubscribed` event forces a round the moment a dropped
+/// channel comes back, so the window this interval bounds is an event the server
+/// never sent rather than every event since the socket died; the fallback below
+/// covers periods without a confirmed channel.
 pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Idle poll interval ceiling **while it is not**.

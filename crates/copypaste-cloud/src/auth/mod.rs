@@ -57,12 +57,10 @@
 //! permanent and surfaces to the caller immediately. A `429` is **not** retried
 //! here — it is returned as [`AuthError::RateLimited`] with the server's
 //! `Retry-After`, because the caller (the refresh loop) is the thing that knows
-//! how long it may sleep. v1 had six separate hand-rolled backoffs; this crate
-//! has none of its own.
+//! how long it may sleep.
 //!
-//! [`http`] is a module rather than a handful of loose functions because every
-//! item in it has exactly one job: to be the *only* implementation of something
-//! v1 had several of. Keeping them together is what makes a second one obvious.
+//! [`http`] keeps the shared policy in one visible module so callers cannot grow
+//! independent retry, masking, or clock implementations.
 
 pub mod client;
 pub mod error;

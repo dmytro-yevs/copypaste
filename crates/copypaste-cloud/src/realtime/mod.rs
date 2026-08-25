@@ -2,13 +2,13 @@
 //!
 //! # Realtime is an accelerator, never the source of truth
 //!
-//! Read this before using anything in this module. Supabase Realtime, like the
-//! v1 relay's SSE channel before it, is **at-most-once**: events that occur
-//! while the socket is down are not replayed when it comes back. Manifest 05
-//! §5.1 row 9a calls this "the single most important item in the table", and
-//! §4.8 states the rule directly — the cursor poll in [`crate::sync`] is the
-//! correctness mechanism, and this module only shortens the latency between a
-//! write on one device and its appearance on another.
+//! Read this before using anything in this module. Supabase Realtime is
+//! **at-most-once**: events that occur while the socket is down are not replayed
+//! when it comes back. Manifest 05 §5.1 row 9a calls this "the single most
+//! important item in the table", and §4.8 states the rule directly — the cursor
+//! poll in [`crate::sync`] is the correctness mechanism, and this module only
+//! shortens the latency between a write on one device and its appearance on
+//! another.
 //!
 //! Deleting the poll loop "because we have Realtime now" reintroduces silent
 //! data loss on every reconnect. What Realtime is allowed to change is the poll
@@ -45,11 +45,10 @@
 //! `AGENTS.md` rule 1 says reach for a crate first. There is no maintained Rust
 //! client for Supabase Realtime, and the Phoenix subset actually used here is
 //! five message shapes: `phx_join`, `phx_reply`, `heartbeat`, `access_token`,
-//! `phx_leave`, plus the `postgres_changes` payload. The v1 audit reached the same conclusion and
-//! it still holds under exemption 1 — but it holds only for *this* subset. This
-//! module is not a Phoenix client library: there is no channel registry, no
-//! push/ref correlation table, no presence, no generic event router. Adding one
-//! would be the wheel this rule exists to prevent.
+//! `phx_leave`, plus the `postgres_changes` payload. This subset is the entire
+//! scope of exemption 1. The module is not a Phoenix client library: there is no
+//! channel registry, push/ref correlation table, presence, or generic event
+//! router. Adding one would be the wheel this rule exists to prevent.
 //!
 //! What is *not* hand-rolled: the websocket itself (`tokio-tungstenite`), the
 //! JSON (`serde_json`), and the reconnect schedule (`backon`).
@@ -63,10 +62,9 @@
 //! ```
 //!
 //! Frames that are not exactly five elements are rejected. A `ref` that is not
-//! a JSON string maps to *absent* rather than to an empty string: v1's
-//! `CopyPaste-crh3.97` came from mapping a numeric ref to `Some("")`, so a
-//! reply's ref never matched the heartbeat's and every heartbeat reply was
-//! silently dropped.
+//! a JSON string maps to *absent* rather than to an empty string: mapping a
+//! numeric ref to `Some("")` prevents a reply from matching the heartbeat and
+//! silently drops every heartbeat reply (`CopyPaste-crh3.97`).
 //!
 //! # Log hygiene
 //!

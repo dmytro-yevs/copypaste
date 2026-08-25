@@ -23,9 +23,9 @@
 //!     item_id           text not null,
 //!     -- Sealed on the client. base64 in a `text` column, deliberately not
 //!     -- `bytea`: assigning a bare base64 string to a bytea column stores the
-//!     -- ASCII bytes of the base64 text and reads back as `\x…` hex, which is
-//!     -- what made cloud download fail outright in v1 (port manifest 05 §4.5).
-//!     -- A text column has one encoding, and it is the one the client wrote.
+//!     -- ASCII bytes of the base64 text and reads back as `\x…` hex instead of
+//!     -- the original base64 (port manifest 05 §4.5, AT-45).
+//!     -- A text column preserves the encoding the client wrote.
 //!     -- NULL on a tombstone.
 //!     ciphertext        text,
 //!     nonce             text,
@@ -127,8 +127,7 @@
 //! cannot carry a correct metadata signature, because the signature covers
 //! columns a `PATCH` does not hold (`content_type`, `origin_device_id`), and a
 //! row whose signature does not cover them is a row every device refuses.
-//! Manifest 05 §7.5 asked for one upsert and one code path for a different
-//! reason — v1's second path dropped every re-push — and this is that path.
+//! Manifest 05 §7.5 requires this single write path so re-pushes cannot diverge.
 //!
 //! # What this module does not do
 //!

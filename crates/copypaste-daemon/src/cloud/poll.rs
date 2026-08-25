@@ -304,10 +304,9 @@ mod tests {
         assert_eq!(state.cloud.status().last_sync_ms, None);
     }
 
-    /// Manifest 05 AT-33 (`CopyPaste-1t38`), which v1 needed an in-memory retry
-    /// queue for and v2 gets from the floor: a round against an unreachable
+    /// Manifest 05 AT-33 (`CopyPaste-1t38`): a round against an unreachable
     /// backend must leave the cursor exactly where it was, so the next round
-    /// re-derives the same work from local state. There is no queue to lose.
+    /// re-derives the same work from local state.
     #[tokio::test]
     async fn a_failed_round_leaves_the_upload_floor_where_it_was() {
         use copypaste_cloud::crypto::derive_sync_key;

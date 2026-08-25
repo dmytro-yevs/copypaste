@@ -29,7 +29,7 @@
 //!   reads (`CloudSource::apply_remote`: `created_at`, then the content hash,
 //!   then `deleted`, then `origin_device_id`).
 //! * The source-app fields travel with the winning version and are covered so
-//!   a relay cannot relabel which application captured the item.
+//!   the backend cannot relabel which application captured the item.
 //! * `item_id` is the identity the ordering is *scoped to*. Without it a valid
 //!   signature could be lifted onto another item, which is the metadata twin of
 //!   the row-move the AAD already prevents for content.

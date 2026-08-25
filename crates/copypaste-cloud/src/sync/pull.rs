@@ -22,8 +22,8 @@
 //!
 //! The cursor rules live here because they are one rule seen from three angles
 //! — the inclusive bound, the ascending page order, and the watermark that only
-//! moves forward — and separating them is how v1 ended up with a `>` on one
-//! side and a `>=` on the other.
+//! moves forward. Keeping them together prevents the read bound and persisted
+//! cursor from drifting apart.
 
 use super::driver::CloudSync;
 use super::outcome::{SyncError, SyncStats};

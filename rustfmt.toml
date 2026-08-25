@@ -1,5 +1,2 @@
-# Stable-only options. v1's file set imports_granularity and group_imports,
-# which are nightly-gated: stable rustfmt panics on them, so `cargo fmt` was
-# silently unusable for anyone not on nightly.
 edition = "2021"
 max_width = 100

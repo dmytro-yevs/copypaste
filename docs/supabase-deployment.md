@@ -66,8 +66,7 @@ depends on that job, so a failed platform contract cannot produce a release.
 **The upsert assumption held.** `?on_conflict=user_id,item_id` resolves with no
 `user_id` in the request body: the column default fills it before the conflict
 is inferred, exactly as designed. The negative control matters as much — with
-the unique index dropped, the *first* upsert fails **400** (`42P10`), not a 409
-on the replay as this document previously claimed. Either way the client
+the unique index dropped, the *first* upsert fails **400** (`42P10`). The client
 classifies it `Permanent` and the round fails loudly.
 
 `scripts/cloud-stub.py` is a different thing and is not evidence about this
@@ -134,8 +133,7 @@ Four things are load-bearing and easy to lose in a refactor:
 
 - **`ciphertext` is `text`, not `bytea`.** Assigning a bare base64 string to a
   `bytea` column stores the ASCII bytes of the base64 text and reads back as
-  `\x…` hex. That is manifest 05 §4.5 — the bug that made cloud download fail
-  outright in v1.
+  `\x…` hex. Manifest 05 §4.5 and AT-45 require an end-to-end text round trip.
 - **The unique index on `(user_id, item_id)`** is what PostgREST resolves
   `on_conflict` through. Without it every write fails 400 (`42P10`) — measured,
   not assumed; see the verification table above.
@@ -169,14 +167,12 @@ Two additions beyond the contract, both about the same attack:
 - **Column-level INSERT/UPDATE grants.** `authenticated` may write only the
   eight client columns. `id`, `user_id`, `inserted_at` and `updated_at` are not
   writable at all. Without this, any account holder could restamp `inserted_at`
-  and escape eviction — the forgery of manifest 05 §5.1 row 4a, moved from v1's
-  `wall_time` to v2's retention column.
+  and escape eviction (manifest 05 §5.1 row 4a, `CopyPaste-1uqb`).
 - **The timestamp trigger restores `inserted_at`** on every update, so the
   privilege system is not the only thing holding that column still.
 
-The model is unchanged from v1's: RLS pivots on `user_id`, not on a device, so
-**one account is one trust circle** — every device signed in reads every other
-device's rows.
+RLS pivots on `user_id`, not on a device, so **one account is one trust circle**:
+every device signed in reads every other device's rows.
 
 The retention job is the only cross-account reader, and because RLS is *forced*
 it cannot inherit an exemption from owning the table: it runs `SECURITY DEFINER`
@@ -186,14 +182,12 @@ rows; it can never write one.
 
 ## Quota and TTL
 
-The v1 relay held **≤ 500 items per account for ≤ 24 hours**. Manifest 05 §5.2
-is explicit that this was the design and not a limitation: bounded storage, and
-a server that forgets within a day. Supabase as shipped keeps every row forever,
-so both properties are rebuilt here, with v1's numbers as the defaults, in
-`private.retention_policy` (one row, `ttl_hours = 24`, `max_rows_per_user =
-500`) driven by `private.enforce_retention()` on an hourly `pg_cron` schedule.
+Cloud storage is bounded to **500 items per account for 24 hours**. The policy
+lives in `private.retention_policy` (one row, `ttl_hours = 24`,
+`max_rows_per_user = 500`) and is enforced by
+`private.enforce_retention()` on an hourly `pg_cron` schedule.
 
-Where each of v1's limits now lives, and why:
+Where each limit lives, and why:
 
 | Limit | Home | Reasoning |
 |---|---|---|
@@ -201,7 +195,6 @@ Where each of v1's limits now lives, and why:
 | 500 rows per account | **Server**, same job | Same reasoning, plus rule 4a: the prune must order on a server-assigned value. Ranking is `row_number() over (partition by user_id order by inserted_at desc)`. |
 | Prune by server clock, never the client's | **Server**, three ways | The job reads `inserted_at`; `authenticated` holds no column privilege on it; the trigger restores it on update. `tests/03` inserts a row stamped a decade into the future by the client and asserts it is still evicted. |
 | Per-item size (10 MiB image/file, 8 MiB text) | **Client** (`sync::push`), with a server backstop | Manifest verdict for row 13: enforce before upload so the user gets a clear local error rather than an opaque backend rejection. The server's `check (octet_length(ciphertext) <= 16 MiB)` sits above every client-side limit; it bounds abuse, it is not the product limit. The client measures the **plaintext**, before sealing, so the number it reports is the one the user can see. |
-| Per-account device cap (5 / 10) | **Dropped** | A billing lever, not a correctness one (manifest row 12). |
 | HTTP rate limiting | **Platform** | Supabase enforces its own; the client honours `429` + `Retry-After` in delta-seconds (`rest/error.rs`, `sync/retry.rs`). |
 | Page size | **Client**, ceiling on the server | The client clamps to 200 (`MAX_PAGE_LIMIT`); PostgREST's `max_rows` is 1000. That ordering matters — if `max_rows` were ever set *below* the client's limit, PostgREST would silently truncate pages and "a short page means caught up" would stop being true (manifest row 8). |
 | Local history cap | **Client**, unchanged | And local eviction must not move the download watermark (INV-N5). |
@@ -209,8 +202,7 @@ Where each of v1's limits now lives, and why:
 Consequences worth stating plainly, because they are user-visible:
 
 - A device offline for more than 24 hours misses whatever aged out. Local
-  history is the durable copy; the cloud table is a transit buffer. This is v1's
-  behaviour, not a regression.
+  history is the durable copy; the cloud table is a transit buffer.
 - A row evicted by retention is **not** re-uploaded: push only sends local
   changes newer than the watermark. It is gone from the cloud for good.
 - A new device signing in sees at most the retention window, never the full
@@ -256,50 +248,16 @@ item in this table"). Nothing in this deployment can change that, and one thing
 in it depends on it: rows larger than Realtime's per-record limit (1 MiB by
 default) are not delivered as events at all, and are picked up by the next poll.
 
-## Relay → Supabase parity check
+## Compound cursor pagination
 
-Manifest 05 §5.1, row by row, against what now exists. "Covered" here means
-covered *by something that is written down and runnable*, not covered in
-principle.
+INV-N1 requires a keyset over a total order with no ties, and AT-24 is its
+regression test. A single inclusive `created_at=gte.<cursor>` bound avoids
+skipping rows at the boundary millisecond, but it cannot advance when more than
+one page shares that millisecond: every pull would return the same first page by
+`item_id`, leaving the remaining rows unreachable.
 
-| # | Relay guarantee | Where it lives now | Status |
-|---|---|---|---|
-| 1 | Shared-account fan-out | `clipboard_items` + the four policies | ✅ Covered. Asserted in `tests/02`. |
-| 2 | Independent per-device credentials on one account | GoTrue sessions; each device holds its own refresh token, sign-out revokes one | ✅ Covered by the platform. Nothing owed server-side. |
-| 3 | Distinct per-device inboxes | — | ⚪ Dropped, as the manifest recommends. |
-| 4 | Per-account quota, 500 items, silent prune of the oldest | `private.retention_policy.max_rows_per_user` + `enforce_retention()` | ✅ **Gap closed.** Asserted in `tests/03`. Needs `pg_cron` enabled on the project. |
-| 4a | Prune on a server-assigned value, never a client clock | `inserted_at`: read by the job, not writable by `authenticated`, restored by the trigger | ✅ Covered, three independent ways, one test. |
-| 5 | 24 h item TTL | `private.retention_policy.ttl_hours` | ✅ **Gap closed**, same job, same caveat about `pg_cron`. |
-| 6 | Keyset cursor pagination with no ties | Client keyset `or=(created_at.gt.M,and(created_at.eq.M,item_id.gt.ID))` + the `(user_id, created_at, item_id)` index | ✅ **Gap closed, client-side.** See the note below for what it was and what it now is. |
-| 7 | `Relay-Watermark` response header | Client computes it from the last row of the page | ⚪ Dropped, no loss. |
-| 8 | `Relay-Has-More` header | Not needed: PostgREST has no byte budget, so a short page is unambiguously "caught up" | ⚪ Dropped — **conditional on `max_rows` (1000) staying above the client's page limit (200)**, which is now written down in `config.toml`. |
-| 9 | At-least-once delivery, replay from a cursor | Rows persist until retention; poll replays from the watermark | ✅ Covered, and now bounded by our own TTL exactly as the relay's was. |
-| 9a | Push channel is at-most-once; the poll is mandatory | `sync::pull` + `sync::cadence`; Realtime only resets the interval | ✅ Covered — and nothing in this deployment tempts anyone to remove the poll. Retention deletes are invisible to Realtime by design, which makes the poll the only path for them, which is correct. |
-| 10 | Proof-of-possession registration | GoTrue account auth + RLS, **plus the `signature` column** | ✅ **Gap closed.** The secret being proven is still different — the account password gates the rows, the sync passphrase decrypts them — but an attacker holding only the former can no longer produce a row any device will merge. Bounded by: the metadata signature (client + `not null` here), the AEAD's AAD binding `item_id`, `created_at >= 0` and the charset checks, the future-skew refusal, and `inserted_at` being unforgeable so an injected row cannot escape eviction. What such an attacker can still do is *read* ciphertext and metadata, and fill the table with rows every device refuses. |
-| 11 | Per-(IP, device) registration rate limit | GoTrue sign-in throttling | 🟡 Roughly covered by the platform. No per-item-id analogue is needed. |
-| 12 | Per-account device cap | — | ⚪ Dropped. Billing lever. |
-| 13 | Per-item size cap, split by type | Client caps in `sync::push` (8 MiB text, 10 MiB otherwise), server `check` at 16 MiB base64 as the backstop | ✅ **Covered.** Measured on the plaintext, before sealing, so the number is the one the user can see; an item over the cap is withheld and counted (`skipped_too_large`), never deleted and never sent for the backend to refuse. |
-| 14 | Per-IP rate limiting with `Retry-After` | Platform + the client's 429 handling | ✅ Covered. |
-| 15 | Inactive-device reaping | — | ⚪ Dropped. No device registry exists. |
-| 16 | Zero-knowledge, account-less server | — | 🔴 **Genuine regression, unchanged.** Content stays end-to-end encrypted; the metadata surface grows and sync now requires an account. What this deployment stores per row: `user_id`, `item_id`, ciphertext **length**, `content_type`, `origin_device_id`, `created_at`, `deleted`, `inserted_at`, `updated_at` — plus the account email in GoTrue. Retention shortens the window to 24 h, which limits but does not remove it. **Written down now**, in [cloud-privacy](cloud-privacy.md) (manifest §5.4 item 3). The metadata surface itself is unchanged: documenting a regression does not remove it. |
-| 17 | Operational scaffolding (write-behind cache, retry queue, supervisors, metrics, connection caps) | Supabase's problem | ✅ Dropped entirely. This is the payoff. |
-
-### Row 6, in full — what it was, and what it is now
-
-v1's cursor was a compound keyset: `or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))`.
-INV-N1 states the requirement as a keyset over a total order with no ties,
-"not over a millisecond timestamp alone", and AT-24 is its regression test.
-
-v2's client sent a single inclusive bound — `created_at=gte.<cursor>`. The
-inclusive bound fixed the worse half of the v1 bug: no row sharing the boundary
-millisecond is skipped, because re-offering a row is free and skipping it is not.
-But the cursor carried only the millisecond, so if **more than one page of rows
-shared a single `created_at`** (100 rows, `PULL_PAGE_LIMIT`), the watermark could
-not advance past that millisecond: every pull re-fetched the same first 100 of
-them by `item_id` and the rest were never reached.
-
-The client now carries both halves and sends the compound form once it knows
-them, against the index this deployment already had:
+The client carries both halves and sends the compound form once it knows them,
+against the deployment index:
 
 ```
 or=(created_at.gt.M,and(created_at.eq.M,item_id.gt.ID))
@@ -310,20 +268,20 @@ Two details are worth keeping straight, because they look contradictory:
 
 - **The bare millisecond bound stays inclusive.** A strict `gt` is only safe on
   the *pair*, which is unique. On the millisecond alone it drops the boundary
-  row, which is the original v1 bug.
+  rows.
 - **The tie-break may be absent**, and then the inclusive form is what goes out.
   A page is still drained by the pair within one round, so the stall is gone
   from the drain; a source that does not persist the second half re-offers the
   boundary millisecond on the next round, which is free. `supabase/tests/03`'s
   plan assertion covers both shapes — same index, same ordering.
 
-## Deviations from the contract in `rest/mod.rs`
+## Deployment additions to the contract in `rest/mod.rs`
 
-Everything the client depends on is unchanged: column names and types, the
-`select=` list, the conflict target, the `user_id` default, the four policies.
-The additions:
+The deployment adds the following constraints without changing the client's
+column names, types, `select=` list, conflict target, `user_id` default, or four
+policies:
 
-| Deviation | Why |
+| Addition | Why |
 |---|---|
 | `check` constraints mirroring `CloudItem::validate` (tombstone carries no payload, live row carries one, `item_id` charset, `created_at >= 0`) | The same rules the client already enforces, as a backstop for a writer that is not this client. Manifest 05 §5.3 is explicit that account compromise implies write access. |
 | Column-level INSERT/UPDATE grants | Retention-order forgery — see [Row-level security](#row-level-security). |
@@ -333,26 +291,15 @@ The additions:
 | The publication excludes DELETE | See [Realtime](#realtime). |
 | Metadata length caps (`content_type`, `origin_device_id`, 128 chars) | These columns are plaintext, and so are the only place bulk data could be stashed in the clear. |
 
-`rest/mod.rs` used to describe the read index as `(created_at asc, item_id
-desc)` while `fetch_since` sent `order=created_at.asc,item_id.asc` and
-`sync::pull::sort_page` sorted ascending on both. The code was consistent and the
-comment was stale; the comment now says `asc` on both, which is what the index
-here is. Building the index the old comment described would have cost an
-incremental sort on every page.
-
 ## What is not here
 
-- **Pin state does not cross this transport, and that is now a decision rather
-  than a silence.** Manifest 05 T-6 and §3.6 treat `pinned`/`pin_order` as
-  ordinary LWW fields that must travel; v2's `CloudItem` has no such columns, so
-  the table has none. The divergence is recorded in manifest 05 §3.6, together
-  with the thing it is entangled with: the daemon refuses a remote delete of a
-  pinned row *because* pin state does not sync, so carrying pin state means
-  revisiting that refusal in the same change. Neither half moves alone.
-- **No `expires_at`, no `content_hash`, no `blob_ref`, no `is_sensitive`, no
-  `app_bundle_id`.** All are in v1's schema; §7.6 lists the first three as dead
-  columns, `is_sensitive` is recomputed on the receiver from plaintext the
-  server never has, and sensitive items never leave the device at all.
+- **Pin state does not cross this transport.** Manifest 05 T-6 and §3.6 treat
+  `pinned`/`pin_order` as ordinary LWW fields that must travel; `CloudItem` has no
+  such columns, so the table has none. The divergence is recorded in manifest
+  05 §3.6, together with the thing it is entangled with: the daemon refuses a
+  remote delete of a pinned row *because* pin state does not sync, so carrying
+  pin state means revisiting that refusal in the same change. Neither half moves
+  alone.
 - **No storage bucket.** Large payloads go in the row; if that changes, the size
   backstop and Realtime's per-record limit are the two constraints to revisit.
 - **No `service_role` usage.** Nothing here needs a key that bypasses RLS, and

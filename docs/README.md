@@ -14,11 +14,11 @@
 | [ADR-0019](adr/0019-decode-realtime-jwt-subjects-without-verification.md) | Realtime JWT subjects are decoded only to form the server-verified subscription filter. |
 | [ADR-0020](adr/0020-windows-distribution-and-update-signing.md) | Windows ships through current-user NSIS with separate Authenticode and updater signatures. |
 | [ADR-0021](adr/0021-accept-the-glib-advisory-as-unshipped.md) | The glib advisory is accepted only for the unshipped Linux test subtree. |
-| [android-clipboard-access](rewrite/android-clipboard-access.md) | What Android lets a clipboard manager read, and what we ask the user for. A four-rung ladder with rung 0 (no permission) as the default and Shizuku as the one upgrade we build; v1's `READ_LOGS` approach is not ported. |
+| [android-clipboard-access](rewrite/android-clipboard-access.md) | What Android lets a clipboard manager read, and what we ask the user for. A four-rung ladder with rung 0 (no permission) as the default and Shizuku as the supported upgrade. |
 | [target-architecture](rewrite/target-architecture.md) | Which maintained crate does each job, and the short list of custom code that stays. |
 | [design/README](../design/README.md) | The visual system: shadcn/ui on Tailwind v4, zinc base in OKLCH, one token source in `design/tokens/`, and a contrast gate that measures composited pairs rather than asserting AA. |
 | [supabase-deployment](supabase-deployment.md) | What the server side of cloud sync is: one table, its RLS policies, its Realtime publication, and the retention job — plus where the deployment deviates from the contract in `copypaste-cloud/src/rest/mod.rs`. |
-| [cloud-privacy](cloud-privacy.md) | What the backend can see when cloud sync is on, what it cannot, and the two things that got worse than v1's account-less relay: an email address plus a metadata surface, and an account password that reaches the rows without decrypting them. |
+| [cloud-privacy](cloud-privacy.md) | What the backend can see when cloud sync is on, what it cannot, and how account access remains separate from content decryption. |
 
 ## Requirements and operating guides
 
@@ -35,4 +35,4 @@
 | | |
 |---|---|
 | [CLAUDE.md](../CLAUDE.md) | The working rules. |
-| [port-manifest/README](rewrite/port-manifest/README.md) | Which manifest sections are still requirements and which became reference material. Behaviour binds; the v1 byte formats and the v1 visuals do not. |
+| [port-manifest/README](rewrite/port-manifest/README.md) | Which manifest sections are current requirements and which are reference material. Behaviour binds; retired formats and visuals do not. |

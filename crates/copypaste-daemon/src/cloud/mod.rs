@@ -223,11 +223,9 @@ impl Cloud {
         CloudStatusData {
             configured: self.is_configured(),
             signed_in: account.is_some(),
-            // One and the same in v2: the key is derived during sign-in, so a
-            // session without a key cannot be constructed. v1 could be signed
-            // in with no passphrase and silently synced nothing; the field
-            // stays on the wire because a UI should be able to say which half
-            // is missing if that ever changes.
+            // The key is derived during sign-in, so a session without one
+            // cannot be constructed. The separate wire field lets the UI report
+            // which half is missing if that invariant ever changes.
             key_ready: account.is_some(),
             email: account.as_ref().map(|a| a.email.clone()),
             last_sync_ms: (last_sync_ms > 0).then_some(last_sync_ms),
@@ -404,10 +402,9 @@ pub fn note_version_written(state: &AppState, created_at_ms: i64) {
 ///
 /// The store already filters sensitive rows out of the outbound query; this is
 /// the second layer, and it exists because manifest 05 AT-56
-/// (`CopyPaste-20yw`) records that v1 had exactly one enforcement point and it
-/// had a hole. It calls the daemon's own detector rather than re-implementing a
-/// "quick check", which would be a second regex engine disagreeing with the one
-/// that ran at capture time.
+/// (`CopyPaste-20yw`) requires the regular upload and backlog sweep to enforce
+/// the same gate. It calls the daemon's own detector rather than implementing a
+/// second regex engine that could disagree with capture-time detection.
 fn sensitive_guard(state: &AppState) -> SensitiveGuard {
     let detector = Arc::clone(&state.detector);
     SensitiveGuard::new(move |item| {

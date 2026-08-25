@@ -66,7 +66,7 @@ mod tests {
     fn debug_for_a_session_shows_no_token() {
         let session = Session {
             access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret".into(),
-            refresh_token: "v1-refresh-secret".into(),
+            refresh_token: "refresh-secret".into(),
             user_id: "user-uuid-1".into(),
             expires_at_ms: 1_700_000_000_000,
         };
@@ -76,7 +76,7 @@ mod tests {
             "access token leaked: {rendered}"
         );
         assert!(
-            !rendered.contains("v1-refresh-secret"),
+            !rendered.contains("refresh-secret"),
             "refresh token leaked: {rendered}"
         );
         assert!(rendered.contains("<redacted>"));

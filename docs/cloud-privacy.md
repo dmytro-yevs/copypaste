@@ -1,10 +1,8 @@
 # What cloud sync discloses
 
 Cloud sync is optional and off until an account is signed in. This page says
-what the backend can see when it is on, what it cannot, and how that differs
-from the v1 relay it replaces. It is the documentation manifest 05 §5.4 item 3
-asks for, and its claims are the ones `supabase/tests/01_schema_audit.sql`
-asserts against the schema.
+what the backend can see when it is on and what it cannot. Its claims are the
+ones `supabase/tests/01_schema_audit.sql` asserts against the schema.
 
 Peer-to-peer sync and local history disclose nothing to any server.
 
@@ -69,20 +67,11 @@ The consequences are worth knowing:
 - An operator with a copy of the database has at most a day of ciphertext, not a
   corpus to attack offline later.
 
-## What is worse than v1, and by how much
+## Account access and decryption use separate secrets
 
-v1 synced through a relay that knew nothing but an opaque inbox identifier
-derived from the sync key, and required no account. Supabase requires an account
-and sees the metadata listed above. This is a **real regression in metadata
-privacy**, taken deliberately: the relay was 12,000 lines of server we
-maintained, and the alternative to running it was not running anything.
-
-Content confidentiality is unchanged — end-to-end encrypted in both.
-
-There is a second consequence, and it is the sharper one. In v1 the secret that
-reached the data and the secret that decrypted it were the same secret. They are
-now different: the **account password** gates access to the rows, and the **sync
-passphrase** decrypts them.
+The **account password** gates access to the rows, while the **sync passphrase**
+decrypts and authenticates them. The backend therefore learns the account email
+and the metadata listed above even though it cannot read clipboard content.
 
 Someone who compromises the account but not the passphrase therefore can:
 
