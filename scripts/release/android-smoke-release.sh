@@ -346,6 +346,7 @@ PY
         --commit "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
         --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
         --elapsed-ms "$paint_elapsed_ms" \
+        --feature-state devices=scan-pairing-code \
         --artifact screenshot=pairing-entry.png \
         --artifact accessibility=pairing-entry.xml \
         --artifact measurement=latency.json \

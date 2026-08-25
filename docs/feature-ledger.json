@@ -77,6 +77,7 @@
         }
       },
       "release_evidence": [
+        "release-android-physical-evidence",
         "release-android-smoke-evidence",
         "release-android-api33-smoke-evidence",
         "release-macos-native-evidence",
@@ -159,6 +160,7 @@
         }
       },
       "release_evidence": [
+        "release-android-physical-evidence",
         "release-android-smoke-evidence",
         "release-android-api33-smoke-evidence",
         "release-macos-native-evidence",
@@ -218,12 +220,12 @@
         "android": {
           "scenario": "./scripts/release/android-smoke-release.sh",
           "evidence_status": "verified",
-          "screenshot": "artifacts/release-android-smoke/pairing-entry.png",
-          "ax_log": "artifacts/release-android-smoke/pairing-entry.xml",
+          "screenshot": "artifacts/release-android-physical/pairing-entry.png",
+          "ax_log": "artifacts/release-android-physical/pairing-entry.xml",
           "evidence_states": [
             "scan-pairing-code"
           ],
-          "release_artifact": "release-android-smoke-evidence"
+          "release_artifact": "release-android-physical-evidence"
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
@@ -251,6 +253,7 @@
         }
       },
       "release_evidence": [
+        "release-android-physical-evidence",
         "release-android-smoke-evidence",
         "release-android-api33-smoke-evidence",
         "release-macos-native-evidence",
@@ -377,6 +380,7 @@
       "release_evidence": [
         "release-android-storage-evidence",
         "release-android-api33-smoke-evidence",
+        "release-android-physical-evidence",
         "release-macos-native-evidence",
         "release-windows-native-evidence",
         "release-android-smoke-evidence"
@@ -470,6 +474,7 @@
       "release_evidence": [
         "release-android-cloud-evidence",
         "release-android-api33-smoke-evidence",
+        "release-android-physical-evidence",
         "release-macos-cloud-evidence",
         "release-macos-native-evidence",
         "release-windows-native-evidence",

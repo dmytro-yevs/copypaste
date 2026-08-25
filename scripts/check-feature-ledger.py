@@ -24,13 +24,13 @@ from feature_ledger_evidence import (
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "docs/feature-ledger.json"
 LEDGER_SCHEMA = ROOT / "docs/feature-ledger.schema.json"
-HANDLER = ROOT / "crates/copypaste-ui/src-tauri/src/lib.rs"
 COMMAND_INVENTORY = ROOT / "crates/copypaste-ui/src/generated/ui-command-inventory.json"
 FORBIDDEN = re.compile(r"\b(?:todo|tbd|waiv(?:e|ed|er)|placeholder)\b", re.I)
 CLOUD_STATES = {"unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"}
 CLOUD_RELEASE = {
     "release-android-api33-smoke-evidence",
     "release-android-cloud-evidence",
+    "release-android-physical-evidence",
     "release-android-smoke-evidence",
     "release-macos-cloud-evidence",
     "release-macos-native-evidence",
@@ -42,7 +42,7 @@ CLOUD_UI_TEST_FILE = "crates/copypaste-ui/src/features/settings/patterns/CloudSy
 SHIPPED_PLATFORMS = {"android", "macos", "windows"}
 PERFORMANCE_PLATFORMS = SHIPPED_PLATFORMS
 REQUIRED_RELEASE = {
-    "release-android-smoke-evidence",
+    "release-android-physical-evidence",
     "release-macos-native-evidence",
     "release-windows-native-evidence",
 }
@@ -93,17 +93,13 @@ def inventory_commands(document):
 
 
 def shipped_commands(root=ROOT):
-    if COMMAND_INVENTORY.is_file():
-        try:
-            return inventory_commands(json.loads(COMMAND_INVENTORY.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError, ValueError) as error:
-            raise ValueError(str(error)) from None
-    source = (root / HANDLER.relative_to(ROOT)).read_text(encoding="utf-8")
+    inventory = root / COMMAND_INVENTORY.relative_to(ROOT)
     try:
-        block = source.split("tauri::generate_handler![", 1)[1].split("]", 1)[0]
-    except IndexError:
+        return inventory_commands(json.loads(inventory.read_text(encoding="utf-8")))
+    except FileNotFoundError:
         raise ValueError("generated UI command inventory is missing") from None
-    return set(re.findall(r"^\s*(?:[a-z_]+::)+([a-z_]+),", block, re.MULTILINE))
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError(str(error)) from None
 
 
 def contract_errors(shipped, features):
@@ -413,7 +409,7 @@ def self_test():
         (root / "scripts").mkdir()
         (root / ".github/workflows").mkdir(parents=True)
         artifact_names = {
-            "android": "release-android-smoke-evidence",
+            "android": "release-android-physical-evidence",
             "macos": "release-macos-native-evidence",
             "windows": "release-windows-native-evidence",
         }
@@ -471,7 +467,7 @@ def self_test():
         checks.append((
             "artifact provenance retains the producing workflow job",
             producer_jobs == {
-                "release-android-smoke-evidence": "android",
+                "release-android-physical-evidence": "android",
                 "release-macos-native-evidence": "macos",
                 "release-windows-native-evidence": "windows",
             },
