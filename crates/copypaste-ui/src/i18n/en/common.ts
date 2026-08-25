@@ -43,6 +43,7 @@ export const errors = {
     "CopyPaste couldn't reach this device's key store, so your history stayed locked.",
   key_unusable:
     "This device's encryption key can't be used, so its clipboard history can't be unlocked.",
+  unsupported_content: "That item can't be copied in the requested format.",
   /** Pairing and sync. Each names the next step, because that is the whole
    *  difference between these and the one sentence they used to share. */
   pairing_code:

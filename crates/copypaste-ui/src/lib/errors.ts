@@ -26,6 +26,7 @@ const FRIENDLY = {
   auth_failed: "errors.auth_failed",
   key_locked: "errors.key_locked",
   key_unusable: "errors.key_unusable",
+  unsupported_content: "errors.unsupported_content",
   pairing_code: "errors.pairing_code",
   pairing_address: "errors.pairing_address",
   rate_limited: "errors.rate_limited",
