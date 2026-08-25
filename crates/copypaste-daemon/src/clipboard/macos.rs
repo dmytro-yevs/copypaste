@@ -298,25 +298,24 @@ impl ClipboardSource for MacOsClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        use copypaste_core::ClipboardWriteError;
+
         let uti = match content_type {
             copypaste_ipc::content_type::IMAGE_PNG => UTI_PNG,
             copypaste_ipc::content_type::IMAGE_TIFF => UTI_TIFF,
             copypaste_ipc::content_type::FILE => UTI_FILE_URL,
             _ => {
-                return Err(anyhow::anyhow!(
-                    "the pasteboard cannot write this binary content type"
-                ));
+                return Err(ClipboardWriteError::UnsupportedContent);
             }
         };
         let file_url = if content_type == copypaste_ipc::content_type::FILE {
-            let metadata =
-                metadata.ok_or_else(|| anyhow::anyhow!("file metadata is unavailable"))?;
-            let path = self.staging.materialize(bytes, metadata)?;
-            Some(
-                url::Url::from_file_path(path)
-                    .map_err(|_| anyhow::anyhow!("could not materialize file paste"))?,
-            )
+            let metadata = metadata.ok_or(ClipboardWriteError::Failed)?;
+            let path = self
+                .staging
+                .materialize(bytes, metadata)
+                .map_err(|_| ClipboardWriteError::Failed)?;
+            Some(url::Url::from_file_path(path).map_err(|_| ClipboardWriteError::Failed)?)
         } else {
             None
         };
@@ -335,7 +334,7 @@ impl ClipboardSource for MacOsClipboard {
                 .arm(unsafe { pb.clearContents() } as i64);
             if !unsafe { pb.setData_forType(Some(&data), &uti) } {
                 self.tracker.sentinel.clear();
-                return Err(anyhow::anyhow!("the pasteboard rejected the binary write"));
+                return Err(ClipboardWriteError::Failed);
             }
             let actual = unsafe { pb.changeCount() } as i64;
             if actual != pre + SELF_WRITE_DELTA {

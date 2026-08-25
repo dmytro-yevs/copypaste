@@ -68,7 +68,7 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn copy_as_plain_text(&self, id: &str) -> Result<Item> {
-        items::copy(self, id).await
+        items::copy_plain_text(self, id).await
     }
 
     async fn delete(&self, id: &str) -> Result<()> {
@@ -293,10 +293,24 @@ mod tests {
     #[derive(Default)]
     pub(super) struct FakeClipboard(Mutex<Vec<String>>);
 
+    impl FakeClipboard {
+        pub(super) fn entries(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
     impl Clipboard for Arc<FakeClipboard> {
-        fn set_text(&self, text: &str) -> std::result::Result<(), &'static str> {
-            self.0.lock().unwrap().push(text.to_string());
-            Ok(())
+        fn write(
+            &self,
+            payload: &copypaste_core::ClipboardPayload,
+        ) -> std::result::Result<(), copypaste_core::ClipboardWriteError> {
+            match payload {
+                copypaste_core::ClipboardPayload::Text(text) => {
+                    self.0.lock().unwrap().push(text.to_string());
+                    Ok(())
+                }
+                _ => Err(copypaste_core::ClipboardWriteError::UnsupportedContent),
+            }
         }
     }
 

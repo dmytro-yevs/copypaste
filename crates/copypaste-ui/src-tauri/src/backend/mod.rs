@@ -178,6 +178,8 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
     ///
     /// This is the backend half of Quick Paste's ⌥Enter action. It remains an
     /// id-based operation, so a sensitive item still never enters the WebView.
+    /// Only `text` and `text/*` rows have this representation; binary rows are
+    /// refused instead of copying their UI placeholder.
     async fn copy_as_plain_text(&self, id: &str) -> Result<Item>;
 
     async fn delete(&self, id: &str) -> Result<()>;

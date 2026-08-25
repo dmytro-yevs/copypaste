@@ -34,11 +34,25 @@ pub struct FakeClipboard {
 
 /// Everything written to a [`FakeClipboard`], shared with whoever made it.
 #[derive(Default, Clone)]
-pub struct WriteLog(Arc<std::sync::Mutex<Vec<String>>>);
+pub struct WriteLog(Arc<std::sync::Mutex<Vec<WrittenPayload>>>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WrittenPayload {
+    Text(String),
+    Image(Vec<u8>),
+    File {
+        bytes: Vec<u8>,
+        metadata: Option<copypaste_core::FileMetadata>,
+    },
+}
 
 impl WriteLog {
     pub fn count(&self) -> usize {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn entries(&self) -> Vec<WrittenPayload> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -71,7 +85,33 @@ impl ClipboardSource for FakeClipboard {
             .0
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push(text.to_string());
+            .push(WrittenPayload::Text(text.to_string()));
+        Ok(())
+    }
+
+    fn write_payload(
+        &mut self,
+        _item_id: &str,
+        payload: &copypaste_core::ClipboardPayload,
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        use copypaste_core::{ClipboardPayload, ClipboardWriteError};
+
+        let written = match payload {
+            ClipboardPayload::Text(text) => WrittenPayload::Text(text.to_string()),
+            ClipboardPayload::Image { bytes, .. } => WrittenPayload::Image(bytes.to_vec()),
+            ClipboardPayload::File { bytes, metadata } => WrittenPayload::File {
+                bytes: bytes.to_vec(),
+                metadata: metadata.clone(),
+            },
+            ClipboardPayload::Unsupported { .. } => {
+                return Err(ClipboardWriteError::UnsupportedContent);
+            }
+        };
+        self.writes
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(written);
         Ok(())
     }
     fn backend_name(&self) -> &'static str {

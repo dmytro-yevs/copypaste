@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use copypaste_core::{decrypt, open_binary, origin_or, thumbnail_png, StoredItem};
+use copypaste_core::{open_binary, origin_or, thumbnail_png, ClipboardPayload, StoredItem};
 use copypaste_ipc::{ImagePreview, Item};
 
 use super::open::Inner;
@@ -30,39 +30,32 @@ impl Inner {
             .store
             .device_names(std::slice::from_ref(&device_id))
             .unwrap_or_default();
-        self.to_wire_with(row, &names)
+        self.to_wire_with(row, &names).map(|(item, _)| item)
     }
 
     /// [`Inner::to_wire`] with the page's device names already resolved.
-    fn to_wire_with(&self, row: StoredItem, names: &HashMap<String, String>) -> Result<Item> {
+    fn to_wire_with(
+        &self,
+        row: StoredItem,
+        names: &HashMap<String, String>,
+    ) -> Result<(Item, ClipboardPayload)> {
         let key = self.state.keyring.item_key();
-        let plaintext = if copypaste_ipc::content_type::is_binary(&row.content_type) {
-            open_binary(&row.content_ciphertext, &key, &row.id)
-        } else {
-            decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
-        }
-        .map_err(|_| BackendError::internal("that item could not be decrypted"))?;
+        let payload = ClipboardPayload::open(&row, &key)
+            .map_err(|_| BackendError::internal("that item could not be decrypted"))?;
         // A row captured here stores no origin; substituting this device's id
         // is what makes the field mean the same thing on both platforms
         // (`copypaste_core::origin_or`). The name is `None` rather than a guess
         // until a session with that device has told us one.
         let device_id = origin_or(&row.origin_device_id, &self.state.device_id).to_string();
         let origin_device_name = names.get(&device_id).cloned();
-        let content = if copypaste_ipc::content_type::is_binary(&row.content_type) {
-            format!(
-                "[{}]",
-                copypaste_ipc::content_type::label(&row.content_type)
-            )
-        } else {
-            String::from_utf8_lossy(&plaintext).into_owned()
-        };
+        let content = payload.display_text();
         let sensitive_finding = (!row.is_sensitive
             && copypaste_ipc::content_type::is_text(&row.content_type))
         .then(|| self.state.detector.inert_finding_metadata(&content))
         .flatten();
         let too_large_to_sync =
-            copypaste_cloud::sync::too_large_to_sync(&row.content_type, plaintext.len());
-        Ok(Item {
+            copypaste_cloud::sync::too_large_to_sync(&row.content_type, payload.byte_len());
+        let item = Item {
             id: row.id,
             content,
             content_type: row.content_type,
@@ -76,7 +69,8 @@ impl Inner {
             source_app_name: row.app_name,
             too_large_to_sync,
             truncated: false,
-        })
+        };
+        Ok((item, payload))
     }
 
     /// Decrypt a page, dropping any row that will not open — and **counting**
@@ -104,7 +98,7 @@ impl Inner {
         for row in rows {
             let id = row.id.clone();
             match self.to_wire_with(row, &names) {
-                Ok(item) => page.items.push(item),
+                Ok((item, _)) => page.items.push(item),
                 Err(_) => {
                     tracing::warn!(%id, "skipping an item that failed to decrypt");
                     page.skipped_undecryptable = page.skipped_undecryptable.saturating_add(1);
@@ -115,8 +109,20 @@ impl Inner {
     }
 
     pub(super) fn fetch(&self, id: &str) -> Result<Item> {
+        self.fetch_with_payload(id).map(|(item, _)| item)
+    }
+
+    pub(super) fn fetch_with_payload(&self, id: &str) -> Result<(Item, ClipboardPayload)> {
         match self.state.store.get(id) {
-            Ok(Some(row)) => self.to_wire(row),
+            Ok(Some(row)) => {
+                let device_id = origin_or(&row.origin_device_id, &self.state.device_id).to_string();
+                let names = self
+                    .state
+                    .store
+                    .device_names(std::slice::from_ref(&device_id))
+                    .unwrap_or_default();
+                self.to_wire_with(row, &names)
+            }
             Ok(None) => Err(BackendError::NotFound(MSG_NO_ITEM)),
             Err(_) => Err(BackendError::internal("history could not be read")),
         }

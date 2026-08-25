@@ -330,12 +330,18 @@ struct AppClipboard<R: tauri::Runtime> {
 
 #[cfg(target_os = "android")]
 impl<R: tauri::Runtime> backend::embedded::Clipboard for AppClipboard<R> {
-    fn set_text(&self, text: &str) -> Result<(), &'static str> {
+    fn write(
+        &self,
+        payload: &copypaste_core::ClipboardPayload,
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
+        let copypaste_core::ClipboardPayload::Text(text) = payload else {
+            return Err(copypaste_core::ClipboardWriteError::UnsupportedContent);
+        };
         self.app
             .clipboard()
             .write_text(text.to_string())
-            .map_err(|_| "That item couldn't be copied to the clipboard.")
+            .map_err(|_| copypaste_core::ClipboardWriteError::Failed)
     }
 }
 

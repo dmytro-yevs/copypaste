@@ -327,31 +327,30 @@ impl ClipboardSource for WindowsClipboard {
         content_type: &str,
         bytes: &[u8],
         _metadata: Option<&copypaste_core::FileMetadata>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        use copypaste_core::ClipboardWriteError;
+
         if content_type == copypaste_ipc::content_type::FILE {
             // File paste-back needs a managed plaintext staging directory.
-            return Err(anyhow::anyhow!(
-                "this build cannot paste a file back on Windows"
-            ));
+            return Err(ClipboardWriteError::UnsupportedContent);
         }
         if !matches!(
             copypaste_ipc::content_type::classify(content_type),
             copypaste_ipc::content_type::Kind::Image
         ) {
-            return Err(anyhow::anyhow!(
-                "the clipboard cannot write this binary content type"
-            ));
+            return Err(ClipboardWriteError::UnsupportedContent);
         }
         // The clipboard's own image format is a bitmap; PNG on the clipboard is
         // a convention some applications follow and many do not.
         let bitmap = transcode::to_bitmap(bytes, copypaste_ipc::MAX_DECODED_IMAGE_MB)
-            .ok_or_else(|| anyhow::anyhow!("the image could not be converted for the clipboard"))?;
+            .ok_or(ClipboardWriteError::Failed)?;
         self.write(move || {
             // `set_bitmap` does not clear, so the previous owner's other
             // representations would survive beside ours.
             raw::empty()?;
             raw::set_bitmap(&bitmap)
         })
+        .map_err(|_| ClipboardWriteError::Failed)
     }
 
     fn backend_name(&self) -> &'static str {

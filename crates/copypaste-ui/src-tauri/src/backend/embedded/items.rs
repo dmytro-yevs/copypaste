@@ -9,7 +9,9 @@ use copypaste_core::{
 };
 use copypaste_ipc::{ImagePreview, Item};
 
-use super::messages::{MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_TOO_LARGE};
+use super::messages::{
+    MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_TOO_LARGE, MSG_UNSUPPORTED_CONTENT,
+};
 use super::rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 use super::EmbeddedBackend;
 use crate::backend::{BackendError, CaptureWrite, Page, Result};
@@ -179,16 +181,125 @@ pub(super) async fn copy(backend: &EmbeddedBackend, id: &str) -> Result<Item> {
     let id = id.to_string();
     backend
         .blocking(move |inner| {
-            let item = inner.fetch(&id)?;
-            // Clipboard errors are static by contract, so no caller-supplied
-            // path or content can be interpolated into the user-facing error.
-            inner
-                .clipboard
-                .set_text(&item.content)
-                .map_err(|message| BackendError::Internal(message.to_string()))?;
+            let (item, payload) = inner.fetch_with_payload(&id)?;
+            inner.clipboard.write(&payload).map_err(clipboard_error)?;
             Ok(item)
         })
         .await
+}
+
+pub(super) async fn copy_plain_text(backend: &EmbeddedBackend, id: &str) -> Result<Item> {
+    let id = id.to_string();
+    backend
+        .blocking(move |inner| {
+            let (item, payload) = inner.fetch_with_payload(&id)?;
+            if payload.plain_text().is_none() {
+                return Err(BackendError::UnsupportedContent(MSG_UNSUPPORTED_CONTENT));
+            }
+            inner.clipboard.write(&payload).map_err(clipboard_error)?;
+            Ok(item)
+        })
+        .await
+}
+
+fn clipboard_error(error: copypaste_core::ClipboardWriteError) -> BackendError {
+    match error {
+        copypaste_core::ClipboardWriteError::UnsupportedContent => {
+            BackendError::UnsupportedContent(MSG_UNSUPPORTED_CONTENT)
+        }
+        copypaste_core::ClipboardWriteError::Failed => {
+            BackendError::internal("that item could not be copied to the clipboard")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::backend;
+    use super::*;
+    use crate::backend::Backend;
+
+    fn binary(
+        backend: &EmbeddedBackend,
+        content_type: &str,
+        bytes: &[u8],
+        metadata: Option<&copypaste_core::FileMetadata>,
+    ) -> copypaste_core::StoredItem {
+        copypaste_core::ingest_binary_into_with_capture_context(
+            &backend.inner.state.store,
+            &backend.inner.state.keyring,
+            bytes,
+            content_type,
+            copypaste_core::now_ms(),
+            false,
+            None,
+            metadata,
+            &backend.inner.settings(),
+        )
+        .unwrap()
+        .into_item()
+    }
+
+    #[tokio::test]
+    async fn text_copy_uses_the_full_authenticated_body_not_the_list_preview() {
+        let (backend, clipboard, _dir) = backend();
+        let body = "x".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES * 2);
+        let item = backend.add(&body).await.unwrap();
+        let listed = backend.list(20, None).await.unwrap();
+        assert!(listed.items[0].truncated);
+        assert_ne!(listed.items[0].content, body);
+
+        backend.copy(&item.id).await.unwrap();
+        backend.copy_as_plain_text(&item.id).await.unwrap();
+        assert_eq!(clipboard.entries(), vec![body.clone(), body]);
+    }
+
+    #[tokio::test]
+    async fn android_refuses_binary_and_unknown_content_without_writing_labels() {
+        let (backend, clipboard, _dir) = backend();
+        let metadata =
+            copypaste_core::FileMetadata::new("report.bin", "application/octet-stream").unwrap();
+        let image = binary(
+            &backend,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            b"image bytes",
+            None,
+        );
+        let file = binary(
+            &backend,
+            copypaste_ipc::content_type::FILE,
+            b"file bytes",
+            Some(&metadata),
+        );
+        let unknown = binary(&backend, "application/x-future", b"future bytes", None);
+
+        for row in [&image, &file, &unknown] {
+            for error in [
+                backend.copy(&row.id).await.unwrap_err(),
+                backend.copy_as_plain_text(&row.id).await.unwrap_err(),
+            ] {
+                assert!(
+                    matches!(error, BackendError::UnsupportedContent(_)),
+                    "{error:?}"
+                );
+                assert_eq!(error.ui_error().code, "unavailable");
+                assert!(!error.ui_error().retryable);
+            }
+        }
+        assert!(clipboard.entries().is_empty());
+
+        let labels: Vec<String> = backend
+            .list(20, None)
+            .await
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|item| item.content)
+            .collect();
+        for label in ["[image]", "[file]", "[unsupported]"] {
+            assert!(labels.iter().any(|content| content == label), "{label}");
+        }
+    }
 }
 
 pub(super) async fn delete(backend: &EmbeddedBackend, id: &str) -> Result<()> {
