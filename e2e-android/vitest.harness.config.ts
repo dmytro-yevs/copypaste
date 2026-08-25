@@ -6,6 +6,6 @@ import { defineConfig } from "vitest/config";
 // a hosted emulator leg to find.
 export default defineConfig({
   test: {
-    include: ["**/*.harness.test.ts"],
+    include: ["**/*.harness.test.ts", "tests/harness-guard.android.test.ts"],
   },
 });

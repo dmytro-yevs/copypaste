@@ -59,7 +59,39 @@ pub fn load_inputs(root: &Path) -> Result<Inputs> {
     let config_text = fs::read_to_string(&config_path)?;
     let config: GitleaksConfig =
         toml::from_str(&config_text).with_context(|| format!("parse {}", config_path.display()))?;
-    resolve(selection, config)
+    let inputs = resolve(selection, config)?;
+    validate_publication_redaction(&inputs)?;
+    Ok(inputs)
+}
+
+fn validate_publication_redaction(inputs: &Inputs) -> Result<()> {
+    let source = &inputs.selection.source;
+    if source.publication_redaction_decision.trim().is_empty() {
+        bail!("source.publication_redaction_decision must explain the publication boundary");
+    }
+    if source.publication_redaction_rules.is_empty() {
+        bail!("source.publication_redaction_rules must select at least one rule");
+    }
+    let mut selected = BTreeSet::new();
+    for name in &source.publication_redaction_rules {
+        if !selected.insert(name) {
+            bail!("publication redaction rule {name} is selected more than once");
+        }
+        let rule = inputs
+            .rules
+            .iter()
+            .find(|rule| rule.name == *name)
+            .with_context(|| format!("publication redaction rule {name} is absent"))?;
+        if rule.secret_group != 0 {
+            bail!("publication redaction rule {name} does not redact its complete match");
+        }
+        for unsupported in ["(?i", "(?m", "(?s", "(?-", "(?P<", "\\p{"] {
+            if rule.pattern.contains(unsupported) {
+                bail!("publication redaction rule {name} uses non-ECMAScript syntax {unsupported}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {

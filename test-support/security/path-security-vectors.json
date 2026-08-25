@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "displayLeakCases": [
+    {
+      "id": "parent-traversal-posix",
+      "surface": "Could not open ../outside/device.key",
+      "expectedRule": "parent-traversal"
+    },
+    {
+      "id": "parent-traversal-windows",
+      "surface": "Could not open ..\\outside\\device.key",
+      "expectedRule": "parent-traversal"
+    },
+    {
+      "id": "arbitrary-posix-root",
+      "surface": "State is stored under /srv-copypaste/private/device.key",
+      "expectedRule": "absolute-posix"
+    },
+    {
+      "id": "single-segment-posix-root",
+      "surface": "State directory: /vault",
+      "expectedRule": "absolute-posix"
+    },
+    {
+      "id": "windows-drive-backslash",
+      "surface": "State is stored under Z:\\Profiles\\alice\\device.key",
+      "expectedRule": "windows-drive"
+    },
+    {
+      "id": "windows-drive-forward-slash",
+      "surface": "State is stored under D:/Profiles/alice/device.key",
+      "expectedRule": "windows-drive"
+    },
+    {
+      "id": "windows-unc",
+      "surface": "State is stored under \\\\fileserver\\private-share\\alice",
+      "expectedRule": "windows-unc"
+    },
+    {
+      "id": "home-relative",
+      "surface": "State is stored under ~/.copypaste/state",
+      "expectedRule": "home-relative"
+    },
+    {
+      "id": "file-uri",
+      "surface": "State URL is file:///opt/copypaste/state.db",
+      "expectedRule": "file-uri"
+    },
+    {
+      "id": "environment-home",
+      "surface": "State is stored under $HOME/.copypaste",
+      "expectedRule": "path-variable"
+    },
+    {
+      "id": "android-private-database-name",
+      "platform": "android",
+      "surface": "Database copypaste-v2.db could not be opened",
+      "expectedRule": "android-private-database"
+    }
+  ],
+  "safeDisplayCases": [
+    {
+      "id": "https-url",
+      "surface": "Read https://example.com/help/getting-started"
+    },
+    {
+      "id": "app-route",
+      "surface": "Open settings/security to continue"
+    },
+    {
+      "id": "fraction",
+      "surface": "Synced 2/3 devices"
+    },
+    {
+      "id": "plain-database-word",
+      "surface": "Database unavailable"
+    }
+  ],
+  "artifactContainmentCases": [
+    {
+      "id": "parent-traversal",
+      "kind": "traversal",
+      "root": "evidence",
+      "entries": ["evidence/accepted.json", "evidence/../outside.json"],
+      "expected": "reject"
+    },
+    {
+      "id": "case-collision",
+      "kind": "case_collision",
+      "root": "evidence",
+      "entries": ["evidence/Failure.json", "evidence/failure.json"],
+      "expected": "reject"
+    },
+    {
+      "id": "symlinked-parent",
+      "kind": "symlink_parent",
+      "root": "evidence",
+      "entries": ["evidence/link/record.json"],
+      "link": { "path": "evidence/link", "target": "../outside" },
+      "expected": "reject"
+    },
+    {
+      "id": "symlinked-leaf",
+      "kind": "symlink_leaf",
+      "root": "evidence",
+      "entries": ["evidence/record.json"],
+      "link": { "path": "evidence/record.json", "target": "../outside.json" },
+      "expected": "reject"
+    },
+    {
+      "id": "hardlink-alias",
+      "kind": "hardlink_alias",
+      "root": "evidence",
+      "entries": ["evidence/first.json", "evidence/alias.json"],
+      "sameFile": ["evidence/first.json", "evidence/alias.json"],
+      "expected": "reject"
+    },
+    {
+      "id": "duplicate-resolved-file",
+      "kind": "duplicate_resolved",
+      "root": "evidence",
+      "entries": ["evidence/nested/../record.json", "evidence/record.json"],
+      "expected": "reject"
+    }
+  ]
+}

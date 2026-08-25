@@ -7,19 +7,35 @@
  * Its own module so the guard that proves it can run without a device: every
  * other harness file reaches `adb.ts`, which shells out at import time.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const REDACTED = "[redacted fixture]";
 
-/**
- * `AKIA[0-9A-Z]{16}` — the `aws_access_key` rule in
- * `crates/copypaste-core/src/sensitive/rules_generated.rs` that the seeded
- * fixtures are shaped to trip. Registration covers what this harness minted;
- * the shape covers what it did not, so publication is not a function of
- * somebody remembering to register.
- */
-const SENSITIVE_SHAPE = /AKIA[0-9A-Z]{16}/g;
+type PublicationRedaction = Readonly<{
+  schemaVersion: 1;
+  source: "config/sensitive-rules.toml";
+  patterns: readonly Readonly<{ rule: string; pattern: string }>[];
+}>;
+
+const policy = JSON.parse(
+  readFileSync(
+    new URL("../../../config/sensitive-publication-redaction.json", import.meta.url),
+    "utf8",
+  ),
+) as PublicationRedaction;
+
+if (
+  policy.schemaVersion !== 1 ||
+  policy.source !== "config/sensitive-rules.toml" ||
+  !Array.isArray(policy.patterns) ||
+  policy.patterns.length === 0 ||
+  policy.patterns.some(({ rule, pattern }) => !rule || !pattern)
+) {
+  throw new Error("unsupported publication-redaction policy");
+}
+
+const SENSITIVE_PATTERNS = policy.patterns.map(({ pattern }) => new RegExp(pattern, "gu"));
 
 const redactions = new Set<string>();
 
@@ -36,7 +52,8 @@ function redactFixtures(text: string): string {
   for (const secret of [...redactions].sort((a, b) => b.length - a.length)) {
     out = out.split(secret).join(REDACTED);
   }
-  return out.replace(SENSITIVE_SHAPE, REDACTED);
+  for (const pattern of SENSITIVE_PATTERNS) out = out.replace(pattern, REDACTED);
+  return out;
 }
 
 /** The only way this harness writes a file a run publishes, enforced by the

@@ -70,11 +70,19 @@ describe("failure evidence", () => {
     expect(written).not.toMatch(/AKIA[0-9A-Z]{16}/);
   });
 
-  test("redacts a credential this harness never minted", () => {
-    const written = published({ rows: [{ text: "arrived from the device AKIAZZZZ0123456789AB" }] });
+  test("redacts canonical credential families this harness never minted", () => {
+    const secrets = [
+      "AKIAZZZZ0123456789AB",
+      `ghp_${"A".repeat(36)}`,
+      `sk-proj-${"B".repeat(48)}`,
+      "xoxb-1234567890-1234567890ABCDEF",
+      `whsec_${"D".repeat(32)}`,
+      `glpat-${"c".repeat(20)}`,
+    ];
+    const written = published({ rows: secrets.map((text) => ({ text })) });
 
-    expect(written).not.toContain("AKIAZZZZ0123456789AB");
-    expect(written).not.toMatch(/AKIA[0-9A-Z]{16}/);
+    for (const secret of secrets) expect(written).not.toContain(secret);
+    expect(written.match(/\[redacted fixture\]/g)).toHaveLength(secrets.length);
   });
 
   // What INV-1 and INV-5 are diagnosed from; redaction must not cost it.
