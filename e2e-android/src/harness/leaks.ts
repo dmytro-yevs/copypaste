@@ -9,6 +9,10 @@
  */
 import { expect } from "vitest";
 
+import {
+  ANDROID_PATH_LEAK_PATTERNS,
+  findFilesystemPathLeaks,
+} from "../../../test-support/security/path-leaks.js";
 import { PACKAGE } from "./adb.js";
 import type { AndroidApp } from "./app.js";
 
@@ -44,16 +48,19 @@ export async function outerHtml(app: AndroidApp): Promise<string> {
   return app.withPage((page) => page.evaluate(() => document.documentElement.outerHTML));
 }
 
-/** INV-12 / CLAUDE.md rule 4. */
+/** INV-12 / AGENTS.md rule 4. */
 export function expectNoFilesystemPath(surface: string, ...forbidden: readonly string[]): void {
-  for (const literal of forbidden) expect(surface).not.toContain(literal);
-  expect(surface).not.toContain(`/data/data/${PACKAGE}`);
-  expect(surface).not.toContain(`/data/user/0/${PACKAGE}`);
-  expect(surface).not.toContain("copypaste-v2.db");
-  expect(surface).not.toMatch(/\.sock\b/);
-  expect(surface).not.toMatch(/\/(?:data|storage|sdcard)\/[A-Za-z0-9._-]+\//);
-  expect(surface).not.toMatch(/\/(?:Users|home|private|var|tmp)\//);
-  expect(surface).not.toMatch(/[A-Za-z]:\\/);
+  expect(
+    findFilesystemPathLeaks(surface, {
+      forbidden: [
+        ...forbidden,
+        `/data/data/${PACKAGE}`,
+        `/data/user/0/${PACKAGE}`,
+      ],
+      additions: ANDROID_PATH_LEAK_PATTERNS,
+    }),
+    "filesystem path leaked to the accessible surface",
+  ).toEqual([]);
 }
 
 export function expectNoRawError(html: string): void {

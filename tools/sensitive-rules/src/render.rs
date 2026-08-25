@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 use anyhow::Result;
+use serde::Serialize;
 
 use crate::schema::{Allowlist, Category, Condition, Inputs, Rule, Target, Validator};
 
@@ -67,6 +68,46 @@ pub fn render(inputs: &Inputs) -> Result<String> {
     }
     writeln!(out, "];")?;
     Ok(out)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PublicationRedaction<'a> {
+    schema_version: u8,
+    source: &'a str,
+    patterns: Vec<PublicationPattern<'a>>,
+}
+
+#[derive(Serialize)]
+struct PublicationPattern<'a> {
+    rule: &'a str,
+    pattern: &'a str,
+}
+
+pub fn render_publication_redaction(inputs: &Inputs) -> Result<String> {
+    let patterns = inputs
+        .selection
+        .source
+        .publication_redaction_rules
+        .iter()
+        .map(|name| {
+            let rule = inputs
+                .rules
+                .iter()
+                .find(|rule| rule.name == *name)
+                .expect("publication rules were validated while loading inputs");
+            PublicationPattern {
+                rule: &rule.name,
+                pattern: &rule.pattern,
+            }
+        })
+        .collect();
+    let document = PublicationRedaction {
+        schema_version: 1,
+        source: "config/sensitive-rules.toml",
+        patterns,
+    };
+    Ok(format!("{}\n", serde_json::to_string_pretty(&document)?))
 }
 
 /// Stopword lists carried by more than one allowlist, in first-appearance order.

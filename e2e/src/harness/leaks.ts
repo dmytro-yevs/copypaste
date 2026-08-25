@@ -8,6 +8,10 @@
  */
 import { expect } from "vitest";
 
+import {
+  DESKTOP_PATH_LEAK_PATTERNS,
+  findFilesystemPathLeaks,
+} from "../../../test-support/security/path-leaks.js";
 import type { Browser } from "./webview-guard.js";
 
 /** Attributes that carry a name, a tooltip or a value to a user or an AT. */
@@ -53,19 +57,18 @@ export async function outerHtml(browser: Browser): Promise<string> {
   )) as string;
 }
 
-/**
- * INV-12 / CLAUDE.md rule 4: the daemon socket path discloses the local
- * username, so no user-facing string may contain a filesystem path at all.
- */
+/** INV-12 / AGENTS.md rule 4: user-facing errors may not disclose paths. */
 export function expectNoFilesystemPath(
   surface: string,
   ...forbidden: readonly string[]
 ): void {
-  for (const literal of forbidden) expect(surface).not.toContain(literal);
-  expect(surface).not.toContain("daemon.sock");
-  expect(surface).not.toMatch(/\.sock\b/);
-  expect(surface).not.toMatch(/\/(?:Users|home|private|var|tmp)\//);
-  expect(surface).not.toMatch(/[A-Za-z]:\\/);
+  expect(
+    findFilesystemPathLeaks(surface, {
+      forbidden,
+      additions: DESKTOP_PATH_LEAK_PATTERNS,
+    }),
+    "filesystem path leaked to the accessible surface",
+  ).toEqual([]);
 }
 
 /** No raw transport wording, which is where a path arrives from (INV-12). */
