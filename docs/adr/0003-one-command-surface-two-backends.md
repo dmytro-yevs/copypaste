@@ -43,17 +43,14 @@ Thirteen backend operations, plus `get`, chosen to match the CLI's verb set —
 because an operation the CLI can reach and the app cannot is a feature with no
 UI (AGENTS.md rule 6), and pairing is the case that rule was written from.
 
-Fourteen Tauri commands sit on top, named after `copypaste_ipc::Method` rather
-than as English verbs — `delete_all` for `DeleteAll`, `set_pinned` for
-`Pin { pinned }`, `sync_now` for `SyncNow`. The wire enum is the single model of
-the contract, so a name that matches it is one fewer mapping to keep straight,
-and `crates/copypaste-ui/src/lib/ipc.ts` was already written against these
-names.
+The Rust-owned Tauri command registry sits on top and generates the TypeScript
+names and signatures. Daemon-backed commands map to `copypaste_ipc::Method`;
+native-only commands stay explicit in the same registry.
 
 | command | `Method` |
 |---|---|
 | `list`, `search`, `add_item`, `copy_item`, `delete_item`, `delete_all`, `set_pinned`, `status` | `List`, `Search`, `Add`, `Copy`, `Delete`, `DeleteAll`, `Pin`, `Status` |
-| `pair_create`, `pair_accept`, `peers`, `unpair`, `sync_now` | `PairCreate`, `PairAccept`, `Peers`, `Unpair`, `SyncNow` |
+| `pair_create_invite`, `pair_progress`, `pair_confirm`, `pair_cancel`, `peers`, `unpair`, `revoke`, `sync_now` | `PairCreateInvite`, `PairProgress`, `PairConfirm`, `PairCancel`, `Peers`, `Unpair`, `Revoke`, `SyncNow` |
 | `reveal_item` | none — see below |
 
 **`start_service` is deliberately not implemented.** `lib/ipc.ts` declares it so

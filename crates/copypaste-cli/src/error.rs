@@ -263,7 +263,7 @@ mod tests {
         let err = CliError::Daemon {
             code: Some(ErrorCode::Internal),
             raw_code: None,
-            message: "could not open /Users/dmitriy/Library/Application Support/CopyPaste/x.db"
+            message: "could not open /Users/dmitriy/Library/Application Support/com.copypaste.CopyPaste/x.db"
                 .into(),
         };
         let msg = err.user_message();

@@ -34,7 +34,7 @@ describe("structured IPC failures", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     for (const raw of [
       "CopyPaste is still starting up",
-      "ENOENT /Users/alice/Library/Application Support/CopyPaste/daemon.sock",
+      "ENOENT /Users/alice/Library/Application Support/com.copypaste.CopyPaste/daemon.sock",
       "connection refused on /home/bob/.copypaste.sock",
       new Error("no such paired device"),
     ]) {

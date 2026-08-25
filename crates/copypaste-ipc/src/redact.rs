@@ -18,9 +18,8 @@
 /// whitespace so the rest of the sentence still reads normally.
 ///
 /// A path may contain a space, and the one that matters does:
-/// `~/Library/Application Support/CopyPaste/daemon.sock`. Redacting one token
-/// at a time left `Support/CopyPaste/daemon.sock` on screen — the username was
-/// gone only because it happens to sit before the space. So once a token is
+/// `~/Library/Application Support/com.copypaste.CopyPaste/daemon.sock`.
+/// Redacting one token at a time left the path tail on screen. So once a token is
 /// path-shaped, following tokens carrying a `/` are absorbed into the same
 /// redaction.
 pub fn scrub_paths(message: &str) -> String {
@@ -124,7 +123,7 @@ mod tests {
     #[test]
     fn a_path_with_a_space_is_redacted_whole() {
         assert_eq!(
-            scrub_paths("could not bind ~/Library/Application Support/CopyPaste/daemon.sock here"),
+            scrub_paths("could not bind ~/Library/Application Support/com.copypaste.CopyPaste/daemon.sock here"),
             "could not bind <path> here"
         );
         // The word after a path is kept, so the sentence survives.
@@ -137,7 +136,7 @@ mod tests {
     #[test]
     fn no_username_survives_a_realistic_socket_error() {
         let leaked = "connection refused (os error 111) on \
-                      /Users/dmytro/Library/Application Support/CopyPaste/daemon.sock";
+                      /Users/dmytro/Library/Application Support/com.copypaste.CopyPaste/daemon.sock";
         let out = scrub_paths(leaked);
         assert!(!out.contains("dmytro"), "username leaked through: {out}");
         assert!(

@@ -343,7 +343,7 @@ mod tests {
     #[test]
     fn a_path_from_the_daemon_is_scrubbed_on_the_way_in() {
         let err = BackendError::from_daemon(
-            "could not open /Users/dmitriy/Library/Application Support/CopyPaste/x.db",
+            "could not open /Users/dmitriy/Library/Application Support/com.copypaste.CopyPaste/x.db",
         );
         let shown = err.to_string();
         assert!(!shown.contains("dmitriy"), "{shown}");
@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn serialised_internal_error_discloses_no_message_path_or_username() {
         let json = serde_json::to_string(&BackendError::internal(
-            "open /Users/alice/Library/Application Support/CopyPaste/history.db failed",
+            "open /Users/alice/Library/Application Support/com.copypaste.CopyPaste/history.db failed",
         ))
         .unwrap();
         assert_eq!(json, r#"{"code":"internal","retryable":true}"#);

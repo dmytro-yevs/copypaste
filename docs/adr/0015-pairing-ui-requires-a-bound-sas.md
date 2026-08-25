@@ -2,15 +2,11 @@
 
 **Status:** Accepted — 2026-08-01; re-entry conditions met — 2026-08-09
 
-The current v2 `PairCreate` / `PairAccept` protocol uses a long-lived pairing
-credential and persists the pairing as part of accepting it. It has no daemon
-pairing state machine, no peer-visible SAS confirmation, and no abort operation
-that can cancel a pending ceremony without also unpairing a confirmed device.
-
-Therefore a product UI may expose Pair or Add-device controls only through a
-ceremony that binds both peers' decisions before persistence. A locally
-generated six-digit code remains prohibited, as does copying the long-lived
-credential to the system clipboard.
+The current native-safe command family creates a memory-only invite, joins the
+authenticated handshake, exposes its bound SAS through native presentation,
+records both peers' decisions before persistence, and supports idempotent
+cancel. A locally generated six-digit code remains prohibited, as does copying
+pairing credentials to the system clipboard.
 
 The Devices screen continues to list, sync, unpair and revoke established
 devices. Pairing may return only with a protocol/API that supplies all of:
@@ -30,8 +26,6 @@ native presentation layer.
 
 ## Consequences
 
-The old WebView Pair/Join dialog remains prohibited: it copied a long-lived
-credential and displayed a value derived from the pairing id as if it were a
-bound SAS. Product controls call only the native-safe command family. Native
-presentation owns QR generation/scanning and SAS comparison; the WebView owns
-progress, cancellation, retry, and the confirmed-device refresh.
+Product controls call only the native-safe command family. Native presentation
+owns QR generation/scanning and SAS comparison; the WebView owns progress,
+cancellation, retry, and the confirmed-device refresh.
