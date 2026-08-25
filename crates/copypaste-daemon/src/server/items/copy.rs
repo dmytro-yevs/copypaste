@@ -58,5 +58,5 @@ fn write_error(id: u64, error: ClipboardWriteError) -> Response {
 }
 
 fn unsupported(id: u64) -> Response {
-    Response::err(id, ErrorCode::InvalidRequest, MSG_UNSUPPORTED_CONTENT)
+    Response::err(id, ErrorCode::UnsupportedContent, MSG_UNSUPPORTED_CONTENT)
 }

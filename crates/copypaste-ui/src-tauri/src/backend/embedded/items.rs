@@ -282,7 +282,7 @@ mod tests {
                     matches!(error, BackendError::UnsupportedContent(_)),
                     "{error:?}"
                 );
-                assert_eq!(error.ui_error().code, "unavailable");
+                assert_eq!(error.ui_error().code, "unsupported_content");
                 assert!(!error.ui_error().retryable);
             }
         }

@@ -293,6 +293,21 @@ fn known_error_code_still_maps_to_the_stable_enum() {
 }
 
 #[test]
+fn unsupported_content_is_a_non_retryable_wire_error() {
+    let response = Response::err(
+        8,
+        ErrorCode::UnsupportedContent,
+        "that representation is unavailable",
+    );
+    let wire = serde_json::to_value(&response).unwrap();
+    assert_eq!(wire["error_code"], "unsupported_content");
+
+    let decoded: Response = serde_json::from_value(wire).unwrap();
+    assert_eq!(decoded.error_code, Some(ErrorCode::UnsupportedContent));
+    assert!(!decoded.error_code.unwrap().retryable());
+}
+
+#[test]
 fn sync_error_code_is_additive_and_omitted_when_absent() {
     let old_wire = json!({
         "pairing_id": "peer-1",

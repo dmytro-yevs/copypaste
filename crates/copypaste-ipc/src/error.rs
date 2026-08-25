@@ -15,6 +15,8 @@ pub enum ErrorCode {
     KeyLocked,
     /// The stored key cannot decrypt this history; retrying cannot repair it.
     KeyUnusable,
+    /// The item exists, but the requested clipboard representation does not.
+    UnsupportedContent,
 
     PairingCode,
     PairingAddress,
@@ -41,6 +43,7 @@ impl ErrorCode {
             Self::AuthFailed => "auth_failed",
             Self::KeyLocked => "key_locked",
             Self::KeyUnusable => "key_unusable",
+            Self::UnsupportedContent => "unsupported_content",
             Self::PairingCode => "pairing_code",
             Self::PairingAddress => "pairing_address",
             Self::RateLimited => "rate_limited",
@@ -62,6 +65,7 @@ impl ErrorCode {
             "auth_failed" => Some(Self::AuthFailed),
             "key_locked" => Some(Self::KeyLocked),
             "key_unusable" => Some(Self::KeyUnusable),
+            "unsupported_content" => Some(Self::UnsupportedContent),
             "pairing_code" => Some(Self::PairingCode),
             "pairing_address" => Some(Self::PairingAddress),
             "rate_limited" => Some(Self::RateLimited),
@@ -89,6 +93,7 @@ impl ErrorCode {
             | Self::ProtocolMismatch
             | Self::AuthFailed
             | Self::KeyUnusable
+            | Self::UnsupportedContent
             | Self::PairingCode
             | Self::PairingAddress
             | Self::RateLimited
@@ -113,6 +118,7 @@ mod tests {
             (ErrorCode::AuthFailed, "\"auth_failed\""),
             (ErrorCode::KeyLocked, "\"key_locked\""),
             (ErrorCode::KeyUnusable, "\"key_unusable\""),
+            (ErrorCode::UnsupportedContent, "\"unsupported_content\""),
             (ErrorCode::PairingCode, "\"pairing_code\""),
             (ErrorCode::PairingAddress, "\"pairing_address\""),
             (ErrorCode::RateLimited, "\"rate_limited\""),
@@ -139,6 +145,7 @@ mod tests {
     fn a_locked_key_store_is_retryable_and_an_unusable_key_is_not() {
         assert!(ErrorCode::KeyLocked.retryable());
         assert!(!ErrorCode::KeyUnusable.retryable());
+        assert!(!ErrorCode::UnsupportedContent.retryable());
     }
 
     #[test]
