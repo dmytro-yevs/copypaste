@@ -50,7 +50,6 @@
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-virtual": "^3.14.9",
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-store": "^2.4.4",
     "@ungap/replace-children": "^0.0.0",
     "abortcontroller-polyfill": "^1.7.8",
