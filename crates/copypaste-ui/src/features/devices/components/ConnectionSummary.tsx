@@ -1,6 +1,6 @@
-import { Button, Icon, Surface } from "@/components/ui";
+import { StatusCard, type StatusCardStatus } from "@/components/shared";
+import { Button, Icon, type IconName } from "@/components/ui";
 import type { ConnectionSummaryPresentation } from "@/features/devices/model/devicePresentation";
-import styles from "./ConnectionSummary.module.css";
 
 export function ConnectionSummary({
   summary,
@@ -15,49 +15,41 @@ export function ConnectionSummary({
   actionBusy: boolean;
   onAction: () => void;
 }) {
+  const status: StatusCardStatus = summary.state === "connected"
+    ? "positive"
+    : summary.state === "syncing"
+      ? "info"
+      : "attention";
+  const icon: IconName = summary.state === "connected"
+    ? "checkCircle"
+    : summary.state === "syncing"
+      ? "refresh"
+      : "alert";
+  const action = summary.action ? (
+    <Button
+      type="button"
+      variant="secondary"
+      size="compact"
+      disabled={actionDisabled}
+      onClick={onAction}
+    >
+      <Icon
+        name={summary.action.kind === "retry-peer" ? "refresh" : "devices"}
+        aria-hidden="true"
+      />
+      {actionBusy ? "Syncing…" : actionLabel ?? summary.action.label}
+    </Button>
+  ) : undefined;
+
   return (
-    <Surface asChild elevation="raised" border="subtle" radius="md">
-      <section
-        data-slot="status-card"
-        data-state={summary.state}
-        className={styles.root}
-        role="status"
-        aria-busy={summary.busy || undefined}
-      >
-        <div className={styles.layout}>
-          <span className={styles.indicator} aria-hidden="true">
-            <Icon
-              name={
-                summary.state === "attention"
-                  ? "alert"
-                  : summary.state === "connected"
-                    ? "checkCircle"
-                    : "refresh"
-              }
-              size="sm"
-            />
-          </span>
-          <span className={styles.copy}>
-            <strong>{summary.title}</strong>
-            {summary.supportingLine ? <small>{summary.supportingLine}</small> : null}
-          </span>
-          {summary.action ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="compact"
-              disabled={actionDisabled}
-              onClick={onAction}
-            >
-              <Icon
-                name={summary.action.kind === "retry-peer" ? "refresh" : "devices"}
-                aria-hidden="true"
-              />
-              {actionBusy ? "Syncing…" : actionLabel ?? summary.action.label}
-            </Button>
-          ) : null}
-        </div>
-      </section>
-    </Surface>
+    <StatusCard
+      status={status}
+      title={summary.title}
+      detail={summary.supportingLine}
+      icon={icon}
+      action={action}
+      density="compact"
+      busy={summary.busy}
+    />
   );
 }

@@ -12,64 +12,13 @@
   gap: var(--s-4);
 }
 
-.stateCard {
-  display: flex;
-  min-inline-size: 0;
-  padding: var(--s-3);
-  flex-direction: column;
-  gap: var(--s-3);
-}
-
-.stateRow {
-  display: flex;
-  min-inline-size: 0;
-  align-items: flex-start;
-  gap: var(--s-2);
-}
-
-.stateDot {
-  inline-size: var(--sz-badge-dot);
-  block-size: var(--sz-badge-dot);
-  margin-block-start: var(--s-1);
-  flex: none;
-  border-radius: var(--r-pill);
-  background: var(--mute);
-}
-
-.stateDot[data-tone="ok"] { background: var(--ok); }
-.stateDot[data-tone="info"] { background: var(--info); }
-.stateDot[data-tone="attention"] { background: var(--warn); }
-.stateDot[data-tone="fault"] { background: var(--err); }
-
-.stateCopy {
-  display: flex;
-  min-inline-size: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: var(--s-1);
-}
-
-.stateTitle {
-  color: var(--text);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
-  overflow-wrap: anywhere;
-}
-
-.stateDetail,
-.stateAge,
 .alwaysBody {
   font-size: var(--fs-xs);
   overflow-wrap: anywhere;
 }
 
-.stateDetail,
 .alwaysBody {
   color: var(--dim);
-}
-
-.stateAge {
-  color: var(--faint);
 }
 
 .actions {

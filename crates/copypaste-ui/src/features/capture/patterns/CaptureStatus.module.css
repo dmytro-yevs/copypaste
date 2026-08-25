@@ -32,7 +32,7 @@
   white-space: nowrap;
 }
 .dot { inline-size: var(--sz-badge-dot); block-size: var(--sz-badge-dot); flex: none; border-radius: var(--r-pill); background: var(--mute); }
-.dot[data-tone="ok"] { background: var(--ok); }
+.dot[data-tone="positive"] { background: var(--ok); }
 .dot[data-tone="info"] { background: var(--info); }
 .dot[data-tone="attention"] { background: var(--warn); }
-.dot[data-tone="fault"] { background: var(--err); }
+.dot[data-tone="danger"] { background: var(--err); }

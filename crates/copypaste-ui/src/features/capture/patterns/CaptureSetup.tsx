@@ -4,8 +4,13 @@
  */
 import { Icon } from "@/components/ui/icon";
 
-import { EmptyState, InlineNotice, SettingsRow } from "@/components/shared";
-import { Button, Surface, Switch } from "@/components/ui";
+import {
+  EmptyState,
+  InlineNotice,
+  SettingsRow,
+  StatusCard,
+} from "@/components/shared";
+import { Button, Switch } from "@/components/ui";
 import { CaptureLadder } from "@/features/capture/components/CaptureLadder";
 import { CapturePhoneOnlyHelp } from "./CapturePhoneOnlyHelp";
 import { SourceExclusions } from "./SourceExclusions";
@@ -14,7 +19,7 @@ import {
   type CapturePrimary,
   ladderOf,
   primaryOf,
-  toneOf,
+  capturePresentationOf,
 } from "@/features/capture/model";
 import {
   useCaptureMutation,
@@ -89,7 +94,7 @@ export function CaptureSetup({
 
   return (
     <div className={styles.content}>
-      {!supplemental && <StateCard snapshot={snapshot} />}
+      {!supplemental && <CaptureStateCard snapshot={snapshot} />}
       {snapshot.droppedClips > 0 && <Dropped count={snapshot.droppedClips} />}
       {managed && <AlwaysOn />}
 
@@ -129,66 +134,50 @@ function SourceExclusionsPanel() {
   );
 }
 
-function StateCard({ snapshot }: { snapshot: CaptureSnapshot }) {
+function CaptureStateCard({ snapshot }: { snapshot: CaptureSnapshot }) {
   const { t } = useTranslation();
   const run = useCaptureMutation();
-  const tone = toneOf(snapshot.health);
+  const presentation = capturePresentationOf(snapshot.health);
   const primary = primaryOf(snapshot.nextStep);
 
-  return (
-    <Surface asChild elevation="raised" border="subtle" radius="md">
-      <section
-        role={tone === "fault" ? "alert" : "status"}
-        data-tone={tone}
-        className={styles.stateCard}
-      >
-        <div className={styles.stateRow}>
-          <span
-            aria-hidden="true"
-            className={styles.stateDot}
-            data-tone={tone}
-          />
-          <div className={styles.stateCopy}>
-            <p className={styles.stateTitle}>{snapshot.headline}</p>
-            {snapshot.detail && (
-              <p className={styles.stateDetail}>{snapshot.detail}</p>
-            )}
-            {snapshot.lastCaptureAt !== null && (
-              <p className={styles.stateAge}>
-                {t("capture.setup.lastSaved", {
-                  age: longAge(snapshot.lastCaptureAt),
-                })}
-              </p>
-            )}
-          </div>
-        </div>
+  const action = primary === "none" ? undefined : (
+    <Button
+      disabled={run.isPending}
+      onClick={() =>
+        run.mutate(
+          primary === "recheck"
+            ? () => captureRefresh()
+            : () => captureArm(),
+        )
+      }
+    >
+      <Icon name="refresh" size="md"
+        aria-hidden="true"
+        className={run.isPending ? styles.spinner : undefined}
+      />
+      {t(
+        run.isPending
+          ? "capture.setup.action.busy"
+          : PRIMARY_LABEL[primary],
+      )}
+    </Button>
+  );
 
-        {primary !== "none" && (
-          <div className={styles.actions}>
-            <Button
-              disabled={run.isPending}
-              onClick={() =>
-                run.mutate(
-                  primary === "recheck"
-                    ? () => captureRefresh()
-                    : () => captureArm(),
-                )
-              }
-            >
-              <Icon name="refresh" size="md"
-                aria-hidden="true"
-                className={run.isPending ? styles.spinner : undefined}
-              />
-              {t(
-                run.isPending
-                  ? "capture.setup.action.busy"
-                  : PRIMARY_LABEL[primary],
-              )}
-            </Button>
-          </div>
-        )}
-      </section>
-    </Surface>
+  return (
+    <StatusCard
+      status={presentation.tone}
+      title={snapshot.headline}
+      detail={snapshot.detail}
+      meta={snapshot.lastCaptureAt === null
+        ? undefined
+        : t("capture.setup.lastSaved", {
+            age: longAge(snapshot.lastCaptureAt),
+          })}
+      action={action}
+      role={presentation.role}
+      live={presentation.urgency}
+      busy={run.isPending}
+    />
   );
 }
 

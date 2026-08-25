@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-
+import { usePngObjectUrl } from "@/components/shared";
 import { Icon } from "@/components/ui";
 
 import styles from "./ClipImage.module.css";
@@ -14,18 +13,6 @@ export interface ClipImageProps {
     size?: "intrinsic" | "thumbnail" | "fill" | "detail" | "quickPaste";
 }
 
-function pngUrl(base64: string): string | null {
-    try {
-        const binary = atob(base64);
-        const bytes = Uint8Array.from(binary, (character) =>
-            character.charCodeAt(0),
-        );
-        return URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
-    } catch {
-        return null;
-    }
-}
-
 /** The virtual list unmounts this outside its visible window, which also drops
  * its Blob URL instead of retaining image data for the whole history. */
 export function ClipImage({
@@ -37,35 +24,18 @@ export function ClipImage({
     failureLabel,
     size = "intrinsic",
 }: ClipImageProps) {
-    const [url, setUrl] = useState<string | null>(null);
-    const [undecodable, setUndecodable] = useState(false);
-
-    // The Blob URL stays owned here, so it is still revoked the moment the
-    // virtualizer unmounts the row; only the round trip behind it is cached.
-    useEffect(() => {
-        if (pngBase64 === null) {
-            setUrl(null);
-            setUndecodable(false);
-            return;
-        }
-        const objectUrl = pngUrl(pngBase64);
-        setUrl(objectUrl);
-        setUndecodable(objectUrl === null);
-        return () => {
-            if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
-        };
-    }, [pngBase64]);
+    const image = usePngObjectUrl(pngBase64);
 
     const state =
-        url !== null
+        image.state === "ready"
             ? "ready"
-            : failed || undecodable
+            : failed || image.state === "invalid"
               ? "failed"
               : loading
                 ? "loading"
                 : "failed";
 
-    if (state !== "ready" || url === null) {
+    if (state !== "ready" || image.state !== "ready") {
         return (
             <span
                 aria-label={state === "loading" ? loadingLabel : failureLabel}
@@ -85,10 +55,11 @@ export function ClipImage({
     return (
         <img
             className={`${styles.image} ${styles[size]}`}
-            src={url}
+            src={image.url}
             alt=""
             title={title}
             draggable={false}
+            onError={image.invalidate}
         />
     );
 }

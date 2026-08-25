@@ -1,0 +1,103 @@
+.root {
+  container-type: inline-size;
+  min-inline-size: 0;
+}
+
+.layout {
+  display: grid;
+  min-inline-size: 0;
+  padding: var(--s-3);
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s-2);
+}
+
+.indicator {
+  display: inline-flex;
+  min-block-size: var(--icon-sm);
+  align-items: center;
+  color: var(--dim);
+}
+
+.dot {
+  inline-size: var(--sz-badge-dot);
+  block-size: var(--sz-badge-dot);
+  margin-block-start: var(--s-1);
+  border-radius: var(--r-pill);
+  background: currentcolor;
+}
+
+.root[data-status="positive"] .indicator { color: var(--ok-strong); }
+.root[data-status="info"] .indicator { color: var(--info-strong); }
+.root[data-status="attention"] .indicator { color: var(--warn-strong); }
+.root[data-status="danger"] .indicator { color: var(--err); }
+.root[data-status="off"] .indicator { color: var(--faint); }
+
+.copy {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.copy strong {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.copy small {
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+
+.copy .meta { color: var(--faint); }
+
+.action {
+  display: flex;
+  min-inline-size: 0;
+  margin-block-start: var(--s-1);
+  grid-column: 2;
+  flex-wrap: wrap;
+}
+
+.root[data-density="compact"] .layout {
+  min-block-size: var(--ctl-h-lg);
+  padding: var(--s-2) var(--s-3);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.root[data-density="compact"] .copy {
+  flex-direction: row;
+  align-items: baseline;
+}
+
+.root[data-density="compact"] .copy strong,
+.root[data-density="compact"] .copy small {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.root[data-density="compact"] .action {
+  margin: 0;
+  grid-column: auto;
+  flex: none;
+}
+
+.root[data-density="compact"] .action > button { white-space: nowrap; }
+
+@container (max-width: $cpXs) {
+  .root[data-density="compact"] .layout {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .root[data-density="compact"] .action {
+    grid-column: 2;
+  }
+}

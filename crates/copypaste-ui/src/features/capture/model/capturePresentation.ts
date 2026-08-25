@@ -5,28 +5,52 @@
  */
 import type { CaptureHealth, CaptureNextStep, CaptureSnapshot } from "@/lib/ipc";
 
-/** Presentation weight, not severity. Setup and restart prompts are
- *  `attention`, not `fault`: they are actionable setup states, not breakage.
- *  `fault` is reserved for a read that was refused. */
-export type CaptureTone = "ok" | "info" | "attention" | "fault" | "off";
+/** Setup and restart prompts are `attention`, not `danger`: they are
+ *  actionable setup states, not breakage. `danger` is reserved for a read
+ *  that was refused. */
+export type CaptureTone =
+  | "positive"
+  | "info"
+  | "attention"
+  | "danger"
+  | "off";
+export type CaptureRole = "status" | "alert";
+export type CaptureUrgency = "polite" | "assertive";
 
-export function toneOf(health: CaptureHealth): CaptureTone {
+export interface CapturePresentation {
+  readonly tone: CaptureTone;
+  readonly role: CaptureRole;
+  readonly urgency: CaptureUrgency;
+}
+
+export function capturePresentationOf(
+  health: CaptureHealth,
+): CapturePresentation {
+  let tone: CaptureTone;
   switch (health.state) {
     case "working":
-      return "ok";
+      tone = "positive";
+      break;
     case "disabled":
-      return "off";
+      tone = "off";
+      break;
     case "not_granted":
-      return health.reason === "unsupported" || health.reason === "not_installed"
+      tone = health.reason === "unsupported" || health.reason === "not_installed"
         ? "info"
         : "attention";
+      break;
     case "granted_not_working":
-      return health.reason === "read_refused"
-        ? "fault"
+      tone = health.reason === "read_refused"
+        ? "danger"
         : health.reason === "awaiting_first_copy"
           ? "info"
           : "attention";
+      break;
   }
+
+  return tone === "danger"
+    ? { tone, role: "alert", urgency: "assertive" }
+    : { tone, role: "status", urgency: "polite" };
 }
 
 /** Rung 2's four steps. Rungs 1 and 3 are not built and have no state in the
