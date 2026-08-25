@@ -25,6 +25,7 @@ pub fn apply(app: &AppHandle<Wry>, theme: NativeTheme) {
 }
 
 #[derive(Clone, Copy, serde::Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum NativeTheme {
     Dark,
