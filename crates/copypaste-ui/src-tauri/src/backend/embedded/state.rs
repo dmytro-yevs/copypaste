@@ -207,7 +207,7 @@ mod tests {
         assert_eq!(
             store.search("alice", 10).unwrap().len(),
             1,
-            "a flagged-only row must stay searchable (CLAUDE.md rule 4)"
+            "a flagged-only row must stay searchable (AGENTS.md rule 4)"
         );
     }
 

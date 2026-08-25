@@ -16,12 +16,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 # Asked only for the Android C compiler's identity, so build.rs can name the
 # compiler-rt archive rather than re-deriving cc's CC_<triple>/TARGET_CC order
-# (CLAUDE.md rule 1). Adds no package: openssl-src and ring resolve it already.
+# (AGENTS.md rule 1). Adds no package: openssl-src and ring resolve it already.
 cc = "1"
 
 [dependencies]
 # The ONE model of the wire contract, shared with the daemon and the CLI. Both
-# backends below speak these types; neither defines its own (CLAUDE.md rule 1).
+# backends below speak these types; neither defines its own (AGENTS.md rule 1).
 copypaste-ipc = { path = "../../copypaste-ipc" }
 copypaste-feedback = { path = "../../copypaste-feedback" }
 copypaste-retry = { path = "../../copypaste-retry" }
@@ -32,7 +32,7 @@ tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-pn
 tauri-plugin-clipboard-manager = "2"
 # The native save/open panel, used **only from Rust** (`commands::transfer`).
 # Two things follow from that and both are the point: the chosen path never
-# crosses into the WebView, so no authored string can carry one (CLAUDE.md rule
+# crosses into the WebView, so no authored string can carry one (AGENTS.md rule
 # 4); and no capability entry is needed, because the ACL gates the JS bridge and
 # nothing here calls the plugin from JS.
 tauri-plugin-dialog = "2"
@@ -47,7 +47,7 @@ tauri-plugin-fs = "2"
 # in `capabilities/`.
 tauri-plugin-notification = "2"
 tokio.workspace = true
-# The one retry implementation in the workspace (CLAUDE.md rule 1). Used for
+# The one retry implementation in the workspace (AGENTS.md rule 1). Used for
 # the bounded wait after starting the background service.
 backon.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
@@ -177,7 +177,7 @@ ndk-context = "0.1"
 
 [dev-dependencies]
 # `start_paused` drives the client budgets without a test that actually waits
-# ten seconds. Tokio's own clock control, not a second one (CLAUDE.md rule 1).
+# ten seconds. Tokio's own clock control, not a second one (AGENTS.md rule 1).
 tokio = { workspace = true, features = ["test-util"] }
 
 # The client budgets have to be proved against a real endpoint on the platform
