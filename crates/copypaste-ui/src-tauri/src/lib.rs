@@ -46,6 +46,7 @@
 pub mod android_context;
 pub mod backend;
 pub mod capture;
+pub mod command_contract;
 pub mod commands;
 #[cfg(all(feature = "dev-web-bridge", not(target_os = "android")))]
 pub mod dev_web_bridge;
@@ -236,97 +237,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::appearance::set_native_theme,
-            // history
-            commands::history::list,
-            commands::history::search,
-            commands::history::add_item,
-            commands::history::copy_item,
-            commands::history::copy_item_as_plain_text,
-            commands::history::reveal_item,
-            commands::history::get_item_body,
-            commands::history::copy_items,
-            commands::history::get_image_preview,
-            commands::history::get_source_app_icon,
-            commands::history::list_installed_source_apps,
-            commands::history::delete_item,
-            commands::history::delete_all,
-            commands::history::history_ceiling,
-            commands::history::set_pinned,
-            commands::history::reorder_pinned,
-            // state
-            commands::status::status,
-            commands::status::set_device_name,
-            commands::cloud::cloud_sign_in,
-            commands::cloud::cloud_sign_up,
-            commands::cloud::cloud_set_endpoint,
-            commands::cloud::cloud_sign_out,
-            commands::cloud::cloud_status,
-            commands::cloud::cloud_sync_now,
-            commands::diagnostics::diagnostics,
-            commands::diagnostics::runtime_log_events,
-            commands::diagnostics::export_diagnostics_report,
-            commands::diagnostics::export_support_bundle,
-            // clipboard capture, and the Android ladder
-            commands::capture::capture_state,
-            commands::capture::capture_refresh,
-            commands::capture::capture_arm,
-            commands::capture::capture_disarm,
-            commands::capture::capture_set_enabled,
-            commands::capture::capture_now,
-            commands::capture::capture_toast_explanation,
-            commands::capture::capture_set_toast_suppressed,
-            commands::capture::capture_open_shizuku,
-            commands::capture::capture_open_developer_options,
-            commands::capture::capture_request_battery_exemption,
-            // the background service, and the window
-            commands::service::service_state,
-            commands::service::start_service,
-            commands::service::restart_service,
-            commands::service::hide_window,
-            commands::service::show_main_window,
-            commands::protection::set_allow_screenshots,
-            commands::shortcut::get_default_shortcut,
-            commands::shortcut::get_shortcut,
-            commands::shortcut::set_shortcut,
-            commands::autostart::get_open_at_login,
-            commands::autostart::set_open_at_login,
-            commands::permissions::permission_snapshot,
-            commands::permissions::permission_request,
-            commands::permissions::permission_open_settings,
-            // the service's own settings
-            commands::config::get_config,
-            commands::config::set_config,
-            commands::config::get_private_mode,
-            commands::config::set_private_mode,
-            // history in and out of a file
-            commands::transfer::export_history,
-            commands::transfer::prepare_import_history,
-            commands::transfer::apply_import_history,
-            commands::transfer::cancel_import_history,
-            commands::transfer::backup_database,
-            commands::transfer::restore_database,
-            updater::update_status,
-            updater::check_for_update,
-            updater::install_update,
-            // peers
-            commands::peers::peers,
-            commands::peers::unpair,
-            commands::peers::revoke,
-            commands::peers::sync_now,
-            commands::peers::discovered,
-            commands::peers::rescan,
-            commands::pairing::pair_create_invite,
-            commands::pairing::pair_scan_invite,
-            commands::pairing::pair_progress,
-            commands::pairing::pair_present,
-            commands::pairing::pair_confirm,
-            commands::pairing::pair_reject,
-            commands::pairing::pair_cancel,
-            // the clipboard, for text the WebView already holds
-            commands::clipboard::copy_text,
-        ])
+        .invoke_handler(command_contract::ui_invoke_handler!())
         .build(tauri::generate_context!())
         .expect("could not start CopyPaste")
         .run(|app, event| {
