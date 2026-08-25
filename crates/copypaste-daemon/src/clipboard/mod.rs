@@ -157,12 +157,8 @@ pub trait ClipboardSource: Send {
     /// Must return `None` when nothing changed — the caller polls on a timer.
     fn poll(&mut self) -> Option<Capture>;
 
-    /// Poll with privacy policy. Legacy sources that cannot attribute an app
-    /// retain their ordinary polling semantics; macOS and the drivable fake
-    /// override this to gate before representation extraction.
-    fn poll_with_policy(&mut self, _policy: CapturePolicy<'_>) -> Option<Capture> {
-        self.poll()
-    }
+    /// Apply privacy policy before extracting a clipboard representation.
+    fn poll_with_policy(&mut self, policy: CapturePolicy<'_>) -> Option<Capture>;
 
     /// Whether [`ClipboardSource::poll`] has anything to report, without
     /// consuming it.

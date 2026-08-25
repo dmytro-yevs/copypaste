@@ -171,8 +171,8 @@ matching estimate and remain measurable.
 
 Appearance has one mode choice (`system|light|dark`) and one product-theme
 choice (`midnight|aurora|ember|graphite`). The persisted keys remain `theme`
-and `colorTheme` for storage compatibility; public DOM semantics are
-`data-color-scheme`, `data-mode`, `data-theme` and `data-translucency`.
+and `colorTheme`; public DOM semantics are `data-color-scheme`, `data-mode`,
+`data-theme` and `data-translucency`.
 `design/tokens/color/themes.*.json` owns all eight resolved palettes. Theme
 previews are generated from those values, and components consume only semantic
 variables. There is no independent accent preference or runtime palette writer.

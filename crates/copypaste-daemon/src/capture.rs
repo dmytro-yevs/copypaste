@@ -663,6 +663,13 @@ mod tests {
             self.inner.take()
         }
 
+        fn poll_with_policy(
+            &mut self,
+            _policy: crate::clipboard::CapturePolicy<'_>,
+        ) -> Option<crate::clipboard::Capture> {
+            self.poll()
+        }
+
         fn set_contents(&mut self, _text: &str) -> anyhow::Result<()> {
             Ok(())
         }
