@@ -72,7 +72,9 @@ pub fn open_settings<R: Runtime>(
     snapshot(app)
 }
 
-fn notification_status<R: Runtime>(app: &AppHandle<R>) -> Result<PermissionStatus, BackendError> {
+pub(super) fn notification_status<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<PermissionStatus, BackendError> {
     #[cfg(target_os = "macos")]
     {
         let _ = app;

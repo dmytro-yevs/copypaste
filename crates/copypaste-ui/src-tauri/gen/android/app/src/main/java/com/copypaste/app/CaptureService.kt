@@ -26,12 +26,12 @@ class CaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val state = state(this)
-        if (intent == null || !state.enabled) {
+        val copy = state(this)
+        if (intent == null || copy == null) {
             clearState(this)
             ClipCascadeCapture.disarm()
-            if (state.enabled) {
-                CaptureNotifications.postLost(this, state.lostTitle, state.lostBody)
+            if (copy != null) {
+                CaptureNotifications.postLost(this, copy.lostTitle, copy.lostBody)
             }
             stopSelf(startId)
             return START_NOT_STICKY
@@ -46,10 +46,12 @@ class CaptureService : Service() {
             return START_NOT_STICKY
         }
         CaptureNotifications.ensureChannels(this)
-        val text = intent.getStringExtra(EXTRA_TEXT) ?: state.text
-        startForeground(CaptureNotifications.ONGOING_ID, CaptureNotifications.ongoing(this, text))
+        startForeground(
+            CaptureNotifications.ONGOING_ID,
+            CaptureNotifications.ongoing(this, copy.ongoingText),
+        )
         if (!ClipCascadeCapture.arm(this, {
-                lost(this, state.lostTitle, state.lostBody)
+                lost(this, copy)
             })) {
             clearState(this)
             stopSelf(startId)
@@ -62,43 +64,46 @@ class CaptureService : Service() {
     override fun onDestroy() {
         // The callback belongs to this process, not the service object. An
         // unexpected teardown cannot leave a persisted green state behind.
-        val state = state(this)
+        val copy = state(this)
         clearState(this)
         ClipCascadeCapture.disarm()
-        if (state.enabled) {
-            CaptureNotifications.postLost(this, state.lostTitle, state.lostBody)
+        if (copy != null) {
+            CaptureNotifications.postLost(this, copy.lostTitle, copy.lostBody)
         }
         super.onDestroy()
     }
 
     companion object {
-        private const val EXTRA_TEXT = "text"
-        private const val EXTRA_LOST_TITLE = "lostTitle"
-        private const val EXTRA_LOST_BODY = "lostBody"
         private const val PREFS = "capture-service"
         private const val KEY_ENABLED = "enabled"
-        private const val KEY_TEXT = "text"
+        private const val KEY_ONGOING_TEXT = "ongoingText"
         private const val KEY_LOST_TITLE = "lostTitle"
         private const val KEY_LOST_BODY = "lostBody"
 
-        fun start(context: Context, text: String, lostTitle: String, lostBody: String): Boolean {
+        fun start(context: Context, copy: CaptureArmRequest): Boolean {
+            if (copy.ongoingText.isBlank() || copy.lostTitle.isBlank() || copy.lostBody.isBlank()) {
+                clearState(context)
+                return false
+            }
             if (!ClipCascadeCapture.arm(context, {
-                    lost(context, lostTitle, lostBody)
+                    lost(context, copy)
                 })) {
                 clearState(context)
                 return false
             }
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val persisted = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(KEY_ENABLED, true)
-                .putString(KEY_TEXT, text)
-                .putString(KEY_LOST_TITLE, lostTitle)
-                .putString(KEY_LOST_BODY, lostBody)
-                .apply()
+                .putString(KEY_ONGOING_TEXT, copy.ongoingText)
+                .putString(KEY_LOST_TITLE, copy.lostTitle)
+                .putString(KEY_LOST_BODY, copy.lostBody)
+                .commit()
+            if (!persisted) {
+                ClipCascadeCapture.disarm()
+                clearState(context)
+                return false
+            }
             val intent = Intent(context, CaptureService::class.java)
-                .putExtra(EXTRA_TEXT, text)
-                .putExtra(EXTRA_LOST_TITLE, lostTitle)
-                .putExtra(EXTRA_LOST_BODY, lostBody)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -113,36 +118,30 @@ class CaptureService : Service() {
             context.stopService(Intent(context, CaptureService::class.java))
         }
 
-        fun lost(context: Context, title: String, body: String) {
+        private fun lost(context: Context, copy: CaptureArmRequest) {
             clearState(context)
             ClipCascadeCapture.disarm()
-            CaptureNotifications.postLost(context, title, body)
+            CaptureNotifications.postLost(context, copy.lostTitle, copy.lostBody)
             context.stopService(Intent(context, CaptureService::class.java))
         }
 
-        fun isArmed(context: Context): Boolean = state(context).enabled
+        fun isArmed(context: Context): Boolean = state(context) != null
 
         private fun clearState(context: Context) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         }
 
-        private fun state(context: Context): CaptureState {
+        private fun state(context: Context): CaptureArmRequest? {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            return CaptureState(
-                enabled = prefs.getBoolean(KEY_ENABLED, false),
-                text = prefs.getString(KEY_TEXT, "Capturing from every app.")
-                    ?: "Capturing from every app.",
-                lostTitle = prefs.getString(KEY_LOST_TITLE, "Background capture stopped.")
-                    ?: "Background capture stopped.",
-                lostBody = prefs.getString(KEY_LOST_BODY, "") ?: "",
+            if (!prefs.getBoolean(KEY_ENABLED, false)) return null
+            val copy = CaptureArmRequest(
+                ongoingText = prefs.getString(KEY_ONGOING_TEXT, null) ?: return null,
+                lostTitle = prefs.getString(KEY_LOST_TITLE, null) ?: return null,
+                lostBody = prefs.getString(KEY_LOST_BODY, null) ?: return null,
             )
+            return copy.takeUnless {
+                it.ongoingText.isBlank() || it.lostTitle.isBlank() || it.lostBody.isBlank()
+            }
         }
     }
-
-    private data class CaptureState(
-        val enabled: Boolean,
-        val text: String,
-        val lostTitle: String,
-        val lostBody: String,
-    )
 }
