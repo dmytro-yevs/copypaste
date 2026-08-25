@@ -1,0 +1,28 @@
+.root {
+  display: inline-grid;
+  min-inline-size: calc(1em + var(--s-2));
+  padding-inline: var(--s-1);
+  flex: none;
+  grid-auto-flow: column;
+  gap: var(--stroke-1);
+  place-items: center;
+  border: var(--stroke-1) solid var(--border);
+  border-block-end-color: var(--border-strong);
+  border-radius: var(--r-xs);
+  color: var(--dim);
+  background: var(--elevated);
+  font-family: var(--f-mono);
+  line-height: 1;
+  white-space: nowrap;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.modifier { font-family: var(--f-ui); font-size: 1em; }
+.key { font-size: .833em; font-weight: var(--fw-semibold); }
+
+.compact { block-size: calc(var(--icon-sm) + var(--s-2)); font-size: var(--fs-xs); }
+.regular { block-size: calc(var(--icon-md) + var(--s-2)); font-size: var(--fs-xs); }
+
+@media (prefers-reduced-motion: reduce) {
+  .root { transition: none; }
+}

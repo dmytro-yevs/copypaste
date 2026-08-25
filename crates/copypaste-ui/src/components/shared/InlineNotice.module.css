@@ -1,0 +1,5 @@
+.root { inline-size: 100%; padding: var(--s-2) var(--s-3); font-size: var(--fs-xs); }
+.message { min-inline-size: 0; flex: 1; }
+.content { min-inline-size: 0; overflow-wrap: anywhere; }
+.icon { inline-size: var(--icon-sm); block-size: var(--icon-sm); flex: none; }
+.action { margin-inline-start: auto; flex: none; }

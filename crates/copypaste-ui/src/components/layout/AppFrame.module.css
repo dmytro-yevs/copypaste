@@ -1,0 +1,50 @@
+.root {
+  position: relative;
+  display: flex;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  color: var(--text);
+  background-color: var(--app-bg);
+  background-image: none;
+}
+
+.expanded {
+  flex-direction: row;
+}
+
+.compact {
+  flex-direction: column;
+}
+
+.navigation {
+  block-size: 100%;
+  min-block-size: 0;
+  flex: none;
+}
+
+.expanded > .navigation {
+  align-self: stretch;
+}
+
+.compact > .navigation {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-sticky);
+  pointer-events: none;
+}
+
+.content {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.compact > .content {
+  --scroll-dock-clearance: calc(var(--s-9) + var(--s-7) + var(--s-1) + var(--inset-bottom));
+}
+
+.desktopContent { background: transparent; }

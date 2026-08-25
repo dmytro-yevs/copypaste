@@ -40,9 +40,10 @@ pub async fn status(
     }
 
     #[cfg(not(target_os = "android"))]
-    let _ = app;
-
-    Ok(status)
+    {
+        let _ = app;
+        Ok(status)
+    }
 }
 
 #[tauri::command]

@@ -30,8 +30,8 @@ export const CLASS_RULES = [
     test: /(?<![\w-])(?:ring|outline|border|shadow)-(?:ring|sidebar-ring|primary|brand|accent|destructive)\/\d+(?![\w-])/g,
     fix: 'drop the /N — the focus indicator is the accent at full alpha (`ring-ring`)',
     why:
-      "shadcn's stock `ring-ring/50` measures 1.51-2.98 over --bg, --card and --elevated across " +
-      'the six accents; full alpha measures 3.12 against a 3:1 floor (WCAG 1.4.11). --color-ring ' +
+      "shadcn's stock `ring-ring/50` cannot meet the 3:1 focus floor across every theme. " +
+      'Full alpha does, and --color-ring ' +
       'is already correct, so nothing in dist/ changes and the contrast gate stays green.',
   },
   {
@@ -79,28 +79,28 @@ export const CLASS_RULES = [
   {
     id: 'literal-colour',
     test: /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![0-9a-zA-Z_])|\b(?:rgba?|hsla?|oklch|oklab|color-mix)\(/g,
-    fix: 'add a token in design/tokens/ and use the utility it generates',
+    fix: 'add a semantic token in design/tokens/ and consume the generated variable',
     why:
-      'A colour in a component is the beginning of a second palette, and it cannot follow ' +
-      '[data-theme] or [data-accent].',
+      'A literal or runtime colour recipe in a component is the beginning of a second palette. ' +
+      'Recipes belong in design/tokens/color/ so the build can emit concrete legacy-WebView values.',
   },
 ];
 
 /** Tokens that must be reachable from a component, or the treatment they
  *  replaced has probably come back by another route. */
 export const REQUIRED_UTILITIES = [
-  { util: 'bg-withheld', why: 'the slot standing in for absent content (INV-10)' },
-  { util: 'text-withheld-fg', why: 'its label' },
-  { util: 'border-withheld-border', why: 'the reveal affordance is a real button (A11Y-3)' },
-  { util: 'bg-selected-edge', why: 'selection is carried by the edge, never by the fill' },
+  { util: 'bg-withheld', token: 'withheld', why: 'the slot standing in for absent content (INV-10)' },
+  { util: 'text-withheld-fg', token: 'withheld-fg', why: 'its label' },
+  { util: 'border-withheld-border', token: 'withheld-border', why: 'the reveal affordance is a real button (A11Y-3)' },
+  { util: 'bg-selected-edge', token: 'selected-edge', why: 'selection is carried by the edge, never by the fill' },
 ];
 
 /**
  * Every alpha-modified colour utility the tree is allowed to contain.
  *
  * A `/N` on a fill is a colour that exists in no token file, so it has a ratio
- * only once composited. `measure` entries are composited across both themes
- * and all six accents; the rest record why a combination carries no floor.
+ * only once composited. `measure` entries are composited across all eight
+ * resolved palettes; the rest record why a combination carries no floor.
  * Anything found in the source and absent here fails, which is what stops the
  * list going stale.
  */
@@ -162,18 +162,6 @@ export const EXEMPTIONS = [
       'Rows deliberately have no coarse variant. A one-line row already computes to 63px, and ' +
       '--pad-row-y is read by the virtualiser (INV-5) — a media query on it would change the ' +
       'row-height model without the virtualiser knowing, which is CopyPaste-g27b.30 again.',
-  },
-  {
-    rule: 'literal-colour',
-    files: ['index.css'],
-    why:
-      'These color-mix declarations compose resolved CopyPaste tokens for desktop glow, translucency and Sonner; they introduce no literal palette value.',
-  },
-  {
-    rule: 'literal-colour',
-    files: ['lib/nativeAppearance.ts'],
-    why:
-      'The native bridge must calculate black or white from a runtime system accent before CSS can resolve a token; no component palette value is hard-coded.',
   },
   {
     rule: 'literal-colour',

@@ -419,7 +419,14 @@ therefore never solved in v1 either — it was only less visible, because v1's
 shipping surface was a CLI and CLIs are not quarantined the way `.app` bundles
 are.
 
-## Not decided here
+## In-app update mechanism
 
-Auto-update. Sparkle expects a signed feed, and `brew upgrade` is the update
-mechanism for as long as the tap is the distribution channel.
+The macOS in-app updater delegates to the project cask through Homebrew. It
+invokes `/opt/homebrew/bin/brew` or `/usr/local/bin/brew` directly (never a
+shell and never an arbitrary PATH executable), runs `update-if-needed` and
+then `outdated --cask --json=v2 dmytro-yevs/copypaste/copypaste`. Installation
+uses `upgrade --cask --no-ask --no-quit --require-sha` for the same cask.
+Homebrew remains the distribution authority; the updater does not introduce a
+second feed, signature format or installer. Windows keeps its existing signed
+Tauri updater. Android uses a separate signed-APK update mechanism and is not
+part of this Homebrew contract.

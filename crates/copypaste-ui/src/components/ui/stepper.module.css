@@ -1,0 +1,9 @@
+.root { display: flex; flex-direction: column; gap: var(--s-1); }
+.item { display: flex; padding-block: var(--s-2); flex-wrap: wrap; align-items: center; gap: var(--s-2); border-block-end: var(--stroke-1) solid var(--divider); font-size: var(--fs-sm); }
+.item:last-child { border-block-end: 0; }
+.icon, .state { flex: none; }
+.done { color: var(--ok-strong); }
+.pending, .state { color: var(--dim); }
+.label { min-inline-size: 0; flex: 1; }
+.current { font-weight: var(--fw-medium); }
+.state { font-size: var(--fs-xs); }

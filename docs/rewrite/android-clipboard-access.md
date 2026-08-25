@@ -190,7 +190,12 @@ Its user-service may set app-ops and standby state:
 - `am set-standby-bucket <pkg> active`
 
 It may also write the clipboard-toast setting. Shizuku may quit afterwards; the
-runtime reader is CopyPaste's own process.
+runtime reader is CopyPaste's own process. One privacy feature is intentionally
+stricter: while app exclusions are non-empty, CopyPaste needs Shizuku running
+to ask the API 31+ clipboard service which package wrote the clip. If that
+source cannot be resolved, implicit background capture skips the event before
+reading its content. Explicit share, Process Text, tile and in-app actions do
+not depend on attribution.
 
 > **Partially verified.** The API 36 emulator leg proves the app-owned tile
 > capture, the fail-closed service state, and the static grant path. The

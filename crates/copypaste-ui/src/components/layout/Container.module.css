@@ -1,0 +1,20 @@
+.root {
+  inline-size: 100%;
+  min-inline-size: 0;
+  margin-inline: auto;
+}
+
+.fluid { max-inline-size: none; }
+.reading { max-inline-size: calc(var(--s-9) * 14 + var(--s-7)); }
+.library { max-inline-size: calc(var(--s-9) * 17 + var(--s-1)); }
+.gutterNone { padding-inline: 0; }
+.gutterCompact { padding-inline: var(--s-3); }
+.gutterScreen { padding-inline: var(--s-7); }
+
+@media (--cp-lg) {
+  .library.gutterScreen { padding-inline: calc(var(--s-6) + var(--s-1)); }
+}
+
+@media (--cp-sm) {
+  .gutterScreen { padding-inline: var(--s-4); }
+}

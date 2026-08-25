@@ -70,6 +70,8 @@ data class ReadResult(
     val text: String?,
     val atMs: Long,
     val focused: Boolean,
+    val sourceAppBundleId: String?,
+    val sourceAppName: String?,
 )
 
 @Serializable

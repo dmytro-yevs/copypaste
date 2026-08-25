@@ -1,0 +1,16 @@
+.content {
+  z-index: var(--z-popover);
+  max-inline-size: min(calc(var(--s-8) * 7), calc(100vw - var(--s-6)));
+  padding: var(--s-1) var(--s-2);
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: var(--sh2);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+.content[data-state="delayed-open"],
+.content[data-state="instant-open"] { animation: tooltip-in var(--dur-fast) var(--ease); }
+@keyframes tooltip-in { from { opacity: 0; transform: translateY(var(--s-1)) scale(.98); } }
+@media (prefers-reduced-motion: reduce) { .content { animation: none; } }

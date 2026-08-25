@@ -18,13 +18,15 @@ devices. Pairing may return only with a protocol/API that supplies all of:
 - a common SAS derived from the authenticated handshake;
 - a peer-visible confirm/reject state, before persistence;
 - an idempotent abort for every close/cancel path;
-- a QR rendered only after explicit reveal, with no credential text or
-  clipboard copy path.
+- a QR rendered only after explicit reveal; desktop may also render the code
+  and listen address as non-selectable text in the same protected native
+  surface, with no clipboard copy path.
 
 The native-safe pairing commands now meet those conditions. The WebView sees
 only typed ceremony states, presentation availability, sanitized errors, and
-confirmed device metadata. Invite data, QR payloads, SAS values, ceremony peer
-addresses and key material remain in the native presentation layer.
+confirmed device metadata. Invite data, QR payloads, desktop code/address
+entry, SAS values, ceremony peer addresses and key material remain in the
+native presentation layer.
 
 ## Consequences
 

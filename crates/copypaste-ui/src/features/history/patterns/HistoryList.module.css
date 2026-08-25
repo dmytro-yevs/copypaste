@@ -1,0 +1,15 @@
+.root {
+  position: relative;
+  display: flex;
+  min-block-size: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.viewport {
+  min-block-size: 0;
+  flex: 1;
+  overflow-x: hidden;
+}
+
+.loadMore { display: flex; justify-content: center; padding-block: var(--s-3); }

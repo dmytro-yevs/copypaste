@@ -5,14 +5,12 @@
  * Change a token and run `npm run build` in design/.
  */
 
-/* Import order is the cascade. Base first, then the two themes, then the accent
- * axis (which must beat the theme blocks it shares specificity with), then the
- * Tailwind layer. Import `tailwindcss` before this file. */
+/* Import order is the cascade. Base and scheme roles come first, then the
+ * product-theme palettes and their generated previews. */
 @import "./tokens.base.css";
 @import "./tokens.dark.css";
 @import "./tokens.light.css";
-@import "./accents.dark.css";
-@import "./accents.light.css";
+@import "./themes.dark.css";
+@import "./themes.light.css";
 @import "./swatches.dark.css";
 @import "./swatches.light.css";
-@import "./theme.css";

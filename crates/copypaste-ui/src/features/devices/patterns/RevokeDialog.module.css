@@ -1,0 +1,4 @@
+.consequences { display: flex; padding-inline-start: var(--s-5); flex-direction: column; gap: var(--s-2); color: var(--dim); font-size: var(--fs-sm); list-style: disc; }
+.acknowledgement { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-2); }
+.label { font-size: var(--fs-sm); font-weight: var(--fw-normal); overflow-wrap: anywhere; }
+.dialogTitle { overflow-wrap: anywhere; }

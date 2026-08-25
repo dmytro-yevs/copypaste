@@ -105,6 +105,11 @@ for direct download, which is the channel this ADR is about.
   against the Tauri scaffold at `crates/copypaste-ui/src-tauri/gen/android`, and
   the job fails with an explicit message rather than a stack trace if that
   scaffold is not where it expects.
+- The publish job also creates a detached Tauri updater signature for the APK
+  with the same `TAURI_SIGNING_PRIVATE_KEY` used for the Windows updater. One
+  canonical `latest.json` contains both `windows-x86_64` and
+  `android-universal`; missing keys, signatures, URLs, or placeholder values
+  fail closed before the GitHub Release is created.
 
 ## What would change this
 

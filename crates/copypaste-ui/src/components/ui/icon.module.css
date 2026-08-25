@@ -1,0 +1,30 @@
+.icon {
+  display: inline-grid;
+  inline-size: 1em;
+  block-size: 1em;
+  flex: none;
+  place-items: center;
+  line-height: 1;
+}
+
+.icon svg {
+  display: block;
+  inline-size: 1em;
+  block-size: 1em;
+}
+
+.xs {
+  font-size: var(--fs-xs);
+}
+
+.sm {
+  font-size: var(--icon-sm);
+}
+
+.md {
+  font-size: var(--icon-md);
+}
+
+.lg {
+  font-size: var(--icon-lg);
+}

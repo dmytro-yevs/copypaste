@@ -1,0 +1,17 @@
+.root {
+  display: grid;
+  min-inline-size: 0;
+}
+
+.one { grid-template-columns: minmax(0, 1fr); }
+.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.autoControl { grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--s-9) * 3)), 1fr)); }
+.autoCard { grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--s-9) * 4.25)), 1fr)); }
+.autoPane { grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--s-9) * 5.5)), 1fr)); }
+.gapNone { gap: 0; /* grid gap */ }
+.gapSm { gap: var(--s-2); /* grid gap */ }
+.gapMd { gap: var(--s-3); /* grid gap */ }
+.gapLg { gap: var(--s-4); /* grid gap */ }
+.gapXl { gap: var(--s-6); /* grid gap */ }

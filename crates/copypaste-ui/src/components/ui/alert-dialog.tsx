@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 
 import { cn } from "@/lib/cn";
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "./button";
 import {
   modalDescriptionClass,
   modalFooterClass,
@@ -11,7 +11,7 @@ import {
   modalOverlayClass,
   modalTitleClass,
   type ModalFrameProps,
-} from "@/components/ui/modal-shell";
+} from "./modal-shell";
 
 /**
  * The confirm dialog for destructive actions. `AlertDialog` rather than
@@ -105,25 +105,33 @@ function AlertDialogDescription({
 
 function AlertDialogAction({
   className,
+  variant = "primary",
+  size = "md",
+  tone = "neutral",
   ...props
-}: ComponentProps<typeof AlertDialogPrimitive.Action>) {
+}: ComponentProps<typeof AlertDialogPrimitive.Action> & {
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+  size?: "sm" | "md" | "lg";
+  tone?: "neutral" | "danger";
+}) {
   return (
-    <AlertDialogPrimitive.Action
-      className={cn(buttonVariants(), className)}
-      {...props}
-    />
+    <Button asChild variant={variant} size={size} tone={tone} className={className}>
+      <AlertDialogPrimitive.Action {...props} />
+    </Button>
   );
 }
 
 function AlertDialogCancel({
   className,
+  size = "md",
   ...props
-}: ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
+}: ComponentProps<typeof AlertDialogPrimitive.Cancel> & {
+  size?: "sm" | "md" | "lg";
+}) {
   return (
-    <AlertDialogPrimitive.Cancel
-      className={cn(buttonVariants({ variant: "outline" }), className)}
-      {...props}
-    />
+    <Button asChild variant="secondary" size={size} className={className}>
+      <AlertDialogPrimitive.Cancel {...props} />
+    </Button>
   );
 }
 

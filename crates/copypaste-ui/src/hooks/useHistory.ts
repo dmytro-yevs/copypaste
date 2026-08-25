@@ -2,12 +2,14 @@ import { useMemo } from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import {
-  PAGE_SIZE,
   POLL_ACTIVE_MS,
   POLL_BACKOFF_MS,
   POLL_PUSH_BACKSTOP_MS,
-  SEARCH_LIMIT,
-} from "@/lib/layout";
+} from "@/lib/scheduling";
+import {
+  HISTORY_PAGE_SIZE,
+  HISTORY_SEARCH_LIMIT,
+} from "@/lib/historyLimits";
 import {
   HISTORY_HEAD_KEY,
   HISTORY_SEARCH_KEY,
@@ -82,7 +84,9 @@ export function useHistory(query: string, pushLive = false) {
   const pages = useInfiniteQuery({
     queryKey: historyKey(query),
     queryFn: ({ pageParam }) =>
-      searching ? searchItems(query, SEARCH_LIMIT) : listItems(PAGE_SIZE, pageParam),
+      searching
+        ? searchItems(query, HISTORY_SEARCH_LIMIT)
+        : listItems(HISTORY_PAGE_SIZE, pageParam),
     initialPageParam: null as string | null,
     // `next_cursor`, and nothing derived from the page's length: rows counted
     // in `skipped_undecryptable` were read and dropped, so stopping on a short
@@ -100,7 +104,7 @@ export function useHistory(query: string, pushLive = false) {
   // zero times.
   const head = useQuery({
     queryKey: HISTORY_HEAD_KEY,
-    queryFn: () => listItems(PAGE_SIZE, null),
+    queryFn: () => listItems(HISTORY_PAGE_SIZE, null),
     enabled: !searching,
     refetchInterval: (q) => pollInterval(pushLive, q.state.status === "error"),
   });
@@ -139,7 +143,7 @@ export function useHistory(query: string, pushLive = false) {
 export function useHistorySearch(query: string) {
   return useQuery({
     queryKey: [...HISTORY_SEARCH_KEY, query],
-    queryFn: () => searchItems(query, SEARCH_LIMIT),
+    queryFn: () => searchItems(query, HISTORY_SEARCH_LIMIT),
     enabled: query.length > 0,
   });
 }

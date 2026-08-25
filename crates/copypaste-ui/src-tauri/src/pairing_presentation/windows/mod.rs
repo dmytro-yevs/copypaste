@@ -19,7 +19,7 @@ type PayloadEncoder = fn(&PairingInviteData) -> Option<Zeroizing<String>>;
 pub(super) struct WindowsPairingUi {
     active: Mutex<Option<CloseHandle>>,
     encode_payload: PayloadEncoder,
-    decode_payload: entry::PayloadDecoder,
+    validate_fields: entry::FieldValidator,
     affinity: Affinity,
     abort: NativeAbort,
 }
@@ -27,12 +27,12 @@ pub(super) struct WindowsPairingUi {
 impl WindowsPairingUi {
     pub(super) fn new(
         encode_payload: PayloadEncoder,
-        decode_payload: entry::PayloadDecoder,
+        validate_fields: entry::FieldValidator,
         abort: NativeAbort,
     ) -> Self {
         Self::with_affinity(
             encode_payload,
-            decode_payload,
+            validate_fields,
             common::system_affinity,
             abort,
         )
@@ -40,14 +40,14 @@ impl WindowsPairingUi {
 
     fn with_affinity(
         encode_payload: PayloadEncoder,
-        decode_payload: entry::PayloadDecoder,
+        validate_fields: entry::FieldValidator,
         affinity: Affinity,
         abort: NativeAbort,
     ) -> Self {
         Self {
             active: Mutex::new(None),
             encode_payload,
-            decode_payload,
+            validate_fields,
             affinity,
             abort,
         }
@@ -84,11 +84,13 @@ impl NativePairingUi for WindowsPairingUi {
         let Some(payload) = (self.encode_payload)(invite) else {
             return PairingPresentationState::Unavailable;
         };
-        if invite.listen_addr.as_deref().unwrap_or_default().is_empty() {
+        let Some(listen_addr) = invite.listen_addr.as_deref() else {
             return PairingPresentationState::Unavailable;
-        }
+        };
         let window = invite::spawn(
             payload,
+            Zeroizing::new(invite.code.clone()),
+            Zeroizing::new(listen_addr.to_owned()),
             invite.expires_in_secs,
             self.affinity,
             self.abort.clone(),
@@ -104,7 +106,7 @@ impl NativePairingUi for WindowsPairingUi {
 
     fn scan_invite(&self) -> Option<ScannedPairing> {
         self.close_active();
-        entry::prompt(self.decode_payload, self.affinity)
+        entry::prompt(self.validate_fields, self.affinity)
     }
 
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState {
@@ -160,6 +162,7 @@ mod tests {
     fn presenter_requires_a_native_only_payload_encoder() {
         let source = production(include_str!("mod.rs"));
         assert!(source.contains("PayloadEncoder"));
+        assert!(source.contains("FieldValidator"));
         assert!(!source.contains("serde_json::to_string"));
     }
 
@@ -167,7 +170,7 @@ mod tests {
     fn missing_listen_addr_is_unavailable_without_opening_a_window() {
         let ui = super::WindowsPairingUi::new(
             crate::pairing_presentation::invite::encode_native_invite,
-            crate::pairing_presentation::invite::decode_native_invite,
+            crate::pairing_presentation::invite::validate_native_invite_fields,
             std::sync::Arc::new(|| {}),
         );
         let invite = copypaste_ipc::PairingInviteData {
@@ -233,7 +236,7 @@ mod refusal_tests {
     static ASKED: AtomicBool = AtomicBool::new(false);
     static ALIVE_WHEN_ASKED: AtomicBool = AtomicBool::new(false);
     static VISIBLE_WHEN_ASKED: AtomicBool = AtomicBool::new(false);
-    static DECODES: AtomicU32 = AtomicU32::new(0);
+    static VALIDATIONS: AtomicU32 = AtomicU32::new(0);
 
     fn observe(hwnd: &winsafe::HWND) {
         ASKED.store(true, Ordering::Release);
@@ -251,19 +254,22 @@ mod refusal_tests {
         true
     }
 
-    fn counting_decoder(payload: Zeroizing<String>) -> Option<ScannedPairing> {
-        DECODES.fetch_add(1, Ordering::Relaxed);
-        codec::decode_native_invite(payload)
+    fn counting_validator(
+        code: Zeroizing<String>,
+        address: Zeroizing<String>,
+    ) -> Option<ScannedPairing> {
+        VALIDATIONS.fetch_add(1, Ordering::Relaxed);
+        codec::validate_native_invite_fields(code, address)
     }
 
     fn presenter(affinity: common::Affinity) -> WindowsPairingUi {
         ASKED.store(false, Ordering::Release);
         ALIVE_WHEN_ASKED.store(false, Ordering::Release);
         VISIBLE_WHEN_ASKED.store(false, Ordering::Release);
-        DECODES.store(0, Ordering::Release);
+        VALIDATIONS.store(0, Ordering::Release);
         WindowsPairingUi::with_affinity(
             codec::encode_native_invite,
-            counting_decoder,
+            counting_validator,
             affinity,
             std::sync::Arc::new(|| {}),
         )
@@ -358,17 +364,17 @@ mod refusal_tests {
     }
 
     /// The invite is typed into this window, so a refusal has to close it
-    /// before it can take input — nothing must reach the decoder.
+    /// before it can take input — nothing must reach the validator.
     #[test]
     #[ignore = "opens a real native Windows window"]
-    fn a_refused_entry_scans_nothing_and_never_reaches_the_decoder() {
+    fn a_refused_entry_scans_nothing_and_never_reaches_the_validator() {
         let ui = presenter(refuse);
         assert!(ui.scan_invite().is_none());
         assert_asked_before_the_window_was_shown();
         assert_eq!(
-            DECODES.load(Ordering::Acquire),
+            VALIDATIONS.load(Ordering::Acquire),
             0,
-            "a refused entry window still decoded something"
+            "a refused entry window still validated something"
         );
     }
 }

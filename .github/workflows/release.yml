@@ -400,6 +400,8 @@ jobs:
       NDK_VERSION: "27.2.12479018"
       ANDROID_PLATFORM: "android-36"
       BUILD_TOOLS_VERSION: "36.0.0"
+      TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+      TAURI_UPDATER_ENDPOINT: ${{ secrets.TAURI_UPDATER_ENDPOINT }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -488,6 +490,14 @@ jobs:
           set -euo pipefail
           ./scripts/release/android-ndk-env.sh "$NDK_HOME" | tee -a "$GITHUB_ENV"
 
+      - name: Render signed Android updater configuration
+        run: |
+          set -euo pipefail
+          bash scripts/release/android-updater-feed.sh --render-config \
+            crates/copypaste-ui/src-tauri/tauri.android.signed.conf.template.json \
+            crates/copypaste-ui/src-tauri/tauri.android.signed.generated.conf.json \
+            "$TAURI_UPDATER_PUBLIC_KEY" "$TAURI_UPDATER_ENDPOINT"
+
       - name: Build the APK
         run: |
           set -euo pipefail
@@ -540,7 +550,8 @@ jobs:
             exit 1
           }
 
-          npm run tauri -- android build --apk --target "${{ matrix.target }}"
+          npm run tauri -- android build --apk --target "${{ matrix.target }}" \
+            --config src-tauri/tauri.android.signed.generated.conf.json
 
           outputs="src-tauri/gen/android/app/build/outputs/apk"
           shard="$(find "$outputs" -name '*release*.apk' -print -quit)"
@@ -581,6 +592,8 @@ jobs:
       NDK_VERSION: "27.2.12479018"
       ANDROID_PLATFORM: "android-36"
       BUILD_TOOLS_VERSION: "36.0.0"
+      TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+      TAURI_UPDATER_ENDPOINT: ${{ secrets.TAURI_UPDATER_ENDPOINT }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -623,6 +636,13 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/release/android-ndk-env.sh "$NDK_HOME" | tee -a "$GITHUB_ENV"
+      - name: Render signed Android updater configuration
+        run: |
+          set -euo pipefail
+          bash scripts/release/android-updater-feed.sh --render-config \
+            crates/copypaste-ui/src-tauri/tauri.android.signed.conf.template.json \
+            crates/copypaste-ui/src-tauri/tauri.android.signed.generated.conf.json \
+            "$TAURI_UPDATER_PUBLIC_KEY" "$TAURI_UPDATER_ENDPOINT"
       - name: Generate runner-local Tauri Gradle settings
         run: |
           set -euo pipefail
@@ -632,7 +652,8 @@ jobs:
           done
           cd crates/copypaste-ui
           npm ci
-          npm run tauri -- android build --apk --target x86_64
+          npm run tauri -- android build --apk --target x86_64 \
+            --config src-tauri/tauri.android.signed.generated.conf.json
           for generated in \
             src-tauri/gen/android/tauri.settings.gradle \
             src-tauri/gen/android/app/tauri.build.gradle.kts \
@@ -679,6 +700,8 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           unsigned="${RUNNER_TEMP}/copypaste-release-unsigned.apk"
@@ -765,6 +788,8 @@ jobs:
             --apk "$out" --build-type release \
             --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner" \
             --expected-cert "$expected_cert"
+          bash scripts/release/android-updater-feed.sh \
+            --sign-apk "$out" "$out.sig"
           ( cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256" )
           cat "${out}.sha256"
 
@@ -792,6 +817,7 @@ jobs:
           name: android
           path: |
             dist/*.apk
+            dist/*.apk.sig
             dist/*.apk.sha256
           if-no-files-found: error
           retention-days: 14
@@ -1345,8 +1371,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Reject unproven performance credits
-        run: python3 scripts/check-feature-ledger.py
+      - run: python3 -m pip install --requirement requirements-ci.txt
+      - name: Reject incomplete feature evidence
+        run: python3 scripts/check-feature-ledger.py --require-complete
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-macos-native-evidence
@@ -1465,6 +1492,28 @@ jobs:
           name: windows-x86_64
           path: dist
 
+      - name: Compose canonical cross-platform updater feed
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          apk="dist/CopyPaste-v${VERSION}-android.apk"
+          exe="$(find dist -maxdepth 1 -name '*-windows-x86_64-setup.exe' -print -quit)"
+          [[ -n "$exe" ]] || { echo "::error::Windows installer is missing"; exit 1; }
+          [[ -s "${apk}.sig" ]] || { echo "::error::Android updater signature is missing"; exit 1; }
+          win_sig="${exe}.sig"
+          [[ -s "$win_sig" ]] || { echo "::error::Windows updater signature is missing"; exit 1; }
+          bash scripts/release/android-updater-feed.sh --write-feed \
+            "$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RELEASE_BASE_URL" \
+            "$exe" "$win_sig" "$apk" "${apk}.sig" dist/latest.json
+          (
+            cd dist
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS
+          )
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: homebrew
@@ -1500,7 +1549,7 @@ jobs:
             "${prerelease[@]}" \
             dist/*.dmg dist/*.dmg.sha256 \
             dist/*.tar.gz dist/*.tar.gz.sha256 \
-            dist/*.apk dist/*.apk.sha256 \
+            dist/*.apk dist/*.apk.sig dist/*.apk.sha256 \
             dist/*.exe dist/*.exe.sig dist/latest.json dist/SHA256SUMS \
             tap/Casks/copypaste.rb \
             tap/Formula/copypaste-cli.rb

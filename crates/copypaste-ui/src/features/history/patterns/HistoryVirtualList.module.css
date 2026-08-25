@@ -1,0 +1,46 @@
+.canvas {
+    position: relative;
+    inline-size: 100%;
+}
+
+.group,
+.slot {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    inline-size: 100%;
+}
+
+.group {
+    display: flex;
+    block-size: calc(var(--s-8) - var(--s-2) + var(--stroke-2));
+    padding: var(--s-3) 0 var(--s-2);
+    align-items: center;
+    gap: calc(var(--s-3) - var(--stroke-2));
+}
+
+.group::after {
+    min-inline-size: 0;
+    block-size: var(--stroke-1);
+    flex: 1;
+    background: var(--border);
+    content: "";
+}
+
+.groupTitle {
+    min-inline-size: 0;
+    overflow: hidden;
+    color: var(--dim);
+    font-size: calc(var(--fs-xs) - var(--stroke-2));
+    line-height: var(--icon-sm);
+    font-weight: var(--fw-semibold);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.slot {
+    padding-block: var(--s-1);
+}
+.slot[data-drop-target="true"] {
+    box-shadow: inset 0 0 0 var(--stroke-2) var(--accent-2);
+}

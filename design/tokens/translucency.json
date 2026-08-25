@@ -14,8 +14,8 @@
     "frosted": {
       "$description": "Applied only under [data-translucency=\"on\"] AND @supports backdrop-filter. On macOS the transparent native window makes this read as a native frosted panel.",
       "frost-filter": { "$value": "saturate(180%) blur(20px)" },
-      "chrome-bg": { "$value": "color-mix(in oklab, var(--panel) 72%, transparent)" },
-      "app-bg": { "$value": "color-mix(in oklab, var(--bg) 84%, transparent)" },
+      "chrome-bg": { "$value": "var(--chrome-frosted)" },
+      "app-bg": { "$value": "var(--app-frosted)" },
       "scrim-blur": { "$value": "blur(2px)" }
     }
   }

@@ -1,0 +1,130 @@
+.root {
+    --card-selection-slot: var(--s-7);
+    container: clip-card / inline-size;
+    position: relative;
+    display: flex;
+    inline-size: 100%;
+    padding: var(--pad-row);
+    align-items: flex-start;
+    overflow: hidden;
+    text-align: start;
+    transition:
+        border-color var(--dur-fast) var(--ease),
+        background-color var(--dur-fast) var(--ease),
+        box-shadow var(--dur-fast) var(--ease);
+}
+
+.hit {
+    position: absolute;
+    z-index: var(--z-row);
+    inset: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    box-shadow: none;
+    cursor: pointer;
+}
+.root .hit:hover:not(:disabled),
+.root .hit:focus-visible,
+.root .hit:active:not(:disabled) {
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+}
+
+.root:hover {
+    border-color: var(--border-strong);
+    background: var(--hover);
+    box-shadow: var(--sh2);
+}
+.root:has(.hit:active) {
+    border-color: var(--border-strong);
+    background: var(--pressed);
+    box-shadow: var(--sh1);
+}
+.root[data-state="active"] {
+    border-color: var(--selected-edge);
+    background: var(--card);
+    box-shadow: var(--sh1);
+}
+.root[data-state="active"]::before {
+    position: absolute;
+    z-index: var(--z-sticky);
+    inset-block: var(--sel-bar-inset);
+    inset-inline-start: 0;
+    inline-size: var(--sel-bar-w);
+    border-radius: 0 var(--r-pill) var(--r-pill) 0;
+    background: var(--selected-edge);
+    content: "";
+    pointer-events: none;
+}
+.root[data-state="checked"],
+.root[data-checked] {
+    border-color: var(--accent-2);
+    background: var(--selected);
+    box-shadow: var(--sh1);
+}
+.root[data-state="dragging"] {
+    z-index: var(--z-sticky);
+    box-shadow: var(--sh3);
+}
+.root[data-state="pending"] {
+    border-color: var(--accent-2);
+    background: var(--selected);
+}
+.root:has(.hit:focus-visible) {
+    box-shadow: var(--sh-focus);
+}
+
+.content {
+    position: relative;
+    display: flex;
+    min-inline-size: 0;
+    inline-size: 100%;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    pointer-events: none;
+}
+
+.body {
+    min-inline-size: 0;
+    inline-size: 100%;
+    padding-inline-end: var(--card-selection-slot);
+}
+
+.root[data-kind="image"] .body {
+    padding-inline-end: 0;
+}
+
+.selection {
+    position: absolute;
+    z-index: var(--z-sticky);
+    inset-block-start: var(--s-2);
+    inset-inline-end: var(--s-2);
+    display: inline-flex;
+    place-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-fast) var(--ease);
+}
+.selection > [data-slot="selection-control"] {
+    pointer-events: auto;
+}
+.root[data-selection-active] .selection {
+    opacity: 1;
+    pointer-events: auto;
+    inset-block-start: var(--s-1);
+    inset-inline-end: var(--s-1);
+}
+
+@media (pointer: fine) {
+    .root:hover .selection,
+    .root:focus-within .selection {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}

@@ -1,0 +1,19 @@
+.root {
+    position: relative;
+    display: inline-flex;
+    min-inline-size: 0;
+    flex: none;
+}
+
+.indicator {
+    position: absolute;
+    z-index: 1;
+    inset-block-start: var(--s-1);
+    inset-inline-end: var(--s-1);
+    inline-size: var(--sz-chip-dot);
+    block-size: var(--sz-chip-dot);
+    border-radius: var(--r-pill);
+    background: var(--accent);
+    box-shadow: 0 0 0 var(--stroke-1) var(--card);
+    pointer-events: none;
+}

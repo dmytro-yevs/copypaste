@@ -6,6 +6,16 @@
       "$type": "number",
       "$value": 0.15,
       "$description": "The alpha a status colour is tinted to when it backs a container (a warning banner, a danger ghost button). Paired with the matching *-strong foreground, which is what keeps the label at AA; changing this alpha invalidates the measured ratios on those four tokens."
+    },
+    "alpha-ambient-min": {
+      "$type": "number",
+      "$value": 0.28,
+      "$description": "Lower opacity bound for quiet ambient affordance motion."
+    },
+    "alpha-ambient-max": {
+      "$type": "number",
+      "$value": 0.72,
+      "$description": "Upper opacity bound for quiet ambient affordance motion."
     }
   }
 }

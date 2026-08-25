@@ -1,0 +1,19 @@
+.screen {
+  min-block-size: 0;
+  overflow: auto;
+}
+
+.inline {
+  inline-size: 100%;
+  padding-inline: var(--s-3);
+}
+
+.recovery {
+  min-block-size: calc(var(--s-9) * 6);
+}
+
+@container (max-width: $cpXs) {
+  .recovery {
+    min-block-size: calc(var(--s-9) * 5);
+  }
+}

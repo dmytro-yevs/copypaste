@@ -8,8 +8,8 @@
 //! `target/debug|release` (`tauri-plugin-notification-2.3.3/src/desktop.rs`),
 //! so a toast appears from an installed build and not under `tauri dev`.
 //!
-//! NOT VERIFIED IN CI: that a notification is delivered. This host has no
-//! bundle and no notification centre; only [`should_post`] is exercised.
+//! Native delivery remains release-host evidence. Unit tests exercise the
+//! policy gate and Android's explicitly silent notification payload.
 
 use tauri::{AppHandle, Manager as _, Runtime};
 use tauri_plugin_notification::{NotificationExt as _, PermissionState};
@@ -24,15 +24,6 @@ pub const TITLE: &str = "Saved to CopyPaste";
 pub const BODY: &str = "What you just copied is in your history.";
 pub const COPY_TITLE: &str = "Copied from CopyPaste";
 pub const COPY_BODY: &str = "The clipping is ready to paste.";
-
-/// `tauri-winrt-notification`'s `Sound::from_str` matches `"Default"` exactly;
-/// anything else fails to parse, `notify-rust` drops the error, and the toast
-/// is silent. The lowercase name would turn `sound_on_copy` off on Windows
-/// with nothing to see.
-#[cfg(target_os = "windows")]
-const SOUND: &str = "Default";
-#[cfg(not(target_os = "windows"))]
-const SOUND: &str = "default";
 
 /// Something was captured. Post the notification, if the user asked for one and
 /// is not already looking at the app.
@@ -58,12 +49,12 @@ pub fn on_capture<R: Runtime>(app: &AppHandle<R>) {
         }
         // `show` goes to the platform and blocks; the caller is the change
         // stream's task.
-        let _ = tauri::async_runtime::spawn_blocking(move || post(&app, TITLE, BODY, false)).await;
+        let _ = tauri::async_runtime::spawn_blocking(move || post(&app, TITLE, BODY)).await;
     });
 }
 
 /// A tray selection is a copy just as a history-row selection is. It needs the
-/// same native acknowledgement without exposing the clipping in a notification.
+/// same native notification without exposing the clipping.
 pub fn on_recent_copy<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -77,10 +68,8 @@ pub fn on_recent_copy<R: Runtime>(app: &AppHandle<R>) {
         if !config.notify_on_copy {
             return;
         }
-        let sound = config.sound_on_copy;
         let _ =
-            tauri::async_runtime::spawn_blocking(move || post(&app, COPY_TITLE, COPY_BODY, sound))
-                .await;
+            tauri::async_runtime::spawn_blocking(move || post(&app, COPY_TITLE, COPY_BODY)).await;
     });
 }
 
@@ -94,7 +83,7 @@ fn is_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
     window::main_window(app).is_some_and(|window| window.is_focused().unwrap_or(false))
 }
 
-fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str, sound: bool) {
+fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
     let notifier = app.notification();
 
     // Inert on the desktop, where both calls answer `Granted` — macOS decides at
@@ -113,15 +102,33 @@ fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str, sound: bool) {
         return;
     }
 
-    let notification = notifier.builder().title(title).body(body);
-    let notification = if sound {
-        notification.sound(SOUND)
-    } else {
-        notification
-    };
-    if let Err(error) = notification.show() {
+    if let Err(error) = show_silent(app, title, body) {
         tracing::debug!(%error, "the capture notification was not posted");
     }
+}
+
+#[cfg(target_os = "android")]
+fn show_silent<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    body: &str,
+) -> crate::backend::Result<()> {
+    app.state::<crate::capture::SelectedCapture>()
+        .post_silent_notification(title, body)
+}
+
+#[cfg(not(target_os = "android"))]
+fn show_silent<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    body: &str,
+) -> crate::backend::Result<()> {
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|_| crate::backend::BackendError::internal("notification delivery failed"))
 }
 
 #[cfg(test)]
@@ -132,6 +139,13 @@ mod tests {
     fn nothing_is_posted_unless_the_user_asked() {
         assert!(!should_post(false, false));
         assert!(should_post(true, false));
+    }
+
+    #[test]
+    fn notification_delivery_is_not_coupled_to_copy_feedback() {
+        let source = include_str!("notify.rs");
+        assert!(!source.contains(&["sound", "_on_copy"].concat()));
+        assert!(!source.contains(&[".", "sound", "("].concat()));
     }
 
     /// The setting says "while CopyPaste is in the background", and a

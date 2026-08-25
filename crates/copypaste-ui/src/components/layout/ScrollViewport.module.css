@@ -1,0 +1,19 @@
+.root {
+  --scroll-base-padding: 0;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding-block-end: calc(var(--scroll-base-padding) + var(--scroll-dock-clearance, 0));
+  overflow: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block-end: var(--scroll-dock-clearance, 0);
+  scrollbar-color: var(--raised-2) transparent;
+}
+
+.none { --scroll-base-padding: 0; padding-block-start: 0; padding-inline: 0; }
+.compact { --scroll-base-padding: var(--s-3); padding-block-start: var(--s-3); padding-inline: var(--s-3); }
+.screen { --scroll-base-padding: var(--s-6); padding-block-start: var(--s-6); padding-inline: var(--s-6); }
+
+.root:focus-visible {
+  outline: 0;
+  box-shadow: inset var(--sh-focus);
+}

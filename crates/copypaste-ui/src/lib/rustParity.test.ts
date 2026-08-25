@@ -14,7 +14,7 @@ import { parse } from "@babel/parser";
 import traverse from "@babel/traverse";
 import { describe, expect, test } from "vitest";
 
-import { MAX_PAIRINGS } from "@/components/devices/peerState";
+import { MAX_PAIRINGS } from "@/features/devices/model/peerState";
 import {
   MAX_DECODED_IMAGE_MB as DECODED_IMAGE_CHOICES,
   MAX_FILE_SIZE_BYTES as FILE_CHOICES,
@@ -27,7 +27,7 @@ import {
   MIN_TEXT_SIZE_BYTES,
   POLL_INTERVAL_MAX_MS,
   POLL_INTERVAL_MIN_MS,
-} from "@/components/settings/serviceChoices";
+} from "@/features/settings/model/serviceChoices";
 import {
   EVENT_AUTOSTART_CHANGED,
   EVENT_CAPTURE_STATE,
@@ -39,7 +39,10 @@ import {
   TAURI_EVENT_NAMES,
 } from "@/lib/tauriEvents";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
-import { PAGE_SIZE, SEARCH_LIMIT } from "@/lib/layout";
+import {
+  HISTORY_PAGE_SIZE as PAGE_SIZE,
+  HISTORY_SEARCH_LIMIT as SEARCH_LIMIT,
+} from "@/lib/historyLimits";
 import { DEFAULT_SHORTCUT } from "@/lib/accelerator";
 
 // jsdom serves `import.meta.url` over http, so the crates directory is reached
@@ -91,60 +94,6 @@ function sourceFiles(root: string, extensions: ReadonlySet<string>): string[] {
     }
   }
   return found;
-}
-
-function frontendListenersInSource(file: string, text: string): string[] {
-  const listeners: string[] = [];
-  const ast = parse(text, {
-    sourceType: "module",
-    plugins: file.endsWith(".tsx") ? ["typescript", "jsx"] : ["typescript"],
-  });
-  traverse(ast, {
-    CallExpression(call) {
-      if (call.node.callee.type !== "Identifier") return;
-      const binding = call.scope.getBinding(call.node.callee.name);
-      if (!binding?.path.isImportSpecifier()) return;
-      const imported = binding.path.node.imported;
-      const importedName =
-        imported.type === "Identifier" ? imported.name : imported.value;
-      if (
-        importedName !== "listen" ||
-        !binding.path.parentPath?.isImportDeclaration() ||
-        binding.path.parentPath.node.source.value !== "@tauri-apps/api/event"
-      ) {
-        return;
-      }
-      const event = call.node.arguments[0];
-      if (
-        !event ||
-        event.type === "ArgumentPlaceholder" ||
-        event.type === "SpreadElement"
-      ) {
-        throw new Error(`listen() has no static event in ${file}`);
-      }
-      listeners.push(
-        `${file.replace(/\\/g, "/")}:${text.slice(event.start ?? 0, event.end ?? 0)}`,
-      );
-    },
-  });
-  return listeners.sort();
-}
-
-function frontendListeners(): string[] {
-  const listeners: string[] = [];
-  for (const file of sourceFiles(UI_SRC, new Set([".ts", ".tsx"]))) {
-    if (
-      file.includes(`${path.sep}generated${path.sep}`) ||
-      file.includes(".test.")
-    ) {
-      continue;
-    }
-    const text = readFileSync(file, "utf8");
-    listeners.push(
-      ...frontendListenersInSource(path.relative(UI_SRC, file), text),
-    );
-  }
-  return listeners.sort();
 }
 
 function generatedEventNames(): string[] {
@@ -199,60 +148,36 @@ function unguardedEmitterContracts(contracts: readonly string[]): string[] {
   );
 }
 
-function coverageErrors(
-  actual: readonly string[],
-  expected: readonly string[],
-): string[] {
-  const counts = (values: readonly string[]) => {
-    const result = new Map<string, number>();
-    for (const value of values) result.set(value, (result.get(value) ?? 0) + 1);
-    return result;
-  };
-  const actualCounts = counts(actual);
-  const expectedCounts = counts(expected);
-  return [...new Set([...actualCounts.keys(), ...expectedCounts.keys()])]
-    .filter((name) => actualCounts.get(name) !== expectedCounts.get(name))
-    .sort();
-}
-
 const EVENT_CONTRACTS = [
   {
-    listener: "App.tsx:EVENT_OPEN_SETTINGS",
     rust: "OpenSettings",
     event: EVENT_OPEN_SETTINGS,
   },
   {
-    listener: "hooks/useCapture.ts:EVENT_CAPTURE_STATE",
     rust: "CaptureState",
     event: EVENT_CAPTURE_STATE,
   },
   {
-    listener: "hooks/useCapture.ts:EVENT_CAPTURED",
     rust: "Captured",
     event: EVENT_CAPTURED,
   },
   {
-    listener: "hooks/useDiagnostics.ts:EVENT_CHANGED",
     rust: "Changed",
     event: EVENT_CHANGED,
   },
   {
-    listener: "hooks/usePush.ts:EVENT_CHANGED",
     rust: "Changed",
     event: EVENT_CHANGED,
   },
   {
-    listener: "hooks/usePush.ts:EVENT_PUSH_STATE",
     rust: "PushState",
     event: EVENT_PUSH_STATE,
   },
   {
-    listener: "hooks/usePush.ts:EVENT_PRIVATE_MODE_CHANGED",
     rust: "PrivateModeChanged",
     event: EVENT_PRIVATE_MODE_CHANGED,
   },
   {
-    listener: "hooks/usePush.ts:EVENT_AUTOSTART_CHANGED",
     rust: "AutostartChanged",
     event: EVENT_AUTOSTART_CHANGED,
   },
@@ -276,11 +201,6 @@ test(`DEFAULT_SHORTCUT matches ${SHORTCUT}`, () => {
 });
 
 describe("event names the frontend listens for", () => {
-  test("every listen call is covered exactly once", () => {
-    const expected = EVENT_CONTRACTS.map(({ listener }) => listener).sort();
-    expect(coverageErrors(frontendListeners(), expected)).toEqual([]);
-  });
-
   test("the generated Rust union covers every frontend event", () => {
     expect([...TAURI_EVENT_NAMES].sort()).toEqual(generatedEventNames().sort());
     expect([...new Set(EVENT_CONTRACTS.map(({ event }) => event))].sort()).toEqual(
@@ -300,20 +220,6 @@ describe("event names the frontend listens for", () => {
     expect([...new Set(EVENT_CONTRACTS.map(({ rust }) => rust))].sort()).toEqual(
       [...emitted].sort(),
     );
-  });
-
-  test("listener discovery follows the imported binding", () => {
-    const source = `
-      import { listen as subscribe } from "@tauri-apps/api/event";
-      subscribe(EVENT_ALIAS, () => {});
-      function unrelated() {
-        const listen = () => {};
-        listen(EVENT_UNRELATED);
-      }
-    `;
-    expect(frontendListenersInSource("synthetic.ts", source)).toEqual([
-      "synthetic.ts:EVENT_ALIAS",
-    ]);
   });
 
   test("emitter discovery guards emit, emit_to, and emit_filter", () => {

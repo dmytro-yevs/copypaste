@@ -1,0 +1,19 @@
+.root {
+  display: grid;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--elevated);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+}
+
+.xs { inline-size: var(--icon-md); block-size: var(--icon-md); font-size: calc(var(--s-2) - var(--stroke-1)); }
+.sm { inline-size: var(--icon-lg); block-size: var(--icon-lg); font-size: var(--s-2); }
+.md { inline-size: var(--sz-tile); block-size: var(--sz-tile); font-size: var(--fs-xs); }
+.square { border-radius: var(--r-sm); }
+.rounded { border-radius: var(--r-ctl); }
+.circle { border-radius: var(--r-pill); }
+.image { inline-size: 100%; block-size: 100%; object-fit: contain; }
+.glyph { inline-size: var(--icon-sm); block-size: var(--icon-sm); }

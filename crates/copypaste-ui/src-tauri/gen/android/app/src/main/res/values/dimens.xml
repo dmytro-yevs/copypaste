@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="copypaste_space_1">4dp</dimen>
+    <dimen name="copypaste_space_2">8dp</dimen>
+    <dimen name="copypaste_space_3">12dp</dimen>
+    <dimen name="copypaste_space_4">16dp</dimen>
+    <dimen name="copypaste_space_5">20dp</dimen>
+    <dimen name="copypaste_space_6">24dp</dimen>
+    <dimen name="copypaste_touch_target">48dp</dimen>
+    <dimen name="copypaste_radius_control">8dp</dimen>
+    <dimen name="copypaste_radius_card">14dp</dimen>
+    <dimen name="copypaste_pairing_qr_size">240dp</dimen>
+    <dimen name="copypaste_pairing_sas_digit_width">40dp</dimen>
+    <dimen name="copypaste_pairing_sas_text">28sp</dimen>
+    <dimen name="copypaste_body_text">14sp</dimen>
+    <dimen name="copypaste_label_text">12sp</dimen>
+</resources>

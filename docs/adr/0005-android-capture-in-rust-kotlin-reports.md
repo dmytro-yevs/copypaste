@@ -10,13 +10,14 @@ implementation; where they disagree, it wins.
 
 ## Decision
 
-**Kotlin reports facts. Rust decides what they mean.**
+**Rust owns product policy; Kotlin enforces its pre-read projection.**
 
-`crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/` contains no
-policy: is Shizuku running, did a read return, here is the text. Every state
-transition, every sentence the user reads, and the consent gate on the Android
-12+ notice live in `src-tauri/src/capture/model.rs`, which compiles and is
-tested on a Linux host with no Android SDK.
+Rust remains the source of config, capture-origin semantics, state transitions,
+user-facing text and consent. Kotlin reports platform facts and enforces one
+synchronized projection: app exclusions before clipboard text is materialized.
+Sending plaintext to Rust before that decision would itself violate manifest
+I-7. The embedded backend repeats the source-aware gate at the write boundary,
+so a stale or bypassed native bridge cannot persist unknown external capture.
 
 This is ADR-0002's lesson applied to the one place the platform genuinely needs
 native code. That ADR deleted ~2,500 lines of Kotlin because no machine in this
@@ -75,6 +76,27 @@ clips queued — `Buffer` counts what it loses and the count is surfaced, becaus
 a copy that was not saved is precisely what the user must not have to discover
 for themselves.
 
+**App exclusions run before the clipboard read.** Android exposes the writer
+package only through hidden `getPrimaryClipSource` from API 31, guarded by the
+signature-level `SET_CLIP_SOURCE` permission. The existing maintained Shizuku
+client supplies the shell identity; Kotlin resolves the package and cached
+label before asking for `primaryClip`. With exclusions configured, an excluded
+or unavailable source skips only implicit background capture. Share, Process
+Text, the tile and the in-app action remain explicit user-directed intake.
+
+No maintained package exposes this hidden clipboard-service method or its
+versioned signature. This is dependency rule exemption 1: the bridge keeps the
+AOSP API 31–33 and API 34+ signatures at the platform boundary, while Shizuku
+continues to own binder identity and transport.
+
+The bridge targets the clipboard that owns the reading context, not user 0 or
+the default device. The numeric user ID mirrors AOSP
+[`UserHandle.getUserId(Process.myUid())`](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/core/java/android/os/UserHandle.java),
+whose numeric accessor is hidden from the public SDK. On API 34+ the bridge
+also passes public [`Context.getDeviceId()`](https://developer.android.com/reference/android/content/Context#getDeviceId()),
+so work-profile and virtual-device clipboards cannot silently resolve source
+metadata from a different clipboard silo.
+
 ## What this creates for other people
 
 * **Attribution is device-level, not surface-level.** `Item` now carries
@@ -83,9 +105,9 @@ for themselves.
   only on the `copypaste://captured` event and is not persisted. Persisting it
   needs a column and an `Item` field, and is worth deciding rather than
   assuming.
-* **Settings do not persist on Android.** The embedded backend uses
-  `ConfigData::default()`; there is no config file and no daemon to hold one, so
-  a settings screen there will not stick.
+* **Settings persist locally on Android.** The embedded backend atomically
+  writes `settings-v2.json`; an unreadable record starts with private mode,
+  sync and LAN visibility disabled instead of silently restoring defaults.
 * **The React side owns the surfaces.** Commands and events exist
   (`capture_state`, `capture_arm`, `capture_now`,
   `capture_set_toast_suppressed`, `copypaste://capture-state`,

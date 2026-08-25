@@ -62,6 +62,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: python3 -m pip install --requirement requirements-ci.txt
       - name: Reject incomplete features and unproven performance credits
         run: |
           python3 scripts/check-feature-ledger.py --self-test

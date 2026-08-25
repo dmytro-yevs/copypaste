@@ -6,9 +6,13 @@ repo_dir=$(CDPATH= cd -- "$ui_dir/../.." && pwd)
 daemon_bin="$repo_dir/target/debug/copypaste-daemon"
 cli_bin="$repo_dir/target/debug/copypaste"
 bridge_bin="$repo_dir/target/debug/copypaste-web-bridge"
-bridge_env=$(mktemp "${TMPDIR:-/tmp}/copypaste-web-bridge.XXXXXX")
-bridge_runtime="$ui_dir/public/copypaste-web-bridge.js"
 daemon_owned=false
+
+. "$ui_dir/scripts/web-bridge-runtime.sh"
+if ! acquire_bridge_session; then
+  exit 0
+fi
+bridge_env=$(mktemp "${TMPDIR:-/tmp}/copypaste-web-bridge.XXXXXX")
 
 resolve_data_dir() {
   if [ -n "${COPYPASTE_DATA_DIR:-}" ]; then
@@ -28,17 +32,6 @@ resolve_data_dir() {
 COPYPASTE_DATA_DIR=$(resolve_data_dir)
 export COPYPASTE_DATA_DIR
 
-write_bridge_runtime() {
-  printf 'window.__COPYPASTE_WEB_BRIDGE__ = %s;\n' \
-    "$(printf '{"url":"%s","token":"%s"}' \
-      "$VITE_COPYPASTE_WEB_BRIDGE_URL" \
-      "$VITE_COPYPASTE_WEB_BRIDGE_TOKEN")" >"$bridge_runtime"
-}
-
-clear_bridge_runtime() {
-  printf 'window.__COPYPASTE_WEB_BRIDGE__ = null;\n' >"$bridge_runtime"
-}
-
 cleanup() {
   kill "${bridge_pid:-}" 2>/dev/null || true
   wait "${bridge_pid:-}" 2>/dev/null || true
@@ -48,6 +41,7 @@ cleanup() {
   fi
   clear_bridge_runtime
   rm -f "$bridge_env"
+  release_bridge_session
 }
 trap cleanup EXIT INT TERM
 
@@ -68,13 +62,7 @@ else
   "$daemon_bin" --foreground &
   daemon_pid=$!
   daemon_owned=true
-  attempt=0
-  while ! "$cli_bin" status >/dev/null 2>&1 && [ "$attempt" -lt 50 ]; do
-    attempt=$((attempt + 1))
-    sleep 0.1
-  done
-  if ! "$cli_bin" status >/dev/null 2>&1; then
-    echo "CopyPaste daemon did not become ready." >&2
+  if ! wait_for_daemon; then
     exit 1
   fi
 fi
@@ -82,14 +70,7 @@ fi
 COPYPASTE_WEB_BRIDGE_ENV_FILE="$bridge_env" "$bridge_bin" &
 bridge_pid=$!
 
-attempt=0
-while [ ! -s "$bridge_env" ] && [ "$attempt" -lt 100 ]; do
-  attempt=$((attempt + 1))
-  sleep 0.1
-done
-
-if [ ! -s "$bridge_env" ]; then
-  echo "CopyPaste browser bridge did not start." >&2
+if ! wait_for_bridge_runtime; then
   exit 1
 fi
 
@@ -100,7 +81,7 @@ write_bridge_runtime
 cd "$ui_dir"
 if curl --silent --fail --max-time 1 http://localhost:1420/ >/dev/null 2>&1; then
   echo "Vite is already running on http://localhost:1420/."
-  echo "Reload the browser tab so it picks up this bridge runtime file."
+  echo "The open browser tab will attach to this bridge automatically."
   wait "$bridge_pid"
 else
   npm run dev:web

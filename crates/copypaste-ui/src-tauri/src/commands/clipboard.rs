@@ -13,9 +13,8 @@
 //!
 //! It is not the same job as `commands::history::copy_item`, which takes an
 //! *id* so that a sensitive item's plaintext never has to enter the WebView at
-//! all. Here the text is already on screen — the pairing code the user is
-//! reading — so there is nothing to keep out; what is left is not handing the
-//! capability to everything else running in the page.
+//! all. Here diagnostics text is already visible in the app; what remains is
+//! not handing the capability to everything else running in the page.
 
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -29,9 +28,8 @@ const MSG_FAILED: &str = "That couldn't be copied to the clipboard.";
 
 /// Put `text` on the system clipboard.
 ///
-/// A failure is returned, never swallowed. The one caller is the pairing
-/// dialog's copy button, and a copy that silently does nothing sends the user
-/// to the other device to paste a code that is not there.
+/// A failure is returned, never swallowed. Successful writes share the same
+/// user-selected feedback as history and tray copies.
 #[tauri::command]
 pub async fn copy_text<R: Runtime>(app: AppHandle<R>, text: String) -> Result<()> {
     if text.is_empty() {
@@ -44,7 +42,9 @@ pub async fn copy_text<R: Runtime>(app: AppHandle<R>, text: String) -> Result<()
         .map_err(|e| {
             tracing::warn!(error = %e, "a clipboard write failed");
             BackendError::Internal(MSG_FAILED.to_string())
-        })
+        })?;
+    crate::shell::feedback::success(&app);
+    Ok(())
 }
 
 #[cfg(test)]

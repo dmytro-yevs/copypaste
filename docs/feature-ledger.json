@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "features": [
     {
       "id": "history",
@@ -11,10 +11,10 @@
         "copy_item",
         "copy_item_as_plain_text",
         "reveal_item",
+        "get_item_body",
         "copy_items",
         "get_image_preview",
         "get_source_app_icon",
-        "list_installed_source_apps",
         "delete_item",
         "delete_all",
         "history_ceiling",
@@ -53,21 +53,27 @@
       "native": {
         "android": {
           "scenario": "./scripts/release/android-smoke.sh",
-          "screenshot": "artifacts/native/android/history/screenshot.png",
-          "ax_log": "artifacts/native/android/history/ax.json"
+          "evidence_status": "pending",
+          "unverified_states": [
+            "history-ui"
+          ]
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
-          "screenshot": "artifacts/native/macos/history/screenshot.png",
-          "ax_log": "artifacts/native/macos/history/ax.json"
+          "evidence_status": "pending",
+          "unverified_states": [
+            "history-ui"
+          ]
         },
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
+          "evidence_status": "verified",
           "screenshot": "artifacts/release-windows-native/history/screenshot.png",
           "ax_log": "artifacts/release-windows-native/history/accessibility.json",
           "evidence_states": [
             "populated"
-          ]
+          ],
+          "release_artifact": "release-windows-native-evidence"
         }
       },
       "release_evidence": [
@@ -89,10 +95,15 @@
         "capture_now",
         "capture_toast_explanation",
         "capture_set_toast_suppressed",
+        "capture_open_shizuku",
+        "capture_open_developer_options",
+        "capture_request_battery_exemption",
         "copy_text"
       ],
       "backend_tests": [
         "cargo test -p copypaste-core clipboard",
+        "cargo test -p copypaste-feedback",
+        "cargo test -p copypaste-daemon notify",
         "cd crates/copypaste-ui/src-tauri/gen/android && ./gradlew :app:testArmDebugUnitTest"
       ],
       "ui_tests": [
@@ -123,21 +134,28 @@
       "native": {
         "android": {
           "scenario": "./scripts/release/android-smoke.sh",
-          "screenshot": "artifacts/native/android/capture/screenshot.png",
-          "ax_log": "artifacts/native/android/capture/ax.json"
+          "evidence_status": "pending",
+          "unverified_states": [
+            "capture-ui"
+          ]
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
-          "screenshot": "artifacts/native/macos/capture/screenshot.png",
-          "ax_log": "artifacts/native/macos/capture/ax.json"
+          "evidence_status": "pending",
+          "unverified_states": [
+            "capture-ui"
+          ]
         },
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
+          "evidence_status": "verified",
           "screenshot": "artifacts/release-windows-native/capture/screenshot.png",
           "ax_log": "artifacts/release-windows-native/capture/accessibility.json",
           "evidence_states": [
-            "service-capture-status"
-          ]
+            "service-capture-status",
+            "copy-feedback-setting"
+          ],
+          "release_artifact": "release-windows-native-evidence"
         }
       },
       "release_evidence": [
@@ -198,22 +216,38 @@
       },
       "native": {
         "android": {
-          "scenario": "./scripts/release/android-smoke.sh",
-          "screenshot": "artifacts/native/android/devices/screenshot.png",
-          "ax_log": "artifacts/native/android/devices/ax.json"
+          "scenario": "./scripts/release/android-smoke-release.sh",
+          "evidence_status": "verified",
+          "screenshot": "artifacts/release-android-smoke/pairing-entry.png",
+          "ax_log": "artifacts/release-android-smoke/pairing-entry.xml",
+          "evidence_states": [
+            "scan-pairing-code"
+          ],
+          "release_artifact": "release-android-smoke-evidence"
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
-          "screenshot": "artifacts/native/macos/devices/screenshot.png",
-          "ax_log": "artifacts/native/macos/devices/ax.json"
+          "evidence_status": "partial",
+          "screenshot": "artifacts/release-macos-native/screenshot.png",
+          "ax_log": "artifacts/release-macos-native/ax.log",
+          "evidence_states": [
+            "native-shell"
+          ],
+          "unverified_states": [
+            "desktop-pairing-entry",
+            "desktop-pairing-invite"
+          ],
+          "release_artifact": "release-macos-native-evidence"
         },
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
+          "evidence_status": "verified",
           "screenshot": "artifacts/release-windows-native/devices/screenshot.png",
           "ax_log": "artifacts/release-windows-native/devices/accessibility.json",
           "evidence_states": [
-            "ready-to-pair"
-          ]
+            "desktop-pairing-entry"
+          ],
+          "release_artifact": "release-windows-native-evidence"
         }
       },
       "release_evidence": [
@@ -228,7 +262,6 @@
       "status": "product",
       "contracts": [
         "set_native_theme",
-        "system_accent",
         "status",
         "diagnostics",
         "runtime_log_events",
@@ -260,10 +293,12 @@
         "install_update",
         "permission_snapshot",
         "permission_request",
-        "permission_open_settings"
+        "permission_open_settings",
+        "list_installed_source_apps"
       ],
       "backend_tests": [
-        "cargo test --workspace"
+        "cargo test --workspace",
+        "cargo test -p copypaste-ui installed_source_apps"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -281,6 +316,10 @@
         "installer_handoff",
         "declined",
         "error",
+        "catalog_loading",
+        "catalog_empty",
+        "catalog_error",
+        "catalog_search",
         "keyboard",
         "screen_reader"
       ],
@@ -289,7 +328,8 @@
         "offline",
         "permission_denied",
         "unsigned_update",
-        "signature_rejected"
+        "signature_rejected",
+        "catalog_unavailable"
       ],
       "performance": {
         "android": {
@@ -305,22 +345,38 @@
       "native": {
         "android": {
           "scenario": "./scripts/release/android-storage-transfer.sh",
-          "screenshot": "artifacts/android-storage/transfer-persisted.png",
-          "ax_log": "artifacts/android-storage/transfer-persisted.xml"
+          "evidence_status": "partial",
+          "screenshot": "artifacts/release-android-storage/transfer-persisted.png",
+          "ax_log": "artifacts/release-android-storage/transfer-persisted.xml",
+          "evidence_states": [
+            "storage-transfer-persisted"
+          ],
+          "unverified_states": [
+            "source-exclusion-catalog"
+          ],
+          "release_artifact": "release-android-storage-evidence"
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
-          "screenshot": "artifacts/native/macos/settings-and-service/screenshot.png",
-          "ax_log": "artifacts/native/macos/settings-and-service/ax.json"
+          "evidence_status": "pending",
+          "unverified_states": [
+            "settings-ui",
+            "source-exclusion-catalog"
+          ]
         },
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
+          "evidence_status": "partial",
           "screenshot": "artifacts/release-windows-native/settings-and-service/screenshot.png",
           "ax_log": "artifacts/release-windows-native/settings-and-service/accessibility.json",
           "evidence_states": [
             "appearance",
             "updater-configured"
-          ]
+          ],
+          "unverified_states": [
+            "source-exclusion-catalog"
+          ],
+          "release_artifact": "release-windows-native-evidence"
         }
       },
       "release_evidence": [
@@ -346,7 +402,7 @@
         "cargo test -p copypaste-cloud -p copypaste-ui"
       ],
       "ui_tests": [
-        "npm --prefix crates/copypaste-ui test -- SyncTab CloudStep PairingStep"
+        "npm --prefix crates/copypaste-ui run test:cloud"
       ],
       "accessibility_states": [
         "unconfigured",
@@ -386,8 +442,9 @@
       "native": {
         "android": {
           "scenario": "./scripts/release/android-cloud-evidence.sh --all",
-          "screenshot": "artifacts/native/android/cloud/signed-in/screenshot.png",
-          "ax_log": "artifacts/native/android/cloud/signed-in/ax.xml",
+          "evidence_status": "verified",
+          "screenshot": "artifacts/release-android-cloud/signed-in/screenshot.png",
+          "ax_log": "artifacts/release-android-cloud/signed-in/ax.xml",
           "evidence_states": [
             "unconfigured",
             "signed-out",
@@ -395,13 +452,13 @@
             "sync-with-skips",
             "offline-error",
             "signed-out-again"
-          ]
+          ],
+          "release_artifact": "release-android-cloud-evidence"
         },
         "macos": {
           "scenario": "./scripts/release/macos-cloud-evidence.sh",
-          "screenshot": "artifacts/native/macos/cloud/signed-in/screenshot.png",
-          "ax_log": "artifacts/native/macos/cloud/signed-in/ax.txt",
-          "evidence_states": [
+          "evidence_status": "pending",
+          "unverified_states": [
             "unconfigured",
             "signed-out",
             "signed-in",
@@ -412,11 +469,20 @@
         },
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
+          "evidence_status": "partial",
           "screenshot": "artifacts/release-windows-native/cloud-account/screenshot.png",
           "ax_log": "artifacts/release-windows-native/cloud-account/accessibility.json",
           "evidence_states": [
-            "not-configured"
-          ]
+            "unconfigured"
+          ],
+          "unverified_states": [
+            "signed-out",
+            "signed-in",
+            "sync-with-skips",
+            "offline-error",
+            "signed-out-again"
+          ],
+          "release_artifact": "release-windows-native-evidence"
         }
       },
       "release_evidence": [

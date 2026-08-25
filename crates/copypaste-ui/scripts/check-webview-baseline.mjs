@@ -8,13 +8,14 @@
  * lower and asks that package for the version. `--self-test` proves each map
  * entry fires.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { globSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parse } from "@babel/parser";
 import _traverse from "@babel/traverse";
+import { parse as parseCss } from "postcss";
 
 // `require`, because the package resolves this to `plugins.js` or to
 // `data/plugins.json` depending on how it was installed, and the two need
@@ -160,6 +161,23 @@ export function sharesBaselineWithConfig(config) {
   return /from\s+"\.\/scripts\/webview-baseline\.mjs"/.test(config);
 }
 
+/** Shared CSS is loaded by both script variants, so its target is API 24. */
+export function sharesCssBaselineWithConfig(config) {
+  return (
+    /import\s*\{[^}]*\bLEGACY_CSS_TARGET\b[^}]*\}\s*from\s*"\.\/scripts\/webview-baseline\.mjs"/s.test(
+      config,
+    ) && /\bcssTarget\s*:\s*LEGACY_CSS_TARGET\b/.test(config)
+  );
+}
+
+export function unflattenedCascadeLayers(css, filename = "<input>") {
+  const found = [];
+  parseCss(css, { from: filename }).walkAtRules("layer", (rule) => {
+    found.push({ file: filename, line: rule.source?.start?.line ?? 0 });
+  });
+  return found;
+}
+
 function scripts(dir, fromPublic) {
   return readdirSync(path.join(root, "dist", ...dir), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
@@ -175,9 +193,22 @@ function bundles() {
   return [...scripts(["assets"], false), ...scripts([], true)];
 }
 
+function stylesheets() {
+  const dist = path.join(root, "dist");
+  return globSync("**/*.css", { cwd: dist }).map((name) => ({
+    name,
+    code: readFileSync(path.join(dist, name), "utf8"),
+  }));
+}
+
 function main() {
-  if (!sharesBaselineWithConfig(readFileSync(path.join(root, "vite.config.ts"), "utf8"))) {
+  const config = readFileSync(path.join(root, "vite.config.ts"), "utf8");
+  if (!sharesBaselineWithConfig(config)) {
     console.error("FAIL vite.config.ts does not take its engines from scripts/webview-baseline.mjs");
+    return 1;
+  }
+  if (!sharesCssBaselineWithConfig(config)) {
+    console.error("FAIL vite.config.ts does not target shared CSS at LEGACY_CSS_TARGET");
     return 1;
   }
 
@@ -198,6 +229,20 @@ function main() {
   // still downloaded with the app. `vite.config.ts` removes the one the two
   // outputs are known to leave behind, so anything left here is a new one.
   let failed = 0;
+  const css = stylesheets();
+  if (css.length === 0) {
+    console.error("FAIL dist holds no built stylesheet; run vite build first");
+    failed += 1;
+  }
+  const layers = css.flatMap(({ name, code }) => unflattenedCascadeLayers(code, name));
+  for (const { file, line } of layers) {
+    console.error(`FAIL ${file}:${line} still contains @layer; API 24 and API 29 discard it`);
+  }
+  failed += layers.length;
+  if (css.length > 0 && layers.length === 0) {
+    console.log(`ok   ${css.length} stylesheet(s) have no unsupported @layer rules`);
+  }
+
   for (const name of unreferenced(chunks, entryHtml)) {
     console.error(`FAIL ${name} is packaged and nothing loads it; the build must not emit it`);
     failed += 1;

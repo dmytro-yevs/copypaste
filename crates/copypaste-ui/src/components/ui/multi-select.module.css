@@ -1,0 +1,26 @@
+.trigger {
+  position: relative;
+  display: inline-flex;
+  max-inline-size: 100%;
+  padding-inline: var(--s-3);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.triggerContents { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-2); }
+.label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.content {
+  min-inline-size: var(--radix-dropdown-menu-trigger-width);
+}
+.itemLabel { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trigger[data-presentation="icon"] { inline-size: var(--control-block-size); min-inline-size: var(--control-block-size); padding: 0; justify-content: center; }
+.trigger[data-presentation="icon"] .label,
+.trigger[data-presentation="icon"] [data-slot="control-end-slot"] { display: none; }
+@container library-toolbar (max-width: $cpToolbar) {
+  .trigger[data-presentation="auto"] { inline-size: var(--control-block-size); min-inline-size: var(--control-block-size); padding: 0; justify-content: center; }
+  .trigger[data-presentation="auto"] .label,
+  .trigger[data-presentation="auto"] [data-slot="control-end-slot"] { display: none; }
+}

@@ -1,0 +1,178 @@
+.button {
+  --button-content-gap: var(--s-2);
+
+  display: inline-flex;
+  min-inline-size: 0;
+  min-block-size: var(--tap-min);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke-1) solid transparent;
+  border-radius: var(--r-ctl);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.content {
+  display: flex;
+  inline-size: 100%;
+  min-inline-size: 0;
+  flex-direction: inherit;
+  flex-wrap: inherit;
+  align-items: inherit;
+  justify-content: inherit;
+}
+
+.content > * + * {
+  margin-inline-start: var(--button-content-gap);
+}
+
+.button:focus-visible {
+  outline: 0;
+  box-shadow: var(--sh-focus);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(var(--stroke-1));
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.button svg {
+  inline-size: 1em;
+  block-size: 1em;
+  flex: none;
+  pointer-events: none;
+}
+
+.primary {
+  border-color: var(--border);
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.secondary {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--card);
+  box-shadow: var(--sh1);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--button-secondary-hover-bg);
+}
+
+.secondary[aria-pressed="true"] {
+  border-color: var(--button-secondary-pressed-border);
+  color: var(--accent-2);
+  background: var(--selected);
+}
+
+.ghost {
+  color: var(--text);
+  background: transparent;
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--selected);
+}
+
+.danger {
+  border-color: var(--border);
+  color: var(--on-err);
+  background: var(--err);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--err-hover);
+}
+
+.dangerTone:not(.danger) {
+  color: var(--err);
+}
+
+.dangerTone.ghost:hover:not(:disabled),
+.dangerTone.secondary:hover:not(:disabled) {
+  border-color: var(--danger-control-border);
+  color: var(--err);
+  background: var(--button-danger-hover-bg);
+}
+
+.ghost[aria-pressed="true"] {
+  color: var(--accent-2);
+  background: transparent;
+}
+
+.compact {
+  min-block-size: var(--ctl-h-sm);
+  padding-inline: var(--s-3);
+}
+
+.compactIcon {
+  inline-size: var(--ctl-h-sm);
+  block-size: var(--ctl-h-sm);
+  min-inline-size: var(--ctl-h-sm);
+  min-block-size: var(--ctl-h-sm);
+  padding: 0;
+}
+
+.sm {
+  min-block-size: var(--ctl-h-sm);
+  padding-inline: var(--s-3);
+}
+
+.md {
+  min-block-size: max(var(--ctl-h-md), var(--tap-min));
+  padding-inline: var(--s-4);
+}
+
+.lg {
+  min-block-size: max(var(--ctl-h-lg), var(--tap-min));
+  padding-inline: var(--s-5);
+}
+
+.icon {
+  inline-size: max(var(--ctl-h-lg), var(--tap-min));
+  block-size: max(var(--ctl-h-lg), var(--tap-min));
+  min-inline-size: max(var(--ctl-h-lg), var(--tap-min));
+  min-block-size: max(var(--ctl-h-lg), var(--tap-min));
+  padding: 0;
+}
+
+.loading {
+  cursor: progress;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+
+  .button:active:not(:disabled) {
+    transform: none;
+  }
+
+}
+
+@media (pointer: coarse) {
+  .compact, .sm { min-block-size: var(--tap-min); }
+  .compactIcon { inline-size: var(--tap-min); block-size: var(--tap-min); min-inline-size: var(--tap-min); min-block-size: var(--tap-min); }
+}

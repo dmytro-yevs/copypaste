@@ -7,6 +7,8 @@
 import { call } from "@/lib/ipcCall";
 import type { ServiceState } from "@/lib/ipc";
 
+const DIAGNOSTICS_TIMEOUT_MS = 4_000;
+
 /** Cumulative since the service started and never reset, so `uptime_secs` is
  *  the only thing they can honestly be read against. Counts only: there is no
  *  field a clipping could travel in. */
@@ -51,7 +53,9 @@ export interface Diagnostics {
 }
 
 export function getDiagnostics(): Promise<Diagnostics> {
-  return call<Diagnostics>("diagnostics");
+  return call<Diagnostics>("diagnostics", undefined, {
+    timeoutMs: DIAGNOSTICS_TIMEOUT_MS,
+  });
 }
 
 /** `false` means the system save panel was dismissed, never an error. */

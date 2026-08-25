@@ -7,8 +7,3 @@ use crate::shell::appearance::{self, NativeTheme};
 pub fn set_native_theme(app: AppHandle, theme: NativeTheme) {
     appearance::apply(&app, theme);
 }
-
-#[tauri::command]
-pub fn system_accent(app: AppHandle) -> appearance::SystemAccent {
-    appearance::system_accent(&app)
-}

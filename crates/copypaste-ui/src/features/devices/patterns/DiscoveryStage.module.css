@@ -1,0 +1,494 @@
+.stage {
+    display: grid;
+    min-block-size: 0;
+    gap: var(--s-4);
+}
+
+.state {
+    display: grid;
+    min-block-size: calc(var(--s-9) * 7 + var(--s-4));
+    padding: 0;
+    overflow: hidden;
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-card);
+    background: var(--card);
+    box-shadow: var(--sh1);
+    text-align: center;
+}
+
+.radar {
+    position: relative;
+    display: grid;
+    block-size: 100%;
+    min-block-size: calc(var(--s-9) * 6);
+    place-items: center;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: var(--panel);
+    isolation: isolate;
+}
+
+.radarPlot,
+.deviceLayer {
+    position: absolute;
+}
+
+.radarPlot {
+    z-index: var(--z-row);
+    inset: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    color: var(--divider);
+}
+
+.rangeGrid,
+.spokes {
+    fill: none;
+}
+
+.rangeGrid circle,
+.spokes path {
+    stroke: var(--divider);
+    stroke-width: var(--stroke-1);
+    vector-effect: non-scaling-stroke;
+}
+
+.rangeGrid circle[data-major],
+.spokes path[data-major] {
+    stroke: var(--border);
+}
+
+.sweep {
+    transform-origin: 50% 50%;
+    animation: discovery-radar-sweep calc(var(--dur-ambient) * 3)
+        var(--ease-linear) infinite;
+}
+
+.sweepSector {
+    stroke: none;
+    pointer-events: none;
+}
+
+.localNode {
+    position: relative;
+    z-index: var(--z-sticky);
+    display: grid;
+    inline-size: var(--s-9);
+    block-size: var(--s-9);
+    place-items: center;
+    border: var(--stroke-1) solid var(--selected-edge);
+    border-radius: var(--r-row);
+    background: var(--elevated);
+    box-shadow: var(--sh2);
+    animation: discovery-radar-local-breathe calc(var(--dur-ambient) * 1.5)
+        cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.localNode::after {
+    position: absolute;
+    inset: calc(var(--s-1) * -1);
+    border: var(--stroke-1) solid var(--selected-edge);
+    border-radius: calc(var(--r-row) + var(--s-1));
+    content: "";
+    pointer-events: none;
+    animation: discovery-radar-local-ring calc(var(--dur-ambient) * 1.5)
+        var(--ease) infinite;
+}
+
+.errorBadge {
+    position: absolute;
+    inset-block-end: calc(var(--s-1) * -1);
+    inset-inline-end: calc(var(--s-1) * -1);
+    display: grid;
+    inline-size: var(--s-5);
+    block-size: var(--s-5);
+    place-items: center;
+    border: var(--stroke-1) solid var(--card);
+    border-radius: var(--r-pill);
+    color: var(--err-strong);
+    background: var(--status-error-bg);
+}
+
+.deviceLayer {
+    z-index: var(--z-sticky);
+    inset: var(--s-3);
+    display: grid;
+    grid-template: repeat(13, minmax(0, 1fr)) / repeat(13, minmax(0, 1fr));
+    pointer-events: none;
+}
+
+.radarDevice {
+    --button-content-gap: var(--s-2);
+    --radar-node-size: calc(var(--s-9) + var(--s-7) - var(--s-1));
+    --radar-entry-delay: 0ms;
+
+    inline-size: var(--radar-node-size);
+    block-size: var(--radar-node-size);
+    min-block-size: var(--radar-node-size);
+    flex-direction: column;
+    place-self: center;
+    justify-content: center;
+    padding: 0;
+    overflow: hidden;
+    border: var(--stroke-1) solid var(--divider);
+    border-radius: calc(var(--r-card) + var(--s-1));
+    color: var(--text);
+    background: var(--card);
+    box-shadow: var(--sh1);
+    white-space: normal;
+    pointer-events: auto;
+    animation:
+        discovery-radar-device-in var(--dur) var(--ease)
+            var(--radar-entry-delay) both,
+        discovery-radar-detection-echo calc(var(--dur-ambient) * 1.5)
+            var(--ease) var(--radar-entry-delay) 1 both,
+        discovery-radar-live var(--radar-live-duration)
+            cubic-bezier(0.45, 0, 0.55, 1) var(--radar-live-phase) infinite;
+}
+
+.radarDevice:nth-child(2) {
+    --radar-entry-delay: var(--dur-fast);
+}
+
+.radarDevice:nth-child(3) {
+    --radar-entry-delay: var(--dur);
+}
+
+.radarDevice:nth-child(n + 4) {
+    --radar-entry-delay: var(--dur-theme);
+}
+
+.radarDevice > span {
+    block-size: 100%;
+    padding-block: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--s-1); /* apply fgp */
+}
+
+.radarDevice > span > * + * {
+    margin-block-start: 0;
+    margin-inline-start: 0;
+}
+
+.radarDeviceIcon {
+    display: grid;
+    inline-size: var(--s-7);
+    block-size: var(--s-7);
+    flex: none;
+    place-items: center;
+    border-radius: var(--r-row);
+    color: var(--accent-2);
+    background: transparent;
+}
+
+.radarDeviceIcon > span {
+    inline-size: calc(var(--icon-lg) + var(--s-2));
+    block-size: calc(var(--icon-lg) + var(--s-2));
+}
+
+.radarDeviceIcon svg {
+    inline-size: 100%;
+    block-size: 100%;
+}
+
+.radarDevice[data-selected] {
+    border-color: var(--selected-edge);
+    color: var(--text);
+    background: var(--selected);
+    box-shadow: var(--sh-focus);
+}
+
+.radarDevice.radarDevice:hover:not(:disabled) {
+    border-color: var(--selected-edge);
+    opacity: 1;
+    background: var(--raised);
+    box-shadow: var(--sh2);
+}
+
+.radarDeviceCopy {
+    min-inline-size: 0;
+    inline-size: 100%;
+    text-align: center;
+}
+
+.radarDeviceCopy strong {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.radarDeviceCopy strong {
+    color: var(--text);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    line-height: var(--lh-tight);
+}
+
+.radarDevice[data-sector="1"] {
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: start;
+}
+
+.radarDevice[data-sector="2"] {
+    grid-column: 11;
+    grid-row: 2;
+    justify-self: end;
+}
+
+.radarDevice[data-sector="3"] {
+    grid-column: 3;
+    grid-row: 12;
+    justify-self: start;
+}
+
+.radarDevice[data-sector="4"] {
+    grid-column: 11;
+    grid-row: 12;
+    justify-self: end;
+}
+
+.radarDevice[data-sector="5"] {
+    grid-column: 6;
+    grid-row: 2;
+}
+
+.radarDevice[data-sector="6"] {
+    grid-column: 12;
+    grid-row: 6;
+    justify-self: end;
+}
+
+.radarDevice[data-sector="7"] {
+    grid-column: 8;
+    grid-row: 12;
+}
+
+.radarDevice[data-sector="8"] {
+    grid-column: 2;
+    grid-row: 8;
+    justify-self: start;
+}
+
+.radarDevice[data-distance="middle"][data-sector="1"] {
+    grid-column: 4;
+    grid-row: 3;
+}
+
+.radarDevice[data-distance="middle"][data-sector="2"] {
+    grid-column: 10;
+    grid-row: 3;
+}
+
+.radarDevice[data-distance="middle"][data-sector="3"] {
+    grid-column: 4;
+    grid-row: 11;
+}
+
+.radarDevice[data-distance="middle"][data-sector="4"] {
+    grid-column: 10;
+    grid-row: 11;
+}
+
+.radarDevice[data-distance="middle"][data-sector="5"] {
+    grid-column: 6;
+    grid-row: 3;
+}
+
+.radarDevice[data-distance="middle"][data-sector="6"] {
+    grid-column: 11;
+    grid-row: 6;
+}
+
+.radarDevice[data-distance="middle"][data-sector="7"] {
+    grid-column: 8;
+    grid-row: 11;
+}
+
+.radarDevice[data-distance="middle"][data-sector="8"] {
+    grid-column: 3;
+    grid-row: 8;
+}
+
+.radarDevice[data-distance="near"][data-sector="1"] {
+    grid-column: 5;
+    grid-row: 4;
+}
+
+.radarDevice[data-distance="near"][data-sector="2"] {
+    grid-column: 9;
+    grid-row: 4;
+}
+
+.radarDevice[data-distance="near"][data-sector="3"] {
+    grid-column: 5;
+    grid-row: 10;
+}
+
+.radarDevice[data-distance="near"][data-sector="4"] {
+    grid-column: 9;
+    grid-row: 10;
+}
+
+.radarDevice[data-distance="near"][data-sector="5"] {
+    grid-column: 6;
+    grid-row: 4;
+}
+
+.radarDevice[data-distance="near"][data-sector="6"] {
+    grid-column: 10;
+    grid-row: 6;
+}
+
+.radarDevice[data-distance="near"][data-sector="7"] {
+    grid-column: 8;
+    grid-row: 10;
+}
+
+.radarDevice[data-distance="near"][data-sector="8"] {
+    grid-column: 4;
+    grid-row: 8;
+}
+
+.resultSummary span {
+    color: var(--dim);
+    font-size: var(--fs-sm);
+    overflow-wrap: anywhere;
+}
+
+.results {
+    display: grid;
+    gap: var(--s-3);
+    animation: discovery-results-in var(--dur) var(--ease) both;
+}
+
+.resultSummary {
+    display: grid;
+    gap: var(--s-1);
+}
+
+.resultSummary strong {
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.resultSummary span {
+    font-size: var(--fs-xs);
+}
+
+@keyframes discovery-radar-sweep {
+    to {
+        transform: rotate(1turn);
+    }
+}
+
+@keyframes discovery-radar-device-in {
+    from {
+        opacity: 0;
+    }
+}
+
+@keyframes discovery-radar-detection-echo {
+    0%,
+    18% {
+        box-shadow: var(--sh1), 0 0 0 0 var(--selected-edge);
+    }
+
+    70%,
+    100% {
+        box-shadow: var(--sh1), 0 0 0 var(--s-4) transparent;
+    }
+}
+
+@keyframes discovery-radar-live {
+    0%,
+    100% {
+        transform: translate(0, 0) scale(1);
+    }
+
+    23% {
+        transform: translate(var(--radar-drift-x), 0) scale(1.008);
+    }
+
+    58% {
+        transform: translate(var(--radar-drift-x-back), var(--radar-drift-y))
+            scale(0.996);
+    }
+
+    81% {
+        transform: translate(0, var(--radar-drift-y-back)) scale(1.004);
+    }
+}
+
+@keyframes discovery-radar-local-breathe {
+    0%,
+    100% {
+        transform: translateY(0) scale(1);
+    }
+
+    50% {
+        transform: translateY(calc(var(--stroke-2) * -1)) scale(1.07);
+    }
+}
+
+@keyframes discovery-radar-local-ring {
+    0%,
+    25% {
+        opacity: 0.42;
+        transform: scale(0.94);
+    }
+
+    75%,
+    100% {
+        opacity: 0;
+        transform: scale(1.28);
+    }
+}
+
+@keyframes discovery-results-in {
+    from {
+        opacity: 0;
+        transform: translateY(var(--s-1));
+    }
+}
+
+@container (max-width: $cpXs) {
+    .stage {
+        margin-inline: calc(var(--s-4) * -1);
+    }
+
+    .state {
+        min-block-size: calc(var(--s-9) * 7);
+        box-shadow: none;
+    }
+
+    .radar {
+        min-block-size: calc(var(--s-9) * 5 + var(--s-8));
+    }
+
+    .radarDevice {
+        --radar-node-size: calc(var(--s-9) + var(--s-7) - var(--s-1));
+    }
+
+    .results {
+        padding-inline: var(--s-4);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sweep,
+    .localNode,
+    .localNode::after,
+    .radarDevice,
+    .results {
+        animation: none;
+    }
+
+    .sweep {
+        transform: rotate(0.125turn);
+    }
+}

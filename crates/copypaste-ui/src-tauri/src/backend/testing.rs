@@ -176,6 +176,8 @@ impl Backend for FakeBackend {
                 device_name: "Test device".into(),
                 version: version.clone(),
                 protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+                listen_addr: None,
+                device_details: None,
                 item_count: 0,
                 capture_running: true,
                 clipboard_backend: "fake".into(),

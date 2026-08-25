@@ -1067,8 +1067,10 @@ dependencies = [
  "copypaste-clock",
  "copypaste-cloud",
  "copypaste-core",
+ "copypaste-feedback",
  "copypaste-ipc",
  "copypaste-p2p",
+ "copypaste-retry",
  "copypaste-runtime-log",
  "directories",
  "futures-util",
@@ -1098,6 +1100,14 @@ dependencies = [
  "win-security-identifier",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "copypaste-feedback"
+version = "2.0.0-alpha.32"
+dependencies = [
+ "tracing",
+ "winsafe",
 ]
 
 [[package]]
@@ -1136,6 +1146,7 @@ dependencies = [
  "hex",
  "if-addrs",
  "mdns-sd",
+ "os_info",
  "rand 0.8.7",
  "serde",
  "serde_json",
@@ -1150,6 +1161,13 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "copypaste-retry"
+version = "2.0.0-alpha.32"
+dependencies = [
+ "backon",
 ]
 
 [[package]]
@@ -1193,10 +1211,13 @@ dependencies = [
  "cc",
  "copypaste-cloud",
  "copypaste-core",
+ "copypaste-feedback",
  "copypaste-fs",
  "copypaste-ipc",
  "copypaste-p2p",
+ "copypaste-retry",
  "copypaste-runtime-log",
+ "directories",
  "dispatch2",
  "futures-util",
  "image",
@@ -1208,6 +1229,7 @@ dependencies = [
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
  "objc2-user-notifications 0.2.2",
+ "plist",
  "qrcode",
  "serde",
  "serde_json",
@@ -1232,8 +1254,10 @@ dependencies = [
  "ts-rs",
  "url",
  "uuid",
+ "walkdir",
  "win32job",
  "windows-sys 0.61.2",
+ "winreg 0.55.0",
  "winsafe",
  "zeroize",
 ]
@@ -3429,6 +3453,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nom"
 version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3932,6 +3968,21 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "os_info"
+version = "3.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cf20a545b305cf1da722b236b5155c9bb35f1d5ceb28c048bd96ca842f41b5b"
+dependencies = [
+ "android_system_properties",
+ "log",
+ "nix",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "objc2-ui-kit",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

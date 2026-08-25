@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
 
@@ -30,6 +31,10 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
         </intent>
         <package android:name="moe.shizuku.privileged.api" />
     </queries>
@@ -67,7 +72,25 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="copypaste" android:host="pair" />
             </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
+            <intent-filter >
+                <action android:name="android.intent.action.VIEW" />
+                <!-- ChromeOS ARC++ uses a different action for deep links -->
+                <action android:name="org.chromium.arc.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="copypaste" />
+
+
+
+
+
+            </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
         </activity>
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="false" />
 
         <!--
           Rung 0's text-bearing doorways. Invisible and immediate: the user
@@ -91,6 +114,21 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
+            <intent-filter >
+                <action android:name="android.intent.action.VIEW" />
+                <!-- ChromeOS ARC++ uses a different action for deep links -->
+                <action android:name="org.chromium.arc.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="copypaste" />
+
+
+
+
+
+            </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
         </activity>
 
         <activity
@@ -118,7 +156,7 @@
         <service
             android:name=".CaptureTileService"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher"
+            android:icon="@drawable/ic_copypaste_capture_tile"
             android:label="@string/capture_action"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

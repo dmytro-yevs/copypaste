@@ -110,6 +110,26 @@ struct PrivateModeArgs {
     enabled: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadArgs {
+    source: CaptureSource,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExcludedAppsArgs<'a> {
+    configured: bool,
+    bundle_ids: &'a [String],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SilentNotificationArgs<'a> {
+    title: &'a str,
+    body: &'a str,
+}
+
 impl AndroidCapture {
     fn new(handle: PluginHandle<Wry>) -> Self {
         Self {
@@ -153,6 +173,15 @@ impl AndroidCapture {
     pub fn installed_source_apps(&self) -> Result<Vec<AndroidInstalledSourceApp>> {
         self.call::<_, AndroidInstalledSourceApps>("installedSourceApps", (), MSG_BRIDGE)
             .map(|response| response.apps)
+    }
+
+    pub fn post_silent_notification(&self, title: &str, body: &str) -> Result<()> {
+        self.call::<_, AndroidEmptyResult>(
+            "postSilentNotification",
+            SilentNotificationArgs { title, body },
+            MSG_BRIDGE,
+        )
+        .map(|_| ())
     }
 
     fn open(&self, command: &'static str) -> Result<()> {
@@ -205,7 +234,7 @@ impl CaptureControl for AndroidCapture {
     }
 
     fn read_now(&self, source: CaptureSource) -> Result<Option<Clip>> {
-        let result: AndroidReadResult = self.call("readNow", (), MSG_BRIDGE)?;
+        let result: AndroidReadResult = self.call("readNow", ReadArgs { source }, MSG_BRIDGE)?;
         // Recorded, but `focused` is true for this path by construction, so it
         // cannot promote the state to `Working`. See `model::record_read`.
         self.with(|model| model.record_read(result.outcome, result.focused, result.at_ms));
@@ -213,8 +242,8 @@ impl CaptureControl for AndroidCapture {
             text,
             source,
             at_ms: result.at_ms,
-            source_app_bundle_id: None,
-            source_app_name: None,
+            source_app_bundle_id: result.source_app_bundle_id,
+            source_app_name: result.source_app_name,
         }))
     }
 
@@ -244,6 +273,20 @@ impl CaptureControl for AndroidCapture {
             MSG_BRIDGE,
         )
         .map(|_| ())
+    }
+
+    fn set_excluded_app_bundle_ids(&self, bundle_ids: Option<&[String]>) -> Result<()> {
+        let args = ExcludedAppsArgs {
+            configured: bundle_ids.is_some(),
+            bundle_ids: bundle_ids.unwrap_or_default(),
+        };
+        self.call::<_, AndroidEmptyResult>("setExcludedApps", args, MSG_BRIDGE)
+            .map(|_| ())
+    }
+
+    fn play_feedback(&self) -> Result<()> {
+        self.call::<_, AndroidEmptyResult>("playFeedback", (), MSG_BRIDGE)
+            .map(|_| ())
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<CaptureSnapshot> {

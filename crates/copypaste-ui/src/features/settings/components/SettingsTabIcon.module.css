@@ -1,0 +1,5 @@
+.icon {
+  inline-size: var(--icon-sm);
+  block-size: var(--icon-sm);
+  flex: none;
+}

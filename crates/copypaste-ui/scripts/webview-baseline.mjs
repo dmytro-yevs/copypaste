@@ -15,8 +15,11 @@ export const MODERN_TARGET = "chrome74";
 /** The modern engine as a browserslist query, for the plugin and for Babel. */
 export const MODERN_BROWSERSLIST = "chrome >= 74";
 
-/** API 24, which reaches only the nomodule build. */
-export const LEGACY_TARGET = "chrome53";
+/** API 24, which also sets the floor for the stylesheet both builds share. */
+export const LEGACY_CSS_TARGET = "chrome53";
+
+/** API 24's JavaScript reaches only the nomodule build. */
+export const LEGACY_TARGET = LEGACY_CSS_TARGET;
 
 /** The same engine as a browserslist query, which is what `@vitejs/plugin-legacy`
  *  and Babel take; `build.target` takes the esbuild spelling above. */

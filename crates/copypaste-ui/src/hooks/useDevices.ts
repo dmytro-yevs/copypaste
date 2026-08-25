@@ -3,7 +3,7 @@ import { toast } from "sonner";
 
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
-import { PEERS_POLL_MS, POLL_BACKOFF_MS } from "@/lib/layout";
+import { PEERS_POLL_MS, POLL_BACKOFF_MS } from "@/lib/scheduling";
 import {
   type DiscoveredDevice,
   type PeerInfo,

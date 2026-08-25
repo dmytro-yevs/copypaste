@@ -1,0 +1,9 @@
+.root {
+  min-block-size: var(--tap-min);
+  margin-block: calc(var(--s-1) * -1);
+  padding-inline: var(--s-1);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  font-weight: inherit;
+  text-align: start;
+}

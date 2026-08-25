@@ -1,0 +1,4 @@
+.controlEdge {
+  margin-inline-end: calc(var(--s-3) * -1);
+  border-radius: var(--r-input);
+}

@@ -1,0 +1,7 @@
+.actions {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s-2);
+}

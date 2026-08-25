@@ -72,7 +72,7 @@ process_gone_cause() { # <log> <pid>
 looks_encrypted() {
     [[ -s "$1" ]] || return 1
     local magic
-    magic="$(head -c 15 "$1" | tr -d '\000')"
+    magic="$(LC_ALL=C head -c 15 "$1" | LC_ALL=C tr -d '\000')"
     [[ "$magic" != "SQLite format 3" ]]
 }
 
@@ -454,7 +454,7 @@ assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
         bad "a native PNG screenshot was captured" \
             "$(tail -n 12 "${png%.png}-screencap.log" | tr '\n' ' ')"
     fi
-    [[ -s "$png" ]] && shot="$(stat -c %s "$png")"
+    [[ -s "$png" ]] && shot="$(android_file_size "$png")"
     if [[ -s "$dump" ]]; then
         nodes="$(grep -o 'class="[^"]*"' "$dump" | sort | uniq -c | sort -rn | head -n 6 | tr '\n' ' ')"
         probe "the view hierarchy" "${nodes:-none}"

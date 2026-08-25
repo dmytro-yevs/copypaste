@@ -1,3 +1,4 @@
+import { settingsCloud } from "@/i18n/en/settingsCloud";
 import { settingsService } from "@/i18n/en/settingsService";
 
 export const settings = {
@@ -34,35 +35,37 @@ export const settings = {
     shortcut: "Shortcut",
     service: "Service",
     sync: "Sync",
-    storage: "Storage",
+    storage: "Storage & history",
     diagnostics: "Diagnostics",
     about: "About",
   },
 
   appearance: {
     theme: {
-      title: "Theme",
+      title: "Mode",
       system: "System",
       dark: "Dark",
       light: "Light",
       resolves: "Using {{theme}} now.",
-      override: "Choose a theme just for CopyPaste.",
+      override: "Follow this device or keep CopyPaste light or dark.",
     },
-    accent: {
-      title: "Accent",
-      description: "Colors buttons, selection and focus.",
-      system: "System accent",
-      indigo: "Indigo",
-      blue: "Blue",
-      teal: "Teal",
-      green: "Green",
-      amber: "Amber",
-      rose: "Rose",
+    colorTheme: {
+      title: "Theme",
+      description: "Changes surfaces, selection and focus as one coordinated palette.",
+      midnight: "Midnight",
+      midnightDescription: "Focused violet",
+      aurora: "Aurora",
+      auroraDescription: "Calm teal",
+      ember: "Ember",
+      emberDescription: "Warm coral",
+      graphite: "Graphite",
+      graphiteDescription: "Quiet neutral",
     },
     translucency: {
       title: "Translucency",
-      description: "Controls how much of the window background shows through.",
+      description: "Uses frosted chrome where the platform supports it, while respecting reduced transparency.",
     },
+    loading: "Loading appearance…",
   },
 
   list: {
@@ -161,47 +164,14 @@ export const settings = {
       action: "Sync now",
       pending: "Syncing…",
     },
-    cloud: {
-      title: "Cloud sync",
-      description: "Syncs encrypted history through your configured account.",
-      notConfigured:
-        "This build has no cloud deployment configured. Direct device sync still works.",
-      badgeUnavailable: "Unavailable",
-      badgeNotConfigured: "Not configured",
-      badgeConnected: "Connected",
-      badgeSignedOut: "Signed out",
-      loading: "Checking account…",
-      retry: "Try again",
-      lastError: "The last cloud sync failed. Try again or sign in again.",
-      // Not an error: the rest of sync is working. It is the only thing that
-      // separates "everything is uploaded" from "everything but these", and
-      // the row's content and identity deliberately never reach the client.
-      unreadableUploads_one:
-        "1 item on this device could not be prepared for cloud sync and is being retried.",
-      unreadableUploads_other:
-        "{{count}} items on this device could not be prepared for cloud sync and are being retried.",
-      formLabel: "Cloud account sign in",
-      email: "Email",
-      password: "Password",
-      passphrase: "Sync passphrase",
-      signIn: "Sign in",
-      signingIn: "Signing in…",
-      signOut: "Sign out",
-      syncNow: "Sync cloud now",
-      syncing: "Syncing…",
-      toast: {
-        signedIn: "Cloud sync connected",
-        signedOut: "Signed out of cloud sync",
-        synced: "Cloud sync finished: {{uploaded}} uploaded, {{downloaded}} downloaded",
-        syncedWithSkips:
-          "Cloud sync finished: {{uploaded}} uploaded, {{downloaded}} downloaded, {{skipped}} skipped",
-      },
-    },
+    cloud: settingsCloud,
   },
 
   service: settingsService,
 
   transfer: {
+    transferSection: "Import and export",
+    recoverySection: "Backup and restore",
     export: {
       title: "Export history",
       description: "Saves readable text; anyone with the file can read it.",
@@ -266,6 +236,8 @@ export const settings = {
   },
 
   storage: {
+    historySection: "Stored history",
+    dangerSection: "Danger zone",
     stored: {
       title: "Items stored",
       description: "Saved on this device.",
@@ -280,6 +252,7 @@ export const settings = {
   diagnostics: {
     loading: "Reading the service…",
     unavailable: "Diagnostics are unavailable.",
+    errorBody: "CopyPaste couldn't read the service diagnostics.",
     views: "Diagnostics views",
     overview: "Overview",
 
@@ -366,35 +339,56 @@ export const settings = {
   },
 
   about: {
+    versions: {
+      title: "Versions",
+    },
     app: {
       title: "This app",
       description: "The app and service can have different versions.",
-      version: "CopyPaste {{version}}",
+      version: "Version {{version}}",
+      tagline: "Private clipboard memory, across every device.",
     },
     updates: {
       title: "App updates",
-      description: "Signed Windows releases can update from the official feed.",
+      description: "Update CopyPaste from its official distribution source.",
+      descriptionUnsupported: "Install the native app to check and install updates here.",
+      descriptionMacos: "Homebrew checks and upgrades the installed CopyPaste cask.",
+      descriptionWindows: "Checks the signed CopyPaste release feed for Windows.",
+      descriptionAndroid: "Checks, verifies and installs signed CopyPaste APK releases.",
       loading: "Reading update support…",
-      unsupported: "In-app updates aren't available on this platform.",
+      unsupported: "Native CopyPaste app required.",
       unconfigured: "Updates aren't configured in this build.",
       ready: "Updates are checked only when you ask.",
       checking: "Checking for updates…",
+      preparing: "Preparing the verified update…",
       upToDate: "CopyPaste is up to date.",
       available: "CopyPaste {{version}} is available.",
-      downloading: "Downloading the signed update…",
-      downloadingPercent: "Downloading the signed update… {{percent}}%",
-      verifying: "Download complete. Verifying the signed update…",
-      installing: "Update verified. Opening the Windows installer; CopyPaste will restart after installation.",
+      downloading: "Downloading the update…",
+      downloadingPercent: "Downloading the update… {{percent}}%",
+      verifying: "Download complete. Verifying the update…",
+      installing: "Update verified. CopyPaste will restart after installation.",
+      installingMacos: "Homebrew is updating CopyPaste. The app will restart when it finishes.",
       declined: "CopyPaste {{version}} will wait until you choose to install it.",
       error: "CopyPaste couldn't complete the update action.",
+      unavailableLabel: "Unavailable",
+      unconfiguredLabel: "Not configured",
+      attentionLabel: "Needs attention",
       check: "Check for updates",
       checkAgain: "Check again",
       install: "Install update",
+      getNativeApp: "Get CopyPaste",
+      continue: "Continue update",
       downloadProgress: "Downloading CopyPaste {{version}} update",
       confirmTitle: "Install CopyPaste {{version}}?",
-      confirmDescription: "The signed update will download, open the Windows installer, and restart CopyPaste.",
+      confirmDescriptionMacos: "Homebrew will upgrade the installed cask, then CopyPaste will restart.",
+      confirmDescriptionWindows: "CopyPaste will download and verify the signed Windows release, install it, then restart.",
+      confirmDescriptionAndroid: "CopyPaste will download and verify the signed APK, ask Android to install it, then reopen.",
       later: "Later",
+      updateAndRestart: "Update and restart",
       installAndRestart: "Install and restart",
+    },
+    runtime: {
+      title: "Runtime",
     },
     service: {
       title: "Clipboard service",
@@ -424,12 +418,16 @@ export const settings = {
     links: {
       title: "Links",
       repository: "Source code",
+      repositoryDescription: "Browse the project and report an issue on GitHub.",
       releases: "Release notes",
+      releasesDescription: "See what changed in every published version.",
     },
     reset: {
       title: "Reset preferences",
       description: "Restores appearance and list defaults. History stays intact.",
       action: "Reset preferences",
+      confirmTitle: "Reset preferences?",
+      confirmDescription: "Appearance and list preferences return to their defaults. Clipboard history stays intact.",
     },
   },
 } as const;

@@ -6,6 +6,7 @@
 //! |---|---|
 //! | `v` | discovery record version, currently `1` |
 //! | `n` | device display name, UTF-8 |
+//! | `av`/`pv`/`pf`/`dc`/`os`/`ov`/`m` | bounded self-reported device profile |
 //! | `p0`…`pN` | one advertised `pairing_id` per key |
 //!
 //! # What the advertisement discloses about the token
@@ -44,6 +45,7 @@ use super::names::{
 use super::table::DiscoveredPeer;
 use super::DiscoveryError;
 use crate::SERVICE_TYPE;
+use crate::{DeviceClass, DevicePlatform, DeviceProfile};
 
 /// Version stamped into the TXT record, so a future format change can be
 /// ignored by old builds instead of misread by them.
@@ -51,6 +53,13 @@ const TXT_VERSION: &str = "1";
 
 const TXT_KEY_VERSION: &str = "v";
 const TXT_KEY_NAME: &str = "n";
+const TXT_KEY_APP_VERSION: &str = "av";
+const TXT_KEY_PROTOCOL_VERSION: &str = "pv";
+const TXT_KEY_PLATFORM: &str = "pf";
+const TXT_KEY_DEVICE_CLASS: &str = "dc";
+const TXT_KEY_OS_NAME: &str = "os";
+const TXT_KEY_OS_VERSION: &str = "ov";
+const TXT_KEY_MODEL: &str = "m";
 /// Pairing id keys are this prefix followed by a decimal index: `p0`, `p1`, …
 const TXT_KEY_PAIRING_PREFIX: &str = "p";
 
@@ -99,11 +108,12 @@ pub(super) fn build_service_info(
         advertised.truncate(MAX_ADVERTISED_PAIRING_IDS);
     }
 
-    // Only these three kinds of key ever exist, and the pairing id is the only
-    // one of the three derived from the token — see the module docs.
+    // The pairing id remains the only field derived from the token; profile
+    // values are ordinary self-reported metadata (see the module docs).
     let mut txt: HashMap<String, String> = HashMap::new();
     txt.insert(TXT_KEY_VERSION.to_string(), TXT_VERSION.to_string());
     txt.insert(TXT_KEY_NAME.to_string(), display);
+    add_profile_properties(&mut txt, &DeviceProfile::current());
     for (i, id) in advertised.iter().enumerate() {
         txt.insert(format!("{TXT_KEY_PAIRING_PREFIX}{i}"), (*id).clone());
     }
@@ -115,11 +125,38 @@ pub(super) fn build_service_info(
     Ok(info.enable_addr_auto())
 }
 
+fn add_profile_properties(txt: &mut HashMap<String, String>, profile: &DeviceProfile) {
+    if let Some(value) = &profile.app_version {
+        txt.insert(TXT_KEY_APP_VERSION.to_string(), value.clone());
+    }
+    if let Some(value) = profile.protocol_version {
+        txt.insert(TXT_KEY_PROTOCOL_VERSION.to_string(), value.to_string());
+    }
+    txt.insert(
+        TXT_KEY_PLATFORM.to_string(),
+        platform_name(profile.platform).to_string(),
+    );
+    txt.insert(
+        TXT_KEY_DEVICE_CLASS.to_string(),
+        device_class_name(profile.device_class).to_string(),
+    );
+    for (key, value) in [
+        (TXT_KEY_OS_NAME, profile.os_name.as_ref()),
+        (TXT_KEY_OS_VERSION, profile.os_version.as_ref()),
+        (TXT_KEY_MODEL, profile.model.as_ref()),
+    ] {
+        if let Some(value) = value {
+            txt.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
 /// What we were able to read out of somebody's TXT record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Advertisement {
     name: String,
     pairing_ids: Vec<String>,
+    profile: Option<DeviceProfile>,
 }
 
 /// Parse a TXT record. Returns `None` for a record that is not ours or not this
@@ -166,7 +203,75 @@ fn parse_advertisement(txt: &TxtProperties, fallback_name: &str) -> Option<Adver
         }
     }
 
-    Some(Advertisement { name, pairing_ids })
+    Some(Advertisement {
+        name,
+        pairing_ids,
+        profile: parse_profile(txt),
+    })
+}
+
+fn parse_profile(txt: &TxtProperties) -> Option<DeviceProfile> {
+    let app_version = profile_text(txt, TXT_KEY_APP_VERSION);
+    let protocol_version = txt
+        .get_property_val_str(TXT_KEY_PROTOCOL_VERSION)
+        .and_then(|value| value.parse::<u32>().ok());
+    let platform = match txt.get_property_val_str(TXT_KEY_PLATFORM) {
+        Some("macos") => DevicePlatform::Macos,
+        Some("windows") => DevicePlatform::Windows,
+        Some("android") => DevicePlatform::Android,
+        _ => DevicePlatform::Unknown,
+    };
+    let device_class = match txt.get_property_val_str(TXT_KEY_DEVICE_CLASS) {
+        Some("desktop") => DeviceClass::Desktop,
+        Some("laptop") => DeviceClass::Laptop,
+        Some("phone") => DeviceClass::Phone,
+        Some("tablet") => DeviceClass::Tablet,
+        _ => DeviceClass::Unknown,
+    };
+    let os_name = profile_text(txt, TXT_KEY_OS_NAME);
+    let os_version = profile_text(txt, TXT_KEY_OS_VERSION);
+    let model = profile_text(txt, TXT_KEY_MODEL);
+
+    (app_version.is_some()
+        || protocol_version.is_some()
+        || platform != DevicePlatform::Unknown
+        || device_class != DeviceClass::Unknown
+        || os_name.is_some()
+        || os_version.is_some()
+        || model.is_some())
+    .then_some(DeviceProfile {
+        app_version,
+        protocol_version,
+        platform,
+        device_class,
+        os_name,
+        os_version,
+        model,
+    })
+}
+
+fn profile_text(txt: &TxtProperties, key: &str) -> Option<String> {
+    txt.get_property_val_str(key)
+        .and_then(sanitise_display_name)
+}
+
+const fn platform_name(platform: DevicePlatform) -> &'static str {
+    match platform {
+        DevicePlatform::Macos => "macos",
+        DevicePlatform::Windows => "windows",
+        DevicePlatform::Android => "android",
+        DevicePlatform::Unknown => "unknown",
+    }
+}
+
+const fn device_class_name(class: DeviceClass) -> &'static str {
+    match class {
+        DeviceClass::Desktop => "desktop",
+        DeviceClass::Laptop => "laptop",
+        DeviceClass::Phone => "phone",
+        DeviceClass::Tablet => "tablet",
+        DeviceClass::Unknown => "unknown",
+    }
 }
 
 /// A candidate device from one resolved mDNS service. This deliberately
@@ -189,6 +294,7 @@ pub(super) fn peer_from_resolved(
         discovery_id: discovery_id(&resolved.fullname),
         pairing_ids: advertisement.pairing_ids,
         name: advertisement.name,
+        profile: advertisement.profile,
         addr,
         last_seen_ms: now_ms,
     })
@@ -250,6 +356,9 @@ mod tests {
 
         assert_eq!(parsed.name, "Dmitriy's Laptop");
         assert_eq!(parsed.pairing_ids, ids);
+        let profile = parsed.profile.expect("current profile");
+        assert_eq!(profile.protocol_version, Some(crate::PROTOCOL_VERSION));
+        assert_eq!(profile.platform, DevicePlatform::current());
         assert_eq!(info.get_port(), 47_654);
         assert!(info.get_fullname().ends_with(SERVICE_TYPE));
     }
@@ -393,15 +502,20 @@ mod tests {
             assert!(!lowered.contains(banned), "advertisement mentions {banned}");
         }
 
-        // Pin the key set: only v, n and p<n> are ever published, so a fourth
-        // kind of field cannot arrive without a decision.
+        // Pin the closed key set so new LAN disclosure needs a decision.
         let mut keys: Vec<String> = info
             .get_properties()
             .iter()
             .map(|p| p.key().to_string())
             .collect();
         keys.sort();
-        assert_eq!(keys, vec!["n", "p0", "p1", "v"]);
+        let allowed = [
+            "av", "dc", "m", "n", "os", "ov", "p0", "p1", "pf", "pv", "v",
+        ];
+        assert!(keys.iter().all(|key| allowed.contains(&key.as_str())));
+        for required in ["av", "dc", "n", "p0", "p1", "pf", "pv", "v"] {
+            assert!(keys.iter().any(|key| key == required), "missing {required}");
+        }
     }
 
     #[test]

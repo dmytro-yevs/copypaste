@@ -7,7 +7,7 @@
 //! between the two files is the split between the two thread pools.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use copypaste_core::{ItemCursor, StoredItem};
+use copypaste_core::{p2p_contract, ItemCursor, StoredItem};
 use copypaste_ipc::limits::bound_preview;
 use copypaste_ipc::{
     clamp_page, ErrorCode, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
@@ -46,12 +46,19 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
     };
 
     let settings = state.settings.get();
+    let device_name = state.meta.device_name();
+    let listen_addr = state.p2p.listen_addr();
     Response::ok(
         id,
         ResponseData::Status(StatusData {
-            device_name: state.meta.device_name(),
+            device_details: Some(p2p_contract::local_device_details(
+                &device_name,
+                listen_addr.as_deref(),
+            )),
+            device_name,
             version: crate::DAEMON_VERSION.to_string(),
             protocol_version: PROTOCOL_VERSION,
+            listen_addr,
             item_count,
             capture_running: state.capture_running(),
             clipboard_backend: state.backend_name().to_string(),

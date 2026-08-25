@@ -414,6 +414,8 @@ mod tests {
                 "origin_device_id",
                 "payload_metadata",
                 "signature",
+                "source_app_bundle_id",
+                "source_app_name",
             ]
         );
         let mut selected: Vec<&str> = SELECT_COLUMNS.split(',').collect();

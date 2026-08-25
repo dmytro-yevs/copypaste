@@ -6,7 +6,7 @@
   "engines": {
     "node": ">=24 <25"
   },
-  "description": "The single source of truth for CopyPaste colour, type, spacing and motion. Compiled by Style Dictionary to CSS custom properties and a Tailwind v4 @theme layer.",
+  "description": "The single source of truth for CopyPaste colour, type, spacing and motion. Compiled by Style Dictionary to CSS custom properties.",
   "license": "MIT OR Apache-2.0",
   "files": [
     "tokens",
@@ -19,7 +19,6 @@
   "exports": {
     "./css": "./dist/css/index.css",
     "./css/tokens": "./dist/css/tokens.base.css",
-    "./css/theme": "./dist/css/theme.css",
     "./tokens/*": "./tokens/*"
   },
   "scripts": {

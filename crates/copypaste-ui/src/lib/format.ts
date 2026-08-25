@@ -80,7 +80,7 @@ export type Kind =
 const RULES: ReadonlyArray<readonly [Kind, RegExp]> = [
   ["url", /^(https?|ftp):\/\/\S+$/i],
   ["mail", /^[^\s@]+@[^\s@]+\.[^\s@]+$/],
-  ["path", /^(~|\/|\.{1,2}\/)[^\n]*$/],
+  ["path", /^(file:\/\/|~|\/|\.{1,2}\/)[^\n]*$/i],
   ["color", /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$|^(rgba?|hsla?)\(/i],
   ["num", /^[-+]?\d[\d\s,._]*$/],
 ];
@@ -125,23 +125,6 @@ export function kindOf(item: Item): Kind {
 
   return "text";
 }
-
-/** Foreground token per kind. Tailwind needs whole class names, so this is a
- *  lookup rather than an interpolation. */
-export const KIND_TEXT_CLASS: Record<Kind, string> = {
-  secret: "text-c-secret",
-  image: "text-c-image",
-  file: "text-c-file",
-  url: "text-c-url",
-  mail: "text-c-mail",
-  path: "text-c-path",
-  json: "text-c-json",
-  code: "text-c-code",
-  color: "text-c-color",
-  num: "text-c-num",
-  text: "text-c-text",
-  unknown: "text-c-unknown",
-};
 
 /** Kinds whose content reads better in the mono face (manifest §3.1.5). */
 export const MONO_KINDS: ReadonlySet<Kind> = new Set<Kind>([

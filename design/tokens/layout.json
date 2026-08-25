@@ -15,11 +15,11 @@
       "$description": "The macOS menu-bar popover, and the tighter of the two width constraints the shared components face: a row that fits here fits a phone."
     },
     "sidebar-w": {
-      "$value": "200px",
-      "$description": "Fixed nav rail width. Expanded layout only — below the `sm` boundary the nav is a bottom bar, because a 200px rail on a 380px viewport leaves no content."
+      "$value": "192px",
+      "$description": "Fixed nav rail width. Expanded layout only — below the `sm` boundary the nav is a bottom bar."
     },
     "sidebar-half-w": {
-      "$value": "100px",
+      "$value": "96px",
       "$description": "Half the fixed sidebar width. Bottom-centred overlays add it to the viewport midpoint so they centre inside the desktop content pane."
     },
     "tabbar-h": {

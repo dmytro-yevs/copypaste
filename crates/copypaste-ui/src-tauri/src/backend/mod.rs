@@ -53,6 +53,8 @@ use copypaste_ipc::{
 };
 use tokio::sync::mpsc::Receiver;
 
+use crate::capture::model::CaptureSource;
+
 pub mod error;
 mod pairing;
 
@@ -64,6 +66,13 @@ pub use pairing::PairingBackend;
 
 /// Shorthand for what every backend method returns.
 pub type Result<T> = std::result::Result<T, BackendError>;
+
+/// A platform capture accepted by ingest.
+pub struct CaptureWrite {
+    pub item: Item,
+    /// False when ingest only refreshed a recent duplicate.
+    pub saved: bool,
+}
 
 /// A page of history, and what did not make it into one.
 ///
@@ -141,10 +150,13 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
     async fn add_captured(
         &self,
         content: &str,
+        _source: CaptureSource,
         _app_bundle_id: Option<&str>,
         _app_name: Option<&str>,
-    ) -> Result<Option<Item>> {
-        self.add(content).await.map(Some)
+    ) -> Result<Option<CaptureWrite>> {
+        self.add(content)
+            .await
+            .map(|item| Some(CaptureWrite { item, saved: true }))
     }
 
     /// Fetch one item by id, including a sensitive one's plaintext.

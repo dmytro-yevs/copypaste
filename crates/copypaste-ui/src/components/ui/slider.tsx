@@ -2,6 +2,7 @@ import { type ComponentProps, useMemo } from "react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
 
 import { cn } from "@/lib/cn";
+import styles from "./slider.module.css";
 
 function Slider({
   className,
@@ -29,19 +30,16 @@ function Slider({
       value={value}
       min={min}
       max={max}
-      className={cn(
-        "relative flex w-full touch-none items-center select-none data-[disabled]:opacity-50",
-        className,
-      )}
+      className={cn(styles.root, className)}
       {...props}
     >
       <SliderPrimitive.Track
         data-slot="slider-track"
-        className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-muted"
+        className={styles.track}
       >
         <SliderPrimitive.Range
           data-slot="slider-range"
-          className="absolute h-full bg-primary"
+          className={styles.range}
         />
       </SliderPrimitive.Track>
       {/* The element carrying `role="slider"` is the *thumb*, so the
@@ -59,7 +57,7 @@ function Slider({
                 ? `${ariaLabel} ${index + 1}`
                 : ariaLabel
           }
-          className="block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm transition-[color,box-shadow] hover:ring-4 hover:ring-ring focus-visible:ring-4 focus-visible:ring-ring focus-visible:outline-hidden disabled:pointer-events-none"
+          className={styles.thumb}
         />
       ))}
     </SliderPrimitive.Root>

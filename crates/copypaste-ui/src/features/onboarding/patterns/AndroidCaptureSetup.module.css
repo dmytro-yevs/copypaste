@@ -1,0 +1,50 @@
+.root {
+  display: flex;
+  inline-size: min(calc(var(--s-9) * 7), calc(100% - var(--s-6)));
+  min-inline-size: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh2);
+}
+
+.action {
+  display: grid;
+  min-inline-size: 0;
+  min-block-size: calc(var(--s-9) + var(--s-4));
+  padding: var(--s-2) var(--s-3);
+  grid-template-columns: var(--s-8) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.action:not(:last-child) { border-block-end: var(--stroke-1) solid var(--divider); }
+
+.icon {
+  display: grid;
+  inline-size: var(--s-8);
+  block-size: var(--s-8);
+  place-items: center;
+  border-radius: var(--r-ctl);
+  color: var(--accent-2);
+  background: var(--selected);
+}
+
+.icon svg { inline-size: var(--icon-md); block-size: var(--icon-md); }
+
+.copy { display: flex; min-inline-size: 0; flex-direction: column; }
+.copy strong { color: var(--text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.copy small { color: var(--dim); font-size: var(--fs-xs); line-height: var(--lh-tight); }
+
+.action button { max-inline-size: calc(var(--s-9) * 2.5); white-space: normal; }
+
+@media (--cp-sm) {
+  .root { inline-size: min(100%, calc(var(--s-9) * 8)); }
+  .action {
+    min-block-size: calc(var(--s-9) + var(--s-6));
+    grid-template-columns: var(--s-8) minmax(0, 1fr);
+  }
+  .action button { grid-column: 2; justify-self: start; max-inline-size: none; }
+}

@@ -1,0 +1,10 @@
+.root {
+  overflow: hidden;
+  background: var(--card);
+}
+
+.none { padding: 0; }
+.compact { padding: var(--s-3); }
+.regular { padding: var(--s-4); }
+.roomy { padding: var(--s-5); }
+.scroll { overflow: auto; overscroll-behavior: contain; }

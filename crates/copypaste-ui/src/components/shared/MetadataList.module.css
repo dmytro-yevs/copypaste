@@ -1,0 +1,40 @@
+.list {
+  display: grid;
+  min-inline-size: 0;
+  margin: 0;
+}
+
+.row {
+  display: grid;
+  min-inline-size: 0;
+  padding-block: var(--s-3);
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 2fr);
+  align-items: baseline;
+  column-gap: var(--s-3);
+  border-block-end: var(--stroke-1) solid var(--divider);
+}
+
+.list[data-density="compact"] .row { padding-block: var(--s-2); }
+.row:last-child { border-block-end: 0; }
+
+.label,
+.value {
+  min-inline-size: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+.label { color: var(--dim); }
+
+.value {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  text-align: end;
+}
+
+.value[data-overflow="truncate"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

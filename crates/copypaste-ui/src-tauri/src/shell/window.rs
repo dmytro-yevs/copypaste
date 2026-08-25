@@ -141,9 +141,6 @@ pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     let _ = window.set_focus();
 }
 
-#[cfg(target_os = "android")]
-pub fn show_quick_paste<R: Runtime>(_app: &AppHandle<R>) {}
-
 #[cfg(not(target_os = "android"))]
 fn create_quick_paste<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
     WebviewWindowBuilder::new(
@@ -336,6 +333,7 @@ fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickP
 }
 
 /// What the hotkey and every tray entry point do.
+#[cfg(not(target_os = "android"))]
 pub fn toggle_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = quick_paste_window(app) else {
         show_quick_paste(app);

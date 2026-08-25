@@ -177,13 +177,14 @@ every fallback renders inside the shell layout, not against a bare document
 body. *Old: CopyPaste-8ebg.12.*
 
 ### INV-21 — Prefs corruption defaults **per field**, never wholesale
-An invalid `theme` must not discard a valid `accent`. Unknown keys are dropped
+An invalid mode must not discard a valid product theme. Unknown and retired
+keys are dropped
 and never re-persisted. Malformed JSON / non-object payload / storage exception
 → full defaults, logged, never thrown. *Old: `store.ts`, `prefsSchema.ts`.*
 
 ### INV-22 — First paint MUST already carry the persisted appearance
 A synchronous, dependency-free, pre-paint script sets
-`data-theme` / `data-theme-pref` / `data-accent` / `data-translucency` on
+`data-color-scheme` / `data-mode` / `data-theme` / `data-translucency` on
 `<html>` before the app module runs. No default-theme flash. It cannot use
 `import`/`eval` (CSP is `script-src 'self'`, no inline, no nonce).
 *Old: `public/theme-bootstrap.js`.*
@@ -304,7 +305,7 @@ plus re-fetch on window focus/visibility. Whoever toggles it, everyone agrees.
   - daemon spawn-error probe + `daemon-spawn-result` listener,
   - one-shot stale-daemon detection,
   - accessibility-permission polling (only while the banner would be shown).
-- Live appearance sync: whenever `theme`/`accent`/`translucency` change, re-apply
+- Live appearance sync: whenever mode/theme/translucency change, re-apply
   to `<html>`; the pre-paint bootstrap owns only the first paint.
 - **Tauri feature-detection gate:** all `listen()` subscriptions are skipped when
   `window.__TAURI_INTERNALS__` is absent, otherwise every mount logs a console
@@ -369,81 +370,71 @@ plus re-fetch on window focus/visibility. Whoever toggles it, everyone agrees.
 
 #### 3.1.3 Virtualization
 
-- Variable heights, prefix-sum offset table, binary search for the first visible
-  row → O(log n) per scroll event.
+- TanStack Virtual owns the window and uses intrinsic, variable card heights.
+  Initial estimates are variant-aware; every mounted group and item row is
+  passed to `measureElement`, so rendered geometry replaces the estimate.
 - **Overscan: 240 px** above and below the viewport.
-- Height rules (`rowHeightFor`), with `ROW_PAD_V = 18` (row's real 9px+9px
-  vertical padding) as a hard floor:
-  - **Image row:** `max(imageMaxHeight + max(ROW_PAD_V, densityPad), 34)`.
-    `densityPad` = 20 spacious / 12 comfortable / 8 compact. The thumbnail is
-    CSS-capped at exactly `imageMaxHeight` via a per-row `--img-max` var — the
-    HTML `height` attribute is only a decode hint and does not bound layout
-    (CopyPaste-g27b.25).
-  - **File row:** fixed **44 px** (fits the FileChip).
-  - **Text row:** `single = max(previewSize, base, 22)` where
-    `base = max(SINGLE_LINE_FLOOR, 42|34|28)` and
-    `SINGLE_LINE_FLOOR = 21 (title) + 2 (meta margin) + 18 (meta line) + 18 (pad) = 59`.
-    For `previewLines > 1`: `single + (previewLines - 1) * 21`.
-- Each row also publishes its computed height as `--row-max` so CSS collapse
-  animations are bounded by the same number the virtualizer reserved.
-- The density axis is **frozen to `"comfortable"`** in production. The three-value
-  API survives in the height function only as historical floors.
-- Rows are keyed by item id at the `map()` call site, not by index within the
-  sliding window.
-- Anchoring, clamping, and active-descendant rules per INV-1/6/7.
-- A single absolutely-positioned "glide" layer draws the single-selection
-  highlight behind the rows. **In multi-select it is hidden entirely** — the old
-  first→last rectangle visually covered unselected interleaved rows
-  (CopyPaste-5917.75). Multi-selection is shown per-row instead.
-- Mount stagger: applied only to the first ≤10 rows on the very first painted
-  frame, then permanently disabled via a ref (so filter/search re-renders are
-  instant and never re-stagger).
+- Text estimates follow the configured preview-line count. Code reserves five
+  complete 18 px lines plus its language header. File/path/link, color,
+  sensitive and group rows each have their own estimate.
+- Image cards are full width and `object-fit: contain` on a neutral surface.
+  Their rendered preview is 168–240 px high across supported card widths.
+- Rows are keyed by item id and publish `data-index` at the measured wrapper.
+  Anchoring, clamping, and active-descendant rules remain per INV-1/6/7.
+- Selection and active state are drawn by each card. There is no range-shaped
+  glide layer and no fixed card height.
 
 #### 3.1.4 Keyboard (list focused)
 
 | Key | Behaviour |
 |---|---|
-| `↓` / `↑` | Move selection, clamped at both ends (no wrap). Marks the move as keyboard-nav so the scroll-into-view effect runs. |
-| `Enter` | Copy the selected item (same sound/notification gates as click-to-copy). |
-| `Alt`+`Enter` | Paste as plain text (strip rich formatting). Failures surface a toast — not just a console log (CopyPaste-crh3.111). |
+| `↓` / `↑` | Move selection, clamped at both ends (no wrap). Shift extends a range. |
+| `Enter` | Select the focused item and update the Inspector. In compact layouts, open the Inspector-equivalent detail sheet. |
+| `Space` | Toggle the focused item in multi-selection without copying. |
+| `→` | Open the full detail reader for the focused item. |
+| `Alt`+`Enter` | No Library action. Plain-text paste remains a Quick Paste command only. |
 | `Backspace` / `Delete` | Delete selected, with undo window. Selection moves to the next row **before** removal. |
 | `Escape` | Clear multi-selection if in selection mode, else clear single selection. |
-| `⌘F` / `Ctrl+F` | Focus the search field and select its existing text. |
+| `⌘F` / `Ctrl+F`; `⌘K` / `Ctrl+K` | Focus the search field and select its existing text. |
 | `⌘A` / `Ctrl+A` | Select all currently-filtered items. |
 
-- Keyboard scroll-into-view is computed from the **height model**, not
-  `scrollIntoView` — the target row may not be in the DOM.
-- Mouse hover clears the keyboard-nav flag so the auto-scroll doesn't fight the
-  pointer.
+- Keyboard navigation scrolls by virtual item index because the target row may
+  not be in the DOM.
 - Shortcuts are discoverable via the search field's `title` tooltip
-  (`Search (⌘F) · ⌘A select all · ⌥⏎ paste as plain text`) rather than a
-  permanently-visible hint that crowded the header (CopyPaste-7w060.6).
+  (`Search (⌘F) · ↓ to move into the list · ⌘A select all`).
 
 #### 3.1.5 Row anatomy & actions
 
-- Left: multi-select checkbox (`role="checkbox"`, `aria-checked`,
-  `tabIndex` 0 only in selection mode, Enter/Space activate). Revealed by the
-  list's `selecting` state.
-- Content tile: image thumbnail, or a kind glyph coloured by `--c-<kind>`.
-- Body: title + metadata. Title rendering by kind:
-  - image → literal `"Image"`,
-  - file → filename parsed from the daemon's `[file: <name>]` placeholder
-    (fallback `"file"`),
-  - masked/sensitive → the masked preview component,
-  - url → hostname emphasised + path/query/hash dimmed,
-  - code/json/num/color → monospace,
-  - otherwise → preview with per-span redaction applied when the item has
-    `sensitive_spans` and masking is on.
-- Right: `too_large_to_sync` warning icon (**stays visible in selection mode** —
-  CopyPaste-f72f), then Pin/Unpin, Preview, Delete (hidden in selection mode
-  because the bulk bar duplicates them).
-- Row click: in selection mode → toggle checkbox; otherwise → select **and**
-  copy.
-- Copy flash: `.copied` class for ~700 ms (CSS flash is 650 ms).
-  *Old: CopyPaste-8ebg.55.*
-- Row memo comparator is explicit and field-by-field (entry mutable fields +
-  per-row display state + display settings + drag state); handler identities are
-  deliberately ignored.
+- Activating a row selects it and updates the persistent Inspector; it does not
+  copy. In compact layouts the same action opens the detail sheet. Copy is
+  available only from the Inspector or detail sheet.
+
+- Content is primary. Text, URL, file/path and code bodies start at the card's
+  content edge; there is no leading type tile or permanent checkbox rail.
+- File/path cards show filename and path directly. File/HTML type is represented
+  only by the 16 px secondary type glyph. Images use the shared full-width,
+  contain-only media primitive.
+- Code and JSON use the maintained lowlight/highlight.js grammar subset and a
+  safe HAST-to-React renderer. Cards show five complete lines; ambiguous input
+  is escaped plain text with an `Unknown` language label.
+- Source application, age, optional origin device, pinned/sync state and type
+  are secondary metadata. Origin identity comes from the backend id and name;
+  the UI never guesses a device kind from a display name.
+- The selection control is a card-local overlay. Its visual box is 16 px with a
+  single token border and external focus ring; the transparent target is 32 px
+  for a fine pointer and at least 44 px for touch. Hover/focus reveals it on a
+  fine pointer. Selection mode keeps it visible without shifting card content.
+- Row click selects and updates the Inspector; in selection mode it toggles the
+  item. Cmd/Ctrl-click toggles, Shift-click extends a range, Space toggles, and
+  a 450 ms touch long-press enters selection.
+- At 900 px and wider, a 322 px default resizable Inspector remains fixed and
+  fill-sized with no vertical or nested scroll. Close is in its heading and
+  Expand is in the action row. File preview has no nested FILE card; raw text
+  preserves whitespace; images remain contain-only. Metadata is a compact
+  definition list with aligned values and subtle separators.
+- Below 900 px the same Inspector content opens as a fixed non-scrolling modal
+  or bottom sheet. Expand switches to the full reader, whose dialog is the one
+  and only scroll container.
 
 #### 3.1.6 Pinning & drag-to-reorder (`pin_order`)
 
@@ -466,19 +457,22 @@ plus re-fetch on window focus/visibility. Whoever toggles it, everyone agrees.
   hits (found by the daemon but not by client fuzzy) are included at score 0, so
   they rank after scored fuzzy matches. FTS failure degrades silently to the
   client filter.
-- Device filter dropdown appears only when **more than one** origin device has
-  been seen. Labels prefer the daemon-supplied `origin_device_name`, then a
-  UUID-prefix fallback; own device reads `"This device"`.
-- Sort toggle (also only shown with >1 device): recency ↔ group-by-device. Device
-  grouping puts own device first, then alphabetical by id, preserving recency
-  within a group. **Grouping is skipped while a search is active** so relevance
-  ranking is not discarded.
-- The sort toggle persists to the `sortByDevice` pref so Settings › Display stays
-  in sync.
+- The single-row toolbar order is Search, kind filter, conditional device
+  filter, newest/oldest sort, item count, and conditional group-by-device.
+- Device controls appear only when more than one origin has been seen. Labels
+  prefer `origin_device_name`, then a UUID-prefix fallback; glyphs remain
+  generic until device kind is part of the backend contract.
+- Grouping persists to the `sortByDevice` pref and is skipped while a search is
+  active so relevance ranking is not discarded.
+- Container breakpoints are 760, 600 and 520 px. Select labels collapse before
+  Search; below 520 px Search becomes a square trigger. Expanded Search fills
+  the stable row and hides/inerts its siblings. Tab, Shift+Tab, Escape and
+  ArrowDown restore the documented focus order.
 - Toolbar count badge: shows the **daemon total** when unfiltered; switches to
   the **filtered/visible** count whenever a search or device filter is active
   (otherwise a zero-match search still read "14 items"). Hidden until the first
-  page resolves. *Old: `historyBadge.ts` (CopyPaste-g27b.37).*
+  page resolves. It lives in the end/meta slot and is the first optional visual
+  hidden under width pressure; a polite hidden mirror remains available.
 - A display-limit hint (`aria-live="polite"`) appears when the
   `historyDisplayLimit` pref caps the rendered list:
   `Showing first {limit} of {n} results — adjust the display limit in Settings › Storage`.
@@ -497,24 +491,14 @@ plus re-fetch on window focus/visibility. Whoever toggles it, everyone agrees.
 
 #### 3.1.9 Bulk actions
 
-- Selection mode activates on first checkbox toggle and auto-exits when the last
-  item is deselected (via an effect on set size — a microtask hack raced with
-  concurrent selection).
+- Selection mode activates on the first toggle/modified click/long-press and
+  auto-exits when the last item is deselected.
+- The contextual actions replace the normal toolbar in the same row and expose
+  one `toolbar` landmark. They never add a header row or shift card content.
 - Bulk delete requires an explicit confirm modal (no undo for bulk).
-- Bulk copy is **one** command over the whole selection (`copy_items`), which
-  joins the whole bodies of the selected non-sensitive, non-image items and
-  writes them natively, once. Selection order follows the on-screen (filtered)
-  order. A single selected row still goes through the daemon's `copy_item`, so
-  an image lands on the pasteboard as an image.
-  - **Not binding in v2:** v1's "copy the first item, then best-effort write the
-    joined previews to the browser clipboard". Two writes race for one
-    clipboard slot, and the success toast fired on the first item while the
-    write that decided the actual contents was still in flight.
-  - No success message before the whole operation resolves. A row that vanished
-    mid-copy fails it and writes nothing; sensitive and image rows are excluded
-    by the backend, and the returned copied-count is below the selection size,
-    which is reported as a partial rather than as "Copied".
-  - Nothing is invalidated: `copy_items` only reads, so no row is re-sorted.
+- Selection mode offers select-all, pin/unpin, delete and Done. Library copying
+  is intentionally item-scoped through the Inspector/detail sheet so a row
+  activation never has a clipboard side effect.
 - Partial failures report `Deleted 3/5 (2 failed)` style messaging.
 - Busy flag always released (INV-30).
 
@@ -546,7 +530,8 @@ Confirm modals (exact copy):
 - **Bulk delete** — title `Delete N item(s)?`, body `This will permanently remove the selected clipboard items. This action cannot be undone.`, confirm `Delete`.
 - **Reset database** — title `Reset clipboard database?`, body `This will permanently erase all clipboard history on this device and recreate a fresh database. This cannot be undone.`, confirm `Erase and reset`.
 - **Clear all** — title `Clear all clipboard history?`, body `This will permanently delete all clipboard items on this device. This cannot be undone.`, confirm `Clear all`.
-  The "Clear all" toolbar button only renders when `totalCount > 0`.
+  This action is owned by Settings › Storage; Library has no clear-history
+  toolbar action.
 
 Reset-database success path: clear degraded/error state, clear selection, empty
 the item list, **drop the image thumbnail cache**, invalidate the signature,
@@ -679,6 +664,10 @@ Never "daemon" (bdac.34/36). American spelling ("initializing") in newer strings
 - QR SVG is injected as raw markup; it originates from our own backend. The
   frame keeps a white background so the code is always scannable.
 - Copy: `Expires in Ns`, `Scan from CopyPaste on another device to pair automatically.`
+- On macOS and Windows, reveal also exposes the pairing code and listen address
+  as non-selectable values in the same capture-protected native surface. Manual
+  join uses separate bounded protected fields for those values; users never
+  transcribe the encoded JSON payload. Android keeps the native QR scanner.
 - Error copy (never the raw error, INV-12):
   `Could not generate pairing code. Make sure the clipboard service is running and try again.`
 - Idle/loading copy: `Generating pairing code…` / `Generating…` — static text, no
@@ -863,13 +852,11 @@ visibility change; also listen for the broadcast (INV-39).
   subscription (CopyPaste-8ebg.63).
 - **Accent** — 6 swatches in a `role="group"` labelled `Accent`.
 - **Translucency** — toggle.
-- **Preview lines (app)** — slider 1–6, formatted `N line(s)` (a bare number was
-  meaningless — CopyPaste-8ebg.63).
+- **Card previews** — fixed at three lines in both Library and Quick Paste.
 - **Image preview height** — slider 1–200, formatted `Npx`.
 - **Group by device** — toggle (mirrors the History toolbar sort toggle).
 - **Warn before revealing sensitive items** — toggle, default on (Android parity).
 - **Mask sensitive data** — toggle, default on.
-- **Preview lines (popup)** — slider 1–6, independent of the app setting.
 
 #### 3.4.9 Shortcuts tab
 
@@ -935,8 +922,8 @@ aligns (CopyPaste-g27b.31).
 
 #### 3.5.2 Popup data
 
-- Fetch `history_page(limit=50, offset=0)`. `page.total` is surfaced so the cap
-  is visible (`50 of 214`) rather than silently truncating (CopyPaste-8ebg.56).
+- Fetch `history_page(limit=100, offset=0)`. `page.total` is surfaced so the cap
+  is visible (`100 of 214`) rather than silently truncating (CopyPaste-8ebg.56).
 - Refresh triggers: mount, window focus-changed→focused, **3000 ms**
   visibility-gated poll, manual retry from the offline empty state.
 - All four are sequence-tagged (INV-33).
@@ -1011,8 +998,9 @@ aligns (CopyPaste-g27b.31).
   with interior newlines/tabs collapsed to spaces and a trailing `…`. Falls back
   to the placeholder when empty/offline. A stop flag set on app exit lets the
   thread exit cleanly instead of holding the AppHandle.
-- Copying from the Recent submenu fires the **same** sound + rich notification as
-  a row-click copy (audit P1 / M12 parity).
+- Copying from the Recent submenu fires the same user-selected copy-feedback
+  sound as any successful app-owned copy. Its rich notification is independently
+  gated by `notify_on_copy`; notification delivery is always silent.
 - The same 5 s loop watches the newest item's `wall_time` and fires a rich
   notification for background captures (respecting the daemon's `notify_on_copy`),
   seeded on startup so it never fires for pre-existing items.
@@ -1288,7 +1276,7 @@ must not suppress it).
 *then* all 600 items remain.
 
 **AT-8 — Height reservation never under-reserves.**
-*Given* `previewLines = 6` and a very long clip at the **narrowest supported
+*Given* `previewLines = 3` and a very long clip at the **narrowest supported
 window width (720 px)**, *then* the row's rendered height ≤ its reserved height,
 and no row overlaps its neighbour.
 
@@ -1329,7 +1317,7 @@ locked; *when* the outer closes, *then* the original overflow is restored.
 
 **AT-17 — Axe clean.** No `nested-interactive`, `aria-required-children`,
 `aria-allowed-attr`, or `color-contrast` violations on History, Devices,
-Settings (all tabs), or the popup, in **both** themes and **all six** accents.
+Settings (all tabs), or the popup, in all **eight resolved theme palettes**.
 
 **AT-18 — Tablist keyboard.** ArrowRight from the last tab wraps to the first;
 ArrowLeft from the first wraps to the last; Home/End jump to the bounds;
@@ -1382,6 +1370,9 @@ to offline immediately (not after TTL).
 **AT-28 — SAS digits are shown natively and are inert.** The protected native
 surface renders six digits with an accessible label and no copy action. Neither
 the SAS nor the raw QR payload string appears anywhere in the WebView DOM.
+Desktop invite surfaces reveal a non-selectable code and address beside the QR;
+desktop join accepts those values in two bounded protected native fields, while
+Android continues to scan the QR.
 
 **AT-29 — Watchdog hides the decision buttons.**
 *Given* 60 s elapse with no terminal state, *then* the timeout message is shown
@@ -1456,15 +1447,16 @@ the daemon running; tray → Quit exits and stops the daemon.
 ### Theme & prefs
 
 **AT-49 — No theme flash.**
-*Given* persisted `theme: "light"`, *when* the window is opened, *then* the first
-painted frame is light. (Assert the bootstrap ran before the app module via its
-ordering marker.)
+*Given* persisted `{theme: "light", colorTheme: "ember"}`, *when* the window is
+opened, *then* the first painted frame is light Ember. (Assert the bootstrap ran
+before the app module via its ordering marker.)
 
 **AT-50 — Per-field corruption recovery.**
-*Given* stored prefs `{theme: "chartreuse", accent: "teal", translucency: 5}`,
-*then* theme → default, accent → `teal` (**preserved**), translucency → default,
-and a warning is logged for each present-but-invalid field. An **absent** field
-defaults **silently** (no warning).
+*Given* stored prefs `{theme: "chartreuse", colorTheme: "aurora", accent:
+"teal", translucency: 5}`, *then* mode → default, theme → Aurora (**preserved**),
+the retired accent is dropped, and the legacy non-zero translucency value maps
+to `on`. A warning is logged for each present-but-invalid maintained field. An
+**absent** field defaults **silently** (no warning).
 
 **AT-51 — Malformed storage.** Malformed JSON, a non-object payload, and a
 throwing `localStorage` each fall back to full defaults without throwing.
@@ -1473,16 +1465,15 @@ throwing `localStorage` each fall back to full defaults without throwing.
 those keys are not re-persisted.
 
 **AT-53 — System theme live.**
-*Given* `theme: "system"`, *when* the OS appearance flips, *then* `data-theme`
+*Given* `theme: "system"`, *when* the OS appearance flips, *then* `data-color-scheme`
 updates live without a reload — in **both** windows — and exactly one matchMedia
 listener exists (no accumulation across re-applies).
 
 **AT-54 — Bootstrap/schema parity.** The pre-paint script's key, defaults,
 allowed enums, and translucency→`on|off` mapping match the TS schema exactly.
 
-**AT-55 — Token parity.** Every custom property defined in
-`copypaste-design-reference.html` resolves to an identical value in the new
-theme, for both themes and all six accents.
+**AT-55 — Token parity.** Every maintained semantic role resolves in all eight
+mode/theme palettes, and theme-picker previews derive from those same values.
 
 ### Shortcuts
 
@@ -1598,17 +1589,15 @@ See §3.1.4 (History) and §3.5.3 (popup). Settings tabs follow A11Y-6.
 
 ---
 
-## 8. Design tokens that must survive
+## 8. Design-token behaviour that must survive
 
-`tokens.css` is **value-for-value parity-locked** to the token block in
-`copypaste-design-reference.html` (repo root), enforced by
-`src/styles/tokens.parity.test.ts`. The parity is directional: the new theme may
-add tokens, but every token the reference defines must resolve to the identical
-value. **Recreate this test.**
+The values below record the recovered v1 reference and are format history.
+Current values live only in `design/tokens/`; the binding contract is semantic
+coverage, contrast, reduced-motion/transparency behavior and first-paint parity.
 
-Axes on `<html>`: `data-theme="dark|light"` (resolved) ·
-`data-theme-pref="system|dark|light"` (raw choice) ·
-`data-accent="indigo|blue|teal|green|amber|rose"` ·
+Axes on `<html>`: `data-color-scheme="dark|light"` (resolved) ·
+`data-mode="system|dark|light"` (raw choice) ·
+`data-theme="midnight|aurora|ember|graphite"` ·
 `data-translucency="on|off"`. Every `:root` themed selector is duplicated on
 `.theme-scope[...]` so the dev gallery can preview a different theme in a scoped
 wrapper without mutating `<html>`.
@@ -1661,16 +1650,12 @@ text on its own tint. These are foreground-only variants:
 | `--ok-strong` | `var(--ok)` | `#157A42` | verified badge text on a 12% tint |
 | `--warn-strong` | `var(--warn)` | `#96570A` | warn field-notes and warn banners |
 
-### 8.4 Accent axis (theme-independent)
+### 8.4 Product themes
 
-| Accent | `--accent` | `--accent-2` | `--on-accent` | Light `--accent` override |
-|---|---|---|---|---|
-| indigo (default) | `#6E5BFF` | `#9C8FFF` | `#fff` | `#5B49E0` |
-| blue | `#3B82F6` | `#7CB0FF` | `#fff` | `#2563EB` |
-| teal | `#13B8A6` | `#5FE0D2` | `#06302C` | `#0E9E8C` (`--on-accent:#fff`) |
-| green | `#46C56A` | `#84E29A` | `#062A12` | `#1FA85B` (`--on-accent:#fff`) |
-| amber | `#F5A524` | `#FFC56B` | `#2A1B05` | `#C77F1A` (`--on-accent:#fff`) |
-| rose | `#F43F7E` | `#FF85AC` | `#fff` | `#E11D6B` |
+Midnight, Aurora, Ember and Graphite each own surfaces, borders, selection,
+focus and brand roles in both light and dark mode. `--accent`, `--accent-2` and
+`--on-accent` remain semantic component roles, but they are resolved by the
+active theme and are never a separate user preference or platform override.
 
 ### 8.5 Scale tokens
 
@@ -2001,7 +1986,7 @@ with the rule it encodes. The rule is what the rewrite must satisfy.
 | `8ebg.53` | The shortcut control never announced the currently bound accelerator | Announce the raw accelerator (A11Y-13) |
 | `sqw0` | The TS default shortcut could drift from the Rust constant | Fetch the default from Rust |
 | `g27b.31` | At the 720 px minimum, the Settings tab row overflowed behind a hidden scrollbar ("Logs" off-screen), About links spilled, the logs toolbar overflowed | Wrap; fixed-width level badge (A11Y-15) |
-| `g27b.20` | Live OS-theme changes needed a reload; repeated applies accumulated listeners | Idempotent module-level matchMedia subscription; `data-theme-pref` carries the raw choice |
+| `g27b.20` | Live OS-theme changes needed a reload; repeated applies accumulated listeners | Idempotent module-level matchMedia subscription; `data-mode` carries the raw choice |
 | `g27b.27` | `--faint` failed AA as meta text; `--err`/`--info`/`--ok`/`--warn` failed AA as small text on their own tints | Lift `--faint`; add `*-strong` text-only variants (A11Y-10) |
 | `8ebg.63` | "System" didn't say what it resolved to; sliders showed bare numbers | Live-resolved hint; unit-formatted slider values |
 | `8ebg.61` | Six raw z-index literals scattered across two stylesheets | Named z-scale tokens |

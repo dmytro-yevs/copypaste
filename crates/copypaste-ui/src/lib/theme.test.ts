@@ -27,36 +27,50 @@ describe("system appearance after startup (AT-53)", () => {
     });
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
-      value: vi.fn(() => ({ matches, addEventListener }) as unknown as MediaQueryList),
+      value: vi.fn(
+        () =>
+          ({
+            get matches() {
+              return matches;
+            },
+            addEventListener,
+          }) as unknown as MediaQueryList,
+      ),
     });
-    const prefs = { theme: "system", accent: "blue", translucency: 0 } as const;
+    const prefs = {
+      theme: "system",
+      colorTheme: "aurora",
+      translucency: false,
+    } as const;
 
     applyAppearance(prefs);
     subscribeSystemTheme(() => applyAppearance(prefs));
     subscribeSystemTheme(() => applyAppearance(prefs));
-    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.dataset.colorScheme).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("aurora");
+    expect(document.documentElement.dataset.mode).toBe("system");
     expect(addEventListener).toHaveBeenCalledTimes(1);
 
     matches = true;
     onChange?.();
-    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.dataset.colorScheme).toBe("dark");
   });
 
-  it("applies translucency intensity as CSS variables", () => {
-    applyAppearance({ theme: "dark", accent: "indigo", translucency: 50 });
+  it("applies the token-backed translucency state without inline design values", () => {
+    applyAppearance({
+      theme: "dark",
+      colorTheme: "midnight",
+      translucency: true,
+    });
 
     expect(document.documentElement.dataset.translucency).toBe("on");
-    expect(document.documentElement.style.getPropertyValue("--translucency-blur")).toBe("10px");
-    expect(document.documentElement.style.getPropertyValue("--translucency-chrome-opacity")).toBe("86%");
+    expect(document.documentElement.style.length).toBe(0);
 
-    applyAppearance({ theme: "dark", accent: "indigo", translucency: 0 });
+    applyAppearance({
+      theme: "dark",
+      colorTheme: "midnight",
+      translucency: false,
+    });
     expect(document.documentElement.dataset.translucency).toBe("off");
-  });
-
-  it("keeps the browser-preview fallback when System accent is selected", () => {
-    applyAppearance({ theme: "dark", accent: "system", translucency: 0 });
-
-    expect(document.documentElement.dataset.accent).toBe("system");
-    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
   });
 });

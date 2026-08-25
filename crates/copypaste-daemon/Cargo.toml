@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 copypaste-clock = { path = "../copypaste-clock" }
+copypaste-feedback = { path = "../copypaste-feedback" }
+copypaste-retry = { path = "../copypaste-retry" }
 copypaste-core = { path = "../copypaste-core" }
 copypaste-ipc = { path = "../copypaste-ipc" }
 copypaste-p2p = { path = "../copypaste-p2p" }

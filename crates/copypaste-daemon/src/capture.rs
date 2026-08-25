@@ -148,12 +148,12 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
             // `note_local_change` because this is the one caller that knows the
             // change was a *copy*, which is what a client needs to decide
             // whether to notify (parity finding 18).
-            announce_capture(state, item.created_at);
+            announce_capture(state, item.created_at, true);
             Ok(())
         }
         Ok(Ingested::Duplicate(item)) => {
             debug!(id = %item.id, "capture deduplicated against a recent item");
-            announce_capture(state, item.created_at);
+            announce_capture(state, item.created_at, false);
             Ok(())
         }
         // An empty clipboard is not a failure, and there is nothing to store.
@@ -168,9 +168,9 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
     }
 }
 
-fn announce_capture(state: &AppState, created_at: i64) {
+fn announce_capture(state: &AppState, created_at: i64, saved: bool) {
     state.note_capture(created_at);
-    crate::notify::on_capture(state);
+    crate::notify::on_capture(state, saved);
 }
 
 /// `settings` is the caller's snapshot, not a second read.

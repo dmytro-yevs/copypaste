@@ -6,8 +6,14 @@
 use serde::{Deserialize, Serialize};
 
 mod cloud;
+mod device;
 
 pub use cloud::{CloudStatusData, CloudSyncData};
+pub use device::{
+    DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
+    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresenceObservation,
+    DeviceProfileObservation, ExternalNetworkObservation,
+};
 
 use crate::health::SettingsHealth;
 
@@ -148,6 +154,9 @@ pub struct DiscoveredDevice {
     pub addr: String,
     pub last_seen_ms: i64,
     pub paired: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub details: Option<DeviceDetails>,
 }
 
 /// A freshly minted pairing, returned once and never retrievable again.
@@ -239,6 +248,9 @@ pub struct PeerInfo {
     /// True when the peer is currently visible on the network. Discovery is a
     /// convenience, so `false` means "not seen", never "unreachable".
     pub online: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub details: Option<DeviceDetails>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,6 +259,9 @@ pub struct SyncResult {
     pub name: String,
     pub sent: u32,
     pub received: u32,
+    /// End-to-end duration of this sync session. This is not an ICMP ping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     /// Present when this peer failed; the rest of the run still reports.
     pub error: Option<String>,
     /// Machine-readable counterpart to `error`.
@@ -297,6 +312,12 @@ pub struct StatusData {
     pub device_name: String,
     pub version: String,
     pub protocol_version: u32,
+    /// Address of the peer listener that is actually running, when routable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen_addr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub device_details: Option<DeviceDetails>,
     pub item_count: u64,
     pub capture_running: bool,
     /// Which clipboard backend is live — the real pasteboard or the fake used

@@ -27,6 +27,7 @@
         "default-src": ["'self'"],
         "connect-src": ["ipc:", "http://ipc.localhost"],
         "img-src": ["'self'", "asset:", "http://asset.localhost", "data:", "blob:"],
+        "script-src": ["'self'", "data:"],
         "style-src": ["'self'", "'unsafe-inline'"],
         "font-src": ["'self'", "data:"],
         "object-src": ["'none'"],

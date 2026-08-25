@@ -1,0 +1,10 @@
+.root {
+  min-inline-size: 0;
+  overflow: hidden;
+  border-color: var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh1);
+  -webkit-backdrop-filter: var(--frost-filter);
+  backdrop-filter: var(--frost-filter);
+}

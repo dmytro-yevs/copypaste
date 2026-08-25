@@ -31,6 +31,46 @@
         }
       }
     },
+    "dur-progress": {
+      "$type": "duration",
+      "$value": "800ms",
+      "$description": "Finite pending-state progress and shimmer cadence. It is not for decorative idle motion.",
+      "$extensions": {
+        "com.copypaste": {
+          "reducedMotion": "0ms"
+        }
+      }
+    },
+    "dur-ambient": {
+      "$type": "duration",
+      "$value": "2400ms",
+      "$description": "Quiet ambient cadence for an interactive surface that must visibly remain discoverable while idle, such as nearby-device radar. Never use it for generic decoration.",
+      "$extensions": {
+        "com.copypaste": {
+          "reducedMotion": "0ms"
+        }
+      }
+    },
+    "scale-breathe-min": {
+      "$type": "number",
+      "$value": 0.84,
+      "$description": "Lower spatial bound for quiet ambient breathing on an interactive signal."
+    },
+    "scale-breathe-max": {
+      "$type": "number",
+      "$value": 1.08,
+      "$description": "Upper spatial bound for quiet ambient breathing on an interactive signal."
+    },
+    "scale-pulse-start": {
+      "$type": "number",
+      "$value": 0.72,
+      "$description": "Starting scale for an active radial scan pulse."
+    },
+    "scale-pulse-end": {
+      "$type": "number",
+      "$value": 1.18,
+      "$description": "Ending scale for an active radial scan pulse."
+    },
     "ease": {
       "$type": "cubicBezier",
       "$value": [
@@ -39,7 +79,17 @@
         0.2,
         1
       ],
-      "$description": "Tailwind's `ease-out`. One curve for the whole app: UI motion should decelerate into place and never ease in."
+      "$description": "Tailwind's `ease-out`. UI entrances and fades decelerate into place and never ease in."
+    },
+    "ease-linear": {
+      "$type": "cubicBezier",
+      "$value": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "$description": "Constant spatial progress for radial reveals, where front-loaded movement hides the chosen origin."
     }
   }
 }

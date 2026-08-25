@@ -1,0 +1,17 @@
+{
+  "recipe": {
+    "$type": "color",
+    "scheme": {
+      "err-hover": {
+        "$value": "color-mix(in oklab, var(--err) 88%, oklch(0 0 0))",
+        "$description": "Light destructive hover moves away from its light ink toward black."
+      }
+    },
+    "theme": {
+      "selected": {
+        "$value": "color-mix(in oklab, var(--accent) 12%, transparent)",
+        "$description": "Light product-theme selection fill."
+      }
+    }
+  }
+}

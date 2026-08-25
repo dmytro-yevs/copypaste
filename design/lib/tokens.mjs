@@ -2,13 +2,15 @@
  * CSS reading and colour maths over dist/, shared by check-contrast.mjs and
  * check-usage.mjs.
  *
- * dist/ rather than tokens/ on purpose: `--selected` is a color-mix() on the
- * live accent and `--hover` is an alpha layer, so neither has a ratio until it
- * is composited against a real surface.
+ * Contrast reads dist/ rather than tokens/ on purpose: colour recipes are
+ * compiled per product theme and alpha layers have no ratio until they are
+ * composited against a real surface.
  */
 
 import { readFileSync } from 'node:fs';
-import { parse, converter, interpolate, wcagContrast } from 'culori';
+import {
+  parse, converter, interpolateWithPremultipliedAlpha, wcagContrast,
+} from 'culori';
 
 const DIST = new URL('../dist/css/', import.meta.url);
 const rgb = converter('rgb');
@@ -28,8 +30,8 @@ const MIX_SPACE = {
 export const AA_TEXT = 4.5; // WCAG 1.4.3, small text
 export const NON_TEXT = 3.0; // WCAG 1.4.11, control boundaries and focus indicators
 
-export const THEMES = ['dark', 'light'];
-export const ACCENTS = ['indigo', 'blue', 'teal', 'green', 'amber', 'rose'];
+export const SCHEMES = ['dark', 'light'];
+export const PRODUCT_THEMES = ['midnight', 'aurora', 'ember', 'graphite'];
 
 export const read = (file) => readFileSync(new URL(file, DIST), 'utf8');
 
@@ -39,10 +41,10 @@ export function declarations(src) {
   return out;
 }
 
-/** The `[data-accent="x"]` block, which the flat scan above would collapse. */
-export function accentBlock(file, accent) {
-  const m = new RegExp(`data-accent="${accent}"\\][^{]*\\{([^}]*)\\}`).exec(read(file));
-  if (!m) throw new Error(`no [data-accent="${accent}"] block in ${file}`);
+/** One `[data-theme="x"]` block, which the flat scan above would collapse. */
+export function productThemeBlock(file, theme) {
+  const m = new RegExp(`data-theme="${theme}"\\][^{]*\\{([^}]*)\\}`).exec(read(file));
+  if (!m) throw new Error(`no [data-theme="${theme}"] block in ${file}`);
   return declarations(m[1]);
 }
 
@@ -58,9 +60,9 @@ export function over(src, dst) {
 }
 
 /**
- * Resolve a declaration to a colour. Handles the two indirections the token
- * set actually uses — `var()` and a two-argument `color-mix()` — rather than
- * being a general CSS evaluator.
+ * Resolve a declaration to a colour. The generator uses this for authored
+ * recipes and the contrast gate uses it for emitted variables; it handles only
+ * the `var()` and two-argument `color-mix()` forms the token set owns.
  */
 export function resolve(expr, vars, depth = 0) {
   if (depth > 8) throw new Error(`reference cycle at: ${expr}`);
@@ -79,7 +81,11 @@ export function resolve(expr, vars, depth = 0) {
     if (mix[4].trim() === 'transparent') return { ...c, alpha: (c.alpha ?? 1) * pct };
     const mode = MIX_SPACE[mix[1]];
     if (!mode) throw new Error(`unsupported color-mix space: in ${mix[1]}`);
-    return rgb(interpolate([c, resolve(mix[4], vars, depth + 1)], mode)(1 - pct));
+    return rgb(
+      interpolateWithPremultipliedAlpha(
+        [c, resolve(mix[4], vars, depth + 1)], mode,
+      )(1 - pct),
+    );
   }
 
   const parsed = parse(expr);
@@ -92,25 +98,19 @@ export function resolve(expr, vars, depth = 0) {
 /**
  * Everything one (theme, accent) pair resolves to.
  *
- * `aliases` is theme.css's `@theme inline` block, kept out of `vars` for the
- * core pairs and merged only where an alias is what is under test: the point
- * of checking `--color-input` is that a component says `border-input` and
- * never names the token it lands on.
  */
-export function context(theme, accent) {
+export function context(scheme, theme) {
   const vars = {
     ...declarations(read('tokens.base.css')),
-    ...declarations(read(`tokens.${theme}.css`)),
-    ...accentBlock(`accents.${theme}.css`, accent),
+    ...declarations(read(`tokens.${scheme}.css`)),
+    ...productThemeBlock(`themes.${scheme}.css`, theme),
   };
-  const withAliases = { ...declarations(read('theme.css')), ...vars };
-
   const R = (e) => resolve(e, vars);
   const surface = (e) => {
     const c = R(e);
     return c.alpha === undefined || c.alpha === 1 ? c : over(c, R('var(--bg)'));
   };
-  return { vars, R, surface, alias: (e) => resolve(e, withAliases) };
+  return { vars, R, surface };
 }
 
 /** `fg` may be translucent; it is composited onto `on` before measuring. */

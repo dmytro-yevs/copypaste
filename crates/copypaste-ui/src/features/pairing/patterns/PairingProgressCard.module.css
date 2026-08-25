@@ -1,0 +1,50 @@
+.root {
+  display: flex;
+  min-inline-size: 0;
+  padding: var(--s-3);
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+
+.iconWell {
+  display: grid;
+  inline-size: var(--sz-tile);
+  block-size: var(--sz-tile);
+  flex: none;
+  place-items: center;
+  border-radius: var(--r-row);
+  color: var(--dim);
+  background: var(--elevated);
+}
+
+.iconWell svg { inline-size: var(--icon-md); block-size: var(--icon-md); }
+.iconWell[data-state="confirmed"] { color: var(--ok-strong); }
+.iconWell[data-state="failed"],
+.iconWell[data-state="timed_out"] { color: var(--err-strong); }
+
+.copy { min-inline-size: 0; flex: 1; }
+.title { font-size: var(--fs-sm); font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.body { margin-block-start: var(--s-1); color: var(--dim); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+
+.actions {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+
+.spinner { animation: pairing-progress-spin calc(var(--dur) * 4) linear infinite; }
+
+@keyframes pairing-progress-spin { to { transform: rotate(1turn); } }
+
+.root[data-compact="true"] { flex-wrap: wrap; }
+.root[data-compact="true"] .actions { inline-size: 100%; }
+
+@media (pointer: coarse) {
+  .actions button { min-block-size: var(--tap-min); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

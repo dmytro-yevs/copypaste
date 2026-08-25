@@ -1,0 +1,302 @@
+import json
+import os
+import pathlib
+import re
+import shlex
+
+import yaml
+
+
+PLATFORMS = {"android", "macos", "windows"}
+SCENARIO_SUFFIXES = {".py", ".ps1", ".sh"}
+STATE = re.compile(r"[a-z0-9][a-z0-9_-]*\Z")
+SCRIPT_REFERENCE = re.compile(r"(?:\./)?(scripts/[A-Za-z0-9_./-]+\.(?:py|ps1|sh))")
+
+
+def repo_file(root, value):
+    if not isinstance(value, str) or not value:
+        raise ValueError("evidence path is missing")
+    relative = pathlib.PurePosixPath(value.removeprefix("./"))
+    if relative.is_absolute() or ".." in relative.parts or "\\" in value:
+        raise ValueError("evidence path must stay inside the repository")
+    try:
+        file = (root / pathlib.Path(*relative.parts)).resolve(strict=True)
+        file.relative_to(root.resolve(strict=True))
+    except (OSError, ValueError):
+        raise ValueError(f"evidence file does not exist: {value}") from None
+    if not file.is_file():
+        raise ValueError(f"evidence path is not a file: {value}")
+    return file, relative
+
+
+def string_list_errors(value, label, pattern=None):
+    if not isinstance(value, list) or not value:
+        return [f"{label} must be a nonempty list"]
+    errors = []
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        errors.append(f"{label} entries must be nonempty strings")
+        return errors
+    if len(value) != len(set(value)):
+        errors.append(f"{label} entries must be unique")
+    if pattern and any(not pattern.fullmatch(item) for item in value):
+        errors.append(f"{label} entries have an invalid identifier")
+    return errors
+
+
+def _scenario(root, value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("scenario must be an executable command")
+    try:
+        argv = shlex.split(value)
+    except ValueError as error:
+        raise ValueError(f"scenario command is invalid: {error}") from None
+    if not argv or any(token in {"&&", ";", "|", ">", ">>"} for token in argv):
+        raise ValueError("scenario must name one executable without shell composition")
+    file, relative = repo_file(root, argv[0])
+    if file.suffix.lower() not in SCENARIO_SUFFIXES:
+        raise ValueError("scenario must be an executable .sh, .py, or .ps1 file")
+    if file.suffix.lower() != ".ps1" and not os.access(file, os.X_OK):
+        raise ValueError(f"scenario is not executable: {relative.as_posix()}")
+    return file, relative
+
+
+def _script_closure(root, seeds):
+    pending = list(seeds)
+    seen = {}
+    while pending:
+        relative = pending.pop()
+        key = relative.as_posix()
+        if key in seen:
+            continue
+        try:
+            file, _ = repo_file(root, key)
+            source = file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        seen[key] = source
+        for match in SCRIPT_REFERENCE.finditer(source):
+            pending.append(pathlib.PurePosixPath(match.group(1)))
+    return seen
+
+
+def _workflow_contract(root):
+    workflow, _ = repo_file(root, ".github/workflows/release.yml")
+    try:
+        document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise ValueError(f"release workflow is not readable YAML: {error}") from None
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    if not isinstance(jobs, dict):
+        raise ValueError("release workflow has no jobs")
+    downloads = set()
+    for job in jobs.values():
+        for step in (job or {}).get("steps") or []:
+            if str(step.get("uses") or "").startswith("actions/download-artifact"):
+                name = (step.get("with") or {}).get("name")
+                if isinstance(name, str):
+                    downloads.add(name)
+    artifacts = {}
+    for job_name, job in jobs.items():
+        job = job or {}
+        job_source = json.dumps(job, sort_keys=True)
+        seeds = {
+            pathlib.PurePosixPath(match.group(1))
+            for match in SCRIPT_REFERENCE.finditer(job_source)
+        }
+        closure = _script_closure(root, seeds)
+        for step in job.get("steps") or []:
+            if not str(step.get("uses") or "").startswith("actions/upload-artifact"):
+                continue
+            settings = step.get("with") or {}
+            name = settings.get("name")
+            path = settings.get("path")
+            if not isinstance(name, str) or not isinstance(path, str):
+                continue
+            roots = []
+            for line in path.splitlines():
+                candidate = line.strip()
+                if candidate and not any(mark in candidate for mark in "*?!${}"):
+                    roots.append(pathlib.PurePosixPath(candidate.removeprefix("./")))
+            artifacts.setdefault(name, []).append(
+                {
+                    "job": job_name,
+                    "roots": roots,
+                    "strict": settings.get("if-no-files-found") == "error" or name in downloads,
+                    "scripts": closure,
+                }
+            )
+    return artifacts
+
+
+def release_gate_errors(root):
+    workflow, _ = repo_file(root, ".github/workflows/release.yml")
+    try:
+        document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        return [f"release workflow is not readable YAML: {error}"]
+    gate = ((document.get("jobs") or {}).get("native-parity") or {}) if isinstance(document, dict) else {}
+    installed = False
+    found = False
+    for step in gate.get("steps") or []:
+        command = str(step.get("run") or "")
+        if "pip install --requirement requirements-ci.txt" in command:
+            installed = True
+        for line in command.splitlines():
+            try:
+                argv = shlex.split(line.strip())
+            except ValueError:
+                continue
+            if argv == ["python3", "scripts/check-feature-ledger.py", "--require-complete"]:
+                found = True
+                if not installed:
+                    return ["release feature-ledger gate runs before its declared Python dependencies"]
+    if not found:
+        return ["release native-parity must require complete feature evidence"]
+    return []
+
+
+def _artifact_path(value, suffixes):
+    if not isinstance(value, str) or not value:
+        raise ValueError("runtime evidence path is missing")
+    path = pathlib.PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts or "\\" in value:
+        raise ValueError("runtime evidence path must stay inside the artifact")
+    if path.suffix.lower() not in suffixes:
+        raise ValueError(f"runtime evidence must use {', '.join(sorted(suffixes))}")
+    return path
+
+
+def _relative_to_upload(path, roots):
+    for root in roots:
+        try:
+            return path.relative_to(root)
+        except ValueError:
+            continue
+    return None
+
+
+def _declared_output(relative, source):
+    value = relative.as_posix()
+    if value in source:
+        return True
+    if len(relative.parts) == 1:
+        name = relative.name
+        if name in source:
+            return True
+        stem = re.escape(relative.stem)
+        suffix = re.escape(relative.suffix)
+        return bool(
+            re.search(rf"\bcapture_[a-z_]+\s+[\"']?{stem}\b", source)
+            and re.search(rf"\$1{suffix}\b", source)
+        )
+    if len(relative.parts) == 2:
+        state = re.escape(relative.parts[0])
+        return bool(
+            relative.name in source
+            and re.search(rf"\bcapture_[a-z_]+\s+[\"']?{state}\b", source)
+        )
+    return False
+
+
+def _verified_errors(feature_id, platform, record, release_evidence, uploads, scenario_path):
+    label = f"{feature_id}: {platform}"
+    errors = []
+    artifact_name = record.get("release_artifact")
+    if not isinstance(artifact_name, str) or artifact_name not in release_evidence:
+        errors.append(f"{label} release_artifact is not owned by the feature")
+        return errors
+    producers = uploads.get(artifact_name, [])
+    if not producers:
+        return [f"{label} release_artifact does not exist in release.yml"]
+    if len(producers) != 1:
+        return [f"{label} release_artifact has multiple producers"]
+    linked = [producer for producer in producers if scenario_path.as_posix() in producer["scripts"]]
+    if not linked:
+        return [f"{label} scenario is not wired to its release_artifact producer"]
+    if not any(producer["strict"] for producer in linked):
+        errors.append(f"{label} release_artifact may be absent without failing release")
+    try:
+        screenshot = _artifact_path(record.get("screenshot"), {".png"})
+        accessibility = _artifact_path(record.get("ax_log"), {".json", ".log", ".txt", ".xml"})
+    except ValueError as error:
+        return errors + [f"{label} {error}"]
+    source = "\n".join(linked[0]["scripts"].values())
+    for field, path in (("screenshot", screenshot), ("ax_log", accessibility)):
+        relative = _relative_to_upload(path, linked[0]["roots"])
+        if relative is None:
+            errors.append(f"{label} {field} is outside the uploaded release artifact")
+        elif not _declared_output(relative, source):
+            errors.append(f"{label} {field} is not produced by the scenario")
+    return errors
+
+
+def native_errors(feature, root, require_complete=False):
+    feature_id = feature.get("id", "<missing id>")
+    native = feature.get("native")
+    if not isinstance(native, dict) or set(native) != PLATFORMS:
+        return [f"{feature_id}: native must distinguish android, macos, and windows"], []
+    try:
+        uploads = _workflow_contract(root)
+    except ValueError as error:
+        return [str(error)], []
+    release_evidence = feature.get("release_evidence")
+    release_names = {
+        name for name in release_evidence if isinstance(name, str)
+    } if isinstance(release_evidence, list) else set()
+    errors = []
+    pending = []
+    allowed = {
+        "scenario", "evidence_status", "screenshot", "ax_log", "evidence_states",
+        "unverified_states", "release_artifact",
+    }
+    for platform in sorted(PLATFORMS):
+        record = native[platform]
+        label = f"{feature_id}: {platform}"
+        if not isinstance(record, dict):
+            errors.append(f"{label} evidence record must be an object")
+            continue
+        unknown = set(record) - allowed
+        if unknown:
+            errors.append(f"{label} evidence has unknown fields: {', '.join(sorted(unknown))}")
+        status = record.get("evidence_status")
+        if status not in {"verified", "partial", "pending"}:
+            errors.append(f"{label} evidence_status must be verified, partial, or pending")
+            continue
+        try:
+            _, scenario_path = _scenario(root, record.get("scenario"))
+        except ValueError as error:
+            errors.append(f"{label} {error}")
+            continue
+        verified = record.get("evidence_states")
+        unverified = record.get("unverified_states")
+        if status in {"verified", "partial"}:
+            errors.extend(string_list_errors(verified, f"{label} evidence_states", STATE))
+        elif "evidence_states" in record:
+            errors.append(f"{label} pending evidence cannot claim evidence_states")
+        if status in {"partial", "pending"}:
+            errors.extend(string_list_errors(unverified, f"{label} unverified_states", STATE))
+            if isinstance(unverified, list):
+                pending.extend(f"{feature_id}/{platform}/{state}" for state in unverified)
+        elif "unverified_states" in record:
+            errors.append(f"{label} verified evidence cannot contain unverified_states")
+        if (
+            isinstance(verified, list)
+            and isinstance(unverified, list)
+            and all(isinstance(state, str) for state in verified + unverified)
+            and set(verified) & set(unverified)
+        ):
+            errors.append(f"{label} verified and unverified states overlap")
+        if status == "pending":
+            forbidden = {"screenshot", "ax_log", "release_artifact"} & set(record)
+            if forbidden:
+                errors.append(f"{label} pending evidence cannot cite unproduced artifacts")
+        else:
+            errors.extend(
+                _verified_errors(feature_id, platform, record, release_names, uploads, scenario_path)
+            )
+    for name in release_names:
+        if name not in uploads:
+            errors.append(f"{feature_id}: release_evidence does not exist in release.yml: {name}")
+    if require_complete and pending:
+        errors.append(f"{feature_id}: release evidence is pending: {', '.join(sorted(pending))}")
+    return errors, pending

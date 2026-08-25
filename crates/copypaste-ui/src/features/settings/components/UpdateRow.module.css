@@ -1,0 +1,253 @@
+.root {
+  display: grid;
+  min-inline-size: 0;
+  min-block-size: calc(var(--ctl-h-lg) + var(--s-7));
+  padding: var(--s-4);
+  grid-template-columns: var(--s-6) minmax(0, 1fr) calc(var(--s-9) * 3 + var(--s-4));
+  align-items: center;
+  gap: var(--s-3);
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--update-bg);
+  box-shadow: var(--sh1);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.root[data-state="available"],
+.root[data-state="declined"] {
+  border-color: var(--selected-edge);
+  background: var(--update-available-bg);
+}
+
+.root[data-state="error"] {
+  border-color: var(--danger-control-border);
+}
+
+.root:is(
+  [data-state="loading"],
+  [data-state="ready"],
+  [data-state="up_to_date"],
+  [data-state="unsupported"],
+  [data-state="unconfigured"]
+) {
+  min-block-size: auto;
+  padding: var(--s-2) var(--s-1);
+  grid-template-columns: var(--s-6) minmax(0, 1fr) auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.root:is(
+  [data-state="loading"],
+  [data-state="ready"],
+  [data-state="up_to_date"],
+  [data-state="unsupported"],
+  [data-state="unconfigured"]
+) .copy p {
+  display: none;
+}
+
+.stateIcon {
+  display: grid;
+  inline-size: var(--s-6);
+  block-size: var(--s-6);
+  align-self: start;
+  margin-block-start: var(--s-1);
+  place-items: center;
+  color: var(--accent-2);
+}
+
+.root[data-state="error"] .stateIcon {
+  color: var(--err-strong);
+}
+
+.root:is(
+  [data-state="loading"],
+  [data-state="ready"],
+  [data-state="up_to_date"],
+  [data-state="unsupported"],
+  [data-state="unconfigured"]
+) .stateIcon {
+  align-self: center;
+  margin-block-start: 0;
+  color: var(--dim);
+}
+
+.copy {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+}
+
+.copy h3,
+.copy p {
+  margin: 0;
+}
+
+.copy h3 {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.copy p {
+  margin-block-start: var(--s-1);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+.status,
+.errorStatus {
+  margin-block-start: var(--s-2);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+  animation: update-status-arrive var(--dur-fast) var(--ease);
+}
+
+.status {
+  color: var(--text);
+}
+
+.errorStatus {
+  color: var(--err-strong);
+}
+
+.action {
+  display: flex;
+  inline-size: calc(var(--s-9) * 3 + var(--s-4));
+  min-inline-size: 0;
+  min-block-size: var(--ctl-h-sm);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.action > button,
+.action > a,
+.progress {
+  inline-size: 100%;
+}
+
+.root:is(
+  [data-state="loading"],
+  [data-state="ready"],
+  [data-state="up_to_date"],
+  [data-state="unsupported"],
+  [data-state="unconfigured"]
+) .action {
+  inline-size: auto;
+  min-inline-size: 0;
+}
+
+.root:is(
+  [data-state="loading"],
+  [data-state="ready"],
+  [data-state="up_to_date"],
+  [data-state="unsupported"],
+  [data-state="unconfigured"]
+) .action > :is(button, a) {
+  inline-size: auto;
+}
+
+.activity {
+  display: grid;
+  inline-size: var(--ctl-h-sm);
+  block-size: var(--ctl-h-sm);
+  place-items: center;
+  color: var(--dim);
+}
+
+.spinning,
+.activity > * {
+  animation: update-spin var(--dur) var(--ease-linear) infinite;
+}
+
+.progress {
+  block-size: var(--s-2);
+  border: 0;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  accent-color: var(--accent);
+  background: var(--raised);
+}
+
+.progress::-webkit-progress-bar {
+  border-radius: var(--r-pill);
+  background: var(--raised);
+}
+
+.progress::-webkit-progress-value {
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+
+@keyframes update-spin {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes update-status-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(var(--s-1));
+  }
+}
+
+@container (max-width: $cpSm) {
+  .root {
+    padding: var(--s-4) var(--s-3);
+    grid-template-columns: var(--s-6) minmax(0, 1fr);
+    border-inline: 0;
+    border-radius: 0;
+  }
+
+  .action {
+    inline-size: 100%;
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+
+  .activity {
+    inline-size: 100%;
+  }
+
+  .root:is(
+    [data-state="loading"],
+    [data-state="ready"],
+    [data-state="up_to_date"],
+    [data-state="unsupported"],
+    [data-state="unconfigured"]
+  ) {
+    padding: var(--s-2) var(--s-3);
+    grid-template-columns: var(--s-6) minmax(0, 1fr) auto;
+  }
+
+  .root:is(
+    [data-state="loading"],
+    [data-state="ready"],
+    [data-state="up_to_date"],
+    [data-state="unsupported"],
+    [data-state="unconfigured"]
+  ) .action {
+    grid-column: auto;
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    transition: none;
+  }
+
+  .status,
+  .errorStatus,
+  .spinning,
+  .activity > * {
+    animation: none;
+  }
+}

@@ -1,0 +1,25 @@
+@layer base {
+  html {
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  #root {
+    padding-block-start: var(--inset-top);
+    padding-inline: var(--inset-left) var(--inset-right);
+  }
+
+  body {
+    overflow: hidden;
+    color: var(--text);
+    background: transparent;
+    font-family: var(--f-ui);
+    font-size: var(--fs-sm);
+    letter-spacing: var(--ls-none);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--selected);
+  }
+}

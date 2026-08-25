@@ -1,19 +1,38 @@
 import type { ComponentProps } from "react";
 
+import { controlSurfaceVariants, type ControlSurfaceVariants } from "./control-surface";
 import { cn } from "@/lib/cn";
+import styles from "./input.module.css";
 
-function Input({ className, type, ...props }: ComponentProps<"input">) {
+type InputProps = Omit<ComponentProps<"input">, "size"> &
+  ControlSurfaceVariants & { surface?: "standalone" | "embedded" };
+
+function Input({
+  className,
+  type,
+  size,
+  width = "fill",
+  state,
+  surface = "standalone",
+  disabled,
+  ...props
+}: InputProps) {
   return (
     <input
       type={type}
       data-slot="input"
       className={cn(
-        "flex h-9 min-h-[var(--tap-min)] w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground",
-        "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring",
-        "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
-        "aria-invalid:border-destructive aria-invalid:ring-destructive",
+        styles.input,
+        surface === "standalone" && controlSurfaceVariants({
+          size,
+          width,
+          state: disabled ? "disabled" : state,
+        }),
+        surface === "embedded" && styles.embedded,
         className,
       )}
+      disabled={disabled}
+      aria-invalid={state === "invalid" || props["aria-invalid"] || undefined}
       {...props}
     />
   );

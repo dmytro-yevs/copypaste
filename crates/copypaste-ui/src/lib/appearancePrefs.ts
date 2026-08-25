@@ -1,34 +1,31 @@
 export const APPEARANCE_SERIALIZATION = {
   storageKey: "copypaste.prefs",
   themes: ["system", "dark", "light"] as const,
-  accents: ["system", "indigo", "blue", "teal", "green", "amber", "rose"] as const,
+  colorThemes: ["midnight", "aurora", "ember", "graphite"] as const,
   defaults: {
     theme: "system" as const,
-    accent: "indigo" as const,
-    translucency: 0,
+    colorTheme: "midnight" as const,
+    translucency: false,
   },
   systemThemeQuery: "(prefers-color-scheme: dark)",
   systemThemeFallback: "dark" as const,
 } as const;
 
 export type ThemePref = (typeof APPEARANCE_SERIALIZATION.themes)[number];
-export type Accent = (typeof APPEARANCE_SERIALIZATION.accents)[number];
-export type AppearanceField = "theme" | "accent" | "translucency";
-export type Translucency = number;
-
-export const TRANSLUCENCY_MIN = 0;
-export const TRANSLUCENCY_MAX = 100;
+export type ColorTheme = (typeof APPEARANCE_SERIALIZATION.colorThemes)[number];
+export type AppearanceField = "theme" | "colorTheme" | "translucency";
+export type Translucency = boolean;
 
 export interface AppearancePrefs {
   theme: ThemePref;
-  accent: Accent;
+  colorTheme: ColorTheme;
   translucency: Translucency;
 }
 
 export interface AppearanceSerialization {
   storageKey: string;
   themes: readonly ThemePref[];
-  accents: readonly Accent[];
+  colorThemes: readonly ColorTheme[];
   defaults: AppearancePrefs;
   systemThemeQuery: string;
   systemThemeFallback: "dark" | "light";
@@ -73,27 +70,40 @@ export const parseAppearanceFields: ParseAppearanceFields =
         onInvalid("theme");
       }
     }
-    if (Object.prototype.hasOwnProperty.call(raw, "accent")) {
-      const accent = Reflect.get(raw, "accent");
-      if (contract.accents.some((candidate) => candidate === accent)) {
-        Reflect.set(appearance, "accent", accent);
+    if (Object.prototype.hasOwnProperty.call(raw, "colorTheme")) {
+      const colorTheme = Reflect.get(raw, "colorTheme");
+      if (contract.colorThemes.some((candidate) => candidate === colorTheme)) {
+        Reflect.set(appearance, "colorTheme", colorTheme);
       } else {
-        onInvalid("accent");
+        onInvalid("colorTheme");
+      }
+    } else if (Object.prototype.hasOwnProperty.call(raw, "accent")) {
+      const legacyAccent = Reflect.get(raw, "accent");
+      if (legacyAccent === "teal" || legacyAccent === "green") {
+        appearance.colorTheme = "aurora";
+      } else if (legacyAccent === "amber" || legacyAccent === "rose") {
+        appearance.colorTheme = "ember";
+      } else if (
+        legacyAccent === "system" ||
+        legacyAccent === "indigo" ||
+        legacyAccent === "blue"
+      ) {
+        appearance.colorTheme = "midnight";
       }
     }
     if (Object.prototype.hasOwnProperty.call(raw, "translucency")) {
       const translucency = Reflect.get(raw, "translucency");
-      if (
+      if (typeof translucency === "boolean") {
+        appearance.translucency = translucency;
+      } else if (
         typeof translucency === "number" &&
-        Number.isInteger(translucency) &&
+        Number.isFinite(translucency) &&
         translucency >= 0 &&
         translucency <= 100
       ) {
-        appearance.translucency = translucency;
-      } else if (typeof translucency === "boolean") {
-        // v2 alpha stored this as a switch. Keep an existing user's enabled
-        // frost at the former visual strength when the control becomes a range.
-        appearance.translucency = translucency ? 100 : 0;
+        // The intensity control was never a distinct visual system: every
+        // non-zero legacy value maps to the maintained frosted token set.
+        appearance.translucency = translucency > 0;
       } else {
         onInvalid("translucency");
       }
@@ -106,15 +116,5 @@ type TranslucencyAttribute = (value: Translucency) => "on" | "off";
 
 export const translucencyAttribute: TranslucencyAttribute =
   function translucencyAttribute(value) {
-    return value > 0 ? "on" : "off";
+    return value ? "on" : "off";
   };
-
-export function translucencyStyle(value: Translucency): Record<string, string> {
-  const level = Math.min(100, Math.max(0, value));
-  return {
-    "--translucency-chrome-opacity": `${100 - level * 0.28}%`,
-    "--translucency-app-opacity": `${100 - level * 0.16}%`,
-    "--translucency-blur": `${Math.round(level * 0.2)}px`,
-    "--translucency-saturation": `${100 + Math.round(level * 0.8)}%`,
-  };
-}

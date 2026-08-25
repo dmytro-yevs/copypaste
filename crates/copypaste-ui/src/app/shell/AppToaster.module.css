@@ -1,0 +1,100 @@
+:global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme]) {
+  --normal-bg: var(--card);
+  --normal-text: var(--text);
+  --normal-border: var(--border);
+  --success-bg: var(--toast-ok-bg);
+  --success-border: var(--toast-ok-border);
+  --success-text: var(--ok-strong);
+  --info-bg: var(--toast-info-bg);
+  --info-border: var(--toast-info-border);
+  --info-text: var(--info-strong);
+  --warning-bg: var(--toast-warn-bg);
+  --warning-border: var(--toast-warn-border);
+  --warning-text: var(--warn-strong);
+  --error-bg: var(--toast-error-bg);
+  --error-border: var(--toast-error-border);
+  --error-text: var(--err-strong);
+  --border-radius: var(--r-pill);
+  inline-size: min(calc(var(--s-9) * 10), calc(100vw - var(--inset-left) - var(--inset-right) - var(--s-6))) !important;
+  max-inline-size: calc(100vw - var(--inset-left) - var(--inset-right) - var(--s-6));
+  z-index: var(--z-toast);
+}
+
+:global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme] [data-description]) {
+  margin-block-start: var(--stroke-2);
+  color: var(--dim);
+}
+
+:global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-close-button]) {
+  position: relative;
+  order: 2;
+  inline-size: var(--icon-md);
+  block-size: var(--icon-md);
+  margin-inline-start: calc(var(--s-2) + var(--s-1));
+  padding: 0;
+  transform: none;
+  border: 0;
+  color: inherit;
+  background: transparent;
+}
+
+:global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-close-button]::after) {
+  position: absolute;
+  inset: calc(var(--s-2) * -1);
+  content: "";
+}
+
+:global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast][data-styled="true"]) {
+  inline-size: fit-content !important;
+  min-inline-size: min(calc(var(--s-8) * 7), 100%);
+  max-inline-size: min(calc(var(--s-9) * 10), 100%);
+  padding: var(--s-2) var(--s-3);
+  gap: 0; /* inert gap */
+  box-shadow: var(--sh2);
+}
+
+:global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-icon]) {
+  margin: 0;
+  margin-inline-end: var(--s-2);
+}
+
+:global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-content]) {
+  min-inline-size: 0;
+  flex: 1;
+  gap: 0; /* inert gap */
+}
+
+:global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-button]) {
+  block-size: var(--ctl-h-sm);
+  min-inline-size: var(--sz-tile);
+  margin-inline-start: calc(var(--s-2) + var(--s-1));
+  padding-inline: var(--s-2);
+  border: var(--stroke-1) solid currentColor;
+  border-radius: var(--r-pill);
+  color: inherit;
+  background: transparent;
+}
+
+@media (--cp-lg) {
+  :global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme][data-x-position="center"]) {
+    inset-inline-start: calc((100vw + calc(var(--s-8) + var(--s-6))) / 2) !important;
+  }
+}
+
+@media (--cp-wide) {
+  :global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme][data-x-position="center"]) {
+    inset-inline-start: calc((100vw + var(--sidebar-w)) / 2) !important;
+  }
+}
+
+@media (--cp-sm) {
+  :global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme]) {
+    inline-size: calc(100vw - var(--inset-left) - var(--inset-right) - var(--s-6)) !important;
+  }
+
+  :global(:root[data-theme]) :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast][data-styled="true"]) {
+    inline-size: 100% !important;
+    min-inline-size: 0;
+    margin-inline: auto;
+  }
+}

@@ -64,10 +64,11 @@ export function useSetServiceConfig() {
   });
 }
 
-export function usePrivateMode() {
+export function usePrivateMode(enabled = true) {
   return useQuery<PrivateModeData>({
     queryKey: PRIVATE_MODE_KEY,
     queryFn: getPrivateMode,
+    enabled,
     retry: false,
   });
 }

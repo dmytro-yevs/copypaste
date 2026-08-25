@@ -1,34 +1,16 @@
-//! The Android backend: `copypaste-core` and `copypaste-p2p` in the app
-//!  process.
+//! Android's in-process `Backend` adapter.
 //!
-//! Android will not host a long-lived background daemon, so there is no socket
-//! and no second process (ADR-0002). The store, the keyring and the peer file
-//! are opened inside the app and the same operations run inline.
+//! Android has no background daemon, so the core store, peer, and cloud
+//! services run in the app process (ADR-0002, ADR-0003). Stable operations live
+//! in sibling modules; this module only maps them onto the product trait.
 //!
-//! Pairing, syncing, discovery, export, import, `set_config` and
-//! `reorder_pinned` used to be on that list. They are not any more:
-//! `copypaste_p2p::Node` owns the listener and the four peer operations,
-//! `copypaste_core::StoreSource` is the history behind them,
-//! `copypaste_core::transfer` owns the skip accounting and the
-//! detector-re-runs-on-import rule, and `Store::reorder_pinned` owns the pinned
-//! ordering — the same node, the same source and the same functions the daemon
-//! runs (ADR-0003, [`peers`]).
-//!
-//! # What it does do
-//!
-//! Everything reachable through the library API as it stands: the read paths,
-//! ingest, the clipboard write, delete/clear/pin, status, settings, export and
-//! import, and the whole of peer pairing, sync and LAN discovery.
-//!
-//! # Unverified
-//!
-//! Host tests run this backend under `--features embedded-backend` with the
-//! file keystore. Android selects the Keystore-wrapped secret instead, so its
-//! platform binding remains a native-runner assertion.
+//! Host tests use the file keystore. Android's Keystore binding remains a
+//! native-runner assertion.
 
 mod backup;
 mod clear;
 mod cloud;
+mod items;
 mod messages;
 mod open;
 mod pairing;
@@ -41,228 +23,56 @@ mod transfer;
 
 use std::path::Path;
 
-use super::{Backend, BackendError, Page, Result};
-use copypaste_core::{
-    ingest, ingest_into_with_capture_source, IngestError, ItemCursor, StoredItem,
-};
+use super::{Backend, BackendError, CaptureWrite, Page, Result};
+use copypaste_core::p2p_contract;
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
     ImagePreview, ImportData, Item, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
-use messages::{
-    MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_NO_PEER, MSG_TOO_LARGE,
-};
+use messages::MSG_NO_PEER;
 pub use open::{Clipboard, EmbeddedBackend};
-use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
-        let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
-        let after = match cursor.map(ItemCursor::parse).transpose() {
-            Ok(after) => after,
-            // Never "start from the top": a load-more that silently restarted
-            // would replay the whole history, and the caller cannot tell that
-            // from a list that really does begin again.
-            Err(_) => return Err(BackendError::Invalid(MSG_BAD_CURSOR)),
-        };
-        self.blocking(move |inner| {
-            let page = inner
-                .state
-                .store
-                .list_from(after.as_ref(), limit)
-                .map_err(|_| BackendError::internal("history could not be read"))?;
-            let next = page.next.map(|cursor| cursor.token());
-            let mut wire = inner.to_wire_page(page.items);
-            for item in &mut wire.items {
-                item.truncated = copypaste_ipc::limits::bound_preview(&mut item.content);
-            }
-            // From the store's page, never from what survived decryption: rows
-            // that would not open still occupy the window.
-            wire.next_cursor = next;
-            Ok(wire)
-        })
-        .await
+        items::list(self, limit, cursor).await
     }
 
     async fn search(&self, query: &str, limit: u32) -> Result<Page> {
-        let limit = clamp_page(limit, DEFAULT_SEARCH_PAGE);
-        let query = query.to_string();
-        self.blocking(move |inner| {
-            let rows = inner
-                .state
-                .store
-                .search(&query, limit)
-                .map_err(|_| BackendError::internal("history could not be searched"))?;
-            // Read-time enforcement of "sensitive items are never searchable".
-            // The store already keeps them out of the index at write time; this
-            // is the second of the three layers AGENTS.md rule 4 demands, and
-            // it is what protects a database written before the rule existed.
-            // Both backends carrying it is the point of a layered rule, not a
-            // duplicated decision.
-            let rows: Vec<StoredItem> = rows.into_iter().filter(|r| !r.is_sensitive).collect();
-            Ok(inner.to_wire_page(rows))
-        })
-        .await
+        items::search(self, query, limit).await
     }
 
-    /// Every capture on this platform ends here — the share sheet, the
-    /// text-selection action, the Quick Settings tile and rung 2's background
-    /// listener alike (`crate::capture::intake`).
-    ///
-    /// `copypaste_core::ingest` is the daemon's ingest path, moved down into
-    /// the core rather than re-typed here: dedup, the write-time secret rule,
-    /// the id-before-seal ordering and eviction are one implementation with
-    /// two callers, not two that will drift (AGENTS.md rule 1, ADR-0003).
     async fn add(&self, content: &str) -> Result<Item> {
-        let content = content.to_string();
-        self.blocking(move |inner| {
-            let settings = inner.settings();
-            let outcome = ingest(
-                &inner.state.store,
-                &inner.state.detector,
-                &inner.state.keyring,
-                &content,
-                copypaste_ipc::content_type::TEXT,
-                &settings,
-            );
-            match outcome {
-                Ok(ingested) => {
-                    let item = inner.to_wire(ingested.into_item())?;
-                    inner.note_version_written(item.created_at);
-                    inner.note_local_version(item.created_at);
-                    inner.publish_items(false, 0);
-                    Ok(item)
-                }
-                // Both refusals are the user's own configuration answering, so
-                // they are reported as invalid input rather than as a fault —
-                // and neither is retryable with the same content.
-                Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
-                Err(IngestError::TooLarge) => Err(BackendError::Invalid(MSG_TOO_LARGE)),
-                Err(e) => {
-                    tracing::warn!(error = ?e, "a capture could not be stored");
-                    Err(BackendError::internal(MSG_NOT_STORED))
-                }
-            }
-        })
-        .await
+        items::add(self, content).await
     }
 
     async fn add_captured(
         &self,
         content: &str,
+        source: crate::capture::model::CaptureSource,
         app_bundle_id: Option<&str>,
         app_name: Option<&str>,
-    ) -> Result<Option<Item>> {
-        let content = content.to_string();
-        let app_bundle_id = app_bundle_id.map(str::to_owned);
-        let app_name = app_name.map(str::to_owned);
-        self.blocking(move |inner| {
-            let settings = inner.settings();
-            if settings.private_mode {
-                return Ok(None);
-            }
-            let excluded = app_bundle_id.as_ref().is_some_and(|id| {
-                settings
-                    .excluded_app_bundle_ids
-                    .iter()
-                    .any(|excluded| excluded.eq_ignore_ascii_case(id))
-            });
-            if excluded {
-                return Ok(None);
-            }
-
-            let sensitive_floor = app_bundle_id
-                .as_deref()
-                .is_some_and(copypaste_core::sensitive::is_password_manager_app);
-            let outcome = ingest_into_with_capture_source(
-                &inner.state.store,
-                &inner.state.detector,
-                &inner.state.keyring,
-                &content,
-                copypaste_ipc::content_type::TEXT,
-                copypaste_core::now_ms(),
-                sensitive_floor,
-                app_bundle_id.as_deref(),
-                app_name.as_deref(),
-                &settings,
-            );
-            match outcome {
-                Ok(ingested) => {
-                    let item = inner.to_wire(ingested.into_item())?;
-                    inner.note_version_written(item.created_at);
-                    inner.note_local_version(item.created_at);
-                    inner.publish_items(true, 0);
-                    Ok(Some(item))
-                }
-                Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
-                Err(IngestError::TooLarge) => Err(BackendError::Invalid(MSG_TOO_LARGE)),
-                Err(error) => {
-                    tracing::warn!(?error, "a captured clip could not be stored");
-                    Err(BackendError::internal(MSG_NOT_STORED))
-                }
-            }
-        })
-        .await
+    ) -> Result<Option<CaptureWrite>> {
+        items::add_captured(self, content, source, app_bundle_id, app_name).await
     }
 
     async fn get(&self, id: &str) -> Result<Item> {
-        let id = id.to_string();
-        self.blocking(move |inner| inner.fetch(&id)).await
+        items::get(self, id).await
     }
 
     async fn image_preview(&self, id: &str) -> Result<ImagePreview> {
-        let id = id.to_string();
-        self.blocking(move |inner| inner.image_preview(&id)).await
+        items::image_preview(self, id).await
     }
 
     async fn copy(&self, id: &str) -> Result<Item> {
-        let id = id.to_string();
-        self.blocking(move |inner| {
-            let item = inner.fetch(&id)?;
-            // The error is a `&'static str` by the trait's design, so nothing
-            // caller-supplied can be interpolated into it and it needs no
-            // scrubbing.
-            inner
-                .clipboard
-                .set_text(&item.content)
-                .map_err(|msg| BackendError::Internal(msg.to_string()))?;
-            Ok(item)
-        })
-        .await
+        items::copy(self, id).await
     }
 
     async fn copy_as_plain_text(&self, id: &str) -> Result<Item> {
-        let id = id.to_string();
-        self.blocking(move |inner| {
-            let item = inner.fetch(&id)?;
-            inner
-                .clipboard
-                .set_text(&item.content)
-                .map_err(|msg| BackendError::Internal(msg.to_string()))?;
-            Ok(item)
-        })
-        .await
+        items::copy(self, id).await
     }
 
     async fn delete(&self, id: &str) -> Result<()> {
-        let id = id.to_string();
-        self.blocking(move |inner| {
-            let mutation_started = copypaste_core::now_ms();
-            // Read first so an unknown id is `not_found` rather than a silent
-            // success: a client that deleted nothing needs to know it deleted
-            // nothing. Same rule as the daemon's `items::delete`.
-            match inner.state.store.delete(&id) {
-                Ok(true) => {
-                    inner.note_version_written(mutation_started);
-                    inner.note_local_version(mutation_started);
-                    inner.publish_items(false, 0);
-                    Ok(())
-                }
-                Ok(false) => Err(BackendError::NotFound(MSG_NO_ITEM)),
-                Err(_) => Err(BackendError::internal("that item could not be deleted")),
-            }
-        })
-        .await
+        items::delete(self, id).await
     }
 
     async fn history_ceiling(&self) -> Result<u64> {
@@ -274,45 +84,14 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn set_pinned(&self, id: &str, pinned: bool) -> Result<Item> {
-        let id = id.to_string();
-        self.blocking(move |inner| {
-            match inner.state.store.set_pinned(&id, pinned) {
-                Ok(true) => {}
-                Ok(false) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
-                Err(_) => return Err(BackendError::internal("that item could not be changed")),
-            }
-            inner.note_local_version(copypaste_core::now_ms());
-            inner.publish_items(false, 0);
-            // Reply with the updated row so the caller need not re-list.
-            inner.fetch(&id)
-        })
-        .await
+        items::set_pinned(self, id, pinned).await
     }
 
-    /// `Store::reorder_pinned` — the same transaction the daemon reaches
-    /// through `Method::ReorderPinned`, not a second one derived here.
-    ///
-    /// An id the caller named that is gone or no longer pinned is ignored
-    /// rather than refused; the core method owns that rule so both platforms
-    /// keep it. A count of zero is therefore success, not a miss.
     async fn reorder_pinned(&self, ids: &[String]) -> Result<()> {
-        let ids = ids.to_vec();
-        self.blocking(move |inner| {
-            let renumbered = inner
-                .state
-                .store
-                .reorder_pinned(&ids)
-                .map_err(|_| BackendError::internal("the pinned order could not be changed"))?;
-            if renumbered > 0 {
-                inner.publish_items(false, 0);
-            }
-            Ok(())
-        })
-        .await
+        items::reorder_pinned(self, ids).await
     }
 
     async fn status(&self) -> Result<StatusData> {
-        let status = self.blocking(rows::status_of).await?;
         // The supervisor probes `status` at launch, and this is what makes that
         // probe start the peer listener: without it a paired device could only
         // reach this one while a peer screen happened to be open. A node that
@@ -320,6 +99,13 @@ impl Backend for EmbeddedBackend {
         if let Err(e) = self.node().await {
             tracing::warn!(error = %e, "the peer node did not start");
         }
+        let listen_addr = self.inner.node.get().and_then(peers::PeerNode::listen_addr);
+        let mut status = self.blocking(rows::status_of).await?;
+        status.listen_addr = listen_addr;
+        status.device_details = Some(p2p_contract::local_device_details(
+            &status.device_name,
+            status.listen_addr.as_deref(),
+        ));
         Ok(status)
     }
 
@@ -499,6 +285,7 @@ impl Backend for EmbeddedBackend {
 mod tests {
     use super::*;
     use crate::backend::PairingBackend;
+    use crate::capture::model::CaptureSource;
     use std::sync::{Arc, Mutex};
 
     /// Records what was written, so `copy` can be asserted without a system
@@ -801,6 +588,7 @@ mod tests {
         let item = backend
             .add_captured(
                 "a note from another app",
+                CaptureSource::Background,
                 Some("com.example.writer"),
                 Some("Writer"),
             )
@@ -808,14 +596,14 @@ mod tests {
             .unwrap()
             .expect("capture was enabled");
         assert_eq!(
-            item.source_app_bundle_id.as_deref(),
+            item.item.source_app_bundle_id.as_deref(),
             Some("com.example.writer")
         );
-        assert_eq!(item.source_app_name.as_deref(), Some("Writer"));
+        assert_eq!(item.item.source_app_name.as_deref(), Some("Writer"));
     }
 
     #[tokio::test]
-    async fn an_excluded_source_package_is_not_stored() {
+    async fn external_exclusions_fail_closed_without_blocking_explicit_intake() {
         let (backend, _clip, _dir) = backend();
         backend
             .set_config(ConfigPatch {
@@ -828,13 +616,29 @@ mod tests {
         assert!(backend
             .add_captured(
                 "do not retain",
+                CaptureSource::Background,
                 Some("com.example.private"),
                 Some("Private")
             )
             .await
             .unwrap()
             .is_none());
-        assert!(backend.list(50, None).await.unwrap().items.is_empty());
+        assert!(backend
+            .add_captured(
+                "unknown external source",
+                CaptureSource::Background,
+                None,
+                None
+            )
+            .await
+            .unwrap()
+            .is_none());
+        assert!(backend
+            .add_captured("explicit share", CaptureSource::Share, None, None)
+            .await
+            .unwrap()
+            .is_some());
+        assert_eq!(backend.list(50, None).await.unwrap().items.len(), 1);
     }
 
     #[tokio::test]
@@ -848,7 +652,7 @@ mod tests {
                 .unwrap();
         assert!(saved.private_mode);
         assert!(backend
-            .add_captured("not retained", None, None)
+            .add_captured("not retained", CaptureSource::Background, None, None)
             .await
             .unwrap()
             .is_none());
@@ -856,7 +660,7 @@ mod tests {
         backend.set_private_mode(false).await.unwrap();
         assert!(backend.list(50, None).await.unwrap().items.is_empty());
         assert!(backend
-            .add_captured("retained later", None, None)
+            .add_captured("retained later", CaptureSource::Background, None, None)
             .await
             .unwrap()
             .is_some());
@@ -929,8 +733,18 @@ mod tests {
     async fn a_replayed_android_capture_is_one_encrypted_row() {
         let (backend, _clip, dir) = backend();
         let plaintext = "same Android tile capture";
-        backend.add_captured(plaintext, None, None).await.unwrap();
-        backend.add_captured(plaintext, None, None).await.unwrap();
+        let first = backend
+            .add_captured(plaintext, CaptureSource::Tile, None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let second = backend
+            .add_captured(plaintext, CaptureSource::Tile, None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(first.saved);
+        assert!(!second.saved);
         assert_eq!(backend.list(50, None).await.unwrap().items.len(), 1);
         drop(backend);
         let database = std::fs::read(dir.path().join("copypaste-v2.db")).unwrap();
@@ -1014,7 +828,10 @@ mod tests {
         let (backend, _clip, _dir) = backend();
         let mut events = backend.watch().await.unwrap();
         let first = backend.add("ordered").await.unwrap();
-        backend.add_captured("captured", None, None).await.unwrap();
+        backend
+            .add_captured("captured", CaptureSource::Background, None, None)
+            .await
+            .unwrap();
         backend.delete(&first.id).await.unwrap();
 
         let added = events.recv().await.unwrap();

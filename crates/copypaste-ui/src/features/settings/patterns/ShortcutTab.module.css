@@ -1,0 +1,79 @@
+.root {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.keycaps,
+.controlRow {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+}
+
+.keycaps {
+  gap: var(--s-1);
+  /* apply fgp */
+}
+
+.keycap {
+  display: inline-flex;
+  min-inline-size: var(--s-6);
+  block-size: var(--s-6);
+  padding-inline: calc(var(--s-2) - var(--stroke-2));
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--elevated);
+  font-family: var(--f-ui);
+  font-size: var(--fs-xs);
+}
+
+.controlRow {
+  max-inline-size: 100%;
+  gap: var(--s-2);
+  /* apply fgp */
+}
+
+.captureButton {
+  --button-content-gap: var(--s-2);
+
+  min-inline-size: calc(var(--s-8) * 4);
+  max-inline-size: 100%;
+  min-block-size: var(--tap-min);
+  block-size: var(--tap-min);
+  padding-inline: var(--s-3);
+  border: var(--stroke-1) solid;
+  border-radius: var(--r-ctl);
+  font-size: var(--fs-sm);
+  outline: 0;
+}
+
+.captureButton:focus-visible {
+  box-shadow: var(--sh-focus);
+}
+
+.capturing {
+  border-color: var(--accent);
+  background: var(--selected);
+}
+
+.idle {
+  border-color: var(--border-strong);
+  background: var(--bg);
+}
+
+.idle:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.capturingPrompt {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

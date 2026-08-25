@@ -94,6 +94,11 @@ impl SourceAppIconCache {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) fn registered_executable(image_name: &str) -> Option<std::path::PathBuf> {
+    win_icon::find_executable(image_name)
+}
+
 fn cache_key(bundle_id: &str) -> String {
     if cfg!(target_os = "windows") || bundle_id.ends_with(".exe") {
         bundle_id.to_ascii_lowercase()
@@ -134,12 +139,14 @@ fn valid_package_id(value: &str) -> bool {
 fn resolve_desktop(bundle_id: &str) -> Option<UiSourceAppIcon> {
     use std::ptr::NonNull;
 
-    use objc2::rc::autoreleasepool;
-    use objc2_app_kit::NSWorkspace;
-    use objc2_foundation::NSString;
+    use objc2::{rc::autoreleasepool, ClassType};
+    use objc2_app_kit::{
+        NSBitmapImageFileType, NSBitmapImageRep, NSCompositingOperation, NSDeviceRGBColorSpace,
+        NSGraphicsContext, NSWorkspace,
+    };
+    use objc2_foundation::{NSDictionary, NSPoint, NSRect, NSSize, NSString};
 
-    const MAX_TIFF_BYTES: usize = 2 * 1024 * 1024;
-    const DECODE_BUDGET_MB: u32 = 8;
+    const ICON_EDGE: usize = 64;
 
     autoreleasepool(|_| {
         let bundle_id = NSString::from_str(bundle_id);
@@ -147,19 +154,52 @@ fn resolve_desktop(bundle_id: &str) -> Option<UiSourceAppIcon> {
         let path = unsafe { workspace.URLForApplicationWithBundleIdentifier(&bundle_id) }
             .and_then(|url| unsafe { url.path() })?;
         let image = unsafe { workspace.iconForFile(&path) };
-        let data = unsafe { image.TIFFRepresentation() }?;
+        let bitmap = unsafe {
+            NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+                NSBitmapImageRep::alloc(),
+                std::ptr::null_mut(),
+                ICON_EDGE as isize,
+                ICON_EDGE as isize,
+                8,
+                4,
+                true,
+                false,
+                NSDeviceRGBColorSpace,
+                0,
+                0,
+            )
+        }?;
+        let context = unsafe { NSGraphicsContext::graphicsContextWithBitmapImageRep(&bitmap) }?;
+        let previous_context = unsafe { NSGraphicsContext::currentContext() };
+        unsafe {
+            NSGraphicsContext::setCurrentContext(Some(&context));
+            image.drawInRect_fromRect_operation_fraction(
+                NSRect::new(
+                    NSPoint::new(0.0, 0.0),
+                    NSSize::new(ICON_EDGE as f64, ICON_EDGE as f64),
+                ),
+                NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+                NSCompositingOperation::Copy,
+                1.0,
+            );
+            context.flushGraphics();
+            NSGraphicsContext::setCurrentContext(previous_context.as_deref());
+        }
+        let properties = NSDictionary::new();
+        let data = unsafe {
+            bitmap.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)
+        }?;
         let len = data.length();
-        if len == 0 || len > MAX_TIFF_BYTES {
+        if len == 0 {
             return None;
         }
         let mut bytes = vec![0_u8; len];
         let pointer = NonNull::new(bytes.as_mut_ptr().cast())?;
         unsafe { data.getBytes_length(pointer, len) };
-        let thumbnail = copypaste_core::thumbnail_png(&bytes, DECODE_BUDGET_MB).ok()?;
         Some(UiSourceAppIcon::from_png(
-            thumbnail.png,
-            thumbnail.width,
-            thumbnail.height,
+            bytes,
+            ICON_EDGE as u32,
+            ICON_EDGE as u32,
         ))
     })
 }

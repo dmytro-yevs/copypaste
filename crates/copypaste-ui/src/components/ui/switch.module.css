@@ -1,0 +1,11 @@
+.root { display: inline-flex; inline-size: var(--tap-min); block-size: var(--tap-min); padding: 0; flex: none; align-items: center; justify-content: center; border: 0; border-radius: var(--r-pill); outline: 0; background: transparent; cursor: pointer; }
+.root:focus-visible { box-shadow: var(--sh-focus); }
+.root:disabled { cursor: not-allowed; opacity: .5; }
+.track { position: relative; display: block; inline-size: calc(var(--s-8) - var(--s-2) + var(--stroke-2)); block-size: calc(var(--s-5) - var(--stroke-1)); border: 0; border-radius: var(--r-pill); background: var(--border-strong); transition: background-color var(--dur-fast) var(--ease); }
+.root[data-state="checked"] .track { background: var(--accent); }
+.thumb { position: absolute; inset-block-start: calc(var(--s-1) - var(--stroke-1)); inset-inline-start: calc(var(--s-1) - var(--stroke-1)); display: block; inline-size: calc(var(--s-3) + var(--stroke-1)); block-size: calc(var(--s-3) + var(--stroke-1)); pointer-events: none; border-radius: var(--r-pill); background: var(--on-accent); box-shadow: var(--sh1); transition: transform var(--dur-fast) var(--ease); }
+.root[data-state="checked"] .thumb { transform: translateX(calc(var(--s-4) - var(--stroke-1))); }
+@media (prefers-reduced-motion: reduce) {
+  .track,
+  .thumb { transition: none; }
+}

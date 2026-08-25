@@ -8,7 +8,7 @@
  */
 import fuzzysort from "fuzzysort";
 
-import { originOf } from "@/components/history/origin";
+import { originOf } from "@/lib/itemOrigin";
 import { rankFuzzy } from "@/lib/fuzzy";
 import { t } from "@/i18n";
 import { type Kind, kindOf, previewOf } from "@/lib/format";
@@ -18,31 +18,31 @@ export type KindFilter = "all" | Kind;
 export type SortOrder = "newest" | "oldest";
 
 export interface ViewOptions {
-  readonly kind: KindFilter;
+  readonly kinds: readonly Kind[];
   readonly sort: SortOrder;
-  readonly device: string;
+  readonly devices: readonly string[];
   readonly groupByDevice: boolean;
 }
 
 export const ALL_DEVICES = "all";
 export const DEFAULT_VIEW: ViewOptions = {
-  kind: "all",
+  kinds: [],
   sort: "newest",
-  device: ALL_DEVICES,
+  devices: [],
   groupByDevice: false,
 };
 
 export function isDefaultView(view: ViewOptions): boolean {
   return (
-    view.kind === DEFAULT_VIEW.kind &&
+    view.kinds.length === 0 &&
     view.sort === DEFAULT_VIEW.sort &&
-    view.device === DEFAULT_VIEW.device &&
+    view.devices.length === 0 &&
     view.groupByDevice === DEFAULT_VIEW.groupByDevice
   );
 }
 
 export function isFilteringView(view: ViewOptions): boolean {
-  return view.kind !== "all" || view.device !== ALL_DEVICES;
+  return view.kinds.length > 0 || view.devices.length > 0;
 }
 
 /** Not every `Kind`: `unknown` is what an item with no content resolves to, so
@@ -103,11 +103,16 @@ export function applyView(
 ): readonly Item[] {
   if (isDefaultView(view) && !searching) return items;
 
+  const kinds = new Set(view.kinds);
   let filtered =
-    view.kind === "all" ? items : items.filter((item) => kindOf(item) === view.kind);
+    kinds.size === 0 ? items : items.filter((item) => kinds.has(kindOf(item)));
 
-  if (view.device !== ALL_DEVICES) {
-    filtered = filtered.filter((item) => originOf(item)?.id === view.device);
+  if (view.devices.length > 0) {
+    const devices = new Set(view.devices);
+    filtered = filtered.filter((item) => {
+      const id = originOf(item)?.id;
+      return id !== undefined && devices.has(id);
+    });
   }
 
   if (searching) return filtered;

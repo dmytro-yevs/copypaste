@@ -154,12 +154,26 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 /// and an item that trips it comes back as an opaque rejection with the whole
 /// round already spent uploading it (manifest 05 §5.1 row 13).
 fn over_size_limit(item: &LocalItem) -> Option<usize> {
-    let limit = if item.content_type == "text" {
+    let limit = upload_limit(&item.content_type);
+    too_large_to_sync(&item.content_type, item.content.len()).then_some(limit)
+}
+
+/// Would cloud sync refuse this plaintext payload for its size?
+///
+/// This is the same gate [`CloudSync::push`] applies before encryption. History
+/// presenters call it so an item that can never upload is marked before the
+/// first round, on every platform.
+#[must_use]
+pub fn too_large_to_sync(content_type: &str, byte_len: usize) -> bool {
+    byte_len > upload_limit(content_type)
+}
+
+fn upload_limit(content_type: &str) -> usize {
+    if content_type == copypaste_ipc::content_type::TEXT {
         MAX_TEXT_BYTES
     } else {
         MAX_BINARY_BYTES
-    };
-    (item.content.len() > limit).then_some(limit)
+    }
 }
 
 #[cfg(test)]
@@ -440,9 +454,13 @@ mod tests {
         let mut at_limit = item("a", 1, "");
         at_limit.content = zeroize::Zeroizing::new(vec![b'x'; MAX_TEXT_BYTES]);
         assert_eq!(over_size_limit(&at_limit), None, "the cap itself must fit");
+        assert!(!too_large_to_sync("text", MAX_TEXT_BYTES));
 
         at_limit.content.push(b'x');
         assert_eq!(over_size_limit(&at_limit), Some(MAX_TEXT_BYTES));
+        assert!(too_large_to_sync("text", MAX_TEXT_BYTES + 1));
+        assert!(!too_large_to_sync("text/rtf", MAX_TEXT_BYTES + 1));
+        assert!(too_large_to_sync("image/png", MAX_BINARY_BYTES + 1));
 
         assert_eq!(MAX_TEXT_BYTES, 8 * 1024 * 1024);
         assert_eq!(MAX_BINARY_BYTES, 10 * 1024 * 1024);

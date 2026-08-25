@@ -2,16 +2,18 @@
  * CopyPaste v2 — design token build.
  *
  * `tokens/` is the only source of truth. This file is configuration for Style
- * Dictionary plus the one platform format Style Dictionary does not ship (a
- * Tailwind v4 `@theme` layer). It does not parse, resolve or transform tokens
- * itself — that is the library's job.
+ * Dictionary plus the custom CSS formats Style Dictionary does not ship.
+ * Style Dictionary owns token references and transforms; Culori owns the
+ * recipe colour maths used for legacy-WebView fallbacks.
  *
  * Run with `npm run build`. Everything it writes under `dist/` is generated;
  * see design/README.md.
  */
 
 import { writeFile } from 'node:fs/promises';
+import { formatRgb } from 'culori';
 import StyleDictionary from 'style-dictionary';
+import { resolve } from './lib/tokens.mjs';
 
 const EXT = 'com.copypaste';
 const DIST = 'dist/';
@@ -27,6 +29,7 @@ const DIST = 'dist/';
  */
 const GROUP_DROP = {
   color: 1,
+  recipe: 2, // recipe.theme.control-focus-border -> control-focus-border
   elevation: 1,
   type: 1,
   space: 1,
@@ -35,7 +38,7 @@ const GROUP_DROP = {
   size: 1,
   layout: 1,
   z: 0,
-  accents: 2, // accents.teal.accent -> accent (emitted under its own selector)
+  themes: 2, // themes.aurora.accent -> accent (emitted under its own selector)
   translucency: 2, // translucency.frosted.chrome-bg -> chrome-bg
   tw: 1,
 };
@@ -79,7 +82,28 @@ const banner = (what) => `/**
 
 /* ------------------------------------------------------------- CSS formats */
 
-const decl = (token) => `  --${token.name}: ${token.$value ?? token.value};`;
+const tokenValue = (token) => token.$value ?? token.value;
+
+const recipeVars = (tokens) =>
+  Object.fromEntries(tokens.map((token) => [token.name, tokenValue(token)]));
+
+/** Recipes stay expressive in tokens/, but shipping CSS is concrete. Culori is
+ *  already the design package's colour engine, so fallback generation and the
+ *  contrast gate use the same OKLab interpolation and alpha semantics. */
+function decl(token, vars) {
+  const value = tokenValue(token);
+  if (token.path[0] !== 'recipe') return `  --${token.name}: ${value};`;
+  try {
+    return `  --${token.name}: ${formatRgb(resolve(value, vars))};`;
+  } catch (error) {
+    throw new Error(`cannot resolve ${token.path.join('.')} from ${token.filePath}: ${error.message}`);
+  }
+}
+
+const declarations = (tokens, context = tokens) => {
+  const vars = recipeVars(context);
+  return tokens.map((token) => decl(token, vars)).join('\n');
+};
 
 /**
  * A themed block of custom properties, plus the conditional blocks that attach
@@ -103,7 +127,7 @@ StyleDictionary.registerFormat({
 
     out.push(`${selectors} {`);
     if (options.prelude) out.push(`  ${options.prelude}`);
-    out.push(main.map(decl).join('\n'), '}\n');
+    out.push(declarations(main), '}\n');
 
     if (reduced.length) {
       out.push(
@@ -153,19 +177,24 @@ StyleDictionary.registerFormat({
   },
 });
 
-/** One block per accent, on the [data-accent] axis (§8.4). */
+/** One complete product palette per theme, resolved for a colour scheme. */
 StyleDictionary.registerFormat({
-  name: 'css/copypaste-accents',
+  name: 'css/copypaste-themes',
   format({ dictionary, options }) {
-    const byAccent = new Map();
-    for (const token of dictionary.allTokens) {
-      const accent = token.path[1];
-      if (!byAccent.has(accent)) byAccent.set(accent, []);
-      byAccent.get(accent).push(token);
+    const all = dictionary.allTokens;
+    const scheme = all.filter((token) => token.path[0] === 'color');
+    const recipes = all.filter((token) => token.path[0] === 'recipe');
+    const themeRecipes = recipes.filter((token) => token.path[1] === 'theme');
+    const byTheme = new Map();
+    for (const token of all.filter((candidate) => candidate.path[0] === 'themes')) {
+      const theme = token.path[1];
+      if (!byTheme.has(theme)) byTheme.set(theme, []);
+      byTheme.get(theme).push(token);
     }
-    const blocks = [...byAccent].map(([accent, tokens]) => {
-      const selectors = options.selectors.map((s) => s.replace('%s', accent)).join(',\n');
-      return `${selectors} {\n${tokens.map(decl).join('\n')}\n}`;
+    const blocks = [...byTheme].map(([theme, tokens]) => {
+      const selectors = options.selectors(theme).join(',\n');
+      const context = [...scheme, ...tokens, ...recipes];
+      return `${selectors} {\n${declarations([...tokens, ...themeRecipes], context)}\n}`;
     });
     return [banner(options.title), blocks.join('\n\n'), ''].join('\n');
   },
@@ -176,87 +205,21 @@ StyleDictionary.registerFormat({
   format({ dictionary, options }) {
     const swatches = new Map();
     for (const token of dictionary.allTokens) {
-      if (token.path[0] !== 'accents') continue;
-      const [_, accent, role] = token.path;
-      if (!swatches.has(accent)) swatches.set(accent, new Map());
-      swatches.get(accent).set(role, token.$value ?? token.value);
+      if (token.path[0] !== 'themes') continue;
+      const [_, theme, role] = token.path;
+      if (!swatches.has(theme)) swatches.set(theme, new Map());
+      swatches.get(theme).set(role, token.$value ?? token.value);
     }
 
     const selectors = options.selectors.join(',\n');
-    const declarations = [...swatches].flatMap(([accent, roles]) => [
-      `  --swatch-${accent}: ${roles.get('accent')};`,
-      `  --on-swatch-${accent}: ${roles.get('on-accent')};`,
+    const declarations = [...swatches].flatMap(([theme, roles]) => [
+      `  --preview-${theme}-canvas: ${roles.get('bg')};`,
+      `  --preview-${theme}-rail: ${roles.get('panel')};`,
+      `  --preview-${theme}-card: ${roles.get('elevated')};`,
+      `  --preview-${theme}-muted: ${roles.get('raised-2')};`,
+      `  --preview-${theme}-accent: ${roles.get('accent')};`,
     ]);
     return [banner(options.title), `${selectors} {`, declarations.join('\n'), '}\n'].join('\n');
-  },
-});
-
-/**
- * The Tailwind v4 theme layer. Two parts:
- *   1. the explicit semantic slots from tokens/semantic/tailwind.json — the
- *      shadcn/ui contract, and the half of the mapping table the desktop uses;
- *   2. a mechanical bridge exposing every core token as a Tailwind theme key,
- *      so `bg-panel`, `text-c-url`, `rounded-card` and `shadow-2` exist without
- *      anybody maintaining a list.
- * Explicit slots win — that is how `--color-accent` stays shadcn's neutral
- * hover surface rather than our brand colour, which is `--color-primary`.
- */
-StyleDictionary.registerFormat({
-  name: 'css/copypaste-tailwind',
-  format({ dictionary, options }) {
-    const byPath = new Map(dictionary.allTokens.map((t) => [t.path.join('.'), t]));
-    const lines = new Map();
-
-    const alias = (key, token, why) => {
-      const ref = refPath(token);
-      if (!ref) throw new Error(`tw.${token.path[1]} must be a pure alias, got ${token.original.$value}`);
-      const target = byPath.get(ref.join('.'));
-      if (!target) throw new Error(`tw.${token.path[1]} references unknown token {${ref.join('.')}}`);
-      lines.set(key, `  --${key}: var(--${varName(target)});${why ? ` /* ${why} */` : ''}`);
-    };
-
-    for (const token of dictionary.allTokens.filter((t) => t.path[0] === 'tw')) {
-      alias(varName(token), token);
-    }
-
-    const bridge = (key, token) => {
-      if (lines.has(key)) return; // an explicit semantic slot already claimed it
-      lines.set(key, `  --${key}: var(--${varName(token)});`);
-    };
-    for (const token of dictionary.allTokens) {
-      const name = varName(token);
-      switch (token.path[0]) {
-        case 'color':
-          if (token.$type === 'color') bridge(`color-${name}`, token);
-          break;
-        case 'accents':
-          break;
-        case 'elevation':
-          bridge(`shadow-${name.replace(/^sh-?/, '')}`, token);
-          break;
-        case 'radius':
-          bridge(`radius-${name.replace(/^r-/, '')}`, token);
-          break;
-        case 'space':
-          if (token.$type === 'dimension') bridge(`spacing-${name}`, token);
-          break;
-        case 'type':
-          if (name.startsWith('fs-')) bridge(`text-${name}`, token);
-          break;
-        default:
-          break;
-      }
-    }
-
-    return `${banner(options.title)}
-/* Tailwind v4 reads its theme from CSS custom properties. \`inline\` means the
- * utilities emit var(--our-token) rather than a copy of the value, so switching
- * [data-theme] or [data-accent] re-tints every shadcn component with no
- * per-component override and no second palette. */
-@theme inline {
-${[...lines.values()].join('\n')}
-}
-`;
   },
 });
 
@@ -264,9 +227,8 @@ StyleDictionary.registerFormat({
   name: 'css/copypaste-index',
   format({ options }) {
     return `${banner(options.title)}
-/* Import order is the cascade. Base first, then the two themes, then the accent
- * axis (which must beat the theme blocks it shares specificity with), then the
- * Tailwind layer. Import \`tailwindcss\` before this file. */
+/* Import order is the cascade. Base and scheme roles come first, then the
+ * product-theme palettes and their generated previews. */
 ${options.imports.map((f) => `@import "./${f}";`).join('\n')}
 `;
   },
@@ -276,7 +238,9 @@ ${options.imports.map((f) => `@import "./${f}";`).join('\n')}
 
 const sources = (theme) => [
   `tokens/color/theme.${theme}.json`,
-  `tokens/color/accents.${theme}.json`,
+  `tokens/color/themes.${theme}.json`,
+  'tokens/color/recipes.json',
+  `tokens/color/recipes.${theme}.json`,
   `tokens/color/static.json`,
   `tokens/elevation.${theme}.json`,
   'tokens/elevation.static.json',
@@ -288,7 +252,6 @@ const sources = (theme) => [
   'tokens/layout.json',
   'tokens/z-index.json',
   'tokens/translucency.json',
-  'tokens/semantic/tailwind.json',
 ];
 
 const CSS_TRANSFORMS = [
@@ -299,10 +262,8 @@ const CSS_TRANSFORMS = [
 ];
 
 /**
- * No colour transform on the CSS side on purpose: the token values are already
- * exactly the CSS §8 specifies, including the rgba() state layers and the
- * color-mix() selection fill, and round-tripping them through a colour parser
- * would only introduce drift.
+ * Palette values stay authored as-is. Only recipe tokens are resolved, in the
+ * custom formats above, because old Android WebViews cannot parse color-mix().
  */
 const cssPlatform = (theme, files) => ({
   transforms: CSS_TRANSFORMS,
@@ -315,29 +276,30 @@ const themeConfig = (theme) => ({
   log: { verbosity: 'silent', warnings: 'warn' },
   platforms: {
     css: cssPlatform(theme, cssFiles(theme)),
-    ...(theme === 'dark' ? { tailwind: cssPlatform(theme, [tailwindFile()]) } : {}),
   },
 });
 
 const themeSelectors = (theme) =>
   theme === 'dark'
-    ? [':root', ':root[data-theme="dark"]', '.theme-scope[data-theme="dark"]']
-    : [':root[data-theme="light"]', '.theme-scope[data-theme="light"]'];
+    ? [':root', ':root[data-color-scheme="dark"]', '.theme-scope[data-color-scheme="dark"]']
+    : [':root[data-color-scheme="light"]', '.theme-scope[data-color-scheme="light"]'];
 
-const accentSelectors = (theme) =>
-  theme === 'dark'
-    ? [':root[data-accent="%s"]', '.theme-scope[data-accent="%s"]']
-    : [
-        ':root[data-theme="light"][data-accent="%s"]',
-        '.theme-scope[data-theme="light"][data-accent="%s"]',
-      ];
+const productThemeSelectors = (scheme, theme) => {
+  const scoped = [
+    `:root[data-color-scheme="${scheme}"][data-theme="${theme}"]`,
+    `.theme-scope[data-color-scheme="${scheme}"][data-theme="${theme}"]`,
+  ];
+  return scheme === 'dark' && theme === 'midnight' ? [':root', ...scoped] : scoped;
+};
 
 function cssFiles(theme) {
   const files = [
     {
       destination: `css/tokens.${theme}.css`,
       format: 'css/copypaste',
-      filter: (t) => isThemed(t) && inGroup(t, 'color', 'elevation') && targets(t).includes('css'),
+      filter: (t) =>
+        ((isThemed(t) && inGroup(t, 'color', 'elevation')) || inGroup(t, 'recipe'))
+        && targets(t).includes('css'),
       options: {
         title: `CopyPaste ${theme} theme — shadcn/ui default theme, zinc base (OKLCH).`,
         selectors: themeSelectors(theme),
@@ -345,20 +307,22 @@ function cssFiles(theme) {
       },
     },
     {
-      destination: `css/accents.${theme}.css`,
-      format: 'css/copypaste-accents',
-      filter: (t) => inGroup(t, 'accents'),
+      destination: `css/themes.${theme}.css`,
+      format: 'css/copypaste-themes',
+      filter: (t) =>
+        (inGroup(t, 'themes', 'recipe') || (isThemed(t) && inGroup(t, 'color')))
+        && targets(t).includes('css'),
       options: {
-        title: `CopyPaste accent axis, ${theme} — Tailwind v4 palette steps.`,
-        selectors: accentSelectors(theme),
+        title: `CopyPaste product themes resolved for ${theme} mode.`,
+        selectors: (productTheme) => productThemeSelectors(theme, productTheme),
       },
     },
     {
       destination: `css/swatches.${theme}.css`,
       format: 'css/copypaste-swatches',
-      filter: (t) => inGroup(t, 'accents'),
+      filter: (t) => inGroup(t, 'themes'),
       options: {
-        title: `CopyPaste accent swatches, ${theme} — immutable picker colours.`,
+        title: `CopyPaste theme previews, ${theme} — derived from the shipping palettes.`,
         selectors: themeSelectors(theme),
       },
     },
@@ -369,7 +333,7 @@ function cssFiles(theme) {
       destination: 'css/tokens.base.css',
       format: 'css/copypaste',
       filter: (t) =>
-        !isThemed(t) && !inGroup(t, 'tw', 'accents') && targets(t).includes('css'),
+        !isThemed(t) && !inGroup(t, 'tw', 'themes', 'recipe') && targets(t).includes('css'),
       options: {
         title: 'CopyPaste theme-independent tokens — type, space, radius, motion, size.',
         selectors: [':root'],
@@ -388,22 +352,15 @@ function cssFiles(theme) {
           'tokens.base.css',
           'tokens.dark.css',
           'tokens.light.css',
-          'accents.dark.css',
-          'accents.light.css',
+          'themes.dark.css',
+          'themes.light.css',
           'swatches.dark.css',
           'swatches.light.css',
-          'theme.css',
         ],
       },
     },
   ];
 }
-
-const tailwindFile = () => ({
-  destination: 'css/theme.css',
-  format: 'css/copypaste-tailwind',
-  options: { title: 'CopyPaste Tailwind v4 theme layer — the shadcn/ui semantic contract.' },
-});
 
 /* ------------------------------------------------------------------- build */
 

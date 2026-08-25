@@ -40,7 +40,10 @@ artifact before packaging.
 Release artifacts are named
 `CopyPaste-v<version>-windows-x86_64-setup.exe`. `SHA256SUMS` contains relative
 names only, and signed releases include Tauri's detached signature plus static
-`latest.json` metadata for `windows-x86_64`.
+`latest.json` metadata. The publish job is the single owner of the official
+feed and combines the Windows entry with the signed `android-universal` APK
+entry; the Windows packaging self-test may still use a Windows-only feed while
+that artifact is exercised in isolation.
 
 ## Rule 1 exemption 1
 

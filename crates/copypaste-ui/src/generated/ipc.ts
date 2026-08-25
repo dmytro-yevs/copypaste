@@ -40,7 +40,27 @@ export type OnboardingPermissions = { platform: PermissionHost, notifications: O
 
 export type DiagnosticCounters = { rejected_too_large: number, lost_intermediates: number, sensitive_swept: number, index_purged: number, uptime_secs: number, };
 
-export type DiscoveredDevice = { discovery_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, };
+export type DeviceObservationProvenance = "self_reported" | "observed" | "measured";
+
+export type DeviceObservationTrust = "local" | "unverified" | "authenticated";
+
+export type DevicePlatform = "macos" | "windows" | "android" | "unknown";
+
+export type DeviceClass = "desktop" | "laptop" | "phone" | "tablet" | "unknown";
+
+export type DeviceProfileObservation = { display_name: string, app_version: string | null, protocol_version: number | null, platform: DevicePlatform, device_class: DeviceClass, os_name: string | null, os_version: string | null, model: string | null, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
+
+export type DeviceEndpointObservation = { lan_endpoint: string, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
+
+export type DeviceLatencyObservation = { connect_latency_ms: number, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
+
+export type DevicePresenceObservation = { online: boolean, last_seen_ms: number, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
+
+export type ExternalNetworkObservation = { "availability": "unavailable" } | { "availability": "available", value: string, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
+
+export type DeviceDetails = { profile: DeviceProfileObservation | null, endpoint: DeviceEndpointObservation | null, latency: DeviceLatencyObservation | null, presence: DevicePresenceObservation | null, public_ip: ExternalNetworkObservation, geo: ExternalNetworkObservation, };
+
+export type DiscoveredDevice = { discovery_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, details?: DeviceDetails, };
 
 export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "pairing_code" | "pairing_address" | "rate_limited" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_version" | "peer_not_found" | "internal";
 
@@ -78,7 +98,7 @@ export type PairedDevice = { name: string, last_seen_ms: number, online: boolean
 
 export type PairingCeremony = { ceremony_id: string | null, role: PairingRole | null, state: PairingState, presentation: PairingPresentationState, known_device: PairedDevice | null, error: UiError | null, };
 
-export type PeerInfo = { pairing_id: string, name: string, last_addr: string | null, last_seen_ms: number, online: boolean, };
+export type PeerInfo = { pairing_id: string, name: string, last_addr: string | null, last_seen_ms: number, online: boolean, details?: DeviceDetails, };
 
 export type PrivateModeData = { private_mode: boolean, private_mode_epoch: number, };
 
@@ -86,9 +106,9 @@ export type ServiceState = { "state": "running", version: string, matches_app: b
 
 export type SettingsHealth = { record_unreadable: boolean, unreadable_fields: Array<string>, };
 
-export type StatusData = { device_name: string, version: string, protocol_version: number, item_count: number, capture_running: boolean, clipboard_backend: string, private_mode: boolean, private_mode_epoch: number, counters: DiagnosticCounters, settings_health: SettingsHealth | null, };
+export type StatusData = { device_name: string, version: string, protocol_version: number, listen_addr?: string | null, device_details?: DeviceDetails, item_count: number, capture_running: boolean, clipboard_backend: string, private_mode: boolean, private_mode_epoch: number, counters: DiagnosticCounters, settings_health: SettingsHealth | null, };
 
-export type SyncResult = { pairing_id: string, name: string, sent: number, received: number, error: UiError | null, };
+export type SyncResult = { pairing_id: string, name: string, sent: number, received: number, duration_ms: number | null, error: UiError | null, };
 
 export type UiError = { code: string, retryable: boolean, };
 

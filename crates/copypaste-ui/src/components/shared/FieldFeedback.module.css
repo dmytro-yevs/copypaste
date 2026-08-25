@@ -1,0 +1,20 @@
+.root {
+  display: inline-flex;
+  min-inline-size: 0;
+  align-items: flex-start;
+  gap: var(--s-1);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.root[data-state="error"] { color: var(--err-strong); }
+.root[data-state="warning"] { color: var(--warn-strong); }
+.root[data-state="success"] { color: var(--ok-strong); }
+.spinner { animation: field-feedback-spin calc(var(--dur) * 4) linear infinite; }
+
+@keyframes field-feedback-spin { to { transform: rotate(1turn); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

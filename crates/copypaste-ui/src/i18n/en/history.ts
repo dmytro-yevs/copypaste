@@ -1,4 +1,33 @@
 export const history = {
+  header: {
+    eyebrow: "Your clipboard memory",
+    title: "Library",
+    description: "The content you copied — recognizable at a glance.",
+  },
+
+  stream: {
+    label: "Clipboard memory stream",
+  },
+
+  inspector: {
+    label: "Inspector",
+    clipboardItem: "Clipboard item",
+    resize: "Resize Library and Inspector",
+    emptyTitle: "Choose an item",
+    emptyBody: "Its content, source and actions will appear here.",
+    application: "Application",
+    created: "Created",
+    device: "Device",
+    type: "Type",
+    characters: "Characters",
+    savedAs: "Saved as",
+    pinned: "Pinned",
+    historyItem: "History item",
+    cloudEligibility: "Cloud sync",
+    eligible: "Eligible",
+    tooLarge: "Too large · peer sync only",
+  },
+
   list: {
     label: "Clipboard history",
     loadMore: "Load more",
@@ -7,8 +36,9 @@ export const history = {
   },
 
   search: {
+    toolbar: "Library controls",
     label: "Search clipboard history",
-    placeholder: "Search clipboard history",
+    placeholder: "Search content, apps, devices…",
     hint: "Search (⌘F) · ↓ to move into the list · ⌘A select all",
     open: "Search clipboard history",
     close: "Close search",
@@ -18,10 +48,9 @@ export const history = {
     allDevices: "All devices",
     sortOrder: "Sort order",
     groupByDevice: "Group clipboard items by device",
+    controlDefault: "{{control}}, default",
+    controlActive: "{{control}}, active",
     group: "Group",
-    selectMultiple: "Select multiple items",
-    leaveSelection: "Leave selection mode",
-    clearAll: "Clear clipboard history",
     count_one: "{{count}} item",
     count_other: "{{count}} items",
     displayLimitHint:
@@ -30,6 +59,7 @@ export const history = {
 
   kind: {
     all: "All kinds",
+    allShort: "All",
     text: "Text",
     image: "Images",
     file: "Files",
@@ -54,6 +84,8 @@ export const history = {
     empty: "Select items to act on them",
     selected_one: "{{count}} item selected",
     selected_other: "{{count}} items selected",
+    selectAll: "Select all",
+    clear: "Clear selection",
     pin: "Pin",
     unpin: "Unpin",
     delete: "Delete",
@@ -73,10 +105,6 @@ export const history = {
     empty: "Empty item",
     pinnedPrefix: "Pinned.",
     selectPrefix: "Select",
-    selectingHint: "Click to add to the selection",
-    hint: "Click to select · double-click to copy",
-    tapHint: "Tap to copy",
-    actions: "Item actions",
     hide: "Hide sensitive content",
     reveal: "Reveal sensitive content",
     copy: "Copy to clipboard",
@@ -113,6 +141,7 @@ export const history = {
     empty: "This item has no text.",
     bodyUnavailable:
       "The rest of this item could not be read — what is shown is the shortened preview.",
+    fullBodyUnavailable: "Full contents could not be loaded.",
     hide: "Hide again",
     copy: "Copy",
     copyImage: "Copy image",
@@ -191,7 +220,7 @@ export const history = {
   bulkDelete: {
     title_one: "Delete {{count}} item?",
     title_other: "Delete {{count}} items?",
-    body: "This removes the selected clipboard items. You have a few seconds to undo it.",
+    body: "This permanently removes the selected clipboard items.",
     action: "Delete",
   },
 

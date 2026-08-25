@@ -146,7 +146,10 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
             tauri::async_runtime::spawn(async move {
                 let backend = app.state::<SelectedBackend>();
                 match backend.copy(&item).await {
-                    Ok(_) => notify::on_recent_copy(&app),
+                    Ok(_) => {
+                        crate::shell::feedback::success(&app);
+                        notify::on_recent_copy(&app);
+                    }
                     Err(error) => {
                         tracing::warn!(%error, "could not copy a clipping from the menu");
                     }

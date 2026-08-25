@@ -1,0 +1,40 @@
+.value {
+  display: block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trigger {
+  inline-size: 100%;
+  min-block-size: 0;
+  padding: 0;
+  justify-content: flex-start;
+  text-align: start;
+}
+
+.popover {
+  z-index: var(--z-popover);
+  display: grid;
+  max-inline-size: min(calc(var(--s-9) * 7), calc(100vw - var(--s-6)));
+  padding: var(--s-3);
+  gap: var(--s-3);
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: var(--sh2);
+}
+
+.full {
+  max-block-size: calc(var(--s-9) * 4);
+  overflow: auto;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.arrow { fill: var(--panel); }

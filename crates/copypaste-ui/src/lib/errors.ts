@@ -19,6 +19,7 @@ export type ErrorKind = ErrorCode
   | "update_network_failed"
   | "update_check_failed"
   | "update_install_failed"
+  | "update_permission_required"
   | "unknown";
 
 const FRIENDLY = {
@@ -47,6 +48,7 @@ const FRIENDLY = {
   update_network_failed: "errors.update_network_failed",
   update_check_failed: "errors.update_check_failed",
   update_install_failed: "errors.update_install_failed",
+  update_permission_required: "errors.update_permission_required",
   internal: "errors.internal",
   unknown: "errors.unknown",
 } as const satisfies Record<ErrorKind, string>;

@@ -48,7 +48,7 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
     };
 
     let (advertised, remote) =
-        exchange_summaries_initiator(chan, source, cursor.advertise_from(peer.3)).await?;
+        exchange_summaries_initiator(chan, source, cursor.advertise_from(peer.4)).await?;
 
     let mut stats = SyncStats::default();
     let planned = plan(&advertised, &remote, now_ms(), &mut stats);
@@ -66,7 +66,8 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
         stats,
         peer_device_id: peer.0,
         peer_device_name: peer.1,
-        peer_listen_addr: peer.2,
+        peer_profile: peer.2,
+        peer_listen_addr: peer.3,
         cursor: SyncCursor {
             since_ms: watermark(cursor.since_ms, &remote, &planned, &applied.attempted),
             relay_floor_ms: None,
@@ -94,7 +95,7 @@ pub async fn run_responder<C: SyncChannel, S: SyncSource>(
     };
 
     let (advertised, remote) =
-        exchange_summaries_responder(chan, source, cursor.advertise_from(peer.3)).await?;
+        exchange_summaries_responder(chan, source, cursor.advertise_from(peer.4)).await?;
 
     let mut stats = SyncStats::default();
 
@@ -112,7 +113,8 @@ pub async fn run_responder<C: SyncChannel, S: SyncSource>(
         stats,
         peer_device_id: peer.0,
         peer_device_name: peer.1,
-        peer_listen_addr: peer.2,
+        peer_profile: peer.2,
+        peer_listen_addr: peer.3,
         cursor: SyncCursor {
             since_ms: watermark(cursor.since_ms, &remote, &planned, &applied.attempted),
             relay_floor_ms: None,
@@ -126,6 +128,7 @@ fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>, since_ms: i
         protocol_version: PROTOCOL_VERSION,
         device_id: source.device_id(),
         device_name: source.device_name(),
+        profile: Some(source.device_profile()),
         listen_addr: listen_addr.map(str::to_owned),
         since_ms,
     }
@@ -138,13 +141,23 @@ fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>, since_ms: i
 async fn recv_hello<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
-) -> Result<(String, String, Option<std::net::SocketAddr>, i64), SyncError> {
+) -> Result<
+    (
+        String,
+        String,
+        Option<crate::DeviceProfile>,
+        Option<std::net::SocketAddr>,
+        i64,
+    ),
+    SyncError,
+> {
     let msg = chan.recv().await?;
     msg.validate()?;
     match msg {
         SyncMessage::Hello {
             device_id,
             device_name,
+            profile,
             listen_addr,
             since_ms,
             ..
@@ -155,6 +168,7 @@ async fn recv_hello<C: SyncChannel, S: SyncSource>(
             Ok((
                 device_id,
                 device_name,
+                profile,
                 // Validated, not merely parsed: this becomes the address every
                 // later round dials, and it replaces one that worked.
                 listen_addr
@@ -701,6 +715,12 @@ mod tests {
         assert_eq!(oa.peer_device_id, "dev-b");
         assert_eq!(ob.peer_device_id, "dev-a");
         assert_eq!(oa.peer_device_name, "dev-b name");
+        assert_eq!(
+            oa.peer_profile
+                .as_ref()
+                .and_then(|profile| profile.protocol_version),
+            Some(PROTOCOL_VERSION)
+        );
         assert_eq!(oa.stats.received, 1);
         assert_eq!(oa.stats.sent, 1);
         assert_eq!(ob.stats.received, 1);
@@ -1012,6 +1032,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                profile: None,
                 listen_addr: None,
                 since_ms: 0,
             },
@@ -1059,6 +1080,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                profile: None,
                 listen_addr: None,
                 since_ms: 0,
             },
@@ -1095,6 +1117,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                profile: None,
                 listen_addr: None,
                 since_ms: 0,
             },
@@ -1130,6 +1153,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                profile: None,
                 listen_addr: None,
                 since_ms: 0,
             },
@@ -1165,6 +1189,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                profile: None,
                 listen_addr: None,
                 since_ms: 0,
             },
@@ -1192,6 +1217,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                profile: None,
                 listen_addr: None,
                 since_ms: 0,
             },
@@ -1217,6 +1243,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "dev-b".into(),
             device_name: "B".into(),
+            profile: None,
             listen_addr: None,
             since_ms: 0,
         }];
@@ -1240,6 +1267,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION + 1,
             device_id: "dev-b".into(),
             device_name: "B".into(),
+            profile: None,
             listen_addr: None,
             since_ms: 0,
         };
@@ -1267,6 +1295,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "dev-a".into(),
             device_name: "me".into(),
+            profile: None,
             listen_addr: None,
             since_ms: 0,
         }]);
@@ -1468,6 +1497,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                profile: None,
                 listen_addr: None,
                 since_ms: 0,
             },

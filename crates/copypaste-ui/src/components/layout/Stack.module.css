@@ -1,0 +1,16 @@
+.root {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+}
+
+.gapNone { gap: 0; /* apply fgp */ }
+.gapXs { gap: var(--s-1); /* apply fgp */ }
+.gapSm { gap: var(--s-2); /* apply fgp */ }
+.gapMd { gap: var(--s-3); /* apply fgp */ }
+.gapLg { gap: var(--s-4); /* apply fgp */ }
+.gapXl { gap: var(--s-6); /* apply fgp */ }
+.stretch { align-items: stretch; }
+.start { align-items: flex-start; }
+.center { align-items: center; }
+.end { align-items: flex-end; }

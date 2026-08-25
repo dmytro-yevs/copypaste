@@ -1,20 +1,24 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Theme.copypaste_ui" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
-    </style>
-
-    <!--
-      Clipboard capture activity theme. It exists only to hold window focus for the
-      instant a clipboard read needs it, so it must not draw, must not animate,
-      and must not dim what is behind it: the user asked to save a clip, not to
-      leave the app they were in.
-    -->
-    <style name="Theme.CopyPaste.Invisible" parent="android:Theme.Translucent.NoTitleBar">
-        <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:windowIsTranslucent">true</item>
-        <item name="android:windowNoTitle">true</item>
-        <item name="android:windowAnimationStyle">@null</item>
-        <item name="android:backgroundDimEnabled">false</item>
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.copypaste_ui" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/copypaste_accent</item>
+        <item name="colorOnPrimary">@color/copypaste_on_accent</item>
+        <item name="colorPrimaryContainer">@color/copypaste_selected</item>
+        <item name="colorOnPrimaryContainer">@color/copypaste_text</item>
+        <item name="colorSecondary">@color/copypaste_accent_pressed</item>
+        <item name="colorSurface">@color/copypaste_surface</item>
+        <item name="colorSurfaceVariant">@color/copypaste_surface_raised</item>
+        <item name="colorOnSurface">@color/copypaste_text</item>
+        <item name="colorOnSurfaceVariant">@color/copypaste_text_muted</item>
+        <item name="colorOutline">@color/copypaste_border</item>
+        <item name="colorError">@color/copypaste_error</item>
+        <item name="android:colorAccent">@color/copypaste_accent</item>
+        <item name="android:windowBackground">@color/copypaste_canvas</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.CopyPaste.AlertDialog</item>
+        <item name="materialButtonStyle">@style/Widget.CopyPaste.Button</item>
     </style>
 </resources>

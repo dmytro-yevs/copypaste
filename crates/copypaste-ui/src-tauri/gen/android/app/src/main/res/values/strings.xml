@@ -4,6 +4,12 @@
     <!-- The share-sheet entry, the text-selection action, and the tile all
          share one label: they are one gesture to the user. -->
     <string name="capture_action">"Save to CopyPaste"</string>
+    <string name="capture_status_channel">Capture status</string>
+    <string name="capture_status_channel_description">Shows when CopyPaste is actively saving clipboard history.</string>
+    <string name="capture_lost_channel">Capture stopped</string>
+    <string name="capture_lost_channel_description">Warns when Android background capture needs to be restarted.</string>
+    <string name="capture_saved_channel">Saved clipboard items</string>
+    <string name="capture_saved_channel_description">Silent confirmations that clipboard history changed.</string>
     <string name="pairing_invite_title">Pair a new device</string>
     <string name="pairing_qr_label">Pairing QR code</string>
     <string name="pairing_code_label">Pairing code</string>

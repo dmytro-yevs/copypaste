@@ -10,6 +10,7 @@ copypaste-clock = { path = "../copypaste-clock" }
 copypaste-fs = { path = "../copypaste-fs" }
 snow.workspace = true
 mdns-sd.workspace = true
+os_info.workspace = true
 data-encoding.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

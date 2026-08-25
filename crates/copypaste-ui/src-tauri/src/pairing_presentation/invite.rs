@@ -1,12 +1,16 @@
 use copypaste_ipc::PairingInviteData;
-use serde::{Deserialize, Serialize};
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+#[cfg(any(test, target_os = "android"))]
+use serde::Deserialize;
+use serde::Serialize;
+use zeroize::Zeroizing;
+#[cfg(any(test, target_os = "android"))]
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::ScannedPairing;
 
 const VERSION: u8 = 1;
-const MAX_CODE_BYTES: usize = 128;
-const MAX_LISTEN_ADDR_BYTES: usize = 64;
+pub(crate) const MAX_CODE_BYTES: usize = 128;
+pub(crate) const MAX_LISTEN_ADDR_BYTES: usize = 64;
 const MAX_ENCODED_BYTES: usize = 512;
 
 #[derive(Serialize)]
@@ -17,6 +21,7 @@ struct NativeInviteRef<'a> {
     listen_addr: &'a str,
 }
 
+#[cfg(any(test, target_os = "android"))]
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
 struct NativeInvite {
@@ -27,9 +32,7 @@ struct NativeInvite {
 
 pub(crate) fn encode_native_invite(invite: &PairingInviteData) -> Option<Zeroizing<String>> {
     let listen_addr = invite.listen_addr.as_deref()?;
-    if !valid_field(&invite.code, MAX_CODE_BYTES)
-        || !valid_field(listen_addr, MAX_LISTEN_ADDR_BYTES)
-    {
+    if !valid_invite_fields(&invite.code, listen_addr) {
         return None;
     }
     let encoded = Zeroizing::new(
@@ -43,21 +46,30 @@ pub(crate) fn encode_native_invite(invite: &PairingInviteData) -> Option<Zeroizi
     (encoded.len() <= MAX_ENCODED_BYTES).then_some(encoded)
 }
 
+#[cfg(any(test, target_os = "android"))]
 pub(super) fn decode_native_invite(payload: Zeroizing<String>) -> Option<ScannedPairing> {
     if payload.len() > MAX_ENCODED_BYTES {
         return None;
     }
     let mut invite: NativeInvite = serde_json::from_str(&payload).ok()?;
-    if invite.version != VERSION
-        || !valid_field(&invite.code, MAX_CODE_BYTES)
-        || !valid_field(&invite.listen_addr, MAX_LISTEN_ADDR_BYTES)
-    {
+    if invite.version != VERSION {
         return None;
     }
-    Some(ScannedPairing {
-        code: Zeroizing::new(std::mem::take(&mut invite.code)),
-        addr: Zeroizing::new(std::mem::take(&mut invite.listen_addr)),
-    })
+    validate_native_invite_fields(
+        Zeroizing::new(std::mem::take(&mut invite.code)),
+        Zeroizing::new(std::mem::take(&mut invite.listen_addr)),
+    )
+}
+
+pub(crate) fn validate_native_invite_fields(
+    code: Zeroizing<String>,
+    addr: Zeroizing<String>,
+) -> Option<ScannedPairing> {
+    valid_invite_fields(&code, &addr).then_some(ScannedPairing { code, addr })
+}
+
+fn valid_invite_fields(code: &str, addr: &str) -> bool {
+    valid_field(code, MAX_CODE_BYTES) && valid_field(addr, MAX_LISTEN_ADDR_BYTES)
 }
 
 fn valid_field(value: &str, max_bytes: usize) -> bool {
@@ -142,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn field_byte_boundaries_are_exact_on_encode_and_decode() {
+    fn field_byte_boundaries_are_exact_for_qr_and_manual_entry() {
         let code = "c".repeat(MAX_CODE_BYTES);
         let addr = "a".repeat(MAX_LISTEN_ADDR_BYTES);
         let mut boundary = invite();
@@ -150,10 +162,20 @@ mod tests {
         boundary.listen_addr = Some(addr.clone());
         assert!(encode_native_invite(&boundary).is_some());
         assert!(decode_native_invite(payload(&code, &addr)).is_some());
+        assert!(validate_native_invite_fields(
+            Zeroizing::new(code.clone()),
+            Zeroizing::new(addr.clone())
+        )
+        .is_some());
 
         boundary.code.push('c');
         assert!(encode_native_invite(&boundary).is_none());
         assert!(decode_native_invite(payload(&boundary.code, &addr)).is_none());
+        assert!(validate_native_invite_fields(
+            Zeroizing::new(boundary.code.clone()),
+            Zeroizing::new(addr.clone())
+        )
+        .is_none());
 
         boundary.code = "secret".into();
         boundary.listen_addr = Some("a".repeat(MAX_LISTEN_ADDR_BYTES + 1));
@@ -162,6 +184,11 @@ mod tests {
             &boundary.code,
             boundary.listen_addr.as_deref().unwrap()
         ))
+        .is_none());
+        assert!(validate_native_invite_fields(
+            Zeroizing::new(boundary.code.clone()),
+            Zeroizing::new(boundary.listen_addr.clone().unwrap())
+        )
         .is_none());
 
         boundary.code.clear();
@@ -172,6 +199,11 @@ mod tests {
         boundary.listen_addr = Some(String::new());
         assert!(encode_native_invite(&boundary).is_none());
         assert!(decode_native_invite(payload("secret", "")).is_none());
+        assert!(validate_native_invite_fields(
+            Zeroizing::new("secret".into()),
+            Zeroizing::new(String::new())
+        )
+        .is_none());
     }
 
     #[test]

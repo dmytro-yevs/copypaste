@@ -1,0 +1,47 @@
+:global(:root[data-theme-transition="native"]::view-transition-image-pair(root)) {
+  isolation: auto;
+}
+
+:global(:root[data-theme-transition="native"]::view-transition-old(root)),
+:global(:root[data-theme-transition="native"]::view-transition-new(root)) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+:global(:root[data-theme-transition="native"]::view-transition-old(root)) {
+  z-index: var(--z-row);
+}
+
+:global(:root[data-theme-transition="native"]::view-transition-new(root)) {
+  z-index: var(--z-sticky);
+}
+
+.veil {
+  position: fixed;
+  z-index: var(--z-dialog);
+  top: var(--theme-transition-y);
+  left: var(--theme-transition-x);
+  width: var(--theme-transition-diameter);
+  height: var(--theme-transition-diameter);
+  border-radius: var(--r-pill);
+  pointer-events: none;
+  opacity: 1;
+  background: var(--bg);
+  transform: translate(-50%, -50%) scale(0);
+  transition-duration: calc(var(--dur-theme) + var(--dur-fast));
+  transition-property: transform;
+  transition-timing-function: var(--ease-linear);
+  will-change: transform, opacity;
+}
+
+.veil[data-phase="reveal"],
+.veil[data-phase="fade"] {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.veil[data-phase="fade"] {
+  opacity: 0;
+  transition-duration: var(--dur-fast);
+  transition-property: opacity;
+  transition-timing-function: var(--ease);
+}

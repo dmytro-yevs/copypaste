@@ -1,0 +1,17 @@
+.bar {
+  flex: none;
+  border-block-end: var(--stroke-1) solid var(--status-error-border);
+  color: var(--err-strong);
+  background: var(--status-error-bg);
+  font-size: var(--fs-sm);
+}
+
+.layout {
+  display: flex;
+  padding: var(--s-2) var(--s-4);
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.icon { flex: none; }
+.message { min-inline-size: 0; flex: 1; }

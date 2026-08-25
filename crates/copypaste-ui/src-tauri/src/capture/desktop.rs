@@ -63,6 +63,15 @@ impl CaptureControl for DesktopCapture {
         Ok(())
     }
 
+    fn set_excluded_app_bundle_ids(&self, _bundle_ids: Option<&[String]>) -> Result<()> {
+        Ok(())
+    }
+
+    fn play_feedback(&self) -> Result<()> {
+        copypaste_feedback::play();
+        Ok(())
+    }
+
     fn set_enabled(&self, _enabled: bool) -> Result<CaptureSnapshot> {
         Err(BackendError::Unsupported(MSG_NO_LADDER))
     }

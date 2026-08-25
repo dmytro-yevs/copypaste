@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::{decrypt, open_binary, origin_or, thumbnail_png, StoredItem};
-use copypaste_ipc::{ImagePreview, Item, PeerInfo};
+use copypaste_ipc::{ImagePreview, Item};
 
 use super::open::Inner;
 use crate::backend::{BackendError, Page, Result};
@@ -60,6 +60,8 @@ impl Inner {
             && copypaste_ipc::content_type::is_text(&row.content_type))
         .then(|| self.state.detector.inert_finding_metadata(&content))
         .flatten();
+        let too_large_to_sync =
+            copypaste_cloud::sync::too_large_to_sync(&row.content_type, plaintext.len());
         Ok(Item {
             id: row.id,
             content,
@@ -72,8 +74,7 @@ impl Inner {
             origin_device_name,
             source_app_bundle_id: row.app_bundle_id,
             source_app_name: row.app_name,
-            // Nothing here talks to a cloud account.
-            too_large_to_sync: false,
+            too_large_to_sync,
             truncated: false,
         })
     }
@@ -146,19 +147,6 @@ impl Inner {
     }
 }
 
-pub(super) fn peer_info(peer: &copypaste_p2p::Peer, online: bool) -> PeerInfo {
-    PeerInfo {
-        pairing_id: peer.pairing_id.clone(),
-        name: peer.name.clone(),
-        // `Peer` holds a parsed `SocketAddr`; the wire type carries the
-        // rendered form, because it is shown to a user and never dialled by the
-        // frontend.
-        last_addr: peer.last_addr.map(|addr| addr.to_string()),
-        last_seen_ms: peer.last_seen_ms,
-        online,
-    }
-}
-
 /// The status this build can honestly report.
 ///
 /// Never fails: an unreadable count is reported as zero rather than an error,
@@ -169,6 +157,8 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         device_name: inner.state.device_name(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+        listen_addr: None,
+        device_details: None,
         item_count: inner.state.store.count().unwrap_or(0),
         // There is no capture loop in this build: Android has no background
         // daemon and no clipboard polling. Reporting `true` would tell the

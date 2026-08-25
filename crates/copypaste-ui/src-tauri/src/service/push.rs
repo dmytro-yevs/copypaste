@@ -19,26 +19,15 @@
 
 use std::time::Duration;
 
-use backon::{BackoffBuilder, ExponentialBuilder};
+use backon::BackoffBuilder;
 use copypaste_ipc::{EventData, EventKind};
+use copypaste_retry::stream_reconnect_backoff;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio_util::sync::CancellationToken;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
 use crate::events::TauriEventName;
-
-/// How long to wait before reconnecting a stream that ended.
-const RECONNECT_MIN: Duration = Duration::from_secs(5);
-const RECONNECT_MAX: Duration = Duration::from_secs(300);
-
-fn reconnect_policy() -> ExponentialBuilder {
-    // Jitter stays disabled so every client follows the required exact ladder.
-    ExponentialBuilder::new()
-        .with_min_delay(RECONNECT_MIN)
-        .with_max_delay(RECONNECT_MAX)
-        .without_max_times()
-}
 
 /// Owns the app-wide push subscription and its shutdown signal.
 pub struct PushMonitor {
@@ -93,7 +82,7 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) -> PushMonitor {
 }
 
 async fn run<R: Runtime>(app: AppHandle<R>, shutdown: CancellationToken) {
-    let policy = reconnect_policy();
+    let policy = stream_reconnect_backoff();
     let mut schedule = policy.build();
     loop {
         let result = tokio::select! {
@@ -203,30 +192,12 @@ mod tests {
         assert!(json.contains(r#""swept":2"#), "{json}");
     }
 
-    #[test]
-    fn the_reconnect_schedule_is_exact_and_bounded() {
-        let delays: Vec<_> = reconnect_policy().build().take(9).collect();
-        assert_eq!(
-            delays,
-            [5, 10, 20, 40, 80, 160, 300, 300, 300].map(Duration::from_secs)
-        );
-    }
-
-    #[test]
-    fn a_live_stream_resets_the_reconnect_schedule() {
-        let mut failed = reconnect_policy().build();
-        assert_eq!(failed.nth(5), Some(Duration::from_secs(160)));
-
-        let mut after_success = reconnect_policy().build();
-        assert_eq!(after_success.next(), Some(RECONNECT_MIN));
-    }
-
     #[tokio::test]
     async fn cancellation_interrupts_the_longest_reconnect_wait() {
         let shutdown = CancellationToken::new();
         let waiting = tokio::spawn({
             let shutdown = shutdown.clone();
-            async move { wait_to_reconnect(RECONNECT_MAX, &shutdown).await }
+            async move { wait_to_reconnect(copypaste_retry::STREAM_RECONNECT_MAX, &shutdown).await }
         });
         tokio::task::yield_now().await;
 

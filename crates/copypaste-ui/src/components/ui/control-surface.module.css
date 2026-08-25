@@ -1,0 +1,86 @@
+.root {
+    position: relative;
+    min-inline-size: 0;
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-input);
+    color: var(--text);
+    background: var(--card);
+    box-shadow: var(--sh1);
+    transition:
+        border-color var(--dur-fast) var(--ease),
+        background-color var(--dur-fast) var(--ease),
+        box-shadow var(--dur-fast) var(--ease);
+}
+
+.root:hover:not(:disabled):not([data-disabled]) {
+    border-color: var(--border-strong);
+}
+
+.root[data-active-filter] {
+    border-color: var(--button-secondary-pressed-border);
+    color: var(--accent-2);
+    background: var(--selected);
+}
+
+.root:focus-visible,
+.root:focus-within {
+    outline: 0;
+    border-color: var(--control-focus-border);
+    box-shadow: var(--sh-focus);
+}
+
+.root[aria-invalid="true"],
+.invalid {
+    border-color: var(--err);
+}
+
+.root:disabled,
+.root[data-disabled],
+.disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.md {
+    --control-block-size: calc(var(--ctl-h-lg) + var(--s-1));
+    min-block-size: calc(var(--ctl-h-lg) + var(--s-1));
+}
+
+.library {
+    --control-block-size: calc(var(--ctl-h-lg) + var(--s-1));
+    block-size: calc(var(--ctl-h-lg) + var(--s-1));
+    min-block-size: calc(var(--ctl-h-lg) + var(--s-1));
+}
+
+.compact {
+    --control-block-size: max(var(--ctl-h-sm), var(--tap-min));
+    block-size: var(--control-block-size);
+    min-block-size: var(--control-block-size);
+}
+
+.sm {
+    --control-block-size: var(--ctl-h-sm);
+    block-size: var(--control-block-size);
+    min-block-size: var(--control-block-size);
+}
+
+.endSlot {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: var(--s-1);
+}
+
+.content {
+    inline-size: fit-content;
+}
+
+.fill {
+    inline-size: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .root {
+        transition: none;
+    }
+}

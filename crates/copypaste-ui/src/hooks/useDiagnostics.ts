@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
-import { copyText, hasBridge, hasWebBridge } from "@/lib/ipc";
+import { copyText } from "@/lib/ipc";
+import { subscribeNativeEvent } from "@/lib/tauriEventRegistry";
 import { EVENT_CHANGED, type ChangePayload } from "@/hooks/usePush";
 import {
   exportSupportBundle,
@@ -67,27 +67,12 @@ export function useSweepNotices() {
   const qc = useQueryClient();
 
   useEffect(() => {
-    if (!hasBridge() || hasWebBridge()) return;
-
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-
-    void listen<SweepPayload>(EVENT_CHANGED, (event) => {
+    return subscribeNativeEvent<SweepPayload>(EVENT_CHANGED, (event) => {
       const swept = event.payload.swept;
       if (swept > 0) {
         toast.warning(t("settings.diagnostics.swept", { count: swept }));
         void qc.invalidateQueries({ queryKey: DIAGNOSTICS_KEY });
       }
-    }).then((off) => {
-      // An effect that unmounts before the promise settles must still detach,
-      // or a fast remount stacks two listeners and doubles every notice.
-      if (cancelled) off();
-      else unlisten = off;
     });
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
   }, [qc]);
 }

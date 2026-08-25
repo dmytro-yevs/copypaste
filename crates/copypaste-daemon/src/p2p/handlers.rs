@@ -1,10 +1,9 @@
 //! Peer-to-peer IPC handlers.
 //!
-//! Each is [`copypaste_p2p::Node`] plus the two things only the daemon knows:
-//! which `ErrorCode` a failure carries, and what else has to be told about it —
-//! the event stream, the device-name registry, the cloud cursor. The node holds
-//! the sentences, because what a user reads must not depend on which client
-//! asked.
+//! Each is [`copypaste_p2p::Node`] plus the things only the daemon knows: the
+//! response envelope, event stream, device-name registry and cloud cursor. The
+//! node holds the sentences, because what a user reads must not depend on which
+//! client asked.
 //!
 //! These are the only handlers in the daemon that do network I/O, which is why
 //! they are `async` while every store handler in `server` is a blocking call on
@@ -16,12 +15,14 @@
 //! derived, non-secret and safe to log; it is what every message uses instead.
 
 use std::sync::Arc;
+use std::time::Instant;
 
-use copypaste_core::now_ms;
+use copypaste_core::{now_ms, p2p_contract};
 use copypaste_ipc::{
-    DiscoveredData, DiscoveredDevice, ErrorCode, PairingData, PairingInviteData,
-    PairingProgressData, PairingRole, PairingState, PeerInfo, Response, ResponseData, SyncResult,
+    DiscoveredData, ErrorCode, PairingData, PairingInviteData, Response, ResponseData, SyncResult,
 };
+#[cfg(test)]
+use copypaste_ipc::{PairingProgressData, PeerInfo};
 use copypaste_p2p::peers::Peer;
 use copypaste_p2p::{NodeError, PairingPhase, PairingStatus};
 use tracing::{info, warn};
@@ -125,37 +126,17 @@ fn pairing_progress(state: &AppState, id: u64, status: PairingStatus) -> Respons
             .pairing_id
             .as_deref()
             .and_then(|pairing_id| state.p2p.peers().get(pairing_id))
-            .map(|peer| peer_info(&peer, state.p2p.find(&peer.pairing_id).is_some()))
+            .map(|peer| {
+                let discovered = state.p2p.find(&peer.pairing_id);
+                let authenticated = state.p2p.node().authenticated_profile(&peer.pairing_id);
+                p2p_contract::peer_info(&peer, discovered.as_ref(), authenticated.as_ref())
+            })
     } else {
         None
     };
-    let peer = status.peer.as_ref();
     Response::ok(
         id,
-        ResponseData::PairingProgress(PairingProgressData {
-            pairing_id: status.pairing_id,
-            role: status.role.map(|role| match role {
-                copypaste_p2p::PairingRole::Initiator => PairingRole::Initiator,
-                copypaste_p2p::PairingRole::Responder => PairingRole::Responder,
-            }),
-            state: match status.phase {
-                PairingPhase::Idle => PairingState::Idle,
-                PairingPhase::WaitingForPeer => PairingState::WaitingForPeer,
-                PairingPhase::Handshaking => PairingState::Handshaking,
-                PairingPhase::AwaitingConfirmation => PairingState::AwaitingConfirmation,
-                PairingPhase::Confirmed => PairingState::Confirmed,
-                PairingPhase::Rejected => PairingState::Rejected,
-                PairingPhase::Cancelled => PairingState::Cancelled,
-                PairingPhase::TimedOut => PairingState::TimedOut,
-                PairingPhase::Failed => PairingState::Failed,
-            },
-            sas: status.sas,
-            peer_device_id: peer.map(|peer| peer.device_id.clone()),
-            peer_name: peer.map(|peer| peer.name.clone()),
-            peer_addr: peer.and_then(|peer| peer.addr.map(|addr| addr.to_string())),
-            known_device,
-            error_code: status.error.as_ref().map(node_error_code),
-        }),
+        ResponseData::PairingProgress(p2p_contract::pairing_progress(status, known_device)),
     )
 }
 
@@ -213,8 +194,9 @@ pub async fn peers(state: &Arc<AppState>, id: u64) -> Response {
         .list()
         .iter()
         .map(|peer| {
-            let online = state.p2p.find(&peer.pairing_id).is_some();
-            peer_info(peer, online)
+            let discovered = state.p2p.find(&peer.pairing_id);
+            let authenticated = state.p2p.node().authenticated_profile(&peer.pairing_id);
+            p2p_contract::peer_info(peer, discovered.as_ref(), authenticated.as_ref())
         })
         .collect();
     Response::ok(id, ResponseData::Peers(infos))
@@ -281,18 +263,15 @@ fn devices(state: &Arc<AppState>) -> DiscoveredData {
         .p2p
         .seen()
         .into_iter()
-        .map(|found| DiscoveredDevice {
+        .map(|found| {
             // Resolved locally rather than taken from the advertisement:
             // anyone on the LAN can claim any pairing id, and `paired` decides
             // whether the UI offers "pair" or "sync" (`CopyPaste-vgpy`).
-            paired: found
+            let paired = found
                 .pairing_ids
                 .iter()
-                .any(|id| state.p2p.peers().get(id).is_some()),
-            addr: found.addr.to_string(),
-            discovery_id: found.discovery_id,
-            name: found.name,
-            last_seen_ms: found.last_seen_ms,
+                .any(|id| state.p2p.peers().get(id).is_some());
+            p2p_contract::discovered_device(found, paired)
         })
         .collect();
     DiscoveredData { devices }
@@ -301,65 +280,18 @@ fn devices(state: &Arc<AppState>) -> DiscoveredData {
 /// One peer, start to finish. Never returns `Err`: a failure is a field.
 pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
     let source = peer_source(state);
-    match state.p2p.node().sync_one(peer, &source).await {
-        Ok(outcome) => {
-            crate::p2p::remember_device(state, &outcome);
-            SyncResult {
-                pairing_id: peer.pairing_id.clone(),
-                name: outcome.peer_device_name,
-                sent: u32::try_from(outcome.stats.sent).unwrap_or(u32::MAX),
-                received: u32::try_from(outcome.stats.received).unwrap_or(u32::MAX),
-                error: None,
-                error_code: None,
-            }
-        }
-        Err(e) => SyncResult {
-            pairing_id: peer.pairing_id.clone(),
-            name: peer.name.clone(),
-            sent: 0,
-            received: 0,
-            error: Some(e.to_string()),
-            error_code: Some(node_error_code(&e)),
-        },
+    let started = Instant::now();
+    let result = state.p2p.node().sync_one(peer, &source).await;
+    let duration = started.elapsed();
+    if let Ok(outcome) = &result {
+        crate::p2p::remember_device(state, outcome);
     }
+    p2p_contract::sync_result(peer, result, duration)
 }
 
-/// The one mapping from the node's failures onto the IPC taxonomy.
-///
-/// Total, and deliberately not routed through
-/// [`NodeError::is_client_error`]: that answers "whose fault is it", and what a
-/// client needs is "what does the user do next". Collapsing nine sentences onto
-/// three codes is what left a typo, a switched-off device and a full pairing
-/// list indistinguishable, and sent `NoPeer` out under the code every client
-/// renders as a missing clipboard item (post-merge review, finding 4).
+/// Keep the daemon response envelope local; only the taxonomy is shared.
 fn failed(id: u64, error: NodeError) -> Response {
-    Response::err(id, node_error_code(&error), error.to_string())
-}
-
-fn node_error_code(error: &NodeError) -> ErrorCode {
-    match error {
-        NodeError::BadCode | NodeError::Handshake | NodeError::SelfPairing => {
-            ErrorCode::PairingCode
-        }
-        NodeError::PairingBusy => ErrorCode::RateLimited,
-        NodeError::NoPairing => ErrorCode::NotReady,
-        NodeError::BadAddress => ErrorCode::PairingAddress,
-        NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
-        NodeError::TooManyPairings => ErrorCode::PairingLimit,
-        NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
-        NodeError::PeerVersion => ErrorCode::PeerVersion,
-        NodeError::NoPeer => ErrorCode::PeerNotFound,
-    }
-}
-
-fn peer_info(peer: &Peer, online: bool) -> PeerInfo {
-    PeerInfo {
-        pairing_id: peer.pairing_id.clone(),
-        name: peer.name.clone(),
-        last_addr: peer.last_addr.map(|addr| addr.to_string()),
-        last_seen_ms: peer.last_seen_ms,
-        online,
-    }
+    Response::err(id, p2p_contract::node_error_code(&error), error.to_string())
 }
 
 #[cfg(test)]
@@ -752,7 +684,7 @@ mod tests {
     /// Every variant the node can produce, with the code it arrives under.
     ///
     /// Exhaustive on purpose: this is the list a new `NodeError` has to be
-    /// added to, and the compiler already forces the `match` in [`failed`].
+    /// added to, while the compiler forces the canonical mapping to be total.
     const EVERY_FAILURE: &[(NodeError, ErrorCode)] = &[
         (NodeError::BadCode, ErrorCode::PairingCode),
         (NodeError::Handshake, ErrorCode::PairingCode),

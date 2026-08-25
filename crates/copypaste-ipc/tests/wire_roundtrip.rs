@@ -42,6 +42,7 @@ fn peer() -> PeerInfo {
         last_addr: Some("192.0.2.1:47654".into()),
         last_seen_ms: 1,
         online: true,
+        details: None,
     }
 }
 
@@ -51,6 +52,7 @@ fn sync_result() -> SyncResult {
         name: "Phone".into(),
         sent: 1,
         received: 2,
+        duration_ms: Some(42),
         error: None,
         error_code: None,
     }
@@ -103,6 +105,8 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             device_name: "Laptop".into(),
             version: "2.0.0".into(),
             protocol_version: PROTOCOL_VERSION,
+            listen_addr: Some("192.0.2.1:47654".into()),
+            device_details: None,
             item_count: 1,
             capture_running: true,
             clipboard_backend: "fake".into(),
@@ -133,6 +137,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
                 addr: "192.0.2.1:47654".into(),
                 last_seen_ms: 1,
                 paired: true,
+                details: None,
             }],
         }),
         ResponseData::Config(ConfigApplied {

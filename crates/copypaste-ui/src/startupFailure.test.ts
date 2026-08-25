@@ -107,7 +107,7 @@ describe("a startup that never reaches the first render", () => {
   });
 
   test("shows the screen stage when an app chunk cannot load", async () => {
-    await bootWith("@/App", "Failed to fetch dynamically imported module: /assets/App.js");
+    await bootWith("@/app/App", "Failed to fetch dynamically imported module: /assets/App.js");
 
     expect(notice().dataset.startupFailure).toBe("screens");
     expect(notice().textContent).toContain("screens did not load");
@@ -121,7 +121,7 @@ describe("a startup that never reaches the first render", () => {
 describe("a component that throws during the first render", () => {
   test("shows the render stage and redacts the thrown error", async () => {
     vi.resetModules();
-    vi.doMock("@/App", () => ({
+    vi.doMock("@/app/App", () => ({
       default: function BrokenApp(): never {
         throw new Error("render exploded: /Users/someone/CopyPaste/src/App.tsx");
       },

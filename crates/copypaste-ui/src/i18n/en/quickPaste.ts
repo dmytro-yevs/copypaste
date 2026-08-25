@@ -10,6 +10,7 @@ export const quickPaste = {
 
   search: {
     label: "Search clipboard history",
+    clear: "Clear search",
   },
 
   loading: {
@@ -61,6 +62,8 @@ export const quickPaste = {
     pin: "Pin",
     unpin: "Unpin",
     copyPrefix: "Copy",
+    fullLoading: "Loading the complete value…",
+    fullUnavailable: "The complete value could not be loaded.",
   },
 
   toast: {

@@ -202,11 +202,15 @@ def contract_errors(release, nightly, ci):
         if (windows_uploads.get(name) or {}).get("if-no-files-found") != "error":
             errors.append(f"{name} upload must fail closed")
 
-    publish_commands = commands(publish)
+    release_create = next(
+        (step for step in steps(publish) if step.get("name") == "Create GitHub Release"),
+        {},
+    )
+    release_create_commands = str(release_create.get("run") or "")
     if "windows-x86_64" not in downloads(publish):
         errors.append("publication must download the Windows release artifact")
     for asset in ("dist/*.exe", "dist/*.exe.sig", "dist/latest.json", "dist/SHA256SUMS"):
-        if asset not in publish_commands:
+        if asset not in release_create_commands:
             errors.append(f"publication is missing Windows asset {asset}")
 
     nightly_jobs = nightly.get("jobs") or {}

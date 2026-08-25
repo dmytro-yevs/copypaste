@@ -635,13 +635,49 @@ Three separate hard-won rules, all on the same subsystem:
 - **Bug id.** audit HIGH #8.
 - **v1 site.** `daemon/mod.rs:363-372`.
 
-### 3.23 Sound-on-copy is suppressed in test environments
+### 3.23 Copy feedback is success-bound and platform-native
 
-- **Rule.** The capture-completed sound MUST be suppressed when the daemon is
-  running with an ephemeral key (test mode), and the player process MUST be
-  reaped.
+- **Rule.** When enabled, feedback plays only after a newly stored capture or a
+  successful app-owned clipboard write. Private, excluded, rejected, failed and
+  duplicate-without-save outcomes stay silent. Notification permission and
+  `notify_on_copy` never gate it.
+- **Platform contract.** macOS uses the reaped stock player, Windows queues the
+  user-configured Default Beep, and Android uses the notification audio stream
+  while respecting ringer, mute and stream volume. No bundled audio asset.
+- **Test contract.** Fake/ephemeral capture backends suppress feedback, and any
+  player process MUST be reaped.
 - **Why.** OS hangs and sound spam in CI; zombie processes otherwise.
 - **v1 site.** `tick.rs:167-181`, `:203-213`.
+
+### 3.24 Source exclusions use the installed launcher catalogue
+
+- **Rule.** The picker lists every user-launchable application the platform
+  exposes, never a curated set. Search matches both display name and stable
+  identity; icons and names are presentation only. Manual identity entry stays
+  available when an application is missing or no longer installed.
+- **Platform contract.** macOS scans standard Applications domains and keeps
+  `.app` bundles with a bundle id and executable, excluding `LSUIElement` and
+  `LSBackgroundOnly` agents. Windows reads per-user and machine `App Paths` in
+  both registry views, keeps existing executables, and honours the Shell's
+  `IsHostApp` / `NoStartPage` exclusions; the process image name is the identity
+  capture can enforce. Android queries enabled `MAIN` launchers for handheld
+  and Leanback categories through package visibility, without the broader
+  `QUERY_ALL_PACKAGES` permission, and persists the package id.
+- **Primary sources.** Apple defines
+  [`LSUIElement`](https://developer.apple.com/documentation/bundleresources/information-property-list/lsuielement)
+  and
+  [`LSBackgroundOnly`](https://developer.apple.com/documentation/bundleresources/information-property-list/lsbackgroundonly)
+  as non-Dock/background application roles; Android documents intent-scoped
+  [package visibility](https://developer.android.com/training/package-visibility/declaring);
+  Microsoft specifies per-user/machine
+  [`App Paths`](https://learn.microsoft.com/windows/win32/shell/app-registration)
+  as the preferred executable registration.
+- **State contract.** Loading preserves list geometry. Empty search, catalogue
+  failure and retry are explicit; retry/manual actions are full-width on narrow
+  layouts. Browser preview calls the host adapter rather than returning samples.
+- **Why.** A fixed shortlist hid installed password managers and made the
+  privacy control look complete while most applications were impossible to
+  select.
 
 ---
 

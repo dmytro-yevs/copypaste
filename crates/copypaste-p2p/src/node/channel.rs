@@ -137,6 +137,7 @@ mod tests {
             protocol_version: crate::PROTOCOL_VERSION,
             device_id: "device-a".into(),
             device_name: "A".into(),
+            profile: None,
             listen_addr: None,
             since_ms: 0,
         })

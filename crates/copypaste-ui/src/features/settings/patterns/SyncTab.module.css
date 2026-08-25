@@ -1,0 +1,13 @@
+.root { display: flex; min-inline-size: 0; flex-direction: column; gap: var(--s-4); }
+.pairedActions { display: flex; min-inline-size: 0; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.spinner { animation: sync-settings-spin calc(var(--dur) * 4) linear infinite; }
+
+@keyframes sync-settings-spin { to { transform: rotate(1turn); } }
+
+@container (max-width: $cpSm) {
+  .pairedActions { inline-size: 100%; align-items: stretch; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

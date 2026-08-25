@@ -10,10 +10,17 @@
  * and logs are shown, so the original error is dropped rather than reported.
  */
 
-export type StartupStage = "polyfills" | "screens" | "render";
+export type StartupStage =
+  | "polyfills"
+  | "platform"
+  | "platform-data"
+  | "screens"
+  | "render";
 
 const WHAT: Record<StartupStage, string> = {
   polyfills: "This device needs a compatibility layer that did not load.",
+  platform: "The app could not load this device's platform support.",
+  "platform-data": "The app could not read this device's platform information.",
   screens: "The app's screens did not load.",
   render: "The app loaded but could not draw its first screen.",
 };

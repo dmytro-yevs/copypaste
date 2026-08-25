@@ -5,9 +5,17 @@ import path from "node:path";
 const EXPECTED = new Map([
   ["history/populated", { feature: "history", state: "populated", name: "Clipboard history", directory: "history", direct: true }],
   ["capture/service-capture-status", { feature: "capture", state: "service-capture-status", name: "Background capture", directory: "capture", direct: true }],
-  ["devices/ready-to-pair", { feature: "devices", state: "ready-to-pair", name: "Ready to pair", directory: "devices", direct: true }],
+  ["capture/copy-feedback-setting", { feature: "capture", state: "copy-feedback-setting", name: "Copy feedback sound", directory: "capture/copy-feedback-setting", direct: false }],
+  ["devices/desktop-pairing-entry", {
+    feature: "devices",
+    state: "desktop-pairing-entry",
+    name: "Enter pairing code",
+    requiredNames: ["Show pairing code", "Enter pairing code"],
+    directory: "devices",
+    direct: true,
+  }],
   ["settings-and-service/appearance", { feature: "settings-and-service", state: "appearance", name: "Theme", directory: "settings-and-service", direct: true }],
-  ["cloud-account/not-configured", { feature: "cloud-account", state: "not-configured", name: "Not configured", directory: "cloud-account", direct: true }],
+  ["cloud-account/unconfigured", { feature: "cloud-account", state: "unconfigured", name: "Cloud server configuration", directory: "cloud-account", direct: true }],
 ]);
 
 const UPDATER_STATES = new Map([
@@ -162,6 +170,19 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
       : null;
     if (!marker) {
       throw new Error(`${label} ${state.feature} accessibility does not prove its expected UI state`);
+    }
+    for (const requiredName of expectedState.requiredNames ?? []) {
+      if (!accessibility.nodes.some((node) => (
+        node?.name === requiredName
+        && node.enabled === true
+        && node.offscreen === false
+        && Number.isFinite(node.bounds?.width)
+        && Number.isFinite(node.bounds?.height)
+        && node.bounds.width > 0
+        && node.bounds.height > 0
+      ))) {
+        throw new Error(`${label} ${state.feature} accessibility lacks ${requiredName}`);
+      }
     }
   }
   if ([...expected.keys()].some((identity) => !observed.has(identity))) {

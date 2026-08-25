@@ -11,6 +11,15 @@
       }
     ]
   },
+  "build": {
+    "beforeBuildCommand": "npm run build:android"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
+    }
+  },
   "bundle": {
     "android": {
       "minSdkVersion": 24,

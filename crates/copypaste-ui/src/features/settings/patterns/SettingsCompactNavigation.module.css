@@ -1,0 +1,81 @@
+.menu {
+  min-inline-size: 0;
+  overflow: hidden;
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh1);
+  -webkit-backdrop-filter: var(--frost-filter);
+  backdrop-filter: var(--frost-filter);
+}
+
+.category {
+  --button-content-gap: 0;
+
+  display: grid;
+  inline-size: 100%;
+  min-block-size: calc(var(--s-9) + var(--s-4));
+  padding: var(--s-2) var(--s-3);
+  grid-template-columns: var(--s-8) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-3);
+  border: 0;
+  border-block-end: var(--stroke-1) solid var(--divider);
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+  white-space: normal;
+}
+.category > [data-slot="button-content"] { display: contents; }
+
+.category:last-child { border-block-end: 0; }
+.category:hover { background: var(--hover); }
+.category:focus-visible { outline: 0; box-shadow: inset var(--sh-focus); }
+
+.iconBox {
+  display: grid;
+  inline-size: var(--s-8);
+  block-size: var(--s-8);
+  place-items: center;
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--elevated);
+  color: var(--faint);
+}
+
+.copy { display: flex; min-inline-size: 0; flex-direction: column; }
+.copy strong { font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.copy span {
+  margin-block-start: var(--s-1);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+}
+.caret { color: var(--faint); }
+
+.detail {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.detailHeader {
+  min-inline-size: 0;
+  padding-block-start: 0;
+  padding-block-end: var(--s-3);
+  align-items: flex-start;
+  border-block-end: var(--stroke-1) solid var(--divider);
+}
+
+.detailContent {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .category { scroll-behavior: auto; }
+}

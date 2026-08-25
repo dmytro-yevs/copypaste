@@ -31,7 +31,7 @@ mod windows;
 pub fn windows_ui(abort: NativeAbort) -> impl NativePairingUi {
     windows::WindowsPairingUi::new(
         invite::encode_native_invite,
-        invite::decode_native_invite,
+        invite::validate_native_invite_fields,
         abort,
     )
 }
@@ -80,7 +80,7 @@ impl Default for PairingPresenter {
         #[cfg(target_os = "windows")]
         let native = Box::new(windows::WindowsPairingUi::new(
             invite::encode_native_invite,
-            invite::decode_native_invite,
+            invite::validate_native_invite_fields,
             Arc::new(|| {}),
         ));
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -187,8 +187,9 @@ mod native_pairing_source_contracts {
     }
 
     #[test]
-    fn windows_and_android_pairing_keep_credentials_off_the_webview() {
+    fn native_pairing_keeps_credentials_off_the_webview_with_platform_entry_parity() {
         let sources = [
+            production(include_str!("pairing_presentation/macos.rs")),
             production(include_str!("pairing_presentation/windows/mod.rs")),
             production(include_str!("pairing_presentation/windows/invite.rs")),
             production(include_str!("pairing_presentation/windows/entry.rs")),
@@ -205,6 +206,31 @@ mod native_pairing_source_contracts {
         }
         assert!(joined.contains("encode_native_invite"));
         assert!(joined.contains("decode_native_invite"));
+        assert!(joined.contains("validate_native_invite_fields"));
         assert!(joined.contains("Zeroizing"));
+
+        let macos = production(include_str!("pairing_presentation/macos.rs"));
+        assert!(macos.matches("NSSecureTextField").count() >= 2);
+        assert!(macos.contains("Pairing code"));
+        assert!(macos.contains("Pairing address"));
+        assert!(macos.contains("setSelectable(false)"));
+
+        let windows = production(include_str!("pairing_presentation/windows/entry.rs"));
+        assert_eq!(windows.matches("co::ES::PASSWORD").count(), 2);
+        assert!(windows.contains("Pairing &code"));
+        assert!(windows.contains("Pairing &address"));
+
+        let android = production(include_str!("pairing_presentation/android.rs"));
+        assert!(android.contains("\"scanInvite\""));
+        assert!(android.contains("decode_native_invite(payload)"));
+        let android_plugin = include_str!(
+            "../gen/android/app/src/main/java/com/copypaste/app/PairingPresentationPlugin.kt"
+        );
+        let android_dialog = include_str!(
+            "../gen/android/app/src/main/java/com/copypaste/app/PairingDialogController.kt"
+        );
+        assert!(android_plugin.contains("GmsBarcodeScanning.getClient"));
+        assert!(android_plugin.contains("Barcode.FORMAT_QR_CODE"));
+        assert!(android_dialog.contains("WindowManager.LayoutParams.FLAG_SECURE"));
     }
 }

@@ -65,6 +65,16 @@ pub enum CaptureSource {
     Background,
 }
 
+impl CaptureSource {
+    /// Background is the only doorway where the user did not direct this
+    /// specific content into CopyPaste. Its source must therefore satisfy the
+    /// exclusion gate; the share sheet, Process Text, tile and in-app action
+    /// are explicit gestures and stay usable when attribution is unavailable.
+    pub const fn requires_external_attribution(self) -> bool {
+        matches!(self, Self::Background)
+    }
+}
+
 /// Why background capture is not set up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]

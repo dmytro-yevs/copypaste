@@ -155,7 +155,7 @@ mod tests {
         let source = include_str!("macos.rs");
         for required in [
             "encode_native_invite",
-            "decode_native_invite",
+            "validate_native_invite_fields",
             "QrCode::new",
             "NSSecureTextField",
             "setAccessibilityProtectedContent(true)",
@@ -164,6 +164,7 @@ mod tests {
             "setSelectable(false)",
             "for (index, digit) in sas.chars().enumerate()",
             "NativeAbort",
+            "let abort = self.abort.clone()",
             "(self.abort)()",
             "PairingPresentationState::Unavailable",
         ] {

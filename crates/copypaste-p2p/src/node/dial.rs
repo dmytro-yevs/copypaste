@@ -45,6 +45,7 @@ impl Node {
             return Err(NodeError::SelfPairing);
         }
         self.record_cursor(&peer.pairing_id, &outcome);
+        self.record_authenticated_profile(&peer.pairing_id, outcome.peer_profile.as_ref());
         self.touch_peer(
             peer,
             outcome.peer_listen_addr.or(Some(addr)),

@@ -40,8 +40,11 @@ function setMatchMedia(matches: boolean): void {
 function runBootstrap(stored?: unknown): DOMStringMap {
   const root = document.documentElement;
   for (const key of [
+    "colorScheme",
+    "mode",
     "theme",
     "themePref",
+    "colorTheme",
     "accent",
     "translucency",
     "themeBootstrapped",
@@ -96,13 +99,13 @@ describe("first-frame ordering (INV-22 / AT-49)", () => {
 
     setMatchMedia(false);
     const dataset = runBootstrap({
-      state: { theme: "light", accent: "amber", translucency: 65 },
+      state: { theme: "light", colorTheme: "ember", accent: "amber", translucency: 65 },
       version: 0,
     });
     expect(dataset).toMatchObject({
-      theme: "light",
-      themePref: "light",
-      accent: "amber",
+      colorScheme: "light",
+      mode: "light",
+      theme: "ember",
       translucency: "on",
       themeBootstrapped: "1",
     });
@@ -115,12 +118,13 @@ describe("bootstrap/runtime schema parity", () => {
     const storedValues: unknown[] = [
       undefined,
       ...APPEARANCE_SERIALIZATION.themes.map((theme) => ({ state: { theme }, version: 0 })),
-      ...APPEARANCE_SERIALIZATION.accents.map((accent) => ({ accent })),
+      ...APPEARANCE_SERIALIZATION.colorThemes.map((colorTheme) => ({ colorTheme })),
+      { state: { accent: "teal" }, version: 0 },
       { translucency: 0 },
       { translucency: 65 },
       { translucency: true },
       { translucency: false },
-      { state: { theme: "chartreuse", accent: "teal", translucency: 1 }, version: 0 },
+      { state: { theme: "chartreuse", colorTheme: "aurora", accent: "teal", translucency: 1 }, version: 0 },
     ];
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -131,32 +135,32 @@ describe("bootstrap/runtime schema parity", () => {
       const dataset = runBootstrap(stored);
       expect(
         {
+          colorScheme: dataset.colorScheme,
+          mode: dataset.mode,
           theme: dataset.theme,
-          themePref: dataset.themePref,
-          accent: dataset.accent,
           translucency: dataset.translucency,
         },
         JSON.stringify(stored),
       ).toEqual({
-        theme: resolveTheme(runtime.theme),
-        themePref: runtime.theme,
-        accent: runtime.accent,
+        colorScheme: resolveTheme(runtime.theme),
+        mode: runtime.theme,
+        theme: runtime.colorTheme,
         translucency: translucencyAttribute(runtime.translucency),
       });
     }
   });
 
-  it("sets translucency CSS variables before the first app render", () => {
+  it("selects token-backed translucency without writing inline design values", () => {
     runBootstrap({ state: { translucency: 50 }, version: 0 });
-    expect(document.documentElement.style.getPropertyValue("--translucency-blur")).toBe("10px");
-    expect(document.documentElement.style.getPropertyValue("--translucency-app-opacity")).toBe("92%");
+    expect(document.documentElement.dataset.translucency).toBe("on");
+    expect(document.documentElement.style.getPropertyValue("--translucency-blur")).toBe("");
   });
 
   it("resolves system appearance synchronously and survives unavailable state", () => {
     setMatchMedia(false);
-    expect(runBootstrap({ state: { theme: "system" }, version: 0 }).theme).toBe("light");
+    expect(runBootstrap({ state: { theme: "system" }, version: 0 }).colorScheme).toBe("light");
     setMatchMedia(true);
-    expect(runBootstrap({ state: { theme: "system" }, version: 0 }).theme).toBe("dark");
+    expect(runBootstrap({ state: { theme: "system" }, version: 0 }).colorScheme).toBe("dark");
 
     expect(() => runBootstrap("{not json")).not.toThrow();
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {

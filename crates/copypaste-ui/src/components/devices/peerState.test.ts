@@ -11,11 +11,12 @@ import {
   MAX_PAIRINGS,
   STALE_AFTER_MS,
   atPairingCap,
+  latestManualAttempt,
   noteSync,
   peerIsStalled,
   peerState,
   unsettledFailure,
-} from "@/components/devices/peerState";
+} from "@/features/devices/model/peerState";
 import type { SyncResult } from "@/lib/ipc";
 import { peer } from "@/test/harness";
 
@@ -29,6 +30,7 @@ function result(over: Partial<SyncResult> = {}): SyncResult {
     received: 0,
     error: null,
     ...over,
+    duration_ms: over.duration_ms ?? null,
   };
 }
 
@@ -69,16 +71,16 @@ describe("what a paired device is doing", () => {
     ).toBe("synced");
   });
 
-  /** Manifest 06 §3.8 defines freshness independently from current mDNS
-   *  presence: an away peer can still be the peer silently not receiving. */
-  it("calls an old successful sync stalled even when discovery is quiet", () => {
+  /** Manifest 06 §3.2.3 makes current presence tri-state. A stale success is
+   *  not evidence that a sleeping or offline device needs intervention. */
+  it("keeps an old successful sync neutral when discovery is quiet", () => {
     expect(
       peerState(
         peer({ last_seen_ms: NOW - 30 * STALE_AFTER_MS, online: false }),
         undefined,
         NOW,
       ),
-    ).toBe("stalled");
+    ).toBe("away");
   });
 
   it("uses the binding thirty-minute boundary exactly", () => {
@@ -90,37 +92,60 @@ describe("what a paired device is doing", () => {
     ).toBe(true);
   });
 
-  it("flags a rekey failure immediately, including on a fresh pairing", () => {
-    const fresh = peer({ last_seen_ms: 0 }) as ReturnType<typeof peer> & {
-      rekey_failures: number;
-      added_at: number;
-    };
-    fresh.rekey_failures = 1;
-    fresh.added_at = NOW - 1000;
-
-    expect(peerIsStalled(fresh, NOW)).toBe(true);
-    expect(peerState(fresh, undefined, NOW)).toBe("stalled");
-  });
-
-  it("guards a never-synced peer until its known pairing age passes", () => {
-    const withoutDate = peer({ last_seen_ms: 0 });
-    const fresh = { ...withoutDate, added_at: NOW - STALE_AFTER_MS };
-    const old = { ...withoutDate, added_at: NOW - STALE_AFTER_MS - 1 };
-
-    expect(peerIsStalled(withoutDate, NOW)).toBe(false);
-    expect(peerIsStalled(fresh, NOW)).toBe(false);
-    expect(peerIsStalled(old, NOW)).toBe(true);
-  });
 });
 
 describe("a failure this screen watched happen", () => {
-  it("outranks the structural states, because it is evidence", () => {
-    const state = peerState(
-      peer({ last_addr: null, last_seen_ms: NOW - 1000 }),
-      { failure: { at: NOW, kind: "peer_unreachable", retryable: true } },
-      NOW,
-    );
-    expect(state).toBe("failing");
+  it("keeps reachability transient but preserves a failed sync session", () => {
+    const offlinePeer = peer({
+      last_addr: null,
+      last_seen_ms: NOW - 1000,
+      online: false,
+    });
+    expect(
+      peerState(
+        offlinePeer,
+        {
+          failure: {
+            at: NOW,
+            kind: "peer_unreachable",
+            retryable: true,
+            durationMs: null,
+          },
+        },
+        NOW,
+      ),
+    ).toBe("away");
+    expect(
+      peerState(
+        offlinePeer,
+        {
+          failure: {
+            at: NOW,
+            kind: "peer_failed",
+            retryable: true,
+            durationMs: null,
+          },
+        },
+        NOW,
+      ),
+    ).toBe("failing");
+  });
+
+  it("does not let offline presence erase a trust failure", () => {
+    expect(
+      peerState(
+        peer({ last_seen_ms: NOW - 1000, online: false }),
+        {
+          failure: {
+            at: NOW,
+            kind: "auth_failed",
+            retryable: false,
+            durationMs: null,
+          },
+        },
+        NOW,
+      ),
+    ).toBe("failing");
   });
 
   /**
@@ -130,7 +155,12 @@ describe("a failure this screen watched happen", () => {
    */
   it("is settled by a session that succeeded after it", () => {
     const health = {
-      failure: { at: NOW - 1000, kind: "peer_failed", retryable: true },
+      failure: {
+        at: NOW - 1000,
+        kind: "peer_failed",
+        retryable: true,
+        durationMs: null,
+      },
     } as const;
     expect(peerState(peer({ last_seen_ms: NOW }), health, NOW)).toBe("synced");
     expect(unsettledFailure(peer({ last_seen_ms: NOW }), health)).toBeUndefined();
@@ -141,8 +171,13 @@ describe("a failure this screen watched happen", () => {
   it("is settled by a later run of its own that worked", () => {
     const stale = peer({ last_seen_ms: NOW - 60_000 });
     const health = {
-      failure: { at: NOW - 1000, kind: "peer_unreachable", retryable: true },
-      success: { at: NOW, sent: 2, received: 0 },
+      failure: {
+        at: NOW - 1000,
+        kind: "peer_unreachable",
+        retryable: true,
+        durationMs: null,
+      },
+      success: { at: NOW, sent: 2, received: 0, durationMs: null },
     } as const;
     expect(unsettledFailure(stale, health)).toBeUndefined();
     expect(peerState(stale, health, NOW)).toBe("synced");
@@ -156,16 +191,41 @@ describe("what one run recorded, per peer", () => {
    * is the question the row exists to answer.
    */
   it("keeps the last success and the last failure apart", () => {
-    const first = noteSync({}, [result({ sent: 3, received: 1 })], NOW - 5000);
+    const first = noteSync(
+      {},
+      [result({ sent: 3, received: 1, duration_ms: 84 })],
+      NOW - 5000,
+    );
     const second = noteSync(
       first,
-      [result({ error: { code: "peer_unreachable", retryable: true } })],
+      [
+        result({
+          duration_ms: 125,
+          error: { code: "peer_unreachable", retryable: true },
+        }),
+      ],
       NOW,
     );
 
     expect(second["pair-1"]).toEqual({
-      success: { at: NOW - 5000, sent: 3, received: 1 },
-      failure: { at: NOW, kind: "peer_unreachable", retryable: true },
+      success: {
+        at: NOW - 5000,
+        sent: 3,
+        received: 1,
+        durationMs: 84,
+      },
+      failure: {
+        at: NOW,
+        kind: "peer_unreachable",
+        retryable: true,
+        durationMs: 125,
+      },
+    });
+    expect(latestManualAttempt(second["pair-1"])).toEqual({
+      at: NOW,
+      sent: 0,
+      received: 0,
+      durationMs: 125,
     });
   });
 
@@ -181,6 +241,7 @@ describe("what one run recorded, per peer", () => {
       at: NOW,
       kind: "peer_not_found",
       retryable: false,
+      durationMs: null,
     });
     expect(JSON.stringify(health)).not.toMatch(/Users/);
   });
@@ -198,7 +259,12 @@ describe("what one run recorded, per peer", () => {
       NOW,
     );
     expect(health["pair-1"]?.failure).toBeUndefined();
-    expect(health["pair-1"]?.success).toEqual({ at: NOW, sent: 0, received: 4 });
+    expect(health["pair-1"]?.success).toEqual({
+      at: NOW,
+      sent: 0,
+      received: 4,
+      durationMs: null,
+    });
     expect(health["pair-2"]?.success).toBeUndefined();
     expect(health["pair-2"]?.failure?.at).toBe(NOW);
   });

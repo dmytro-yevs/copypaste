@@ -1,0 +1,53 @@
+.root {
+  position: relative;
+  display: grid;
+  inline-size: min(100%, calc(var(--s-9) * 8));
+  margin: clamp(var(--s-4), 8vh, var(--s-8)) auto auto;
+  padding: var(--s-4) var(--s-3) var(--s-4) var(--s-5);
+  grid-template-columns: var(--s-7) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s-3);
+  text-align: start;
+}
+.root::before {
+  position: absolute;
+  inset-block: var(--s-4);
+  inset-inline-start: 0;
+  inline-size: var(--stroke-2);
+  border-radius: var(--r-pill);
+  background: var(--border-strong);
+  content: "";
+}
+.root[data-tone="info"]::before { background: var(--info-strong); }
+.root[data-tone="attention"]::before { background: var(--warn-strong); }
+.root[data-tone="danger"]::before { background: var(--err-strong); }
+.root[data-tone="private"]::before { background: var(--dim); }
+.compact {
+  max-inline-size: calc(var(--s-9) * 6.5);
+  margin-block-start: var(--s-3);
+  padding-block: var(--s-3);
+  grid-template-columns: var(--s-6) minmax(0, 1fr);
+  gap: var(--s-2);
+  /* grid gap */
+}
+.marker {
+  display: grid;
+  inline-size: var(--s-7);
+  block-size: var(--s-7);
+  place-items: center;
+  color: var(--dim);
+}
+.root[data-tone="info"] .marker { color: var(--info-strong); }
+.root[data-tone="attention"] .marker { color: var(--warn-strong); }
+.root[data-tone="danger"] .marker { color: var(--err-strong); }
+.content,
+.copy { min-inline-size: 0; }
+.copy { display: grid; gap: calc(var(--s-1) / 2); padding-block-start: var(--s-1); }
+.title { color: var(--text); font-size: var(--fs-base); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.body { max-inline-size: calc(var(--s-9) * 10); color: var(--dim); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.action { display: flex; margin-block-start: var(--s-3); flex-wrap: wrap; }
+.secondary { inline-size: 100%; margin-block-start: var(--s-4); padding-block-start: var(--s-3); border-block-start: var(--stroke-1) solid var(--divider); }
+.attached { padding-block-start: 0; border: 0; }
+.spinner { animation: empty-state-spin var(--dur-progress) var(--ease-linear) infinite; }
+@keyframes empty-state-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

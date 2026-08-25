@@ -307,6 +307,8 @@ mod tests {
                 deleted: false,
                 content_hash: content_hash(text),
                 origin_device_id: "peer-device".into(),
+                source_app_bundle_id: None,
+                source_app_name: None,
                 pinned: false,
                 pin_order: None,
                 pin_updated_at: 0,
@@ -341,6 +343,8 @@ mod tests {
                     created_at: 2_000,
                     deleted: false,
                     origin_device_id: "cloud-device".into(),
+                    source_app_bundle_id: None,
+                    source_app_name: None,
                 })
                 .unwrap(),
             Applied::Merged
@@ -414,6 +418,8 @@ mod tests {
             deleted: false,
             content_hash: content_hash(text),
             origin_device_id: "peer-device".into(),
+            source_app_bundle_id: None,
+            source_app_name: None,
             pinned: false,
             pin_order: None,
             pin_updated_at: 0,
@@ -443,6 +449,8 @@ mod tests {
                 created_at: tombstone.created_at,
                 deleted: false,
                 origin_device_id: "cloud-device".into(),
+                source_app_bundle_id: None,
+                source_app_name: None,
             })
             .unwrap());
         assert_eq!(cloud.upload_floor().unwrap(), tombstone.created_at);
@@ -486,6 +494,8 @@ mod tests {
                 created_at: 9_000,
                 deleted: false,
                 origin_device_id: "old-device".into(),
+                source_app_bundle_id: None,
+                source_app_name: None,
             })
             .is_err());
 

@@ -64,6 +64,15 @@ pub trait CaptureControl: Send + Sync + 'static {
     /// the ambiguous pending batch before any later drain can replay it.
     fn set_private_mode(&self, enabled: bool) -> Result<()>;
 
+    /// Synchronise the source-exclusion gate that runs before Android reads
+    /// clipboard content. `None` pauses implicit external reads while a config
+    /// change is in flight; `Some(&[])` is the deliberate fail-open default.
+    fn set_excluded_app_bundle_ids(&self, bundle_ids: Option<&[String]>) -> Result<()>;
+
+    /// Queue native acknowledgement playback. Preference policy stays in the
+    /// shared shell feedback service.
+    fn play_feedback(&self) -> Result<()>;
+
     /// Turn background capture on or off. Off is a choice, not a fault.
     fn set_enabled(&self, enabled: bool) -> Result<CaptureSnapshot>;
 

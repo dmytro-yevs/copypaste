@@ -26,17 +26,14 @@ class ClipboardFloatingActivity : Activity() {
                 if (handled) return@OnGlobalLayoutListener
                 handled = true
                 floatingView.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
-                clipboardText(this)?.let { text ->
-                    ClipQueue.offer(text, CaptureSource.BACKGROUND)
-                    if (!ClipQueue.rustIsUp) {
-                        startActivity(
-                            Intent(this, MainActivity::class.java)
-                                .addFlags(
-                                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                                        Intent.FLAG_ACTIVITY_CLEAR_TOP,
-                                ),
-                        )
-                    }
+                val read = clipboardRead(this, CaptureSource.BACKGROUND)
+                read.text?.let { text ->
+                    queueClip(
+                        text,
+                        CaptureSource.BACKGROUND,
+                        read.sourceAppBundleId,
+                        read.sourceAppName,
+                    )
                 }
             } finally {
                 unfocusFloatingView()

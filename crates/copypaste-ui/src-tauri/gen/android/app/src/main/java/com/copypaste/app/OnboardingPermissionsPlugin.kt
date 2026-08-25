@@ -60,8 +60,8 @@ class OnboardingPermissionsPlugin(private val activity: android.app.Activity) : 
         val manager = activity.getSystemService(StatusBarManager::class.java)
         manager.requestAddTileService(
             ComponentName(activity, CaptureTileService::class.java),
-            "Save clipboard",
-            Icon.createWithResource(activity, android.R.drawable.ic_menu_save),
+            activity.getString(R.string.capture_action),
+            Icon.createWithResource(activity, R.drawable.ic_copypaste_capture_tile),
             activity.mainExecutor,
         ) { result ->
             tileStatus = TileAddGate.status(result)

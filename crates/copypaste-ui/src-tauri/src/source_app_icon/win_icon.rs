@@ -32,7 +32,7 @@ pub(super) fn resolve(image_name: &str) -> Option<UiSourceAppIcon> {
 
 /// App Paths first, then System32: the tools Windows ships (`cmd.exe`,
 /// `notepad.exe`) register no App Path at all.
-fn find_executable(image_name: &str) -> Option<PathBuf> {
+pub(super) fn find_executable(image_name: &str) -> Option<PathBuf> {
     if let Some(path) = registry::app_path(image_name) {
         return Some(path);
     }

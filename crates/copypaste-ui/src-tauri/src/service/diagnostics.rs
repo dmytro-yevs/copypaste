@@ -10,10 +10,53 @@
 //! [`Diagnostics`] can carry any, because there is no field one could travel
 //! in. The shape enforces it; the tests only prove it did not regress.
 
+use std::time::Duration;
+
 use copypaste_ipc::{redact::scrub_paths, StatusData, PROTOCOL_VERSION};
 use serde::Serialize;
+use tokio::time::timeout;
 
 use super::ServiceState;
+use crate::backend::{Backend, BackendError};
+
+pub(crate) const DIAGNOSTICS_PROBE_BUDGET: Duration = Duration::from_secs(2);
+
+pub(crate) struct BackendSnapshot {
+    pub status: Option<StatusData>,
+    pub history_read: HistoryRead,
+    pub service_hint: ServiceState,
+}
+
+pub(crate) async fn backend_snapshot(backend: &impl Backend) -> BackendSnapshot {
+    let (status_result, history_result) = tokio::join!(
+        timeout(DIAGNOSTICS_PROBE_BUDGET, backend.status()),
+        timeout(DIAGNOSTICS_PROBE_BUDGET, backend.list(1, None)),
+    );
+    let service_hint = match &status_result {
+        Ok(Ok(status)) => ServiceState::Running {
+            version: status.version.clone(),
+            matches_app: status.version == env!("CARGO_PKG_VERSION"),
+            ours: false,
+        },
+        Ok(Err(BackendError::Unreachable)) => ServiceState::Stopped,
+        _ => ServiceState::Unhealthy,
+    };
+    let status = status_result.ok().and_then(Result::ok);
+    let history_read = match history_result {
+        Ok(Ok(_)) => HistoryRead::Readable,
+        Ok(Err(error)) => HistoryRead::Failed {
+            code: error.ui_error().code,
+        },
+        Err(_) => HistoryRead::Failed {
+            code: BackendError::Timeout.ui_error().code,
+        },
+    };
+    BackendSnapshot {
+        status,
+        history_read,
+        service_hint,
+    }
+}
 
 /// One snapshot, structured for the panel and pre-rendered for the clipboard.
 ///
@@ -222,6 +265,7 @@ fn service_line(service: &ServiceState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::testing::FakeBackend;
     use copypaste_ipc::DiagnosticCounters;
 
     /// Every free-text field a hostile or broken daemon could fill, filled with
@@ -237,6 +281,8 @@ mod tests {
             device_name: "Test device".into(),
             version: "2.0.0-alpha.1".into(),
             protocol_version: PROTOCOL_VERSION,
+            listen_addr: None,
+            device_details: None,
             item_count: 42,
             capture_running: true,
             clipboard_backend: "macos-pasteboard".into(),
@@ -265,6 +311,24 @@ mod tests {
     /// sanitising step is part of what is under test.
     fn report_of(service: ServiceState, status: Option<StatusData>) -> String {
         Diagnostics::new(service, status, HistoryRead::Readable).report
+    }
+
+    #[tokio::test]
+    async fn backend_snapshot_keeps_diagnostics_alive_without_a_service() {
+        let snapshot = backend_snapshot(&FakeBackend::unreachable()).await;
+        assert!(snapshot.status.is_none());
+        assert_eq!(snapshot.service_hint, ServiceState::Stopped);
+    }
+
+    #[tokio::test]
+    async fn backend_snapshot_includes_live_status_and_history() {
+        let snapshot = backend_snapshot(&FakeBackend::running(env!("CARGO_PKG_VERSION"))).await;
+        assert!(snapshot.status.is_some());
+        assert!(matches!(snapshot.history_read, HistoryRead::Readable));
+        assert!(matches!(
+            snapshot.service_hint,
+            ServiceState::Running { .. }
+        ));
     }
 
     #[test]

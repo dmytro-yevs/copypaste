@@ -9,7 +9,6 @@
  */
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 
 import { invalidateHistoryHead, STATUS_KEY } from "@/hooks/historyRefresh";
@@ -22,9 +21,9 @@ import {
   captureRefresh,
   captureState,
   captureToastExplanation,
-  hasBridge,
-  hasWebBridge,
 } from "@/lib/ipc";
+import { hasNativeBridge } from "@/lib/ipcCall";
+import { subscribeNativeEvent } from "@/lib/tauriEventRegistry";
 import { EVENT_CAPTURED, EVENT_CAPTURE_STATE } from "@/lib/tauriEvents";
 import { useUi } from "@/store/ui";
 
@@ -67,24 +66,17 @@ export function useCaptureSync() {
   const snapshot = useCaptureState().data;
 
   useEffect(() => {
-    if (!hasBridge() || hasWebBridge()) return;
+    if (!hasNativeBridge()) return;
 
-    let cancelled = false;
-    const detach: Array<() => void> = [];
-
-    function keep(unlisten: () => void) {
-      if (cancelled) unlisten();
-      else detach.push(unlisten);
-    }
-
-    void listen<CaptureSnapshot>(EVENT_CAPTURE_STATE, (event) => {
-      qc.setQueryData(CAPTURE_KEY, event.payload);
-    }).then(keep);
-
-    void listen(EVENT_CAPTURED, () => {
-      void invalidateHistoryHead(qc);
-      void qc.invalidateQueries({ queryKey: STATUS_KEY });
-    }).then(keep);
+    const detach = [
+      subscribeNativeEvent<CaptureSnapshot>(EVENT_CAPTURE_STATE, (event) => {
+        qc.setQueryData(CAPTURE_KEY, event.payload);
+      }),
+      subscribeNativeEvent(EVENT_CAPTURED, () => {
+        void invalidateHistoryHead(qc);
+        void qc.invalidateQueries({ queryKey: STATUS_KEY });
+      }),
+    ];
 
     function refresh() {
       if (document.visibilityState !== "visible") return;
@@ -101,8 +93,7 @@ export function useCaptureSync() {
     refresh();
 
     return () => {
-      cancelled = true;
-      for (const unlisten of detach) unlisten();
+      for (const unsubscribe of detach) unsubscribe();
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("focus", refresh);
     };

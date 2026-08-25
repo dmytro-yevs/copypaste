@@ -7,9 +7,9 @@
 
 use tauri::{AppHandle, Runtime, State};
 
-use crate::backend::{Backend, BackendError, SelectedBackend};
+use crate::backend::{BackendError, SelectedBackend};
 use crate::commands::document;
-use crate::service::diagnostics::{Diagnostics, HistoryRead};
+use crate::service::diagnostics::{backend_snapshot, Diagnostics, DIAGNOSTICS_PROBE_BUDGET};
 use crate::service::Supervisor;
 
 const REPORT_NAME: &str = "copypaste-diagnostics.txt";
@@ -28,10 +28,16 @@ pub async fn diagnostics(
     backend: State<'_, SelectedBackend>,
     supervisor: State<'_, Supervisor>,
 ) -> std::result::Result<Diagnostics, BackendError> {
-    let service = supervisor.state(backend.inner()).await;
-    let status = backend.status().await.ok();
-    let history_read = history_read(backend.inner()).await;
-    Ok(Diagnostics::new(service, status, history_read))
+    let (service, snapshot) = tokio::join!(
+        tokio::time::timeout(DIAGNOSTICS_PROBE_BUDGET, supervisor.state(backend.inner()),),
+        backend_snapshot(backend.inner()),
+    );
+    let service = service.unwrap_or_else(|_| snapshot.service_hint.clone());
+    Ok(Diagnostics::new(
+        service,
+        snapshot.status,
+        snapshot.history_read,
+    ))
 }
 
 /// Read a bounded, redacted page of runtime events for the in-app log viewer.
@@ -81,9 +87,8 @@ pub async fn export_diagnostics_report<R: Runtime>(
     supervisor: State<'_, Supervisor>,
 ) -> std::result::Result<bool, BackendError> {
     let service = supervisor.state(backend.inner()).await;
-    let status = backend.status().await.ok();
-    let history_read = history_read(backend.inner()).await;
-    let report = Diagnostics::new(service, status, history_read).report;
+    let snapshot = backend_snapshot(backend.inner()).await;
+    let report = Diagnostics::new(service, snapshot.status, snapshot.history_read).report;
 
     let Some(dest) = document::save_panel_file(&app, REPORT_NAME).await else {
         return Ok(false);
@@ -102,9 +107,8 @@ pub async fn export_support_bundle<R: Runtime>(
     supervisor: State<'_, Supervisor>,
 ) -> std::result::Result<bool, BackendError> {
     let service = supervisor.state(backend.inner()).await;
-    let status = backend.status().await.ok();
-    let history_read = history_read(backend.inner()).await;
-    let diagnostics = Diagnostics::new(service, status, history_read).report;
+    let snapshot = backend_snapshot(backend.inner()).await;
+    let diagnostics = Diagnostics::new(service, snapshot.status, snapshot.history_read).report;
     let log_dir = crate::runtime_log_dir(&app)
         .map_err(|_| BackendError::Internal(MSG_BUNDLE_NOT_WRITTEN.into()))?;
     // Off the reactor for the reason `runtime_log_events` is, and more so: an
@@ -138,17 +142,6 @@ pub async fn export_support_bundle<R: Runtime>(
     };
     document::write_picked(&app, dest, bundle.as_bytes(), MSG_BUNDLE_NOT_WRITTEN)?;
     Ok(true)
-}
-
-/// Checks the same read path used by History without retaining an item or
-/// serialising its content into diagnostics.
-async fn history_read(backend: &impl Backend) -> HistoryRead {
-    match backend.list(1, None).await {
-        Ok(_) => HistoryRead::Readable,
-        Err(error) => HistoryRead::Failed {
-            code: error.ui_error().code,
-        },
-    }
 }
 
 fn format_support_bundle(

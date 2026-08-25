@@ -1,0 +1,25 @@
+.root {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.embeddedExclusions { min-inline-size: 0; }
+
+.embeddedExclusions > section {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.exclusionsFeedback { padding: 0 var(--s-3) var(--s-3); }
+
+.sensitiveWarning {
+  font-size: var(--fs-xs);
+}
+
+.sensitiveWarning {
+  color: var(--warn-strong);
+}

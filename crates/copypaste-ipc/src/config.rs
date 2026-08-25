@@ -77,8 +77,8 @@ pub enum Liveness {
 /// * `sqlite_cache_mb`, `config_version` — implementation detail, dead, and
 ///   unnecessary without backward compatibility (AGENTS.md rule 3).
 ///
-/// `sound_on_copy` and `notify_on_copy` were absent for the same reason and are
-/// now present: parity finding 18 is built.
+/// `sound_on_copy` and `notify_on_copy` are separate live settings. Platform
+/// feedback never depends on notification permission.
 ///
 /// One field was **considered and refused**: a user-settable sensitive-content
 /// confidence threshold. Manifest 07 I4 makes index exclusion unconditional on

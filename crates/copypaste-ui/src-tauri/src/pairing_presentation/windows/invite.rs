@@ -21,6 +21,8 @@ struct NativeQr {
 
 pub(super) fn spawn(
     payload: Zeroizing<String>,
+    code: Zeroizing<String>,
+    address: Zeroizing<String>,
     expires_in_secs: u64,
     affinity: common::Affinity,
     abort: NativeAbort,
@@ -33,7 +35,15 @@ pub(super) fn spawn(
                 let _ = sender.send(None);
                 return;
             };
-            let _ = run(payload, expires_in_secs, sender, affinity, abort);
+            let _ = run(
+                payload,
+                code,
+                address,
+                expires_in_secs,
+                sender,
+                affinity,
+                abort,
+            );
         })
         .ok()?;
     receiver.recv_timeout(Duration::from_secs(5)).ok().flatten()
@@ -41,6 +51,8 @@ pub(super) fn spawn(
 
 fn run(
     payload: Zeroizing<String>,
+    code: Zeroizing<String>,
+    address: Zeroizing<String>,
     expires_in_secs: u64,
     ready: mpsc::SyncSender<Option<CloseHandle>>,
     affinity: common::Affinity,
@@ -48,26 +60,30 @@ fn run(
 ) -> winsafe::AnyResult<i32> {
     let qr_bitmap = qr_bitmap(payload.as_bytes()).ok_or("QR generation failed")?;
     let qr_size = qr_bitmap.size;
-    let wnd = common::window("Pair a new device", (620, 520));
+    let wnd = common::window("Pair a new device", (620, 600));
     let _heading = common::label(&wnd, "Pair a new device", (24, 18), (560, 32));
     let _instructions = common::label(
         &wnd,
-        "Scan this QR code from CopyPaste on the other device.",
+        "Scan this QR code, or enter the code and address on the other device.",
         (24, 52),
         (560, 48),
     );
     let qr_description = common::label(&wnd, "Pairing QR code is hidden", (24, 104), (150, 48));
     let reveal = common::button(&wnd, "&Reveal pairing QR code", (190, 200), (240, 46), 1001);
+    let code_label = common::label(&wnd, "Pairing code", (24, 360), (130, 24));
+    let code_value = common::label(&wnd, "", (164, 360), (420, 24));
+    let address_label = common::label(&wnd, "Pairing address", (24, 402), (130, 24));
+    let address_value = common::label(&wnd, "", (164, 402), (420, 24));
     let expires = common::label(
         &wnd,
         &format!("Expires in {expires_in_secs} seconds"),
-        (24, 380),
+        (24, 462),
         (350, 32),
     );
     let close = common::button(
         &wnd,
         "&Close",
-        (474, 424),
+        (474, 520),
         (110, 34),
         co::DLGID::CANCEL.raw(),
     );
@@ -79,12 +95,21 @@ fn run(
         let wnd = wnd.clone();
         let qr_description = qr_description.clone();
         let reveal = reveal.clone();
+        let code_label = code_label.clone();
+        let code_value = code_value.clone();
+        let address_label = address_label.clone();
+        let address_value = address_value.clone();
         let revealed = revealed.clone();
         move || {
             revealed.store(true, Ordering::Release);
             qr_description
                 .hwnd()
                 .SetWindowText("Pairing QR code is visible")?;
+            code_value.hwnd().SetWindowText(&code)?;
+            address_value.hwnd().SetWindowText(&address)?;
+            for label in [&code_label, &code_value, &address_label, &address_value] {
+                common::show(label.hwnd());
+            }
             common::hide(reveal.hwnd());
             wnd.hwnd().InvalidateRect(None, true)?;
             Ok(())
@@ -97,12 +122,27 @@ fn run(
             Ok(())
         }
     });
+    wnd.on().wm_close({
+        let wnd = wnd.clone();
+        let code_value = code_value.clone();
+        let address_value = address_value.clone();
+        move || {
+            code_value.hwnd().SetWindowText("")?;
+            address_value.hwnd().SetWindowText("")?;
+            wnd.hwnd().DestroyWindow()?;
+            Ok(())
+        }
+    });
     let started = Instant::now();
     wnd.on().wm_create({
         let wnd = wnd.clone();
         let reveal = reveal.clone();
         let ready = ready.clone();
         let qr_description = qr_description.clone();
+        let code_label = code_label.clone();
+        let code_value = code_value.clone();
+        let address_label = address_label.clone();
+        let address_value = address_value.clone();
         let programmatic = programmatic.clone();
         let handle = handle.clone();
         move |_| {
@@ -114,6 +154,9 @@ fn run(
                 let _ = ready.send(None);
                 wnd.close();
                 return Ok(0);
+            }
+            for label in [&code_label, &code_value, &address_label, &address_value] {
+                common::hide(label.hwnd());
             }
             wnd.hwnd().SetTimer(TIMER_ID, 1_000, None)?;
             reveal.focus()?;
@@ -128,6 +171,10 @@ fn run(
         let reveal = reveal.clone();
         let expires = expires.clone();
         let close = close.clone();
+        let code_label = code_label.clone();
+        let code_value = code_value.clone();
+        let address_label = address_label.clone();
+        let address_value = address_value.clone();
         move || {
             let remaining = expires_in_secs.saturating_sub(started.elapsed().as_secs());
             if remaining == 0 {
@@ -137,6 +184,11 @@ fn run(
                 qr_description
                     .hwnd()
                     .SetWindowText("Pairing QR code expired")?;
+                code_value.hwnd().SetWindowText("")?;
+                address_value.hwnd().SetWindowText("")?;
+                for label in [&code_label, &code_value, &address_label, &address_value] {
+                    common::hide(label.hwnd());
+                }
                 expires.hwnd().SetWindowText("Pairing invite expired.")?;
                 wnd.hwnd().InvalidateRect(None, true)?;
                 close.focus()?;
@@ -214,17 +266,18 @@ mod tests {
     }
 
     #[test]
-    fn invite_never_shows_code_or_listen_addr_as_window_text() {
+    fn invite_reveals_native_display_only_fields_after_capture_protection() {
         let source = include_str!("invite.rs")
             .split_once("#[cfg(test)]")
             .unwrap()
             .0;
-        for forbidden in ["Pairing code:", "Device address:", "format!(\"Pairing code"] {
-            assert!(
-                !source.contains(forbidden),
-                "invite credential text must stay out of the window: {forbidden}"
-            );
-        }
+        assert!(source.contains("Pairing code"));
+        assert!(source.contains("Pairing address"));
+        assert!(source.contains("SetWindowText(&code)"));
+        assert!(source.contains("SetWindowText(&address)"));
+        assert!(source.contains("protect_from_capture"));
+        assert!(source.contains("common::hide(label.hwnd())"));
+        assert!(!source.contains("gui::Edit"));
         assert!(source.contains("abort_if_user_dismissed"));
     }
 
@@ -247,6 +300,8 @@ mod tests {
             Zeroizing::new(
                 r#"{"version":1,"code":"ABCD-EFGH","listen_addr":"192.0.2.1:47654"}"#.into(),
             ),
+            Zeroizing::new("ABCD-EFGH".into()),
+            Zeroizing::new("192.0.2.1:47654".into()),
             120,
             common::system_affinity,
             std::sync::Arc::new(|| {}),
