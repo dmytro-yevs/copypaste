@@ -50,12 +50,6 @@ All four secrets must be configured before tagging. A key change requires
 updating the public pin in the same reviewed change; it is an upgrade-breaking
 event, not a routine secret rotation.
 
-The one-time exception is v2 alpha.1, or a local/debug APK that used
-`com.copypaste.app` with an incompatible key. Android requires that package to
-be uninstalled before the durable-key release can be installed, which erases
-that install's history, pairings and settings. Future debug builds use
-`com.copypaste.app.debug`, leaving the release identity and data separate.
-
 ## Why not the alternatives
 
 **A debug keystore, generated per run.** This is useful only for an ephemeral,

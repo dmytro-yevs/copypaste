@@ -100,20 +100,38 @@ if [[ "$HAVE_RUBY" == 1 ]]; then
     check "ruby -c packaging/homebrew/copypaste-cli.rb"   ruby -c packaging/homebrew/copypaste-cli.rb
 fi
 
-group "Install-time tooling uses the application data directory"
-for f in Casks/copypaste.rb packaging/macos/selfsign.sh; do
-    if grep -qE 'Application Support/CopyPaste([/"]|$)' "$f"; then
-        bad "$f names only the application data directory" \
-            "it names an unsupported application-support directory"
-    else
-        ok "$f names only the application data directory"
-    fi
+group "macOS tooling uses only the current data directory"
+MACOS_PATH_OWNERS=(
+    Casks/copypaste.rb
+    packaging/macos/selfsign.sh
+    crates/copypaste-ui/scripts/dev-web-daemon.sh
+)
+RETIRED_MACOS_PATHS=(
+    'Library/Application Support/CopyPaste'
+    'Library/Caches/CopyPaste'
+    'Library/Logs/CopyPaste'
+)
+for f in "${MACOS_PATH_OWNERS[@]}"; do
+    for retired in "${RETIRED_MACOS_PATHS[@]}"; do
+        if grep -Fq "$retired" "$f"; then
+            bad "$f does not name retired $retired" \
+                "macOS tooling must not read, preserve, or delete prior-product paths"
+        else
+            ok "$f does not name retired $retired"
+        fi
+    done
 done
 if grep -q 'Application Support/com.copypaste.CopyPaste' Casks/copypaste.rb; then
     ok "the cask zaps the application data directory"
 else
     bad "the cask zaps the application data directory" \
         "zap removes no CopyPaste data at all"
+fi
+if grep -q 'Application Support/com.copypaste.CopyPaste' crates/copypaste-ui/scripts/dev-web-daemon.sh; then
+    ok "the browser bridge defaults to the application data directory"
+else
+    bad "the browser bridge defaults to the application data directory" \
+        "without an explicit override it must share the current native database"
 fi
 
 group "Seeded values fail closed"
