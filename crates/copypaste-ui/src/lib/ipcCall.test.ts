@@ -113,7 +113,7 @@ describe("IPC call lifecycle", () => {
     invoke.mockReturnValue(native.promise);
     const controller = new AbortController();
 
-    const outcome = call<string>("status", undefined, {
+    const outcome = call("status", undefined, {
       signal: controller.signal,
       timeoutMs: 20,
     });

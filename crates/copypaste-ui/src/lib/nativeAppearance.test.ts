@@ -18,12 +18,14 @@ describe("native appearance", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("synchronises the resolved theme with native chrome", () => {
+  it("synchronises the resolved theme with native chrome", async () => {
     (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
     invoke.mockResolvedValue(undefined);
 
     applyNativeAppearance("light");
 
-    expect(invoke).toHaveBeenCalledWith("set_native_theme", { theme: "light" });
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("set_native_theme", { theme: "light" });
+    });
   });
 });

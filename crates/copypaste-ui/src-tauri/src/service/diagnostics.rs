@@ -64,6 +64,7 @@ pub(crate) async fn backend_snapshot(backend: &impl Backend) -> BackendSnapshot 
 /// disagree: a user who reads a number on screen and pastes a block underneath
 /// is entitled to the same round.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 pub struct Diagnostics {
     pub app_version: String,
     pub app_protocol_version: u32,
@@ -85,6 +86,7 @@ pub struct Diagnostics {
 
 /// Result of a one-item history read made while collecting diagnostics.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum HistoryRead {
     Readable,
