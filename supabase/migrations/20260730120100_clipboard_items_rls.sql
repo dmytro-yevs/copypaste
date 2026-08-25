@@ -32,9 +32,8 @@ revoke all on public.clipboard_items from anon, authenticated, public;
 -- matters here for one specific reason: `inserted_at` is the only ordering the
 -- retention job trusts (manifest 05 §5.1 row 4a), and a blanket
 -- `grant update on clipboard_items` would let any account holder restamp it and
--- escape eviction — the same forgery the relay's `wall_time` sort suffered,
--- moved to a new column. `id`, `user_id`, `inserted_at` and `updated_at` are
--- therefore not writable by the client at all.
+-- escape eviction (`CopyPaste-1uqb`). `id`, `user_id`, `inserted_at` and
+-- `updated_at` are therefore not writable by the client at all.
 -- ---------------------------------------------------------------------------
 
 -- SELECT is whole-table on purpose: Realtime evaluates RLS for the subscribed

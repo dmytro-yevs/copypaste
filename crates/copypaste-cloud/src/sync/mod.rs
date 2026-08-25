@@ -2,12 +2,10 @@
 //!
 //! # This module does not decide which version wins
 //!
-//! Manifest 05 INV-C2: v1 had P2P using the full ordering while the cloud and
-//! relay paths each used a cut-down comparison, so two devices holding
-//! different content at an equal timestamp never converged. Here the comparator
-//! lives behind [`CloudSource::apply_remote`], in the daemon's store, alongside
-//! the one the P2P transport calls. This module hands a version down and is told
-//! whether it won; there is no second comparator to drift.
+//! Manifest 05 INV-C2 requires every transport to use the same full ordering.
+//! The comparator lives behind [`CloudSource::apply_remote`], in the daemon's
+//! store, alongside the one the P2P transport calls. This module hands a version
+//! down and is told whether it won; there is no second comparator to drift.
 //!
 //! # `created_at` is a wall clock
 //!

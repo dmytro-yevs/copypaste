@@ -120,9 +120,9 @@ insert into public.clipboard_items
      signature, inserted_at)
 values
     -- Old by the server's clock, and stamped a decade into the future by the
-    -- client's. v1's relay sorted eviction on the client value, which let an
-    -- intra-account writer forge a low sort key, escape eviction and displace
-    -- legitimate items (`CopyPaste-1uqb`, manifest 05 §5.1 row 4a).
+    -- client's. Sorting eviction on the client value lets an intra-account
+    -- writer forge a low sort key, escape eviction and displace legitimate
+    -- items (`CopyPaste-1uqb`, manifest 05 §5.1 row 4a).
     ('11111111-1111-4111-8111-111111111111', 'forged-old', 'Y3Q=', 'bm8=', 'text',
      4102444800000, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=', now() - interval '48 hours'),
     -- Fresh by the server's clock, ancient by the client's: must survive.

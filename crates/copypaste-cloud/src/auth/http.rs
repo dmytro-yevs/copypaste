@@ -1,9 +1,7 @@
 //! The pieces this module shares with [`crate::rest`].
 //!
-//! Every item here exists to be the *only* implementation of something v1 had
-//! several of: one retry policy where v1 had six hand-rolled backoffs, one
-//! `Retry-After` reader, one email mask, one clock. They sit together so that a
-//! second one would be conspicuous rather than plausible (`AGENTS.md` rule 1).
+//! This module is the single owner of the retry policy, `Retry-After` parsing,
+//! email masking, and the wall clock (`AGENTS.md` rule 1).
 //!
 //! `rest` reaches in here rather than owning a copy. That direction is
 //! deliberate: `auth` is the module that must exist for `rest` to have a bearer
