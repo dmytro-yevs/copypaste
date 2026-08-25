@@ -194,6 +194,10 @@ pub enum BackendError {
     /// `backend::embedded` for the full list and what has to move.
     #[error("{0}")]
     Unsupported(&'static str),
+
+    /// The item exists, but the requested clipboard representation does not.
+    #[error("{0}")]
+    UnsupportedContent(&'static str),
 }
 
 impl BackendError {
@@ -301,6 +305,7 @@ impl BackendError {
             Self::Invalid(_) => UiError::from_error_code(Some(ErrorCode::InvalidRequest)),
             Self::Internal(_) => UiError::from_error_code(Some(ErrorCode::Internal)),
             Self::Unsupported(_) => UiError::from_boundary(UiBoundaryErrorCode::Unavailable),
+            Self::UnsupportedContent(_) => UiError::from_boundary(UiBoundaryErrorCode::Unavailable),
         }
     }
 }

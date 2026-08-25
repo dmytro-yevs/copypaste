@@ -73,7 +73,7 @@ impl Inner {
     }
 }
 
-/// Whatever can put text on the system clipboard.
+/// Whatever can put an authenticated payload on the system clipboard.
 ///
 /// An indirection rather than a direct call into
 /// `tauri_plugin_clipboard_manager` because the plugin needs an `AppHandle`,
@@ -81,9 +81,10 @@ impl Inner {
 /// parameter through every signature in `backend::mod`. One trait object at the
 /// edge is cheaper than a type parameter on the whole surface.
 pub trait Clipboard: Send + Sync + 'static {
-    /// Errors are `&'static str`: this string can reach a user, and a
-    /// platform error rendered into it is where a path would appear.
-    fn set_text(&self, text: &str) -> std::result::Result<(), &'static str>;
+    fn write(
+        &self,
+        payload: &copypaste_core::ClipboardPayload,
+    ) -> std::result::Result<(), copypaste_core::ClipboardWriteError>;
 }
 
 impl EmbeddedBackend {
