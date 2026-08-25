@@ -7,9 +7,9 @@ Android it links the core in-process
 ([ADR-0003](docs/adr/0003-one-command-surface-two-backends.md)).
 
 **Early v2 prerelease, on `main`, unaudited.** The
-[releases page](https://github.com/dmytro-yevs/copypaste/releases) lists v2
-prereleases newest first; GitHub's `releases/latest` redirect selects the
-legacy stable line. See the
+[releases page](https://github.com/dmytro-yevs/copypaste/releases) lists
+prereleases newest first; GitHub's `releases/latest` redirect does not select a
+prerelease. See the
 [Android installation notes](packaging/release-notes.md#android) for the current
 release asset. CopyPaste is under active development.
 Dependencies are the default; hand-rolled infrastructure needs a written reason.
