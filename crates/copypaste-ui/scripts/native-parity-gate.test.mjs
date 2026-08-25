@@ -631,6 +631,63 @@ test("rejects label-only and incomplete Android feature states", () => withRoot(
   );
 }));
 
+test("accepts multiple feature states bound to distinct same-run artifacts", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "android");
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const directory = path.dirname(receiptPath);
+  const screenshotBytes = Buffer.from("second-state-screenshot\n");
+  const accessibilityBytes = Buffer.from("second-state-accessibility\n");
+  const screenshot = {
+    kind: "screenshot",
+    path: "second-state.png",
+    sha256: createHash("sha256").update(screenshotBytes).digest("hex"),
+    bytes: screenshotBytes.length,
+  };
+  const accessibility = {
+    kind: "accessibility",
+    path: "second-state.xml",
+    sha256: createHash("sha256").update(accessibilityBytes).digest("hex"),
+    bytes: accessibilityBytes.length,
+  };
+  await writeFile(path.join(directory, screenshot.path), screenshotBytes);
+  await writeFile(path.join(directory, accessibility.path), accessibilityBytes);
+  receipt.artifacts.push(screenshot, accessibility);
+  receipt.feature_states.push({
+    feature_id: "history",
+    state: "populated",
+    screenshot: {
+      path: screenshot.path,
+      sha256: screenshot.sha256,
+      bytes: screenshot.bytes,
+    },
+    accessibility: {
+      path: accessibility.path,
+      sha256: accessibility.sha256,
+      bytes: accessibility.bytes,
+    },
+  });
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const expectedFeatureStates = new Map([
+    [
+      "android:devices=scan-pairing-code",
+      { screenshot: "screenshot.txt", accessibility: "accessibility.txt" },
+    ],
+    [
+      "android:history=populated",
+      { screenshot: "second-state.png", accessibility: "second-state.xml" },
+    ],
+  ]);
+  const receipts = await validateEvidence({
+    commit: COMMIT,
+    evidence: [receiptPath],
+    expectedFeatureStates,
+    required: new Set(["android"]),
+    runId: RUN_ID,
+  });
+  assert.equal(receipts.length, 1);
+}));
+
 test("rejects wrong, unrelated, and reused feature-state artifacts", () => withRoot(async (root) => {
   const wrongPath = await fixture(root, "android");
   const wrongReceipt = JSON.parse(await readFile(wrongPath, "utf8"));

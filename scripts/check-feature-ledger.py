@@ -12,6 +12,7 @@ from jsonschema.exceptions import SchemaError
 
 from feature_ledger_evidence import (
     STATE,
+    evidence_state_ids,
     ledger_dependency_errors,
     native_errors,
     receipt_expectation_tokens,
@@ -145,8 +146,9 @@ def cloud_errors(feature, root=ROOT):
         verified = scenario.get("evidence_states", [])
         unverified = scenario.get("unverified_states", [])
         states = {
-            state for state in verified + unverified if isinstance(state, str)
-        } if isinstance(verified, list) and isinstance(unverified, list) else set()
+            *evidence_state_ids(platform, verified),
+            *(state for state in unverified if isinstance(state, str)),
+        } if isinstance(unverified, list) else set()
         if states != CLOUD_STATES:
             errors.append(f"cloud-account: {platform} evidence coverage must be {sorted(CLOUD_STATES)}")
         if "cloud-evidence.sh" not in scenario.get("scenario", ""):
@@ -388,8 +390,28 @@ def self_test():
     cloud = {
         "ui_tests": [CLOUD_UI_TEST],
         "native": {
-            "android": {"scenario": "./scripts/release/android-cloud-evidence.sh", "evidence_states": list(CLOUD_STATES)},
-            "macos": {"scenario": "./scripts/release/macos-cloud-evidence.sh", "evidence_states": list(CLOUD_STATES)},
+            "android": {
+                "scenario": "./scripts/release/android-cloud-evidence.sh",
+                "evidence_states": [
+                    {
+                        "state": state,
+                        "screenshot": f"artifacts/android/{state}.png",
+                        "accessibility": f"artifacts/android/{state}.xml",
+                    }
+                    for state in CLOUD_STATES
+                ],
+            },
+            "macos": {
+                "scenario": "./scripts/release/macos-cloud-evidence.sh",
+                "evidence_states": [
+                    {
+                        "state": state,
+                        "screenshot": f"artifacts/macos/{state}.png",
+                        "accessibility": f"artifacts/macos/{state}.json",
+                    }
+                    for state in CLOUD_STATES
+                ],
+            },
             "windows": {
                 "scenario": "./scripts/release/windows-native-evidence.ps1",
                 "evidence_states": ["unconfigured"],
@@ -402,7 +424,10 @@ def self_test():
     cloud["ui_tests"] = ["npm --prefix crates/copypaste-ui test -- CloudStep"]
     checks.append(("a filtered command that can skip the cloud UI test fails", bool(cloud_errors(cloud))))
     cloud["ui_tests"] = [CLOUD_UI_TEST]
-    cloud["native"]["android"]["evidence_states"].remove("offline-error")
+    cloud["native"]["android"]["evidence_states"] = [
+        state for state in cloud["native"]["android"]["evidence_states"]
+        if state["state"] != "offline-error"
+    ]
     checks.append(("a missing native cloud state fails", bool(cloud_errors(cloud))))
     with tempfile.TemporaryDirectory() as directory:
         root = pathlib.Path(directory)
@@ -439,18 +464,33 @@ def self_test():
             + "      - run: python3 scripts/check-feature-ledger.py --require-complete\n",
             encoding="utf-8",
         )
+        def visual_state(platform, state="ready"):
+            return {
+                "state": state,
+                "screenshot": f"artifacts/{platform}/{state}.png",
+                "accessibility": f"artifacts/{platform}/{state}.json",
+            }
         product = {
             "id": "fixture",
             "native": {
-                platform: {
-                    "scenario": f"./scripts/{platform}.sh",
+                "android": {
+                    "scenario": "./scripts/android.sh",
                     "evidence_status": "verified",
-                    "screenshot": f"artifacts/{platform}/screenshot.png",
-                    "ax_log": f"artifacts/{platform}/ax.json",
+                    "evidence_states": [visual_state("android")],
+                    "release_artifact": artifact_names["android"],
+                },
+                "macos": {
+                    "scenario": "./scripts/macos.sh",
+                    "evidence_status": "verified",
+                    "evidence_states": [visual_state("macos")],
+                    "release_artifact": artifact_names["macos"],
+                },
+                "windows": {
+                    "scenario": "./scripts/windows.sh",
+                    "evidence_status": "verified",
                     "evidence_states": ["ready"],
-                    "release_artifact": artifact_names[platform],
-                }
-                for platform in SHIPPED_PLATFORMS
+                    "release_artifact": artifact_names["windows"],
+                },
             },
             "performance": {platform: {"status": "uncredited"} for platform in SHIPPED_PLATFORMS},
             "release_evidence": list(REQUIRED_RELEASE),
@@ -460,6 +500,36 @@ def self_test():
             return any(message in error for error in platform_errors(probe, root, complete)[0])
 
         checks.append(("all three shipped platform records pass", not platform_errors(product, root)[0]))
+        probe = copy.deepcopy(product)
+        probe["native"]["android"]["evidence_states"].append(
+            visual_state("android", "offline")
+        )
+        checks.append((
+            "multiple visual states carry distinct artifact paths",
+            not platform_errors(probe, root)[0],
+        ))
+        probe["native"]["android"]["evidence_states"][1]["screenshot"] = (
+            probe["native"]["android"]["evidence_states"][0]["screenshot"]
+        )
+        checks.append((
+            "visual states cannot reuse an artifact path",
+            platform_rejects(probe, "artifact paths must be unique"),
+        ))
+        probe = copy.deepcopy(product)
+        duplicate = copy.deepcopy(probe["native"]["android"]["evidence_states"][0])
+        duplicate["screenshot"] = "artifacts/android/other.png"
+        duplicate["accessibility"] = "artifacts/android/other.json"
+        probe["native"]["android"]["evidence_states"].append(duplicate)
+        checks.append((
+            "visual state identifiers cannot be duplicated",
+            platform_rejects(probe, "states must be unique"),
+        ))
+        probe = copy.deepcopy(product)
+        del probe["native"]["android"]["evidence_states"][0]["accessibility"]
+        checks.append((
+            "visual states require both artifact paths",
+            platform_rejects(probe, "must name state, screenshot, and accessibility"),
+        ))
         producer_jobs = {
             name: records[0]["job"]
             for name, records in workflow_contract(root).items()
@@ -504,7 +574,9 @@ def self_test():
         del probe["native"]["windows"]["evidence_states"]
         checks.append(("missing platform evidence states fail", platform_rejects(probe, "nonempty list")))
         probe = copy.deepcopy(product)
-        probe["native"]["windows"]["screenshot"] = "artifacts/generic/screenshot.png"
+        probe["native"]["android"]["evidence_states"][0]["screenshot"] = (
+            "artifacts/generic/screenshot.png"
+        )
         checks.append(("an artifact outside its upload fails", platform_rejects(probe, "outside the uploaded")))
         probe = copy.deepcopy(product)
         probe["native"]["windows"]["scenario"] = "manual evidence review"
@@ -525,8 +597,8 @@ def self_test():
         errors, pending = platform_errors(probe, root)
         checks.append(("honest pending evidence is visible", not errors and pending == ["fixture/macos/ready"]))
         checks.append(("release completion rejects pending evidence", platform_rejects(probe, "release evidence is pending", True)))
-        probe["native"]["macos"]["screenshot"] = "artifacts/macos/screenshot.png"
-        checks.append(("pending evidence cannot cite a fake artifact", platform_rejects(probe, "cannot cite unproduced")))
+        probe["native"]["macos"]["evidence_states"] = [visual_state("macos")]
+        checks.append(("pending evidence cannot cite a fake artifact", platform_rejects(probe, "cannot claim evidence_states")))
         probe = copy.deepcopy(product)
         del probe["performance"]["windows"]
         checks.append(("missing Windows performance record fails", platform_rejects(probe, "android, macos, and windows")))
@@ -609,7 +681,25 @@ def self_test():
     ))
     ledger_document = json.loads(LEDGER.read_text(encoding="utf-8"))
     checks.append(("the ledger conforms to its schema", not schema_errors(ledger_document)))
-    removed_document = {"schema_version": 3, "features": [removed]}
+    probe = copy.deepcopy(ledger_document)
+    devices = next(feature for feature in probe["features"] if feature["id"] == "devices")
+    del devices["native"]["android"]["evidence_states"][0]["accessibility"]
+    checks.append((
+        "the schema requires per-state visual artifact paths",
+        bool(schema_errors(probe)),
+    ))
+    probe = copy.deepcopy(ledger_document)
+    history = next(feature for feature in probe["features"] if feature["id"] == "history")
+    history["native"]["windows"]["evidence_states"] = [{
+        "state": "populated",
+        "screenshot": "history.png",
+        "accessibility": "history.json",
+    }]
+    checks.append((
+        "Windows retains its manifest-owned state shape",
+        bool(schema_errors(probe)),
+    ))
+    removed_document = {"schema_version": 4, "features": [removed]}
     checks.append(("the schema rejects command ownership by removed features", bool(schema_errors(removed_document))))
     checks.append(("a non-object ledger fails schema validation", bool(schema_errors([]))))
     checks.append((
@@ -623,9 +713,18 @@ def self_test():
                 "status": "product",
                 "native": {
                     "android": {
-                        "screenshot": "artifacts/android/screenshot.png",
-                        "ax_log": "artifacts/android/ax.json",
-                        "evidence_states": ["ready"],
+                        "evidence_states": [
+                            {
+                                "state": "offline",
+                                "screenshot": "artifacts/android/offline.png",
+                                "accessibility": "artifacts/android/offline.json",
+                            },
+                            {
+                                "state": "ready",
+                                "screenshot": "artifacts/android/ready.png",
+                                "accessibility": "artifacts/android/ready.json",
+                            },
+                        ],
                         "release_artifact": "android-evidence",
                     },
                     "macos": {"unverified_states": ["ready"]},
@@ -640,11 +739,24 @@ def self_test():
         receipt_expectation_tokens(receipt_fixture, {
             "android-evidence": [{"roots": [pathlib.PurePosixPath("artifacts/android")]}],
         }) == [
-            "android:fixture=ready,screenshot=screenshot.png,accessibility=ax.json",
+            "android:fixture=offline,screenshot=offline.png,accessibility=offline.json",
+            "android:fixture=ready,screenshot=ready.png,accessibility=ready.json",
             "windows:fixture=offline",
             "windows:fixture=ready",
         ],
     ))
+    duplicate_path_fixture = copy.deepcopy(receipt_fixture)
+    duplicate_path_fixture["features"][0]["native"]["android"]["evidence_states"][1][
+        "screenshot"
+    ] = "artifacts/android/offline.png"
+    try:
+        receipt_expectation_tokens(duplicate_path_fixture, {
+            "android-evidence": [{"roots": [pathlib.PurePosixPath("artifacts/android")]}],
+        })
+        duplicate_paths_fail = False
+    except ValueError as error:
+        duplicate_paths_fail = "reuses an artifact path" in str(error)
+    checks.append(("receipt expectations reject reused artifact paths", duplicate_paths_fail))
     for description, held in checks:
         print(f"{'PASS' if held else 'FAIL'}|self-test: {description}|")
     return 0 if all(held for _, held in checks) else 1
@@ -706,10 +818,15 @@ def main():
                 errors.extend(cloud_errors(feature))
 
     errors.extend(contract_errors(shipped, features))
+    receipt_tokens = []
+    try:
+        receipt_tokens = receipt_expectation_tokens(document, uploads)
+    except ValueError as error:
+        errors.append(str(error))
     if errors:
         return fail("\nfeature-ledger: ".join(errors))
     if "--receipt-expectations" in sys.argv:
-        for token in receipt_expectation_tokens(document, uploads):
+        for token in receipt_tokens:
             print(token)
         return 0
     if pending:
