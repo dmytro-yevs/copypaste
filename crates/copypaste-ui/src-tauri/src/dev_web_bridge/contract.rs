@@ -400,6 +400,7 @@ mod tests {
                 pairing_id: Some("ceremony-1".into()),
                 role: None,
                 state: copypaste_ipc::PairingState::AwaitingConfirmation,
+                expires_in_ms: Some(60_000),
                 sas: Some("123456".into()),
                 peer_device_id: Some("peer-device".into()),
                 peer_name: Some("Phone".into()),

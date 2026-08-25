@@ -4,9 +4,8 @@
 //! The rest of this crate provides the parts — a Noise channel, a last-write-
 //! wins session, an mDNS browser — and deliberately knows nothing about a
 //! database. This module owns the parts: the paired-device list, the
-//! advertisement, the inbound listener and its concurrency limit, and the four
-//! operations a user drives all of it with ([`Node::pair_create`],
-//! [`Node::pair_accept`], [`Node::unpair`], [`Node::sync_one`]).
+//! advertisement, the inbound listener and its concurrency limit, and the
+//! pairing, unpairing and sync operations a user drives.
 //!
 //! It is generic over [`SyncSource`](crate::sync::SyncSource), which is the
 //! whole of what it needs from a history. The desktop daemon supplies one over
@@ -59,27 +58,6 @@ pub(super) const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
 
 const DISCOVERY_INTEREST_MS: i64 = 60_000;
 const AUTHENTICATED_PROFILE_TTL_MS: i64 = 5 * 60_000;
-
-/// A freshly minted pairing, and the one rendering of its secret.
-///
-/// `code` is shown to the user once and never stored, logged or retrievable
-/// again — hence the redacting `Debug`.
-pub struct NewPairing {
-    pub code: String,
-    pub pairing_id: String,
-    /// Where the other device should dial, when this host has a routable
-    /// address. `None` means the user has to supply one.
-    pub listen_addr: Option<String>,
-}
-
-impl std::fmt::Debug for NewPairing {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NewPairing")
-            .field("pairing_id", &self.pairing_id)
-            .field("code", &"<redacted>")
-            .finish_non_exhaustive()
-    }
-}
 
 /// Everything the peer half of a device shares.
 ///
@@ -325,17 +303,6 @@ impl Node {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = advertised;
     }
 
-    /// Legacy spelling for an in-memory pairing invitation.
-    pub fn pair_create(&self, name: &str) -> Result<NewPairing, NodeError> {
-        let _ = name;
-        let invite = self.pair_create_invite()?;
-        Ok(NewPairing {
-            code: invite.code,
-            pairing_id: invite.pairing_id,
-            listen_addr: invite.listen_addr,
-        })
-    }
-
     /// Forget a peer. `Ok(false)` when there was no such pairing.
     ///
     /// Local and unilateral: the other device keeps its half until it also
@@ -429,14 +396,14 @@ mod tests {
     fn a_pairing_waiting_to_be_redeemed_keeps_this_device_discoverable() {
         let (node, _dir) = node_with_discovery();
         assert!(node.peers().list().is_empty());
-        node.pair_create("laptop").expect("mint a pairing");
+        node.pair_create_invite().expect("mint a pairing");
         assert!(browsing(&node));
     }
 
     #[test]
     fn cancelling_the_last_invite_stops_mdns() {
         let (node, _dir) = node_with_discovery();
-        node.pair_create("laptop").expect("mint a pairing");
+        node.pair_create_invite().expect("mint a pairing");
         assert!(browsing(&node));
 
         assert_eq!(node.pair_cancel().phase, PairingPhase::Cancelled);
@@ -464,7 +431,7 @@ mod tests {
     #[test]
     fn a_new_pairing_is_memory_only_before_both_devices_confirm() {
         let (node, _dir) = node();
-        let pairing = node.pair_create("laptop").unwrap();
+        let pairing = node.pair_create_invite().unwrap();
 
         assert!(!pairing.code.is_empty());
         assert_ne!(pairing.code, pairing.pairing_id);
@@ -480,7 +447,7 @@ mod tests {
     #[test]
     fn the_pairing_code_is_redacted_in_debug_output() {
         let (node, _dir) = node();
-        let pairing = node.pair_create("laptop").unwrap();
+        let pairing = node.pair_create_invite().unwrap();
         let rendered = format!("{pairing:?}");
         assert!(!rendered.contains(&pairing.code), "{rendered}");
         assert!(rendered.contains(&pairing.pairing_id));
@@ -510,10 +477,13 @@ mod tests {
     #[test]
     fn only_one_pairing_ceremony_runs_at_a_time() {
         let (node, _dir) = node();
-        let first = node.pair_create("a").unwrap();
-        assert_eq!(node.pair_create("b").unwrap_err(), NodeError::PairingBusy);
+        let first = node.pair_create_invite().unwrap();
+        assert_eq!(
+            node.pair_create_invite().unwrap_err(),
+            NodeError::PairingBusy
+        );
         node.pair_cancel();
-        let second = node.pair_create("b").unwrap();
+        let second = node.pair_create_invite().unwrap();
         assert_ne!(first.pairing_id, second.pairing_id);
         assert_eq!(node.peers().usable_count(), 0);
     }
@@ -537,7 +507,7 @@ mod tests {
         }
 
         let err = node
-            .pair_create("one too many")
+            .pair_create_invite()
             .expect_err("past the cap must be refused");
         assert_eq!(err, NodeError::TooManyPairings);
         assert!(
@@ -550,7 +520,7 @@ mod tests {
         assert_eq!(node.peers().usable_count(), crate::peers::MAX_PAIRINGS);
         let existing = node.peers().psks()[0].pairing_id.clone();
         assert!(node.unpair(&existing).unwrap());
-        node.pair_create("the replacement")
+        node.pair_create_invite()
             .expect("a freed slot must be usable");
     }
 

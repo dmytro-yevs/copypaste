@@ -32,9 +32,13 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
         activity.runOnUiThread {
             val presented = args.payload.withinUtf8Bytes(MAX_PAYLOAD_BYTES) &&
                 args.code.withinUtf8Bytes(MAX_CODE_BYTES) &&
-                dialogs.presentInvite(args.payload, args.code, args.expiresInSecs) {
-                    args.onAbort?.send(JSObject())
-                }
+                dialogs.presentInvite(
+                    args.payload,
+                    args.code,
+                    args.expiresInSecs,
+                    onRefresh = { args.onRefresh?.send(JSObject()) },
+                    onAbort = { args.onAbort?.send(JSObject()) },
+                )
             invoke.resolve(JSObject().put("presented", presented))
         }
     }
@@ -91,9 +95,12 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
         val peerName = args.optString("peerName").takeIf { it.isNotBlank() }
         val role = args.optString("role").takeIf { it.isNotBlank() }
         activity.runOnUiThread {
-            val shown = dialogs.confirm(sas, peerName, role) { decision ->
-                invoke.resolve(JSObject().put("decision", decision))
-            }
+            val shown = dialogs.confirm(
+                sas,
+                peerName,
+                role,
+                args.optLong("expiresInMs"),
+            ) { decision -> invoke.resolve(JSObject().put("decision", decision)) }
             if (!shown) invoke.resolve(JSObject())
         }
     }
@@ -139,6 +146,7 @@ class PresentInviteArgs {
     @JvmField var code: String = ""
     @JvmField var expiresInSecs: Long = 0
     @JvmField var onAbort: Channel? = null
+    @JvmField var onRefresh: Channel? = null
 }
 
 @InvokeArg

@@ -11,7 +11,8 @@ use zeroize::Zeroizing;
 
 use self::common::{Affinity, CloseHandle};
 use super::{
-    NativeAbort, NativePairingUi, PairingDecision, PairingPresentationState, ScannedPairing,
+    NativeAbort, NativePairingUi, NativePresentationOutcome, NativeRefresh, PairingDecision,
+    PairingPresentationState, ScannedPairing,
 };
 
 type PayloadEncoder = fn(&PairingInviteData) -> Option<Zeroizing<String>>;
@@ -22,6 +23,7 @@ pub(super) struct WindowsPairingUi {
     validate_fields: entry::FieldValidator,
     affinity: Affinity,
     abort: NativeAbort,
+    refresh: NativeRefresh,
 }
 
 impl WindowsPairingUi {
@@ -29,12 +31,14 @@ impl WindowsPairingUi {
         encode_payload: PayloadEncoder,
         validate_fields: entry::FieldValidator,
         abort: NativeAbort,
+        refresh: NativeRefresh,
     ) -> Self {
         Self::with_affinity(
             encode_payload,
             validate_fields,
             common::system_affinity,
             abort,
+            refresh,
         )
     }
 
@@ -43,6 +47,7 @@ impl WindowsPairingUi {
         validate_fields: entry::FieldValidator,
         affinity: Affinity,
         abort: NativeAbort,
+        refresh: NativeRefresh,
     ) -> Self {
         Self {
             active: Mutex::new(None),
@@ -50,6 +55,7 @@ impl WindowsPairingUi {
             validate_fields,
             affinity,
             abort,
+            refresh,
         }
     }
 
@@ -79,13 +85,13 @@ impl Drop for WindowsPairingUi {
 }
 
 impl NativePairingUi for WindowsPairingUi {
-    fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState {
+    fn present_invite(&self, invite: &PairingInviteData) -> NativePresentationOutcome {
         self.close_active();
         let Some(payload) = (self.encode_payload)(invite) else {
-            return PairingPresentationState::Unavailable;
+            return NativePresentationOutcome::Unavailable;
         };
         let Some(listen_addr) = invite.listen_addr.as_deref() else {
-            return PairingPresentationState::Unavailable;
+            return NativePresentationOutcome::Unavailable;
         };
         let window = invite::spawn(
             payload,
@@ -94,11 +100,12 @@ impl NativePairingUi for WindowsPairingUi {
             invite.expires_in_secs,
             self.affinity,
             self.abort.clone(),
+            self.refresh.clone(),
         );
         let state = if window.is_some() {
-            PairingPresentationState::Presented
+            NativePresentationOutcome::Presented
         } else {
-            PairingPresentationState::Unavailable
+            NativePresentationOutcome::Unavailable
         };
         self.replace(window);
         state
@@ -132,7 +139,7 @@ impl NativePairingUi for WindowsPairingUi {
 
 #[cfg(test)]
 mod tests {
-    use crate::pairing_presentation::PairingPresentationState;
+    use crate::pairing_presentation::{NativePresentationOutcome, PairingPresentationState};
 
     fn production(source: &'static str) -> &'static str {
         source
@@ -172,6 +179,7 @@ mod tests {
             crate::pairing_presentation::invite::encode_native_invite,
             crate::pairing_presentation::invite::validate_native_invite_fields,
             std::sync::Arc::new(|| {}),
+            std::sync::Arc::new(|| {}),
         );
         let invite = copypaste_ipc::PairingInviteData {
             code: "ABCD-EFGH-IJKL".into(),
@@ -181,7 +189,7 @@ mod tests {
         };
         assert_eq!(
             crate::pairing_presentation::NativePairingUi::present_invite(&ui, &invite),
-            PairingPresentationState::Unavailable
+            NativePresentationOutcome::Unavailable
         );
         assert!(ui.active.lock().expect("active").is_none());
     }
@@ -272,6 +280,7 @@ mod refusal_tests {
             counting_validator,
             affinity,
             std::sync::Arc::new(|| {}),
+            std::sync::Arc::new(|| {}),
         )
     }
 
@@ -304,6 +313,7 @@ mod refusal_tests {
             pairing_id: Some("public-id".into()),
             role: Some(PairingRole::Responder),
             state: PairingState::AwaitingConfirmation,
+            expires_in_ms: Some(60_000),
             sas: Some("123456".into()),
             peer_device_id: Some("device-key-material".into()),
             peer_name: Some("Phone".into()),
@@ -320,7 +330,7 @@ mod refusal_tests {
         let started = std::time::Instant::now();
         assert_eq!(
             ui.present_invite(&invite()),
-            PairingPresentationState::Unavailable
+            NativePresentationOutcome::Unavailable
         );
         let waited = started.elapsed();
         assert_asked_before_the_window_was_shown();
@@ -344,7 +354,7 @@ mod refusal_tests {
         let ui = presenter(accept);
         assert_eq!(
             ui.present_invite(&invite()),
-            PairingPresentationState::Presented
+            NativePresentationOutcome::Presented
         );
         assert_asked_before_the_window_was_shown();
         assert!(ui.active.lock().expect("active window").is_some());

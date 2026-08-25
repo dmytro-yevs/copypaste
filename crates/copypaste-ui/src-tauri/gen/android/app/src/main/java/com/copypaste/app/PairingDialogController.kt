@@ -21,7 +21,6 @@ import kotlin.math.min
 internal class PairingDialogController(
     private val activity: Activity,
     private val qrRenderer: PairingQrRenderer = ZxingPairingQrRenderer(),
-    private val confirmTimeoutMs: Long = 60_000L,
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var activeDialog: AlertDialog? = null
@@ -37,9 +36,10 @@ internal class PairingDialogController(
         payload: String,
         code: String,
         expiresInSecs: Long,
+        onRefresh: (() -> Unit)? = null,
         onAbort: (() -> Unit)? = null,
     ): Boolean {
-        if (destroyed || payload.isEmpty() || code.isEmpty()) return false
+        if (destroyed || payload.isEmpty() || code.isEmpty() || expiresInSecs <= 0) return false
         dismissActive()
         this.onAbort = onAbort
         showingInvite = true
@@ -80,14 +80,31 @@ internal class PairingDialogController(
         }
         root.addView(reveal, matchWidth())
         root.addView(qr, centered(qrSize))
-        root.addView(label(activity.getString(R.string.pairing_expires, expiresInSecs)))
-        show(
-            MaterialAlertDialogBuilder(activity)
-                .setTitle(R.string.pairing_invite_title)
-                .setView(root)
-                .setNegativeButton(R.string.pairing_cancel) { dialog, _ -> dialog.dismiss() }
-                .create(),
-        )
+        val expires = label(activity.getString(R.string.pairing_expires, expiresInSecs))
+        root.addView(expires)
+        val dialog = MaterialAlertDialogBuilder(activity)
+            .setTitle(R.string.pairing_invite_title)
+            .setView(root)
+            .setNegativeButton(R.string.pairing_cancel) { dialog, _ -> dialog.dismiss() }
+            .create()
+        show(dialog)
+        timeout = Runnable {
+            if (activeDialog !== dialog) return@Runnable
+            reveal.setOnClickListener(null)
+            reveal.visibility = View.GONE
+            qr.setImageDrawable(null)
+            qr.contentDescription = null
+            qr.visibility = View.GONE
+            clearQr()
+            expires.text = activity.getString(R.string.pairing_checking_status)
+            expires.contentDescription = activity.getString(R.string.pairing_checking_status)
+            this.onAbort = null
+            showingInvite = false
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).text =
+                activity.getString(R.string.pairing_close)
+            timeout = null
+            onRefresh?.invoke()
+        }.also { handler.postDelayed(it, expiresInSecs * 1_000L) }
         return true
     }
 
@@ -129,8 +146,18 @@ internal class PairingDialogController(
         return true
     }
 
-    fun confirm(sas: String, peerName: String?, role: String?, decision: (String) -> Unit): Boolean {
+    fun confirm(
+        sas: String,
+        peerName: String?,
+        role: String?,
+        expiresInMs: Long,
+        decision: (String) -> Unit,
+    ): Boolean {
         if (destroyed || sas.length != 6 || sas.any { it !in '0'..'9' }) return false
+        if (expiresInMs <= 0) {
+            decision("refresh")
+            return true
+        }
         dismissActive()
         pendingDecision = decision
         onAbort = null
@@ -161,10 +188,23 @@ internal class PairingDialogController(
             }
         }
         timeout = Runnable {
-            deliver("cancel")
+            val sasView = dialog.findViewById<LinearLayout>(R.id.pairing_sas)
+            sasView?.contentDescription = null
+            sasView?.removeAllViews()
+            sasView?.visibility = View.GONE
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).visibility = View.GONE
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).visibility = View.GONE
+            root.getChildAt(0)?.let { instruction ->
+                if (instruction is MaterialTextView) {
+                    instruction.text = activity.getString(R.string.pairing_checking_status)
+                    instruction.contentDescription = activity.getString(R.string.pairing_checking_status)
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).text =
+                activity.getString(R.string.pairing_close)
+            deliver("refresh")
             dialog.dismiss()
-            presentProgress("timed_out")
-        }.also { handler.postDelayed(it, confirmTimeoutMs) }
+        }.also { handler.postDelayed(it, expiresInMs) }
         return true
     }
 

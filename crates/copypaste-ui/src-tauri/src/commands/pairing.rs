@@ -3,7 +3,9 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::backend::{PairingBackend, Result};
-use crate::pairing_presentation::{PairingDecision, PairingPresentationState, PairingPresenter};
+use crate::pairing_presentation::{
+    NativePresentationOutcome, PairingDecision, PairingPresentationState, PairingPresenter,
+};
 use crate::SelectedBackend;
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,17 +73,19 @@ pub async fn pair_create_invite(
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
     let invite = backend.pair_create_invite().await?;
-    let presentation = presenter.present_invite(&invite);
-    if presentation == PairingPresentationState::Unavailable {
-        return backend
-            .pair_cancel()
-            .await
-            .map(|progress| PairingCeremony::from_progress(progress, presentation));
+    match presenter.present_invite(&invite) {
+        NativePresentationOutcome::Unavailable => backend.pair_cancel().await.map(|progress| {
+            PairingCeremony::from_progress(progress, PairingPresentationState::Unavailable)
+        }),
+        NativePresentationOutcome::Presented => backend.pair_progress().await.map(|progress| {
+            PairingCeremony::from_progress(progress, PairingPresentationState::Presented)
+        }),
+        NativePresentationOutcome::Refresh => {
+            let progress = backend.pair_progress().await?;
+            let presentation = presenter.present_progress(&progress);
+            Ok(PairingCeremony::from_progress(progress, presentation))
+        }
     }
-    backend
-        .pair_progress()
-        .await
-        .map(|progress| PairingCeremony::from_progress(progress, presentation))
 }
 
 #[tauri::command]
@@ -132,6 +136,11 @@ pub async fn pair_confirm(
         PairingDecision::Accept => backend.pair_confirm(true).await?,
         PairingDecision::Reject => backend.pair_confirm(false).await?,
         PairingDecision::Cancel => backend.pair_cancel().await?,
+        PairingDecision::Refresh => {
+            let progress = backend.pair_progress().await?;
+            let presentation = presenter.present_progress(&progress);
+            return Ok(PairingCeremony::from_progress(progress, presentation));
+        }
     };
     Ok(PairingCeremony::from_progress(
         progress,
@@ -188,6 +197,7 @@ mod tests {
                 pairing_id: Some("ceremony-1".into()),
                 role: Some(PairingRole::Initiator),
                 state: PairingState::AwaitingConfirmation,
+                expires_in_ms: Some(60_000),
                 sas: Some("123456".into()),
                 peer_device_id: Some("device-secret".into()),
                 peer_name: Some("Unverified Phone".into()),
@@ -213,6 +223,7 @@ mod tests {
                 pairing_id: Some("ceremony-1".into()),
                 role: Some(PairingRole::Responder),
                 state: PairingState::Confirmed,
+                expires_in_ms: None,
                 sas: Some("654321".into()),
                 peer_device_id: Some("device-secret".into()),
                 peer_name: Some("Unverified Phone".into()),

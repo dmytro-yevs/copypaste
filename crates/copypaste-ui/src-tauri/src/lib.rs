@@ -142,6 +142,7 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             {
                 let handle = app.handle().clone();
+                let refresh = pairing_presentation::native_refresh(handle.clone());
                 let abort = std::sync::Arc::new(move || {
                     let handle = handle.clone();
                     tauri::async_runtime::spawn(async move {
@@ -151,7 +152,7 @@ pub fn run() {
                     });
                 });
                 app.manage(pairing_presentation::PairingPresenter::new(
-                    pairing_presentation::windows_ui(abort),
+                    pairing_presentation::windows_ui(abort, refresh),
                 ));
             }
             #[cfg(target_os = "macos")]

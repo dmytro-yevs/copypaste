@@ -171,6 +171,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             pairing_id: Some("peer-1".into()),
             role: Some(PairingRole::Initiator),
             state: PairingState::AwaitingConfirmation,
+            expires_in_ms: Some(60_000),
             sas: Some("123456".into()),
             peer_device_id: Some("device-1".into()),
             peer_name: Some("Phone".into()),

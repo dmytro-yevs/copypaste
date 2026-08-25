@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
@@ -46,6 +46,7 @@ pub struct PairingStatus {
     pub sas: Option<String>,
     pub peer: Option<PairingPeer>,
     pub error: Option<NodeError>,
+    pub expires_in_ms: Option<u64>,
 }
 
 impl PairingStatus {
@@ -57,6 +58,7 @@ impl PairingStatus {
             sas: None,
             peer: None,
             error: None,
+            expires_in_ms: None,
         }
     }
 }
@@ -84,6 +86,7 @@ pub(super) enum LocalDecision {
     Accept,
     Reject,
     Cancel,
+    Expire,
 }
 
 struct Invitation {
@@ -96,6 +99,7 @@ struct Invitation {
 struct Active {
     status: PairingStatus,
     control: watch::Sender<LocalDecision>,
+    expires_at: Option<Instant>,
     committing: bool,
 }
 
@@ -108,13 +112,23 @@ enum PairingState {
 
 pub(super) struct PairingManager {
     state: Mutex<PairingState>,
+    now: Arc<dyn Fn() -> Instant + Send + Sync>,
 }
 
 impl PairingManager {
     pub(super) fn new() -> Self {
+        Self::with_clock(Instant::now)
+    }
+
+    fn with_clock(now: impl Fn() -> Instant + Send + Sync + 'static) -> Self {
         Self {
             state: Mutex::new(PairingState::Idle),
+            now: Arc::new(now),
         }
+    }
+
+    fn now(&self) -> Instant {
+        (self.now)()
     }
 
     pub(super) fn create_invite(
@@ -137,9 +151,10 @@ impl PairingManager {
                 sas: None,
                 peer: None,
                 error: None,
+                expires_in_ms: None,
             },
             token,
-            expires_at: Instant::now() + PAIRING_INVITE_TTL,
+            expires_at: self.now() + PAIRING_INVITE_TTL,
             control,
         });
         Ok(PairingInvite {
@@ -152,15 +167,7 @@ impl PairingManager {
 
     pub(super) fn candidate(&self) -> Option<PskCandidate> {
         let mut state = self.lock();
-        let expired = matches!(
-            &*state,
-            PairingState::Invited(invite) if Instant::now() >= invite.expires_at
-        );
-        if expired {
-            let status = terminal_from(&state, PairingPhase::TimedOut, None);
-            *state = PairingState::Terminal(status);
-            return None;
-        }
+        expire_due(&mut state, self.now());
         match &*state {
             PairingState::Invited(invite) => Some(PskCandidate {
                 pairing_id: invite.status.pairing_id.clone().unwrap_or_default(),
@@ -179,7 +186,7 @@ impl PairingManager {
         match previous {
             PairingState::Invited(invite)
                 if invite.status.pairing_id.as_deref() == Some(pairing_id)
-                    && Instant::now() < invite.expires_at =>
+                    && self.now() < invite.expires_at =>
             {
                 let psk = Zeroizing::new(invite.token.psk());
                 let receiver = invite.control.subscribe();
@@ -189,6 +196,7 @@ impl PairingManager {
                         ..invite.status
                     },
                     control: invite.control,
+                    expires_at: None,
                     committing: false,
                 });
                 Ok((psk, receiver))
@@ -217,8 +225,10 @@ impl PairingManager {
                 sas: None,
                 peer: None,
                 error: None,
+                expires_in_ms: None,
             },
             control,
+            expires_at: None,
             committing: false,
         });
         Ok(receiver)
@@ -231,6 +241,7 @@ impl PairingManager {
                 active.status.phase = PairingPhase::AwaitingConfirmation;
                 active.status.sas = Some(sas);
                 active.status.peer = Some(peer);
+                active.expires_at = Some(self.now() + PAIRING_CONFIRM_TIMEOUT);
             }
         }
     }
@@ -243,17 +254,16 @@ impl PairingManager {
             {
                 Some(active.status.clone())
             }
-            PairingState::Terminal(status)
-                if status.pairing_id.as_deref() == Some(pairing_id)
-                    && status.phase == PairingPhase::Cancelled =>
-            {
-                return;
+            PairingState::Terminal(status) if status.pairing_id.as_deref() == Some(pairing_id) => {
+                return
             }
             _ => None,
         };
         if let Some(mut status) = current {
             status.phase = phase;
             status.error = error;
+            status.sas = None;
+            status.expires_in_ms = None;
             *state = PairingState::Terminal(status);
         }
     }
@@ -267,11 +277,18 @@ impl PairingManager {
             return false;
         }
         active.committing = true;
+        active.expires_at = None;
         true
     }
 
     pub(super) fn confirm(&self, accept: bool) -> Result<PairingStatus, NodeError> {
-        let state = self.lock();
+        let mut state = self.lock();
+        expire_due(&mut state, self.now());
+        if let PairingState::Terminal(status) = &*state {
+            if status.phase == PairingPhase::TimedOut {
+                return Ok(status.clone());
+            }
+        }
         let PairingState::Active(active) = &*state else {
             return Err(NodeError::NoPairing);
         };
@@ -286,7 +303,11 @@ impl PairingManager {
                 LocalDecision::Reject
             })
             .map_err(|_| NodeError::Session)?;
-        Ok(active.status.clone())
+        Ok(snapshot(
+            active.status.clone(),
+            active.expires_at,
+            self.now(),
+        ))
     }
 
     pub(super) fn cancel(&self) -> PairingStatus {
@@ -308,6 +329,8 @@ impl PairingManager {
         };
         let status = PairingStatus {
             phase: PairingPhase::Cancelled,
+            sas: None,
+            expires_in_ms: None,
             ..status
         };
         *state = PairingState::Terminal(status.clone());
@@ -316,18 +339,14 @@ impl PairingManager {
 
     pub(super) fn progress(&self) -> PairingStatus {
         let mut state = self.lock();
-        let expired = matches!(
-            &*state,
-            PairingState::Invited(invite) if Instant::now() >= invite.expires_at
-        );
-        if expired {
-            let status = terminal_from(&state, PairingPhase::TimedOut, None);
-            *state = PairingState::Terminal(status);
-        }
+        let now = self.now();
+        expire_due(&mut state, now);
         match &*state {
             PairingState::Idle => PairingStatus::idle(),
-            PairingState::Invited(invite) => invite.status.clone(),
-            PairingState::Active(active) => active.status.clone(),
+            PairingState::Invited(invite) => {
+                snapshot(invite.status.clone(), Some(invite.expires_at), now)
+            }
+            PairingState::Active(active) => snapshot(active.status.clone(), active.expires_at, now),
             PairingState::Terminal(status) => status.clone(),
         }
     }
@@ -359,13 +378,45 @@ fn terminal_from(
     };
     status.phase = phase;
     status.error = error;
+    status.sas = None;
+    status.expires_in_ms = None;
     status
+}
+
+fn expire_due(state: &mut PairingState, now: Instant) {
+    let due = match state {
+        PairingState::Invited(invite) => (now >= invite.expires_at).then_some(&invite.control),
+        PairingState::Active(active) => active
+            .expires_at
+            .filter(|deadline| now >= *deadline)
+            .map(|_| &active.control),
+        PairingState::Idle | PairingState::Terminal(_) => None,
+    };
+    let Some(control) = due else {
+        return;
+    };
+    let _ = control.send(LocalDecision::Expire);
+    *state = PairingState::Terminal(terminal_from(state, PairingPhase::TimedOut, None));
+}
+
+fn snapshot(mut status: PairingStatus, expires_at: Option<Instant>, now: Instant) -> PairingStatus {
+    status.expires_in_ms = expires_at.map(|deadline| remaining_ms(deadline, now));
+    status
+}
+
+fn remaining_ms(deadline: Instant, now: Instant) -> u64 {
+    let remaining = deadline.saturating_duration_since(now);
+    u64::try_from(remaining.as_millis())
+        .unwrap_or(u64::MAX)
+        .saturating_add(u64::from(
+            !remaining.is_zero() && remaining.subsec_nanos() % 1_000_000 != 0,
+        ))
 }
 
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::discovery::Discovery;
@@ -412,6 +463,24 @@ mod tests {
         })
         .await
         .unwrap_or_else(|_| panic!("pairing did not reach {phase:?}"))
+    }
+
+    fn controlled_manager() -> (PairingManager, Arc<Mutex<Instant>>) {
+        let now = Arc::new(Mutex::new(Instant::now()));
+        let clock = Arc::clone(&now);
+        let manager = PairingManager::with_clock(move || {
+            *clock
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        });
+        (manager, now)
+    }
+
+    fn advance(clock: &Mutex<Instant>, duration: Duration) {
+        let mut now = clock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *now += duration;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -500,19 +569,47 @@ mod tests {
 
     #[test]
     fn an_expired_invite_is_terminal_and_releases_the_ceremony_slot() {
-        let manager = PairingManager::new();
+        let (manager, clock) = controlled_manager();
         let first = manager.create_invite(None).unwrap();
-        if let PairingState::Invited(invite) = &mut *manager.lock() {
-            invite.expires_at = Instant::now();
-        } else {
-            panic!("the invitation was not retained");
-        }
+        assert_eq!(manager.progress().expires_in_ms, Some(120_000));
+        advance(&clock, PAIRING_INVITE_TTL - Duration::from_millis(1));
+        assert_eq!(manager.progress().expires_in_ms, Some(1));
+        advance(&clock, Duration::from_millis(1));
 
         assert_eq!(manager.progress().phase, PairingPhase::TimedOut);
+        assert_eq!(manager.progress().expires_in_ms, None);
         assert!(manager.candidate().is_none());
         assert_ne!(
             manager.create_invite(None).unwrap().pairing_id,
             first.pairing_id
         );
+    }
+
+    #[test]
+    fn confirmation_deadline_owns_timeout_and_cannot_be_relabelled_cancelled() {
+        let (manager, clock) = controlled_manager();
+        let pairing_id = "pairing-id";
+        let decision = manager.begin_join(pairing_id.into()).unwrap();
+        manager.awaiting(
+            pairing_id,
+            "123456".into(),
+            PairingPeer {
+                pairing_id: pairing_id.into(),
+                device_id: "device-id".into(),
+                name: "Phone".into(),
+                addr: None,
+            },
+        );
+        assert_eq!(manager.progress().expires_in_ms, Some(60_000));
+        advance(&clock, PAIRING_CONFIRM_TIMEOUT);
+
+        let expired = manager.confirm(true).expect("expiry is a terminal result");
+        assert_eq!(expired.phase, PairingPhase::TimedOut);
+        assert_eq!(expired.sas, None);
+        assert_eq!(expired.expires_in_ms, None);
+        assert!(*decision.borrow() == LocalDecision::Expire);
+        assert_eq!(manager.cancel().phase, PairingPhase::TimedOut);
+        manager.finish(pairing_id, PairingPhase::Cancelled, None);
+        assert_eq!(manager.progress().phase, PairingPhase::TimedOut);
     }
 }

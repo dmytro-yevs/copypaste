@@ -223,6 +223,7 @@ pub fn pairing_progress(
             PairingPhase::TimedOut => PairingState::TimedOut,
             PairingPhase::Failed => PairingState::Failed,
         },
+        expires_in_ms: status.expires_in_ms,
         sas: status.sas,
         peer_device_id: peer.map(|peer| peer.device_id.clone()),
         peer_name: peer.map(|peer| peer.name.clone()),

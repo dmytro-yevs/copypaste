@@ -7,15 +7,18 @@
 #![allow(unsafe_code)]
 
 use std::io::Cursor;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
-use dispatch2::DispatchQueue;
+use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, DispatchTime, GlobalQueueIdentifier};
 use image::{DynamicImage, ImageFormat, Luma};
 use objc2::ClassType;
 use objc2_app_kit::{
     NSAccessibility, NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn,
-    NSAlertThirdButtonReturn, NSImage, NSImageView, NSSecureTextField, NSTextField, NSView,
-    NSWindowSharingType,
+    NSAlertThirdButtonReturn, NSApplication, NSImage, NSImageView, NSSecureTextField, NSTextField,
+    NSView, NSWindowSharingType,
 };
 use objc2_foundation::{MainThreadMarker, NSData, NSPoint, NSRect, NSSize, NSString};
 use qrcode::QrCode;
@@ -24,7 +27,8 @@ use zeroize::Zeroizing;
 use super::invite::{encode_native_invite, validate_native_invite_fields};
 use super::macos_model::{progress_copy, sas_digits};
 use super::{
-    NativeAbort, NativePairingUi, PairingDecision, PairingPresentationState, ScannedPairing,
+    NativeAbort, NativePairingUi, NativePresentationOutcome, PairingDecision,
+    PairingPresentationState, ScannedPairing,
 };
 use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 
@@ -39,29 +43,33 @@ impl MacOsPairingUi {
 }
 
 impl NativePairingUi for MacOsPairingUi {
-    fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState {
+    fn present_invite(&self, invite: &PairingInviteData) -> NativePresentationOutcome {
         let Some(listen_addr) = invite.listen_addr.as_deref() else {
             show_message(
                 "Pair a new device",
                 "This Mac does not have a reachable pairing address yet. Check the network and try again.",
             );
-            return PairingPresentationState::Unavailable;
+            return NativePresentationOutcome::Unavailable;
         };
         let Some(payload) = encode_native_invite(invite) else {
             show_message(
                 "Pair a new device",
                 "This Mac does not have a reachable pairing address yet. Check the network and try again.",
             );
-            return PairingPresentationState::Unavailable;
+            return NativePresentationOutcome::Unavailable;
         };
         let Some(png) = render_qr_png(payload.as_bytes()) else {
             show_message(
                 "Pair a new device",
                 "The pairing code could not be rendered. Try generating a new invite.",
             );
-            return PairingPresentationState::Unavailable;
+            return NativePresentationOutcome::Unavailable;
         };
+        drop(payload);
         let expires = invite.expires_in_secs;
+        let Some(watchdog) = ModalDeadline::arm(Duration::from_secs(expires)) else {
+            return NativePresentationOutcome::Refresh;
+        };
         let code = Zeroizing::new(invite.code.clone());
         let address = Zeroizing::new(listen_addr.to_owned());
         let abort = self.abort.clone();
@@ -76,14 +84,18 @@ impl NativePairingUi for MacOsPairingUi {
                 &["Reveal QR Code", "Cancel"],
             );
             if reveal.runModal() != NSAlertFirstButtonReturn {
+                if watchdog.finish() {
+                    return NativePresentationOutcome::Refresh;
+                }
                 abort();
-                return PairingPresentationState::Unavailable;
+                return NativePresentationOutcome::Unavailable;
             }
 
             let Some((invite_view, code_value, address_value)) =
                 invite_view(mtm, &png, &code, &address)
             else {
-                return PairingPresentationState::Unavailable;
+                watchdog.finish();
+                return NativePresentationOutcome::Unavailable;
             };
             let shown = alert(
                 mtm,
@@ -95,11 +107,14 @@ impl NativePairingUi for MacOsPairingUi {
             let response = shown.runModal();
             code_value.setStringValue(&NSString::from_str(""));
             address_value.setStringValue(&NSString::from_str(""));
+            if watchdog.finish() {
+                return NativePresentationOutcome::Refresh;
+            }
             if response == NSAlertFirstButtonReturn {
-                PairingPresentationState::Presented
+                NativePresentationOutcome::Presented
             } else {
                 abort();
-                PairingPresentationState::Unavailable
+                NativePresentationOutcome::Unavailable
             }
         })
     }
@@ -161,6 +176,10 @@ impl NativePairingUi for MacOsPairingUi {
             return None;
         }
         let sas = sas_digits(progress)?.to_owned();
+        let remaining = Duration::from_millis(progress.expires_in_ms?);
+        let Some(watchdog) = ModalDeadline::arm(remaining) else {
+            return Some(PairingDecision::Refresh);
+        };
         let copy = progress_copy(progress);
 
         Some(on_main(move |mtm| unsafe {
@@ -172,13 +191,56 @@ impl NativePairingUi for MacOsPairingUi {
             );
             let code = sas_view(mtm, &sas);
             prompt.setAccessoryView(Some(&code));
-            match prompt.runModal() {
+            let response = prompt.runModal();
+            if watchdog.finish() {
+                return PairingDecision::Refresh;
+            }
+            match response {
                 response if response == NSAlertFirstButtonReturn => PairingDecision::Accept,
                 response if response == NSAlertSecondButtonReturn => PairingDecision::Reject,
                 response if response == NSAlertThirdButtonReturn => PairingDecision::Cancel,
                 _ => PairingDecision::Cancel,
             }
         }))
+    }
+}
+
+struct ModalDeadline {
+    armed: Arc<AtomicBool>,
+    expired: Arc<AtomicBool>,
+}
+
+impl ModalDeadline {
+    fn arm(delay: Duration) -> Option<Self> {
+        if delay.is_zero() {
+            return None;
+        }
+        let armed = Arc::new(AtomicBool::new(true));
+        let expired = Arc::new(AtomicBool::new(false));
+        let timer_armed = Arc::clone(&armed);
+        let timer_expired = Arc::clone(&expired);
+        let when = DispatchTime::try_from(delay).ok()?;
+        DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+            DispatchQueueGlobalPriority::Default,
+        ))
+        .after(when, move || {
+            if !timer_armed.swap(false, Ordering::AcqRel) {
+                return;
+            }
+            timer_expired.store(true, Ordering::Release);
+            DispatchQueue::main().exec_async(|| {
+                let mtm =
+                    MainThreadMarker::new().expect("dispatch main queue runs on the main thread");
+                unsafe { NSApplication::sharedApplication(mtm).abortModal() };
+            });
+        })
+        .ok()?;
+        Some(Self { armed, expired })
+    }
+
+    fn finish(&self) -> bool {
+        self.armed.store(false, Ordering::Release);
+        self.expired.load(Ordering::Acquire)
     }
 }
 
@@ -363,4 +425,14 @@ fn on_main<T: Send>(work: impl Send + FnOnce(MainThreadMarker) -> T) -> T {
         .into_inner()
         .expect("main-thread result lock poisoned")
         .expect("main-thread closure returned a result")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn elapsed_deadline_never_opens_a_secret_surface() {
+        assert!(ModalDeadline::arm(Duration::ZERO).is_none());
+    }
 }
