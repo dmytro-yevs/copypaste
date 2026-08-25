@@ -1,4 +1,3 @@
-import json
 import os
 import pathlib
 import re
@@ -10,7 +9,6 @@ import yaml
 PLATFORMS = {"android", "macos", "windows"}
 SCENARIO_SUFFIXES = {".py", ".ps1", ".sh"}
 STATE = re.compile(r"[a-z0-9][a-z0-9_-]*\Z")
-SCRIPT_REFERENCE = re.compile(r"(?:\./)?(scripts/[A-Za-z0-9_./-]+\.(?:py|ps1|sh))")
 
 
 def repo_file(root, value):
@@ -43,6 +41,34 @@ def string_list_errors(value, label, pattern=None):
     return errors
 
 
+def receipt_expectations(document):
+    expected = {platform: [] for platform in sorted(PLATFORMS)}
+    features = document.get("features") if isinstance(document, dict) else None
+    for feature in features if isinstance(features, list) else []:
+        if not isinstance(feature, dict) or feature.get("status") != "product":
+            continue
+        feature_id = feature.get("id")
+        native = feature.get("native")
+        for platform in sorted(PLATFORMS):
+            record = native.get(platform) if isinstance(native, dict) else None
+            states = record.get("evidence_states") if isinstance(record, dict) else None
+            for state in states if isinstance(states, list) else []:
+                if isinstance(feature_id, str) and isinstance(state, str):
+                    expected[platform].append({"feature_id": feature_id, "state": state})
+    for states in expected.values():
+        states.sort(key=lambda value: (value["feature_id"], value["state"]))
+    return expected
+
+
+def receipt_expectation_tokens(document):
+    expected = receipt_expectations(document)
+    return [
+        f'{platform}:{record["feature_id"]}={record["state"]}'
+        for platform in sorted(expected)
+        for record in expected[platform]
+    ]
+
+
 def _scenario(root, value):
     if not isinstance(value, str) or not value.strip():
         raise ValueError("scenario must be an executable command")
@@ -60,26 +86,7 @@ def _scenario(root, value):
     return file, relative
 
 
-def _script_closure(root, seeds):
-    pending = list(seeds)
-    seen = {}
-    while pending:
-        relative = pending.pop()
-        key = relative.as_posix()
-        if key in seen:
-            continue
-        try:
-            file, _ = repo_file(root, key)
-            source = file.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError, ValueError):
-            continue
-        seen[key] = source
-        for match in SCRIPT_REFERENCE.finditer(source):
-            pending.append(pathlib.PurePosixPath(match.group(1)))
-    return seen
-
-
-def _workflow_contract(root):
+def workflow_contract(root):
     workflow, _ = repo_file(root, ".github/workflows/release.yml")
     try:
         document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
@@ -89,7 +96,7 @@ def _workflow_contract(root):
     if not isinstance(jobs, dict):
         raise ValueError("release workflow has no jobs")
     downloads = set()
-    for job in jobs.values():
+    for job_name, job in jobs.items():
         for step in (job or {}).get("steps") or []:
             if str(step.get("uses") or "").startswith("actions/download-artifact"):
                 name = (step.get("with") or {}).get("name")
@@ -98,12 +105,6 @@ def _workflow_contract(root):
     artifacts = {}
     for job_name, job in jobs.items():
         job = job or {}
-        job_source = json.dumps(job, sort_keys=True)
-        seeds = {
-            pathlib.PurePosixPath(match.group(1))
-            for match in SCRIPT_REFERENCE.finditer(job_source)
-        }
-        closure = _script_closure(root, seeds)
         for step in job.get("steps") or []:
             if not str(step.get("uses") or "").startswith("actions/upload-artifact"):
                 continue
@@ -122,10 +123,50 @@ def _workflow_contract(root):
                     "job": job_name,
                     "roots": roots,
                     "strict": settings.get("if-no-files-found") == "error" or name in downloads,
-                    "scripts": closure,
                 }
             )
     return artifacts
+
+
+def _run_commands(step):
+    command = str(step.get("run") or "") if isinstance(step, dict) else ""
+    for line in command.splitlines():
+        try:
+            argv = shlex.split(line.strip(), comments=True)
+        except ValueError:
+            continue
+        if argv:
+            yield argv
+
+
+def _installs_requirements(argv):
+    return (
+        argv[:4] in (["python3", "-m", "pip", "install"], ["python", "-m", "pip", "install"])
+        and "--requirement" in argv
+        and "requirements-ci.txt" in argv
+    )
+
+
+def ledger_dependency_errors(root):
+    errors = []
+    workflows = root / ".github/workflows"
+    for path in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        jobs = document.get("jobs") if isinstance(document, dict) else None
+        job_items = jobs.items() if isinstance(jobs, dict) else []
+        for job_name, job in job_items:
+            installed = False
+            for step in (job or {}).get("steps") or []:
+                for argv in _run_commands(step):
+                    installed = installed or _installs_requirements(argv)
+                    if len(argv) >= 2 and argv[1] == "scripts/check-feature-ledger.py" and not installed:
+                        errors.append(
+                            f"{path.name}/{job_name} runs feature ledger before requirements-ci.txt is installed"
+                        )
+    return errors
 
 
 def release_gate_errors(root):
@@ -138,14 +179,9 @@ def release_gate_errors(root):
     installed = False
     found = False
     for step in gate.get("steps") or []:
-        command = str(step.get("run") or "")
-        if "pip install --requirement requirements-ci.txt" in command:
-            installed = True
-        for line in command.splitlines():
-            try:
-                argv = shlex.split(line.strip())
-            except ValueError:
-                continue
+        for argv in _run_commands(step):
+            if _installs_requirements(argv):
+                installed = True
             if argv == ["python3", "scripts/check-feature-ledger.py", "--require-complete"]:
                 found = True
                 if not installed:
@@ -175,30 +211,7 @@ def _relative_to_upload(path, roots):
     return None
 
 
-def _declared_output(relative, source):
-    value = relative.as_posix()
-    if value in source:
-        return True
-    if len(relative.parts) == 1:
-        name = relative.name
-        if name in source:
-            return True
-        stem = re.escape(relative.stem)
-        suffix = re.escape(relative.suffix)
-        return bool(
-            re.search(rf"\bcapture_[a-z_]+\s+[\"']?{stem}\b", source)
-            and re.search(rf"\$1{suffix}\b", source)
-        )
-    if len(relative.parts) == 2:
-        state = re.escape(relative.parts[0])
-        return bool(
-            relative.name in source
-            and re.search(rf"\bcapture_[a-z_]+\s+[\"']?{state}\b", source)
-        )
-    return False
-
-
-def _verified_errors(feature_id, platform, record, release_evidence, uploads, scenario_path):
+def _verified_errors(feature_id, platform, record, release_evidence, uploads):
     label = f"{feature_id}: {platform}"
     errors = []
     artifact_name = record.get("release_artifact")
@@ -210,35 +223,30 @@ def _verified_errors(feature_id, platform, record, release_evidence, uploads, sc
         return [f"{label} release_artifact does not exist in release.yml"]
     if len(producers) != 1:
         return [f"{label} release_artifact has multiple producers"]
-    linked = [producer for producer in producers if scenario_path.as_posix() in producer["scripts"]]
-    if not linked:
-        return [f"{label} scenario is not wired to its release_artifact producer"]
-    if not any(producer["strict"] for producer in linked):
+    if not any(producer["strict"] for producer in producers):
         errors.append(f"{label} release_artifact may be absent without failing release")
     try:
         screenshot = _artifact_path(record.get("screenshot"), {".png"})
         accessibility = _artifact_path(record.get("ax_log"), {".json", ".log", ".txt", ".xml"})
     except ValueError as error:
         return errors + [f"{label} {error}"]
-    source = "\n".join(linked[0]["scripts"].values())
     for field, path in (("screenshot", screenshot), ("ax_log", accessibility)):
-        relative = _relative_to_upload(path, linked[0]["roots"])
+        relative = _relative_to_upload(path, producers[0]["roots"])
         if relative is None:
             errors.append(f"{label} {field} is outside the uploaded release artifact")
-        elif not _declared_output(relative, source):
-            errors.append(f"{label} {field} is not produced by the scenario")
     return errors
 
 
-def native_errors(feature, root, require_complete=False):
+def native_errors(feature, root, require_complete=False, uploads=None):
     feature_id = feature.get("id", "<missing id>")
     native = feature.get("native")
     if not isinstance(native, dict) or set(native) != PLATFORMS:
         return [f"{feature_id}: native must distinguish android, macos, and windows"], []
-    try:
-        uploads = _workflow_contract(root)
-    except ValueError as error:
-        return [str(error)], []
+    if uploads is None:
+        try:
+            uploads = workflow_contract(root)
+        except ValueError as error:
+            return [str(error)], []
     release_evidence = feature.get("release_evidence")
     release_names = {
         name for name in release_evidence if isinstance(name, str)
@@ -263,7 +271,7 @@ def native_errors(feature, root, require_complete=False):
             errors.append(f"{label} evidence_status must be verified, partial, or pending")
             continue
         try:
-            _, scenario_path = _scenario(root, record.get("scenario"))
+            _scenario(root, record.get("scenario"))
         except ValueError as error:
             errors.append(f"{label} {error}")
             continue
@@ -292,7 +300,7 @@ def native_errors(feature, root, require_complete=False):
                 errors.append(f"{label} pending evidence cannot cite unproduced artifacts")
         else:
             errors.extend(
-                _verified_errors(feature_id, platform, record, release_names, uploads, scenario_path)
+                _verified_errors(feature_id, platform, record, release_names, uploads)
             )
     for name in release_names:
         if name not in uploads:
