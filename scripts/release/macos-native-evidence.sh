@@ -98,14 +98,16 @@ if [[ "$surface_ready" != "yes" ]]; then
   exit 1
 fi
 ready_ms="$(python3 -c 'import time; print(time.time_ns() // 1000000)')"
+scenario="$(python3 scripts/release/native_evidence_policy.py value --platform macos --field scenario)"
+budget_ms="$(python3 scripts/release/native_evidence_policy.py value --platform macos --field budget_ms)"
 mac_ax surface > "$out/ax.log" 2> "$out/ax.err"
 check_accessibility_surface "$out/ax.log"
 screencapture -x "$out/screenshot.png"
-python3 - "$out/latency.json" "$((ready_ms - start_ms))" <<'PY'
+python3 - "$out/latency.json" "$scenario" "$((ready_ms - start_ms))" "$budget_ms" <<'PY'
 import json, pathlib, sys
-pathlib.Path(sys.argv[1]).write_text(json.dumps({"scenario": "native-launch", "latency_ms": int(sys.argv[2]), "budget_ms": 3000}) + "\n")
-if int(sys.argv[2]) > 3000:
-    raise SystemExit("native launch exceeded 3000 ms")
+pathlib.Path(sys.argv[1]).write_text(json.dumps({"scenario": sys.argv[2], "latency_ms": int(sys.argv[3]), "budget_ms": int(sys.argv[4])}) + "\n")
+if int(sys.argv[3]) > int(sys.argv[4]):
+    raise SystemExit("native launch exceeded its policy budget")
 PY
 
 test -s "$out/ax.log"
@@ -120,12 +122,7 @@ python3 scripts/release/write-native-evidence.py \
   --architecture "$(uname -m)" \
   --commit "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
   --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
-  --scenario native-launch \
   --elapsed-ms "$((ready_ms - start_ms))" \
-  --budget-ms 3000 \
-  --assertion "installed app launched" \
-  --assertion "native accessibility tree is non-empty" \
-  --assertion "native accessibility surface exposes a menu bar and named elements" \
   --artifact screenshot=screenshot.png \
   --artifact accessibility=ax.log \
   --artifact measurement=latency.json
