@@ -71,6 +71,45 @@ def artifact_record(root, value):
     }
 
 
+def feature_state_record(value, requirement, artifacts):
+    parts = value.split(",")
+    try:
+        feature_id, state = parts[0].split("=", 1)
+    except ValueError:
+        raise ValueError("feature state must use FEATURE_ID=STATE") from None
+    if not FEATURE_STATE_PATTERN.fullmatch(feature_id) or not FEATURE_STATE_PATTERN.fullmatch(state):
+        raise ValueError("feature state identifiers are invalid")
+    bindings = {}
+    for part in parts[1:]:
+        try:
+            kind, relative = part.split("=", 1)
+        except ValueError:
+            raise ValueError("feature state artifact must use KIND=RELATIVE_PATH") from None
+        if kind in bindings:
+            raise ValueError("feature state repeats an artifact binding")
+        bindings[kind] = relative
+    required = set(requirement["feature_state_artifacts"])
+    if set(bindings) != required:
+        raise ValueError("feature state artifact bindings contradict native evidence policy")
+    record = {"feature_id": feature_id, "state": state}
+    for kind, relative in bindings.items():
+        artifact = next(
+            (
+                candidate for candidate in artifacts
+                if candidate["kind"] == kind and candidate["path"] == relative
+            ),
+            None,
+        )
+        if artifact is None:
+            raise ValueError(f"feature state {kind} does not name a declared artifact")
+        record[kind] = {
+            "path": artifact["path"],
+            "sha256": artifact["sha256"],
+            "bytes": artifact["bytes"],
+        }
+    return record
+
+
 def main():
     args = parser().parse_args()
     requirement = PLATFORMS[args.platform]
@@ -111,18 +150,21 @@ def main():
     if missing or unexpected or duplicates:
         raise SystemExit("write-native-evidence: artifact set contradicts native evidence policy")
 
-    feature_states = []
-    for value in args.feature_state:
-        try:
-            feature_id, state = value.split("=", 1)
-        except ValueError:
-            raise SystemExit("write-native-evidence: feature state must use FEATURE_ID=STATE") from None
-        if not FEATURE_STATE_PATTERN.fullmatch(feature_id) or not FEATURE_STATE_PATTERN.fullmatch(state):
-            raise SystemExit("write-native-evidence: feature state identifiers are invalid")
-        feature_states.append({"feature_id": feature_id, "state": state})
+    try:
+        feature_states = [
+            feature_state_record(value, requirement, artifacts)
+            for value in args.feature_state
+        ]
+    except ValueError as error:
+        raise SystemExit(f"write-native-evidence: {error}") from None
     identities = {(item["feature_id"], item["state"]) for item in feature_states}
     if len(identities) != len(feature_states):
         raise SystemExit("write-native-evidence: duplicate feature state")
+    screenshot_identities = [
+        item["screenshot"]["sha256"] for item in feature_states if "screenshot" in item
+    ]
+    if len(screenshot_identities) != len(set(screenshot_identities)):
+        raise SystemExit("write-native-evidence: feature states reuse screenshot evidence")
 
     receipt = {
         "schema_version": POLICY["receipt_schema_version"],
@@ -214,6 +256,8 @@ def self_test():
                     "--artifact", f"screenshot={name}",
                     "--artifact", "accessibility=accessibility.txt",
                     "--artifact", "measurement=measurement.json",
+                    "--feature-state",
+                    f"devices=scan-pairing-code,screenshot={name},accessibility=accessibility.txt",
                 ],
                 check=False,
                 capture_output=True,
@@ -233,6 +277,8 @@ def self_test():
                 "--artifact", "screenshot=good.png",
                 "--artifact", "accessibility=accessibility.txt",
                 "--artifact", "measurement=measurement.json",
+                "--feature-state",
+                "devices=scan-pairing-code,screenshot=good.png,accessibility=accessibility.txt",
             ],
             check=False,
             capture_output=True,
@@ -240,6 +286,21 @@ def self_test():
         )
         if result.returncode == 0 or emulator_receipt.exists():
             raise SystemExit("emulator produced a physical Android publication receipt")
+        label_only_receipt = root / "label-only.json"
+        result = subprocess.run(
+            common + [
+                "--output", os.fspath(label_only_receipt),
+                "--artifact", "screenshot=good.png",
+                "--artifact", "accessibility=accessibility.txt",
+                "--artifact", "measurement=measurement.json",
+                "--feature-state", "devices=scan-pairing-code",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 or label_only_receipt.exists():
+            raise SystemExit("label-only Android feature state produced a receipt")
     print("native evidence writer self-test passed")
 
 

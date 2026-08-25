@@ -41,7 +41,7 @@ def string_list_errors(value, label, pattern=None):
     return errors
 
 
-def receipt_expectations(document):
+def receipt_expectations(document, uploads):
     expected = {platform: [] for platform in sorted(PLATFORMS)}
     features = document.get("features") if isinstance(document, dict) else None
     for feature in features if isinstance(features, list) else []:
@@ -54,19 +54,42 @@ def receipt_expectations(document):
             states = record.get("evidence_states") if isinstance(record, dict) else None
             for state in states if isinstance(states, list) else []:
                 if isinstance(feature_id, str) and isinstance(state, str):
-                    expected[platform].append({"feature_id": feature_id, "state": state})
+                    expectation = {"feature_id": feature_id, "state": state}
+                    if platform in {"android", "macos"}:
+                        producers = uploads.get(record.get("release_artifact"), [])
+                        roots = producers[0]["roots"] if len(producers) == 1 else []
+                        screenshot = _relative_to_upload(
+                            _artifact_path(record.get("screenshot"), {".png"}), roots
+                        )
+                        accessibility = _relative_to_upload(
+                            _artifact_path(record.get("ax_log"), {".json", ".log", ".txt", ".xml"}),
+                            roots,
+                        )
+                        if screenshot is None or accessibility is None:
+                            raise ValueError("feature-state evidence is outside its release artifact")
+                        expectation.update({
+                            "screenshot": screenshot.as_posix(),
+                            "accessibility": accessibility.as_posix(),
+                        })
+                    expected[platform].append(expectation)
     for states in expected.values():
         states.sort(key=lambda value: (value["feature_id"], value["state"]))
     return expected
 
 
-def receipt_expectation_tokens(document):
-    expected = receipt_expectations(document)
-    return [
-        f'{platform}:{record["feature_id"]}={record["state"]}'
-        for platform in sorted(expected)
-        for record in expected[platform]
-    ]
+def receipt_expectation_tokens(document, uploads):
+    expected = receipt_expectations(document, uploads)
+    tokens = []
+    for platform in sorted(expected):
+        for record in expected[platform]:
+            token = f'{platform}:{record["feature_id"]}={record["state"]}'
+            if platform in {"android", "macos"}:
+                token += (
+                    f',screenshot={record["screenshot"]}'
+                    f',accessibility={record["accessibility"]}'
+                )
+            tokens.append(token)
+    return tokens
 
 
 def _scenario(root, value):
