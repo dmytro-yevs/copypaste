@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Icon, type IconName } from "@/components/ui/icon";
 
 import { Inline } from "@/components/layout";
@@ -9,10 +9,6 @@ export interface InlineNoticeProps {
   children: ReactNode;
   tone?: "neutral" | "accent" | "warning" | "danger";
   icon?: IconName;
-  Icon?: ComponentType<{
-    className?: string;
-    "aria-hidden"?: boolean | "true" | "false";
-  }>;
   action?: ReactNode;
   role?: "alert" | "status";
   live?: boolean;
@@ -22,7 +18,6 @@ export function InlineNotice({
   children,
   tone = "neutral",
   icon,
-  Icon: LegacyIcon,
   action,
   role,
   live = false,
@@ -39,11 +34,7 @@ export function InlineNotice({
       <Inline gap="sm" align="center" justify="between" wrap>
         <Inline asChild gap="sm" align="center">
           <span className={styles.message}>
-            {icon ? (
-              <Icon name={icon} size="sm" className={styles.icon} />
-            ) : LegacyIcon ? (
-              <LegacyIcon aria-hidden="true" className={styles.icon} />
-            ) : null}
+            {icon ? <Icon name={icon} size="sm" className={styles.icon} /> : null}
             <span className={styles.content}>{children}</span>
           </span>
         </Inline>
