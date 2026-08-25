@@ -111,7 +111,7 @@ $$;
 do $$
 begin
     -- The eviction-order forgery of manifest 05 §5.1 row 4a, attempted against
-    -- v2's column instead of v1's.
+    -- the server-assigned retention column.
     begin
         update public.clipboard_items
            set inserted_at = now() + interval '10 years'
