@@ -9,6 +9,17 @@ license_sha256 = "e3884b252b3bfc045e55be43a34d1e80da070bc6f804ac95bf4660e97d62eb
 vendored_config = "config/gitleaks/gitleaks.toml"
 vendored_license = "config/gitleaks/LICENSE"
 generated_rust = "crates/copypaste-core/src/sensitive/rules_generated.rs"
+generated_publication_redaction = "config/sensitive-publication-redaction.json"
+publication_redaction_rules = [
+    "aws_access_key",
+    "github_classic_pat",
+    "openai_new",
+    "openai_legacy",
+    "slack_token",
+    "stripe_webhook",
+    "gitlab_pat",
+]
+publication_redaction_decision = "Published Android harness evidence is a diagnostic trust boundary. It redacts registered fixtures first, then a conservative subset of canonical detector patterns whose Rust regex syntax is also valid ECMAScript; false positives here remove diagnostic text rather than user data."
 unsupported_context_decision = "Clipboard scans have no commit or path; OR path/commit clauses can never match, and AND groups containing either are omitted whole. Rules requiring a path are rejected."
 regex_dialect_decision = "Pinned RE2 patterns must compile with Rust regex; existing Unicode shorthand behavior is retained because clipboard input is Unicode and every selected credential alphabet is otherwise ASCII-bounded."
 use_global_allowlist = false
