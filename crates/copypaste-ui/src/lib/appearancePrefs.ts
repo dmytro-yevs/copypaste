@@ -1,5 +1,6 @@
 export const APPEARANCE_SERIALIZATION = {
   storageKey: "copypaste.prefs",
+  version: 2,
   fields: ["theme", "colorTheme", "translucency"] as const,
   themes: ["system", "dark", "light"] as const,
   colorThemes: ["midnight", "aurora", "ember", "graphite"] as const,
@@ -26,6 +27,7 @@ export interface AppearancePrefs {
 
 export interface AppearanceSerialization {
   storageKey: string;
+  version: number;
   fields: readonly AppearanceField[];
   themes: readonly ThemePref[];
   colorThemes: readonly ColorTheme[];
@@ -34,19 +36,21 @@ export interface AppearanceSerialization {
   systemThemeFallback: "dark" | "light";
 }
 
-type UnwrapPersistedPrefs = (raw: unknown) => unknown;
+type ReadCurrentPrefsState = (
+  raw: unknown,
+  contract: AppearanceSerialization,
+) => unknown;
 
-/** Zustand persist wraps preferences as `{ state, version }`. */
-export const unwrapPersistedPrefs: UnwrapPersistedPrefs = function unwrapPersistedPrefs(
-  raw,
-) {
-  return typeof raw === "object" &&
+export const readCurrentPrefsState: ReadCurrentPrefsState =
+  function readCurrentPrefsState(raw, contract) {
+    return typeof raw === "object" &&
     raw !== null &&
     !Array.isArray(raw) &&
+    Reflect.get(raw, "version") === contract.version &&
     Object.prototype.hasOwnProperty.call(raw, "state")
-    ? Reflect.get(raw, "state")
-    : raw;
-};
+      ? Reflect.get(raw, "state")
+      : undefined;
+  };
 
 type ParseAppearanceFields = (
   raw: unknown,
