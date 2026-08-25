@@ -1,44 +1,20 @@
-use std::collections::BTreeSet;
-
-use winreg::enums::{
-    HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY,
-    KEY_WOW64_64KEY,
-};
+use winreg::enums::{HKEY_CLASSES_ROOT, KEY_READ};
 use winreg::RegKey;
 
 use super::{finish, CatalogUnavailable, InstalledSourceApp, Result};
 
-const APP_PATHS: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths";
 const APPLICATIONS: &str = r"Applications";
 const OWN_IMAGES: &[&str] = &["copypaste-ui.exe", "copypaste.exe", "copypaste-daemon.exe"];
 
 pub(super) fn list() -> Result<Vec<InstalledSourceApp>> {
-    let mut names = BTreeSet::new();
-    let mut readable_catalog = false;
-    for root in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
-        let root = RegKey::predef(root);
-        for view in [
-            KEY_READ,
-            KEY_READ | KEY_WOW64_32KEY,
-            KEY_READ | KEY_WOW64_64KEY,
-        ] {
-            let Ok(paths) = root.open_subkey_with_flags(APP_PATHS, view) else {
-                continue;
-            };
-            readable_catalog = true;
-            names.extend(paths.enum_keys().filter_map(std::result::Result::ok));
-        }
-    }
-    if !readable_catalog {
-        return Err(CatalogUnavailable);
-    }
+    let names = crate::source_app_icon::registry::image_names().ok_or(CatalogUnavailable)?;
 
     let apps = names
         .into_iter()
         .filter(|name| is_application_image(name))
         .filter(|name| !shell_suppresses(name))
         .filter_map(|name| {
-            crate::source_app_icon::registered_executable(&name)?;
+            crate::source_app_icon::registry::executable(&name)?;
             let label = friendly_name(&name).unwrap_or_else(|| image_label(&name));
             Some(InstalledSourceApp { id: name, label })
         })
