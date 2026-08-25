@@ -9,7 +9,6 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use super::common;
 use crate::pairing_presentation::PairingDecision;
 
-const SAS_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_PEER_TEXT_CHARS: usize = 96;
 const TIMER_ID: usize = 1;
 
@@ -18,12 +17,16 @@ struct ConfirmationCopy {
     heading: String,
     sas_digits: [char; 6],
     details: String,
+    expires_in_ms: u64,
 }
 
 pub(super) fn prompt(
     progress: &PairingProgressData,
     affinity: common::Affinity,
 ) -> Option<PairingDecision> {
+    if progress.expires_in_ms == Some(0) {
+        return Some(PairingDecision::Refresh);
+    }
     let copy = copy(progress)?;
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
@@ -39,6 +42,7 @@ pub(super) fn prompt(
 }
 
 fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult<PairingDecision> {
+    let deadline = Duration::from_millis(copy.expires_in_ms);
     let wnd = common::window("Confirm device pairing", (620, 430));
     let _heading = common::label(&wnd, &copy.heading, (24, 18), (560, 36));
     let instructions = common::label(
@@ -120,22 +124,29 @@ fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult
         let reject = reject.clone();
         let accept = accept.clone();
         let cancel = cancel.clone();
+        let details = details.clone();
+        let result = result.clone();
         move || {
-            if started.elapsed() < SAS_TIMEOUT {
+            if started.elapsed() < deadline {
                 return Ok(());
             }
             wnd.hwnd().KillTimer(TIMER_ID)?;
-            instructions.hwnd().SetWindowText(
-                "Pairing timed out. Check that both devices are on the same network and try again.",
-            )?;
+            instructions
+                .hwnd()
+                .SetWindowText("Checking pairing status…")?;
             for digit in &sas_digits {
                 digit.hwnd().SetWindowText("")?;
                 common::hide(digit.hwnd());
             }
+            details.hwnd().SetWindowText("")?;
+            common::hide(details.hwnd());
             common::hide(reject.hwnd());
             common::hide(accept.hwnd());
             cancel.hwnd().SetWindowText("&Close")?;
-            cancel.focus()?;
+            if let Ok(mut slot) = result.lock() {
+                *slot = PairingDecision::Refresh;
+            }
+            wnd.close();
             Ok(())
         }
     });
@@ -151,6 +162,7 @@ fn copy(progress: &PairingProgressData) -> Option<ConfirmationCopy> {
         return None;
     }
     let sas = progress.sas.as_deref()?;
+    let expires_in_ms = progress.expires_in_ms?;
     if sas.len() != 6 || !sas.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
@@ -166,6 +178,7 @@ fn copy(progress: &PairingProgressData) -> Option<ConfirmationCopy> {
         details: format!(
             "Unverified device details — reported by the peer, not yet confirmed\r\nName: {name}\r\nAddress: {address}"
         ),
+        expires_in_ms,
     })
 }
 
@@ -188,6 +201,7 @@ mod tests {
             pairing_id: Some("public-id".into()),
             role: Some(PairingRole::Responder),
             state: PairingState::AwaitingConfirmation,
+            expires_in_ms: Some(60_000),
             sas: Some("123456".into()),
             peer_device_id: Some("device-key-material".into()),
             peer_name: Some("Phone".into()),
@@ -203,6 +217,7 @@ mod tests {
         assert_eq!(copy.sas_digits, ['1', '2', '3', '4', '5', '6']);
         assert!(copy.details.contains("Unverified device details"));
         assert!(copy.details.contains("192.0.2.1:47654"));
+        assert_eq!(copy.expires_in_ms, 60_000);
         assert!(!copy.details.contains("device-key-material"));
     }
 
@@ -224,6 +239,9 @@ mod tests {
         assert!(copy(&value).is_none());
         value.sas = Some("123456".into());
         value.state = PairingState::TimedOut;
+        assert!(copy(&value).is_none());
+        value.state = PairingState::AwaitingConfirmation;
+        value.expires_in_ms = None;
         assert!(copy(&value).is_none());
     }
 }

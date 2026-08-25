@@ -9,8 +9,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use super::invite::{decode_native_invite, encode_native_invite};
 use super::{
-    NativeAbort, NativePairingUi, PairingDecision, PairingPresentationState, PairingPresenter,
-    ScannedPairing,
+    NativeAbort, NativePairingUi, NativePresentationOutcome, NativeRefresh, PairingDecision,
+    PairingPresentationState, PairingPresenter, ScannedPairing,
 };
 use crate::backend::{PairingBackend as _, SelectedBackend};
 
@@ -22,7 +22,10 @@ pub(crate) fn plugin() -> TauriPlugin<Wry> {
         .setup(|app, api| {
             let handle = api.register_android_plugin(PLUGIN_PACKAGE, PLUGIN_CLASS)?;
             let abort = pairing_abort(app.clone());
-            app.manage(PairingPresenter::new(AndroidPairingUi::new(handle, abort)));
+            let refresh = super::native_refresh(app.clone());
+            app.manage(PairingPresenter::new(AndroidPairingUi::new(
+                handle, abort, refresh,
+            )));
             Ok(())
         })
         .build()
@@ -41,15 +44,19 @@ fn pairing_abort(app: AppHandle) -> NativeAbort {
 struct AndroidPairingUi {
     plugin: PluginHandle<Wry>,
     abort: NativeAbort,
+    refresh: NativeRefresh,
     on_abort: Mutex<Option<Channel<()>>>,
+    on_refresh: Mutex<Option<Channel<()>>>,
 }
 
 impl AndroidPairingUi {
-    fn new(plugin: PluginHandle<Wry>, abort: NativeAbort) -> Self {
+    fn new(plugin: PluginHandle<Wry>, abort: NativeAbort, refresh: NativeRefresh) -> Self {
         Self {
             plugin,
             abort,
+            refresh,
             on_abort: Mutex::new(None),
+            on_refresh: Mutex::new(None),
         }
     }
 
@@ -77,6 +84,18 @@ impl AndroidPairingUi {
         }
         channel
     }
+
+    fn retain_refresh_channel(&self) -> Channel<()> {
+        let refresh = self.refresh.clone();
+        let channel = Channel::new(move |_| {
+            refresh();
+            Ok(())
+        });
+        if let Ok(mut slot) = self.on_refresh.lock() {
+            *slot = Some(channel.clone());
+        }
+        channel
+    }
 }
 
 #[derive(Serialize)]
@@ -86,6 +105,7 @@ struct InviteArgs<'a> {
     code: &'a str,
     expires_in_secs: u64,
     on_abort: Channel<()>,
+    on_refresh: Channel<()>,
 }
 
 #[derive(Serialize)]
@@ -101,6 +121,7 @@ struct ConfirmArgs<'a> {
     sas: &'a str,
     peer_name: Option<&'a str>,
     role: Option<copypaste_ipc::PairingRole>,
+    expires_in_ms: u64,
 }
 
 #[derive(Deserialize)]
@@ -119,6 +140,7 @@ enum Decision {
     Accept,
     Reject,
     Cancel,
+    Refresh,
 }
 
 #[derive(Deserialize)]
@@ -127,11 +149,12 @@ struct DecisionResult {
 }
 
 impl NativePairingUi for AndroidPairingUi {
-    fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState {
+    fn present_invite(&self, invite: &PairingInviteData) -> NativePresentationOutcome {
         let Some(payload) = encode_native_invite(invite) else {
-            return PairingPresentationState::Unavailable;
+            return NativePresentationOutcome::Unavailable;
         };
         let on_abort = self.retain_abort_channel();
+        let on_refresh = self.retain_refresh_channel();
         self.call::<_, PresentationResult>(
             "presentInvite",
             InviteArgs {
@@ -139,11 +162,12 @@ impl NativePairingUi for AndroidPairingUi {
                 code: &invite.code,
                 expires_in_secs: invite.expires_in_secs,
                 on_abort,
+                on_refresh,
             },
         )
         .filter(|result| result.presented)
-        .map_or(PairingPresentationState::Unavailable, |_| {
-            PairingPresentationState::Presented
+        .map_or(NativePresentationOutcome::Unavailable, |_| {
+            NativePresentationOutcome::Presented
         })
     }
 
@@ -182,18 +206,21 @@ impl NativePairingUi for AndroidPairingUi {
         if let Ok(mut slot) = self.on_abort.lock() {
             *slot = None;
         }
+        let expires_in_ms = progress.expires_in_ms?;
         let result: DecisionResult = self.call(
             "confirm",
             ConfirmArgs {
                 sas,
                 peer_name: progress.peer_name.as_deref(),
                 role: progress.role,
+                expires_in_ms,
             },
         )?;
         result.decision.map(|decision| match decision {
             Decision::Accept => PairingDecision::Accept,
             Decision::Reject => PairingDecision::Reject,
             Decision::Cancel => PairingDecision::Cancel,
+            Decision::Refresh => PairingDecision::Refresh,
         })
     }
 }
