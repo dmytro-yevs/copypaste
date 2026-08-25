@@ -11,12 +11,10 @@
 //!   ciphertext in `copypaste-core` (whose AAD begins `copypaste/v2/item-aead|`).
 //!   A blob can never be moved between the two domains and still authenticate,
 //!   even if the two keys were somehow confused.
-//! * The **schema version** is the fail-closed hinge for a future format change.
-//!   It is bound into the AAD rather than carried on the wire on purpose: a wire
-//!   field would be attacker-controlled and would need a dispatch table, which is
-//!   how v1 ended up with `key_version` and a repair sweep. Here, a v2 reader
-//!   simply cannot open a v1 row — it gets `AuthFailed` — and the migration is a
-//!   deliberate act, not a silent fallback.
+//! * The **schema version** makes the current format fail closed. It is bound
+//!   into the AAD rather than carried as an attacker-controlled dispatch field.
+//!   A row under any other value gets `AuthFailed`; there is no alternate
+//!   decoder or fallback open path.
 //! * The **`item_id`** is the cross-device logical identity. Binding it means a
 //!   row lifted out of one item and pasted into another fails authentication.
 //!   That matters more here than locally: manifest 05 §5.3 records that an
@@ -421,19 +419,19 @@ mod tests {
         // Simulate the next format: same key, same item, AAD that differs only
         // in the schema version. It must not open.
         let k = key();
-        let (nonce, ct) = encrypt_row(b"v1 row", &k, ITEM).unwrap();
+        let (nonce, ct) = encrypt_row(b"current row", &k, ITEM).unwrap();
 
         let cipher = XChaCha20Poly1305::new(Key::from_slice(k.material()));
-        let mut v2_aad = cloud_aad(ITEM);
+        let mut alternate_aad = cloud_aad(ITEM);
         // b"…|1|36:…" -> b"…|2|36:…"
         let pos = CLOUD_AAD_PREFIX.len();
-        v2_aad[pos] = b'2';
+        alternate_aad[pos] = b'2';
 
         let out = cipher.decrypt(
             XNonce::from_slice(&B64.decode(&nonce).unwrap()),
             Payload {
                 msg: &B64.decode(&ct).unwrap(),
-                aad: &v2_aad,
+                aad: &alternate_aad,
             },
         );
         assert!(out.is_err(), "a schema-version bump did not fail closed");

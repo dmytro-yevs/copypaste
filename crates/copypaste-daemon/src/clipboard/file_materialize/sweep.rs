@@ -660,7 +660,7 @@ mod tests {
         let (_parent, root) = staging_root();
         let now = SystemTime::now();
         for index in 0..5u8 {
-            write_at(&root.join(format!("legacy-{index}.txt")), now - MINUTE * 2);
+            write_at(&root.join(format!("expired-{index}.txt")), now - MINUTE * 2);
         }
 
         let mut sweeper = Sweeper::with_budget(open_root(&root), 2);
@@ -934,20 +934,20 @@ mod tests {
         let boundary = staging
             .materialize(b"boundary", &metadata("boundary.txt"))
             .unwrap();
-        let legacy_stale = staging.root().join("legacy-stale.txt");
-        fs::write(&legacy_stale, b"old layout").unwrap();
+        let ungrouped_stale = staging.root().join("ungrouped-stale.txt");
+        fs::write(&ungrouped_stale, b"stale payload").unwrap();
         let now = SystemTime::now();
         set_modified(&stale, now - Duration::from_secs(61));
         set_modified(&fresh, now - Duration::from_secs(59));
         set_modified(&boundary, now - Duration::from_secs(60));
-        set_modified(&legacy_stale, now - Duration::from_secs(61));
+        set_modified(&ungrouped_stale, now - Duration::from_secs(61));
 
         let report = staging.sweep_now(now, MINUTE);
 
         assert!(!stale.exists());
         assert!(fresh.exists());
         assert!(boundary.exists());
-        assert!(!legacy_stale.exists());
+        assert!(!ungrouped_stale.exists());
         assert_eq!(report.removed, 2, "{report:?}");
     }
 
