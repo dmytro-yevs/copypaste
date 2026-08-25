@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "features": [
     {
       "id": "history",
@@ -345,16 +345,11 @@
       "native": {
         "android": {
           "scenario": "./scripts/release/android-storage-transfer.sh",
-          "evidence_status": "partial",
-          "screenshot": "artifacts/release-android-storage/transfer-persisted.png",
-          "ax_log": "artifacts/release-android-storage/transfer-persisted.xml",
-          "evidence_states": [
-            "storage-transfer-persisted"
-          ],
+          "evidence_status": "pending",
           "unverified_states": [
+            "storage-transfer-persisted",
             "source-exclusion-catalog"
-          ],
-          "release_artifact": "release-android-storage-evidence"
+          ]
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
@@ -420,17 +415,7 @@
       ],
       "performance": {
         "android": {
-          "status": "credited",
-          "scenario": "offline-error",
-          "p95_ms": 60000,
-          "evidence": {
-            "kind": "scenario",
-            "path": "scripts/release/android-cloud-evidence.sh",
-            "executed_by": [
-              "scripts/release/android-release-emulator-legs.sh",
-              ".github/workflows/release.yml"
-            ]
-          }
+          "status": "uncredited"
         },
         "macos": {
           "status": "uncredited"
@@ -442,18 +427,15 @@
       "native": {
         "android": {
           "scenario": "./scripts/release/android-cloud-evidence.sh --all",
-          "evidence_status": "verified",
-          "screenshot": "artifacts/release-android-cloud/signed-in/screenshot.png",
-          "ax_log": "artifacts/release-android-cloud/signed-in/ax.xml",
-          "evidence_states": [
+          "evidence_status": "pending",
+          "unverified_states": [
             "unconfigured",
             "signed-out",
             "signed-in",
             "sync-with-skips",
             "offline-error",
             "signed-out-again"
-          ],
-          "release_artifact": "release-android-cloud-evidence"
+          ]
         },
         "macos": {
           "scenario": "./scripts/release/macos-cloud-evidence.sh",

@@ -26,10 +26,10 @@ before running the command. The pinned Tauri toolchain also accepts
 `crates/copypaste-ui/src-tauri/gen/android/local.properties`, which is ignored
 and must remain untracked.
 
-Performance credit is platform-specific. A credited p95 names either a JSON
-measurement artifact or a scenario with an execution chain ending in a
-workflow; a configured budget or prose report is not evidence. An unmeasured
-platform stays `uncredited` rather than borrowing another platform's number.
+Performance credit is platform-specific. A credited p95 names a JSON runtime
+measurement artifact with samples; configured budgets, source-code strings,
+and prose reports are not evidence. An unmeasured platform stays `uncredited`
+rather than borrowing another platform's number.
 
 Run `npm --prefix crates/copypaste-ui run test:native-parity` to exercise the
 fail-closed receipt gate without native hardware. Release publication requires
@@ -42,6 +42,12 @@ deliberately omit updater metadata.
 
 Incomplete records fail validation. Do not encode completion with TODOs,
 waivers, placeholders, skipped assertions, or green jobs that lack evidence.
+`evidence_status: verified` is a runtime claim, not ledger prose. Its receipt
+must list every credited state as `{feature_id, state}` under `feature_states`;
+the receipt's outer `source.commit` and `source.run_id` bind those states to the
+publication run. Missing, additional, or duplicate states fail publication.
+`python3 scripts/check-feature-ledger.py --receipt-expectations` prints the
+exact `platform:feature=state` arguments expected by the receipt gate.
 
 ## Reclaiming build artifacts
 

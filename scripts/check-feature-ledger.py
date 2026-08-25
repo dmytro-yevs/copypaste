@@ -7,17 +7,25 @@ import shlex
 import sys
 import tempfile
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
 from feature_ledger_evidence import (
     STATE,
+    ledger_dependency_errors,
     native_errors,
+    receipt_expectation_tokens,
     release_gate_errors,
     repo_file,
     string_list_errors,
+    workflow_contract,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "docs/feature-ledger.json"
+LEDGER_SCHEMA = ROOT / "docs/feature-ledger.schema.json"
 HANDLER = ROOT / "crates/copypaste-ui/src-tauri/src/lib.rs"
+COMMAND_INVENTORY = ROOT / "crates/copypaste-ui/src/generated/ui-command-inventory.json"
 FORBIDDEN = re.compile(r"\b(?:todo|tbd|waiv(?:e|ed|er)|placeholder)\b", re.I)
 CLOUD_STATES = {"unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"}
 CLOUD_RELEASE = {
@@ -38,7 +46,6 @@ REQUIRED_RELEASE = {
     "release-macos-native-evidence",
     "release-windows-native-evidence",
 }
-SCENARIO_SUFFIXES = {".py", ".ps1", ".sh"}
 TEST_RUNNERS = {"cargo", "npm", "python", "python3", "pwsh", "bash", "./gradlew"}
 
 
@@ -47,16 +54,79 @@ def fail(message):
     return 1
 
 
-def shipped_commands(source):
-    block = source.split("tauri::generate_handler![", 1)[1].split("]", 1)[0]
+def schema_errors(document, schema_file=LEDGER_SCHEMA):
+    try:
+        schema = json.loads(schema_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"feature ledger schema is unreadable: {error}"]
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as error:
+        return [f"feature ledger schema is invalid: {error.message}"]
+    errors = []
+    for error in Draft202012Validator(schema).iter_errors(document):
+        location = "/" + "/".join(str(part) for part in error.absolute_path)
+        errors.append(f"schema {location}: {error.message}")
+    return sorted(errors)
+
+
+def inventory_commands(document):
+    expected_keys = {"schema_version", "native_commands", "preview_only_commands"}
+    if not isinstance(document, dict) or set(document) != expected_keys:
+        raise ValueError("UI command inventory has an invalid envelope")
+    if document.get("schema_version") != 1:
+        raise ValueError("UI command inventory has an unsupported schema")
+    commands = document.get("native_commands")
+    preview = document.get("preview_only_commands")
+    if (
+        not isinstance(commands, list)
+        or not commands
+        or any(not isinstance(command, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", command) for command in commands)
+        or len(commands) != len(set(commands))
+        or not isinstance(preview, list)
+        or any(not isinstance(command, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", command) for command in preview)
+        or len(preview) != len(set(preview))
+        or set(commands) & set(preview)
+    ):
+        raise ValueError("UI command inventory has invalid command sets")
+    return set(commands)
+
+
+def shipped_commands(root=ROOT):
+    if COMMAND_INVENTORY.is_file():
+        try:
+            return inventory_commands(json.loads(COMMAND_INVENTORY.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            raise ValueError(str(error)) from None
+    source = (root / HANDLER.relative_to(ROOT)).read_text(encoding="utf-8")
+    try:
+        block = source.split("tauri::generate_handler![", 1)[1].split("]", 1)[0]
+    except IndexError:
+        raise ValueError("generated UI command inventory is missing") from None
     return set(re.findall(r"^\s*(?:[a-z_]+::)+([a-z_]+),", block, re.MULTILINE))
 
 
-def contract_errors(shipped, classified):
+def contract_errors(shipped, features):
     errors = []
-    duplicates = sorted({name for name in classified if classified.count(name) > 1})
-    missing = sorted(shipped - set(classified))
-    unknown = sorted(set(classified) - shipped)
+    owners = {}
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+        feature_id = feature.get("id", "<missing id>")
+        contracts = feature.get("contracts")
+        if not isinstance(contracts, list):
+            continue
+        if feature.get("status") == "removed" and contracts:
+            errors.append(f"{feature_id}: removed features cannot own shipped commands")
+            continue
+        if feature.get("status") != "product":
+            continue
+        for command in contracts:
+            if isinstance(command, str):
+                owners.setdefault(command, []).append(feature_id)
+    duplicates = sorted(command for command, command_owners in owners.items() if len(command_owners) != 1)
+    missing = sorted(shipped - set(owners))
+    unknown = sorted(set(owners) - shipped)
     if duplicates:
         errors.append("contracts classified more than once: " + ", ".join(duplicates))
     if missing:
@@ -64,6 +134,12 @@ def contract_errors(shipped, classified):
     if unknown:
         errors.append("ledger contracts not shipped: " + ", ".join(unknown))
     return errors
+
+
+def feature_id_errors(features):
+    feature_ids = [feature.get("id") for feature in features if isinstance(feature, dict)]
+    valid_feature_ids = [feature_id for feature_id in feature_ids if isinstance(feature_id, str)]
+    return ["feature ids must be unique"] if len(valid_feature_ids) != len(set(valid_feature_ids)) else []
 
 
 def cloud_errors(feature, root=ROOT):
@@ -152,51 +228,6 @@ def artifact_errors(root, platform, credit, evidence):
     return [] if held else [message]
 
 
-def scenario_errors(root, platform, credit, evidence):
-    errors = []
-    try:
-        producer, producer_path = repo_file(root, evidence.get("path"))
-    except ValueError as error:
-        return [str(error)]
-    if producer.suffix.lower() not in SCENARIO_SUFFIXES:
-        errors.append("reproducible evidence must be an executable scenario, not prose")
-        return errors
-    source = producer.read_text(encoding="utf-8")
-    scenario = re.escape(credit["scenario"])
-    p95_ms = credit["p95_ms"]
-    if not any(re.search(rf"\b{scenario}\b.*\b{p95_ms}\b", line) for line in source.splitlines()):
-        errors.append("scenario no longer records the credited p95")
-    platform_patterns = (
-        rf"--platform\s+[\"']?{platform}\b",
-        rf"cloud_latency_write[^\n]*\b{platform}\b",
-    )
-    if not any(re.search(pattern, source) for pattern in platform_patterns):
-        errors.append("scenario records evidence for the wrong platform")
-
-    execution = evidence.get("executed_by")
-    if not isinstance(execution, list) or not execution:
-        errors.append("scenario has no release execution chain")
-        return errors
-    invoked = producer_path
-    final = None
-    for value in execution:
-        try:
-            wiring, wiring_path = repo_file(root, value)
-        except ValueError as error:
-            errors.append(str(error))
-            return errors
-        body = wiring.read_text(encoding="utf-8")
-        target = invoked.as_posix()
-        if target not in body and f"./{target}" not in body:
-            errors.append(f"{value} does not execute {target}")
-            return errors
-        invoked = wiring_path
-        final = wiring_path
-    if final is None or final.suffix.lower() not in {".yml", ".yaml"} or final.parts[:2] != (".github", "workflows"):
-        errors.append("scenario execution chain does not end in a workflow")
-    return errors
-
-
 def performance_errors(feature, root=ROOT):
     feature_id = feature.get("id", "<missing id>")
     performance = feature.get("performance")
@@ -226,12 +257,10 @@ def performance_errors(feature, root=ROOT):
             errors.append(f"{label} evidence is missing")
             continue
         kind = evidence.get("kind")
-        expected = {"kind", "path"} if kind == "artifact" else {"kind", "path", "executed_by"}
-        if kind not in {"artifact", "scenario"} or set(evidence) != expected:
-            errors.append(f"{label} evidence must be an artifact or executed scenario")
+        if kind != "artifact" or set(evidence) != {"kind", "path"}:
+            errors.append(f"{label} evidence must be a runtime measurement artifact")
             continue
-        validator = artifact_errors if kind == "artifact" else scenario_errors
-        errors.extend(f"{label}: {message}" for message in validator(root, platform, credit, evidence))
+        errors.extend(f"{label}: {message}" for message in artifact_errors(root, platform, credit, evidence))
     return errors
 
 
@@ -282,7 +311,7 @@ def feature_shape_errors(feature, root=ROOT):
     return errors
 
 
-def platform_errors(feature, root=ROOT, require_complete=False):
+def platform_errors(feature, root=ROOT, require_complete=False, uploads=None):
     feature_id = feature.get("id", "<missing id>")
     errors = []
     values = feature.get("release_evidence", [])
@@ -290,27 +319,28 @@ def platform_errors(feature, root=ROOT, require_complete=False):
     missing_release = sorted(REQUIRED_RELEASE - release_evidence)
     if missing_release:
         errors.append(f"{feature_id}: release evidence missing {', '.join(missing_release)}")
-    native, pending = native_errors(feature, root, require_complete)
+    native, pending = native_errors(feature, root, require_complete, uploads)
     errors.extend(native)
     errors.extend(performance_errors(feature, root))
     return errors, pending
 
 
 def self_test():
+    def inventory_fails(document):
+        try:
+            inventory_commands(document)
+        except ValueError:
+            return True
+        return False
+
+    checks = []
     with tempfile.TemporaryDirectory() as directory:
         root = pathlib.Path(directory)
-        (root / "scripts").mkdir()
-        (root / ".github/workflows").mkdir(parents=True)
         for platform in PERFORMANCE_PLATFORMS:
-            producer = root / f"scripts/{platform}.sh"
-            producer.write_text(
-                f'cloud_latency_record "$OUT" ready "$elapsed" 42\n'
-                f'cloud_latency_write "$OUT" "$OUT/latency.json" {platform}\n',
+            artifact = {"platform": platform, "scenario": "ready", "p95_ms": 42, "samples_ms": [40, 42]}
+            (root / f"{platform}.json").write_text(
+                json.dumps(artifact),
                 encoding="utf-8",
-            )
-            producer.chmod(0o755)
-            (root / f".github/workflows/{platform}.yml").write_text(
-                f"run: ./scripts/{platform}.sh\n", encoding="utf-8"
             )
         feature = {
             "id": "fixture",
@@ -319,11 +349,7 @@ def self_test():
                     "status": "credited",
                     "scenario": "ready",
                     "p95_ms": 42,
-                    "evidence": {
-                        "kind": "scenario",
-                        "path": f"scripts/{platform}.sh",
-                        "executed_by": [f".github/workflows/{platform}.yml"],
-                    },
+                    "evidence": {"kind": "artifact", "path": f"{platform}.json"},
                 }
                 for platform in PERFORMANCE_PLATFORMS
             },
@@ -331,28 +357,29 @@ def self_test():
         def rejects(probe, message):
             return any(message in error for error in performance_errors(probe, root))
 
-        checks = [("valid reproducible evidence passes", not performance_errors(feature, root))]
+        checks.append(("valid runtime measurement artifacts pass", not performance_errors(feature, root)))
         probe = copy.deepcopy(feature)
-        probe["performance"]["android"]["evidence"]["path"] = "scripts/missing.sh"
+        probe["performance"]["android"]["evidence"]["path"] = "missing.json"
         checks.append(("a missing evidence file fails", rejects(probe, "does not exist")))
         probe = copy.deepcopy(feature)
         probe["performance"]["android"]["scenario"] = "stale"
-        checks.append(("a stale scenario fails", rejects(probe, "no longer records")))
+        checks.append(("a stale scenario fails", rejects(probe, "matching measured")))
         probe = copy.deepcopy(feature)
-        probe["performance"]["android"]["evidence"]["path"] = "scripts/macos.sh"
+        probe["performance"]["android"]["evidence"]["path"] = "macos.json"
         checks.append(("evidence from the wrong platform fails", rejects(probe, "wrong platform")))
         probe = copy.deepcopy(feature)
         probe["performance"]["android"]["p95_ms"] = 0
         checks.append(("a nonpositive p95 fails", rejects(probe, "positive integer")))
-        (root / ".github/workflows/android.yml").write_text("run: echo configured\n", encoding="utf-8")
-        checks.append(("an unexecuted scenario fails", rejects(feature, "does not execute")))
-        for platform in PERFORMANCE_PLATFORMS:
-            artifact = {"platform": platform, "scenario": "ready", "p95_ms": 42, "samples_ms": [40, 42]}
-            (root / f"{platform}.json").write_text(json.dumps(artifact), encoding="utf-8")
-            feature["performance"][platform]["evidence"] = {
-                "kind": "artifact", "path": f"{platform}.json"
-            }
-        checks.append(("valid measurement artifacts pass", not performance_errors(feature, root)))
+        probe = copy.deepcopy(feature)
+        probe["performance"]["android"]["evidence"] = {
+            "kind": "scenario",
+            "path": "scripts/commented-or-inert.sh",
+            "executed_by": [".github/workflows/inert.yml"],
+        }
+        checks.append((
+            "source strings cannot stand in for runtime measurements",
+            rejects(probe, "runtime measurement artifact"),
+        ))
         (root / "android.json").write_text(
             json.dumps({"platform": "android", "scenario": "ready", "p95_ms": 42}),
             encoding="utf-8",
@@ -437,6 +464,43 @@ def self_test():
             return any(message in error for error in platform_errors(probe, root, complete)[0])
 
         checks.append(("all three shipped platform records pass", not platform_errors(product, root)[0]))
+        producer_jobs = {
+            name: records[0]["job"]
+            for name, records in workflow_contract(root).items()
+        }
+        checks.append((
+            "artifact provenance retains the producing workflow job",
+            producer_jobs == {
+                "release-android-smoke-evidence": "android",
+                "release-macos-native-evidence": "macos",
+                "release-windows-native-evidence": "windows",
+            },
+        ))
+        workflow = root / ".github/workflows/release.yml"
+        workflow_source = workflow.read_text(encoding="utf-8")
+        windows_upload = (
+            "      - uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: release-windows-native-evidence\n"
+            "          path: artifacts/windows\n"
+            "          if-no-files-found: error\n"
+        )
+        workflow.write_text(
+            workflow_source.replace(
+                windows_upload,
+                "".join(f"# {line}" for line in windows_upload.splitlines(keepends=True)),
+            ),
+            encoding="utf-8",
+        )
+        checks.append((
+            "commented artifact declarations do not create evidence",
+            platform_rejects(product, "does not exist"),
+        ))
+        workflow.write_text(workflow_source, encoding="utf-8")
+        probe = copy.deepcopy(product)
+        probe["native"]["windows"]["evidence_status"] = "partial"
+        probe["native"]["windows"]["unverified_states"] = ["ready"]
+        checks.append(("verified and unverified native states cannot overlap", platform_rejects(probe, "overlap")))
         probe = copy.deepcopy(product)
         del probe["native"]["windows"]
         checks.append(("a missing Windows platform fails", platform_rejects(probe, "must distinguish")))
@@ -446,9 +510,6 @@ def self_test():
         probe = copy.deepcopy(product)
         probe["native"]["windows"]["screenshot"] = "artifacts/generic/screenshot.png"
         checks.append(("an artifact outside its upload fails", platform_rejects(probe, "outside the uploaded")))
-        probe = copy.deepcopy(product)
-        probe["native"]["windows"]["ax_log"] = "artifacts/windows/invented.json"
-        checks.append(("an unproduced artifact path fails", platform_rejects(probe, "not produced")))
         probe = copy.deepcopy(product)
         probe["native"]["windows"]["scenario"] = "manual evidence review"
         checks.append(("prose-only platform evidence fails", platform_rejects(probe, "does not exist")))
@@ -474,12 +535,31 @@ def self_test():
         del probe["performance"]["windows"]
         checks.append(("missing Windows performance record fails", platform_rejects(probe, "android, macos, and windows")))
         checks.append(("release requires complete feature evidence", not release_gate_errors(root)))
-        workflow = root / ".github/workflows/release.yml"
-        workflow.write_text(
-            workflow.read_text(encoding="utf-8").replace(" --require-complete", ""),
+        nightly = root / ".github/workflows/native-nightly.yml"
+        nightly.write_text(
+            "jobs:\n  ledger:\n    steps:\n      - run: python3 scripts/check-feature-ledger.py\n",
             encoding="utf-8",
         )
-        checks.append(("a prose-only release ledger check fails", bool(release_gate_errors(root))))
+        checks.append((
+            "workflow ledger checks require declared Python dependencies",
+            bool(ledger_dependency_errors(root)),
+        ))
+        nightly.write_text(
+            "jobs:\n  ledger:\n    steps:\n"
+            "      - run: python3 -m pip install --requirement requirements-ci.txt\n"
+            "      - run: python3 scripts/check-feature-ledger.py\n",
+            encoding="utf-8",
+        )
+        checks.append(("installed workflow ledger dependencies pass", not ledger_dependency_errors(root)))
+        workflow.write_text(
+            workflow.read_text(encoding="utf-8").replace(
+                "      - run: python3 scripts/check-feature-ledger.py --require-complete\n",
+                "      # run: python3 scripts/check-feature-ledger.py --require-complete\n"
+                "      - run: echo 'python3 scripts/check-feature-ledger.py --require-complete'\n",
+            ),
+            encoding="utf-8",
+        )
+        checks.append(("commented and inert release commands do not execute the gate", bool(release_gate_errors(root))))
     shape = {
         "id": "fixture",
         "contracts": ["status"],
@@ -496,14 +576,72 @@ def self_test():
     probe = copy.deepcopy(shape)
     probe["accessibility_states"] = []
     checks.append(("empty accessibility coverage fails", bool(feature_shape_errors(probe))))
-    handler = """tauri::generate_handler![
-        commands::history::copy_item,
-        updater::update_status,
-    ]"""
-    shipped = shipped_commands(handler)
-    checks.append(("sibling-module Tauri commands are extracted", shipped == {"copy_item", "update_status"}))
-    checks.append(("an omitted sibling-module command fails", any("update_status" in error for error in contract_errors(shipped, ["copy_item"]))))
-    checks.append(("a misclassified sibling-module command fails", bool(contract_errors(shipped, ["copy_item", "update_state"]))))
+    shipped = inventory_commands({
+        "schema_version": 1,
+        "native_commands": ["copy_item", "update_status"],
+        "preview_only_commands": [],
+    })
+    checks.append(("generated native commands are extracted", shipped == {"copy_item", "update_status"}))
+    checks.append((
+        "malformed and overlapping generated command inventories fail",
+        all(
+            inventory_fails(document)
+            for document in [
+                {"schema_version": 1, "native_commands": [], "preview_only_commands": []},
+                {"schema_version": 2, "native_commands": ["copy_item"], "preview_only_commands": []},
+                {"schema_version": 1, "native_commands": ["copy_item"], "preview_only_commands": ["copy_item"]},
+            ]
+        ),
+    ))
+    owner = {"id": "fixture", "status": "product", "contracts": ["copy_item", "update_status"]}
+    checks.append(("one product owner per shipped command passes", not contract_errors(shipped, [owner])))
+    probe = copy.deepcopy(owner)
+    probe["contracts"].remove("update_status")
+    checks.append((
+        "an omitted generated command fails",
+        any("update_status" in error for error in contract_errors(shipped, [probe])),
+    ))
+    duplicate = {"id": "duplicate", "status": "product", "contracts": ["copy_item"]}
+    checks.append((
+        "duplicate product ownership fails",
+        any("copy_item" in error for error in contract_errors(shipped, [owner, duplicate])),
+    ))
+    removed = {"id": "removed", "status": "removed", "contracts": ["copy_item"]}
+    checks.append((
+        "removed features cannot own commands",
+        any("removed features" in error for error in contract_errors(shipped, [owner, removed])),
+    ))
+    ledger_document = json.loads(LEDGER.read_text(encoding="utf-8"))
+    checks.append(("the ledger conforms to its schema", not schema_errors(ledger_document)))
+    removed_document = {"schema_version": 3, "features": [removed]}
+    checks.append(("the schema rejects command ownership by removed features", bool(schema_errors(removed_document))))
+    checks.append(("a non-object ledger fails schema validation", bool(schema_errors([]))))
+    checks.append((
+        "duplicate feature ids fail",
+        bool(feature_id_errors([owner, {"id": "fixture", "status": "removed", "contracts": []}])),
+    ))
+    receipt_fixture = {
+        "features": [
+            {
+                "id": "fixture",
+                "status": "product",
+                "native": {
+                    "android": {"evidence_states": ["ready"]},
+                    "macos": {"unverified_states": ["ready"]},
+                    "windows": {"evidence_states": ["ready", "offline"]},
+                },
+            },
+            {"id": "old", "status": "removed", "native": {"android": {"evidence_states": ["stale"]}}},
+        ]
+    }
+    checks.append((
+        "receipt expectations contain only registered verified product states",
+        receipt_expectation_tokens(receipt_fixture) == [
+            "android:fixture=ready",
+            "windows:fixture=offline",
+            "windows:fixture=ready",
+        ],
+    ))
     for description, held in checks:
         print(f"{'PASS' if held else 'FAIL'}|self-test: {description}|")
     return 0 if all(held for _, held in checks) else 1
@@ -512,6 +650,10 @@ def self_test():
 def main():
     if "--self-test" in sys.argv:
         return self_test()
+    allowed_arguments = {"--require-complete", "--receipt-expectations"}
+    unknown_arguments = set(sys.argv[1:]) - allowed_arguments
+    if unknown_arguments:
+        return fail("unknown arguments: " + ", ".join(sorted(unknown_arguments)))
     require_complete = "--require-complete" in sys.argv
     raw = LEDGER.read_text(encoding="utf-8")
     if FORBIDDEN.search(raw):
@@ -520,40 +662,38 @@ def main():
         document = json.loads(raw)
     except json.JSONDecodeError as error:
         return fail(str(error))
-    if document.get("schema_version") != 2:
-        return fail("unsupported schema_version")
-
-    shipped = shipped_commands(HANDLER.read_text(encoding="utf-8"))
-    classified = []
-    errors = []
+    if not isinstance(document, dict):
+        return fail("\nfeature-ledger: ".join(schema_errors(document)))
+    errors = schema_errors(document)
+    try:
+        shipped = shipped_commands()
+    except (OSError, ValueError) as error:
+        shipped = set()
+        errors.append(str(error))
     pending = []
     errors.extend(release_gate_errors(ROOT))
-    required = {
-        "contracts", "backend_tests", "ui_tests", "accessibility_states", "failure_states",
-        "performance", "native", "release_evidence",
-    }
+    errors.extend(ledger_dependency_errors(ROOT))
+    try:
+        uploads = workflow_contract(ROOT)
+    except ValueError as error:
+        uploads = {}
+        errors.append(str(error))
     features = document.get("features")
     if not isinstance(features, list) or not features:
         return fail("features must be a nonempty list")
-    feature_ids = [feature.get("id") for feature in features if isinstance(feature, dict)]
-    valid_feature_ids = [feature_id for feature_id in feature_ids if isinstance(feature_id, str)]
-    if len(valid_feature_ids) != len(set(valid_feature_ids)):
-        errors.append("feature ids must be unique")
+    errors.extend(feature_id_errors(features))
     for feature in features:
         if not isinstance(feature, dict):
             errors.append("feature records must be objects")
             continue
         feature_id = feature.get("id", "<missing id>")
-        missing = sorted(required - feature.keys())
-        if missing:
-            errors.append(f"{feature_id}: missing {', '.join(missing)}")
-        if feature.get("status") not in {"product", "removed"}:
-            errors.append(f"{feature_id}: status must be product or removed")
-        errors.extend(feature_shape_errors(feature))
-        if isinstance(feature.get("contracts"), list):
-            classified.extend(contract for contract in feature["contracts"] if isinstance(contract, str))
         if feature.get("status") == "product":
-            native, feature_pending = platform_errors(feature, require_complete=require_complete)
+            errors.extend(feature_shape_errors(feature))
+            native, feature_pending = platform_errors(
+                feature,
+                require_complete=require_complete,
+                uploads=uploads,
+            )
             errors.extend(native)
             pending.extend(feature_pending)
             for state in ("restart", "offline"):
@@ -562,9 +702,13 @@ def main():
             if feature_id == "cloud-account":
                 errors.extend(cloud_errors(feature))
 
-    errors.extend(contract_errors(shipped, classified))
+    errors.extend(contract_errors(shipped, features))
     if errors:
         return fail("\nfeature-ledger: ".join(errors))
+    if "--receipt-expectations" in sys.argv:
+        for token in receipt_expectation_tokens(document):
+            print(token)
+        return 0
     if pending:
         print(f"feature-ledger: PENDING native evidence: {', '.join(sorted(pending))}")
     print(f"feature-ledger: {len(features)} features, {len(shipped)} Tauri commands classified")
