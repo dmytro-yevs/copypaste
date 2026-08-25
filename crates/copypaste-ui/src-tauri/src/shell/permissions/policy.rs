@@ -1,6 +1,24 @@
 //! Maps OS facts onto the onboarding row. Kept free of `cfg` so Linux CI owns it.
 
 use super::model::PermissionStatus;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AndroidNotificationFacts {
+    pub api_level: u32,
+    pub granted: bool,
+    pub ever_asked: bool,
+    pub show_rationale: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AndroidTileFacts {
+    pub api_level: u32,
+    pub last_add_result: Option<i32>,
+    pub result_constants: TileAddResultConstants,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Authorization {
@@ -43,18 +61,49 @@ pub fn android_notification_authorization(
     }
 }
 
-/// `StatusBarManager.requestAddTileService` result codes (API 33).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TileAddResultConstants {
+    pub not_added: i32,
+    pub already_added: i32,
+    pub added: i32,
+}
+
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub fn tile_status_from_add_result(result: i32) -> PermissionStatus {
-    match result {
-        1 | 2 => PermissionStatus::Granted,
-        _ => PermissionStatus::Denied,
+pub fn android_tile_status(
+    api_level: u32,
+    last_add_result: Option<i32>,
+    constants: TileAddResultConstants,
+) -> PermissionStatus {
+    if api_level < 33 {
+        return PermissionStatus::Unavailable;
+    }
+    match last_add_result {
+        None => PermissionStatus::Prompt,
+        Some(result) if result == constants.added || result == constants.already_added => {
+            PermissionStatus::Granted
+        }
+        Some(result) if result == constants.not_added => PermissionStatus::Denied,
+        Some(_) => PermissionStatus::Denied,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TILE_RESULTS: TileAddResultConstants = TileAddResultConstants {
+        not_added: 0,
+        already_added: 1,
+        added: 2,
+    };
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BridgeFixture {
+        notification_facts: AndroidNotificationFacts,
+        tile_facts: AndroidTileFacts,
+    }
 
     #[test]
     fn optional_rows_never_become_required() {
@@ -73,33 +122,76 @@ mod tests {
     }
 
     #[test]
-    fn first_android_13_ask_is_a_prompt_even_without_rationale() {
-        assert_eq!(
-            android_notification_authorization(33, false, false, false),
-            Authorization::NotDetermined
-        );
+    fn android_api_policy_matrix() {
+        for api_level in [24, 29] {
+            assert_eq!(
+                android_notification_authorization(api_level, false, false, false),
+                Authorization::NotRequired
+            );
+            assert_eq!(
+                android_tile_status(api_level, None, TILE_RESULTS),
+                PermissionStatus::Unavailable
+            );
+        }
+
+        for api_level in [33, 34, 36] {
+            assert_eq!(
+                android_notification_authorization(api_level, false, false, false),
+                Authorization::NotDetermined
+            );
+            assert_eq!(
+                android_notification_authorization(api_level, false, true, false),
+                Authorization::Denied
+            );
+            assert_eq!(
+                android_notification_authorization(api_level, false, true, true),
+                Authorization::NotDetermined
+            );
+            assert_eq!(
+                android_notification_authorization(api_level, true, true, false),
+                Authorization::Granted
+            );
+            assert_eq!(
+                android_tile_status(api_level, None, TILE_RESULTS),
+                PermissionStatus::Prompt
+            );
+            assert_eq!(
+                android_tile_status(api_level, Some(TILE_RESULTS.not_added), TILE_RESULTS),
+                PermissionStatus::Denied
+            );
+            assert_eq!(
+                android_tile_status(api_level, Some(i32::MAX), TILE_RESULTS),
+                PermissionStatus::Denied
+            );
+            for result in [TILE_RESULTS.already_added, TILE_RESULTS.added] {
+                assert_eq!(
+                    android_tile_status(api_level, Some(result), TILE_RESULTS),
+                    PermissionStatus::Granted
+                );
+            }
+        }
     }
 
     #[test]
-    fn a_permanent_android_denial_is_denied() {
+    fn rust_consumes_androids_permission_fact_fixture() {
+        let fixture: BridgeFixture = serde_json::from_str(include_str!(
+            "../../../gen/android/app/src/test/resources/capture-bridge-contract.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture.notification_facts.api_level, 36);
+        assert!(fixture.notification_facts.granted);
+        assert!(fixture.notification_facts.ever_asked);
+        assert!(!fixture.notification_facts.show_rationale);
+        assert_eq!(fixture.tile_facts.api_level, 36);
+        assert_eq!(fixture.tile_facts.last_add_result, Some(2));
+        assert_eq!(fixture.tile_facts.result_constants, TILE_RESULTS);
         assert_eq!(
-            android_notification_authorization(33, false, true, false),
-            Authorization::Denied
+            android_tile_status(
+                fixture.tile_facts.api_level,
+                fixture.tile_facts.last_add_result,
+                fixture.tile_facts.result_constants,
+            ),
+            PermissionStatus::Granted
         );
-    }
-
-    #[test]
-    fn pre_tiramisu_has_no_notification_prompt() {
-        assert_eq!(
-            android_notification_authorization(32, false, false, false),
-            Authorization::NotRequired
-        );
-    }
-
-    #[test]
-    fn already_added_tiles_count_as_granted() {
-        assert_eq!(tile_status_from_add_result(1), PermissionStatus::Granted);
-        assert_eq!(tile_status_from_add_result(2), PermissionStatus::Granted);
-        assert_eq!(tile_status_from_add_result(0), PermissionStatus::Denied);
     }
 }
