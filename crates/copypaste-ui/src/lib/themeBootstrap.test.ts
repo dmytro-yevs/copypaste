@@ -6,6 +6,7 @@ import { minifySync } from "vite";
 
 import {
   APPEARANCE_SERIALIZATION,
+  parseAppearanceFields,
   translucencyAttribute,
   unwrapPersistedPrefs,
 } from "@/lib/appearancePrefs";
@@ -85,6 +86,27 @@ describe("appearance bootstrap artifact", () => {
       expect(scriptPolicy).not.toContain("'unsafe-eval'");
     }
   });
+
+  it("serializes only the current appearance fields", () => {
+    expect(APPEARANCE_SERIALIZATION.fields).toEqual([
+      "theme",
+      "colorTheme",
+      "translucency",
+    ]);
+    expect(Object.keys(APPEARANCE_SERIALIZATION.defaults)).toEqual(
+      APPEARANCE_SERIALIZATION.fields,
+    );
+
+    const invalid: string[] = [];
+    expect(
+      parseAppearanceFields(
+        { accent: "teal", translucency: 65 },
+        APPEARANCE_SERIALIZATION,
+        (field) => invalid.push(field),
+      ),
+    ).toEqual(APPEARANCE_SERIALIZATION.defaults);
+    expect(invalid).toEqual(["translucency"]);
+  });
 });
 
 describe("first-frame ordering (INV-22 / AT-49)", () => {
@@ -99,7 +121,7 @@ describe("first-frame ordering (INV-22 / AT-49)", () => {
 
     setMatchMedia(false);
     const dataset = runBootstrap({
-      state: { theme: "light", colorTheme: "ember", accent: "amber", translucency: 65 },
+      state: { theme: "light", colorTheme: "ember", translucency: true },
       version: 0,
     });
     expect(dataset).toMatchObject({
@@ -119,12 +141,11 @@ describe("bootstrap/runtime schema parity", () => {
       undefined,
       ...APPEARANCE_SERIALIZATION.themes.map((theme) => ({ state: { theme }, version: 0 })),
       ...APPEARANCE_SERIALIZATION.colorThemes.map((colorTheme) => ({ colorTheme })),
-      { state: { accent: "teal" }, version: 0 },
       { translucency: 0 },
       { translucency: 65 },
       { translucency: true },
       { translucency: false },
-      { state: { theme: "chartreuse", colorTheme: "aurora", accent: "teal", translucency: 1 }, version: 0 },
+      { state: { theme: "chartreuse", colorTheme: "aurora", translucency: 1 }, version: 0 },
     ];
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -151,7 +172,7 @@ describe("bootstrap/runtime schema parity", () => {
   });
 
   it("selects token-backed translucency without writing inline design values", () => {
-    runBootstrap({ state: { translucency: 50 }, version: 0 });
+    runBootstrap({ state: { translucency: true }, version: 0 });
     expect(document.documentElement.dataset.translucency).toBe("on");
     expect(document.documentElement.style.getPropertyValue("--translucency-blur")).toBe("");
   });
