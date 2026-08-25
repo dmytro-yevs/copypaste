@@ -29,6 +29,9 @@ pub struct Source {
     pub vendored_config: String,
     pub vendored_license: String,
     pub generated_rust: String,
+    pub generated_publication_redaction: String,
+    pub publication_redaction_rules: Vec<String>,
+    pub publication_redaction_decision: String,
     pub unsupported_context_decision: String,
     pub regex_dialect_decision: String,
     #[serde(default)]

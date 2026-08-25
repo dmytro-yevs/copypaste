@@ -60,9 +60,16 @@ fn generate(root: &Path) -> Result<()> {
         &root.join(&inputs.selection.source.generated_rust),
         output.as_bytes(),
     )?;
+    let redaction = render::render_publication_redaction(&inputs)?;
+    write_atomic(
+        &root.join(&inputs.selection.source.generated_publication_redaction),
+        redaction.as_bytes(),
+    )?;
     println!(
-        "generated {} from Gitleaks {}",
-        inputs.selection.source.generated_rust, inputs.selection.source.release
+        "generated {} and {} from Gitleaks {}",
+        inputs.selection.source.generated_rust,
+        inputs.selection.source.generated_publication_redaction,
+        inputs.selection.source.release
     );
     Ok(())
 }
@@ -78,7 +85,17 @@ fn check(root: &Path) -> Result<()> {
             path.display()
         );
     }
-    println!("Gitleaks snapshot checksum and generated rules are current");
+    let expected_redaction = render::render_publication_redaction(&inputs)?;
+    let redaction_path = root.join(&inputs.selection.source.generated_publication_redaction);
+    let actual_redaction = fs::read_to_string(&redaction_path)
+        .with_context(|| format!("read {}", redaction_path.display()))?;
+    if actual_redaction != expected_redaction {
+        bail!(
+            "{} is stale; run cargo run -p copypaste-sensitive-rules -- generate",
+            redaction_path.display()
+        );
+    }
+    println!("Gitleaks snapshot, generated rules and publication redaction are current");
     Ok(())
 }
 
@@ -128,6 +145,7 @@ mod tests {
         assert!(inputs.global_allowlists.is_empty());
         assert_eq!(inputs.selected_ids.len(), 27);
         assert_eq!(inputs.rules.len(), 49);
+        assert_eq!(inputs.selection.source.publication_redaction_rules.len(), 7);
         // Two rules carry gitleaks' 1,446-entry placeholder vocabulary, and
         // spelled out at each site it is 1,446 lines of duplicate table. This
         // stopword is unique to that list, so one occurrence means one copy.
@@ -143,6 +161,10 @@ mod tests {
         assert_eq!(
             render_generated(&inputs).unwrap(),
             render_generated(&inputs).unwrap()
+        );
+        assert_eq!(
+            render::render_publication_redaction(&inputs).unwrap(),
+            render::render_publication_redaction(&inputs).unwrap()
         );
     }
 }
