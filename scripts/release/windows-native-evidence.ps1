@@ -422,7 +422,10 @@ try {
         Invoke-UiaNamedControl $app "History" "Clipboard history"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history"
         Invoke-UiaNamedControl $app "Devices" "Ready to pair"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "ready-to-pair" "Ready to pair"
+        Invoke-UiaNamedControl $app "Connect a device" "Enter pairing code"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "desktop-pairing-entry" "Enter pairing code"
+        [Windows.Forms.SendKeys]::SendWait("{ESC}")
+        Wait-UiaName $app "Ready to pair" | Out-Null
         Invoke-UiaNamedControl $app "Settings" "Theme"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Theme"
         $updateText = if ($ExpectedSignature -eq "Valid") { "Check for updates" } else { "Updates aren't configured in this build." }
@@ -431,8 +434,9 @@ try {
         $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" $updateState $updateText $updateState
         Invoke-UiaNamedControl $app "Service" "Background capture"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "service-capture-status" "Background capture"
-        Invoke-UiaNamedControl $app "Sync" "Not configured"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "not-configured" "Not configured"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "copy-feedback-setting" "Copy feedback sound" "copy-feedback-setting"
+        Invoke-UiaNamedControl $app "Sync" "Cloud server configuration"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured" "Cloud server configuration"
         Write-WindowsFeatureManifest $evidencePath $featureStates
         Invoke-UiaNamedControl $app "List" "Allow screenshots"
         Set-UiaScreenshots $app $false

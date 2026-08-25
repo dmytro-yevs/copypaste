@@ -21,6 +21,8 @@ set -uo pipefail
 
 # shellcheck source=scripts/release/android-smoke-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
+# shellcheck source=scripts/release/android-ui-evidence-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-ui-evidence-lib.sh"
 
 APK="${APK:-}"
 MAIN="$PKG/$APP_NAMESPACE.MainActivity"
@@ -43,7 +45,7 @@ abi="$(sh_ getprop ro.product.cpu.abi)"
 printf '  device: API %s, %s\n' "$sdk" "$abi"
 
 [[ -f "$APK" ]] || { echo "  FATAL APK not found at '${APK:-<unset>}'"; exit 1; }
-printf '  apk: %s (%s bytes)\n' "$APK" "$(stat -c %s "$APK")"
+printf '  apk: %s (%s bytes)\n' "$APK" "$(android_file_size "$APK")"
 
 apk_libs="$(unzip -l "$APK")"
 if grep -q "lib/${abi}/libcopypaste_ui_lib.so" <<<"$apk_libs"; then
@@ -146,6 +148,27 @@ if native_ax="$(PKG="$PKG" SMOKE_OUT="$OUT" NATIVE_AX_TREE="$OUT/release-ui.xml"
     ok "$native_ax"
 else
     bad "the native Android accessibility surface is observable and usable" "$native_ax"
+fi
+
+group "2a. Android pairing entry is a scanner"
+if reach_settings_tab "$OUT/pairing-shell.xml" 30 \
+    && tap_selector "Devices" "$OUT/pairing-devices-action.xml" 15 \
+    && wait_selector "Connect a device" "$OUT/pairing-devices.xml" 15 \
+    && tap_selector "Connect a device" "$OUT/pairing-launcher-action.xml" 15 \
+    && wait_selector "Scan pairing code" "$OUT/pairing-entry.xml" 15; then
+    if [[ -n "$(node_center "$OUT/pairing-entry.xml" "Show pairing code")" ]] \
+        && [[ -z "$(node_center "$OUT/pairing-entry.xml" "Enter pairing code")" ]]; then
+        ok "Android offers Show pairing code and Scan pairing code"
+    else
+        bad "Android offers Show pairing code and Scan pairing code" \
+            "the launcher did not expose the platform-specific pairing actions"
+    fi
+    capture_png "$OUT/pairing-entry.png" \
+        && ok "the Android pairing launcher screenshot is complete" \
+        || bad "the Android pairing launcher screenshot is complete"
+else
+    bad "the Android pairing scanner entry is reachable" \
+        "uiautomator could not open Devices > Connect a device > Scan pairing code"
 fi
 
 # The security half of the UI harness in e2e-android/: that harness attaches to
@@ -316,8 +339,8 @@ PY
         --assertion "signed release app launched" \
         --assertion "WebView accessibility content painted" \
         --assertion "release smoke assertions passed" \
-        --artifact screenshot=release.png \
-        --artifact accessibility=release-ui.xml \
+        --artifact screenshot=pairing-entry.png \
+        --artifact accessibility=pairing-entry.xml \
         --artifact measurement=latency.json \
         --artifact diagnostic-log=release-final.log; then
         ok "native evidence receipt was written"

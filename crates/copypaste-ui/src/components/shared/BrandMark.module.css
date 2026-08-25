@@ -1,0 +1,19 @@
+.mark {
+  display: block;
+  flex: none;
+  user-select: none;
+}
+
+.app { inline-size: var(--s-9); block-size: var(--s-9); }
+.sidebar { inline-size: calc(var(--s-7) + var(--stroke-2)); block-size: calc(var(--s-7) + var(--stroke-2)); }
+.mono { inline-size: var(--s-6); block-size: var(--s-6); }
+.animated { animation: mark-arrive var(--dur-theme) var(--ease); }
+
+@keyframes mark-arrive {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animated { animation: none; }
+}

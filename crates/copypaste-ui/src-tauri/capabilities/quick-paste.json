@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick-paste",
+  "description": "Desktop-only permissions for the transient Quick Paste window.",
+  "windows": ["quick-paste"],
+  "platforms": ["macOS", "windows"],
+  "permissions": [
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-start-dragging",
+    "core:event:default",
+    "store:default"
+  ]
+}

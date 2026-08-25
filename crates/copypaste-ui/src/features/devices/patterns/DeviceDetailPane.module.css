@@ -1,0 +1,23 @@
+.root { display: flex; min-inline-size: 0; min-block-size: 0; block-size: 100%; max-block-size: 100%; flex: 1; flex-direction: column; overflow: hidden; }
+.detailHead { display: flex; flex: none; margin-block-end: var(--s-3); align-items: center; justify-content: space-between; }
+.detailHead > span { color: var(--dim); font-size: var(--fs-xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-wider); text-transform: uppercase; }
+.body { min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; }
+.deviceHero { border: var(--stroke-1) solid var(--border); border-radius: var(--r-card); background: var(--card); }
+.deviceHeroLayout { display: flex; padding: var(--s-4); align-items: center; gap: var(--s-3); }
+.identityWell { display: grid; inline-size: var(--s-9); block-size: var(--s-9); flex: none; place-items: center; border-radius: var(--r-row); color: var(--device-icon-fg); background: var(--selected); }
+.headingCopy { min-inline-size: 0; flex: 1; }
+.name { min-inline-size: 0; margin: 0; font-size: var(--fs-lg); overflow-wrap: anywhere; }
+.headingCopy > p { margin: var(--s-1) 0 0; color: var(--dim); font-size: var(--fs-xs); }
+.statList { margin: var(--s-4) 0 var(--s-5); }
+.actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+.actions > * { inline-size: 100%; }
+
+.actions button {
+  --button-content-gap: var(--s-2);
+
+  min-block-size: var(--tap-min);
+  justify-content: flex-start;
+}
+
+.actions button svg { inline-size: var(--icon-sm); block-size: var(--icon-sm); color: currentColor; }
+.stickyFooter { flex: none; padding-block-start: var(--s-3); background: var(--panel); }

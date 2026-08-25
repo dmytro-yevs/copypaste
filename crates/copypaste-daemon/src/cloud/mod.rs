@@ -400,35 +400,6 @@ pub fn note_version_written(state: &AppState, created_at_ms: i64) {
     state.cloud.note_version_written(&state.meta, created_at_ms);
 }
 
-/// Would cloud sync refuse to carry this item for its size?
-///
-/// The cap is enforced in `copypaste_cloud::sync::push`, which is where an item
-/// is actually withheld and counted (`SyncStats::skipped_too_large`). This
-/// answers the same question *before* a round, so a row can say so: an item
-/// that will never reach the other device must not look like one that is still
-/// on its way (`CopyPaste-f72f`, UI audit finding 9).
-///
-/// **It mirrors `push::over_size_limit` and must not drift from it.** That
-/// function is private, so the predicate is spelled twice; the constants are
-/// not, and `the_upload_caps_are_the_cloud_crates_own` pins the pair. Delete
-/// this the moment `copypaste-cloud` exports the predicate itself — one
-/// definition of "too large" is the point (AGENTS.md rule 1).
-#[must_use]
-pub fn too_large_to_sync(content_type: &str, byte_len: usize) -> bool {
-    // `== "text"`, not `content_type::is_text`: the cloud's split is between
-    // the exact type `text` and everything else. Using the wider predicate
-    // would put a 9 MiB `text/rtf` item under the 8 MiB text cap and warn about
-    // an item push would in fact carry — a false warning on a row is a worse
-    // failure than a missing one, because it is the row that says "this will
-    // never arrive".
-    let cap = if content_type == copypaste_ipc::content_type::TEXT {
-        copypaste_cloud::sync::MAX_TEXT_BYTES
-    } else {
-        copypaste_cloud::sync::MAX_BINARY_BYTES
-    };
-    byte_len > cap
-}
-
 /// The gate every item passes before it may leave the device.
 ///
 /// The store already filters sensitive rows out of the outbound query; this is
@@ -454,25 +425,6 @@ mod tests {
     use crate::testutil::{test_state, test_state_with_cloud};
     use copypaste_cloud::auth::Session;
     use copypaste_cloud::crypto::derive_sync_key;
-
-    /// The per-item cap, mirrored from `copypaste_cloud::sync::push`. If those
-    /// constants move, this fails and the mirror in `too_large_to_sync` has to
-    /// move with them — that is the whole job of this test.
-    #[test]
-    fn the_upload_caps_are_the_cloud_crates_own() {
-        use copypaste_cloud::sync::{MAX_BINARY_BYTES, MAX_TEXT_BYTES};
-        assert_eq!(MAX_TEXT_BYTES, 8 * 1024 * 1024);
-        assert_eq!(MAX_BINARY_BYTES, 10 * 1024 * 1024);
-
-        // Text takes the smaller cap; everything else — including `text/rtf`,
-        // which is *not* the exact type `text` — takes the larger one, because
-        // that is the split `push::over_size_limit` makes.
-        assert!(!too_large_to_sync("text", MAX_TEXT_BYTES));
-        assert!(too_large_to_sync("text", MAX_TEXT_BYTES + 1));
-        assert!(!too_large_to_sync("image/png", MAX_TEXT_BYTES + 1));
-        assert!(!too_large_to_sync("text/rtf", MAX_TEXT_BYTES + 1));
-        assert!(too_large_to_sync("image/png", MAX_BINARY_BYTES + 1));
-    }
 
     fn config() -> CloudConfig {
         CloudConfig::new("https://example.supabase.co", "anon").unwrap()

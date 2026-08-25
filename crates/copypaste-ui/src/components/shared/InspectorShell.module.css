@@ -1,0 +1,69 @@
+.root {
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--panel);
+}
+
+.layout {
+  display: flex;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: var(--s-4);
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.header { min-block-size: var(--s-8); }
+
+.title {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-wider);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.body {
+  display: grid;
+  min-block-size: 0;
+  flex: 1;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  overflow: hidden;
+}
+
+.content {
+  display: grid;
+  min-inline-size: 0;
+  min-block-size: 0;
+  align-content: start;
+  overflow: hidden;
+}
+
+.actions {
+  min-inline-size: 0;
+  margin-block-start: var(--s-3);
+}
+
+.actionLayout {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+
+.metadata { min-inline-size: 0; margin-block-start: var(--s-3); }
+
+@media (--cp-inspector-short) {
+  .layout { padding: var(--s-3); gap: var(--s-2); /* apply fgp */ }
+}

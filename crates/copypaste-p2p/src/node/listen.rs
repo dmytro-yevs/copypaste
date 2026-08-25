@@ -147,6 +147,7 @@ async fn serve_peer<S, F>(
                 "served a peer sync session"
             );
             node.record_cursor(&pairing_id, &outcome);
+            node.record_authenticated_profile(&pairing_id, outcome.peer_profile.as_ref());
             if let Some(peer) = node.peers().get(&pairing_id) {
                 node.touch_peer(
                     &peer,

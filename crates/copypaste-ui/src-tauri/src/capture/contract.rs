@@ -33,6 +33,8 @@ pub(crate) struct AndroidReadResult {
     pub text: Option<String>,
     pub at_ms: i64,
     pub focused: bool,
+    pub source_app_bundle_id: Option<String>,
+    pub source_app_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +111,11 @@ mod tests {
             ]
         );
         assert!(fixture.reads[0].text.is_some());
+        assert_eq!(
+            fixture.reads[0].source_app_bundle_id.as_deref(),
+            Some("com.example.writer")
+        );
+        assert_eq!(fixture.reads[0].source_app_name.as_deref(), Some("Writer"));
         assert!(fixture.reads[1..].iter().all(|read| read.text.is_none()));
         assert!(fixture.reads.iter().all(|read| read.focused));
         assert_eq!(fixture.reads[0].at_ms, 1_700_000_000_001);

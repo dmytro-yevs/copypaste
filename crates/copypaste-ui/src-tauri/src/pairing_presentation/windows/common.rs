@@ -93,6 +93,10 @@ pub(super) fn hide(hwnd: &winsafe::HWND) {
     hwnd.ShowWindow(co::SW::HIDE);
 }
 
+pub(super) fn show(hwnd: &winsafe::HWND) {
+    hwnd.ShowWindow(co::SW::SHOW);
+}
+
 /// Whether the session accepted a window's display affinity.
 ///
 /// Injected rather than called in place because the answer is a property of the

@@ -1,10 +1,8 @@
 package com.copypaste.app
 
 import android.app.Activity
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
@@ -123,15 +121,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     fun installedSourceApps(invoke: Invoke) {
         thread(name = "capture-installed-source-apps") {
             try {
-                val packageManager = activity.applicationContext.packageManager
-                val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-                val apps = packageManager.queryIntentActivities(intent, 0)
-                    .asSequence()
-                    .mapNotNull { info -> installedApp(packageManager, info) }
-                    .filter { app -> app.packageId != activity.packageName }
-                    .distinctBy { app -> app.packageId }
-                    .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { app -> app.label })
-                    .toList()
+                val apps = InstalledSourceApps.list(activity.applicationContext)
 
                 val result = JSArray()
                 apps.forEach { app ->
@@ -147,15 +137,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             }
         }
     }
-
-    private fun installedApp(packageManager: PackageManager, info: ResolveInfo): InstalledApp? {
-        val activityInfo = info.activityInfo ?: return null
-        val packageId = activityInfo.packageName.takeIf { it.isNotBlank() } ?: return null
-        val label = info.loadLabel(packageManager).toString().trim().ifBlank { packageId }
-        return InstalledApp(packageId, label)
-    }
-
-    private data class InstalledApp(val packageId: String, val label: String)
 
     @Command
     fun openShizuku(invoke: Invoke) {
@@ -353,11 +334,22 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      */
     @Command
     fun readNow(invoke: Invoke) {
-        val text = clipboardText(activity)
-        val outcome = clipboardOutcome(activity)
+        val source = captureSource(invoke.getArgs().optString("source", ""))
+        if (source == null) {
+            invoke.reject("The capture source was not recognised.")
+            return
+        }
+        val read = clipboardRead(activity, source)
         invoke.resolve(CaptureBridgeJson.objectOf(
             ReadResult.serializer(),
-            ReadResult(outcome, text, System.currentTimeMillis(), focused = true),
+            ReadResult(
+                read.outcome,
+                read.text,
+                System.currentTimeMillis(),
+                focused = true,
+                sourceAppBundleId = read.sourceAppBundleId,
+                sourceAppName = read.sourceAppName,
+            ),
         ))
     }
 
@@ -373,6 +365,43 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun setPrivateMode(invoke: Invoke) {
         ClipQueue.setPrivateMode(invoke.getArgs().optBoolean("enabled", false))
+        invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
+    }
+
+    @Command
+    fun setExcludedApps(invoke: Invoke) {
+        val args = invoke.getArgs()
+        if (!args.has("configured") || !args.has("bundleIds")) {
+            invoke.reject("The source-exclusion policy was incomplete.")
+            return
+        }
+        val values = args.optJSONArray("bundleIds")
+        if (values == null) {
+            invoke.reject("The source-exclusion policy was incomplete.")
+            return
+        }
+        val bundleIds = (0 until values.length())
+            .mapNotNull { index -> values.optString(index, null) }
+        CaptureExclusions.replace(args.optBoolean("configured", false), bundleIds)
+        invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
+    }
+
+    @Command
+    fun playFeedback(invoke: Invoke) {
+        CaptureFeedback.play(activity)
+        invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
+    }
+
+    @Command
+    fun postSilentNotification(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val title = args.optString("title")
+        val body = args.optString("body")
+        if (title.isBlank() || body.isBlank()) {
+            invoke.reject("The notification was incomplete.")
+            return
+        }
+        CaptureNotifications.postSaved(activity, title, body)
         invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
     }
 
@@ -409,6 +438,15 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      */
     private fun captureEnabled(): Boolean =
         CaptureService.isArmed(activity) && ClipCascadeCapture.isListening()
+
+    private fun captureSource(value: String): CaptureSource? = when (value) {
+        "in_app" -> CaptureSource.IN_APP
+        "share" -> CaptureSource.SHARE
+        "process_text" -> CaptureSource.PROCESS_TEXT
+        "tile" -> CaptureSource.TILE
+        "background" -> CaptureSource.BACKGROUND
+        else -> null
+    }
 
     /**
      * Without this the loss notification is dropped by the system, which would

@@ -223,6 +223,7 @@ mod tests {
                     last_addr: Some("198.51.100.2:47654".into()),
                     last_seen_ms: 42,
                     online: true,
+                    details: None,
                 }),
                 error_code: None,
             },

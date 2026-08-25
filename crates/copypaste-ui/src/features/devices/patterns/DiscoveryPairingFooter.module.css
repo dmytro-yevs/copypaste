@@ -1,0 +1,36 @@
+.root {
+    display: grid;
+    padding-block-start: var(--s-3);
+    gap: var(--s-3);
+    border-block-start: var(--stroke-1) solid var(--divider);
+    background: var(--panel);
+}
+
+.hint {
+    margin: 0;
+    color: var(--dim);
+    font-size: var(--fs-xs);
+    overflow-wrap: anywhere;
+}
+
+.paired {
+    margin: 0;
+    color: var(--ok-strong);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.pairedLayout {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+}
+
+.actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.actions > * {
+    inline-size: 100%;
+}

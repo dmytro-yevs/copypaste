@@ -140,6 +140,10 @@ unconfigured_scenario() {
     launch_app unconfigured || { bad "the unconfigured app exposes accessibility state"; return; }
     open_cloud || { bad "the unconfigured cloud row is reachable"; return; }
     expect_label "Not configured" "$OUT/unconfigured-status.txt"
+    expect_label "Cloud server configuration" "$OUT/unconfigured-form.txt"
+    expect_label "Server URL" "$OUT/unconfigured-url.txt"
+    expect_label "Publishable key" "$OUT/unconfigured-key.txt"
+    expect_label "Configure" "$OUT/unconfigured-action.txt"
     elapsed=$(( $(now_ms) - started ))
     cloud_latency_record "$LATENCIES" unconfigured-status "$elapsed" 30000 \
         && ok "unconfigured cloud status meets its latency budget" \

@@ -1,0 +1,78 @@
+@layer components {
+  .badge {
+    display: inline-flex;
+    inline-size: fit-content;
+    padding: calc(var(--s-1) / 2) var(--s-2);
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: var(--stroke-1) solid transparent;
+    border-radius: var(--r-ctl);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    line-height: calc(var(--fs-xs) + var(--s-1));
+    white-space: nowrap;
+  }
+
+  .content {
+    display: inline-flex;
+    min-inline-size: 0;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .content > * + * {
+    margin-inline-start: var(--s-1);
+  }
+
+  .content > svg:not(:last-child) {
+    margin-inline-end: var(--s-1);
+  }
+
+  .content > svg {
+    inline-size: calc(var(--s-2) + var(--s-1));
+    block-size: calc(var(--s-2) + var(--s-1));
+    pointer-events: none;
+  }
+
+  .primary {
+    color: var(--on-accent);
+    background: var(--accent);
+  }
+
+  .secondary {
+    color: var(--text);
+    background: var(--raised);
+  }
+
+  .destructive {
+    color: var(--on-err);
+    background: var(--err);
+  }
+
+  .outline {
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  .ok {
+    color: var(--ok-strong);
+    background: var(--status-ok-bg);
+  }
+
+  .warn {
+    color: var(--warn-strong);
+    background: var(--status-warn-bg);
+  }
+
+  .error {
+    color: var(--err-strong);
+    background: var(--status-error-bg);
+  }
+
+  .info {
+    color: var(--info-strong);
+    background: var(--status-info-bg);
+  }
+}

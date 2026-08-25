@@ -1,0 +1,5 @@
+.actions { display: flex; min-inline-size: 0; align-items: center; justify-content: flex-end; gap: var(--s-2); }
+
+@container (max-width: $cpXs) {
+  .actions { justify-content: flex-start; }
+}

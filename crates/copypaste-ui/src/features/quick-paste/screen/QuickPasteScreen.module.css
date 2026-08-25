@@ -1,0 +1,53 @@
+.root {
+  padding: var(--s-3);
+  overflow: hidden;
+  color: var(--text);
+  background-color: var(--app-bg);
+  background-image: none;
+  -webkit-backdrop-filter: var(--frost-filter);
+  backdrop-filter: var(--frost-filter);
+}
+
+.search {
+  flex: none;
+  margin-block-end: var(--s-3);
+}
+
+.list {
+  display: grid;
+  min-block-size: 0;
+  flex: 1;
+  padding: var(--s-1) var(--s-1) var(--s-2);
+  align-content: start;
+  grid-auto-rows: max-content;
+  gap: var(--s-2);
+}
+
+.loadingList {
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.footer {
+  min-block-size: max(var(--ctl-h-lg), var(--sz-iconbtn));
+  margin-block-start: var(--s-2);
+  flex: none;
+  border-block-start: var(--stroke-1) solid var(--border);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+
+.footerLayout {
+  display: flex;
+  min-inline-size: 0;
+  padding-block-start: var(--s-1);
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.settingsAction { margin-inline-start: auto; }

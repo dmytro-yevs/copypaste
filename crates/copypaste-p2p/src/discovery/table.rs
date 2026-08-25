@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 pub(super) use crate::now_ms;
+use crate::DeviceProfile;
 
 /// How long a peer stays in the table after it was last seen. mdns-sd publishes
 /// host records with a 120 s TTL and refreshes ahead of expiry, so three minutes
@@ -33,6 +34,7 @@ pub struct DiscoveredPeer {
     /// Display name the peer advertised. Untrusted, unvalidated beyond length
     /// and control-character stripping — never use it as an identity.
     pub name: String,
+    pub profile: Option<DeviceProfile>,
     pub addr: SocketAddr,
     pub last_seen_ms: i64,
 }
@@ -140,6 +142,7 @@ mod tests {
             discovery_id: format!("device-{pairing_id}"),
             pairing_ids: vec![pairing_id.to_string()],
             name: "peer".to_string(),
+            profile: None,
             addr: SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
                 crate::DEFAULT_PORT,
@@ -193,6 +196,7 @@ mod tests {
                 discovery_id: "laptop".into(),
                 pairing_ids: vec!["a".into(), "b".into()],
                 name: "peer".into(),
+                profile: None,
                 addr: std::net::SocketAddr::new(
                     std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 2)),
                     crate::DEFAULT_PORT,

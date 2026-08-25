@@ -4,8 +4,7 @@
  * The "smarter" character-count estimate was itself the bug
  * (CopyPaste-g27b.30): it under-reserved at narrow widths and rows overlapped
  * site-wide. These tests pin the two properties that make under-reservation
- * impossible — the height depends only on the setting, and it is at least the
- * full cap.
+ * impossible — every row reserves the fixed three-line cap.
  */
 import { describe, expect, it } from "vitest";
 
@@ -24,15 +23,13 @@ import {
   overscanRows,
   rowPreviewHeight,
   rowHeight,
-} from "./layout";
+} from "@/features/history/model/virtualizationMetrics";
 
 describe("row height reserves the full preview cap", () => {
-  it("is the floor plus one title line per extra preview line", () => {
-    for (let lines = MIN_PREVIEW_LINES; lines <= MAX_PREVIEW_LINES; lines++) {
-      expect(rowHeight(lines)).toBe(
-        SINGLE_LINE_FLOOR + (lines - 1) * TITLE_LINE_PX,
-      );
-    }
+  it("reserves the fixed three-line preview", () => {
+    expect(MIN_PREVIEW_LINES).toBe(3);
+    expect(MAX_PREVIEW_LINES).toBe(3);
+    expect(rowHeight(3)).toBe(SINGLE_LINE_FLOOR + 2 * TITLE_LINE_PX);
   });
 
   it("leaves room for the title, the meta line and both paddings", () => {
@@ -43,13 +40,7 @@ describe("row height reserves the full preview cap", () => {
     expect(rowHeight(1)).toBeGreaterThan(TITLE_LINE_PX + META_LINE_PX);
   });
 
-  it("is strictly increasing in the preview-line setting", () => {
-    for (let lines = MIN_PREVIEW_LINES; lines < MAX_PREVIEW_LINES; lines++) {
-      expect(rowHeight(lines + 1)).toBeGreaterThan(rowHeight(lines));
-    }
-  });
-
-  it("clamps a setting outside the slider's range instead of shrinking", () => {
+  it("clamps legacy and corrupt settings to three lines", () => {
     // A corrupt pref must not be able to produce a row shorter than one line.
     expect(rowHeight(0)).toBe(rowHeight(MIN_PREVIEW_LINES));
     expect(rowHeight(-4)).toBe(rowHeight(MIN_PREVIEW_LINES));
@@ -66,29 +57,19 @@ describe("row height reserves the full preview cap", () => {
 
 describe("image preview height", () => {
   it("uses a 3.75× cap while reserving a matching virtual row height", () => {
-    for (let lines = MIN_PREVIEW_LINES; lines <= MAX_PREVIEW_LINES; lines++) {
-      expect(imagePreviewHeight(lines)).toBe(
-        rowPreviewHeight(lines) * IMAGE_PREVIEW_HEIGHT_MULTIPLIER,
-      );
-      expect(imageRowHeight(lines)).toBe(
-        imagePreviewHeight(lines) + META_MARGIN_PX + META_LINE_PX + ROW_PAD_V,
-      );
-    }
+    expect(imagePreviewHeight(3)).toBe(
+      rowPreviewHeight(3) * IMAGE_PREVIEW_HEIGHT_MULTIPLIER,
+    );
+    expect(imageRowHeight(3)).toBe(
+      imagePreviewHeight(3) + META_MARGIN_PX + META_LINE_PX + ROW_PAD_V,
+    );
   });
 });
 
 describe("overscan is a pixel budget converted to rows", () => {
-  it("covers at least 240px above and below at every setting", () => {
-    for (let lines = MIN_PREVIEW_LINES; lines <= MAX_PREVIEW_LINES; lines++) {
-      expect(overscanRows(lines) * rowHeight(lines)).toBeGreaterThanOrEqual(
-        OVERSCAN_PX,
-      );
-    }
-  });
-
-  it("renders fewer rows as rows get taller", () => {
-    expect(overscanRows(MAX_PREVIEW_LINES)).toBeLessThan(
-      overscanRows(MIN_PREVIEW_LINES),
+  it("covers at least 240px above and below", () => {
+    expect(overscanRows(3) * rowHeight(3)).toBeGreaterThanOrEqual(
+      OVERSCAN_PX,
     );
   });
 });

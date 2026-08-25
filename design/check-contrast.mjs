@@ -18,10 +18,10 @@
  * Colour maths comes from culori. Run `npm run check` after `npm run build`.
  */
 
-import { AA_TEXT, NON_TEXT, THEMES, ACCENTS, context, over, ratio } from './lib/tokens.mjs';
+import { AA_TEXT, NON_TEXT, SCHEMES, PRODUCT_THEMES, context, over, ratio } from './lib/tokens.mjs';
 
-function pairsFor(theme, accent) {
-  const { vars, R, surface, alias } = context(theme, accent);
+function pairsFor(scheme, theme) {
+  const { vars, R, surface } = context(scheme, theme);
 
   const bg = surface('var(--bg)');
   const panel = surface('var(--panel)');
@@ -30,8 +30,6 @@ function pairsFor(theme, accent) {
   const selected = over(R('var(--selected)'), bg);
   const hover = over(R('var(--hover)'), bg);
   const withheld = surface('var(--withheld)');
-
-  const named = { '--bg': bg, '--card': card, '--elevated': elevated };
 
   const pairs = [];
   const text = (fg, on, name) => pairs.push({ fg, on, name, floor: AA_TEXT });
@@ -60,8 +58,7 @@ function pairsFor(theme, accent) {
   }
   for (const s of [bg, elevated, selected]) text('var(--c-secret)', s, '--c-secret as text');
 
-  // Accent: --accent is a fill, --accent-2 is the text step. Keeping these
-  // apart is the whole reason --accent-2 exists (see accents.*.json).
+  // The theme owns separate fill and text-safe brand roles.
   text('var(--on-accent)', R('var(--accent)'), '--on-accent on an --accent fill');
   text('var(--on-err)', R('var(--err)'), '--on-err on an --err fill');
 
@@ -103,27 +100,6 @@ function pairsFor(theme, accent) {
 
   const measured = pairs.map((p) => ({ ...p, ratio: ratio(R(p.fg), p.on) }));
 
-  // The shadcn aliases, measured through the alias rather than through the
-  // token underneath. `border-input` is the case that needs this: --color-input
-  // routes to --border-strong here and to --border upstream, and every pair
-  // above stays green if it is pointed back at the 1.25:1 one, because no pair
-  // above names it. Surfaces match what each role is already blessed on.
-  const aliasPairs = [
-    ['color-input', ['--bg', '--card', '--elevated']],
-    ['color-ring', ['--bg', '--card', '--elevated']],
-    ['color-sidebar-ring', ['--bg', '--card', '--elevated']],
-  ];
-  for (const [a, surfaces] of aliasPairs) {
-    for (const n of surfaces) {
-      measured.push({
-        name: `--${a} (alias) on ${n}`,
-        floor: NON_TEXT,
-        on: named[n],
-        ratio: ratio(alias(`var(--${a})`), named[n]),
-      });
-    }
-  }
-
   return measured;
 }
 
@@ -133,15 +109,15 @@ const verbose = process.argv.includes('--verbose');
 const failures = [];
 let checked = 0;
 
-for (const theme of THEMES) {
-  for (const accent of ACCENTS) {
-    for (const p of pairsFor(theme, accent)) {
+for (const scheme of SCHEMES) {
+  for (const theme of PRODUCT_THEMES) {
+    for (const p of pairsFor(scheme, theme)) {
       checked += 1;
       const ok = p.ratio + 1e-9 >= p.floor;
-      if (!ok) failures.push({ theme, accent, ...p });
+      if (!ok) failures.push({ scheme, theme, ...p });
       if (verbose) {
         console.log(
-          `${ok ? '  ' : 'FAIL'} ${theme}/${accent.padEnd(6)} ` +
+          `${ok ? '  ' : 'FAIL'} ${scheme}/${theme.padEnd(8)} ` +
             `${p.name.padEnd(46)} ${p.ratio.toFixed(2).padStart(6)} (needs ${p.floor})`,
         );
       }
@@ -153,7 +129,7 @@ if (failures.length) {
   console.error(`\ncontrast: ${failures.length} of ${checked} pairs below floor\n`);
   for (const f of failures) {
     console.error(
-      `  ${f.theme}/${f.accent} ${f.name} — ${f.ratio.toFixed(2)}:1, needs ${f.floor}:1`,
+      `  ${f.scheme}/${f.theme} ${f.name} — ${f.ratio.toFixed(2)}:1, needs ${f.floor}:1`,
     );
   }
   console.error(

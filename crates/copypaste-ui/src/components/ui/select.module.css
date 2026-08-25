@@ -1,0 +1,164 @@
+.trigger {
+    --select-trigger-gap: var(--s-2);
+
+    display: inline-flex;
+    max-inline-size: 100%;
+    padding-inline: var(--s-3);
+    align-items: center;
+    justify-content: space-between;
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+}
+
+.triggerLayout {
+    display: flex;
+    inline-size: 100%;
+    min-inline-size: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--select-trigger-gap);
+}
+
+.triggerContents {
+    display: flex;
+    min-inline-size: 0;
+    align-items: center;
+    gap: var(--s-2);
+}
+
+.label {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.check {
+    inline-size: var(--icon-sm);
+    block-size: var(--icon-sm);
+    flex: none;
+}
+
+.content {
+    z-index: var(--z-popover);
+    max-block-size: var(--radix-select-content-available-height);
+    min-inline-size: var(--radix-select-trigger-width);
+    max-inline-size: calc(100vw - var(--s-4));
+    overflow: hidden;
+    border: var(--stroke-1) solid var(--border-strong);
+    border-radius: var(--r-card);
+    color: var(--text);
+    background: var(--panel);
+    box-shadow: var(--sh2);
+}
+.content[data-state="open"] {
+    animation: select-in var(--dur-fast) var(--ease);
+}
+.content[data-state="closed"] {
+    animation: select-out var(--dur-fast) var(--ease);
+}
+
+.viewport {
+    max-block-size: var(--radix-select-content-available-height);
+    padding: var(--s-1);
+}
+
+.item {
+    position: relative;
+    display: flex;
+    min-block-size: var(--ctl-h-md);
+    padding-inline: var(--s-2) var(--s-8);
+    align-items: center;
+    gap: var(--s-2);
+    border-radius: var(--r-row);
+    outline: 0;
+    font-size: var(--fs-sm);
+    cursor: default;
+}
+
+.item:hover,
+.item:focus,
+.item[data-state="checked"] {
+    background: var(--selected);
+}
+
+.itemLabel {
+    min-inline-size: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.indicator {
+    position: absolute;
+    inset-inline-end: var(--s-2);
+    display: inline-flex;
+    color: var(--accent-2);
+}
+.auto {
+    inline-size: auto;
+}
+.regular {
+    min-inline-size: calc(var(--s-9) * 3);
+}
+.wide {
+    inline-size: calc(var(--s-9) * 3 + var(--s-6));
+}
+
+.trigger[data-presentation="icon"] {
+    --select-trigger-gap: 0;
+
+    inline-size: var(--control-block-size);
+    min-inline-size: var(--control-block-size);
+    padding: 0;
+    justify-content: center;
+}
+.trigger[data-presentation="icon"] .triggerLayout {
+    justify-content: center;
+}
+
+.trigger[data-presentation="icon"] .label,
+.trigger[data-presentation="icon"] [data-slot="control-end-slot"] {
+    display: none;
+}
+
+@keyframes select-in {
+    from {
+        opacity: 0;
+        transform: translateY(calc(var(--s-1) * -1)) scale(0.98);
+    }
+}
+@keyframes select-out {
+    to {
+        opacity: 0;
+        transform: translateY(calc(var(--s-1) * -1)) scale(0.98);
+    }
+}
+
+@container library-toolbar (max-width: $cpToolbar) {
+    .trigger[data-presentation="auto"] {
+        --select-trigger-gap: 0;
+
+        inline-size: var(--control-block-size);
+        min-inline-size: var(--control-block-size);
+        padding: 0;
+        justify-content: center;
+    }
+
+    .trigger[data-presentation="auto"] .triggerLayout {
+        justify-content: center;
+    }
+
+    .trigger[data-presentation="auto"] .label,
+    .trigger[data-presentation="auto"] [data-slot="control-end-slot"] {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .content {
+        animation: none;
+    }
+}

@@ -27,6 +27,7 @@ use copypaste_ipc::{ConfigApplied, ConfigPatch, PrivateModeData};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
+use crate::capture::{CaptureControl, SelectedCapture};
 use crate::events::TauriEventName;
 
 type Result<T> = std::result::Result<T, BackendError>;
@@ -46,6 +47,7 @@ pub async fn get_config(backend: State<'_, SelectedBackend>) -> Result<ConfigApp
 pub async fn set_config(
     app: AppHandle,
     backend: State<'_, SelectedBackend>,
+    capture: State<'_, SelectedCapture>,
     patch: ConfigPatch,
 ) -> Result<ConfigApplied> {
     if patch == ConfigPatch::default() {
@@ -55,7 +57,28 @@ pub async fn set_config(
         return Err(BackendError::Invalid("There was nothing to change."));
     }
     let private_mode_changed = patch.private_mode.is_some();
-    let applied = backend.set_config(patch).await?;
+    let exclusions_changed = patch.excluded_app_bundle_ids.is_some();
+    let prior_exclusions = if exclusions_changed {
+        let prior = backend.get_config().await?;
+        capture.set_excluded_app_bundle_ids(None)?;
+        Some(prior.config.excluded_app_bundle_ids)
+    } else {
+        None
+    };
+    let applied = match backend.set_config(patch).await {
+        Ok(applied) => applied,
+        Err(error) => {
+            if let Some(prior) = prior_exclusions.as_deref() {
+                if let Err(sync_error) = capture.set_excluded_app_bundle_ids(Some(prior)) {
+                    tracing::warn!(%sync_error, "the Android source-exclusion gate stayed closed");
+                }
+            }
+            return Err(error);
+        }
+    };
+    if exclusions_changed {
+        capture.set_excluded_app_bundle_ids(Some(&applied.config.excluded_app_bundle_ids))?;
+    }
     if private_mode_changed {
         let _ = app.emit(
             TauriEventName::PrivateModeChanged.as_str(),

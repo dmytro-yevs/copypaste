@@ -26,8 +26,10 @@ import androidx.core.content.ContextCompat
 object CaptureNotifications {
     private const val CHANNEL_STATUS = "capture-status"
     private const val CHANNEL_LOST = "capture-lost"
+    private const val CHANNEL_SAVED = "capture-saved"
     const val ONGOING_ID = 1
     private const val LOST_ID = 2
+    private const val SAVED_ID = 3
 
     /** Lands on the rung 2 screen with the start step selected. */
     const val EXTRA_REARM = "com.copypaste.app.REARM"
@@ -45,19 +47,35 @@ object CaptureNotifications {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_STATUS,
-                "Capture status",
+                context.getString(R.string.capture_status_channel),
                 NotificationManager.IMPORTANCE_LOW,
-            )
+            ).apply {
+                description = context.getString(R.string.capture_status_channel_description)
+                setShowBadge(false)
+            }
         )
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_LOST,
-                "Capture stopped",
+                context.getString(R.string.capture_lost_channel),
                 // Default rather than low: this one is the whole point. A
                 // silent notice about having silently stopped saving would be
                 // the same failure one level up.
                 NotificationManager.IMPORTANCE_DEFAULT,
-            )
+            ).apply {
+                description = context.getString(R.string.capture_lost_channel_description)
+            }
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_SAVED,
+                context.getString(R.string.capture_saved_channel),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = context.getString(R.string.capture_saved_channel_description)
+                setSound(null, null)
+                enableVibration(false)
+            }
         )
     }
 
@@ -68,9 +86,11 @@ object CaptureNotifications {
 
     fun ongoing(context: Context, text: String): Notification =
         builder(context, CHANNEL_STATUS)
-            .setContentTitle("CopyPaste")
+            .setContentTitle(context.getString(R.string.app_name))
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_save)
+            .setSmallIcon(R.drawable.ic_copypaste_notification)
+            .setColor(context.getColor(R.color.copypaste_accent))
+            .setCategory(Notification.CATEGORY_SERVICE)
             .setOngoing(true)
             .setContentIntent(open(context, rearm = false))
             .build()
@@ -82,12 +102,36 @@ object CaptureNotifications {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
-            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setSmallIcon(R.drawable.ic_copypaste_notification)
+            .setColor(context.getColor(R.color.copypaste_error))
+            .setCategory(Notification.CATEGORY_ERROR)
             .setAutoCancel(true)
             .setContentIntent(open(context, rearm = true))
             .build()
         context.getSystemService(NotificationManager::class.java)
             .notify(LOST_ID, notification)
+    }
+
+    @Suppress("DEPRECATION")
+    fun postSaved(context: Context, title: String, body: String) {
+        if (!canPost(context)) return
+        ensureChannels(context)
+        val notification = builder(context, CHANNEL_SAVED)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setSmallIcon(R.drawable.ic_copypaste_notification)
+            .setColor(context.getColor(R.color.copypaste_accent))
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setContentIntent(open(context, rearm = false))
+            .apply {
+                setDefaults(0)
+                setSound(null)
+                setVibrate(null)
+            }
+            .build()
+        context.getSystemService(NotificationManager::class.java)
+            .notify(SAVED_ID, notification)
     }
 
     private fun builder(context: Context, channel: String): Notification.Builder =

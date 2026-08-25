@@ -1,0 +1,63 @@
+.surface {
+  min-inline-size: 0;
+  color: var(--text);
+}
+
+.flat {
+  background: var(--bg);
+}
+
+.raised {
+  background: var(--card);
+  box-shadow: var(--sh1);
+  -webkit-backdrop-filter: var(--frost-filter);
+  backdrop-filter: var(--frost-filter);
+}
+
+.overlay {
+  background: var(--panel);
+  box-shadow: var(--sh2);
+}
+
+.borderNone {
+  border: 0;
+}
+
+.borderSubtle {
+  border: var(--stroke-1) solid var(--border);
+}
+
+.borderStrong {
+  border: var(--stroke-1) solid var(--border-strong);
+}
+
+.radiusSm {
+  border-radius: var(--r-sm);
+}
+
+.radiusMd {
+  border-radius: var(--r-card);
+}
+
+.radiusLg {
+  border-radius: var(--r-window);
+}
+
+.neutral {
+  color: var(--text);
+}
+
+.accent {
+  color: var(--text);
+  background: var(--selected);
+}
+
+.warning {
+  color: var(--warn-strong);
+  background: var(--surface-warning-bg);
+}
+
+.danger {
+  color: var(--err-strong);
+  background: var(--surface-danger-bg);
+}

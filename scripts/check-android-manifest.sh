@@ -68,9 +68,21 @@ if grep -E 'return[[:space:]]+START_STICKY([^_]|$)' crates/copypaste-ui/src-taur
     printf 'FAIL: CaptureService uses START_STICKY; OEM kills must fail closed\n' >&2
     exit 1
 fi
-if rg -n 'ShizukuBinderWrapper|IClipboard\\$Stub|addPrimaryClipChangedListener|OnPrimaryClipChangedListener' \
-    crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/com/copypaste/app >/dev/null; then
-    printf 'FAIL: live Shizuku clipboard reading reappeared in shipping Kotlin\n' >&2
+android_kotlin="crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/com/copypaste/app"
+source_bridge="$android_kotlin/ShizukuClipboard.kt"
+if ! grep -q 'getPrimaryClipSource' "$source_bridge"; then
+    printf 'FAIL: Android source attribution no longer asks getPrimaryClipSource\n' >&2
+    exit 1
+fi
+if rg -n --glob '*.kt' --glob '!ShizukuClipboard.kt' \
+    'ShizukuBinderWrapper|IClipboard\\$Stub' "$android_kotlin" >/dev/null; then
+    printf 'FAIL: the Shizuku clipboard binder escaped its source-attribution boundary\n' >&2
+    exit 1
+fi
+if rg --pcre2 -n \
+    '"(?:getPrimaryClip(?!Source")|setPrimaryClip|clearPrimaryClip|hasPrimaryClip|hasClipboardText|addPrimaryClipChangedListener|removePrimaryClipChangedListener)"|OnPrimaryClipChangedListener' \
+    "$android_kotlin" >/dev/null; then
+    printf 'FAIL: Shizuku clipboard content transport reappeared in shipping Kotlin\n' >&2
     exit 1
 fi
 printf 'PASS: Android capture-ladder static contracts\n'

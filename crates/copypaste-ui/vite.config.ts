@@ -1,19 +1,73 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 
 import { defineConfig } from "vite";
 import legacy from "@vitejs/plugin-legacy";
 import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
+import postcssCascadeLayers from "@csstools/postcss-cascade-layers";
+import postcssCustomMedia from "postcss-custom-media";
+import postcssGlobalData from "@csstools/postcss-global-data";
+import postcssSimpleVars from "postcss-simple-vars";
+import flexGapPolyfill from "flex-gap-polyfill";
 
 import { dropOrphanChunks } from "./scripts/orphan-chunks.mjs";
-import { LEGACY_BROWSERSLIST, MODERN_BROWSERSLIST } from "./scripts/webview-baseline.mjs";
+import { RESPONSIVE_POSTCSS_VARIABLES } from "./src/lib/layoutBreakpoints.ts";
+import {
+  LEGACY_BROWSERSLIST,
+  LEGACY_CSS_TARGET,
+  MODERN_BROWSERSLIST,
+} from "./scripts/webview-baseline.mjs";
 
-// Tailwind v4 is a Vite plugin — no postcss.config, no tailwind.config.
-// The theme comes from design/dist/css, which Style Dictionary generates.
+const androidBuild = process.env.VITE_ANDROID_BUILD === "1";
+const packageManifest = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
+) as { version: string };
+function quickPasteAndroidGate() {
+  return {
+    name: "copypaste:android-quick-paste-gate",
+    resolveId(id: string) {
+      if (androidBuild && id.endsWith("/desktopQuickPaste")) {
+        return "\0copypaste-android-desktop-quick-paste";
+      }
+    },
+    load(id: string) {
+      if (id === "\0copypaste-android-desktop-quick-paste") {
+        return "export async function loadQuickPaste() { throw new Error('Quick Paste is desktop-only'); }";
+      }
+    },
+    generateBundle() {
+      if (!androidBuild) return;
+      for (const id of this.getModuleIds()) {
+        if (id.includes("/features/quick-paste/")) {
+          this.error(`Android bundle contains desktop-only Quick Paste module: ${id}`);
+        }
+      }
+    },
+  };
+}
+
 export default defineConfig({
+  base: "./",
+  define: {
+    __COPYPASTE_APP_VERSION__: JSON.stringify(packageManifest.version),
+  },
+  css: {
+    postcss: {
+      plugins: [
+        postcssCascadeLayers(),
+        postcssGlobalData({ files: ["./src/styles/media.css"] }),
+        postcssSimpleVars({ variables: RESPONSIVE_POSTCSS_VARIABLES }),
+        postcssCustomMedia(),
+        flexGapPolyfill({
+          only: true,
+          flexGapNotSupported: ".flexGapNotSupported",
+        }),
+      ],
+    },
+  },
   plugins: [
+    quickPasteAndroidGate(),
     react(),
-    tailwindcss(),
     // Two builds, because the matrix spans two engines: the module build for
     // API 29 and above, the nomodule build for API 24. Only an engine that
     // cannot read `type="module"` asks for the second, so the generators and
@@ -37,6 +91,17 @@ export default defineConfig({
     // why removal waits for the output that does not name it. The nomodule
     // output loads its copy, so only the modern one loses anything.
     dropOrphanChunks(/^legacyPolyfills-/),
+    {
+      name: "copypaste:production-web-bridge-runtime",
+      apply: "build",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "copypaste-web-bridge.js",
+          source: "window.__COPYPASTE_WEB_BRIDGE__ = null;\n",
+        });
+      },
+    },
   ],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
@@ -49,5 +114,5 @@ export default defineConfig({
   // The plugin owns the lowering for both builds, and
   // `scripts/check-webview-baseline.mjs` holds each emitted chunk to the engine
   // that will load it.
-  build: { emptyOutDir: true },
+  build: { cssTarget: LEGACY_CSS_TARGET, emptyOutDir: true },
 });

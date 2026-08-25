@@ -3,8 +3,13 @@ package com.copypaste.app
 import android.app.Activity
 import android.content.Intent
 
-internal fun Activity.queueClip(text: String, source: CaptureSource) {
-    ClipQueue.offer(text, source)
+internal fun Activity.queueClip(
+    text: String,
+    source: CaptureSource,
+    sourceAppBundleId: String? = null,
+    sourceAppName: String? = null,
+) {
+    ClipQueue.offer(text, source, sourceAppBundleId, sourceAppName)
     if (!ClipQueue.rustIsUp) {
         startActivity(
             Intent(this, MainActivity::class.java)

@@ -1,0 +1,150 @@
+.inspector {
+    container: library-inspector / inline-size;
+    block-size: 100%;
+    min-block-size: 0;
+    overflow: hidden;
+    background: var(
+        --shell-inspector-bg,
+        var(--inspector-bg-fallback)
+    );
+}
+.preview {
+    max-block-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
+    padding: calc(var(--s-3) + var(--stroke-2));
+    overflow: hidden;
+    background:
+        radial-gradient(
+            circle at 100% 0,
+            var(--inspector-glow),
+            transparent 44%
+        ),
+        var(--card);
+    box-shadow: var(--sh2);
+}
+.previewLayout {
+    display: flex;
+    max-block-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
+    flex-direction: column;
+    gap: var(--s-3);
+}
+.source {
+    display: grid;
+    min-inline-size: 0;
+    grid-template-columns: var(--s-6) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s-3);
+}
+.source > :first-child:not(.sourceCopy) {
+    inline-size: var(--s-6);
+    block-size: var(--s-6);
+    justify-self: center;
+}
+.sourceCopy {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--s-1);
+    line-height: var(--lh-tight);
+}
+.sourceCopy strong,
+.sourceCopy small {
+    min-inline-size: 0;
+    overflow: hidden;
+    font-size: var(--fs-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sourceCopy small {
+    color: var(--dim);
+    font-weight: var(--fw-normal);
+}
+.type {
+    display: inline-flex;
+    justify-self: end;
+    color: var(--dim);
+}
+.applicationValue {
+    display: inline-flex;
+    min-inline-size: 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--s-2);
+}
+.applicationValue > :last-child { min-inline-size: 0; }
+.previewBody {
+    display: flex;
+    min-block-size: 0;
+    max-block-size: 100%;
+    flex: 0 1 auto;
+    overflow: hidden;
+    border-radius: var(--r-ctl);
+}
+.previewContent {
+    display: flex;
+    inline-size: 100%;
+    min-block-size: 0;
+    max-block-size: 100%;
+    flex: 0 1 auto;
+}
+.previewContent > * {
+    inline-size: 100%;
+    max-block-size: 100%;
+    flex: 0 1 auto;
+}
+.protected {
+    --button-content-gap: 0;
+
+    display: grid;
+    inline-size: 100%;
+    block-size: 100%;
+    min-block-size: 0;
+    padding: var(--s-3);
+    place-items: center;
+    align-content: center;
+    gap: var(--s-2);
+    border: 0;
+    border-radius: var(--r-card);
+    color: var(--withheld-fg);
+    background: var(--withheld);
+    white-space: normal;
+}
+.protected > [data-slot="button-content"] { display: contents; }
+.protectedLines {
+    display: grid;
+    inline-size: 100%;
+    gap: var(--s-2);
+}
+.protectedLines i {
+    block-size: var(--s-2);
+    border-radius: var(--r-pill);
+    background: var(--protected-line-bg);
+}
+.protectedLines i:nth-child(2) {
+    inline-size: 76%;
+}
+.protectedLines i:last-child {
+    inline-size: 58%;
+}
+.empty {
+    display: grid;
+    min-block-size: 0;
+    flex: 1;
+    padding: var(--s-6);
+    place-items: center;
+    align-content: center;
+    color: var(--dim);
+    text-align: center;
+}
+.empty strong {
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+}
+.empty p {
+    max-inline-size: var(--content-max-width);
+    margin-block-start: var(--s-1);
+    font-size: var(--fs-xs);
+}
