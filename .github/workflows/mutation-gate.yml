@@ -10,7 +10,7 @@ name: Mutation gate
 
 on:
   push:
-    branches: [main, v2-main]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
