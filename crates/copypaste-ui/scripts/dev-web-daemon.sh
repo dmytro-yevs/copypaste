@@ -20,13 +20,7 @@ resolve_data_dir() {
     return
   fi
 
-  native_data_dir="$HOME/Library/Application Support/com.copypaste.CopyPaste"
-  if [ -f "$native_data_dir/copypaste-v2.db" ]; then
-    printf '%s\n' "$native_data_dir"
-    return
-  fi
-
-  printf '%s\n' "$HOME/Library/Application Support/CopyPaste"
+  printf '%s\n' "$HOME/Library/Application Support/com.copypaste.CopyPaste"
 }
 
 COPYPASTE_DATA_DIR=$(resolve_data_dir)
