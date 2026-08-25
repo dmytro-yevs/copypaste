@@ -167,26 +167,17 @@ the parser. The distinction does not matter — the flag no longer suppresses
 quarantine, and there is no replacement — but "removed" invites someone to go
 looking for a version where it still worked.
 
-### Two things this ADR did not say, and should
+### Signing details
 
-**The snippet may not be sufficient.** v1 shipped this same cask and found that
-stripping the attribute was not enough on its own: the app still refused to
-launch, with `RBSRequestErrorDomain Code=5` / POSIX 163, shown to the user as
-"CopyPaste.app can't be opened." v1's fix was to re-seal the bundle in the same
-`postflight` with `codesign --force --sign -`.
+**Removing quarantine is not the complete signing step.** The cask also
+re-seals the bundle in `postflight`; that is how the machine's self-signed
+certificate is applied. The build does not enable the hardened runtime, which
+is a precondition for notarisation and provides no benefit for this
+never-notarised distribution path.
 
-The likely cause is that v1 signed with `--options runtime`. The hardened
-runtime is a *precondition for notarisation*, so on a bundle we will never
-notarise it costs something and buys nothing. v2's build therefore drops it,
-which should remove the failure — but the ADR should not have implied the
-`xattr` call alone was known to be enough, because it was not. The cask keeps
-the re-seal, and the question of whether it is still needed is now moot: the
-re-seal is how the self-signed certificate gets applied, so it stays regardless
-of what the first real install says about `RBSRequestErrorDomain`.
-
-**A hardened runtime and an entitlements file are not wanted.** Stated
-explicitly because it is the natural thing to copy from any macOS signing
-guide, and because v1 did copy it.
+**A hardened runtime and an entitlements file are not wanted.** They must not be
+copied into the build merely because they appear in a conventional notarised
+macOS signing guide.
 
 ### Why this path may still close
 
@@ -220,32 +211,13 @@ is the fallback and not the default.
 
 ## The third path: re-sign on the user's machine
 
-This was recorded as untested on 2026-07-30 and is now built. It falls out of
-something v1 already shipped without noticing.
-
-v1's cask re-signed the app **on the user's machine at install time**:
-
-```ruby
-postflight do
-  system_command "/usr/bin/xattr",    args: ["-dr", "com.apple.quarantine", app_path]
-  system_command "/usr/bin/codesign", args: ["--force", "--deep", "--sign", "-", app_path]
-end
-```
-
-That was aimed at Gatekeeper. But re-signing locally is also the shape that
-fixes TCC: sign in `postflight` with a **self-signed certificate generated once
-on that machine and kept in a keychain there**, and every later update is signed
-by the same certificate. The designated requirement stops moving, so the grant
-survives the upgrade — no Apple account, no CI secret, and no private key ever
-leaving the machine. TCC is per-machine anyway, so per-machine identities cost
-nothing.
-
-Note also that v1 hit the ad-hoc instability and patched around it —
-`1bd33bf4`, "eliminate recurring Keychain prompt on ad-hoc installs … stable
-codesign identifier" — without connecting it to TCC. The recurring prompt v1
-was chasing is the same root cause seen from the other side: a Keychain item's
-ACL is keyed on code identity too, and under ad-hoc that identity moves.
-A stable certificate fixes both, and v1 fixed neither.
+This was recorded as untested on 2026-07-30 and is now built. Re-signing locally
+also gives TCC a stable identity: sign in `postflight` with a **self-signed
+certificate generated once on that machine and kept in a keychain there**, and
+every later update is signed by the same certificate. The designated
+requirement stops moving, so the grant survives the upgrade — no Apple account,
+no CI secret, and no private key ever leaving the machine. TCC is per-machine
+anyway, so per-machine identities cost nothing.
 
 ### What is signed, where
 
@@ -260,8 +232,7 @@ A stable certificate fixes both, and v1 fixed neither.
 - **The certificate** is RSA-2048, self-signed, `codeSigning` EKU, ten years,
   in a dedicated keychain under
   `~/Library/Application Support/com.copypaste.CopyPaste/signing` — the app's
-  own data directory. Not the unprefixed `CopyPaste` beside it: that is
-  v0.4.x's, and CLAUDE.md rule 3 makes it read-only.
+  own v2 data directory. No other application-data directory is probed or used.
 
 ### The open question, and how much of it is now answered
 
@@ -412,12 +383,6 @@ Enrolling in the Apple Developer Program. It would give a stable Team ID
 (making TCC grants survive updates, which unblocks auto-paste), pass
 `homebrew/cask` audit (removing the tap and the `postflight`), and drop the
 first-launch warning. Everything above exists because of one recurring $99.
-
-Note that v0.4.x reached the same conclusion by a different route: its ADR-010
-chose ad-hoc signing to keep certificates out of CI. The Gatekeeper problem was
-therefore never solved in v1 either — it was only less visible, because v1's
-shipping surface was a CLI and CLIs are not quarantined the way `.app` bundles
-are.
 
 ## In-app update mechanism
 

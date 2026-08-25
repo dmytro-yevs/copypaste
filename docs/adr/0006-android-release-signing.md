@@ -24,10 +24,6 @@ between builds breaks the upgrade path — but with a harsher failure and no
 install-time escape, because there is nothing on the device that can sign for
 us.
 
-v0.4 used `com.copypaste.android`; v2 uses `com.copypaste.app`. Android treats
-them as separate applications, so v2 neither upgrades v0.4 nor imports its
-history or pairings. The two versions may remain installed together.
-
 ## Decision
 
 **The APK is signed by the release workflow, from a durable keystore supplied
@@ -35,8 +31,7 @@ through repository secrets. All four secrets are required. If any are absent,
 the release fails before it uploads an Android artifact or creates a GitHub
 Release.**
 
-The four secret names are carried over from v0.4.x rather than invented, so a
-keystore made for v1 still works:
+The four secret names are the release workflow's canonical signing interface:
 
 | Secret | Meaning |
 |---|---|
@@ -67,21 +62,12 @@ that install's history, pairings and settings. Future debug builds use
 never-published emulator test. A release signed this way cannot upgrade an
 existing install, so the workflow refuses to create one.
 
-**A keystore committed to the repository.** This is what v1 actually did — it
-carried `android/app/debug.keystore` and signed the fallback with it. It has a
-real advantage: the key is stable, so in-place upgrades work with no secret and
-no account. The cost is that the private key is public, so anyone can build an
-APK that Android will accept as an update to an installed CopyPaste. That does
-not let an attacker push anything — they still need the user to install their
-file — but it removes the one check that would otherwise stop a sideloaded
-"update" from silently replacing the real app and inheriting its data
-directory. v1 took that trade without writing it down.
-
-It remains the right answer if this project decides it would rather have working
-upgrades than that check, and it is a two-line change: commit the keystore under
-`packaging/android/` and point the workflow at it. **It is not taken by default
-here because it is a security decision and it should be made deliberately, in a
-commit that says so, rather than inherited.**
+**A keystore committed to the repository.** It would make the key stable with
+no secret-management account. The cost is that the private key becomes public,
+so anyone can build an APK that Android accepts as an update to an installed
+CopyPaste. That does not let an attacker push a file, but it removes the check
+that otherwise stops a sideloaded replacement from inheriting the app's data
+directory. This ADR rejects that trade.
 
 **Play App Signing.** Needs a Play Console account ($25, one-off). Cheaper than
 Apple's $99/yr and worth revisiting if the app is ever listed. It solves nothing
