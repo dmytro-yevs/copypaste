@@ -47,7 +47,7 @@ The Kotlin holds no policy — see
 The release build is run through `npm run tauri -- android build --apk`; it
 uses this tracked project directly. Tauri rewrites generated derivatives such
 as Gradle's debug suffix, so the tracked value must match platform config. The Android
-application ids, version fields, and deep-link registrations are updated by
+application ids and version fields are updated by
 `scripts/release/android-metadata.mjs`. `Cargo.toml` is the only editable source:
 `[workspace.package].version` plus `[workspace.metadata.copypaste]`.
 After changing either, run `node scripts/release/android-metadata.mjs --sync`;

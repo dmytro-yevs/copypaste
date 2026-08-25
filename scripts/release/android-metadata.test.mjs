@@ -5,17 +5,16 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { previousFixtureVersion, syncAndroidConfig, versionCodeFor, writeVersionOverlay } from "./android-metadata.mjs";
-import { projectDeepLinkConfigs, staleDeepLinkConfigs } from "./product-config.mjs";
+import { assertNoDeepLinks, deepLinkSurfaces } from "./product-config.mjs";
 
-const deepLinkFixtures = {
-  tauri: `${JSON.stringify({
-    plugins: {
-      "deep-link": {
-        desktop: { schemes: ["old-scheme"] },
-        mobile: [{ scheme: ["old-scheme"], appLink: false }],
-      },
-    },
-  }, null, 2)}\n`,
+const noDeepLinkFixtures = {
+  cargoMetadata: {
+    metadata: { copypaste: {} },
+    packages: [{ name: "copypaste-ui", dependencies: [] }],
+  },
+  uiPackage: { dependencies: {} },
+  uiLock: { packages: { "": { dependencies: {} } } },
+  tauri: '{ "bundle": { "active": true } }\n',
   androidManifest: `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <queries>
@@ -27,16 +26,13 @@ const deepLinkFixtures = {
   </queries>
   <application><activity android:name=".MainActivity">
     <intent-filter>
-      <action android:name="android.intent.action.VIEW" />
-      <category android:name="android.intent.category.BROWSABLE" />
-      <data android:scheme="old-scheme" android:host="pair" />
+      <action android:name="android.intent.action.MAIN" />
+      <category android:name="android.intent.category.LAUNCHER" />
     </intent-filter>
   </activity></application>
 </manifest>
 `,
-  capability: `${JSON.stringify({
-    permissions: ["core:default", "deep-link:allow-get-current", "store:default"],
-  }, null, 2)}\n`,
+  capability: '{ "permissions": ["core:default", "store:default"] }\n',
 };
 
 test("prereleases and releases are strictly monotonic", () => {
@@ -156,38 +152,40 @@ test("previous-version overlay carries versionName and versionCode", (context) =
   });
 });
 
-test("canonical scheme projects to every deep-link registration", () => {
-  const projected = projectDeepLinkConfigs(deepLinkFixtures, "copy-test");
-  const tauri = JSON.parse(projected.tauri);
-  const capability = JSON.parse(projected.capability);
-
-  assert.deepEqual(tauri.plugins["deep-link"].desktop.schemes, ["copy-test"]);
-  assert.deepEqual(tauri.plugins["deep-link"].mobile[0], {
-    scheme: ["copy-test"],
-    appLink: false,
-  });
-  assert.match(projected.androidManifest, /android:scheme="copy-test" android:host="pair"/);
-  assert.match(projected.androidManifest, /android\.intent\.action\.MAIN/);
-  assert.match(projected.androidManifest, /android\.intent\.category\.LAUNCHER/);
-  assert.match(projected.androidManifest, /moe\.shizuku\.privileged\.api/);
-  assert.deepEqual(capability.permissions, [
-    "core:default",
-    "deep-link:default",
-    "store:default",
-  ]);
-  assert.deepEqual(projectDeepLinkConfigs(projected, "copy-test"), projected);
-  assert.throws(() => projectDeepLinkConfigs(projected, "CopyPaste"), /invalid deep-link scheme/);
+test("normal launch and Android queries are not deep links", () => {
+  assert.deepEqual(deepLinkSurfaces(noDeepLinkFixtures), []);
+  assert.doesNotThrow(() => assertNoDeepLinks(noDeepLinkFixtures));
+  assert.match(noDeepLinkFixtures.androidManifest, /android\.intent\.action\.MAIN/);
+  assert.match(noDeepLinkFixtures.androidManifest, /android\.intent\.category\.LAUNCHER/);
+  assert.match(noDeepLinkFixtures.androidManifest, /moe\.shizuku\.privileged\.api/);
 });
 
-test("drift check identifies each generated deep-link surface", () => {
-  const projected = projectDeepLinkConfigs(deepLinkFixtures, "copypaste");
-  const drift = {
-    tauri: projected.tauri.replace('"copypaste"', '"wrong"'),
-    androidManifest: projected.androidManifest.replace('android:scheme="copypaste"', 'android:scheme="wrong"'),
-    capability: projected.capability.replace('"deep-link:default",', ""),
-  };
+test("every deep-link registration owner fails closed", () => {
+  const cases = [
+    ["Cargo product metadata", (fixture) => { fixture.cargoMetadata.metadata.copypaste["deep-link-scheme"] = "copy-test"; }],
+    ["Rust plugin dependency", (fixture) => { fixture.cargoMetadata.packages[0].dependencies.push({ name: "tauri-plugin-deep-link" }); }],
+    ["JavaScript plugin dependency", (fixture) => { fixture.uiPackage.dependencies["@tauri-apps/plugin-deep-link"] = "2"; }],
+    ["JavaScript plugin lock entry", (fixture) => { fixture.uiLock.packages["node_modules/@tauri-apps/plugin-deep-link"] = {}; }],
+    ["Tauri plugin configuration", (fixture) => { fixture.tauri = '{ "plugins": { "deep-link": {} } }'; }],
+    ["Tauri capability grant", (fixture) => { fixture.capability = '{ "permissions": ["deep-link:default"] }'; }],
+    ["Android deep-link intent filter", (fixture) => {
+      fixture.androidManifest = fixture.androidManifest.replace(
+        "</activity>",
+        '<intent-filter><action android:name="android.intent.action.VIEW" /><data android:scheme="copy-test" /></intent-filter></activity>',
+      );
+    }],
+    ["Android generated plugin block", (fixture) => {
+      fixture.androidManifest = fixture.androidManifest.replace(
+        "</activity>",
+        "<!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. --></activity>",
+      );
+    }],
+  ];
 
-  for (const name of Object.keys(drift)) {
-    assert.deepEqual(staleDeepLinkConfigs({ ...projected, [name]: drift[name] }, "copypaste"), [name]);
+  for (const [surface, mutate] of cases) {
+    const fixture = structuredClone(noDeepLinkFixtures);
+    mutate(fixture);
+    assert.deepEqual(deepLinkSurfaces(fixture), [surface]);
+    assert.throws(() => assertNoDeepLinks(fixture), /deep links are not a product surface/);
   }
 });

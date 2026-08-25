@@ -252,7 +252,6 @@ describe("native-safe pairing", () => {
       const html = await outerHtml(app.browser);
       expect(html).not.toContain(minted.code);
       expect(html).not.toContain(minted.code.replace(/-/g, ""));
-      expect(html).not.toContain("copypaste://pair");
     } finally {
       await other.json<PairingProgress>(["pair", "cancel"]);
     }

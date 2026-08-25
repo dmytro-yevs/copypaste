@@ -5,7 +5,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const requireFromUi = createRequire(pathToFileURL(join(repo, "crates/copypaste-ui/package.json")));
 const androidNamespace = "http://schemas.android.com/apk/res/android";
-const deepLinkPermission = "deep-link:default";
+const jsPlugin = "@tauri-apps/plugin-deep-link";
+const rustPlugin = "tauri-plugin-deep-link";
 
 function jsoncParser() {
   return requireFromUi("jsonc-parser");
@@ -13,25 +14,6 @@ function jsoncParser() {
 
 function xmlDom() {
   return requireFromUi("@xmldom/xmldom");
-}
-
-function validateDeepLinkScheme(scheme) {
-  if (typeof scheme !== "string" || !/^[a-z][a-z0-9+.-]*$/.test(scheme)) {
-    throw new Error(`invalid deep-link scheme '${scheme}'`);
-  }
-}
-
-function updateJson(source, fields) {
-  const { applyEdits, modify, parse } = jsoncParser();
-  let updated = source;
-  for (const [path, value] of fields) {
-    const current = path.reduce((parent, key) => parent?.[key], parse(updated));
-    if (JSON.stringify(current) === JSON.stringify(value)) continue;
-    updated = applyEdits(updated, modify(updated, path, value, {
-      formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
-    }));
-  }
-  return updated;
 }
 
 function androidAttribute(element, name) {
@@ -43,50 +25,7 @@ function childElements(element, name) {
     .filter((node) => node.nodeType === 1 && node.tagName === name);
 }
 
-function deepLinkDataElement(document) {
-  const matches = [];
-  for (const activity of Array.from(document.getElementsByTagName("activity"))) {
-    if (androidAttribute(activity, "name") !== ".MainActivity") continue;
-    for (const filter of childElements(activity, "intent-filter")) {
-      const isView = childElements(filter, "action")
-        .some((action) => androidAttribute(action, "name") === "android.intent.action.VIEW");
-      if (!isView) continue;
-      matches.push(...childElements(filter, "data")
-        .filter((data) => androidAttribute(data, "host") === "pair"));
-    }
-  }
-  if (matches.length !== 1) {
-    throw new Error(`AndroidManifest.xml must contain one MainActivity VIEW data element for host 'pair'; found ${matches.length}`);
-  }
-  return matches[0];
-}
-
-export function updateTauriDeepLinkConfig(source, scheme) {
-  validateDeepLinkScheme(scheme);
-  return updateJson(source, [
-    [["plugins", "deep-link", "desktop", "schemes"], [scheme]],
-    [["plugins", "deep-link", "mobile", 0, "scheme"], [scheme]],
-  ]);
-}
-
-export function updateCapabilityDeepLinkConfig(source, scheme) {
-  validateDeepLinkScheme(scheme);
-  const { parse } = jsoncParser();
-  const permissions = parse(source)?.permissions;
-  if (!Array.isArray(permissions)) {
-    throw new Error("capabilities/default.json must contain a permissions array");
-  }
-  const firstDeepLink = permissions.findIndex((permission) =>
-    typeof permission === "string" && permission.startsWith("deep-link:"));
-  const retained = permissions.filter((permission) =>
-    typeof permission !== "string" || !permission.startsWith("deep-link:"));
-  retained.splice(firstDeepLink < 0 ? retained.length : firstDeepLink, 0, deepLinkPermission);
-  const permissionPath = ["permissions"];
-  return updateJson(source, [[permissionPath, retained]]);
-}
-
-export function updateAndroidDeepLinkManifest(source, scheme) {
-  validateDeepLinkScheme(scheme);
+function hasAndroidDeepLink(source) {
   const { DOMParser } = xmlDom();
   const errors = [];
   const document = new DOMParser({
@@ -95,24 +34,47 @@ export function updateAndroidDeepLinkManifest(source, scheme) {
   if (errors.length !== 0) {
     throw new Error(`AndroidManifest.xml is not valid XML: ${errors.join("; ")}`);
   }
-  const current = androidAttribute(deepLinkDataElement(document), "scheme");
-  if (current === scheme) return source;
-  const attribute = `android:scheme="${current}"`;
-  if (source.split(attribute).length !== 2) {
-    throw new Error("AndroidManifest.xml deep-link scheme must use one double-quoted android:scheme attribute");
+
+  return Array.from(document.getElementsByTagName("intent-filter")).some((filter) => {
+    const actions = childElements(filter, "action").map((action) => androidAttribute(action, "name"));
+    const hasScheme = childElements(filter, "data").some((data) => androidAttribute(data, "scheme"));
+    return actions.some((action) => action === "android.intent.action.VIEW"
+      || action === "org.chromium.arc.intent.action.VIEW")
+      && hasScheme;
+  });
+}
+
+export function deepLinkSurfaces(configs) {
+  const surfaces = [];
+  const product = configs.cargoMetadata.metadata?.copypaste;
+  if (product && Object.hasOwn(product, "deep-link-scheme")) surfaces.push("Cargo product metadata");
+  if (configs.cargoMetadata.packages.some((item) =>
+    item.dependencies?.some((dependency) => dependency.name === rustPlugin))) {
+    surfaces.push("Rust plugin dependency");
   }
-  return source.replace(attribute, `android:scheme="${scheme}"`);
+  if (Object.hasOwn(configs.uiPackage.dependencies ?? {}, jsPlugin)) surfaces.push("JavaScript plugin dependency");
+  if (Object.hasOwn(configs.uiLock.packages?.[""]?.dependencies ?? {}, jsPlugin)
+      || Object.hasOwn(configs.uiLock.packages ?? {}, `node_modules/${jsPlugin}`)) {
+    surfaces.push("JavaScript plugin lock entry");
+  }
+
+  const tauri = jsoncParser().parse(configs.tauri);
+  if (Object.hasOwn(tauri?.plugins ?? {}, "deep-link")) surfaces.push("Tauri plugin configuration");
+  const capability = jsoncParser().parse(configs.capability);
+  if (capability?.permissions?.some((permission) =>
+    typeof permission === "string" && permission.startsWith("deep-link:"))) {
+    surfaces.push("Tauri capability grant");
+  }
+  if (hasAndroidDeepLink(configs.androidManifest)) surfaces.push("Android deep-link intent filter");
+  if (configs.androidManifest.includes("DEEP LINK PLUGIN. AUTO-GENERATED")) {
+    surfaces.push("Android generated plugin block");
+  }
+  return surfaces;
 }
 
-export function projectDeepLinkConfigs(configs, scheme) {
-  return {
-    tauri: updateTauriDeepLinkConfig(configs.tauri, scheme),
-    androidManifest: updateAndroidDeepLinkManifest(configs.androidManifest, scheme),
-    capability: updateCapabilityDeepLinkConfig(configs.capability, scheme),
-  };
-}
-
-export function staleDeepLinkConfigs(configs, scheme) {
-  const projected = projectDeepLinkConfigs(configs, scheme);
-  return Object.keys(projected).filter((name) => projected[name] !== configs[name]);
+export function assertNoDeepLinks(configs) {
+  const surfaces = deepLinkSurfaces(configs);
+  if (surfaces.length !== 0) {
+    throw new Error(`deep links are not a product surface: ${surfaces.join(", ")}`);
+  }
 }

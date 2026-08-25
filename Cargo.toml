@@ -27,7 +27,6 @@ repository = "https://github.com/dmytro-yevs/copypaste"
 android-release-application-id = "com.copypaste.app"
 android-debug-application-id-suffix = ".debug"
 android-release-certificate-sha256 = "a30ecf2ffd22fe36e781ac1e399c709e94392119a7437069364b9bd4ada22355"
-deep-link-scheme = "copypaste"
 
 # Library-first (CLAUDE.md rule 1). Every entry here is a wheel we are NOT
 # carving. v1 hand-rolled six of these.
