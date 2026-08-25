@@ -1,6 +1,8 @@
 package com.copypaste.app
 
+import android.app.StatusBarManager
 import app.tauri.plugin.JSObject
+import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationStrategy
@@ -65,6 +67,43 @@ data class ArmResult(
 )
 
 @Serializable
+data class CaptureArmRequest(
+    val ongoingText: String,
+    val lostTitle: String,
+    val lostBody: String,
+)
+
+@Serializable
+data class NotificationPermissionFacts(
+    val apiLevel: Int,
+    val granted: Boolean,
+    val everAsked: Boolean,
+    val showRationale: Boolean,
+)
+
+@Serializable
+data class TileAddResultConstants(
+    val notAdded: Int,
+    val alreadyAdded: Int,
+    val added: Int,
+) {
+    companion object {
+        fun platform(): TileAddResultConstants = TileAddResultConstants(
+            StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED,
+            StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED,
+            StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED,
+        )
+    }
+}
+
+@Serializable
+data class TilePermissionFacts(
+    val apiLevel: Int,
+    val lastAddResult: Int?,
+    val resultConstants: TileAddResultConstants,
+)
+
+@Serializable
 data class ReadResult(
     val outcome: ReadOutcome,
     val text: String?,
@@ -101,6 +140,9 @@ object CaptureBridgeJson {
 
     fun <T> encode(serializer: SerializationStrategy<T>, value: T): String =
         format.encodeToString(serializer, value)
+
+    fun <T> decode(serializer: DeserializationStrategy<T>, value: JSObject): T =
+        format.decodeFromString(serializer, value.toString())
 
     fun <T> objectOf(serializer: SerializationStrategy<T>, value: T): JSObject =
         JSObject(encode(serializer, value))
