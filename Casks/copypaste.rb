@@ -136,8 +136,6 @@ cask "copypaste" do
   #
   zap trash: [
     "~/Library/Application Support/com.copypaste.CopyPaste",
-    "~/Library/Caches/CopyPaste",
-    "~/Library/Logs/CopyPaste",
   ]
 
   caveats <<~EOS
