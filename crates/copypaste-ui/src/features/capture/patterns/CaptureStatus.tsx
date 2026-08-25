@@ -1,7 +1,7 @@
 /** Abnormal capture states stay visible beside History; healthy capture is
  * surfaced only in contextual Service and Diagnostics views. */
 import { Button } from "@/components/ui";
-import { toneOf } from "@/features/capture/model";
+import { capturePresentationOf } from "@/features/capture/model";
 import { useCaptureState } from "@/hooks/useCapture";
 import { useTranslation } from "@/i18n";
 import { useUi } from "@/store/ui";
@@ -15,18 +15,20 @@ export function CaptureStatus() {
   // Never guess while the answer is in flight, and never show a static success
   // strip for normal capture.
   const snapshot = capture.data;
-  if (snapshot === undefined || toneOf(snapshot.health) === "ok") return null;
+  if (snapshot === undefined) return null;
+  const presentation = capturePresentationOf(snapshot.health);
+  if (presentation.tone === "positive") return null;
 
   const summary = snapshot.detail
     ? `${snapshot.headline} ${snapshot.detail}`
     : snapshot.headline;
-  const tone = toneOf(snapshot.health);
 
   return (
     <div className={styles.root}>
       <div className={styles.layout}>
         <div
-          role="status"
+          role={presentation.role}
+          aria-live={presentation.urgency}
           aria-label={t("capture.status.label", { summary })}
           title={summary}
           className={styles.status}
@@ -34,7 +36,7 @@ export function CaptureStatus() {
           <span
             aria-hidden="true"
             className={styles.dot}
-            data-tone={tone}
+            data-tone={presentation.tone}
           />
           <span className={styles.headline}>{snapshot.headline}</span>
         </div>
