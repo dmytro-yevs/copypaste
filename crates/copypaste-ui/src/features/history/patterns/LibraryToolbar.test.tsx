@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui";
 import type { OriginDevice } from "@/features/history/model/origin";
 import { DEFAULT_VIEW, type ViewOptions } from "@/lib/view";
-import { DEFAULT_PREFS, STORAGE_KEY, usePrefs } from "@/store/prefs";
+import {
+    DEFAULT_PREFS,
+    PREFERENCES_VERSION,
+    STORAGE_KEY,
+    usePrefs,
+} from "@/store/prefs";
 import { LibraryToolbar } from "./LibraryToolbar";
 
 const toolbarSize = vi.hoisted(() => ({ width: 900 }));
@@ -197,7 +202,10 @@ describe("Library toolbar active-control badges", () => {
     it("restores and resets the persisted grouping badge", async () => {
         window.localStorage.setItem(
             STORAGE_KEY,
-            JSON.stringify({ state: { sortByDevice: true }, version: 1 }),
+            JSON.stringify({
+                state: { sortByDevice: true },
+                version: PREFERENCES_VERSION,
+            }),
         );
         await act(async () => usePrefs.persist.rehydrate());
 
@@ -217,7 +225,10 @@ describe("Library toolbar active-control badges", () => {
 
         window.localStorage.setItem(
             STORAGE_KEY,
-            JSON.stringify({ state: { sortByDevice: false }, version: 1 }),
+            JSON.stringify({
+                state: { sortByDevice: false },
+                version: PREFERENCES_VERSION,
+            }),
         );
         await act(async () => usePrefs.persist.rehydrate());
         expectDefault(

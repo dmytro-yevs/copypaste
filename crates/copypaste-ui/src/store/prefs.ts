@@ -15,7 +15,7 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 import {
   APPEARANCE_SERIALIZATION,
   parseAppearanceFields,
-  unwrapPersistedPrefs,
+  readCurrentPrefsState,
   type ColorTheme,
   type ThemePref,
   type Translucency,
@@ -28,6 +28,7 @@ import {
 import { hasNativeBridge } from "@/lib/ipcCall";
 
 export const STORAGE_KEY = APPEARANCE_SERIALIZATION.storageKey;
+export const PREFERENCES_VERSION = APPEARANCE_SERIALIZATION.version;
 const NATIVE_PREFERENCES_FILE = "preferences.json";
 const nativePreferences = new LazyStore(NATIVE_PREFERENCES_FILE, {
   autoSave: false,
@@ -147,9 +148,9 @@ export function readPrefs(): Prefs {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored === null) return { ...DEFAULT_PREFS };
-    // zustand/persist wraps state as { state, version }.
     const parsed: unknown = JSON.parse(stored);
-    return parsePrefs(unwrapPersistedPrefs(parsed));
+    const state = readCurrentPrefsState(parsed, APPEARANCE_SERIALIZATION);
+    return state === undefined ? { ...DEFAULT_PREFS } : parsePrefs(state);
   } catch {
     console.warn("[copypaste] preferences could not be read; using defaults");
     return { ...DEFAULT_PREFS };
@@ -189,17 +190,10 @@ const durableStorage: StateStorage<unknown> = {
 
     try {
       const stored = await nativePreferences.get<string>(name);
-      if (stored !== undefined) return stored;
-
-      const browserValue = browserStorage.getItem(name);
-      if (browserValue !== null) {
-        await nativePreferences.set(name, browserValue);
-        await nativePreferences.save();
-      }
-      return browserValue;
+      return stored ?? null;
     } catch {
-      console.warn("[copypaste] durable preferences could not be read; using browser storage");
-      return browserStorage.getItem(name);
+      console.warn("[copypaste] durable preferences could not be read; using defaults");
+      return null;
     }
   },
   async setItem(name, value) {
@@ -244,9 +238,8 @@ export const usePrefs = create<PrefsStore>()(
     }),
     {
       name: STORAGE_KEY,
-      version: 1,
+      version: PREFERENCES_VERSION,
       storage: createJSONStorage(() => durableStorage),
-      migrate: (persisted) => parsePrefs(persisted),
       partialize: (state) =>
         // Built from the known key list so an action can never be persisted,
         // and so a key removed from `Prefs` stops being written on the next

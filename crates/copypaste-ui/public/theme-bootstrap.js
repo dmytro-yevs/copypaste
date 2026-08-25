@@ -2,17 +2,16 @@
 (function () {
   "use strict";
 
-  var contract = {"storageKey":"copypaste.prefs","fields":["theme","colorTheme","translucency"],"themes":["system","dark","light"],"colorThemes":["midnight","aurora","ember","graphite"],"defaults":{"theme":"system","colorTheme":"midnight","translucency":false},"systemThemeQuery":"(prefers-color-scheme: dark)","systemThemeFallback":"dark"};
-  var unwrapPersistedPrefs = function unwrapPersistedPrefs(
-  raw,
-) {
-  return typeof raw === "object" &&
+  var contract = {"storageKey":"copypaste.prefs","version":2,"fields":["theme","colorTheme","translucency"],"themes":["system","dark","light"],"colorThemes":["midnight","aurora","ember","graphite"],"defaults":{"theme":"system","colorTheme":"midnight","translucency":false},"systemThemeQuery":"(prefers-color-scheme: dark)","systemThemeFallback":"dark"};
+  var readCurrentPrefsState = function readCurrentPrefsState(raw, contract) {
+    return typeof raw === "object" &&
     raw !== null &&
     !Array.isArray(raw) &&
+    Reflect.get(raw, "version") === contract.version &&
     Object.prototype.hasOwnProperty.call(raw, "state")
-    ? Reflect.get(raw, "state")
-    : raw;
-};
+      ? Reflect.get(raw, "state")
+      : undefined;
+  };
   var parseAppearanceFields = function parseAppearanceFields(raw, contract, onInvalid) {
     const appearance = Object.assign({}, contract.defaults);
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -54,11 +53,10 @@
   try {
     var stored = localStorage.getItem(contract.storageKey);
     if (stored !== null) {
-      appearance = parseAppearanceFields(
-        unwrapPersistedPrefs(JSON.parse(stored)),
-        contract,
-        function () {},
-      );
+      var state = readCurrentPrefsState(JSON.parse(stored), contract);
+      if (state !== undefined) {
+        appearance = parseAppearanceFields(state, contract, function () {});
+      }
     }
   } catch (_) {}
 

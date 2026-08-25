@@ -6,13 +6,45 @@
  * never re-persisted. Malformed JSON, a non-object payload and a throwing
  * `localStorage` all fall back to full defaults without throwing.
  */
+import { act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_PREFS, STORAGE_KEY, parsePrefs, readPrefs } from "./prefs";
+const nativePreferences = vi.hoisted(() => ({
+  get: vi.fn(),
+  set: vi.fn(),
+  save: vi.fn(),
+  delete: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-store", () => ({
+  LazyStore: vi.fn(function LazyStore() {
+    return nativePreferences;
+  }),
+}));
+
+import {
+  DEFAULT_PREFS,
+  PREFERENCES_VERSION,
+  STORAGE_KEY,
+  parsePrefs,
+  readPrefs,
+  usePrefs,
+} from "./prefs";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  nativePreferences.get.mockReset();
+  nativePreferences.set.mockReset();
+  nativePreferences.save.mockReset();
+  nativePreferences.delete.mockReset();
+  Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   window.localStorage.clear();
+  usePrefs.setState(DEFAULT_PREFS);
+});
+
+const currentEnvelope = (state: unknown) => ({
+  state,
+  version: PREFERENCES_VERSION,
 });
 
 describe("per-field recovery (AT-50)", () => {
@@ -127,21 +159,78 @@ describe("malformed storage (AT-51)", () => {
 });
 
 describe("reading what zustand persisted", () => {
-  it("unwraps the { state, version } envelope (INV-22)", () => {
+  it("reads the current { state, version } envelope (INV-22)", () => {
     // This is the pre-paint path: it has to understand the same bytes the
     // store writes, or the first frame is themed from defaults and then jumps.
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ state: { theme: "light", colorTheme: "aurora" }, version: 0 }),
+      JSON.stringify(currentEnvelope({ theme: "light", colorTheme: "aurora" })),
     );
     const prefs = readPrefs();
     expect(prefs.theme).toBe("light");
     expect(prefs.colorTheme).toBe("aurora");
   });
 
-  it("also reads a bare object written by the current native store", () => {
+  it("ignores an envelope from another preference version", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ state: { theme: "dark" }, version: 1 }),
+    );
+    expect(readPrefs()).toEqual(DEFAULT_PREFS);
+  });
+
+  it("ignores a bare preference object", () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ theme: "dark" }));
-    expect(readPrefs().theme).toBe("dark");
+    expect(readPrefs()).toEqual(DEFAULT_PREFS);
+  });
+
+  it("does not let zustand migrate a version-1 preference", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ state: { theme: "dark" }, version: 1 }),
+    );
+
+    await act(async () => usePrefs.persist.rehydrate());
+
+    expect(usePrefs.getState().theme).toBe(DEFAULT_PREFS.theme);
+  });
+});
+
+describe("native preference authority", () => {
+  it("ignores browser storage when the native store has no value", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    nativePreferences.get.mockResolvedValue(undefined);
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(currentEnvelope({ theme: "dark" })),
+    );
+
+    await act(async () => usePrefs.persist.rehydrate());
+
+    expect(nativePreferences.get).toHaveBeenCalledWith(STORAGE_KEY);
+    expect(nativePreferences.set).not.toHaveBeenCalled();
+    expect(usePrefs.getState().theme).toBe(DEFAULT_PREFS.theme);
+  });
+
+  it("uses defaults rather than browser storage after a native read failure", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    nativePreferences.get.mockRejectedValue(new Error("unavailable"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(currentEnvelope({ theme: "dark" })),
+    );
+
+    await act(async () => usePrefs.persist.rehydrate());
+
+    expect(usePrefs.getState().theme).toBe(DEFAULT_PREFS.theme);
   });
 });
 
@@ -172,7 +261,7 @@ describe("the screenshot preference fails towards protected (INV-35)", () => {
   it("is on only when the user actually stored that", () => {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ state: { allowScreenshots: true }, version: 0 }),
+      JSON.stringify(currentEnvelope({ allowScreenshots: true })),
     );
     expect(readPrefs().allowScreenshots).toBe(true);
   });
