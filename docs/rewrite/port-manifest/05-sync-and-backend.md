@@ -348,6 +348,31 @@ authentication differ.
 - Scheduled work skips an active round while an explicit request queues and
   receives the later outcome.
 
+### 9.6 Stable acceptance IDs
+
+Source comments and focused tests cite these ids as compact links to the
+current contract. Their meaning remains stable when test names or modules move.
+
+| ID | Current v2 acceptance rule |
+|---|---|
+| **AT-16** | Every upsert sends the complete row, including explicit `deleted`; replay cannot acquire a live default. |
+| **AT-22** | A tombstone with ciphertext, nonce-dependent content or payload/source metadata is rejected before upload. |
+| **AT-23** | A backlog larger than one page drains in ascending order with no gap or duplicate local row. |
+| **AT-24** | More than one page sharing one millisecond drains through the `(created_at, item_id)` keyset. |
+| **AT-29** | A full page that produces no cursor progress stops the drain instead of requesting the same page forever. |
+| **AT-33** | Mutations made during an outage remain derivable below the upload floor and are offered after recovery. |
+| **AT-34** | A data-request 401 refreshes the shared session, retries once and uses the refreshed bearer on read and write. |
+| **AT-35** | When a stored session can refresh, recovery uses that grant before requesting password authentication. |
+| **AT-36** | A second 401 after refresh is a hard error and cannot enter a retry loop. |
+| **AT-38** | A non-JSON backend error becomes a bounded diagnosable snippet rather than an invented generic message. |
+| **AT-39** | A 429 honors bounded delta-seconds `Retry-After`; missing guidance uses the shared fallback and repeated throttling stops. |
+| **AT-42** | Session diagnostics reveal neither token, mask email and may retain non-secret expiry metadata. |
+| **AT-43** | Hostile `expires_in` arithmetic saturates and cannot wrap a session into immediate expiry. |
+| **AT-45** | A cloud push followed by pull opens to the original bytes through the production ciphertext representation. |
+| **AT-51** | Schema audit proves forced account-scoped RLS, revoked anonymous access and server-owned account identity. |
+| **AT-52** | The `(user_id, item_id)` unique conflict target exists and a merge-duplicates upsert resolves against it. |
+| **AT-56** | Live sensitive payloads never leave the device; their payload-less tombstones propagate and remain deletions. |
+
 ## 10. Module and dependency rules
 
 Use the maintained HTTP, URL, WebSocket, retry, crypto and serialization

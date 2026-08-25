@@ -436,6 +436,31 @@ are contained, never cropped.
   and recent items from daemon truth.
 - Toasts stack, pause on hover/focus and do not cover dialogs.
 
+### 11.6 Stable acceptance IDs
+
+Source comments and focused tests cite these ids as compact links to the
+current contract. Their meaning remains stable when test names or components
+move.
+
+| ID | Current v2 acceptance rule |
+|---|---|
+| **AT-8** | Every History row reservation covers the rendered cap at the narrowest supported width; measured rows never overlap. |
+| **AT-10** | History arrows reveal off-screen rows without wrapping; Quick Paste arrows wrap. |
+| **AT-24** | A raw error containing a filesystem path leaves no matching DOM text or accessible name. |
+| **AT-29** | Pairing timeout removes SAS digits and decision controls and shows the terminal timeout state. |
+| **AT-39** | Dismissing Quick Paste without a recorded target does not focus or promote the main window. |
+| **AT-44** | Hiding Quick Paste clears its item list and image cache; showing it refetches the list. |
+| **AT-49** | Persisted appearance is applied before the first painted application frame. |
+| **AT-50** | One invalid preference falls back independently and does not discard valid neighboring preferences. |
+| **AT-51** | Malformed, non-object or unreadable preference storage falls back safely without throwing. |
+| **AT-52** | Unknown preference keys are ignored and are not written back. |
+| **AT-53** | System appearance changes update every window live through one maintained media-query subscription. |
+| **AT-54** | The pre-paint bootstrap and application preference schema agree on key, defaults, enums and normalized values. |
+| **AT-56** | Shortcut capture uses the physical key code and is independent of keyboard layout. |
+| **AT-57** | Bare modifiers and shortcuts with no modifier are rejected without changing the binding. |
+| **AT-58** | Escape cancels shortcut capture without changing the binding. |
+| **AT-73** | Search finds a matching row beyond the loaded History pages through the database-wide search command. |
+
 ## 12. Module and dependency rules
 
 Use React Query for server state, TanStack Virtual for measured virtualization,
