@@ -77,7 +77,7 @@ KEYCHAIN_STEM="${SUPPORT}/copypaste-signing.keychain"
 PASSFILE="${SUPPORT}/keychain-password"
 FINGERPRINT_FILE="${SUPPORT}/certificate-sha1"
 
-# CLAUDE.md rule 4: nothing shown to the user may contain a path that discloses
+# AGENTS.md rule 4: nothing shown to the user may contain a path that discloses
 # the local username. Everything printed goes through this.
 say() {
     local message="$*"

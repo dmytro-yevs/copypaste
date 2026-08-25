@@ -31,7 +31,7 @@ be exact about its edges.
 - Keyboard input reaching a text field, and the list re-rendering from it.
 - INV-10: a flagged item's plaintext is absent from `outerHTML` and from every
   live input value, not merely covered.
-- INV-12 / CLAUDE.md rule 4: no accessible string — text, `title`,
+- INV-12 / AGENTS.md rule 4: no accessible string — text, `title`,
   `aria-label`, `placeholder`, `value` — carries a filesystem path.
 - That the share-sheet doorway reaches the store *and the screen*, which is
   further than `android-smoke.sh` follows it.
