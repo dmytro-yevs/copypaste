@@ -134,6 +134,8 @@ fn apply(store: &Store, (id, content, ciphertext, nonce, hash): Sealed) -> bool 
             deleted: false,
             is_sensitive: false,
             origin_device_id: "peer-device",
+            app_bundle_id: Some("com.example.benchmark"),
+            app_name: Some("Benchmark App"),
             pinned: false,
             pin_order: None,
             pin_updated_at: 0,

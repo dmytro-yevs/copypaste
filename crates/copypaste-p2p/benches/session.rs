@@ -149,6 +149,8 @@ fn history(n: usize, origin: &str) -> Vec<SyncItem> {
                 content,
                 binary_content: Vec::new(),
                 payload_metadata: None,
+                source_app_bundle_id: Some("com.example.benchmark".into()),
+                source_app_name: Some("Benchmark App".into()),
                 content_type: "text".into(),
                 created_at: T0 + i as i64 * 1_000,
                 deleted: false,
