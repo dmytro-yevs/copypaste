@@ -25,6 +25,71 @@
 use copypaste_ipc::redact::scrub_paths;
 use copypaste_ipc::ErrorCode;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum UiBoundaryErrorCode {
+    Offline,
+    Timeout,
+    Unavailable,
+    UpdateBusy,
+    UpdateUnconfigured,
+    UpdateUnsupported,
+    UpdateSignatureInvalid,
+    UpdateNetworkFailed,
+    UpdateCheckFailed,
+    UpdateInstallFailed,
+    UpdatePermissionRequired,
+    Unknown,
+}
+
+impl UiBoundaryErrorCode {
+    pub const ALL: &'static [Self] = &[
+        Self::Offline,
+        Self::Timeout,
+        Self::Unavailable,
+        Self::UpdateBusy,
+        Self::UpdateUnconfigured,
+        Self::UpdateUnsupported,
+        Self::UpdateSignatureInvalid,
+        Self::UpdateNetworkFailed,
+        Self::UpdateCheckFailed,
+        Self::UpdateInstallFailed,
+        Self::UpdatePermissionRequired,
+        Self::Unknown,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Offline => "offline",
+            Self::Timeout => "timeout",
+            Self::Unavailable => "unavailable",
+            Self::UpdateBusy => "update_busy",
+            Self::UpdateUnconfigured => "update_unconfigured",
+            Self::UpdateUnsupported => "update_unsupported",
+            Self::UpdateSignatureInvalid => "update_signature_invalid",
+            Self::UpdateNetworkFailed => "update_network_failed",
+            Self::UpdateCheckFailed => "update_check_failed",
+            Self::UpdateInstallFailed => "update_install_failed",
+            Self::UpdatePermissionRequired => "update_permission_required",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub const fn retryable(self) -> bool {
+        matches!(
+            self,
+            Self::Offline
+                | Self::Timeout
+                | Self::UpdateBusy
+                | Self::UpdateNetworkFailed
+                | Self::UpdateCheckFailed
+                | Self::UpdatePermissionRequired
+                | Self::Unknown
+        )
+    }
+}
+
 /// The complete and deliberately small Tauri error contract.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
@@ -35,17 +100,21 @@ pub struct UiError {
 }
 
 impl UiError {
-    pub(crate) fn new(code: impl Into<String>, retryable: bool) -> Self {
+    fn new(code: impl Into<String>, retryable: bool) -> Self {
         Self {
             code: code.into(),
             retryable,
         }
     }
 
+    pub(crate) fn from_boundary(code: UiBoundaryErrorCode) -> Self {
+        Self::new(code.as_str(), code.retryable())
+    }
+
     pub(crate) fn from_error_code(code: Option<ErrorCode>) -> Self {
         match code {
             Some(code) => Self::new(code.as_str(), code.retryable()),
-            None => Self::new("unknown", true),
+            None => Self::from_boundary(UiBoundaryErrorCode::Unknown),
         }
     }
 
@@ -55,7 +124,11 @@ impl UiError {
             && code
                 .bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
-        Self::new(if safe { code } else { "unknown" }, true)
+        if safe {
+            Self::new(code, true)
+        } else {
+            Self::from_boundary(UiBoundaryErrorCode::Unknown)
+        }
     }
 }
 
@@ -219,15 +292,15 @@ impl BackendError {
     #[must_use]
     pub fn ui_error(&self) -> UiError {
         match self {
-            Self::Unreachable => UiError::new("offline", true),
-            Self::Timeout => UiError::new("timeout", true),
+            Self::Unreachable => UiError::from_boundary(UiBoundaryErrorCode::Offline),
+            Self::Timeout => UiError::from_boundary(UiBoundaryErrorCode::Timeout),
             Self::Daemon { ui, .. } => ui.clone(),
             Self::NotReady => UiError::from_error_code(Some(ErrorCode::NotReady)),
             Self::ProtocolMismatch => UiError::from_error_code(Some(ErrorCode::ProtocolMismatch)),
             Self::NotFound(_) => UiError::from_error_code(Some(ErrorCode::NotFound)),
             Self::Invalid(_) => UiError::from_error_code(Some(ErrorCode::InvalidRequest)),
             Self::Internal(_) => UiError::from_error_code(Some(ErrorCode::Internal)),
-            Self::Unsupported(_) => UiError::new("unavailable", false),
+            Self::Unsupported(_) => UiError::from_boundary(UiBoundaryErrorCode::Unavailable),
         }
     }
 }
@@ -245,6 +318,16 @@ impl serde::Serialize for BackendError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boundary_codes_serialize_with_their_rust_owned_retry_policy() {
+        for code in UiBoundaryErrorCode::ALL {
+            assert_eq!(serde_json::to_value(code).unwrap(), code.as_str());
+            let error = UiError::from_boundary(*code);
+            assert_eq!(error.code, code.as_str());
+            assert_eq!(error.retryable, code.retryable());
+        }
+    }
 
     /// The property the whole module exists for.
     #[test]

@@ -24,6 +24,7 @@ pub struct ConfigApplied {
 
 /// What changed. Coalesced: a burst of captures may produce one event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
     /// History changed — an item was added, deleted, pinned, imported or

@@ -1,7 +1,7 @@
 use serde::Serialize;
 use tauri::{ipc::Channel, AppHandle};
 
-use crate::backend::UiError;
+use crate::backend::{UiBoundaryErrorCode, UiError};
 
 #[cfg(target_os = "android")]
 pub mod android;
@@ -37,6 +37,7 @@ pub enum UpdateProgress {
 
 #[tauri::command]
 pub fn update_status(app: AppHandle) -> UpdateStatus {
+    let _ = &app;
     #[cfg(target_os = "windows")]
     {
         return windows::status(&app);
@@ -72,7 +73,7 @@ pub async fn check_for_update(
     let _guard = runtime
         .operation
         .try_lock()
-        .map_err(|_| UiError::new("update_busy", true))?;
+        .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateBusy))?;
 
     #[cfg(target_os = "windows")]
     {
@@ -89,11 +90,9 @@ pub async fn check_for_update(
             return Ok(UpdateStatus::Unconfigured);
         };
         return Ok(
-            match updater
-                .check()
-                .await
-                .map_err(|error| config::plugin_error(error, "update_check_failed"))?
-            {
+            match updater.check().await.map_err(|error| {
+                config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed)
+            })? {
                 Some(update) => UpdateStatus::Available {
                     version: update.version,
                 },
@@ -118,7 +117,7 @@ pub async fn install_update(
     let _guard = runtime
         .operation
         .try_lock()
-        .map_err(|_| UiError::new("update_busy", true))?;
+        .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateBusy))?;
 
     #[cfg(target_os = "windows")]
     {
@@ -136,7 +135,7 @@ pub async fn install_update(
         let Some(update) = updater
             .check()
             .await
-            .map_err(|error| config::plugin_error(error, "update_check_failed"))?
+            .map_err(|error| config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed))?
         else {
             return Ok(UpdateStatus::UpToDate);
         };
@@ -145,8 +144,7 @@ pub async fn install_update(
                 version: update.version,
             });
         }
-        android::prepare_install(&app)
-            .map_err(|code| UiError::new(code, code == "update_permission_required"))?;
+        android::prepare_install(&app).map_err(UiError::from_boundary)?;
 
         let mut downloaded = 0_u64;
         let progress_copy = progress.clone();
@@ -161,14 +159,16 @@ pub async fn install_update(
                 },
             )
             .await
-            .map_err(|error| config::plugin_error(error, "update_install_failed"))?;
+            .map_err(|error| {
+                config::plugin_error(error, UiBoundaryErrorCode::UpdateInstallFailed)
+            })?;
 
         let _ = progress.send(UpdateProgress::Installing);
         let app_for_stage = app.clone();
         tokio::task::spawn_blocking(move || android::stage_and_install(&app_for_stage, &bytes))
             .await
-            .map_err(|_| UiError::new("update_install_failed", false))?
-            .map_err(|code| UiError::new(code, code == "update_permission_required"))?;
+            .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateInstallFailed))?
+            .map_err(UiError::from_boundary)?;
         return Ok(UpdateStatus::UpToDate);
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]

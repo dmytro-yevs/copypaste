@@ -48,6 +48,7 @@ impl Drop for PushMonitor {
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 pub struct ChangePayload {
     pub topic: EventKind,
     pub item_count: u64,
@@ -62,6 +63,7 @@ pub struct ChangePayload {
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 pub struct PushStatePayload {
     pub live: bool,
 }

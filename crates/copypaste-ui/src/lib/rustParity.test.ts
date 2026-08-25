@@ -38,7 +38,6 @@ import {
   EVENT_PUSH_STATE,
   TAURI_EVENT_NAMES,
 } from "@/lib/tauriEvents";
-import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import {
   HISTORY_PAGE_SIZE as PAGE_SIZE,
   HISTORY_SEARCH_LIMIT as SEARCH_LIMIT,
@@ -49,7 +48,6 @@ import { DEFAULT_SHORTCUT } from "@/lib/accelerator";
 // from the vitest root instead.
 const CRATES = path.resolve(process.cwd(), "..");
 
-const IPC_LIB = "copypaste-ipc/src/lib.rs";
 const IPC_CONFIG = "copypaste-ipc/src/config.rs";
 const IPC_LIMITS = "copypaste-ipc/src/limits.rs";
 const P2P_PEERS = "copypaste-p2p/src/peers/mod.rs";
@@ -182,10 +180,6 @@ const EVENT_CONTRACTS = [
     event: EVENT_AUTOSTART_CHANGED,
   },
 ] as const;
-
-test(`CURRENT_PROTOCOL_VERSION matches PROTOCOL_VERSION in ${IPC_LIB}`, () => {
-  expect(CURRENT_PROTOCOL_VERSION).toBe(number(IPC_LIB, "PROTOCOL_VERSION"));
-});
 
 test(`service payload ceilings match MAX_CONTENT_BYTES in ${IPC_LIMITS}`, () => {
   const hard = product(IPC_LIMITS, "MAX_CONTENT_BYTES");

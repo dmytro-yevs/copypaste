@@ -1,5 +1,5 @@
 #[cfg(target_os = "windows")]
-use super::{UiError, UpdateProgress, UpdateStatus};
+use super::{UiBoundaryErrorCode, UiError, UpdateProgress, UpdateStatus};
 #[cfg(target_os = "windows")]
 use tauri::{ipc::Channel, AppHandle};
 
@@ -23,11 +23,9 @@ pub(super) async fn check(app: &AppHandle) -> Result<UpdateStatus, UiError> {
         return Ok(UpdateStatus::Unconfigured);
     };
     Ok(
-        match updater
-            .check()
-            .await
-            .map_err(|error| super::config::plugin_error(error, "update_check_failed"))?
-        {
+        match updater.check().await.map_err(|error| {
+            super::config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed)
+        })? {
             Some(update) => UpdateStatus::Available {
                 version: update.version.to_string(),
             },
@@ -50,10 +48,9 @@ pub(super) async fn install(
     else {
         return Ok(UpdateStatus::Unconfigured);
     };
-    let Some(update) = updater
-        .check()
-        .await
-        .map_err(|error| super::config::plugin_error(error, "update_check_failed"))?
+    let Some(update) = updater.check().await.map_err(|error| {
+        super::config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed)
+    })?
     else {
         return Ok(UpdateStatus::UpToDate);
     };
@@ -74,6 +71,10 @@ pub(super) async fn install(
             },
         )
         .await
-        .map_err(|error| super::config::plugin_error(error, "update_install_failed"))?;
-    Err(UiError::new("update_install_failed", false))
+        .map_err(|error| {
+            super::config::plugin_error(error, UiBoundaryErrorCode::UpdateInstallFailed)
+        })?;
+    Err(UiError::from_boundary(
+        UiBoundaryErrorCode::UpdateInstallFailed,
+    ))
 }

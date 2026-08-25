@@ -1,4 +1,4 @@
-use super::{UiError, UpdateProgress, UpdateStatus};
+use super::{UiBoundaryErrorCode, UiError, UpdateProgress, UpdateStatus};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::ipc::Channel;
@@ -16,24 +16,26 @@ pub(super) fn brew_path() -> Option<PathBuf> {
 
 fn run(args: &[&str]) -> Result<std::process::Output, UiError> {
     let Some(path) = brew_path() else {
-        return Err(UiError::new("update_unconfigured", false));
+        return Err(UiError::from_boundary(
+            UiBoundaryErrorCode::UpdateUnconfigured,
+        ));
     };
     Command::new(path)
         .args(args)
         .output()
-        .map_err(|_| UiError::new("update_check_failed", true))
+        .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateCheckFailed))
         .and_then(|output| {
             output
                 .status
                 .success()
                 .then_some(output)
-                .ok_or_else(|| UiError::new("update_network_failed", true))
+                .ok_or_else(|| UiError::from_boundary(UiBoundaryErrorCode::UpdateNetworkFailed))
         })
 }
 
 fn parse(stdout: &[u8]) -> Result<UpdateStatus, UiError> {
-    let json: serde_json::Value =
-        serde_json::from_slice(stdout).map_err(|_| UiError::new("update_check_failed", true))?;
+    let json: serde_json::Value = serde_json::from_slice(stdout)
+        .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateCheckFailed))?;
     let Some(entry) = json
         .get("casks")
         .and_then(serde_json::Value::as_array)
@@ -46,7 +48,7 @@ fn parse(stdout: &[u8]) -> Result<UpdateStatus, UiError> {
         .or_else(|| entry.get("current_version"))
         .and_then(serde_json::Value::as_str)
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| UiError::new("update_check_failed", true))?;
+        .ok_or_else(|| UiError::from_boundary(UiBoundaryErrorCode::UpdateCheckFailed))?;
     Ok(UpdateStatus::Available {
         version: version.to_owned(),
     })
@@ -58,7 +60,7 @@ pub(super) async fn check() -> Result<UpdateStatus, UiError> {
         parse(&run(&["outdated", "--cask", "--json=v2", CASK])?.stdout)
     })
     .await
-    .map_err(|_| UiError::new("update_check_failed", true))?
+    .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateCheckFailed))?
 }
 
 pub(super) async fn install(
@@ -84,7 +86,7 @@ pub(super) async fn install(
         ])
     })
     .await
-    .map_err(|_| UiError::new("update_install_failed", false))??;
+    .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateInstallFailed))??;
     let _ = progress.send(UpdateProgress::Installing);
     app.restart()
 }

@@ -6,6 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 
 use crate::backend::{Backend, BackendError, PairingBackend};
+use crate::command_contract::UiCommandName;
 use crate::commands::pairing::PairingCeremony;
 use crate::model::{UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSyncResult};
 use crate::pairing_presentation::PairingPresentationState;
@@ -25,9 +26,10 @@ pub(crate) async fn call(
         return Err(unauthorized());
     }
 
-    let command = match BridgeCommand::parse(&request.command) {
+    let ui_command = UiCommandName::parse(&request.command).ok_or_else(invalid_request)?;
+    let command = match BridgeCommand::from_ui(ui_command) {
         Some(command) => command,
-        None if is_native_only(&request.command) => return Err(unavailable()),
+        None if is_native_only(ui_command) => return Err(unavailable()),
         None => return Err(invalid_request()),
     };
     let backend = &state.backend;

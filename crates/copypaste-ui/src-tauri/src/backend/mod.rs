@@ -61,7 +61,7 @@ mod pairing;
 #[cfg(test)]
 pub mod testing;
 
-pub use error::{BackendError, UiError};
+pub use error::{BackendError, UiBoundaryErrorCode, UiError};
 pub use pairing::PairingBackend;
 
 /// Shorthand for what every backend method returns.

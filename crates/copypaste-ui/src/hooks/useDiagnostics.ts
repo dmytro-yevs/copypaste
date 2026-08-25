@@ -6,7 +6,8 @@ import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import { copyText } from "@/lib/ipc";
 import { subscribeNativeEvent } from "@/lib/tauriEventRegistry";
-import { EVENT_CHANGED, type ChangePayload } from "@/hooks/usePush";
+import { EVENT_CHANGED } from "@/hooks/usePush";
+import type { ChangePayload } from "@/generated/ipc";
 import {
   exportSupportBundle,
   getDiagnostics,
@@ -14,10 +15,6 @@ import {
 } from "@/service/diagnostics";
 
 export const DIAGNOSTICS_KEY = ["diagnostics"] as const;
-
-/** The change frame, plus the field only this panel reads. An intersection
- *  rather than a second declaration: `usePush` owns the shape. */
-type SweepPayload = ChangePayload & { readonly swept: number };
 
 /** A diagnostics panel is a live view. React Query starts it on mount and
  * tears the interval down with its last observer. */
@@ -67,7 +64,7 @@ export function useSweepNotices() {
   const qc = useQueryClient();
 
   useEffect(() => {
-    return subscribeNativeEvent<SweepPayload>(EVENT_CHANGED, (event) => {
+    return subscribeNativeEvent<ChangePayload>(EVENT_CHANGED, (event) => {
       const swept = event.payload.swept;
       if (swept > 0) {
         toast.warning(t("settings.diagnostics.swept", { count: swept }));

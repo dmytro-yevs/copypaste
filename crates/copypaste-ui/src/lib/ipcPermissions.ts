@@ -5,6 +5,7 @@ import type {
   OnboardingPermissions as GeneratedOnboardingPermissions,
   PermissionHost as GeneratedPermissionHost,
 } from "@/generated/ipc";
+import { UI_COMMANDS } from "@/generated/ipc";
 import type { ReadonlyDeep } from "type-fest";
 import { call, hasWebBridge } from "./ipcCall";
 
@@ -28,7 +29,7 @@ function isAndroidWebPreview(): boolean {
 
 export function permissionSnapshot(): Promise<OnboardingPermissions> {
   if (isAndroidWebPreview()) return Promise.resolve(androidPreviewPermissions);
-  return call<OnboardingPermissions>("permission_snapshot");
+  return call<OnboardingPermissions>(UI_COMMANDS.permission_snapshot);
 }
 
 export function permissionRequest(
@@ -41,12 +42,12 @@ export function permissionRequest(
     };
     return Promise.resolve(androidPreviewPermissions);
   }
-  return call<OnboardingPermissions>("permission_request", { id });
+  return call<OnboardingPermissions>(UI_COMMANDS.permission_request, { id });
 }
 
 export function permissionOpenSettings(
   id: OnboardingPermissionId,
 ): Promise<OnboardingPermissions> {
   if (isAndroidWebPreview()) return permissionRequest(id);
-  return call<OnboardingPermissions>("permission_open_settings", { id });
+  return call<OnboardingPermissions>(UI_COMMANDS.permission_open_settings, { id });
 }

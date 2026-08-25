@@ -1,5 +1,5 @@
 #[cfg(any(target_os = "windows", target_os = "android"))]
-use crate::backend::UiError;
+use crate::backend::{UiBoundaryErrorCode, UiError};
 #[cfg(any(target_os = "windows", target_os = "android"))]
 use tauri::AppHandle;
 
@@ -65,29 +65,25 @@ pub(super) fn updater(
     builder
         .build()
         .map(Some)
-        .map_err(|error| plugin_error(error, "update_check_failed"))
+        .map_err(|error| plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed))
 }
 
 #[cfg(any(target_os = "windows", target_os = "android"))]
-pub(super) fn plugin_error(error: PluginError, fallback: &'static str) -> UiError {
+pub(super) fn plugin_error(error: PluginError, fallback: UiBoundaryErrorCode) -> UiError {
     let code = match error {
-        PluginError::EmptyEndpoints => "update_unconfigured",
-        PluginError::UnsupportedArch | PluginError::UnsupportedOs => "update_unsupported",
+        PluginError::EmptyEndpoints => UiBoundaryErrorCode::UpdateUnconfigured,
+        PluginError::UnsupportedArch | PluginError::UnsupportedOs => {
+            UiBoundaryErrorCode::UpdateUnsupported
+        }
         PluginError::Minisign(_) | PluginError::Base64(_) | PluginError::SignatureUtf8(_) => {
-            "update_signature_invalid"
+            UiBoundaryErrorCode::UpdateSignatureInvalid
         }
         PluginError::Reqwest(_)
         | PluginError::Network(_)
         | PluginError::ReleaseNotFound
         | PluginError::TargetNotFound(_)
-        | PluginError::TargetsNotFound(_) => "update_network_failed",
+        | PluginError::TargetsNotFound(_) => UiBoundaryErrorCode::UpdateNetworkFailed,
         _ => fallback,
     };
-    UiError::new(
-        code,
-        matches!(
-            code,
-            "update_busy" | "update_check_failed" | "update_network_failed"
-        ),
-    )
+    UiError::from_boundary(code)
 }

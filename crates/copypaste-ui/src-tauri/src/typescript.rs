@@ -6,18 +6,19 @@ use copypaste_ipc::{
     CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, DeviceClass,
     DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
     DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresenceObservation,
-    DeviceProfileObservation, DiagnosticCounters, DiscoveredDevice, ErrorCode,
+    DeviceProfileObservation, DiagnosticCounters, DiscoveredDevice, ErrorCode, EventKind,
     ExternalNetworkObservation, ImportData, Liveness, PairingRole, PairingState, PeerInfo,
     PrivateModeData, SensitiveFinding, SensitiveSpan, SettingsHealth, StatusData,
 };
 use ts_rs::{Config, ExportError, TS};
 
-use crate::backend::UiError;
+use crate::backend::{UiBoundaryErrorCode, UiError};
 use crate::capture::intake::CapturedPayload;
 use crate::capture::model::{
     CaptureHealth, CaptureSnapshot, CaptureSource, NextStep, NotGrantedReason, NotWorkingReason,
     Rung, ShizukuProbe,
 };
+use crate::command_contract::UiCommandName;
 use crate::commands::pairing::{PairedDevice, PairingCeremony};
 use crate::commands::transfer::{ExportReport, ImportPreview};
 use crate::events::TauriEventName;
@@ -25,6 +26,7 @@ use crate::model::{
     UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon, UiSyncResult,
 };
 use crate::pairing_presentation::PairingPresentationState;
+use crate::service::push::{ChangePayload, PushStatePayload};
 use crate::service::ServiceState;
 use crate::shell::permissions::{
     OnboardingPermissions, PermissionHost, PermissionId, PermissionItem, PermissionStatus,
@@ -72,7 +74,10 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<DeviceDetails>(&config, &mut output);
     declaration::<DiscoveredDevice>(&config, &mut output);
     declaration::<ErrorCode>(&config, &mut output);
+    declaration::<EventKind>(&config, &mut output);
     declaration::<TauriEventName>(&config, &mut output);
+    declaration::<ChangePayload>(&config, &mut output);
+    declaration::<PushStatePayload>(&config, &mut output);
     declaration::<ExportReport>(&config, &mut output);
     declaration::<ImportData>(&config, &mut output);
     declaration::<ImportPreview>(&config, &mut output);
@@ -96,12 +101,89 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<StatusData>(&config, &mut output);
     declaration::<UiSyncResult>(&config, &mut output);
     declaration::<UiError>(&config, &mut output);
+    declaration::<UiBoundaryErrorCode>(&config, &mut output);
     declaration::<UpdateStatus>(&config, &mut output);
     declaration::<UpdateProgress>(&config, &mut output);
+    runtime_contracts(&mut output);
 
     std::fs::create_dir_all(out_dir.as_ref())?;
     std::fs::write(out_dir.as_ref().join("ipc.ts"), output)?;
+    std::fs::write(
+        out_dir.as_ref().join("ui-command-inventory.json"),
+        command_inventory(),
+    )?;
     Ok(())
+}
+
+fn runtime_contracts(output: &mut String) {
+    output.push_str("export const UI_COMMANDS = {\n");
+    for command in UiCommandName::ALL {
+        let name = command.as_str();
+        output.push_str(&format!("  {name}: \"{name}\",\n"));
+    }
+    output.push_str("} as const;\n\n");
+    output
+        .push_str("export type UiCommandName = typeof UI_COMMANDS[keyof typeof UI_COMMANDS];\n\n");
+
+    output.push_str("export const NATIVE_UI_COMMAND_NAMES = [\n");
+    for command in UiCommandName::NATIVE {
+        output.push_str(&format!("  UI_COMMANDS.{},\n", command.as_str()));
+    }
+    output.push_str("] as const satisfies readonly UiCommandName[];\n\n");
+
+    output.push_str("export const TAURI_EVENTS = {\n");
+    for event in TauriEventName::ALL {
+        output.push_str(&format!(
+            "  {}: \"{}\",\n",
+            runtime_key(event.as_str()),
+            event.as_str()
+        ));
+    }
+    output.push_str("} as const satisfies Record<string, TauriEventName>;\n\n");
+    output.push_str("export const TAURI_EVENT_NAMES = Object.values(TAURI_EVENTS);\n\n");
+    output.push_str("export const UI_BOUNDARY_ERROR_CODES = {\n");
+    for code in UiBoundaryErrorCode::ALL {
+        output.push_str(&format!("  {}: \"{}\",\n", code.as_str(), code.as_str()));
+    }
+    output.push_str("} as const satisfies Record<string, UiBoundaryErrorCode>;\n\n");
+    output.push_str(&format!(
+        "export const CURRENT_PROTOCOL_VERSION = {} as const;\n",
+        copypaste_ipc::PROTOCOL_VERSION
+    ));
+}
+
+fn runtime_key(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn command_inventory() -> String {
+    let native_commands = UiCommandName::NATIVE
+        .iter()
+        .map(|command| command.as_str())
+        .collect::<Vec<_>>();
+    let preview_only_commands = UiCommandName::PREVIEW_ONLY
+        .iter()
+        .map(|command| command.as_str())
+        .collect::<Vec<_>>();
+    let value = serde_json::json!({
+        "schema_version": 1,
+        "native_commands": native_commands,
+        "preview_only_commands": preview_only_commands,
+    });
+    format!("{}\n", serde_json::to_string_pretty(&value).unwrap())
 }
 
 fn declaration<T: TS>(config: &Config, output: &mut String) {
@@ -149,8 +231,28 @@ mod tests {
         ));
         assert!(!generated.contains("export type Clip ="));
         assert!(generated.contains("export type PermissionHost ="));
+        assert!(generated.contains(
+            "export type ChangePayload = { topic: EventKind, item_count: number, swept: number, };"
+        ));
+        assert!(generated.contains("export const UI_COMMANDS = {"));
+        assert!(generated.contains("status: \"status\""));
+        assert!(generated.contains("export const CURRENT_PROTOCOL_VERSION = 2 as const;"));
         assert!(generated.contains("export type OnboardingPermissions ="));
         assert!(!generated.contains("export type ReadOutcome ="));
+
+        let inventory =
+            std::fs::read_to_string(out_dir.path().join("ui-command-inventory.json")).unwrap();
+        let inventory: serde_json::Value = serde_json::from_str(&inventory).unwrap();
+        assert_eq!(inventory["schema_version"], 1);
+        assert!(inventory["native_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|name| name == "status"));
+        assert_eq!(
+            inventory["preview_only_commands"],
+            serde_json::json!(["pair_preview_invite", "pair_preview_join"])
+        );
 
         let snapshot = CaptureSnapshot {
             rung: Rung::Shizuku,

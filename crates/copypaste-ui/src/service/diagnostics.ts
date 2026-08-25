@@ -5,6 +5,7 @@
  * (AGENTS.md rule 1, and rule 4's no-paths obligation).
  */
 import { call } from "@/lib/ipcCall";
+import { UI_COMMANDS } from "@/generated/ipc";
 import type { ServiceState } from "@/lib/ipc";
 
 const DIAGNOSTICS_TIMEOUT_MS = 4_000;
@@ -53,17 +54,17 @@ export interface Diagnostics {
 }
 
 export function getDiagnostics(): Promise<Diagnostics> {
-  return call<Diagnostics>("diagnostics", undefined, {
+  return call<Diagnostics>(UI_COMMANDS.diagnostics, undefined, {
     timeoutMs: DIAGNOSTICS_TIMEOUT_MS,
   });
 }
 
 /** `false` means the system save panel was dismissed, never an error. */
 export function exportDiagnosticsReport(): Promise<boolean> {
-  return call<boolean>("export_diagnostics_report");
+  return call<boolean>(UI_COMMANDS.export_diagnostics_report);
 }
 
 /** Exports diagnostics plus bounded, redacted runtime events via native I/O. */
 export function exportSupportBundle(): Promise<boolean> {
-  return call<boolean>("export_support_bundle");
+  return call<boolean>(UI_COMMANDS.export_support_bundle);
 }
