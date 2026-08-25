@@ -138,25 +138,17 @@ copypaste-core = { path = "../../copypaste-core" }
 # ---------------------------------------------------------------------------
 [target.'cfg(target_os = "windows")'.dependencies]
 # Pairing stays in native controls, including their UI Automation behavior.
-winsafe = { version = "0.0.28", features = ["gui", "gdi"] }
+winsafe = { version = "0.0.28", features = ["gui", "gdi", "shell"] }
 qrcode = { version = "0.14.1", default-features = false, features = ["image", "svg"] }
 image.workspace = true
-# Source-app icon resolution: App Paths registry lookup, SHGetFileInfoW for the
-# icon, GDI to extract the bitmap. The path is transient and never stored (I-9).
 # `Win32_System_Threading` is `CREATE_NO_WINDOW` alone: naming the constant
-# rather than writing `0x0800_0000` into a spawn call.
+# rather than writing `0x0800_0000` into a spawn call. WinSafe owns shell-icon
+# and GDI calls; winreg owns the App Paths catalogue.
 windows-sys = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_System_Environment",
-    "Win32_System_Registry",
     "Win32_System_Threading",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
 ] }
-# App Paths is Windows' documented executable-registration catalogue. Use the
-# maintained registry wrapper for enumeration; the existing icon resolver
-# remains the single path-to-executable boundary.
+# One winreg-backed App Paths module owns catalogue enumeration and executable
+# resolution for both the picker and shell icons.
 winreg = "0.55"
 # Tauri owns feed parsing, version comparison, signature verification,
 # download, installation and restart under ADR-0020. Pin the exact API audited
