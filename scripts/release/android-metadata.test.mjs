@@ -8,8 +8,6 @@ import { previousFixtureVersion, syncAndroidConfig, versionCodeFor, writeVersion
 import {
   assertNoDeepLinks,
   deepLinkSurfaces,
-  projectNoDeepLinkConfigs,
-  staleNoDeepLinkConfigs,
 } from "./product-config.mjs";
 
 const noDeepLinkFixtures = {
@@ -165,52 +163,6 @@ test("normal launch and Android queries are not deep links", () => {
   assert.match(noDeepLinkFixtures.androidManifest, /moe\.shizuku\.privileged\.api/);
 });
 
-test("the config projection removes authored and Tauri-generated deep links", () => {
-  const clean = {
-    tauri: '{\n  "bundle": {\n    "active": true\n  }\n}\n',
-    capability: '{\n  "permissions": [\n    "core:default",\n    "store:default"\n  ]\n}\n',
-    androidManifest: `<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <application>
-    <activity android:name=".MainActivity">
-      <intent-filter>
-        <action android:name="android.intent.action.MAIN" />
-      </intent-filter>
-    </activity>
-  </application>
-</manifest>
-`,
-  };
-  const dirty = {
-    tauri: clean.tauri.replace(
-      "\n}\n",
-      ',\n  "plugins": {\n    "deep-link": { "desktop": { "schemes": ["copypaste"] } }\n  }\n}\n',
-    ),
-    capability: clean.capability.replace(
-      '    "store:default"',
-      '    "deep-link:default",\n    "store:default"',
-    ),
-    androidManifest: clean.androidManifest.replace(
-      "    </activity>",
-      `      <intent-filter>
-        <action android:name="android.intent.action.VIEW" />
-        <data android:scheme="copypaste" android:host="pair" />
-      </intent-filter>
-      <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
-      <intent-filter>
-        <action android:name="android.intent.action.VIEW" />
-        <data android:scheme="copypaste" />
-      </intent-filter>
-      <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
-    </activity>`,
-    ),
-  };
-
-  assert.deepEqual(staleNoDeepLinkConfigs(dirty), ["tauri", "capability", "androidManifest"]);
-  assert.deepEqual(projectNoDeepLinkConfigs(dirty), clean);
-  assert.deepEqual(projectNoDeepLinkConfigs(clean), clean);
-});
-
 test("every deep-link registration owner fails closed", () => {
   const cases = [
     ["Cargo product metadata", (fixture) => { fixture.cargoMetadata.metadata.copypaste["deep-link-scheme"] = "copy-test"; }],
@@ -239,4 +191,20 @@ test("every deep-link registration owner fails closed", () => {
     assert.deepEqual(deepLinkSurfaces(fixture), [surface]);
     assert.throws(() => assertNoDeepLinks(fixture), /deep links are not a product surface/);
   }
+});
+
+test("Android XML comments cannot register a deep link", () => {
+  const fixture = structuredClone(noDeepLinkFixtures);
+  fixture.androidManifest = fixture.androidManifest.replace(
+    "</activity>",
+    `<!--
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <data android:scheme="copy-test" />
+      </intent-filter>
+    --></activity>`,
+  );
+
+  assert.deepEqual(deepLinkSurfaces(fixture), []);
+  assert.doesNotThrow(() => assertNoDeepLinks(fixture));
 });
