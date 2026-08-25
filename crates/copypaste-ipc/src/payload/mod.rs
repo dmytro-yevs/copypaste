@@ -213,7 +213,11 @@ pub struct PairingProgressData {
     pub pairing_id: Option<String>,
     pub role: Option<PairingRole>,
     pub state: PairingState,
-    /// Present only after the authenticated handshake and before/at a terminal
+    /// Monotonic time remaining in the current Rust-owned pairing phase.
+    /// Native watchdogs may request a fresh progress read when this reaches
+    /// zero, but must not derive a terminal state themselves.
+    pub expires_in_ms: Option<u64>,
+    /// Present only after the authenticated handshake and before a terminal
     /// state. Six ASCII digits, display-only.
     pub sas: Option<String>,
     pub peer_device_id: Option<String>,

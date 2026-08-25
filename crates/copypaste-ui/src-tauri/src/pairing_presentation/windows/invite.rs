@@ -9,7 +9,7 @@ use winsafe::{co, prelude::*, HBITMAP, POINT, SIZE};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::common::{self, CloseHandle};
-use crate::pairing_presentation::NativeAbort;
+use crate::pairing_presentation::{NativeAbort, NativeRefresh};
 
 const QR_SIZE: u32 = 240;
 const TIMER_ID: usize = 1;
@@ -26,6 +26,7 @@ pub(super) fn spawn(
     expires_in_secs: u64,
     affinity: common::Affinity,
     abort: NativeAbort,
+    refresh: NativeRefresh,
 ) -> Option<CloseHandle> {
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
@@ -43,6 +44,7 @@ pub(super) fn spawn(
                 sender,
                 affinity,
                 abort,
+                refresh,
             );
         })
         .ok()?;
@@ -57,8 +59,10 @@ fn run(
     ready: mpsc::SyncSender<Option<CloseHandle>>,
     affinity: common::Affinity,
     abort: NativeAbort,
+    refresh: NativeRefresh,
 ) -> winsafe::AnyResult<i32> {
     let qr_bitmap = qr_bitmap(payload.as_bytes()).ok_or("QR generation failed")?;
+    drop(payload);
     let qr_size = qr_bitmap.size;
     let wnd = common::window("Pair a new device", (620, 600));
     let _heading = common::label(&wnd, "Pair a new device", (24, 18), (560, 32));
@@ -183,15 +187,16 @@ fn run(
                 common::hide(reveal.hwnd());
                 qr_description
                     .hwnd()
-                    .SetWindowText("Pairing QR code expired")?;
+                    .SetWindowText("Pairing QR code is no longer available")?;
                 code_value.hwnd().SetWindowText("")?;
                 address_value.hwnd().SetWindowText("")?;
                 for label in [&code_label, &code_value, &address_label, &address_value] {
                     common::hide(label.hwnd());
                 }
-                expires.hwnd().SetWindowText("Pairing invite expired.")?;
+                expires.hwnd().SetWindowText("Checking pairing status…")?;
                 wnd.hwnd().InvalidateRect(None, true)?;
                 close.focus()?;
+                refresh();
             } else {
                 expires
                     .hwnd()
@@ -304,6 +309,7 @@ mod tests {
             Zeroizing::new("192.0.2.1:47654".into()),
             120,
             common::system_affinity,
+            std::sync::Arc::new(|| {}),
             std::sync::Arc::new(|| {}),
         )
         .expect("the native invite window opens");

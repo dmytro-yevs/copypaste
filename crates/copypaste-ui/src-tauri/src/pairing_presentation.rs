@@ -2,10 +2,33 @@
 use std::sync::Arc;
 
 use copypaste_ipc::{PairingInviteData, PairingProgressData};
+#[cfg(any(target_os = "android", target_os = "windows"))]
+use tauri::{AppHandle, Manager as _};
 use zeroize::Zeroizing;
 
 #[cfg(any(target_os = "android", target_os = "macos", target_os = "windows"))]
 pub type NativeAbort = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(any(target_os = "android", target_os = "windows"))]
+pub type NativeRefresh = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(any(target_os = "android", target_os = "windows"))]
+pub fn native_refresh(app: AppHandle) -> NativeRefresh {
+    Arc::new(move || {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            use crate::backend::PairingBackend as _;
+
+            let backend = app.state::<crate::SelectedBackend>();
+            let Ok(progress) = backend.pair_progress().await else {
+                tracing::warn!("pairing deadline refresh failed");
+                return;
+            };
+            let presenter = app.state::<PairingPresenter>();
+            presenter.present_progress(&progress);
+        });
+    })
+}
 
 #[cfg(any(
     test,
@@ -28,11 +51,12 @@ mod macos_model;
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub fn windows_ui(abort: NativeAbort) -> impl NativePairingUi {
+pub fn windows_ui(abort: NativeAbort, refresh: NativeRefresh) -> impl NativePairingUi {
     windows::WindowsPairingUi::new(
         invite::encode_native_invite,
         invite::validate_native_invite_fields,
         abort,
+        refresh,
     )
 }
 
@@ -60,10 +84,18 @@ pub enum PairingDecision {
     Accept,
     Reject,
     Cancel,
+    Refresh,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativePresentationOutcome {
+    Presented,
+    Unavailable,
+    Refresh,
 }
 
 pub trait NativePairingUi: Send + Sync + 'static {
-    fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState;
+    fn present_invite(&self, invite: &PairingInviteData) -> NativePresentationOutcome;
     fn scan_invite(&self) -> Option<ScannedPairing>;
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState;
     fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision>;
@@ -82,6 +114,7 @@ impl Default for PairingPresenter {
             invite::encode_native_invite,
             invite::validate_native_invite_fields,
             Arc::new(|| {}),
+            Arc::new(|| {}),
         ));
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let native = Box::new(UnavailablePairingUi);
@@ -97,7 +130,7 @@ impl PairingPresenter {
         }
     }
 
-    pub fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState {
+    pub fn present_invite(&self, invite: &PairingInviteData) -> NativePresentationOutcome {
         self.native.present_invite(invite)
     }
 
@@ -119,8 +152,8 @@ struct UnavailablePairingUi;
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl NativePairingUi for UnavailablePairingUi {
-    fn present_invite(&self, _invite: &PairingInviteData) -> PairingPresentationState {
-        PairingPresentationState::Unavailable
+    fn present_invite(&self, _invite: &PairingInviteData) -> NativePresentationOutcome {
+        NativePresentationOutcome::Unavailable
     }
 
     fn scan_invite(&self) -> Option<ScannedPairing> {
@@ -146,6 +179,7 @@ mod tests {
             pairing_id: Some("ceremony-1".into()),
             role: Some(PairingRole::Responder),
             state: PairingState::AwaitingConfirmation,
+            expires_in_ms: Some(60_000),
             sas: Some("123456".into()),
             peer_device_id: Some("device-1".into()),
             peer_name: Some("Phone".into()),
@@ -167,7 +201,7 @@ mod tests {
 
         assert_eq!(
             presenter.present_invite(&invite),
-            PairingPresentationState::Unavailable
+            NativePresentationOutcome::Unavailable
         );
         assert_eq!(
             presenter.present_progress(&progress()),
@@ -232,5 +266,29 @@ mod native_pairing_source_contracts {
         assert!(android_plugin.contains("GmsBarcodeScanning.getClient"));
         assert!(android_plugin.contains("Barcode.FORMAT_QR_CODE"));
         assert!(android_dialog.contains("WindowManager.LayoutParams.FLAG_SECURE"));
+    }
+
+    #[test]
+    fn native_deadlines_remove_secrets_then_refresh_rust_progress() {
+        let macos = production(include_str!("pairing_presentation/macos.rs"));
+        assert!(macos.contains("ModalDeadline::arm"));
+        assert!(macos.contains("abortModal"));
+        assert!(macos.contains("PairingDecision::Refresh"));
+
+        let windows_invite = production(include_str!("pairing_presentation/windows/invite.rs"));
+        assert!(windows_invite.contains("SetWindowText(\"\")"));
+        assert!(windows_invite.contains("refresh();"));
+        let windows_confirm = production(include_str!("pairing_presentation/windows/confirm.rs"));
+        assert!(windows_confirm.contains("PairingDecision::Refresh"));
+        assert!(!windows_confirm.contains("SAS_TIMEOUT"));
+        assert!(!windows_confirm.contains("Pairing timed out"));
+
+        let android = include_str!(
+            "../gen/android/app/src/main/java/com/copypaste/app/PairingDialogController.kt"
+        );
+        assert!(android.contains("reveal.setOnClickListener(null)"));
+        assert!(android.contains("sasView?.removeAllViews()"));
+        assert!(android.contains("deliver(\"refresh\")"));
+        assert!(!android.contains("presentProgress(\"timed_out\")"));
     }
 }
