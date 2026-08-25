@@ -5,6 +5,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ui_dir=$(dirname "$script_dir")
 workspace_dir=$(CDPATH= cd -- "$ui_dir/../.." && pwd)
 checked_in=${COPYPASTE_IPC_BINDINGS_CHECKED_IN:-"$ui_dir/src/generated/ipc.ts"}
+checked_contract=${COPYPASTE_UI_COMMAND_CONTRACT_CHECKED_IN:-"$ui_dir/src/generated/ui-command-contract.ts"}
 checked_inventory=${COPYPASTE_UI_COMMAND_INVENTORY_CHECKED_IN:-"$ui_dir/src/generated/ui-command-inventory.json"}
 
 compare_bindings() {
@@ -41,6 +42,14 @@ if [ "${1:-}" = "--self-test" ]; then
     echo "--check accepted a stale capture binding" >&2
     exit 1
   fi
+  cp "$checked_contract" "$fixture_dir/stale-command-contract.ts"
+  sed 's/status: "status"/status: "stale_status"/' \
+    "$fixture_dir/stale-command-contract.ts" > "$fixture_dir/changed-command-contract.ts"
+  if COPYPASTE_UI_COMMAND_CONTRACT_CHECKED_IN="$fixture_dir/changed-command-contract.ts" \
+    "$0" --check >/dev/null 2>&1; then
+    echo "--check accepted a stale UI command contract" >&2
+    exit 1
+  fi
   cp "$checked_inventory" "$fixture_dir/stale-inventory.json"
   sed 's/"status"/"future_command"/' \
     "$fixture_dir/stale-inventory.json" > "$fixture_dir/changed-inventory.json"
@@ -66,13 +75,16 @@ cargo +1.96 run \
   -- "$output_dir"
 
 generated="$output_dir/ipc.ts"
+generated_contract="$output_dir/ui-command-contract.ts"
 generated_inventory="$output_dir/ui-command-inventory.json"
 if [ "${1:-}" = "--check" ]; then
   compare_bindings "$checked_in" "$generated"
+  compare_bindings "$checked_contract" "$generated_contract"
   compare_bindings "$checked_inventory" "$generated_inventory"
 elif [ "$#" -eq 0 ]; then
   mkdir -p "$(dirname "$checked_in")"
   cp "$generated" "$checked_in"
+  cp "$generated_contract" "$checked_contract"
   cp "$generated_inventory" "$checked_inventory"
 else
   echo "usage: $0 [--check|--self-test]" >&2
