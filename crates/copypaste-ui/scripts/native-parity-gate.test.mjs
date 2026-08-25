@@ -41,7 +41,7 @@ const RECEIPT_VALUES = {
     ],
   },
   android: {
-    environment: "emulator",
+    environment: "physical-device",
     scenario: { name: "release-webview-ready", elapsed_ms: 10, budget_ms: 115000 },
     assertions: [
       "signed release app launched",
@@ -179,7 +179,7 @@ async function withRoot(run) {
   }
 }
 
-test("accepts alpha.29 macOS, emulator Android, and Windows release evidence", () => withRoot(async (root) => {
+test("accepts alpha.29 macOS, physical Android, and Windows release evidence", () => withRoot(async (root) => {
   const evidence = await Promise.all([
     fixture(root, "macos"),
     fixture(root, "android"),
@@ -489,16 +489,70 @@ test("rejects Windows accessibility evidence mapped to another feature", () => w
   );
 }));
 
-test("rejects a physical-device receipt in the emulator Android release slot", () => withRoot(async (root) => {
+test("rejects an emulator receipt in the physical Android release slot", () => withRoot(async (root) => {
   const evidence = [
     await fixture(root, "macos"),
-    await fixture(root, "android", { environment: "physical-device" }),
+    await fixture(root, "android", { environment: "emulator" }),
   ];
   await assert.rejects(
     validateEvidence({
       commit: COMMIT,
       evidence,
       required: new Set(["macos", "android"]),
+      runId: RUN_ID,
+    }),
+    /violates the schema/,
+  );
+}));
+
+test("binds expected feature states to the platform receipt", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "android", {
+    feature_states: [{ feature_id: "history", state: "populated" }],
+  });
+  const options = {
+    commit: COMMIT,
+    evidence: [receiptPath],
+    required: new Set(["android"]),
+    runId: RUN_ID,
+  };
+  const receipts = await validateEvidence({
+    ...options,
+    expectedFeatureStates: new Set(["android:history=populated"]),
+  });
+  assert.equal(receipts.length, 1);
+  await assert.rejects(
+    validateEvidence({
+      ...options,
+      expectedFeatureStates: new Set(["android:history=empty"]),
+    }),
+    /missing required feature states android:history=empty/,
+  );
+  await assert.rejects(
+    validateEvidence({ ...options, expectedFeatureStates: new Set() }),
+    /unexpected feature states android:history=populated/,
+  );
+}));
+
+test("rejects duplicate and malformed feature-state records", () => withRoot(async (root) => {
+  const duplicate = { feature_id: "history", state: "populated" };
+  const duplicatePath = await fixture(root, "android", { feature_states: [duplicate, duplicate] });
+  await assert.rejects(
+    validateEvidence({
+      commit: COMMIT,
+      evidence: [duplicatePath],
+      required: new Set(["android"]),
+      runId: RUN_ID,
+    }),
+    /violates the schema/,
+  );
+  const malformedPath = await fixture(root, "android", {
+    feature_states: [{ feature_id: "History", state: "populated" }],
+  });
+  await assert.rejects(
+    validateEvidence({
+      commit: COMMIT,
+      evidence: [malformedPath],
+      required: new Set(["android"]),
       runId: RUN_ID,
     }),
     /violates the schema/,
@@ -719,7 +773,7 @@ test("rejects artifact kinds that do not belong to the platform contract", () =>
       required: new Set(["macos"]),
       runId: RUN_ID,
     }),
-    /invalid macos artifact kind/,
+    /violates the schema|invalid macos artifact kind/,
   );
 }));
 
@@ -738,18 +792,8 @@ test("the shared receipt writer emits gate-valid evidence", () => withRoot(async
     "--architecture", "fixture-arch",
     "--commit", COMMIT,
     "--run-id", RUN_ID,
-    "--scenario", "windows-installed-release",
     "--elapsed-ms", "10",
-    "--budget-ms", "30000",
-    "--assertion", "installer integrity passed",
-    "--assertion", "installed app launched",
-    "--assertion", "installed sidecar launched",
-    "--assertion", "named-pipe and clipboard passed",
-    "--assertion", "update feed contract matched signing mode",
-    "--assertion", "in-place update passed",
-    "--assertion", "feature-specific UI states captured",
-    "--assertion", "screenshot protection restored",
-    "--assertion", "uninstall passed",
+    "--feature-state", "history=populated",
   ];
   for (const artifact of seeded.artifacts) args.push("--artifact", `${artifact.kind}=${artifact.path}`);
   await run(python, args);
@@ -757,6 +801,7 @@ test("the shared receipt writer emits gate-valid evidence", () => withRoot(async
   const receipts = await validateEvidence({
     commit: COMMIT,
     evidence,
+    expectedFeatureStates: new Set(["windows:history=populated"]),
     required: new Set(["windows"]),
     runId: RUN_ID,
   });

@@ -97,6 +97,26 @@
           "bytes": { "type": "integer", "minimum": 1 }
         }
       }
+    },
+    "feature_states": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["feature_id", "state"],
+        "properties": {
+          "feature_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$"
+          }
+        }
+      }
     }
   },
   "allOf": [
@@ -122,6 +142,15 @@
               { "contains": { "const": "native accessibility tree is non-empty" } },
               { "contains": { "const": "native accessibility surface exposes a menu bar and named elements" } }
             ]
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": { "enum": ["screenshot", "accessibility", "measurement"] }
+              }
+            }
           }
         }
       }
@@ -131,7 +160,7 @@
       "then": {
         "type": "object",
         "properties": {
-          "environment": { "const": "emulator" },
+          "environment": { "const": "physical-device" },
           "scenario": {
             "type": "object",
             "properties": {
@@ -148,6 +177,15 @@
               { "contains": { "const": "WebView accessibility content painted" } },
               { "contains": { "const": "release smoke assertions passed" } }
             ]
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": { "enum": ["screenshot", "accessibility", "measurement", "diagnostic-log"] }
+              }
+            }
           }
         }
       }
@@ -180,6 +218,15 @@
               { "contains": { "const": "screenshot protection restored" } },
               { "contains": { "const": "uninstall passed" } }
             ]
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": { "enum": ["screenshot", "accessibility", "test-log", "measurement", "feature-evidence"] }
+              }
+            }
           }
         }
       }
