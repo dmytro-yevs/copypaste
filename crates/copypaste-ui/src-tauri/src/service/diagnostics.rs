@@ -147,7 +147,7 @@ const REDACTED: &str = "<redacted>";
 /// `scrub_paths` is the one redactor and stays the one detector, but it works
 /// token by token: it replaces the token that starts with `/` and leaves what
 /// follows a space. The real macOS socket path is
-/// `~/Library/Application Support/CopyPaste/daemon.sock`, so token-wise
+/// `~/Library/Application Support/com.copypaste.CopyPaste/daemon.sock`, so token-wise
 /// redaction keeps the username out and still leaves a recognisable tail — in
 /// a block written to be pasted into a public issue.
 ///
@@ -271,7 +271,8 @@ mod tests {
     /// Every free-text field a hostile or broken daemon could fill, filled with
     /// the thing rule 4 exists to keep out. The socket path is the real one:
     /// it lives under the home directory, so it spells the local username.
-    const LEAKY: &str = "/Users/dmytro/Library/Application Support/CopyPaste/daemon.sock";
+    const LEAKY: &str =
+        "/Users/dmytro/Library/Application Support/com.copypaste.CopyPaste/daemon.sock";
     /// Stands in for a clipping. Nothing may put one in a report, so nothing
     /// may put this one in either.
     const SECRET: &str = "sk-live-4f9c1d2e-THIS-IS-A-CLIPPING";
