@@ -31,6 +31,11 @@ it runs before Gradle, gated on `TAURI_ANDROID_PROJECT_PATH`:
 
 So CI runs `tauri android build` and nothing else. There is no init step.
 
+The removed deep-link plugin wrote paired marker blocks during its Rust build.
+With that plugin absent, `android-metadata.mjs --sync` owns their removal: it
+uses the XML DOM to select `VIEW` filters with a scheme, removes the complete
+paired marker spans, and leaves launcher and intake filters unchanged.
+
 | File | What was added |
 |---|---|
 | `app/src/main/AndroidManifest.xml` | `IntakeActivity`, `CaptureTileService`, `CaptureService`, Shizuku's provider, and the permissions the capture ladder needs |
