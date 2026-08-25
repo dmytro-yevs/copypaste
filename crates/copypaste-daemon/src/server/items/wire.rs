@@ -1,9 +1,8 @@
 //! Conversion from encrypted stored rows to IPC items.
 
-use copypaste_core::StoredItem;
+use copypaste_core::{ClipboardPayload, StoredItem};
 use copypaste_ipc::{Item, ItemPage};
 use tracing::warn;
-use zeroize::Zeroizing;
 
 use crate::AppState;
 
@@ -14,13 +13,13 @@ pub(super) fn to_wire(
     state: &AppState,
     row: StoredItem,
 ) -> Result<Item, copypaste_core::CryptoError> {
-    to_wire_and_plaintext(state, row).map(|(item, _)| item)
+    to_wire_and_payload(state, row).map(|(item, _)| item)
 }
 
-pub(super) fn to_wire_and_plaintext(
+pub(super) fn to_wire_and_payload(
     state: &AppState,
     row: StoredItem,
-) -> Result<(Item, Zeroizing<Vec<u8>>), copypaste_core::CryptoError> {
+) -> Result<(Item, ClipboardPayload), copypaste_core::CryptoError> {
     let origin = state.meta.origin_of(&row).unwrap_or_else(|e| {
         // Attribution is advisory: a row whose origin cannot be read is still
         // the user's item, and the fallback is the same one the origin table's
@@ -40,28 +39,17 @@ fn to_wire_with(
     origin: &crate::meta::Origin,
     key: &copypaste_core::ItemKey,
     detector: &copypaste_core::Detector,
-) -> Result<(Item, Zeroizing<Vec<u8>>), copypaste_core::CryptoError> {
+) -> Result<(Item, ClipboardPayload), copypaste_core::CryptoError> {
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (AGENTS.md rule 4,
     // "fail closed on crypto").
-    let plaintext = if copypaste_ipc::content_type::is_binary(&row.content_type) {
-        copypaste_core::open_binary(&row.content_ciphertext, key, &row.id)?
-    } else {
-        copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, key, &row.id)?
-    };
+    let payload = ClipboardPayload::open(&row, key)?;
     // Measured on the plaintext bytes, because that is what the cloud path
     // measures: `LocalItem::content` is the opened payload, and the seal that
     // follows is a fixed overhead the cap does not count.
     let too_large_to_sync =
-        copypaste_cloud::sync::too_large_to_sync(&row.content_type, plaintext.len());
-    let content = if copypaste_ipc::content_type::is_binary(&row.content_type) {
-        format!(
-            "[{}]",
-            copypaste_ipc::content_type::label(&row.content_type)
-        )
-    } else {
-        String::from_utf8_lossy(&plaintext).into_owned()
-    };
+        copypaste_cloud::sync::too_large_to_sync(&row.content_type, payload.byte_len());
+    let content = payload.display_text();
     let sensitive_finding = (!row.is_sensitive
         && copypaste_ipc::content_type::is_text(&row.content_type))
     .then(|| detector.inert_finding_metadata(&content))
@@ -81,7 +69,7 @@ fn to_wire_with(
         too_large_to_sync,
         truncated: false,
     };
-    Ok((item, plaintext))
+    Ok((item, payload))
 }
 
 /// Decrypt a page of rows, dropping any row that will not open — and saying how

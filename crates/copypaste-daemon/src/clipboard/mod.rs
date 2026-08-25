@@ -183,6 +183,34 @@ pub trait ClipboardSource: Send {
     /// the next poll does not re-capture our own content.
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()>;
 
+    /// Write one authenticated history payload without consulting its display
+    /// label. The payload enum is shared with Android's embedded backend, so
+    /// every platform must make the same exhaustive content decision.
+    fn write_payload(
+        &mut self,
+        item_id: &str,
+        payload: &copypaste_core::ClipboardPayload,
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        use copypaste_core::{ClipboardPayload, ClipboardWriteError};
+
+        match payload {
+            ClipboardPayload::Text(text) => self
+                .set_contents(text)
+                .map_err(|_| ClipboardWriteError::Failed),
+            ClipboardPayload::Image {
+                content_type,
+                bytes,
+            } => self.set_binary_contents(item_id, content_type, bytes, None),
+            ClipboardPayload::File { bytes, metadata } => self.set_binary_contents(
+                item_id,
+                copypaste_ipc::content_type::FILE,
+                bytes,
+                metadata.as_ref(),
+            ),
+            ClipboardPayload::Unsupported { .. } => Err(ClipboardWriteError::UnsupportedContent),
+        }
+    }
+
     /// Write a native binary representation back to the platform pasteboard.
     /// A backend that cannot do this refuses rather than converting bytes to
     /// text and corrupting the user's clipboard.
@@ -192,10 +220,8 @@ pub trait ClipboardSource: Send {
         _content_type: &str,
         _bytes: &[u8],
         _metadata: Option<&copypaste_core::FileMetadata>,
-    ) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!(
-            "this clipboard backend cannot write binary content"
-        ))
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        Err(copypaste_core::ClipboardWriteError::UnsupportedContent)
     }
 
     /// Identifies the live backend, surfaced over IPC so a demo cannot be

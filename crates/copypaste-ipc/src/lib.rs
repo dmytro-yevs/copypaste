@@ -109,6 +109,9 @@ pub enum Method {
     /// This is intentionally distinct from [`Method::Copy`]. `Copy` preserves
     /// the item's native representation as capture grows beyond text, whereas
     /// this verb is the explicit Quick Paste ⌥Enter request for plain text.
+    /// It writes the authenticated string for `text` and `text/*` rows exactly;
+    /// image, file, and unknown rows are refused rather than writing a display
+    /// label such as `[image]`.
     CopyPlainText {
         id: String,
     },

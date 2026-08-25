@@ -9,6 +9,7 @@
 #![cfg_attr(target_os = "windows", deny(unsafe_code))]
 
 pub mod binary;
+pub mod clipboard_payload;
 pub mod crypto;
 pub mod image_preview;
 pub mod ingest;
@@ -23,6 +24,7 @@ pub use binary::{
     item_id as binary_item_id, metadata as binary_metadata, open as open_binary,
     seal as seal_binary, BinaryMetadata, FileMetadata, CHUNK_BYTES,
 };
+pub use clipboard_payload::{ClipboardPayload, ClipboardWriteError};
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
 pub use image_preview::{thumbnail_png, ImagePreviewError, ImageThumbnail, MAX_THUMBNAIL_EDGE};
 pub use ingest::{
