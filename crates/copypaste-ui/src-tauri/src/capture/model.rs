@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use super::messages::{detail, headline, MSG_TOAST_UNEXPLAINED};
 
-pub use super::messages::{LOST_BODY, LOST_TITLE, TOAST_EXPLANATION};
+pub use super::messages::{LOST_BODY, LOST_TITLE, ONGOING_TEXT, TOAST_EXPLANATION};
 
 /// Which mechanism is capturing *right now*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

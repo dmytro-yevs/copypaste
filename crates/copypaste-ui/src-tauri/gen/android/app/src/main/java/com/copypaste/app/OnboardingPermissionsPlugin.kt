@@ -11,16 +11,10 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
-import java.util.concurrent.atomic.AtomicReference
 
 @TauriPlugin
 class OnboardingPermissionsPlugin(private val activity: android.app.Activity) : Plugin(activity) {
-    private val pendingNotifications = AtomicReference<Invoke?>(null)
-    private var tileStatus: String =
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) "unavailable" else "prompt"
-    private val prefs by lazy {
-        activity.getSharedPreferences("onboarding-permissions", android.content.Context.MODE_PRIVATE)
-    }
+    private var lastTileAddResult: Int? = null
 
     @Command
     fun notificationFacts(invoke: Invoke) {
@@ -29,32 +23,22 @@ class OnboardingPermissionsPlugin(private val activity: android.app.Activity) : 
 
     @Command
     fun requestNotifications(invoke: Invoke) {
-        if (CaptureNotifications.isPermissionGranted(activity)) {
-            markAsked()
-            invoke.resolve(notificationPayload())
-            return
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            invoke.resolve(notificationPayload())
-            return
-        }
-        pendingNotifications.getAndSet(invoke)?.reject("Another notification request is already open.")
-        markAsked()
-        (activity as MainActivity).requestNotificationPermission { _ ->
-            pendingNotifications.getAndSet(null)?.resolve(notificationPayload())
+        (activity as MainActivity).requestNotificationPermission { facts ->
+            invoke.resolve(
+                CaptureBridgeJson.objectOf(NotificationPermissionFacts.serializer(), facts),
+            )
         }
     }
 
     @Command
     fun tileFacts(invoke: Invoke) {
-        invoke.resolve(JSObject().put("status", tileStatus))
+        invoke.resolve(tilePayload())
     }
 
     @Command
     fun requestTile(invoke: Invoke) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            tileStatus = "unavailable"
-            invoke.resolve(JSObject().put("result", -1))
+            invoke.resolve(tilePayload())
             return
         }
         val manager = activity.getSystemService(StatusBarManager::class.java)
@@ -64,8 +48,8 @@ class OnboardingPermissionsPlugin(private val activity: android.app.Activity) : 
             Icon.createWithResource(activity, R.drawable.ic_copypaste_capture_tile),
             activity.mainExecutor,
         ) { result ->
-            tileStatus = TileAddGate.status(result)
-            invoke.resolve(JSObject().put("result", result))
+            lastTileAddResult = result
+            invoke.resolve(tilePayload())
         }
     }
 
@@ -77,25 +61,17 @@ class OnboardingPermissionsPlugin(private val activity: android.app.Activity) : 
         invoke.resolve(JSObject())
     }
 
-    private fun markAsked() {
-        prefs.edit().putBoolean(ASKED_NOTIFICATIONS, true).apply()
-    }
+    private fun notificationPayload() = CaptureBridgeJson.objectOf(
+        NotificationPermissionFacts.serializer(),
+        (activity as MainActivity).notificationPermissionFacts(),
+    )
 
-    private fun notificationPayload(): JSObject {
-        val granted = CaptureNotifications.isPermissionGranted(activity)
-        val everAsked = prefs.getBoolean(ASKED_NOTIFICATIONS, false)
-        val rationale = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            activity.shouldShowRequestPermissionRationale(
-                android.Manifest.permission.POST_NOTIFICATIONS,
-            )
-        return JSObject()
-            .put("apiLevel", Build.VERSION.SDK_INT)
-            .put("granted", granted)
-            .put("everAsked", everAsked)
-            .put("showRationale", rationale)
-    }
-
-    private companion object {
-        const val ASKED_NOTIFICATIONS = "asked_notifications"
-    }
+    private fun tilePayload() = CaptureBridgeJson.objectOf(
+        TilePermissionFacts.serializer(),
+        TilePermissionFacts(
+            apiLevel = Build.VERSION.SDK_INT,
+            lastAddResult = lastTileAddResult,
+            resultConstants = TileAddResultConstants.platform(),
+        ),
+    )
 }

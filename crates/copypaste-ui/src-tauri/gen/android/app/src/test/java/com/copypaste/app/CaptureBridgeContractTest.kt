@@ -12,6 +12,9 @@ class CaptureBridgeContractTest {
     private data class Fixture(
         val probe: ProbeResult,
         val arms: List<ArmResult>,
+        val armRequest: CaptureArmRequest,
+        val notificationFacts: NotificationPermissionFacts,
+        val tileFacts: TilePermissionFacts,
         val reads: List<ReadResult>,
         val drain: DrainResult,
         val empty: EmptyResult,
@@ -35,6 +38,10 @@ class CaptureBridgeContractTest {
         assertOptionality(ShizukuProbe.serializer())
         assertOptionality(ProbeResult.serializer())
         assertOptionality(ArmResult.serializer())
+        assertOptionality(CaptureArmRequest.serializer())
+        assertOptionality(NotificationPermissionFacts.serializer())
+        assertOptionality(TileAddResultConstants.serializer())
+        assertOptionality(TilePermissionFacts.serializer(), setOf("lastAddResult"))
         assertOptionality(
             ReadResult.serializer(),
             setOf("text", "sourceAppBundleId", "sourceAppName"),
@@ -86,6 +93,18 @@ class CaptureBridgeContractTest {
                     notificationPermission = index != ReadOutcome.entries.lastIndex,
                 )
             },
+            CaptureArmRequest("ongoing", "lost title", "lost body"),
+            NotificationPermissionFacts(
+                apiLevel = 36,
+                granted = true,
+                everAsked = true,
+                showRationale = false,
+            ),
+            TilePermissionFacts(
+                apiLevel = 36,
+                lastAddResult = TileAddResultConstants.platform().added,
+                resultConstants = TileAddResultConstants.platform(),
+            ),
             listOf(
                 ReadResult(
                     ReadOutcome.SUCCEEDED,

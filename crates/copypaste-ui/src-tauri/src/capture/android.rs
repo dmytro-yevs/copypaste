@@ -18,11 +18,10 @@ use tauri::{Manager, Wry};
 use crate::backend::{BackendError, Result};
 
 use super::contract::{
-    AndroidArmResult, AndroidDrainResult, AndroidEmptyResult, AndroidProbeResult, AndroidReadResult,
+    AndroidArmRequest, AndroidArmResult, AndroidDrainResult, AndroidEmptyResult,
+    AndroidProbeResult, AndroidReadResult,
 };
-use super::model::{
-    CaptureModel, CaptureSnapshot, CaptureSource, Clip, ReadOutcome, LOST_BODY, LOST_TITLE,
-};
+use super::model::{CaptureModel, CaptureSnapshot, CaptureSource, Clip, ReadOutcome};
 use super::CaptureControl;
 
 #[derive(Deserialize)]
@@ -86,17 +85,6 @@ pub struct AndroidCapture {
 }
 
 // the wire to Kotlin
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ArmArgs {
-    /// The wording of the loss notification travels *down*, so the death
-    /// recipient can post it without Rust being scheduled — a process that is
-    /// being torn down may never get another turn. One set of words, decided in
-    /// `model`, rendered by whichever side is still alive.
-    lost_title: &'static str,
-    lost_body: &'static str,
-}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -211,10 +199,7 @@ impl CaptureControl for AndroidCapture {
     }
 
     fn arm(&self) -> Result<CaptureSnapshot> {
-        let args = ArmArgs {
-            lost_title: LOST_TITLE,
-            lost_body: LOST_BODY,
-        };
+        let args = AndroidArmRequest::current();
         let result: AndroidArmResult = self.call("arm", args, MSG_ARM)?;
         Ok(self.with(|model| {
             model.set_enabled(result.enabled);

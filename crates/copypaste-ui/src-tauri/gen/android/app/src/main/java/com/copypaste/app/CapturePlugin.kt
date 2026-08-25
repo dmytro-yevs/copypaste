@@ -209,34 +209,40 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun arm(invoke: Invoke) {
-        val args = invoke.getArgs()
-        val title = args.optString("lostTitle", "Background capture stopped.")
-        val body = args.optString("lostBody", "")
+        val copy = runCatching {
+            CaptureBridgeJson.decode(CaptureArmRequest.serializer(), invoke.getArgs())
+        }.getOrNull()
+        if (copy == null || copy.ongoingText.isBlank() ||
+            copy.lostTitle.isBlank() || copy.lostBody.isBlank()
+        ) {
+            invoke.reject("The capture notification contract was incomplete.")
+            return
+        }
 
         if (!CaptureNotifications.isPermissionGranted(activity)) {
             // The permission result is asynchronous. Keep this exact request
             // pending so a granted dialog continues the user's original arm,
             // instead of making the control look as though it did nothing.
-            abandon(pendingArm.getAndSet(ArmRequest(invoke, title, body)))
+            abandon(pendingArm.getAndSet(ArmRequest(invoke, copy)))
             (activity as MainActivity).requestNotificationPermission(::onNotificationPermissionResult)
             return
         }
 
-        finishArm(invoke, title, body)
+        finishArm(invoke, copy)
     }
 
-    private fun finishArm(invoke: Invoke, title: String, body: String) {
+    private fun finishArm(invoke: Invoke, copy: CaptureArmRequest) {
         if (ClipCascadeCapture.isSetupComplete(activity)) {
             resolveArm(
                 invoke,
-                CaptureService.start(activity, "Capturing from every app.", title, body),
+                CaptureService.start(activity, copy),
             )
             return
         }
 
         if (ShizukuClipboard.isRunning() && !ShizukuClipboard.hasPermission()) {
             active = this@CapturePlugin
-            val pending = ArmRequest(invoke, title, body)
+            val pending = ArmRequest(invoke, copy)
             abandon(pendingShizukuArm.getAndSet(pending))
             if (!ShizukuClipboard.requestPermission()) {
                 pendingShizukuArm.compareAndSet(pending, null)
@@ -272,7 +278,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             abandon(pendingShizukuArm.getAndSet(null))
             if (pendingArm.get() == null) active = null
             val listening = prepared &&
-                CaptureService.start(activity, "Capturing from every app.", title, body)
+                CaptureService.start(activity, copy)
             if (!listening) CaptureService.stop(activity)
 
             resolveArm(invoke, listening)
@@ -294,11 +300,11 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         ))
     }
 
-    private fun onNotificationPermissionResult(granted: Boolean) {
+    private fun onNotificationPermissionResult(facts: NotificationPermissionFacts) {
         val pending = pendingArm.getAndSet(null) ?: return
         active = null
-        if (granted) {
-            finishArm(pending.invoke, pending.title, pending.body)
+        if (facts.granted) {
+            finishArm(pending.invoke, pending.copy)
             return
         }
 
@@ -499,9 +505,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
                     pending.invoke,
                     CaptureService.start(
                         activity,
-                        "Capturing from every app.",
-                        pending.title,
-                        pending.body,
+                        pending.copy,
                     ),
                 )
             }
@@ -513,7 +517,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
 
     private data class ArmRequest(
         val invoke: Invoke,
-        val title: String,
-        val body: String,
+        val copy: CaptureArmRequest,
     )
 }

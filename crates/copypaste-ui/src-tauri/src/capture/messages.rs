@@ -35,6 +35,7 @@ pub const MSG_TOAST_UNEXPLAINED: &str =
 pub const LOST_TITLE: &str = "Background capture stopped.";
 pub const LOST_BODY: &str =
     "CopyPaste is only saving what you copy inside the app. Tap to restart.";
+pub const ONGOING_TEXT: &str = "Capturing from every app.";
 
 /// What rung 0 saves, in the words the onboarding uses. Repeated in several
 /// details below because it is the sentence that keeps the app from implying
@@ -47,7 +48,7 @@ pub(super) fn headline(platform: Rung, health: CaptureHealth) -> &'static str {
         return "Capturing everything you copy.";
     }
     match health {
-        CaptureHealth::Working => "Capturing from every app.",
+        CaptureHealth::Working => ONGOING_TEXT,
         CaptureHealth::Disabled => "Background capture is off.",
         CaptureHealth::NotGranted { .. } => "Background capture isn't set up.",
         CaptureHealth::GrantedNotWorking { reason } => match reason {
@@ -135,6 +136,7 @@ mod tests {
             MSG_TOAST_UNEXPLAINED,
             LOST_TITLE,
             LOST_BODY,
+            ONGOING_TEXT,
         ];
         for platform in [Rung::Desktop, Rung::InApp] {
             for health in healths {

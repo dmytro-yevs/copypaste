@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{AppHandle, Manager as _, Runtime, Wry};
 
-use super::policy::{self, android_notification_authorization, tile_status_from_add_result};
+use super::policy::{
+    self, android_notification_authorization, android_tile_status, AndroidNotificationFacts,
+    AndroidTileFacts,
+};
 use super::PermissionStatus;
 use crate::backend::BackendError;
 
@@ -22,27 +25,6 @@ pub fn plugin() -> TauriPlugin<Wry> {
             Ok(())
         })
         .build()
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NotificationFacts {
-    api_level: u32,
-    granted: bool,
-    ever_asked: bool,
-    show_rationale: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TileFacts {
-    status: PermissionStatus,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TileAddResult {
-    result: i32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -65,7 +47,7 @@ fn call<A: Serialize, T: serde::de::DeserializeOwned>(
 pub fn notification_status(
     app: &AppHandle<impl Runtime>,
 ) -> Result<PermissionStatus, BackendError> {
-    let facts: NotificationFacts = call(app, "notificationFacts", Empty {})?;
+    let facts: AndroidNotificationFacts = call(app, "notificationFacts", Empty {})?;
     Ok(policy::notification_status(
         android_notification_authorization(
             facts.api_level,
@@ -77,18 +59,21 @@ pub fn notification_status(
 }
 
 pub fn tile_status(app: &AppHandle<impl Runtime>) -> Result<PermissionStatus, BackendError> {
-    let facts: TileFacts = call(app, "tileFacts", Empty {})?;
-    Ok(facts.status)
+    let facts: AndroidTileFacts = call(app, "tileFacts", Empty {})?;
+    Ok(android_tile_status(
+        facts.api_level,
+        facts.last_add_result,
+        facts.result_constants,
+    ))
 }
 
 pub fn request_notifications(app: &AppHandle<impl Runtime>) -> Result<(), BackendError> {
-    let _: NotificationFacts = call(app, "requestNotifications", Empty {})?;
+    let _: AndroidNotificationFacts = call(app, "requestNotifications", Empty {})?;
     Ok(())
 }
 
 pub fn request_tile(app: &AppHandle<impl Runtime>) -> Result<(), BackendError> {
-    let added: TileAddResult = call(app, "requestTile", Empty {})?;
-    let _ = tile_status_from_add_result(added.result);
+    let _: AndroidTileFacts = call(app, "requestTile", Empty {})?;
     Ok(())
 }
 

@@ -1,6 +1,26 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use super::model::{Clip, ReadOutcome, ShizukuProbe};
+use super::model::{Clip, ReadOutcome, ShizukuProbe, LOST_BODY, LOST_TITLE, ONGOING_TEXT};
+
+/// Rust sends this copy before arming so process teardown cannot force Kotlin
+/// to invent notification wording while Rust is no longer scheduled.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AndroidArmRequest<'a> {
+    ongoing_text: &'a str,
+    lost_title: &'a str,
+    lost_body: &'a str,
+}
+
+impl AndroidArmRequest<'static> {
+    pub(crate) fn current() -> Self {
+        Self {
+            ongoing_text: ONGOING_TEXT,
+            lost_title: LOST_TITLE,
+            lost_body: LOST_BODY,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -55,9 +75,20 @@ mod tests {
     struct CaptureBridgeFixture {
         probe: AndroidProbeResult,
         arms: Vec<AndroidArmResult>,
+        arm_request: FixtureArmRequest,
+        notification_facts: serde_json::Value,
+        tile_facts: serde_json::Value,
         reads: Vec<AndroidReadResult>,
         drain: AndroidDrainResult,
         empty: AndroidEmptyResult,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FixtureArmRequest {
+        ongoing_text: String,
+        lost_title: String,
+        lost_body: String,
     }
 
     #[test]
@@ -98,6 +129,11 @@ mod tests {
         assert!(fixture.arms[1..]
             .iter()
             .all(|arm| !arm.enabled && !arm.listening));
+        assert_eq!(fixture.arm_request.ongoing_text, "ongoing");
+        assert_eq!(fixture.arm_request.lost_title, "lost title");
+        assert_eq!(fixture.arm_request.lost_body, "lost body");
+        let _ = fixture.notification_facts;
+        let _ = fixture.tile_facts;
         assert_eq!(
             fixture
                 .reads
@@ -147,6 +183,14 @@ mod tests {
                 .as_deref(),
             Some("com.example.writer")
         );
+    }
+
+    #[test]
+    fn rust_authors_every_persisted_capture_sentence() {
+        let request = serde_json::to_value(AndroidArmRequest::current()).unwrap();
+        assert_eq!(request["ongoingText"], ONGOING_TEXT);
+        assert_eq!(request["lostTitle"], LOST_TITLE);
+        assert_eq!(request["lostBody"], LOST_BODY);
     }
 
     #[test]

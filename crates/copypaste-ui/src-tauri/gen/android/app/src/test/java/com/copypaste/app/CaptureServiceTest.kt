@@ -25,7 +25,19 @@ class CaptureServiceTest {
     fun isArmedIsFalseUntilStartPersistsState() {
         val context = org.robolectric.RuntimeEnvironment.getApplication()
         assertFalse(CaptureService.isArmed(context))
-        assertFalse(CaptureService.start(context, "Capturing from every app.", "stopped", "body"))
+        assertFalse(
+            CaptureService.start(
+                context,
+                CaptureArmRequest("ongoing", "stopped", "body"),
+            ),
+        )
+        assertFalse(CaptureService.isArmed(context))
+    }
+
+    @Test
+    fun incompleteRustCopyCannotBecomePersistedServiceState() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        assertFalse(CaptureService.start(context, CaptureArmRequest("", "stopped", "body")))
         assertFalse(CaptureService.isArmed(context))
     }
 }

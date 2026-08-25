@@ -1,20 +1,27 @@
 package com.copypaste.app
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
-  private val notificationWaiters = ArrayList<(Boolean) -> Unit>()
+  private val notificationWaiters = ArrayList<(NotificationPermissionFacts) -> Unit>()
+  private val permissionPreferences by lazy {
+    getSharedPreferences(PERMISSION_PREFERENCES, Context.MODE_PRIVATE)
+  }
 
   private val notificationPermission = registerForActivityResult(
     ActivityResultContracts.RequestPermission(),
-  ) { granted ->
+  ) {
     val waiters = ArrayList(notificationWaiters)
     notificationWaiters.clear()
-    waiters.forEach { it(granted) }
+    val facts = notificationPermissionFacts()
+    waiters.forEach { it(facts) }
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,14 +49,31 @@ class MainActivity : TauriActivity() {
     setIntent(intent)
   }
 
-  fun requestNotificationPermission(onResult: (Boolean) -> Unit) {
+  fun requestNotificationPermission(onResult: (NotificationPermissionFacts) -> Unit) {
+    permissionPreferences.edit().putBoolean(ASKED_NOTIFICATIONS, true).apply()
     if (CaptureNotifications.isPermissionGranted(this)) {
-      onResult(true)
+      onResult(notificationPermissionFacts())
       return
     }
     notificationWaiters.add(onResult)
     if (notificationWaiters.size == 1) {
-      notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+      notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
+  }
+
+  fun notificationPermissionFacts(): NotificationPermissionFacts {
+    val rationale = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+      shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+    return NotificationPermissionFacts(
+      apiLevel = Build.VERSION.SDK_INT,
+      granted = CaptureNotifications.isPermissionGranted(this),
+      everAsked = permissionPreferences.getBoolean(ASKED_NOTIFICATIONS, false),
+      showRationale = rationale,
+    )
+  }
+
+  private companion object {
+    const val PERMISSION_PREFERENCES = "onboarding-permissions"
+    const val ASKED_NOTIFICATIONS = "asked_notifications"
   }
 }
