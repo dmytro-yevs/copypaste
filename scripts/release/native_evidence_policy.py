@@ -46,7 +46,7 @@ def load_policy():
         if (
             set(requirement) != {
                 "environment", "scenario", "budget_ms", "assertions", "artifacts",
-                "release_artifact",
+                "feature_state_artifacts", "release_artifact",
             }
             or set(artifacts) != {"required", "optional", "repeatable"}
             or requirement.get("environment") not in environments
@@ -63,6 +63,10 @@ def load_policy():
             or set(required) & set(optional)
             or not set(required) | set(optional) <= set(artifact_kinds)
             or not set(repeatable) <= set(required) | set(optional)
+            or not isinstance(requirement.get("feature_state_artifacts"), list)
+            or len(requirement["feature_state_artifacts"]) != len(set(requirement["feature_state_artifacts"]))
+            or not set(requirement["feature_state_artifacts"]) <= {"screenshot", "accessibility"}
+            or not set(requirement["feature_state_artifacts"]) <= set(required) | set(optional)
             or not isinstance(release_artifact, str)
             or not release_artifact
             or release_artifact in release_artifacts
@@ -81,38 +85,63 @@ def schema_document(policy):
     conditions = []
     for platform, requirement in platforms.items():
         allowed_kinds = requirement["artifacts"]["required"] + requirement["artifacts"]["optional"]
+        platform_properties = {
+            "environment": {"const": requirement["environment"]},
+            "scenario": {
+                "type": "object",
+                "properties": {
+                    "name": {"const": requirement["scenario"]},
+                    "budget_ms": {"const": requirement["budget_ms"]},
+                },
+            },
+            "assertions": {
+                "type": "array",
+                "minItems": len(requirement["assertions"]),
+                "maxItems": len(requirement["assertions"]),
+                "allOf": [
+                    {"contains": {"const": assertion}}
+                    for assertion in requirement["assertions"]
+                ],
+            },
+            "artifacts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"kind": {"enum": allowed_kinds}},
+                },
+            },
+        }
+        feature_state_artifacts = requirement["feature_state_artifacts"]
+        if feature_state_artifacts:
+            platform_properties["feature_states"] = {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": feature_state_artifacts,
+                    "properties": {
+                        kind: {} for kind in feature_state_artifacts
+                    },
+                },
+            }
         conditions.append({
             "if": {"type": "object", "properties": {"platform": {"const": platform}}},
             "then": {
                 "type": "object",
-                "properties": {
-                    "environment": {"const": requirement["environment"]},
-                    "scenario": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"const": requirement["scenario"]},
-                            "budget_ms": {"const": requirement["budget_ms"]},
-                        },
-                    },
-                    "assertions": {
-                        "type": "array",
-                        "minItems": len(requirement["assertions"]),
-                        "maxItems": len(requirement["assertions"]),
-                        "allOf": [
-                            {"contains": {"const": assertion}}
-                            for assertion in requirement["assertions"]
-                        ],
-                    },
-                    "artifacts": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {"kind": {"enum": allowed_kinds}},
-                        },
-                    },
-                },
+                "properties": platform_properties,
             },
         })
+    artifact_reference = {
+        "type": "object", "additionalProperties": False,
+        "required": ["path", "sha256", "bytes"],
+        "properties": {
+            "path": {
+                "type": "string", "minLength": 1, "maxLength": 240,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+            },
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "bytes": {"type": "integer", "minimum": 1},
+        },
+    }
     return {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "$id": "https://copypaste.invalid/native-parity-evidence.schema.json",
@@ -177,6 +206,8 @@ def schema_document(policy):
                         "state": {
                             "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$",
                         },
+                        "screenshot": copy.deepcopy(artifact_reference),
+                        "accessibility": copy.deepcopy(artifact_reference),
                     },
                 },
             },
@@ -223,6 +254,10 @@ def main():
         mutated["platforms"]["android"]["environment"] = "emulator"
         if projected == schema_document(mutated):
             raise SystemExit("native-evidence-policy: stale Android environment fixture passed")
+        mutated = copy.deepcopy(policy)
+        mutated["platforms"]["android"]["feature_state_artifacts"] = []
+        if projected == schema_document(mutated):
+            raise SystemExit("native-evidence-policy: stale feature-state binding fixture passed")
         print("native evidence policy self-test passed")
         return
     try:

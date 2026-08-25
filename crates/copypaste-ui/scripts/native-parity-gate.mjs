@@ -23,6 +23,7 @@ const PLATFORM_REQUIREMENTS = Object.fromEntries(
     artifacts: new Set(requirement.artifacts.required),
     optionalArtifacts: new Set(requirement.artifacts.optional),
     repeatableArtifacts: new Set(requirement.artifacts.repeatable),
+    featureStateArtifacts: new Set(requirement.feature_state_artifacts),
   }]),
 );
 const schema = JSON.parse(
@@ -50,10 +51,30 @@ function parseArguments(argv) {
     if (option === "--run-id") runId = value;
     if (option === "--windows-updater-state") windowsUpdaterState = value;
     if (option === "--expect-feature-state") {
-      if (!FEATURE_STATE_PATTERN.test(value)) throw new Error("invalid expected feature state");
-      expectedFeatureStates ??= new Set();
-      if (expectedFeatureStates.has(value)) throw new Error("duplicate expected feature state");
-      expectedFeatureStates.add(value);
+      const [identity, ...parts] = value.split(",");
+      const match = FEATURE_STATE_PATTERN.exec(identity);
+      if (!match) throw new Error("invalid expected feature state");
+      const requirement = PLATFORM_REQUIREMENTS[match[1]];
+      if (!requirement) throw new Error("invalid expected feature state platform");
+      const bindings = {};
+      for (const part of parts) {
+        const separator = part.indexOf("=");
+        if (separator < 1 || separator === part.length - 1) {
+          throw new Error("invalid expected feature state artifact");
+        }
+        const kind = part.slice(0, separator);
+        if (kind in bindings) throw new Error("duplicate expected feature state artifact");
+        bindings[kind] = part.slice(separator + 1);
+      }
+      if (
+        Object.keys(bindings).length !== requirement.featureStateArtifacts.size
+        || [...requirement.featureStateArtifacts].some((kind) => !(kind in bindings))
+      ) {
+        throw new Error("expected feature state artifacts contradict native evidence policy");
+      }
+      expectedFeatureStates ??= new Map();
+      if (expectedFeatureStates.has(identity)) throw new Error("duplicate expected feature state");
+      expectedFeatureStates.set(identity, bindings);
     }
     if (option === "--require") {
       for (const platform of value.split(",").filter(Boolean)) required.add(platform);
@@ -183,6 +204,30 @@ async function verifyArtifacts(receiptPath, receipt, label) {
   if (missing.length > 0) throw new Error(`${label} lacks ${missing.join(", ")} evidence`);
 }
 
+function sameArtifact(left, right) {
+  return left.path === right.path && left.sha256 === right.sha256 && left.bytes === right.bytes;
+}
+
+function verifyFeatureStateArtifacts(receipt, label, screenshotIdentities) {
+  const required = PLATFORM_REQUIREMENTS[receipt.platform].featureStateArtifacts;
+  if (required.size === 0) return;
+  for (const state of receipt.feature_states ?? []) {
+    for (const kind of required) {
+      const bound = state[kind];
+      const artifact = receipt.artifacts.find(
+        (candidate) => candidate.kind === kind && candidate.path === bound?.path,
+      );
+      if (!artifact || !sameArtifact(bound, artifact)) {
+        throw new Error(`${label} ${state.feature_id}=${state.state} does not bind declared ${kind} evidence`);
+      }
+    }
+    if (screenshotIdentities.has(state.screenshot.sha256)) {
+      throw new Error(`${label} reuses a screenshot identity across feature states`);
+    }
+    screenshotIdentities.add(state.screenshot.sha256);
+  }
+}
+
 export async function validateEvidence({
   commit,
   evidence,
@@ -194,6 +239,7 @@ export async function validateEvidence({
   if (!RUN_ID_PATTERN.test(runId ?? "")) throw new Error("expected workflow run ID is required");
   const receipts = new Map();
   let observedCommit = commit;
+  const featureScreenshotIdentities = new Set();
 
   for (const [index, receiptPath] of evidence.entries()) {
     const label = `receipt ${index + 1}`;
@@ -223,6 +269,7 @@ export async function validateEvidence({
     if (receipt.source.commit !== observedCommit) throw new Error(`${label} belongs to another commit`);
     if (receipt.source.run_id !== runId) throw new Error(`${label} belongs to another workflow run`);
     await verifyArtifacts(receiptPath, receipt, label);
+    verifyFeatureStateArtifacts(receipt, label, featureScreenshotIdentities);
     if (receipt.platform === "windows") {
       await verifyWindowsFeatureEvidence(receiptPath, receipt, label, windowsUpdaterState);
     }
@@ -234,22 +281,35 @@ export async function validateEvidence({
   const unexpected = [...actual].filter((platform) => !required.has(platform));
   if (missing.length > 0) throw new Error(`missing required evidence for ${missing.join(", ")}`);
   if (unexpected.length > 0) throw new Error(`unexpected evidence for ${unexpected.join(", ")}`);
-  const observedFeatureStates = new Set();
+  const observedFeatureStates = new Map();
   for (const receipt of receipts.values()) {
     for (const featureState of receipt.feature_states ?? []) {
       const identity = `${receipt.platform}:${featureState.feature_id}=${featureState.state}`;
       if (observedFeatureStates.has(identity)) throw new Error(`duplicate feature state ${identity}`);
-      observedFeatureStates.add(identity);
+      observedFeatureStates.set(identity, featureState);
     }
   }
   if (expectedFeatureStates !== undefined) {
-    const missingFeatureStates = [...expectedFeatureStates].filter((identity) => !observedFeatureStates.has(identity));
-    const unexpectedFeatureStates = [...observedFeatureStates].filter((identity) => !expectedFeatureStates.has(identity));
+    const expectedIdentities = expectedFeatureStates instanceof Map
+      ? new Set(expectedFeatureStates.keys())
+      : expectedFeatureStates;
+    const missingFeatureStates = [...expectedIdentities].filter((identity) => !observedFeatureStates.has(identity));
+    const unexpectedFeatureStates = [...observedFeatureStates.keys()].filter((identity) => !expectedIdentities.has(identity));
     if (missingFeatureStates.length > 0) {
       throw new Error(`missing required feature states ${missingFeatureStates.join(", ")}`);
     }
     if (unexpectedFeatureStates.length > 0) {
       throw new Error(`unexpected feature states ${unexpectedFeatureStates.join(", ")}`);
+    }
+    if (expectedFeatureStates instanceof Map) {
+      for (const [identity, bindings] of expectedFeatureStates) {
+        const observed = observedFeatureStates.get(identity);
+        for (const [kind, expectedPath] of Object.entries(bindings)) {
+          if (observed[kind].path !== expectedPath) {
+            throw new Error(`${identity} ${kind} path does not match the feature ledger`);
+          }
+        }
+      }
     }
   }
   return [...receipts.values()];

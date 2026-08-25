@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { validateEvidence } from "./native-parity-gate.mjs";
+import { main, validateEvidence } from "./native-parity-gate.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "123456789";
@@ -153,6 +153,26 @@ async function fixture(root, platform, overrides = {}) {
     });
   }
 
+  let featureStates;
+  if (platform === "android" || platform === "macos") {
+    const screenshot = artifacts.find((artifact) => artifact.kind === "screenshot");
+    const accessibility = artifacts.find((artifact) => artifact.kind === "accessibility");
+    featureStates = [{
+      feature_id: "devices",
+      state: platform === "android" ? "scan-pairing-code" : "native-shell",
+      screenshot: {
+        path: screenshot.path,
+        sha256: screenshot.sha256,
+        bytes: screenshot.bytes,
+      },
+      accessibility: {
+        path: accessibility.path,
+        sha256: accessibility.sha256,
+        bytes: accessibility.bytes,
+      },
+    }];
+  }
+
   const receipt = {
     schema_version: 1,
     platform,
@@ -163,6 +183,7 @@ async function fixture(root, platform, overrides = {}) {
     scenario: RECEIPT_VALUES[platform].scenario,
     assertions: RECEIPT_VALUES[platform].assertions,
     artifacts,
+    ...(featureStates ? { feature_states: featureStates } : {}),
     ...receiptOverrides,
   };
   const receiptPath = path.join(directory, "native-evidence.json");
@@ -506,9 +527,7 @@ test("rejects an emulator receipt in the physical Android release slot", () => w
 }));
 
 test("binds expected feature states to the platform receipt", () => withRoot(async (root) => {
-  const receiptPath = await fixture(root, "android", {
-    feature_states: [{ feature_id: "history", state: "populated" }],
-  });
+  const receiptPath = await fixture(root, "android");
   const options = {
     commit: COMMIT,
     evidence: [receiptPath],
@@ -517,24 +536,48 @@ test("binds expected feature states to the platform receipt", () => withRoot(asy
   };
   const receipts = await validateEvidence({
     ...options,
-    expectedFeatureStates: new Set(["android:history=populated"]),
+    expectedFeatureStates: new Map([[
+      "android:devices=scan-pairing-code",
+      { screenshot: "screenshot.txt", accessibility: "accessibility.txt" },
+    ]]),
   });
   assert.equal(receipts.length, 1);
   await assert.rejects(
     validateEvidence({
       ...options,
-      expectedFeatureStates: new Set(["android:history=empty"]),
+      expectedFeatureStates: new Set(["android:devices=empty"]),
     }),
-    /missing required feature states android:history=empty/,
+    /missing required feature states android:devices=empty/,
   );
   await assert.rejects(
     validateEvidence({ ...options, expectedFeatureStates: new Set() }),
-    /unexpected feature states android:history=populated/,
+    /unexpected feature states android:devices=scan-pairing-code/,
+  );
+}));
+
+test("the command-line gate consumes artifact-bound feature expectations", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "android");
+  const common = [
+    "--evidence", receiptPath,
+    "--require", "android",
+    "--commit", COMMIT,
+    "--run-id", RUN_ID,
+  ];
+  await main([
+    ...common,
+    "--expect-feature-state",
+    "android:devices=scan-pairing-code,screenshot=screenshot.txt,accessibility=accessibility.txt",
+  ]);
+  await assert.rejects(
+    main([...common, "--expect-feature-state", "android:devices=scan-pairing-code"]),
+    /artifacts contradict native evidence policy/,
   );
 }));
 
 test("rejects duplicate and malformed feature-state records", () => withRoot(async (root) => {
-  const duplicate = { feature_id: "history", state: "populated" };
+  const seededPath = await fixture(root, "android");
+  const seeded = JSON.parse(await readFile(seededPath, "utf8"));
+  const duplicate = seeded.feature_states[0];
   const duplicatePath = await fixture(root, "android", { feature_states: [duplicate, duplicate] });
   await assert.rejects(
     validateEvidence({
@@ -546,7 +589,7 @@ test("rejects duplicate and malformed feature-state records", () => withRoot(asy
     /violates the schema/,
   );
   const malformedPath = await fixture(root, "android", {
-    feature_states: [{ feature_id: "History", state: "populated" }],
+    feature_states: [{ ...duplicate, feature_id: "History" }],
   });
   await assert.rejects(
     validateEvidence({
@@ -558,6 +601,99 @@ test("rejects duplicate and malformed feature-state records", () => withRoot(asy
     /violates the schema/,
   );
 }));
+
+test("rejects label-only and incomplete Android feature states", () => withRoot(async (root) => {
+  const labelOnly = await fixture(root, "android", {
+    feature_states: [{ feature_id: "devices", state: "scan-pairing-code" }],
+  });
+  await assert.rejects(
+    validateEvidence({
+      commit: COMMIT,
+      evidence: [labelOnly],
+      required: new Set(["android"]),
+      runId: RUN_ID,
+    }),
+    /violates the schema/,
+  );
+  const seededPath = await fixture(root, "macos");
+  const seeded = JSON.parse(await readFile(seededPath, "utf8"));
+  const incomplete = { ...seeded.feature_states[0] };
+  delete incomplete.accessibility;
+  const incompletePath = await fixture(root, "macos", { feature_states: [incomplete] });
+  await assert.rejects(
+    validateEvidence({
+      commit: COMMIT,
+      evidence: [incompletePath],
+      required: new Set(["macos"]),
+      runId: RUN_ID,
+    }),
+    /violates the schema/,
+  );
+}));
+
+test("rejects wrong, unrelated, and reused feature-state artifacts", () => withRoot(async (root) => {
+  const wrongPath = await fixture(root, "android");
+  const wrongReceipt = JSON.parse(await readFile(wrongPath, "utf8"));
+  const state = wrongReceipt.feature_states[0];
+  await assert.rejects(
+    validateEvidence({
+      commit: COMMIT,
+      evidence: [wrongPath],
+      expectedFeatureStates: new Map([[
+        "android:devices=scan-pairing-code",
+        { screenshot: "pairing-entry.png", accessibility: "pairing-entry.xml" },
+      ]]),
+      required: new Set(["android"]),
+      runId: RUN_ID,
+    }),
+    /screenshot path does not match the feature ledger/,
+  );
+
+  state.screenshot = { ...state.accessibility };
+  await writeFile(wrongPath, `${JSON.stringify(wrongReceipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [wrongPath], required: new Set(["android"]), runId: RUN_ID }),
+    /does not bind declared screenshot evidence/,
+  );
+
+  const reusedPath = await fixture(root, "macos");
+  const reusedReceipt = JSON.parse(await readFile(reusedPath, "utf8"));
+  reusedReceipt.feature_states.push({
+    ...reusedReceipt.feature_states[0],
+    state: "desktop-pairing-entry",
+  });
+  await writeFile(reusedPath, `${JSON.stringify(reusedReceipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [reusedPath], required: new Set(["macos"]), runId: RUN_ID }),
+    /reuses a screenshot identity across feature states/,
+  );
+}));
+
+test("rejects changed bytes behind a bound feature-state artifact", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "android");
+  await writeFile(path.join(path.dirname(receiptPath), "screenshot.txt"), "changed screenshot bytes\n");
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["android"]), runId: RUN_ID }),
+    /byte count changed|checksum changed/,
+  );
+}));
+
+test("the ledger emits the exact nine current feature-state expectations", async () => {
+  const ledger = fileURLToPath(new URL("../../../scripts/check-feature-ledger.py", import.meta.url));
+  const python = process.platform === "win32" ? "python" : "python3";
+  const { stdout } = await run(python, [ledger, "--receipt-expectations"]);
+  assert.deepEqual(stdout.trim().split(/\r?\n/), [
+    "android:devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml",
+    "macos:devices=native-shell,screenshot=screenshot.png,accessibility=ax.log",
+    "windows:capture=copy-feedback-setting",
+    "windows:capture=service-capture-status",
+    "windows:cloud-account=unconfigured",
+    "windows:devices=desktop-pairing-entry",
+    "windows:history=populated",
+    "windows:settings-and-service=appearance",
+    "windows:settings-and-service=updater-configured",
+  ]);
+});
 
 test("rejects a known assertion assigned to the wrong platform", () => withRoot(async (root) => {
   const evidence = [await fixture(root, "macos", {
@@ -745,10 +881,10 @@ test("rejects hard-link aliases across artifact kinds", () => withRoot(async (ro
   );
 }));
 
-test("rejects duplicate artifact kinds", () => withRoot(async (root) => {
+test("rejects duplicate non-repeatable artifact kinds", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "macos");
   const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
-  receipt.artifacts[1].kind = "screenshot";
+  receipt.artifacts[1].kind = "measurement";
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   await assert.rejects(
     validateEvidence({
@@ -757,7 +893,7 @@ test("rejects duplicate artifact kinds", () => withRoot(async (root) => {
       required: new Set(["macos"]),
       runId: RUN_ID,
     }),
-    /duplicates screenshot evidence/,
+    /duplicates measurement evidence/,
   );
 }));
 
