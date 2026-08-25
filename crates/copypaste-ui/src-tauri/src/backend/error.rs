@@ -266,6 +266,9 @@ impl BackendError {
             ErrorCode::ProtocolMismatch => Self::ProtocolMismatch,
             // Now only ever an item: a missing device is `PeerNotFound`.
             ErrorCode::NotFound => Self::NotFound("That item is no longer there."),
+            ErrorCode::UnsupportedContent => {
+                Self::UnsupportedContent("That item cannot be copied in the requested format.")
+            }
             ErrorCode::PairingCode
             | ErrorCode::PairingAddress
             | ErrorCode::RateLimited
@@ -305,7 +308,9 @@ impl BackendError {
             Self::Invalid(_) => UiError::from_error_code(Some(ErrorCode::InvalidRequest)),
             Self::Internal(_) => UiError::from_error_code(Some(ErrorCode::Internal)),
             Self::Unsupported(_) => UiError::from_boundary(UiBoundaryErrorCode::Unavailable),
-            Self::UnsupportedContent(_) => UiError::from_boundary(UiBoundaryErrorCode::Unavailable),
+            Self::UnsupportedContent(_) => {
+                UiError::from_error_code(Some(ErrorCode::UnsupportedContent))
+            }
         }
     }
 }
@@ -375,6 +380,7 @@ mod tests {
             BackendError::NotFound("That item is no longer there."),
             BackendError::Invalid("There is nothing to add."),
             BackendError::Unsupported("Pairing is not available in this build."),
+            BackendError::UnsupportedContent("That item cannot be copied in the requested format."),
             BackendError::wrong_shape("a list of items"),
             BackendError::from_daemon("plain trouble"),
             BackendError::internal("plain trouble"),
@@ -400,6 +406,10 @@ mod tests {
         assert!(matches!(
             BackendError::from_code(Some(ErrorCode::NotFound), None, Some("gone")),
             BackendError::NotFound(_)
+        ));
+        assert!(matches!(
+            BackendError::from_code(Some(ErrorCode::UnsupportedContent), None, Some("ignored")),
+            BackendError::UnsupportedContent(_)
         ));
         // An untagged failure still becomes an error rather than a success.
         assert!(matches!(
