@@ -1,7 +1,7 @@
 /**
  * INV-21 / AT-50, AT-51, AT-52 — preferences default **per field**.
  *
- * An invalid `theme` must not discard a valid `accent`. A present-but-invalid
+ * An invalid mode must not discard a valid product theme. A present-but-invalid
  * field warns; an absent one defaults silently. Unknown keys are dropped and
  * never re-persisted. Malformed JSON, a non-object payload and a throwing
  * `localStorage` all fall back to full defaults without throwing.
@@ -21,43 +21,55 @@ describe("per-field recovery (AT-50)", () => {
 
     const prefs = parsePrefs({
       theme: "chartreuse",
-      accent: "teal",
+      colorTheme: "aurora",
       translucency: 101,
-      previewLines: 4,
+      previewLines: 3,
     });
 
     expect(prefs.theme).toBe(DEFAULT_PREFS.theme);
-    expect(prefs.accent).toBe("teal"); // preserved
+    expect(prefs.colorTheme).toBe("aurora");
     expect(prefs.translucency).toBe(DEFAULT_PREFS.translucency);
-    expect(prefs.previewLines).toBe(4); // preserved
+    expect(prefs.previewLines).toBe(3); // preserved
     // One warning per present-but-invalid field, and no more.
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it("defaults an absent field silently", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const prefs = parsePrefs({ accent: "rose" });
+    const prefs = parsePrefs({ colorTheme: "ember" });
     expect(prefs).toEqual({
       ...DEFAULT_PREFS,
-      accent: "rose",
+      colorTheme: "ember",
       onboardingComplete: true,
     });
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("persists the system accent choice", () => {
-    expect(parsePrefs({ accent: "system" }).accent).toBe("system");
+  it("migrates the retired translucency intensity to the maintained switch", () => {
+    expect(parsePrefs({ translucency: 45 }).translucency).toBe(true);
+    expect(parsePrefs({ translucency: 0 }).translucency).toBe(false);
+    expect(parsePrefs({ translucency: true }).translucency).toBe(true);
+    expect(parsePrefs({ translucency: false }).translucency).toBe(false);
   });
 
-  it("accepts a bounded translucency percentage and upgrades the alpha switch", () => {
-    expect(parsePrefs({ translucency: 45 }).translucency).toBe(45);
-    expect(parsePrefs({ translucency: true }).translucency).toBe(100);
-    expect(parsePrefs({ translucency: false }).translucency).toBe(0);
+  it("maps a retired accent to the nearest complete theme", () => {
+    expect(parsePrefs({ accent: "teal" }).colorTheme).toBe("aurora");
+    expect(parsePrefs({ accent: "rose" }).colorTheme).toBe("ember");
+    expect(parsePrefs({ accent: "blue" }).colorTheme).toBe("midnight");
+    expect(parsePrefs({ colorTheme: "graphite", accent: "teal" }).colorTheme).toBe(
+      "graphite",
+    );
   });
 
   it("rejects an out-of-range preview-line count", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(parsePrefs({ previewLines: 99 }).previewLines).toBe(
+      DEFAULT_PREFS.previewLines,
+    );
+    expect(parsePrefs({ previewLines: 4 }).previewLines).toBe(
+      DEFAULT_PREFS.previewLines,
+    );
+    expect(parsePrefs({ previewLines: 1 }).previewLines).toBe(
       DEFAULT_PREFS.previewLines,
     );
     expect(parsePrefs({ previewLines: 2.5 }).previewLines).toBe(
@@ -88,13 +100,14 @@ describe("unknown keys are dropped (AT-52)", () => {
   it("loads cleanly and does not carry them forward", () => {
     const prefs = parsePrefs({
       accent: "blue",
+      colorTheme: "graphite",
       density: "compact",
       oldHistoryDisplayLimit: 1000,
       __proto__: { polluted: true },
     });
     expect(prefs).toEqual({
       ...DEFAULT_PREFS,
-      accent: "blue",
+      colorTheme: "graphite",
       onboardingComplete: true,
     });
     expect(Object.keys(prefs).sort()).toEqual(Object.keys(DEFAULT_PREFS).sort());
@@ -129,11 +142,11 @@ describe("reading what zustand persisted", () => {
     // store writes, or the first frame is themed from defaults and then jumps.
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ state: { theme: "light", accent: "amber" }, version: 0 }),
+      JSON.stringify({ state: { theme: "light", colorTheme: "aurora" }, version: 0 }),
     );
     const prefs = readPrefs();
     expect(prefs.theme).toBe("light");
-    expect(prefs.accent).toBe("amber");
+    expect(prefs.colorTheme).toBe("aurora");
   });
 
   it("also reads a bare object, so an older or hand-written blob still loads", () => {

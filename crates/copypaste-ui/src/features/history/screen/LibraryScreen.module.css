@@ -1,0 +1,19 @@
+.screen {
+  overflow: hidden;
+  background: transparent;
+}
+
+.main {
+  min-inline-size: 0;
+  min-block-size: 0;
+  background: transparent;
+}
+
+.stream {
+  display: flex;
+  min-block-size: 0;
+  margin-inline: 0 auto;
+  flex: 1;
+  flex-direction: column;
+  background: transparent;
+}

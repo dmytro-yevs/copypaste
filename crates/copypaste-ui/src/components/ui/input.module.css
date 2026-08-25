@@ -1,0 +1,29 @@
+.input {
+  display: flex;
+  padding-inline: var(--s-3);
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: 0;
+}
+
+.input::placeholder {
+  color: var(--faint);
+}
+
+.input::selection {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.input:disabled {
+  cursor: not-allowed;
+}
+
+.embedded {
+  min-block-size: 100%;
+  padding-inline: 0;
+  box-shadow: none;
+}

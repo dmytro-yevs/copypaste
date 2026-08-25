@@ -2,7 +2,6 @@ import {
   APPEARANCE_SERIALIZATION,
   parseAppearanceFields,
   translucencyAttribute,
-  translucencyStyle,
   unwrapPersistedPrefs,
 } from "./appearancePrefs.ts";
 
@@ -24,7 +23,6 @@ export function themeBootstrapSource(): string {
   var unwrapPersistedPrefs = ${unwrapPersistedPrefs.toString()};
   var parseAppearanceFields = ${parseAppearanceFields.toString()};
   var translucencyAttribute = ${translucencyAttribute.toString()};
-  var translucencyStyle = ${translucencyStyle.toString()};
   var appearance = Object.assign({}, contract.defaults);
 
   try {
@@ -38,12 +36,12 @@ export function themeBootstrapSource(): string {
     }
   } catch (_) {}
 
-  var resolvedTheme = appearance.theme;
-  if (resolvedTheme === "system") {
-    resolvedTheme = contract.systemThemeFallback;
+  var colorScheme = appearance.theme;
+  if (colorScheme === "system") {
+    colorScheme = contract.systemThemeFallback;
     try {
       if (typeof window.matchMedia === "function") {
-        resolvedTheme = window.matchMedia(contract.systemThemeQuery).matches
+        colorScheme = window.matchMedia(contract.systemThemeQuery).matches
           ? "dark"
           : "light";
       }
@@ -51,14 +49,10 @@ export function themeBootstrapSource(): string {
   }
 
   var root = document.documentElement;
-  root.dataset.theme = resolvedTheme;
-  root.dataset.themePref = appearance.theme;
-  root.dataset.accent = appearance.accent;
+  root.dataset.colorScheme = colorScheme;
+  root.dataset.mode = appearance.theme;
+  root.dataset.theme = appearance.colorTheme;
   root.dataset.translucency = translucencyAttribute(appearance.translucency);
-  var translucencyValues = translucencyStyle(appearance.translucency);
-  for (var name in translucencyValues) {
-    root.style.setProperty(name, translucencyValues[name]);
-  }
   root.dataset.themeBootstrapped = "1";
 })();
 `;

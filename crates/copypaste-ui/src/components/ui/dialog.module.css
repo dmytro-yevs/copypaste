@@ -1,0 +1,8 @@
+.close {
+  position: absolute;
+  inset-block-start: var(--s-3);
+  inset-inline-end: var(--s-3);
+  color: var(--dim);
+}
+
+.close:hover { color: var(--text); }

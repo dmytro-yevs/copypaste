@@ -1,0 +1,16 @@
+.root { display: inline-flex; flex: none; padding: 0; align-items: center; justify-content: center; border: 0; outline: 0; background: transparent; }
+.compact { inline-size: var(--tap-min); block-size: var(--tap-min); }
+.comfortable { inline-size: max(var(--tap-min), calc(var(--ctl-h-lg) + var(--s-1))); block-size: max(var(--tap-min), calc(var(--ctl-h-lg) + var(--s-1))); }
+.root:focus-visible .control { box-shadow: var(--sh-focus); }
+.root:disabled { cursor: not-allowed; opacity: .5; }
+.control { display: flex; inline-size: var(--icon-md); block-size: var(--icon-md); align-items: center; justify-content: center; border: var(--stroke-1) solid var(--border); border-radius: var(--r-xs); color: transparent; background: var(--card); transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
+.root[data-state="unchecked"]:hover:not(:disabled) .control { border-color: var(--border-strong); background: var(--hover); }
+.root[data-state="unchecked"]:active:not(:disabled) .control { transform: scale(.94); background: var(--pressed); }
+.root[data-state="checked"] .control,
+.root[data-state="indeterminate"] .control { border-color: var(--accent); color: var(--on-accent); background: var(--accent); }
+.indicator { display: flex; inline-size: 100%; block-size: 100%; align-items: center; justify-content: center; color: currentColor; }
+.check { inline-size: var(--fs-xs); block-size: var(--fs-xs); }
+
+@media (prefers-reduced-motion: reduce) {
+  .control { transition: none; }
+}

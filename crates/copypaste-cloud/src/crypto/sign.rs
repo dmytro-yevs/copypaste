@@ -22,12 +22,14 @@
 //! Every column a client writes, in this order:
 //!
 //! ```text
-//! item_id | content_type | payload_metadata | origin_device_id | created_at | deleted | nonce | ciphertext
+//! item_id | content_type | payload_metadata | source_app_bundle_id | source_app_name | origin_device_id | created_at | deleted | nonce | ciphertext
 //! ```
 //!
 //! * `created_at`, `deleted` and `origin_device_id` are what the comparator
 //!   reads (`CloudSource::apply_remote`: `created_at`, then the content hash,
 //!   then `deleted`, then `origin_device_id`).
+//! * The source-app fields travel with the winning version and are covered so
+//!   a relay cannot relabel which application captured the item.
 //! * `item_id` is the identity the ordering is *scoped to*. Without it a valid
 //!   signature could be lifted onto another item, which is the metadata twin of
 //!   the row-move the AAD already prevents for content.
@@ -454,7 +456,7 @@ mod tests {
         });
         assert_eq!(
             input,
-            b"copypaste/v2/cloud-row-sig|2|2:a1|4:text|1:0|0:|3:dev|1:7|1:1|4:bm8=|4:Y3Q=".to_vec()
+            b"copypaste/v2/cloud-row-sig|2|2:a1|4:text|1:0|0:|1:0|0:|1:0|0:|3:dev|1:7|1:1|4:bm8=|4:Y3Q=".to_vec()
         );
     }
 

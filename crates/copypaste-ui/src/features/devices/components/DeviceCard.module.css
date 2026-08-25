@@ -1,0 +1,55 @@
+.card {
+  --button-content-gap: 0;
+
+  position: relative;
+  display: grid;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: calc(var(--ctl-h-lg) + var(--s-7));
+  padding: var(--s-3);
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--s-3);
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  color: var(--text);
+  background: var(--card);
+  box-shadow: var(--sh1);
+  white-space: normal;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.card > [data-slot="button-content"] { display: contents; }
+
+.card:hover { border-color: var(--selected-edge); }
+.card[data-selected="true"] { border-color: var(--selected-edge); background: var(--selected); box-shadow: var(--sh-focus); }
+.card:active { background: var(--selected); }
+.card:focus-visible { outline: 0; box-shadow: var(--sh-focus); }
+
+.identityWell {
+  display: grid;
+  inline-size: var(--sz-tile);
+  block-size: var(--sz-tile);
+  flex: none;
+  place-items: center;
+  border-radius: var(--r-row);
+  color: var(--device-icon-fg);
+  background: var(--selected);
+}
+
+.copy { display: flex; min-inline-size: 0; flex: 1; flex-direction: column; }
+.name { min-inline-size: 0; overflow: hidden; font-size: var(--fs-sm); font-weight: var(--fw-medium); text-overflow: ellipsis; white-space: nowrap; }
+.detailLine { display: block; min-inline-size: 0; margin-block-start: var(--s-1); color: var(--dim); font-size: var(--fs-xs); }
+.detailLayout { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-1); }
+.meta { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.separator { flex: none; color: var(--dim); }
+.status { min-inline-size: 0; }
+.chevron { margin-inline-start: auto; flex: none; color: var(--dim); }
+@media (pointer: coarse) { .card { min-block-size: calc(var(--tap-min) + var(--s-6)); } }
+@media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+
+@container (max-width: $cpXs) {
+  .card { min-block-size: calc(var(--ctl-h-lg) + var(--s-6)); padding: var(--s-2) var(--s-3); grid-template-columns: var(--sz-tile) minmax(0, 1fr) var(--s-5); gap: var(--s-2); /* grid gap */ }
+  .identityWell { inline-size: var(--sz-tile); block-size: var(--sz-tile); }
+}

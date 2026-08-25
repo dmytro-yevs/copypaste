@@ -546,6 +546,8 @@ mod tests {
                 device_name: "Test device".into(),
                 version: APP_VERSION.into(),
                 protocol_version: PROTOCOL_VERSION,
+                listen_addr: None,
+                device_details: None,
                 item_count: 0,
                 capture_running: true,
                 clipboard_backend: "fake".into(),

@@ -7,7 +7,8 @@ import {
   permissionRequest,
   permissionSnapshot,
 } from "@/lib/ipc";
-import { hasBridge } from "@/lib/ipcCall";
+import { hasNativeBridge } from "@/lib/ipcCall";
+import { isAndroidPlatform } from "@/lib/platform";
 
 export const ONBOARDING_PERMISSIONS_KEY = ["onboarding-permissions"] as const;
 
@@ -15,7 +16,7 @@ export function useOnboardingPermissions() {
   return useQuery<OnboardingPermissions>({
     queryKey: ONBOARDING_PERMISSIONS_KEY,
     queryFn: permissionSnapshot,
-    enabled: hasBridge(),
+    enabled: hasNativeBridge() || isAndroidPlatform(),
     retry: false,
   });
 }

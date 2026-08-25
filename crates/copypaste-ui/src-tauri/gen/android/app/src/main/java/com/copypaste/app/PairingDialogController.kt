@@ -11,10 +11,12 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import androidx.core.view.setMargins
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.textview.MaterialTextView
+import kotlin.math.min
 
 internal class PairingDialogController(
     private val activity: Activity,
@@ -42,21 +44,33 @@ internal class PairingDialogController(
         this.onAbort = onAbort
         showingInvite = true
         val root = column()
+        val qrSize = min(
+            dim(R.dimen.copypaste_pairing_qr_size),
+            activity.resources.displayMetrics.widthPixels - dim(R.dimen.copypaste_space_6) * 2,
+        )
         val qr = ImageView(activity).apply {
             id = R.id.pairing_qr
             contentDescription = activity.getString(R.string.pairing_qr_label)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             visibility = View.GONE
             adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(space(3), space(3), space(3), space(3))
+            setBackgroundResource(R.drawable.copypaste_pairing_qr_background)
+            clipToOutline = true
         }
-        val reveal = MaterialButton(activity).apply {
+        val reveal = MaterialButton(
+            activity,
+            null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle,
+        ).apply {
             id = R.id.pairing_reveal
             text = activity.getString(R.string.pairing_reveal)
             contentDescription = activity.getString(R.string.pairing_reveal_label)
-            minimumHeight = dp(MIN_TOUCH_DP)
+            minimumHeight = touchTarget()
             setOnClickListener {
                 val bitmap = runCatching {
-                    qrRenderer.render(payload, dp(QR_SIZE_DP))
+                    qrRenderer.render(payload, qrSize)
                 }.getOrNull() ?: return@setOnClickListener
                 activeQr = bitmap
                 qr.setImageBitmap(bitmap)
@@ -65,8 +79,8 @@ internal class PairingDialogController(
             }
         }
         root.addView(reveal, matchWidth())
-        root.addView(qr, centered(dp(QR_SIZE_DP)))
-        root.addView(text(activity.getString(R.string.pairing_expires, expiresInSecs)))
+        root.addView(qr, centered(qrSize))
+        root.addView(label(activity.getString(R.string.pairing_expires, expiresInSecs)))
         show(
             MaterialAlertDialogBuilder(activity)
                 .setTitle(R.string.pairing_invite_title)
@@ -142,8 +156,8 @@ internal class PairingDialogController(
             activity.getString(R.string.pairing_match_label)
         for (which in listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL)) {
             dialog.getButton(which).apply {
-                minimumHeight = dp(MIN_TOUCH_DP)
-                minimumWidth = dp(MIN_TOUCH_DP)
+                minimumHeight = touchTarget()
+                minimumWidth = touchTarget()
             }
         }
         timeout = Runnable {
@@ -176,8 +190,8 @@ internal class PairingDialogController(
         dialog.show()
         dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
-            minimumHeight = dp(MIN_TOUCH_DP)
-            minimumWidth = dp(MIN_TOUCH_DP)
+            minimumHeight = touchTarget()
+            minimumWidth = touchTarget()
         }
     }
 
@@ -220,26 +234,38 @@ internal class PairingDialogController(
         contentDescription = activity.getString(R.string.pairing_sas_label, sas)
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         for (digit in sas) {
-            addView(TextView(activity).apply {
+            addView(MaterialTextView(activity).apply {
                 text = digit.toString()
-                textSize = 28f
+                setTextAppearance(R.style.TextAppearance_CopyPaste_SecurityCode)
                 gravity = Gravity.CENTER
+                setBackgroundResource(R.drawable.copypaste_pairing_digit_background)
                 setTextIsSelectable(false)
                 isLongClickable = false
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(40), dp(MIN_TOUCH_DP)))
+            }, LinearLayout.LayoutParams(
+                dim(R.dimen.copypaste_pairing_sas_digit_width),
+                touchTarget(),
+            ).apply { setMargins(space(1) / 2) })
         }
     }
 
     private fun column() = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(dp(24), dp(8), dp(24), 0)
+        setPadding(space(6), space(2), space(6), 0)
     }
 
-    private fun text(value: String) = TextView(activity).apply {
+    private fun text(value: String) = MaterialTextView(activity).apply {
         text = value
-        setPadding(0, dp(8), 0, dp(8))
+        setTextAppearance(R.style.TextAppearance_CopyPaste_Body)
+        setPadding(0, space(2), 0, space(2))
+    }
+
+    private fun label(value: String) = MaterialTextView(activity).apply {
+        text = value
+        setTextAppearance(R.style.TextAppearance_CopyPaste_Label)
+        gravity = Gravity.CENTER
+        setPadding(0, space(2), 0, 0)
     }
 
     private fun matchWidth() = LinearLayout.LayoutParams(
@@ -251,10 +277,14 @@ internal class PairingDialogController(
         gravity = Gravity.CENTER_HORIZONTAL
     }
 
-    private fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()
+    private fun dim(id: Int): Int = activity.resources.getDimensionPixelSize(id)
 
-    private companion object {
-        const val MIN_TOUCH_DP = 48
-        const val QR_SIZE_DP = 240
-    }
+    private fun space(step: Int): Int = dim(when (step) {
+        1 -> R.dimen.copypaste_space_1
+        2 -> R.dimen.copypaste_space_2
+        3 -> R.dimen.copypaste_space_3
+        else -> R.dimen.copypaste_space_6
+    })
+
+    private fun touchTarget(): Int = dim(R.dimen.copypaste_touch_target)
 }

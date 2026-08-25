@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { ladderOf, primaryOf, toneOf } from "@/lib/capture";
+import { ladderOf, primaryOf, toneOf } from "@/features/capture/model";
 import type { CaptureHealth } from "@/lib/ipc";
 import { captureSnapshot, probe } from "@/test/harness";
 

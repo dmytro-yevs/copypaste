@@ -1,0 +1,37 @@
+.root {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.metric {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exportOptions {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.checkboxRow {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.hint {
+  min-inline-size: 0;
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}

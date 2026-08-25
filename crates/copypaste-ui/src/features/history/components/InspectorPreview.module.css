@@ -1,0 +1,99 @@
+.root {
+    position: relative;
+    display: block;
+    inline-size: 100%;
+    block-size: auto;
+    max-block-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
+}
+.root {
+    overflow: auto;
+}
+.root:focus-visible {
+    outline: 0;
+    box-shadow: inset var(--sh-focus);
+}
+.text {
+    display: block;
+    overflow: visible;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+.file {
+    display: grid;
+    min-inline-size: 0;
+    grid-template-columns: var(--s-6) minmax(0, 1fr);
+    align-items: start;
+    gap: var(--s-3);
+}
+.file > :first-child {
+    margin-block-start: var(--stroke-2);
+    justify-self: center;
+    color: var(--c-file);
+}
+.file div {
+    min-inline-size: 0;
+}
+.file strong,
+.file small {
+    display: block;
+    overflow-wrap: anywhere;
+}
+.file strong {
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+.file small {
+    margin-block-start: var(--s-1);
+    color: var(--dim);
+    font-family: var(--f-mono);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
+    white-space: pre-wrap;
+}
+.link {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--s-2);
+}
+.link strong {
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+    overflow-wrap: anywhere;
+}
+.link span {
+    display: block;
+    color: var(--dim);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
+    overflow-wrap: anywhere;
+}
+.root[data-kind="color"] {
+    display: grid;
+    block-size: auto;
+    min-block-size: calc(var(--s-9) * 4 + var(--s-5));
+    padding: var(--s-5);
+    overflow: hidden;
+    place-items: center;
+}
+.root[data-kind="image"] {
+    display: grid;
+    block-size: 100%;
+    overflow: hidden;
+    place-items: center;
+}
+.root[data-kind="image"] > * {
+    inline-size: 100%;
+    block-size: 100%;
+    max-inline-size: 100%;
+    max-block-size: 100%;
+    object-fit: contain;
+}
+.root[data-kind="code"] > *,
+.root[data-kind="json"] > * {
+    block-size: 100%;
+}

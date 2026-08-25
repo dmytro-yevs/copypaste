@@ -3,20 +3,31 @@ import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
 import { type VariantProps, cva } from "class-variance-authority";
 
 import { cn } from "@/lib/cn";
+import styles from "./toggle-group.module.css";
 
 const toggleVariants = cva(
-  "inline-flex min-h-[var(--tap-min)] min-w-[var(--tap-min)] items-center justify-center gap-2 rounded-full text-sm font-medium whitespace-nowrap transition-[background-color,color,box-shadow] outline-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-muted data-[state=on]:text-foreground data-[state=on]:shadow-xs [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  styles.item,
   {
     variants: {
       size: {
-        default: "h-9 min-w-[var(--tap-min)] px-2",
-        sm: "h-8 min-w-[var(--tap-min)] px-1.5",
-        lg: "h-10 min-w-[var(--tap-min)] px-2.5",
+        default: styles.md,
+        sm: styles.sm,
+        lg: styles.lg,
       },
     },
     defaultVariants: { size: "default" },
   },
 );
+
+const toggleGroupVariants = cva(styles.group, {
+  variants: {
+    equalWidth: {
+      true: styles.equalWidth,
+      false: styles.wrapping,
+    },
+  },
+  defaultVariants: { equalWidth: false },
+});
 
 type ToggleGroupContextValue = VariantProps<typeof toggleVariants> & {
   equalWidth: boolean;
@@ -36,21 +47,18 @@ function ToggleGroup({
 }: ComponentProps<typeof ToggleGroupPrimitive.Root> &
   VariantProps<typeof toggleVariants> & { equalWidth?: boolean }) {
   return (
-    <ToggleGroupPrimitive.Root
-      data-slot="toggle-group"
-      data-equal-width={equalWidth || undefined}
-      className={cn(
-        equalWidth
-          ? "grid w-fit auto-cols-fr grid-flow-col items-center gap-1 rounded-full border border-border bg-panel p-1 shadow-sm backdrop-blur-sm"
-          : "flex w-fit flex-wrap items-center gap-1 rounded-full border border-border bg-panel p-1 shadow-sm backdrop-blur-sm",
-        className,
-      )}
-      {...props}
-    >
-      <ToggleGroupContext.Provider value={{ size, equalWidth }}>
-        {children}
-      </ToggleGroupContext.Provider>
-    </ToggleGroupPrimitive.Root>
+    <div className={styles.frame} data-equal-width={equalWidth || undefined}>
+      <ToggleGroupPrimitive.Root
+        data-slot="toggle-group"
+        data-equal-width={equalWidth || undefined}
+        className={cn(toggleGroupVariants({ equalWidth }), className)}
+        {...props}
+      >
+        <ToggleGroupContext.Provider value={{ size, equalWidth }}>
+          {children}
+        </ToggleGroupContext.Provider>
+      </ToggleGroupPrimitive.Root>
+    </div>
   );
 }
 
@@ -67,12 +75,12 @@ function ToggleGroupItem({
       data-slot="toggle-group-item"
       className={cn(
         toggleVariants({ size: context.size ?? size }),
-        context.equalWidth && "min-w-0 w-full",
+        context.equalWidth && styles.fill,
         className,
       )}
       {...props}
     >
-      {children}
+      <span className={styles.itemContent}>{children}</span>
     </ToggleGroupPrimitive.Item>
   );
 }

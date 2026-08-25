@@ -1,0 +1,74 @@
+.content {
+  z-index: var(--z-popover);
+  min-inline-size: var(--radix-dropdown-menu-trigger-width);
+  max-inline-size: calc(100vw - var(--s-4));
+  max-block-size: var(--radix-dropdown-menu-content-available-height);
+  padding: var(--s-1);
+  overflow-y: auto;
+  border: var(--stroke-1) solid var(--border-strong);
+  border-radius: var(--r-card);
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: var(--sh2);
+}
+.content[data-state="open"] { animation: dropdown-in var(--dur-fast) var(--ease); }
+.content[data-state="closed"] { animation: dropdown-out var(--dur-fast) var(--ease); }
+
+.item {
+  position: relative;
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: var(--ctl-h-md);
+  padding-inline: var(--s-2);
+  align-items: center;
+  gap: var(--s-2);
+  border-radius: var(--r-sm);
+  outline: 0;
+  color: inherit;
+  font-size: var(--fs-sm);
+  cursor: default;
+  user-select: none;
+}
+
+.item[data-highlighted] { background: var(--selected); }
+.item[data-disabled] { opacity: 0.5; pointer-events: none; }
+
+.checkboxItem { padding-inline-end: var(--s-3); }
+
+.marker {
+  display: inline-flex;
+  inline-size: var(--icon-md);
+  block-size: var(--icon-md);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-xs);
+  color: transparent;
+  background: var(--card);
+}
+
+.checkboxItem[data-state="checked"] .marker {
+  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.marker svg { inline-size: var(--fs-xs); block-size: var(--fs-xs); }
+
+.label {
+  padding: var(--s-2);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.separator {
+  block-size: var(--stroke-1);
+  margin: var(--s-1);
+  background: var(--divider);
+}
+
+@keyframes dropdown-in { from { opacity: 0; transform: translateY(calc(var(--s-1) * -1)) scale(.98); } }
+@keyframes dropdown-out { to { opacity: 0; transform: translateY(calc(var(--s-1) * -1)) scale(.98); } }
+@media (prefers-reduced-motion: reduce) { .content { animation: none; } }

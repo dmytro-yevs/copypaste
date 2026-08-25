@@ -25,6 +25,7 @@ pub fn apply<R: Runtime>(app: &AppHandle<R>, allow_screenshots: bool) {
 fn set<R: Runtime>(app: &AppHandle<R>, protect: bool) {
     for window in [
         super::window::main_window(app),
+        #[cfg(not(target_os = "android"))]
         super::window::quick_paste_window(app),
     ]
     .into_iter()

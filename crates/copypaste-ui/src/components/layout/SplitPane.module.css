@@ -1,0 +1,42 @@
+.group {
+  display: flex;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.panel {
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.separator {
+  position: relative;
+  inline-size: var(--s-1);
+  flex: 0 0 var(--s-1);
+  border-inline-start: var(--stroke-1) solid var(--border);
+  background: var(--panel);
+  cursor: col-resize;
+  outline: 0;
+}
+
+.separator::after {
+  position: absolute;
+  inset-block: 0;
+  inset-inline: calc(var(--s-1) * -1) calc(var(--s-1) * -1);
+  content: "";
+}
+
+.separator:hover,
+.separator[data-resize-handle-active] {
+  border-inline-start-color: var(--accent);
+  background: var(--resize-handle-hover);
+}
+
+.separator:focus-visible {
+  border-inline-start-color: var(--accent);
+  outline: 0;
+  box-shadow: var(--sh-focus);
+}

@@ -1,15 +1,64 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Theme.copypaste_ui" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.copypaste_ui" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/copypaste_accent</item>
+        <item name="colorOnPrimary">@color/copypaste_on_accent</item>
+        <item name="colorPrimaryContainer">@color/copypaste_selected</item>
+        <item name="colorOnPrimaryContainer">@color/copypaste_text</item>
+        <item name="colorSecondary">@color/copypaste_accent_pressed</item>
+        <item name="colorSurface">@color/copypaste_surface</item>
+        <item name="colorSurfaceVariant">@color/copypaste_surface_raised</item>
+        <item name="colorOnSurface">@color/copypaste_text</item>
+        <item name="colorOnSurfaceVariant">@color/copypaste_text_muted</item>
+        <item name="colorOutline">@color/copypaste_border</item>
+        <item name="colorError">@color/copypaste_error</item>
+        <item name="android:colorAccent">@color/copypaste_accent</item>
+        <item name="android:windowBackground">@color/copypaste_canvas</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.CopyPaste.AlertDialog</item>
+        <item name="materialButtonStyle">@style/Widget.CopyPaste.Button</item>
     </style>
 
-    <!--
-      Clipboard capture activity theme. It exists only to hold window focus for the
-      instant a clipboard read needs it, so it must not draw, must not animate,
-      and must not dim what is behind it: the user asked to save a clip, not to
-      leave the app they were in.
-    -->
+    <style name="ThemeOverlay.CopyPaste.AlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">@color/copypaste_surface</item>
+        <item name="colorOnSurface">@color/copypaste_text</item>
+        <item name="colorPrimary">@color/copypaste_accent</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.CopyPaste.Card</item>
+    </style>
+
+    <style name="Widget.CopyPaste.Button" parent="Widget.Material3.Button">
+        <item name="android:minHeight">@dimen/copypaste_touch_target</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.CopyPaste.Control</item>
+    </style>
+
+    <style name="ShapeAppearance.CopyPaste.Control" parent="ShapeAppearance.Material3.Corner.Small">
+        <item name="cornerSize">@dimen/copypaste_radius_control</item>
+    </style>
+
+    <style name="ShapeAppearance.CopyPaste.Card" parent="ShapeAppearance.Material3.Corner.Medium">
+        <item name="cornerSize">@dimen/copypaste_radius_card</item>
+    </style>
+
+    <style name="TextAppearance.CopyPaste.Body" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textColor">@color/copypaste_text_muted</item>
+        <item name="android:textSize">@dimen/copypaste_body_text</item>
+    </style>
+
+    <style name="TextAppearance.CopyPaste.Label" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:textColor">@color/copypaste_text_muted</item>
+        <item name="android:textSize">@dimen/copypaste_label_text</item>
+    </style>
+
+    <style name="TextAppearance.CopyPaste.SecurityCode" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="android:textColor">@color/copypaste_accent</item>
+        <item name="android:textSize">@dimen/copypaste_pairing_sas_text</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
     <style name="Theme.CopyPaste.Invisible" parent="android:Theme.Translucent.NoTitleBar">
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowIsTranslucent">true</item>

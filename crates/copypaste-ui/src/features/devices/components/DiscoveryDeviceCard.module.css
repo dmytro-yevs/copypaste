@@ -1,0 +1,109 @@
+.root {
+    --button-content-gap: 0;
+
+    display: grid;
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: calc(var(--ctl-h-lg) + var(--s-7));
+    padding: var(--s-3);
+    grid-template-columns: var(--sz-tile) minmax(0, 1fr) var(--s-5);
+    align-items: center;
+    gap: var(--s-3);
+    overflow: hidden;
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-card);
+    background: var(--card);
+    box-shadow: var(--sh1);
+    white-space: normal;
+    text-align: start;
+    transition:
+        border-color var(--dur-fast) var(--ease),
+        background-color var(--dur-fast) var(--ease),
+        box-shadow var(--dur-fast) var(--ease);
+    animation: discovery-device-in var(--dur) var(--ease) both;
+}
+
+.root > [data-slot="button-content"] {
+    display: contents;
+}
+
+.root:hover {
+    border-color: var(--selected-edge);
+}
+
+.root[data-selected] {
+    border-color: var(--selected-edge);
+    background: var(--selected);
+    box-shadow: var(--sh-focus);
+}
+
+.identityWell {
+    display: grid;
+    inline-size: var(--sz-tile);
+    block-size: var(--sz-tile);
+    place-items: center;
+    border-radius: var(--r-row);
+    color: var(--device-icon-fg);
+    background: var(--selected);
+}
+
+.copy {
+    min-inline-size: 0;
+}
+
+.copy > strong {
+    display: block;
+    min-inline-size: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.metaLine {
+    display: flex;
+    min-inline-size: 0;
+    margin-block-start: var(--s-1);
+    align-items: center;
+    color: var(--dim);
+    font-size: var(--fs-xs);
+}
+
+.metaLine > * + * {
+    margin-inline-start: var(--s-2);
+}
+
+.metaLine > :first-child {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chevron {
+    color: var(--dim);
+}
+
+@container (max-width: $cpXs) {
+    .root {
+        min-block-size: calc(var(--ctl-h-lg) + var(--s-6));
+        padding: var(--s-2) var(--s-3);
+        gap: var(--s-2);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .root {
+        transition: none;
+        animation: none;
+    }
+}
+
+@keyframes discovery-device-in {
+    from {
+        opacity: 0;
+        transform: translateY(var(--s-1));
+    }
+}

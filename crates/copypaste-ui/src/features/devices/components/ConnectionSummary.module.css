@@ -1,0 +1,78 @@
+.root {
+    container-type: inline-size;
+    min-inline-size: 0;
+    min-block-size: var(--ctl-h-lg);
+}
+
+.layout {
+    display: flex;
+    min-inline-size: 0;
+    min-block-size: var(--ctl-h-lg);
+    padding: var(--s-2) var(--s-3);
+    align-items: center;
+    gap: var(--s-2);
+}
+
+.indicator {
+    display: inline-flex;
+    flex: none;
+    color: var(--dim);
+}
+
+.root[data-state="connected"] .indicator {
+    color: var(--ok-strong);
+}
+
+.root[data-state="syncing"] .indicator {
+    color: var(--info-strong);
+}
+
+.root[data-state="attention"] .indicator {
+    color: var(--warn-strong);
+}
+
+.copy {
+    display: flex;
+    min-inline-size: 0;
+    flex: 1;
+    align-items: baseline;
+    gap: var(--s-2);
+}
+
+.copy strong,
+.copy small {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.copy strong {
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.copy small {
+    color: var(--dim);
+    font-size: var(--fs-xs);
+}
+
+.layout > button {
+    flex: none;
+    white-space: nowrap;
+}
+
+@container (max-width: $cpXs) {
+    .layout {
+        flex-wrap: wrap;
+    }
+
+    .copy {
+        flex-basis: calc(100% - var(--ctl-h-sm) - var(--s-2));
+    }
+
+    .layout > button {
+        margin-inline-start: calc(var(--icon-sm) + var(--s-2));
+    }
+}

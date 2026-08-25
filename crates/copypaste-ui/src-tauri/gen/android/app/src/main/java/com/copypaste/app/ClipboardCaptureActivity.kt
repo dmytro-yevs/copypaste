@@ -12,8 +12,10 @@ class ClipboardCaptureActivity : Activity() {
         if (!hasFocus || handled) return
 
         handled = true
-        val text = clipboardText(this)
-        if (!text.isNullOrBlank()) queueClip(text, CaptureSource.TILE)
+        val read = clipboardRead(this, CaptureSource.TILE)
+        read.text?.let { text ->
+            queueClip(text, CaptureSource.TILE, read.sourceAppBundleId, read.sourceAppName)
+        }
         finish()
     }
 }

@@ -28,6 +28,7 @@ mod listen;
 mod pairing;
 mod pairing_ceremony;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -38,6 +39,7 @@ use tracing::{debug, warn};
 use crate::discovery::{DiscoveredPeer, Discovery};
 use crate::peers::{CursorStore, Peer, PeerStore, DEFAULT_CURSOR_FILE_NAME};
 use crate::sync::SyncOutcome;
+use crate::{AuthenticatedDeviceProfile, DeviceProfile};
 
 pub use channel::{NoiseChannel, READ_TIMEOUT, SESSION_TIMEOUT};
 pub use error::NodeError;
@@ -56,6 +58,7 @@ pub use pairing::{
 pub(super) const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
 
 const DISCOVERY_INTEREST_MS: i64 = 60_000;
+const AUTHENTICATED_PROFILE_TTL_MS: i64 = 5 * 60_000;
 
 /// A freshly minted pairing, and the one rendering of its secret.
 ///
@@ -97,6 +100,7 @@ pub struct Node {
     browse_until_ms: AtomicI64,
     lan_visible: AtomicBool,
     pairing: pairing::PairingManager,
+    profiles: RwLock<HashMap<String, AuthenticatedDeviceProfile>>,
 }
 
 impl std::fmt::Debug for Node {
@@ -140,6 +144,7 @@ impl Node {
             browse_until_ms: AtomicI64::new(0),
             lan_visible: AtomicBool::new(lan_visible),
             pairing: pairing::PairingManager::new(),
+            profiles: RwLock::new(HashMap::new()),
         };
         node.republish();
         node
@@ -229,6 +234,39 @@ impl Node {
         self.discovery.as_ref()?.find(pairing_id)
     }
 
+    #[must_use]
+    pub fn authenticated_profile(&self, pairing_id: &str) -> Option<AuthenticatedDeviceProfile> {
+        let now = crate::now_ms();
+        let mut profiles = self
+            .profiles
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        profiles.retain(|_, observed| now < observed.fresh_until_ms);
+        profiles.get(pairing_id).cloned()
+    }
+
+    pub(crate) fn record_authenticated_profile(
+        &self,
+        pairing_id: &str,
+        profile: Option<&DeviceProfile>,
+    ) {
+        let Some(profile) = profile else {
+            return;
+        };
+        let observed_at_ms = crate::now_ms();
+        self.profiles
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                pairing_id.to_string(),
+                AuthenticatedDeviceProfile {
+                    profile: profile.clone(),
+                    observed_at_ms,
+                    fresh_until_ms: observed_at_ms.saturating_add(AUTHENTICATED_PROFILE_TTL_MS),
+                },
+            );
+    }
+
     /// Re-advertise after the set of pairings changed.
     ///
     /// Best-effort by construction: a new pairing must not fail because mDNS is
@@ -311,6 +349,10 @@ impl Node {
         })?;
         if removed {
             self.cursors.forget(pairing_id);
+            self.profiles
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(pairing_id);
             self.republish();
         }
         Ok(removed)

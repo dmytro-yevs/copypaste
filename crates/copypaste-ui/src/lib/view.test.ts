@@ -33,12 +33,12 @@ describe("applyView", () => {
   });
 
   it("keeps only the chosen kind", () => {
-    const urls = applyView(rows, { ...DEFAULT_VIEW, kind: "url" });
+    const urls = applyView(rows, { ...DEFAULT_VIEW, kinds: ["url"] });
     expect(urls.map((r) => r.id)).toEqual(["a", "c"]);
   });
 
   it("does not reorder within a kind filter", () => {
-    const urls = applyView(rows, { ...DEFAULT_VIEW, kind: "url" });
+    const urls = applyView(rows, { ...DEFAULT_VIEW, kinds: ["url"] });
     expect(urls.map((r) => r.created_at)).toEqual([300, 100]);
   });
 
@@ -68,13 +68,13 @@ describe("applyView", () => {
   it("finds sensitive items by their flag, not by their content", () => {
     const secrets = applyView(
       [...rows, item({ id: "s", is_sensitive: true, created_at: 400 })],
-      { ...DEFAULT_VIEW, kind: "secret" },
+      { ...DEFAULT_VIEW, kinds: ["secret"] },
     );
     expect(secrets.map((r) => r.id)).toEqual(["s"]);
   });
 
   it("returns an empty list rather than everything when nothing matches", () => {
-    expect(applyView(rows, { ...DEFAULT_VIEW, kind: "color" })).toHaveLength(0);
+    expect(applyView(rows, { ...DEFAULT_VIEW, kinds: ["color"] })).toHaveLength(0);
   });
 
   it("filters by stable device id rather than cosmetic name", () => {
@@ -84,7 +84,7 @@ describe("applyView", () => {
     ];
     const filtered = applyView(devices, {
       ...DEFAULT_VIEW,
-      device: "device-a",
+      devices: ["device-a"],
     });
     expect(filtered.map((entry) => entry.id)).toEqual(["mac"]);
   });

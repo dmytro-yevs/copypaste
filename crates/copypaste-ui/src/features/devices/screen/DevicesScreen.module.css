@@ -1,0 +1,42 @@
+.root {
+  container-type: inline-size;
+  background: transparent;
+}
+
+.viewport { flex: 1; }
+
+.content {
+  display: flex;
+  max-inline-size: calc(var(--s-9) * 23 + var(--s-4));
+  padding-block: 0 var(--s-7);
+  flex-direction: column;
+  gap: 0;
+}
+
+.content > :first-child { margin-block-end: var(--s-5); }
+.content > [data-slot="state-notice"],
+.content > [data-slot="status-card"] { margin-block-end: var(--s-6); }
+
+.composition {
+  display: grid;
+  min-inline-size: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s-5);
+}
+
+.rosterPane { min-inline-size: 0; }
+.detailOverlay { background: var(--scrim); backdrop-filter: var(--scrim-blur); }
+.detailDrawer { display: flex; flex-direction: column; overflow: hidden; }
+.detailSheet { display: flex; inset-inline: var(--s-2); inset-block-end: var(--inset-bottom); block-size: 84dvh; max-block-size: 84dvh; padding: var(--s-4); padding-block-end: max(var(--s-4), env(safe-area-inset-bottom)); flex-direction: column; overflow: hidden; border-radius: var(--r-card) var(--r-card) 0 0; }
+
+@container (max-width: $cpXs) {
+  .content > :first-child > [data-slot="pane-header-layout"] {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .content > :first-child > [data-slot="pane-header-layout"] > * + * {
+    margin-block-start: var(--s-4);
+    margin-inline-start: 0;
+  }
+}

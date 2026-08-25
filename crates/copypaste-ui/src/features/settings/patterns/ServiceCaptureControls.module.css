@@ -1,0 +1,17 @@
+.spinner {
+  animation: service-capture-spin calc(
+    var(--dur-theme) + var(--dur-theme) + var(--dur) + var(--dur)
+  ) linear infinite;
+}
+
+@keyframes service-capture-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

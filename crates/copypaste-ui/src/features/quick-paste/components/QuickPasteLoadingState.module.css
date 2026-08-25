@@ -1,0 +1,60 @@
+.root {
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  overflow: hidden;
+  animation: quick-paste-loading-in calc(var(--dur) * 3) var(--ease) both;
+}
+
+.rows {
+  display: grid;
+  block-size: 100%;
+  grid-template-rows: repeat(16, minmax(calc(var(--s-9) + var(--s-2)), 1fr));
+  gap: var(--s-2);
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  min-block-size: calc(var(--s-9) + var(--s-2));
+  padding: var(--pad-row-y) var(--pad-row-x);
+  grid-template-columns: var(--icon-lg) minmax(0, 1fr) var(--icon-lg);
+  align-items: center;
+  gap: var(--gap-row);
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--skeleton-card-bg);
+}
+
+.glyph,
+.line,
+.metaCopy,
+.device,
+.action {
+  display: block;
+  border-radius: var(--r-pill);
+  background: var(--skeleton-element-bg);
+}
+
+.glyph { inline-size: var(--icon-lg); block-size: var(--icon-lg); border-radius: var(--r-sm); }
+.copy { display: grid; gap: var(--s-2); }
+.line { inline-size: 78%; block-size: var(--s-2); }
+.meta { display: flex; align-items: center; gap: var(--s-2); }
+.metaCopy { inline-size: 22%; block-size: var(--s-1); }
+.device { inline-size: 11%; block-size: var(--s-1); }
+.action { inline-size: var(--icon-md); block-size: var(--icon-md); justify-self: end; }
+.row[data-width="medium"] .line { inline-size: 62%; }
+.row[data-width="short"] .line { inline-size: 42%; }
+
+@keyframes quick-paste-loading-in {
+  from { opacity: .38; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glyph,
+  .line,
+  .metaCopy,
+  .device,
+  .action,
+  .root { animation: none; }
+}

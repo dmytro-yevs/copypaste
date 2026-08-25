@@ -1,0 +1,213 @@
+.welcome,
+.captureScene,
+.networkScene {
+  position: relative;
+  inline-size: min(calc(var(--s-9) * 8.25), 88%);
+  block-size: calc(var(--s-9) * 8.25);
+}
+
+.welcome {
+  display: grid;
+  place-items: center;
+}
+
+.floatingClip {
+  position: absolute;
+  inline-size: calc(var(--s-9) * 6);
+  padding: var(--s-3);
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh3);
+}
+
+.floatingTitle { color: var(--dim); font-size: var(--fs-xs); }
+.floatingClip p {
+  margin: var(--s-3) 0 0;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+.clipBack { opacity: .4; transform: translate(calc(var(--s-1) * -8.5), calc(var(--s-1) * -15.5)) rotate(-6deg); }
+.clipMiddle { opacity: .65; transform: translate(calc(var(--s-1) * 8.75), calc(var(--s-1) * -3)) rotate(5deg); }
+.clipFront { border-color: var(--selected-edge); transform: translate(calc(var(--s-1) * -1.25), calc(var(--s-1) * 12)) ; }
+
+.captureScene::before {
+  position: absolute;
+  inset: var(--s-8);
+  border: var(--stroke-1) solid var(--artwork-orbit-border);
+  border-radius: 50%;
+  animation: onboarding-orbit calc(var(--dur) * 90) linear infinite;
+  content: "";
+}
+
+.flow,
+.networkPaths { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; }
+.flow path,
+.networkPaths path {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 8;
+  opacity: .58;
+  animation: onboarding-line-flow calc(var(--dur) * 12) linear infinite;
+}
+
+.captureCore,
+.networkHub {
+  position: absolute;
+  z-index: 3;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  display: grid;
+  place-items: center;
+  border: var(--stroke-1) solid var(--accent);
+  color: var(--accent-2);
+  background: var(--selected);
+  box-shadow: var(--sh3);
+  transform: translate(-50%, -50%);
+  animation: onboarding-core-breathe calc(var(--dur) * 16) ease-in-out infinite;
+}
+
+.captureCore { inline-size: calc(var(--s-9) * 2.4); block-size: calc(var(--s-9) * 2.4); border-radius: var(--r-card); }
+.captureCore > svg { inline-size: var(--s-9); block-size: var(--s-9); }
+.secureBadge {
+  position: absolute;
+  inset-inline-end: calc(var(--s-1) * -1);
+  inset-block-end: calc(var(--s-1) * -1);
+  display: grid;
+  inline-size: var(--s-8);
+  block-size: var(--s-8);
+  place-items: center;
+  border: var(--focus-ring-width) solid var(--elevated);
+  border-radius: 50%;
+  color: var(--on-accent);
+  background: var(--ok);
+}
+.secureBadge svg { inline-size: var(--icon-sm); block-size: var(--icon-sm); }
+
+.captureCard {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  inline-size: calc(var(--s-9) * 3.65);
+  min-block-size: calc(var(--s-9) * 1.45);
+  padding: var(--s-2);
+  grid-template-columns: var(--s-9) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-2);
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh2);
+  animation: onboarding-card-float calc(var(--dur) * 20) ease-in-out infinite;
+}
+.captureCardIcon { display: grid; inline-size: var(--s-9); block-size: var(--s-9); place-items: center; border-radius: var(--r-ctl); }
+.captureCardIcon svg { inline-size: var(--icon-sm); block-size: var(--icon-sm); }
+.captureCardCopy { min-inline-size: 0; }
+.captureCardCopy strong,
+.captureCardCopy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.captureCardCopy strong { color: var(--text); font-size: var(--fs-xs); }
+.captureCardCopy small { margin-block-start: var(--s-1); color: var(--dim); font-size: var(--fs-xs); }
+.captureA { inset-inline-start: 0; inset-block-start: calc(var(--s-1) * 7.5); transform: rotate(-4deg); }
+.captureA .captureCardIcon { color: var(--accent-2); background: var(--selected); }
+.captureB { inset-inline-end: calc(var(--s-1) * -.5); inset-block-start: calc(var(--s-1) * 19.5); transform: rotate(3deg); animation-delay: calc(var(--dur) * -5.5); }
+.captureB .captureCardIcon { color: var(--err-strong); background: var(--artwork-error-bg); }
+.captureC { inset-inline-start: calc(var(--s-1) * 8.75); inset-block-end: calc(var(--s-1) * 5.25); transform: rotate(2deg); animation-delay: calc(var(--dur) * -10.5); }
+.captureC .captureCardIcon { color: var(--info-strong); background: var(--artwork-info-bg); }
+
+.networkScene { block-size: calc(var(--s-9) * 8.75); }
+.networkPaths { overflow: visible; }
+.networkPaths path { stroke-dasharray: 7 8; opacity: .54; animation-duration: calc(var(--dur) * 14); }
+.networkHub {
+  inset-inline-start: 49%;
+  inset-block-start: 46%;
+  inline-size: calc(var(--s-9) * 2.1);
+  block-size: calc(var(--s-9) * 2.1);
+  border-radius: var(--r-card);
+  background: var(--selected);
+  box-shadow: var(--sh3);
+  animation-duration: calc(var(--dur) * 35);
+}
+.networkHub svg { inline-size: var(--s-8); block-size: var(--s-8); }
+.deviceNode {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border: var(--stroke-1) solid var(--border);
+  color: var(--dim);
+  background: var(--card);
+  box-shadow: var(--sh2);
+  animation: onboarding-device-float calc(var(--dur) * 23) ease-in-out infinite;
+}
+.deviceNode svg { inline-size: var(--icon-md); block-size: var(--icon-md); }
+.deviceMac { inset-inline-start: 1%; inset-block-start: 12%; inline-size: calc(var(--s-1) * 19); block-size: calc(var(--s-1) * 14.5); border-radius: calc(var(--s-1) * 4.75); transform: rotate(-4deg); }
+.devicePhone { inset-inline-end: 4%; inset-block-start: 3%; inline-size: calc(var(--s-1) * 12.25); block-size: calc(var(--s-1) * 17); border-radius: calc(var(--s-1) * 4.5); transform: rotate(5deg); animation-delay: calc(var(--dur) * -4); }
+.deviceTablet { inset-inline-end: -1%; inset-block-end: 12%; inline-size: calc(var(--s-1) * 16.75); block-size: calc(var(--s-1) * 19.75); border-radius: calc(var(--s-1) * 5.25); transform: rotate(-3deg); animation-delay: calc(var(--dur) * -8.5); }
+.deviceDesktop { inset-inline-start: 4%; inset-block-end: 6%; inline-size: calc(var(--s-1) * 20.5); block-size: calc(var(--s-1) * 16.5); border-radius: calc(var(--s-1) * 5); transform: rotate(3deg); animation-delay: calc(var(--dur) * -11.5); }
+.networkNote {
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-end: calc(var(--s-1) * -7.5);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.networkNote strong { color: var(--accent-2); }
+
+@keyframes onboarding-line-flow { to { stroke-dashoffset: -45; } }
+@keyframes onboarding-orbit { to { transform: rotate(360deg); } }
+@keyframes onboarding-core-breathe { 50% { filter: brightness(1.13); } }
+@keyframes onboarding-card-float { 50% { translate: 0 calc(var(--s-1) * -1.75); } }
+@keyframes onboarding-device-float { 50% { translate: 0 calc(var(--s-1) * -1.5); } }
+
+@media (--cp-sm) {
+  .welcome,
+  .captureScene,
+  .networkScene {
+    inline-size: min(calc(var(--s-9) * 8.25), 92vw);
+    block-size: calc(var(--s-9) * 7.5);
+    transform: translateY(calc(var(--s-1) * -1)) scale(.92);
+  }
+
+  .networkScene { block-size: calc(var(--s-9) * 7.75); }
+  .networkNote { display: none; }
+
+  .welcome::before {
+    position: absolute;
+    inset: var(--s-9) var(--s-6);
+    border-radius: 50%;
+    background: var(--artwork-glow-bg);
+    filter: blur(var(--s-9));
+    content: "";
+  }
+
+  .floatingClip { inline-size: min(calc(var(--s-9) * 6.3), 74vw); }
+  .clipBack { opacity: .52; transform: translate(calc(var(--s-1) * -7), calc(var(--s-1) * -14.5)) rotate(-5deg); }
+  .clipMiddle { opacity: .76; transform: translate(calc(var(--s-1) * 7.25), calc(var(--s-1) * -2.25)) rotate(4deg); }
+  .clipFront { transform: translate(calc(var(--s-1) * -1), calc(var(--s-1) * 12.5)); }
+}
+
+@media (--cp-lg-short) {
+  .welcome,
+  .captureScene,
+  .networkScene {
+    inline-size: calc(var(--s-9) * 7.5);
+    transform: scale(.82);
+  }
+
+  .networkNote { display: none; }
+}
+
+@media (--cp-sm-short-mobile) {
+  .welcome,
+  .captureScene { block-size: calc(var(--s-9) * 6.25); }
+  .networkScene { block-size: calc(var(--s-9) * 6.75); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome *,
+  .captureScene *,
+  .networkScene * { animation: none !important; }
+}

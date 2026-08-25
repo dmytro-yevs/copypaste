@@ -289,6 +289,8 @@ mod tests {
             device_name: "Test device".into(),
             version: "2.0.0-alpha.1".into(),
             protocol_version,
+            listen_addr: None,
+            device_details: None,
             item_count: 42,
             capture_running: true,
             clipboard_backend: backend.into(),

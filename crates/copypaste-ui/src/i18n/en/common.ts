@@ -4,6 +4,7 @@ export const common = {
   close: "Close",
   cancel: "Cancel",
   tryAgain: "Try again",
+  error: "Error",
   on: "On",
   off: "Off",
   unknown: "Unknown",
@@ -15,9 +16,11 @@ export const common = {
 
 export const nav = {
   primary: "Primary",
-  history: "History",
+  history: "Library",
   devices: "Devices",
+  connections: "Connections",
   settings: "Settings",
+  preferences: "Preferences",
 } as const;
 
 /** Keyed by `ErrorKind`. These are *our* sentences for a classified failure —
@@ -66,6 +69,7 @@ export const errors = {
   update_network_failed: "CopyPaste couldn't reach the update service. Check your connection and try again.",
   update_check_failed: "CopyPaste couldn't check for updates. Try again in a moment.",
   update_install_failed: "The verified update couldn't be installed. Close other installers and try again.",
+  update_permission_required: "Android opened the install permission for CopyPaste. Allow it, return here, then continue the update.",
   internal: "The clipboard service returned an error.",
   unknown: "The clipboard service returned an error.",
 } as const;

@@ -15,7 +15,9 @@
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { AA_TEXT, THEMES, ACCENTS, context, over, ratio, read } from './lib/tokens.mjs';
+import {
+  AA_TEXT, SCHEMES, PRODUCT_THEMES, context, over, productThemeBlock, ratio, read,
+} from './lib/tokens.mjs';
 import {
   SRC, SCANNED, NOT_SCANNED, CLASS_RULES, REQUIRED_UTILITIES, ALPHA_UTILITIES,
   COARSE_TOKENS, EXEMPTIONS, exemptions, isExempt,
@@ -53,6 +55,22 @@ function sources() {
 
 const files = sources();
 
+/* CSS literals belong in generated design tokens. The one source-level
+ * exemption is the breakpoint contract, which PostCSS expands before shipping. */
+const RAW_CSS_LITERAL = /#[\da-fA-F]{3,8}\b|\b\d+(?:px|rem|ms|s)\b/g;
+let rawCssHits = 0;
+for (const { path, lines } of files) {
+  if (!path.endsWith('.css') || path === 'styles/media.css') continue;
+  for (const [i, line] of lines.entries()) {
+    for (const match of line.matchAll(RAW_CSS_LITERAL)) {
+      rawCssHits += 1;
+      fail(`${path}:${i + 1}`, match[0], 'use a generated design token or a named media token',
+        'Shipping CSS must not carry one-off colours, dimensions or motion literals.');
+    }
+  }
+}
+notes.push(`raw-css-literals              ${rawCssHits ? `${rawCssHits} hit(s)` : 'clear'} (media token source exempt)`);
+
 /* ------------------------------------------------------- class-level rules */
 
 for (const rule of CLASS_RULES) {
@@ -88,30 +106,110 @@ for (const e of EXEMPTIONS) {
 /* --------------------------------------------- absences that are contracts */
 
 const corpus = files.map((f) => f.lines.join('\n')).join('\n');
-for (const { util, why } of REQUIRED_UTILITIES) {
-  if (!new RegExp(`(?<![\\w-])${util}(?![\\w-])`).test(corpus)) {
+for (const { util, token, why } of REQUIRED_UTILITIES) {
+  const utility = new RegExp(`(?<![\\w-])${util}(?![\\w-])`);
+  const variable = new RegExp(`var\\(--${token}\\)`);
+  if (!utility.test(corpus) && !variable.test(corpus)) {
     fail(SRC, `no component uses ${util}`, `use ${util}`,
       `${why}. A token nothing reaches is a token whose job something else has quietly taken over.`);
   }
 }
 notes.push(`required-utilities            ${REQUIRED_UTILITIES.length} present`);
 
-const blurAllowed = exemptions('no-blur-token').map((e) => e.token);
-function blurTokens(dir = new URL('./tokens/', import.meta.url), rel = 'tokens/') {
+function tokenSources(dir = new URL('./tokens/', import.meta.url), rel = 'tokens/', out = []) {
   for (const name of readdirSync(dir).sort()) {
     const child = new URL(name, dir);
-    if (statSync(child).isDirectory()) { blurTokens(new URL(`${name}/`, dir), `${rel}${name}/`); continue; }
+    if (statSync(child).isDirectory()) {
+      tokenSources(new URL(`${name}/`, dir), `${rel}${name}/`, out);
+      continue;
+    }
     if (!name.endsWith('.json')) continue;
-    for (const m of readFileSync(child, 'utf8').matchAll(/"([\w-]*blur[\w-]*)"\s*:\s*\{/g)) {
-      if (blurAllowed.includes(m[1])) continue;
-      fail(`${rel}${name}`, `token ${m[1]}`, 'delete it; the content is absent, not filtered',
-        'A blur token is the treatment INV-10 rules out — it asserts the plaintext is present '
-        + 'behind a filter. v1 had --mask-blur: 6px.');
+    out.push({ path: `${rel}${name}`, source: readFileSync(child, 'utf8') });
+  }
+  return out;
+}
+
+const tokenFiles = tokenSources();
+const blurAllowed = exemptions('no-blur-token').map((e) => e.token);
+for (const { path, source } of tokenFiles) {
+  for (const m of source.matchAll(/"([\w-]*blur[\w-]*)"\s*:\s*\{/g)) {
+    if (blurAllowed.includes(m[1])) continue;
+    fail(path, `token ${m[1]}`, 'delete it; the content is absent, not filtered',
+      'A blur token is the treatment INV-10 rules out — it asserts the plaintext is present '
+      + 'behind a filter. v1 had --mask-blur: 6px.');
+  }
+}
+notes.push(`no-blur-token                 clear (exempt: ${blurAllowed.join(', ')})`);
+
+let recipeSourceMixes = 0;
+const dynamicTokenPaths = (value, path = [], out = []) => {
+  if (!value || typeof value !== 'object') return out;
+  if (typeof value.$value === 'string' && value.$value.includes('color-mix(')) {
+    out.push(path.join('.'));
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (!key.startsWith('$')) dynamicTokenPaths(child, [...path, key], out);
+  }
+  return out;
+};
+for (const { path, source } of tokenFiles) {
+  const mixes = dynamicTokenPaths(JSON.parse(source));
+  recipeSourceMixes += mixes.length;
+  if (mixes.length && !path.startsWith('tokens/color/recipes')) {
+    fail(path, `color-mix() outside the recipe sources: ${mixes.join(', ')}`,
+      'move the expression to tokens/color/recipes*.json and consume its generated variable',
+      'Only the recipe compiler produces a concrete value for legacy WebViews. A mix elsewhere '
+      + 'can reach generated CSS without that compatibility step.');
+  }
+}
+notes.push(`recipe-source-mixes           ${recipeSourceMixes} centralized`);
+
+const recipeFile = (path) => {
+  const file = tokenFiles.find((candidate) => candidate.path === path);
+  if (!file) throw new Error(`missing recipe source: ${path}`);
+  return JSON.parse(file.source).recipe;
+};
+const commonRecipes = recipeFile('tokens/color/recipes.json');
+const recipeNames = (group) => Object.keys(group ?? {});
+const hasConcreteRecipe = (source, name) => {
+  const values = [...source.matchAll(new RegExp(`^\\s*--${name}:\\s*([^;]+);`, 'gm'))]
+    .map((match) => match[1]);
+  return values.some((value) => !/\b(?:color-mix|var)\(/.test(value));
+};
+
+let generatedRecipeContexts = 0;
+for (const scheme of SCHEMES) {
+  const schemeRecipes = recipeFile(`tokens/color/recipes.${scheme}.json`);
+  const allNames = [
+    ...recipeNames(commonRecipes.scheme), ...recipeNames(commonRecipes.theme),
+    ...recipeNames(schemeRecipes.scheme), ...recipeNames(schemeRecipes.theme),
+  ];
+  const schemeCss = read(`tokens.${scheme}.css`);
+  generatedRecipeContexts += 1;
+  for (const name of allNames) {
+    if (!hasConcreteRecipe(schemeCss, name)) {
+      fail(`dist/css/tokens.${scheme}.css`, `--${name} has no concrete scheme fallback`,
+        'emit the recipe through css/copypaste for this scheme',
+        'The scheme block is the pre-product-theme fallback and must work before bootstrap finishes.');
+    }
+  }
+
+  const themeNames = [...recipeNames(commonRecipes.theme), ...recipeNames(schemeRecipes.theme)];
+  for (const theme of PRODUCT_THEMES) {
+    const block = productThemeBlock(`themes.${scheme}.css`, theme);
+    const source = Object.entries(block).map(([name, value]) => `--${name}: ${value};`).join('\n');
+    generatedRecipeContexts += 1;
+    for (const name of themeNames) {
+      if (!hasConcreteRecipe(source, name)) {
+        fail(`dist/css/themes.${scheme}.css [data-theme="${theme}"]`,
+          `--${name} has no concrete product-theme fallback`,
+          'emit the recipe through css/copypaste-themes for every product theme',
+          'A scheme-default value would make this theme inherit Midnight colour maths.');
+      }
     }
   }
 }
-blurTokens();
-notes.push(`no-blur-token                 clear (exempt: ${blurAllowed.join(', ')})`);
+notes.push(`recipe-fallback-contexts      ${generatedRecipeContexts} concrete palette block(s)`);
 
 /* ---------------------------------------------- coarse pointer, not width */
 
@@ -147,6 +245,35 @@ for (const file of ['tokens.base.css', 'tokens.dark.css', 'tokens.light.css']) {
 }
 notes.push(`coarse-pointer-set            exactly [${COARSE_TOKENS}], --pad-row-y deliberately absent`);
 
+/* A modern dynamic enhancement is allowed only after the same property has a
+ * concrete declaration. Current generated output intentionally needs none. */
+const generatedCss = [
+  'tokens.base.css', 'tokens.dark.css', 'tokens.light.css',
+  'themes.dark.css', 'themes.light.css', 'swatches.dark.css', 'swatches.light.css',
+];
+let emittedMixes = 0;
+for (const file of generatedCss) {
+  const lines = read(file).split('\n');
+  for (const [index, line] of lines.entries()) {
+    if (!line.includes('color-mix(')) continue;
+    emittedMixes += 1;
+    const dynamic = /^\s*--([\w-]+):\s*(.+);\s*$/.exec(line);
+    let previous = index - 1;
+    while (previous >= 0 && !lines[previous].trim()) previous -= 1;
+    const fallback = previous >= 0
+      ? /^\s*--([\w-]+):\s*(.+);\s*$/.exec(lines[previous])
+      : null;
+    if (!dynamic || !fallback || dynamic[1] !== fallback[1]
+        || /\b(?:color-mix|var)\(/.test(fallback[2])) {
+      fail(`dist/css/${file}:${index + 1}`, line.trim(),
+        'emit the same custom property with a concrete colour immediately before this declaration',
+        'Chrome 53/74 ignores color-mix(). Its cascade needs a concrete declaration that survives '
+        + 'when the optional modern enhancement is rejected.');
+    }
+  }
+}
+notes.push(`generated-color-mix           ${emittedMixes} optional enhancement(s)`);
+
 /* ------------------------------- fills a component dilutes at the call site */
 
 const found = new Map();
@@ -173,13 +300,13 @@ for (const [util, sites] of [...found].sort()) {
 
   const { fill, alpha, fg, on } = known.measure;
   let worst = null;
-  for (const theme of THEMES) {
-    for (const accent of ACCENTS) {
-      const { R, surface } = context(theme, accent);
+  for (const scheme of SCHEMES) {
+    for (const theme of PRODUCT_THEMES) {
+      const { R, surface } = context(scheme, theme);
       for (const n of on) {
         const composited = over({ ...R(fill), alpha }, surface(`var(${n})`));
         const r = ratio(R(fg), composited);
-        if (!worst || r < worst.r) worst = { r, theme, accent, n };
+        if (!worst || r < worst.r) worst = { r, scheme, theme, n };
       }
     }
   }
@@ -187,10 +314,10 @@ for (const [util, sites] of [...found].sort()) {
     fail(sites.join(', '), `${util} puts ${fg.slice(4, -1)} at ${worst.r.toFixed(2)}:1`,
       'do not dilute a fill that carries a label — the hover state needs its own token, '
       + 'not an alpha at the call site',
-      `Worst over ${worst.n} on ${worst.theme}/${worst.accent}, against a ${AA_TEXT} floor. `
+      `Worst over ${worst.n} on ${worst.scheme}/${worst.theme}, against a ${AA_TEXT} floor. `
       + `${fg.slice(4, -1)} was measured against the undiluted fill only, so the token gate is green.`);
   }
-  notes.push(`${util.padEnd(32)} worst ${worst.r.toFixed(2)}:1 (${worst.theme}/${worst.accent} over ${worst.n})`);
+  notes.push(`${util.padEnd(32)} worst ${worst.r.toFixed(2)}:1 (${worst.scheme}/${worst.theme} over ${worst.n})`);
 }
 
 /* --------------------------------------------------------------- reporting */
