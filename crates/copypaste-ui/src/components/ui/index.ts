@@ -11,7 +11,7 @@ export {
 export { Badge, badgeVariants } from "./badge";
 export { Button, buttonVariants } from "./button";
 export { Checkbox, SelectionControl } from "./checkbox";
-export { ControlAdornment, ControlShortcut } from "./control-adornment";
+export { ControlAdornment } from "./control-adornment";
 export {
     ControlEndSlot,
     ControlSurface,
