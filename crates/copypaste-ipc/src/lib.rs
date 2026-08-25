@@ -1,16 +1,4 @@
-//! The single model of the daemon wire contract.
-//!
-//! v1 modelled this three times — typed DTOs in a shared crate that the CLI
-//! never imported, a near-duplicate inside the daemon, and untyped
-//! `serde_json::Value` poking in the CLI across 128 `.as_*()` calls that
-//! silently defaulted on a missing field. Both the daemon and the CLI depend on
-//! this crate and on nothing else for wire types, so a change here breaks
-//! compilation on both sides rather than drifting.
-//!
-//! Framing is newline-delimited JSON over the local endpoint [`transport`]
-//! names. That much v1 got right; what it got wrong was hand-rolling the frame
-//! codec, so the daemon uses `tokio_util::codec::LinesCodec` instead of a
-//! byte-scanning read loop.
+//! The typed daemon wire contract and local transport.
 
 #![forbid(unsafe_code)]
 
@@ -70,17 +58,6 @@ fn default_protocol_version() -> u32 {
 }
 
 /// Every operation the daemon supports.
-///
-/// An enum rather than a method-name string plus untyped params: v1 dispatched
-/// 61 stringly-typed methods through a chain of `match` arms spread over 21
-/// files, and extracted params by hand. Here the compiler enumerates the cases.
-/// The pre-confirmation pairing operations are intentionally absent:
-/// ```compile_fail
-/// let _ = copypaste_ipc::Method::PairCreate { name: String::new() };
-/// ```
-/// ```compile_fail
-/// let _ = copypaste_ipc::Method::PairAccept { code: String::new(), addr: String::new() };
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Method {
@@ -386,17 +363,9 @@ impl Method {
     /// Whether this verb needs the long client budget rather than the ordinary
     /// one (manifest 04 §3.4, `CopyPaste-8ebg.4`).
     ///
-    /// Here rather than in each client because v1 kept three models of the wire
-    /// contract and they disagreed (AGENTS.md rule 1). A client that classified
-    /// this on its own would eventually cancel an operation the other client
-    /// waits for, and the difference would show up as an intermittent failure
-    /// on one surface only.
-    ///
-    /// Three reasons, all of them "the work is genuinely longer than a request":
-    /// local I/O across a whole history, a round trip over the network, and a
-    /// step that waits on a human comparing a SAS. The daemon writes nothing
-    /// until its handler returns, so a budget shorter than the work does not
-    /// protect the client — it cancels an operation that was going to succeed.
+    /// Shared by every client so one does not cancel work that another waits
+    /// for. Long operations span history-wide I/O, a network round trip, or a
+    /// human comparing a SAS.
     #[must_use]
     pub fn is_long_running(&self) -> bool {
         matches!(
@@ -418,13 +387,12 @@ impl Method {
 mod tests {
     use super::*;
 
-    /// Optional status fields preserve protocol-v1 decoding across releases.
     #[test]
     fn a_status_without_optional_fields_decodes_with_defaults() {
-        let older = r#"{"version":"2.0.0-alpha.1","protocol_version":1,"item_count":3,
+        let minimal = r#"{"version":"2.0.0-alpha.1","protocol_version":1,"item_count":3,
                         "capture_running":true,"clipboard_backend":"fake",
                         "private_mode_epoch":0}"#;
-        let status: StatusData = serde_json::from_str(older).unwrap();
+        let status: StatusData = serde_json::from_str(minimal).unwrap();
         assert!(status.device_name.is_empty());
         assert!(status.listen_addr.is_none());
         assert!(!status.private_mode);
@@ -513,16 +481,12 @@ mod tests {
         assert!(serde_json::from_str::<PrivateModeData>(r#"{"private_mode":true}"#).is_err());
     }
 
-    /// The reason fields were added within protocol v1. A client that speaks
-    /// the same protocol must continue to accept a reply from a daemon built
-    /// before they existed, while retaining the old aggregate for an honest
-    /// "reason unavailable" report.
     #[test]
     fn an_import_reply_without_reason_fields_keeps_its_total() {
-        let older = r#"{"id":1,"ok":true,"data":{"import":{"inserted":7,"skipped":2}}}"#;
-        let response: Response = serde_json::from_str(older).unwrap();
+        let minimal = r#"{"id":1,"ok":true,"data":{"import":{"inserted":7,"skipped":2}}}"#;
+        let response: Response = serde_json::from_str(minimal).unwrap();
         let Some(ResponseData::Import(imported)) = response.data else {
-            panic!("the older import reply decoded as the wrong payload")
+            panic!("the import reply decoded as the wrong payload")
         };
 
         assert_eq!(imported.inserted, 7);
