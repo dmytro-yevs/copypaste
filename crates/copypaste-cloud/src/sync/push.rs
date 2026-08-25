@@ -18,9 +18,8 @@ const UPLOAD_BATCH: usize = 50;
 /// Per-item upload cap for text.
 ///
 /// Split from [`MAX_BINARY_BYTES`] rather than unified at the larger number
-/// because that is what the relay enforced (manifest 05 §5.1 row 13) and the
-/// split exists so a text item large enough to be suspicious is refused while
-/// an image of the same size is not.
+/// because manifest 05 §5.1 row 13 requires suspiciously large text to be
+/// refused while allowing an image of the same size.
 pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
 /// Per-item upload cap for anything that is not text.

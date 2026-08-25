@@ -55,10 +55,9 @@ impl SupabaseRest {
     /// * `after_item_id = None` — the caller knows only the millisecond, so the
     ///   bound is **inclusive** (`created_at=gte.…`). A strict `gt` on a
     ///   millisecond alone silently drops every row that shares the boundary
-    ///   millisecond with the last row of the previous page — the worst
-    ///   silent-data-loss bug in v1 (manifest §4.4, INV-N1). Re-offered
-    ///   boundary rows are free to absorb, because applying a version already
-    ///   applied is a no-op (INV-I1).
+    ///   millisecond with the last row of the previous page (manifest §4.4,
+    ///   INV-N1). Re-offered boundary rows are free to absorb, because applying
+    ///   a version already applied is a no-op (INV-I1).
     /// * `after_item_id = Some(id)` — the caller knows the full position, so the
     ///   bound is the compound keyset
     ///   `or=(created_at.gt.M,and(created_at.eq.M,item_id.gt.ID))`: everything
@@ -71,7 +70,7 @@ impl SupabaseRest {
     /// shares a single `created_at`: the watermark cannot advance past that
     /// millisecond, so the same first page comes back forever and the rows
     /// behind it never download (manifest §5.1 row 6, INV-N1, AT-24). The
-    /// compound form is what v1 sent and is why it did not have that problem.
+    /// compound form advances through every row in the total order.
     ///
     /// The order is **ascending** — `(created_at asc, item_id asc)` — and it is
     /// the order the keyset is expressed in; the deployment's
@@ -83,9 +82,8 @@ impl SupabaseRest {
     /// same page is returned on every tick. The failure is invisible in steady
     /// state, where the backlog is smaller than one page, and appears only for
     /// a device that has been offline long enough to matter — which is exactly
-    /// when history matters most. Manifest 05 §4.4 records this as a shipped v1
-    /// bug: `order=wall_time.desc&limit=20` re-fetched the same newest twenty
-    /// rows and older history never downloaded at all.
+    /// when history matters most. Manifest 05 §4.4 records the required forward
+    /// order and AT-23 exercises a backlog larger than one page.
     ///
     /// `limit` is clamped to [`MAX_PAGE_LIMIT`]; a full page means "there may
     /// be more", and the caller should drain rather than wait for the next tick.

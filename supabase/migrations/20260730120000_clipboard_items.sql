@@ -27,9 +27,9 @@ create table public.clipboard_items (
 
     -- Sealed on the client, base64 in a `text` column. Deliberately not
     -- `bytea`: assigning a bare base64 string to bytea stores the ASCII bytes
-    -- of the base64 text and reads back as `\x…` hex, which is what made cloud
-    -- download fail outright in v1 (manifest 05 §4.5, AT-45). A text column has
-    -- one encoding and it is the one the client wrote.
+    -- of the base64 text and reads back as `\x…` hex instead of the original
+    -- base64 (manifest 05 §4.5, AT-45). A text column preserves the encoding the
+    -- client wrote.
     -- Empty on a tombstone written by the upsert path, NULL on one written by
     -- the PATCH path; both spellings are what the client actually sends.
     ciphertext        text,

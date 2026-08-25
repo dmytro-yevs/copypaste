@@ -255,9 +255,8 @@ pub trait CloudSource: Send + Sync {
 ///
 /// `CloudSource` filters sensitive items already — the detector ran at capture
 /// time and the store knows the answer. This is the second layer, and it exists
-/// because manifest 05 AT-56 (`CopyPaste-20yw`) records that v1 had exactly one
-/// enforcement point and it had a hole: the backlog sweep took a different path
-/// to the same table and did not consult it.
+/// because manifest 05 AT-56 (`CopyPaste-20yw`) requires both the regular upload
+/// query and backlog sweep to enforce the sensitive-content gate.
 ///
 /// It is required by [`CloudSync::new`](super::CloudSync::new) rather than
 /// defaulted, so there is no way to construct a driver that uploads unchecked.
