@@ -1,0 +1,7 @@
+.root { display: flex; min-inline-size: 0; align-items: center; gap: calc(var(--s-2) + var(--stroke-2)); }
+.copy { display: flex; min-inline-size: 0; flex-direction: column; gap: calc(var(--s-1) / 2); }
+.copy strong,
+.copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copy strong { color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-semibold); line-height: var(--lh-tight); }
+.copy small { color: var(--dim); font-size: calc(var(--fs-xs) - var(--stroke-2)); line-height: var(--lh-tight); }
+.root[data-compact] .copy { display: none; }

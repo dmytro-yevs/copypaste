@@ -187,6 +187,8 @@ unconfigured_scenario() {
     if install_and_open "$APK_UNCONFIGURED"; then
         if open_cloud; then
             expect_label "Not configured" "$OUT/unconfigured-status.xml"
+            expect_label "Cloud server configuration" "$OUT/unconfigured-form.xml"
+            expect_label "Configure" "$OUT/unconfigured-action.xml"
             elapsed=$(( $(now_ms) - started ))
             cloud_latency_record "$LATENCIES" unconfigured-status "$elapsed" 90000 \
                 && ok "unconfigured cloud status meets its latency budget" \

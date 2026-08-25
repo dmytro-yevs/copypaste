@@ -1,0 +1,10 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.heading {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}

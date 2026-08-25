@@ -10,9 +10,11 @@ import {
   postBaselineRuntime,
   postBaselineSyntax,
   sharesBaselineWithConfig,
+  sharesCssBaselineWithConfig,
   targetOf,
+  unflattenedCascadeLayers,
 } from "./check-webview-baseline.mjs";
-import { LEGACY_TARGET, MODERN_TARGET } from "./webview-baseline.mjs";
+import { LEGACY_CSS_TARGET, LEGACY_TARGET, MODERN_TARGET } from "./webview-baseline.mjs";
 
 describe("which syntax each engine is missing", () => {
   // The versions come from `@babel/compat-data`, so this asserts the wiring
@@ -138,6 +140,26 @@ describe("which engine a chunk is measured against", () => {
       true,
     );
     assert.equal(sharesBaselineWithConfig('build: { target: "chrome74" }'), false);
+  });
+
+  test("the shared stylesheet takes API 24's target from the same module", () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const config = readFileSync(path.join(root, "vite.config.ts"), "utf8");
+
+    assert.equal(LEGACY_CSS_TARGET, LEGACY_TARGET);
+    assert.equal(sharesCssBaselineWithConfig(config), true);
+    assert.equal(sharesCssBaselineWithConfig('build: { cssTarget: "chrome53" }'), false);
+  });
+});
+
+describe("CSS emitted for both engines", () => {
+  test("cascade layers must be flattened rather than shipped", () => {
+    const css = "/* @layer ignored {} */ .plain { content: '@layer'; } @layer base { .a { color: red } }";
+
+    assert.deepEqual(unflattenedCascadeLayers(".plain { color: red }"), []);
+    assert.deepEqual(unflattenedCascadeLayers(css, "bundle.css"), [
+      { file: "bundle.css", line: 1 },
+    ]);
   });
 });
 

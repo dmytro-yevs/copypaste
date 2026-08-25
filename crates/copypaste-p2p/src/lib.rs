@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod device_profile;
 pub mod discovery;
 pub mod netif;
 pub mod node;
@@ -27,6 +28,7 @@ pub mod protocol;
 pub mod sync;
 pub mod transport;
 
+pub use device_profile::{AuthenticatedDeviceProfile, DeviceClass, DevicePlatform, DeviceProfile};
 pub use node::{
     Node, NodeError, PairingInvite, PairingPeer, PairingPhase, PairingRole, PairingStatus,
     PAIRING_CONFIRM_TIMEOUT, PAIRING_INVITE_TTL,

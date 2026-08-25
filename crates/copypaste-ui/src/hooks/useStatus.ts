@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { POLL_BACKOFF_MS, STATUS_POLL_MS } from "@/lib/layout";
+import { POLL_BACKOFF_MS, STATUS_POLL_MS } from "@/lib/scheduling";
 import { type StatusData, getStatus } from "@/lib/ipc";
 import { STATUS_KEY } from "@/hooks/historyRefresh";
 

@@ -1,0 +1,14 @@
+.root {
+  --pane-header-gap: var(--s-4);
+
+  padding-block-start: var(--s-6);
+}
+.layout { align-items: flex-end; }
+.leading,
+.actions { flex: none; }
+.copy { min-inline-size: 0; flex: 1; }
+.eyebrow + .title,
+.title + .description { margin-block-start: var(--s-1); }
+.eyebrow { color: var(--accent-2); font-size: var(--fs-xs); font-weight: var(--fw-bold); letter-spacing: .13em; text-transform: uppercase; }
+.title { color: var(--text); font-size: var(--fs-2xl); font-weight: var(--fw-semibold); letter-spacing: var(--ls-tight); line-height: 1.08; }
+.description { color: var(--dim); font-size: var(--fs-sm); }

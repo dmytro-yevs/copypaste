@@ -3,6 +3,7 @@
  * because that is what serde emits.
  */
 import { call, hasBridge, hasWebBridge } from "./ipcCall";
+import { DEFAULT_SHORTCUT } from "./accelerator";
 import type {
   CloudStatusData,
   CloudSyncData,
@@ -32,8 +33,18 @@ export type {
   ConfigData,
   ConfigPatch,
   DiagnosticCounters,
+  DeviceClass,
+  DeviceDetails,
+  DeviceEndpointObservation,
+  DeviceLatencyObservation,
+  DeviceObservationProvenance,
+  DeviceObservationTrust,
+  DevicePlatform,
+  DevicePresenceObservation,
+  DeviceProfileObservation,
   DiscoveredDevice,
   ErrorCode,
+  ExternalNetworkObservation,
   ExportReport,
   ImagePreview,
   InstalledSourceApp,
@@ -120,6 +131,12 @@ export function revealItem(id: string): Promise<string> {
   return call<string>("reveal_item", { id });
 }
 
+/** Complete plaintext for a non-sensitive item. The native command rejects
+ * sensitive rows before content crosses the WebView boundary. */
+export function getItemBody(id: string): Promise<string> {
+  return call<string>("get_item_body", { id });
+}
+
 /** A bounded PNG thumbnail requested only for a visible history image. */
 export function getImagePreview(id: string): Promise<ImagePreview> {
   return call<ImagePreview>("get_image_preview", { id });
@@ -130,7 +147,7 @@ export function getSourceAppIcon(bundleId: string): Promise<SourceAppIcon | null
   return call<SourceAppIcon | null>("get_source_app_icon", { bundleId });
 }
 
-/** Android's PackageManager catalogue for Settings → Service exclusions. */
+/** Platform catalogue of user-launchable applications for exclusions. */
 export function listInstalledSourceApps(): Promise<InstalledSourceApp[]> {
   return call<InstalledSourceApp[]>("list_installed_source_apps");
 }
@@ -409,10 +426,14 @@ export function restoreDatabase(): Promise<boolean> {
 /** The default is native-owned so the capture UI cannot drift from the binding
  * actually registered by the desktop shell. */
 export function getDefaultShortcut(): Promise<string> {
+  if (hasWebBridge()) return Promise.resolve(DEFAULT_SHORTCUT);
   return call<string>("get_default_shortcut");
 }
 
+let webBridgeShortcut = DEFAULT_SHORTCUT;
+
 export function getShortcut(): Promise<string> {
+  if (hasWebBridge()) return Promise.resolve(webBridgeShortcut);
   return call<string>("get_shortcut");
 }
 
@@ -420,6 +441,10 @@ export function getShortcut(): Promise<string> {
  *  each; `captureAccelerator` refuses the same set here so the user learns why
  *  before spending a round trip. */
 export function setShortcut(accelerator: string): Promise<void> {
+  if (hasWebBridge()) {
+    webBridgeShortcut = accelerator;
+    return Promise.resolve();
+  }
   return call<void>("set_shortcut", { accelerator });
 }
 

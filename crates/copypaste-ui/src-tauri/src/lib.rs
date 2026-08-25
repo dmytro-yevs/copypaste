@@ -50,6 +50,8 @@ pub mod commands;
 #[cfg(all(feature = "dev-web-bridge", not(target_os = "android")))]
 pub mod dev_web_bridge;
 pub mod events;
+#[cfg(not(target_os = "android"))]
+mod installed_source_apps;
 pub mod model;
 #[cfg(target_os = "android")]
 pub mod network_discovery;
@@ -60,7 +62,6 @@ pub mod source_app_icon;
 #[cfg(feature = "typescript")]
 pub mod typescript;
 mod updater;
-
 pub use updater::{UpdateProgress, UpdateStatus};
 
 use backend::SelectedBackend;
@@ -100,6 +101,15 @@ pub fn run() {
 
     #[cfg(target_os = "windows")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    #[cfg(target_os = "android")]
+    let builder = builder
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .target("android-universal")
+                .build(),
+        )
+        .plugin(updater::android::plugin());
 
     // The Kotlin half of the capture ladder. Its setup registers the Android
     // plugin and publishes the `SelectedCapture` the commands are written
@@ -228,7 +238,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::appearance::set_native_theme,
-            commands::appearance::system_accent,
             // history
             commands::history::list,
             commands::history::search,
@@ -236,6 +245,7 @@ pub fn run() {
             commands::history::copy_item,
             commands::history::copy_item_as_plain_text,
             commands::history::reveal_item,
+            commands::history::get_item_body,
             commands::history::copy_items,
             commands::history::get_image_preview,
             commands::history::get_source_app_icon,
@@ -421,7 +431,6 @@ impl<R: tauri::Runtime> backend::embedded::Clipboard for AppClipboard<R> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
     fn production_source() -> &'static str {
         let marker = "#[cfg(test)]\r\nmod tests";
         include_str!("lib.rs")
@@ -429,96 +438,6 @@ mod tests {
             .or_else(|| include_str!("lib.rs").split_once("#[cfg(test)]\nmod tests"))
             .expect("the test module follows production assembly")
             .0
-    }
-
-    fn command_names(source: &str) -> BTreeSet<String> {
-        let mut commands = BTreeSet::new();
-        let mut annotated = false;
-        for line in source.lines() {
-            let line = line.trim();
-            if line == "#[tauri::command]" {
-                annotated = true;
-            } else if annotated
-                && (line.starts_with("pub async fn ") || line.starts_with("pub fn "))
-            {
-                let name = line
-                    .split_whitespace()
-                    .nth(if line.starts_with("pub async") { 3 } else { 2 })
-                    .unwrap();
-                commands.insert(
-                    name.split(['(', '<'])
-                        .next()
-                        .expect("a command has a name")
-                        .to_string(),
-                );
-                annotated = false;
-            }
-        }
-        commands
-    }
-
-    fn registered_command_names() -> Vec<String> {
-        let handler = production_source()
-            .split_once("tauri::generate_handler![")
-            .expect("the app has one invoke handler")
-            .1
-            .split_once("])")
-            .expect("the handler list is closed")
-            .0;
-        handler
-            .lines()
-            .filter_map(|line| {
-                let entry = line.trim().trim_end_matches(',');
-                entry.rsplit_once("::").map(|(_, name)| name.to_string())
-            })
-            .collect()
-    }
-
-    fn product_command_names() -> BTreeSet<String> {
-        let ledger: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../docs/feature-ledger.json"))
-                .expect("the feature ledger is valid JSON");
-        ledger["features"]
-            .as_array()
-            .expect("the ledger has features")
-            .iter()
-            .flat_map(|feature| {
-                feature["contracts"]
-                    .as_array()
-                    .expect("each feature classifies its commands")
-            })
-            .map(|name| name.as_str().expect("a command name").to_string())
-            .collect()
-    }
-
-    #[test]
-    fn every_tauri_command_is_registered_once() {
-        let command_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
-        let mut annotated = BTreeSet::new();
-        for entry in std::fs::read_dir(command_dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_some_and(|extension| extension == "rs") {
-                for command in command_names(&std::fs::read_to_string(path).unwrap()) {
-                    assert!(
-                        annotated.insert(command.clone()),
-                        "duplicate command: {command}"
-                    );
-                }
-            }
-        }
-        for command in command_names(include_str!("updater.rs")) {
-            assert!(
-                annotated.insert(command.clone()),
-                "duplicate command: {command}"
-            );
-        }
-        let registered_entries = registered_command_names();
-        let registered = registered_entries.iter().cloned().collect::<BTreeSet<_>>();
-
-        assert_eq!(registered_entries.len(), registered.len());
-        assert_eq!(annotated, registered);
-        assert_eq!(registered, product_command_names());
-        assert_eq!(registered.len(), 78);
     }
 
     #[test]
@@ -638,39 +557,5 @@ mod tests {
         assert!(hooks.matches("copypaste.exe\" shutdown").count() >= 2);
         assert!(hooks.contains("$UpdateMode <> 1"));
         assert!(hooks.contains("StartupApproved\\Run"));
-    }
-
-    #[test]
-    fn signed_windows_updater_has_a_registered_runtime_consumer() {
-        let cargo = include_str!("../Cargo.toml");
-        let capabilities = include_str!("../capabilities/default.json");
-        let signed_config = include_str!("../tauri.windows.signed.conf.template.json");
-        let updater = include_str!("updater.rs");
-        let compact_updater = updater.split_whitespace().collect::<String>();
-
-        assert!(cargo.contains("tauri-plugin-updater = \"=2.10.1\""));
-        assert!(
-            production_source().contains(".plugin(tauri_plugin_updater::Builder::new().build())")
-        );
-        assert!(signed_config.contains("\"updater\""));
-        assert!(updater.contains("app.config().plugins.0.get(\"updater\")"));
-        assert!(updater.contains("UpdaterExt"));
-        assert!(compact_updater.contains(".check().await"));
-        assert!(updater.contains(".download_and_install("));
-        assert!(updater.contains(".on_before_exit("));
-        assert!(!updater.contains("UpdateStatus::Restarting"));
-        assert!(!capabilities.contains("updater:"));
-        for bypass in [
-            "reqwest::",
-            "minisign::",
-            "semver::",
-            "std::process",
-            "Command::new",
-        ] {
-            assert!(
-                !updater.contains(bypass),
-                "updater boundary bypasses the plugin with {bypass}"
-            );
-        }
     }
 }

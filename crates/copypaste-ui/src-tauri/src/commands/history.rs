@@ -82,17 +82,26 @@ pub async fn add_item(backend: State<'_, SelectedBackend>, content: String) -> R
 /// sensitive item be copied at all (ADR-0001: the user then presses Cmd+V —
 /// the app never synthesises a paste).
 #[tauri::command]
-pub async fn copy_item(backend: State<'_, SelectedBackend>, id: String) -> Result<UiItem> {
-    Ok(backend.copy(&id).await?.into())
+pub async fn copy_item<R: Runtime>(
+    app: AppHandle<R>,
+    backend: State<'_, SelectedBackend>,
+    id: String,
+) -> Result<UiItem> {
+    let item = backend.copy(&id).await?;
+    crate::shell::feedback::success(&app);
+    Ok(item.into())
 }
 
 /// Put an item on the clipboard as plain text, without exposing it to the WebView.
 #[tauri::command]
-pub async fn copy_item_as_plain_text(
+pub async fn copy_item_as_plain_text<R: Runtime>(
+    app: AppHandle<R>,
     backend: State<'_, SelectedBackend>,
     id: String,
 ) -> Result<UiItem> {
-    Ok(backend.copy_as_plain_text(&id).await?.into())
+    let item = backend.copy_as_plain_text(&id).await?;
+    crate::shell::feedback::success(&app);
+    Ok(item.into())
 }
 
 /// The deliberate reveal gesture: return one item's plaintext.
@@ -109,6 +118,22 @@ pub async fn copy_item_as_plain_text(
 #[tauri::command]
 pub async fn reveal_item(backend: State<'_, SelectedBackend>, id: String) -> Result<String> {
     Ok(backend.get(&id).await?.content)
+}
+
+/// Return the complete body of a non-sensitive item.
+///
+/// Unlike `reveal_item`, this command is safe for the authenticated local
+/// development bridge: the sensitivity guard runs after the authoritative
+/// item read and before plaintext crosses into the WebView.
+#[tauri::command]
+pub async fn get_item_body(backend: State<'_, SelectedBackend>, id: String) -> Result<String> {
+    let item = backend.get(&id).await?;
+    if item.is_sensitive {
+        return Err(BackendError::Invalid(
+            "Sensitive content cannot be displayed here.",
+        ));
+    }
+    Ok(item.content)
 }
 
 /// One clipboard write for the whole selection.
@@ -136,6 +161,7 @@ pub async fn copy_items<R: Runtime>(
         tracing::warn!(error = %e, "a bulk clipboard write failed");
         BackendError::Internal(MSG_BULK_COPY_FAILED.to_string())
     })?;
+    crate::shell::feedback::success(&app);
     Ok(copied)
 }
 
@@ -173,9 +199,7 @@ pub fn get_source_app_icon(
     cache.resolve_desktop(&bundle_id)
 }
 
-/// Android-only installed application catalogue used by Settings → Service.
-/// Desktop keeps its existing history/manual bundle-id workflow because macOS
-/// does not expose the same installed-package catalogue to a sandboxed app.
+/// Installed application catalogue used by Settings → Service.
 #[cfg(target_os = "android")]
 #[tauri::command]
 pub fn list_installed_source_apps(
@@ -188,14 +212,18 @@ pub fn list_installed_source_apps(
     })
 }
 
-/// The command is registered on both platforms so the shared frontend keeps a
-/// single IPC surface. It is intentionally empty on desktop, where settings
-/// retains its bundle-id/manual flow instead of pretending macOS has Android's
-/// package catalogue.
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
-pub fn list_installed_source_apps() -> Result<Vec<UiInstalledSourceApp>> {
-    Ok(Vec::new())
+pub async fn list_installed_source_apps() -> Result<Vec<UiInstalledSourceApp>> {
+    tauri::async_runtime::spawn_blocking(crate::installed_source_apps::list)
+        .await
+        .map_err(|_| BackendError::internal("Installed applications couldn't be read."))?
+        .map(|apps| {
+            apps.into_iter()
+                .map(|app| UiInstalledSourceApp::new(app.id, app.label))
+                .collect()
+        })
+        .map_err(|_| BackendError::internal("Installed applications couldn't be read."))
 }
 
 /// Android resolves package icons through the application PackageManager.

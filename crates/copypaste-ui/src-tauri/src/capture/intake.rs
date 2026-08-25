@@ -33,7 +33,7 @@ use copypaste_ipc::EventKind;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Listener, Manager, Runtime};
 
-use crate::backend::{Backend, BackendError, Result, SelectedBackend};
+use crate::backend::{Backend, BackendError, CaptureWrite, Result, SelectedBackend};
 use crate::events::TauriEventName;
 use crate::model::UiItem;
 use crate::service::push::ChangePayload;
@@ -157,18 +157,28 @@ impl Buffer {
 /// `Ok(None)` means there was nothing worth storing. Blank content is dropped
 /// here rather than at the backend so a share of pure whitespace does not spend
 /// a round trip — the same check `commands::history::add_item` makes.
-pub async fn store<B: Backend>(backend: &B, clip: &Clip) -> Result<Option<UiItem>> {
+#[derive(Debug)]
+pub struct StoredCapture {
+    pub item: UiItem,
+    pub saved: bool,
+}
+
+pub async fn store<B: Backend>(backend: &B, clip: &Clip) -> Result<Option<StoredCapture>> {
     if clip.text.trim().is_empty() {
         return Ok(None);
     }
     let item = backend
         .add_captured(
             &clip.text,
+            clip.source,
             clip.source_app_bundle_id.as_deref(),
             clip.source_app_name.as_deref(),
         )
         .await?;
-    Ok(item.map(Into::into))
+    Ok(item.map(|CaptureWrite { item, saved }| StoredCapture {
+        item: item.into(),
+        saved,
+    }))
 }
 
 /// Capture the clipboard right now and store it — the Quick Settings tile and
@@ -191,11 +201,14 @@ pub async fn capture_once<R: Runtime>(
 
     let backend = app.state::<SelectedBackend>();
     let stored = store(backend.inner(), &clip).await?;
-    if let Some(item) = &stored {
-        announce(app, item, source, clip.at_ms).await;
+    if let Some(stored) = &stored {
+        announce(app, &stored.item, source, clip.at_ms).await;
+        if stored.saved {
+            crate::shell::feedback::success(app);
+        }
         sync_after_capture(app).await;
     }
-    Ok(stored)
+    Ok(stored.map(|stored| stored.item))
 }
 
 /// Move what the platform has captured into the database, for the life of the
@@ -219,15 +232,23 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
         let mut buffer = Buffer::default();
         let initial = loop {
             let backend = app.state::<SelectedBackend>();
-            match backend.get_private_mode().await {
-                Ok(mode) => break mode.private_mode,
+            match backend.get_config().await {
+                Ok(applied) => break applied.config,
                 Err(error) => {
-                    tracing::debug!(%error, "private mode is not available yet");
+                    tracing::debug!(%error, "capture settings are not available yet");
                     tokio::time::sleep(DRAIN_INTERVAL).await;
                 }
             }
         };
-        let mut private_gate = PrivateGate::starting(initial);
+        {
+            let capture = app.state::<SelectedCapture>();
+            if let Err(error) =
+                capture.set_excluded_app_bundle_ids(Some(&initial.excluded_app_bundle_ids))
+            {
+                tracing::warn!(%error, "the Android source-exclusion gate stayed closed");
+            }
+        }
+        let mut private_gate = PrivateGate::starting(initial.private_mode);
         synchronize_private_mode(&app, &mut private_gate);
 
         while let Ok(enabled) = private_mode_rx.try_recv() {
@@ -352,8 +373,11 @@ async fn drain_buffer<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer) {
         let backend = app.state::<SelectedBackend>();
         match store(backend.inner(), &clip).await {
             Ok(None) => {}
-            Ok(Some(item)) => {
-                announce(app, &item, clip.source, clip.at_ms).await;
+            Ok(Some(stored)) => {
+                announce(app, &stored.item, clip.source, clip.at_ms).await;
+                if stored.saved {
+                    crate::shell::feedback::success(app);
+                }
                 sync_after_capture(app).await;
             }
             Err(error) => {

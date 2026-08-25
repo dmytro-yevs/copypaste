@@ -33,6 +33,8 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
+use crate::DeviceProfile;
+
 /// Version of the message set. Bumped whenever a change would confuse an older
 /// peer. No negotiation and no compatibility shim: a mismatch is a clear error
 /// rather than a degraded session.
@@ -204,6 +206,8 @@ pub enum SyncMessage {
         device_id: String,
         device_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<DeviceProfile>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         listen_addr: Option<String>,
         #[serde(default)]
         since_ms: i64,
@@ -356,6 +360,7 @@ impl SyncMessage {
                 protocol_version,
                 device_id,
                 device_name,
+                profile,
                 listen_addr,
                 since_ms,
             } => {
@@ -370,6 +375,9 @@ impl SyncMessage {
                 }
                 check_id("device_id", device_id)?;
                 check_len("device_name", device_name, MAX_DEVICE_NAME_BYTES)?;
+                if let Some(profile) = profile {
+                    validate_device_profile(profile)?;
+                }
                 if *since_ms < 0 {
                     return Err(ProtocolError::NegativeTimestamp { field: "since_ms" });
                 }
@@ -440,6 +448,20 @@ impl SyncMessage {
         }
         Ok(())
     }
+}
+
+fn validate_device_profile(profile: &DeviceProfile) -> Result<(), ProtocolError> {
+    for (field, value, max) in [
+        ("app_version", profile.app_version.as_deref(), 64),
+        ("os_name", profile.os_name.as_deref(), 64),
+        ("os_version", profile.os_version.as_deref(), 64),
+        ("model", profile.model.as_deref(), 128),
+    ] {
+        if let Some(value) = value {
+            check_len(field, value, max)?;
+        }
+    }
+    Ok(())
 }
 
 fn check_count(kind: &'static str, count: usize, max: usize) -> Result<(), ProtocolError> {
@@ -566,6 +588,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "dev-a".into(),
             device_name: "Laptop".into(),
+            profile: Some(DeviceProfile::current()),
             listen_addr: None,
             since_ms: 0,
         }
@@ -778,6 +801,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: String::new(),
                 device_name: "n".into(),
+                profile: None,
                 listen_addr: None,
                 since_ms: 0,
             },
@@ -814,6 +838,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "d".into(),
             device_name: "x".repeat(MAX_DEVICE_NAME_BYTES + 1),
+            profile: None,
             listen_addr: None,
             since_ms: 0,
         }
@@ -834,6 +859,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "d".into(),
             device_name: "n".into(),
+            profile: None,
             listen_addr: Some("not-an-endpoint".into()),
             since_ms: 0,
         };
@@ -843,6 +869,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "d".into(),
             device_name: "n".into(),
+            profile: None,
             listen_addr: Some("1".repeat(MAX_LISTEN_ADDR_BYTES + 1)),
             since_ms: 0,
         };

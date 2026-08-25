@@ -1,0 +1,24 @@
+.root {
+  background: transparent;
+}
+
+.header {
+  padding: var(--s-2) var(--s-4);
+  border-block-end: var(--stroke-1) solid var(--divider);
+  background: var(--chrome-bg);
+  backdrop-filter: var(--frost-filter);
+  -webkit-backdrop-filter: var(--frost-filter);
+}
+
+.title {
+  min-inline-size: 0;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewport {
+  flex: 1;
+}

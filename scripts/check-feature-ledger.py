@@ -3,8 +3,17 @@ import copy
 import json
 import pathlib
 import re
+import shlex
 import sys
 import tempfile
+
+from feature_ledger_evidence import (
+    STATE,
+    native_errors,
+    release_gate_errors,
+    repo_file,
+    string_list_errors,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "docs/feature-ledger.json"
@@ -19,6 +28,9 @@ CLOUD_RELEASE = {
     "release-macos-native-evidence",
     "release-windows-native-evidence",
 }
+CLOUD_UI_TEST = "npm --prefix crates/copypaste-ui run test:cloud"
+CLOUD_UI_SCRIPT = "vitest run src/features/settings/patterns/CloudSyncSettings.test.tsx"
+CLOUD_UI_TEST_FILE = "crates/copypaste-ui/src/features/settings/patterns/CloudSyncSettings.test.tsx"
 SHIPPED_PLATFORMS = {"android", "macos", "windows"}
 PERFORMANCE_PLATFORMS = SHIPPED_PLATFORMS
 REQUIRED_RELEASE = {
@@ -27,6 +39,7 @@ REQUIRED_RELEASE = {
     "release-windows-native-evidence",
 }
 SCENARIO_SUFFIXES = {".py", ".ps1", ".sh"}
+TEST_RUNNERS = {"cargo", "npm", "python", "python3", "pwsh", "bash", "./gradlew"}
 
 
 def fail(message):
@@ -53,37 +66,48 @@ def contract_errors(shipped, classified):
     return errors
 
 
-def cloud_errors(feature):
+def cloud_errors(feature, root=ROOT):
     errors = []
     for platform in ("android", "macos"):
         scenario = feature.get("native", {}).get(platform, {})
-        states = set(scenario.get("evidence_states", []))
+        verified = scenario.get("evidence_states", [])
+        unverified = scenario.get("unverified_states", [])
+        states = {
+            state for state in verified + unverified if isinstance(state, str)
+        } if isinstance(verified, list) and isinstance(unverified, list) else set()
         if states != CLOUD_STATES:
-            errors.append(f"cloud-account: {platform} evidence_states must be {sorted(CLOUD_STATES)}")
+            errors.append(f"cloud-account: {platform} evidence coverage must be {sorted(CLOUD_STATES)}")
         if "cloud-evidence.sh" not in scenario.get("scenario", ""):
             errors.append(f"cloud-account: {platform} must use a dedicated cloud evidence scenario")
-        script = ROOT / scenario.get("scenario", "").split()[0].removeprefix("./")
+        script = root / scenario.get("scenario", "").split()[0].removeprefix("./")
         if not script.is_file():
             errors.append(f"cloud-account: {platform} scenario does not exist")
+    windows = feature.get("native", {}).get("windows", {})
+    verified = windows.get("evidence_states", [])
+    unverified = windows.get("unverified_states", [])
+    windows_states = {
+        state for state in verified + unverified if isinstance(state, str)
+    } if isinstance(verified, list) and isinstance(unverified, list) else set()
+    if windows_states != CLOUD_STATES:
+        errors.append(f"cloud-account: windows evidence coverage must be {sorted(CLOUD_STATES)}")
+    if "windows-native-evidence.ps1" not in windows.get("scenario", ""):
+        errors.append("cloud-account: windows must use the native release evidence scenario")
+    if feature.get("ui_tests") != [CLOUD_UI_TEST]:
+        errors.append(f"cloud-account: ui_tests must run {CLOUD_UI_TEST}")
+    try:
+        package_file, _ = repo_file(root, "crates/copypaste-ui/package.json")
+        package = json.loads(package_file.read_text(encoding="utf-8"))
+        if package.get("scripts", {}).get("test:cloud") != CLOUD_UI_SCRIPT:
+            errors.append("cloud-account: test:cloud must run the focused lifecycle test")
+    except (ValueError, OSError, json.JSONDecodeError) as error:
+        errors.append(f"cloud-account: focused UI test script is unavailable: {error}")
+    try:
+        repo_file(root, CLOUD_UI_TEST_FILE)
+    except ValueError as error:
+        errors.append(f"cloud-account: focused UI test is unavailable: {error}")
     if set(feature.get("release_evidence", [])) != CLOUD_RELEASE:
         errors.append(f"cloud-account: release_evidence must be {sorted(CLOUD_RELEASE)}")
     return errors
-
-
-def repo_file(root, value):
-    if not isinstance(value, str) or not value:
-        raise ValueError("evidence path is missing")
-    relative = pathlib.PurePosixPath(value)
-    if relative.is_absolute() or ".." in relative.parts or "\\" in value:
-        raise ValueError("evidence path must stay inside the repository")
-    try:
-        file = (root / pathlib.Path(*relative.parts)).resolve(strict=True)
-        file.relative_to(root.resolve(strict=True))
-    except (OSError, ValueError):
-        raise ValueError(f"evidence file does not exist: {value}") from None
-    if not file.is_file():
-        raise ValueError(f"evidence path is not a file: {value}")
-    return file, relative
 
 
 def artifact_matches(document, platform, scenario, p95_ms):
@@ -211,28 +235,65 @@ def performance_errors(feature, root=ROOT):
     return errors
 
 
-def platform_errors(feature, root=ROOT):
+def test_command_errors(value, label, root=ROOT):
+    errors = string_list_errors(value, label)
+    if errors:
+        return errors
+    for command in value:
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            errors.append(f"{label} contains an invalid command")
+            continue
+        if not re.search(r"(?:^|[^a-z])(?:test|check)[a-z0-9:_-]*", command, re.I):
+            errors.append(f"{label} command does not run a test or check: {command}")
+            continue
+        candidates = [argv[0]] if argv else []
+        if argv and argv[0] == "cd" and "&&" in argv:
+            at = argv.index("&&")
+            candidates = argv[at + 1:at + 2]
+        if not candidates:
+            errors.append(f"{label} command has no executable: {command}")
+            continue
+        runner = candidates[0]
+        if runner in TEST_RUNNERS:
+            continue
+        if runner.startswith("./"):
+            try:
+                repo_file(root, runner)
+                continue
+            except ValueError:
+                pass
+        errors.append(f"{label} command has no recognized executable: {command}")
+    return errors
+
+
+def feature_shape_errors(feature, root=ROOT):
     feature_id = feature.get("id", "<missing id>")
     errors = []
-    release_evidence = set(feature.get("release_evidence", []))
+    if not isinstance(feature_id, str) or not STATE.fullmatch(feature_id):
+        errors.append(f"{feature_id}: id must be a lowercase identifier")
+    errors.extend(string_list_errors(feature.get("contracts"), f"{feature_id}: contracts", re.compile(r"[a-z][a-z0-9_]*\Z")))
+    errors.extend(test_command_errors(feature.get("backend_tests"), f"{feature_id}: backend_tests", root))
+    errors.extend(test_command_errors(feature.get("ui_tests"), f"{feature_id}: ui_tests", root))
+    errors.extend(string_list_errors(feature.get("accessibility_states"), f"{feature_id}: accessibility_states", STATE))
+    errors.extend(string_list_errors(feature.get("failure_states"), f"{feature_id}: failure_states", STATE))
+    errors.extend(string_list_errors(feature.get("release_evidence"), f"{feature_id}: release_evidence", STATE))
+    return errors
+
+
+def platform_errors(feature, root=ROOT, require_complete=False):
+    feature_id = feature.get("id", "<missing id>")
+    errors = []
+    values = feature.get("release_evidence", [])
+    release_evidence = {value for value in values if isinstance(value, str)} if isinstance(values, list) else set()
     missing_release = sorted(REQUIRED_RELEASE - release_evidence)
     if missing_release:
         errors.append(f"{feature_id}: release evidence missing {', '.join(missing_release)}")
-    for platform in sorted(SHIPPED_PLATFORMS):
-        scenario = feature.get("native", {}).get(platform, {})
-        for field in ("scenario", "screenshot", "ax_log"):
-            if not scenario.get(field):
-                errors.append(f"{feature_id}: {platform} missing {field}")
-        if platform == "windows":
-            states = scenario.get("evidence_states")
-            if not isinstance(states, list) or not states or not all(isinstance(state, str) and state for state in states):
-                errors.append(f"{feature_id}: windows missing evidence_states")
-            for field in ("screenshot", "ax_log"):
-                value = scenario.get(field, "")
-                if f"/{feature_id}/" not in value:
-                    errors.append(f"{feature_id}: windows {field} must be feature-specific")
+    native, pending = native_errors(feature, root, require_complete)
+    errors.extend(native)
     errors.extend(performance_errors(feature, root))
-    return errors
+    return errors, pending
 
 
 def self_test():
@@ -241,11 +302,13 @@ def self_test():
         (root / "scripts").mkdir()
         (root / ".github/workflows").mkdir(parents=True)
         for platform in PERFORMANCE_PLATFORMS:
-            (root / f"scripts/{platform}.sh").write_text(
+            producer = root / f"scripts/{platform}.sh"
+            producer.write_text(
                 f'cloud_latency_record "$OUT" ready "$elapsed" 42\n'
                 f'cloud_latency_write "$OUT" "$OUT/latency.json" {platform}\n',
                 encoding="utf-8",
             )
+            producer.chmod(0o755)
             (root / f".github/workflows/{platform}.yml").write_text(
                 f"run: ./scripts/{platform}.sh\n", encoding="utf-8"
             )
@@ -300,45 +363,139 @@ def self_test():
         checks.append(("prose-only evidence fails", rejects(feature, "not prose")))
 
     cloud = {
+        "ui_tests": [CLOUD_UI_TEST],
         "native": {
             "android": {"scenario": "./scripts/release/android-cloud-evidence.sh", "evidence_states": list(CLOUD_STATES)},
             "macos": {"scenario": "./scripts/release/macos-cloud-evidence.sh", "evidence_states": list(CLOUD_STATES)},
+            "windows": {
+                "scenario": "./scripts/release/windows-native-evidence.ps1",
+                "evidence_states": ["unconfigured"],
+                "unverified_states": sorted(CLOUD_STATES - {"unconfigured"}),
+            },
         },
         "release_evidence": list(CLOUD_RELEASE),
     }
     checks.append(("complete native cloud evidence passes", not cloud_errors(cloud)))
+    cloud["ui_tests"] = ["npm --prefix crates/copypaste-ui test -- CloudStep"]
+    checks.append(("a filtered command that can skip the cloud UI test fails", bool(cloud_errors(cloud))))
+    cloud["ui_tests"] = [CLOUD_UI_TEST]
     cloud["native"]["android"]["evidence_states"].remove("offline-error")
     checks.append(("a missing native cloud state fails", bool(cloud_errors(cloud))))
-    product = {
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        (root / "scripts").mkdir()
+        (root / ".github/workflows").mkdir(parents=True)
+        artifact_names = {
+            "android": "release-android-smoke-evidence",
+            "macos": "release-macos-native-evidence",
+            "windows": "release-windows-native-evidence",
+        }
+        jobs = []
+        for platform, artifact_name in artifact_names.items():
+            producer = root / f"scripts/{platform}.sh"
+            producer.write_text(
+                'touch "$OUT/screenshot.png"\nprintf "{}" > "$OUT/ax.json"\n',
+                encoding="utf-8",
+            )
+            producer.chmod(0o755)
+            jobs.append(
+                f"  {platform}:\n"
+                f"    steps:\n"
+                f"      - run: ./scripts/{platform}.sh\n"
+                f"      - uses: actions/upload-artifact@v4\n"
+                f"        with:\n"
+                f"          name: {artifact_name}\n"
+                f"          path: artifacts/{platform}\n"
+                f"          if-no-files-found: error\n"
+            )
+        (root / ".github/workflows/release.yml").write_text(
+            "jobs:\n" + "".join(jobs)
+            + "  native-parity:\n"
+            + "    steps:\n"
+            + "      - run: python3 -m pip install --requirement requirements-ci.txt\n"
+            + "      - run: python3 scripts/check-feature-ledger.py --require-complete\n",
+            encoding="utf-8",
+        )
+        product = {
+            "id": "fixture",
+            "native": {
+                platform: {
+                    "scenario": f"./scripts/{platform}.sh",
+                    "evidence_status": "verified",
+                    "screenshot": f"artifacts/{platform}/screenshot.png",
+                    "ax_log": f"artifacts/{platform}/ax.json",
+                    "evidence_states": ["ready"],
+                    "release_artifact": artifact_names[platform],
+                }
+                for platform in SHIPPED_PLATFORMS
+            },
+            "performance": {platform: {"status": "uncredited"} for platform in SHIPPED_PLATFORMS},
+            "release_evidence": list(REQUIRED_RELEASE),
+        }
+
+        def platform_rejects(probe, message, complete=False):
+            return any(message in error for error in platform_errors(probe, root, complete)[0])
+
+        checks.append(("all three shipped platform records pass", not platform_errors(product, root)[0]))
+        probe = copy.deepcopy(product)
+        del probe["native"]["windows"]
+        checks.append(("a missing Windows platform fails", platform_rejects(probe, "must distinguish")))
+        probe = copy.deepcopy(product)
+        del probe["native"]["windows"]["evidence_states"]
+        checks.append(("missing platform evidence states fail", platform_rejects(probe, "nonempty list")))
+        probe = copy.deepcopy(product)
+        probe["native"]["windows"]["screenshot"] = "artifacts/generic/screenshot.png"
+        checks.append(("an artifact outside its upload fails", platform_rejects(probe, "outside the uploaded")))
+        probe = copy.deepcopy(product)
+        probe["native"]["windows"]["ax_log"] = "artifacts/windows/invented.json"
+        checks.append(("an unproduced artifact path fails", platform_rejects(probe, "not produced")))
+        probe = copy.deepcopy(product)
+        probe["native"]["windows"]["scenario"] = "manual evidence review"
+        checks.append(("prose-only platform evidence fails", platform_rejects(probe, "does not exist")))
+        probe = copy.deepcopy(product)
+        (root / "scripts/windows.sh").chmod(0o644)
+        checks.append(("a non-executable platform scenario fails", platform_rejects(probe, "not executable")))
+        (root / "scripts/windows.sh").chmod(0o755)
+        probe = copy.deepcopy(product)
+        probe["release_evidence"].remove("release-windows-native-evidence")
+        checks.append(("missing Windows release evidence fails", platform_rejects(probe, "release-windows-native-evidence")))
+        probe = copy.deepcopy(product)
+        probe["native"]["macos"] = {
+            "scenario": "./scripts/macos.sh",
+            "evidence_status": "pending",
+            "unverified_states": ["ready"],
+        }
+        errors, pending = platform_errors(probe, root)
+        checks.append(("honest pending evidence is visible", not errors and pending == ["fixture/macos/ready"]))
+        checks.append(("release completion rejects pending evidence", platform_rejects(probe, "release evidence is pending", True)))
+        probe["native"]["macos"]["screenshot"] = "artifacts/macos/screenshot.png"
+        checks.append(("pending evidence cannot cite a fake artifact", platform_rejects(probe, "cannot cite unproduced")))
+        probe = copy.deepcopy(product)
+        del probe["performance"]["windows"]
+        checks.append(("missing Windows performance record fails", platform_rejects(probe, "android, macos, and windows")))
+        checks.append(("release requires complete feature evidence", not release_gate_errors(root)))
+        workflow = root / ".github/workflows/release.yml"
+        workflow.write_text(
+            workflow.read_text(encoding="utf-8").replace(" --require-complete", ""),
+            encoding="utf-8",
+        )
+        checks.append(("a prose-only release ledger check fails", bool(release_gate_errors(root))))
+    shape = {
         "id": "fixture",
-        "native": {
-            platform: {
-                "scenario": "run",
-                "screenshot": "artifacts/fixture/shot",
-                "ax_log": "artifacts/fixture/ax",
-                **({"evidence_states": ["ready"]} if platform == "windows" else {}),
-            }
-            for platform in SHIPPED_PLATFORMS
-        },
-        "performance": {platform: {"status": "uncredited"} for platform in SHIPPED_PLATFORMS},
-        "release_evidence": list(REQUIRED_RELEASE),
+        "contracts": ["status"],
+        "backend_tests": ["cargo test -p fixture"],
+        "ui_tests": ["npm test"],
+        "accessibility_states": ["ready"],
+        "failure_states": ["restart", "offline"],
+        "release_evidence": ["release-fixture-evidence"],
     }
-    checks.append(("all three shipped platform records pass", not platform_errors(product, root)))
-    probe = copy.deepcopy(product)
-    del probe["native"]["windows"]
-    checks.append(("a missing Windows platform fails", any("windows missing" in error for error in platform_errors(probe, root))))
-    probe = copy.deepcopy(product)
-    del probe["native"]["windows"]["evidence_states"]
-    checks.append(("missing Windows feature state fails", any("windows missing evidence_states" in error for error in platform_errors(probe, root))))
-    probe = copy.deepcopy(product)
-    probe["native"]["windows"]["screenshot"] = "artifacts/generic/shot"
-    checks.append(("generic Windows evidence path fails", any("screenshot must be feature-specific" in error for error in platform_errors(probe, root))))
-    probe = copy.deepcopy(product)
-    probe["release_evidence"].remove("release-windows-native-evidence")
-    checks.append(("missing Windows release evidence fails", any("release-windows-native-evidence" in error for error in platform_errors(probe, root))))
-    probe = copy.deepcopy(product)
-    del probe["performance"]["windows"]
-    checks.append(("missing Windows performance record fails", any("android, macos, and windows" in error for error in platform_errors(probe, root))))
+    checks.append(("required feature fields accept structured values", not feature_shape_errors(shape)))
+    probe = copy.deepcopy(shape)
+    probe["ui_tests"] = ["manual QA passed"]
+    checks.append(("prose cannot stand in for a UI test", bool(feature_shape_errors(probe))))
+    probe = copy.deepcopy(shape)
+    probe["accessibility_states"] = []
+    checks.append(("empty accessibility coverage fails", bool(feature_shape_errors(probe))))
     handler = """tauri::generate_handler![
         commands::history::copy_item,
         updater::update_status,
@@ -355,6 +512,7 @@ def self_test():
 def main():
     if "--self-test" in sys.argv:
         return self_test()
+    require_complete = "--require-complete" in sys.argv
     raw = LEDGER.read_text(encoding="utf-8")
     if FORBIDDEN.search(raw):
         return fail("completion records may not contain TODOs, waivers, or placeholders")
@@ -362,23 +520,42 @@ def main():
         document = json.loads(raw)
     except json.JSONDecodeError as error:
         return fail(str(error))
-    if document.get("schema_version") != 1:
+    if document.get("schema_version") != 2:
         return fail("unsupported schema_version")
 
     shipped = shipped_commands(HANDLER.read_text(encoding="utf-8"))
     classified = []
     errors = []
-    required = {"backend_tests", "ui_tests", "accessibility_states", "failure_states", "performance", "native", "release_evidence"}
-    for feature in document.get("features", []):
+    pending = []
+    errors.extend(release_gate_errors(ROOT))
+    required = {
+        "contracts", "backend_tests", "ui_tests", "accessibility_states", "failure_states",
+        "performance", "native", "release_evidence",
+    }
+    features = document.get("features")
+    if not isinstance(features, list) or not features:
+        return fail("features must be a nonempty list")
+    feature_ids = [feature.get("id") for feature in features if isinstance(feature, dict)]
+    valid_feature_ids = [feature_id for feature_id in feature_ids if isinstance(feature_id, str)]
+    if len(valid_feature_ids) != len(set(valid_feature_ids)):
+        errors.append("feature ids must be unique")
+    for feature in features:
+        if not isinstance(feature, dict):
+            errors.append("feature records must be objects")
+            continue
         feature_id = feature.get("id", "<missing id>")
         missing = sorted(required - feature.keys())
         if missing:
             errors.append(f"{feature_id}: missing {', '.join(missing)}")
         if feature.get("status") not in {"product", "removed"}:
             errors.append(f"{feature_id}: status must be product or removed")
-        classified.extend(feature.get("contracts", []))
+        errors.extend(feature_shape_errors(feature))
+        if isinstance(feature.get("contracts"), list):
+            classified.extend(contract for contract in feature["contracts"] if isinstance(contract, str))
         if feature.get("status") == "product":
-            errors.extend(platform_errors(feature))
+            native, feature_pending = platform_errors(feature, require_complete=require_complete)
+            errors.extend(native)
+            pending.extend(feature_pending)
             for state in ("restart", "offline"):
                 if state not in feature.get("failure_states", []):
                     errors.append(f"{feature_id}: failure_states missing {state}")
@@ -388,7 +565,9 @@ def main():
     errors.extend(contract_errors(shipped, classified))
     if errors:
         return fail("\nfeature-ledger: ".join(errors))
-    print(f"feature-ledger: {len(document['features'])} features, {len(shipped)} Tauri commands classified")
+    if pending:
+        print(f"feature-ledger: PENDING native evidence: {', '.join(sorted(pending))}")
+    print(f"feature-ledger: {len(features)} features, {len(shipped)} Tauri commands classified")
     return 0
 
 

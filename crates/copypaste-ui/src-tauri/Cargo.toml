@@ -23,6 +23,8 @@ cc = "1"
 # The ONE model of the wire contract, shared with the daemon and the CLI. Both
 # backends below speak these types; neither defines its own (CLAUDE.md rule 1).
 copypaste-ipc = { path = "../../copypaste-ipc" }
+copypaste-feedback = { path = "../../copypaste-feedback" }
+copypaste-retry = { path = "../../copypaste-retry" }
 # `macos-private-api` is what `"transparent": true` + `macOSPrivateApi` in
 # tauri.conf.json require; without it tauri-build rejects the config. It rules
 # out the Mac App Store, which does not apply — we ship through Homebrew Cask.
@@ -101,12 +103,18 @@ tauri-plugin-autostart = "2"
 # AppKit supplies the frontmost-process hand-off after Quick Paste copies an
 # item. Tauri deliberately keeps this platform detail out of its cross-platform
 # window API.
-objc2-app-kit = { workspace = true, features = ["NSAccessibilityProtocols", "NSAlert", "NSButton", "NSControl", "NSEvent", "NSImage", "NSImageView", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSTextField", "NSView", "NSWindow", "NSWorkspace", "NSColor", "NSColorSpace", "libc"] }
+objc2-app-kit = { workspace = true, features = ["NSAccessibilityProtocols", "NSAlert", "NSBitmapImageRep", "NSButton", "NSControl", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSImageView", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSTextField", "NSView", "NSWindow", "NSWorkspace", "NSColor", "NSColorSpace", "libc"] }
 objc2.workspace = true
 # The maintained objc2 sibling marshals modal AppKit work onto the main queue;
 # it is already present through Tauri and avoids raw dispatch FFI.
 dispatch2 = "0.3.1"
-objc2-foundation = { workspace = true, features = ["NSThread"] }
+objc2-foundation = { workspace = true, features = ["NSDictionary", "NSThread"] }
+# The exclusion picker walks only the platform's standard application roots
+# and reads bundle metadata. Both crates are already in the resolved tree and
+# keep binary/XML plist parsing and recursive traversal out of product code.
+plist = "1.10"
+walkdir = "2.5"
+directories.workspace = true
 # tauri-plugin-notification reports Granted on desktop without asking TCC.
 # The maintained objc2 binding is the real UNUserNotificationCenter prompt.
 objc2-user-notifications = { version = "0.2.2", features = [
@@ -127,7 +135,7 @@ objc2-menu = { package = "objc2", version = "0.6.4" }
 copypaste-core = { path = "../../copypaste-core" }
 
 # ---------------------------------------------------------------------------
-# Windows only
+# Windows and Android updater
 # ---------------------------------------------------------------------------
 [target.'cfg(target_os = "windows")'.dependencies]
 # Pairing stays in native controls, including their UI Automation behavior.
@@ -147,11 +155,14 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# App Paths is Windows' documented executable-registration catalogue. Use the
+# maintained registry wrapper for enumeration; the existing icon resolver
+# remains the single path-to-executable boundary.
+winreg = "0.55"
 # Tauri owns feed parsing, version comparison, signature verification,
 # download, installation and restart under ADR-0020. Pin the exact API audited
 # by the updater command boundary; the dependency stays out of mobile builds.
 tauri-plugin-updater = "=2.10.1"
-url.workspace = true
 # The daemon must die with the app even when the app is killed outright, which
 # is a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. `win32job` wraps
 # exactly that trio of calls, so ADR-0018's preference for a maintained wrapper
@@ -164,6 +175,8 @@ win32job = "2"
 # Android hosts no background daemon (ADR-0002), so there is no socket to talk
 # to and the core is linked into the app process instead.
 [target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-updater = "=2.10.1"
+url.workspace = true
 copypaste-core = { path = "../../copypaste-core" }
 copypaste-p2p = { path = "../../copypaste-p2p" }
 copypaste-cloud = { path = "../../copypaste-cloud" }

@@ -1,0 +1,40 @@
+.root {
+  display: flex;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: var(--ctl-h-lg);
+  flex: none;
+}
+
+.layout {
+  display: flex;
+  inline-size: 100%;
+  min-inline-size: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.layout > * + * {
+  margin-inline-start: var(--pane-header-gap, var(--s-3));
+}
+
+.copy {
+  min-inline-size: 0;
+  flex: 1;
+}
+
+.actions {
+  min-inline-size: 0;
+  flex: none;
+}
+
+.actionLayout {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+}
+
+.actionLayout > * + * {
+  margin-inline-start: var(--s-2);
+}

@@ -1,0 +1,100 @@
+.header,
+.toolbarShell {
+    flex: none;
+    margin-inline: 0 auto;
+}
+.toolbarShell {
+    position: relative;
+    z-index: var(--z-sticky);
+}
+.headerCount {
+    display: inline;
+    color: var(--faint);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    font-variant-numeric: tabular-nums;
+}
+.toolbar {
+    container: library-toolbar / inline-size;
+    position: relative;
+    display: flex;
+    min-inline-size: 0;
+    inline-size: 100%;
+    padding-block: var(--s-4);
+    align-items: center;
+    flex-wrap: nowrap;
+}
+.siblings {
+    --toolbar-item-gap: var(--s-3);
+
+    display: flex;
+    min-inline-size: 0;
+    inline-size: 100%;
+    align-items: center;
+    flex-wrap: nowrap;
+}
+.siblings > * + * {
+    margin-inline-start: var(--toolbar-item-gap);
+}
+.siblings
+    :is(
+        button,
+        [data-slot="multi-select-trigger"],
+        [data-slot="select-trigger"]
+    ) {
+    color: var(--mute);
+}
+.siblings :is([data-active-filter], [aria-pressed="true"]) {
+    color: var(--accent-2);
+}
+.toolbar[data-search-expanded] .siblings {
+    visibility: hidden;
+}
+.searchInline {
+    min-inline-size: calc(var(--s-9) * 4 + var(--s-2));
+    flex: 1 1 auto;
+}
+.searchTrigger {
+    display: none;
+}
+.searchTriggerFrame {
+    display: none;
+}
+.searchOverlay {
+    position: absolute;
+    z-index: var(--z-sticky);
+    inset: var(--s-4) 0;
+}
+.siblings > .count {
+    flex: none;
+    color: var(--faint);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.countNumber {
+    display: none;
+}
+.endSlot {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--s-2);
+}
+.toolbar[data-compact-search] .siblings {
+    --toolbar-item-gap: var(--s-3);
+}
+.toolbar[data-compact-search] .searchInline {
+    display: none;
+}
+.toolbar[data-compact-search] .searchTriggerFrame,
+.toolbar[data-compact-search] .searchTrigger {
+    display: inline-flex;
+}
+.toolbar[data-compact-search] .searchTriggerFrame {
+    margin-inline-end: auto;
+}
+.toolbar[data-compact-search] .count {
+    display: none;
+}

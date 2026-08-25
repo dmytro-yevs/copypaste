@@ -1,0 +1,101 @@
+.card {
+    display: grid;
+    min-inline-size: 0;
+    min-block-size: calc(var(--ctl-h-lg) + var(--s-7));
+    padding: var(--s-3) var(--s-4);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s-3);
+    border-radius: var(--r-card);
+}
+
+.iconWell {
+    display: grid;
+    inline-size: var(--s-9);
+    block-size: var(--s-9);
+    flex: none;
+    place-items: center;
+    border-radius: var(--r-row);
+    color: var(--device-icon-fg);
+    background: var(--selected);
+    transition:
+        color var(--dur-fast) var(--ease),
+        background-color var(--dur-fast) var(--ease);
+}
+.iconWell svg {
+    inline-size: var(--icon-md);
+    block-size: var(--icon-md);
+}
+
+.skeletonDetail {
+    margin-block-start: var(--s-2);
+}
+
+.card[data-state="healthy"] .iconWell {
+    color: var(--ok-strong);
+    background: var(--status-ok-subtle);
+}
+
+.card[data-state="attention"] .iconWell,
+.card[data-state="unavailable"] .iconWell {
+    color: var(--err-strong);
+    background: var(--status-error-bg);
+}
+
+.copy {
+    min-inline-size: 0;
+}
+.copy strong,
+.copy small {
+    display: block;
+    overflow-wrap: anywhere;
+}
+.copy strong {
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+}
+.copy small {
+    margin-block-start: var(--s-1);
+    color: var(--dim);
+    font-size: var(--fs-xs);
+}
+.manageIcon {
+    display: none;
+}
+
+@container (max-width: $cpXs) {
+    .card {
+        min-block-size: calc(var(--ctl-h-lg) + var(--s-6));
+        padding: var(--s-3) var(--s-3) 0;
+        grid-template-columns: var(--s-9) minmax(0, 1fr);
+        gap: var(--s-3);
+        overflow: hidden;
+    }
+    .iconWell {
+        inline-size: var(--s-9);
+        block-size: var(--s-9);
+    }
+    .card .manage {
+        inline-size: calc(100% + var(--s-6));
+        margin-block-start: 0;
+        margin-inline: calc(var(--s-3) * -1);
+        padding-inline: var(--s-3);
+        grid-column: 1 / -1;
+        justify-content: space-between;
+        border-width: var(--stroke-1) 0 0;
+        border-color: var(--divider);
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+    .manageIcon {
+        display: inline-flex;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .iconWell {
+        transition: none;
+    }
+}

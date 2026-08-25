@@ -126,11 +126,11 @@ pub struct UiSourceAppIcon {
     height: u32,
 }
 
-/// An application the Android user can select as a capture exclusion.
+/// A user-launchable application selectable as a capture exclusion.
 ///
-/// The package id is the persisted identity. The display name is resolved by
-/// Android's PackageManager only for this picker, so no local paths cross into
-/// the WebView.
+/// `package_id` is the existing wire name for the platform identity: Android
+/// package id, macOS bundle id, or Windows process image name. No local path
+/// crosses into the WebView.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(
@@ -143,7 +143,6 @@ pub struct UiInstalledSourceApp {
 }
 
 impl UiInstalledSourceApp {
-    #[cfg(target_os = "android")]
     pub(crate) fn new(package_id: String, label: String) -> Self {
         Self { package_id, label }
     }
@@ -328,6 +327,7 @@ pub struct UiSyncResult {
     name: String,
     sent: u32,
     received: u32,
+    duration_ms: Option<u64>,
     error: Option<UiError>,
 }
 
@@ -342,6 +342,7 @@ impl From<SyncResult> for UiSyncResult {
             name: result.name,
             sent: result.sent,
             received: result.received,
+            duration_ms: result.duration_ms,
             error,
         }
     }
@@ -473,6 +474,7 @@ mod tests {
             name: "Phone".into(),
             sent: 0,
             received: 0,
+            duration_ms: Some(750),
             error: Some("timed out at /Users/alice/.copypaste.sock".into()),
             error_code: Some(copypaste_ipc::ErrorCode::PeerUnreachable),
         });
@@ -481,6 +483,7 @@ mod tests {
             json.contains(r#""error":{"code":"peer_unreachable","retryable":true}"#),
             "{json}"
         );
+        assert!(json.contains(r#""duration_ms":750"#), "{json}");
         assert!(!json.contains("alice"), "{json}");
         assert!(!json.contains("sock"), "{json}");
         assert!(!json.contains("timed out"), "{json}");
@@ -493,6 +496,7 @@ mod tests {
             name: "Phone".into(),
             sent: 0,
             received: 0,
+            duration_ms: None,
             error: Some("some future failure".into()),
             error_code: None,
         });

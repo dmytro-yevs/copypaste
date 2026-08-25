@@ -1,0 +1,66 @@
+.form {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.currentName {
+  display: flex;
+  min-inline-size: 0;
+  inline-size: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-3);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.spinner {
+  animation: device-name-spin var(--dur) linear infinite;
+}
+
+.inlineTitle { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-2); }
+.inlineTitle h2 { min-inline-size: 0; overflow: hidden; font-size: var(--fs-lg); font-weight: var(--fw-medium); text-overflow: ellipsis; white-space: nowrap; }
+.inlineTitle button {
+  position: relative;
+  inline-size: var(--fs-lg);
+  block-size: var(--fs-lg);
+  min-inline-size: var(--fs-lg);
+  min-block-size: var(--fs-lg);
+  border-radius: var(--r-xs);
+}
+.inlineTitle button::before {
+  position: absolute;
+  inset: calc((var(--tap-min) - var(--fs-lg)) / -2);
+  content: "";
+}
+.inlineTitle button > span,
+.inlineTitle button > span > span {
+  inline-size: var(--fs-lg);
+  block-size: var(--fs-lg);
+  font-size: var(--fs-lg);
+}
+.inlineEditor { display: grid; min-inline-size: 0; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--s-2); }
+
+@keyframes device-name-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}
+
+@container (max-width: $cpSm) {
+  .currentName { align-items: stretch; flex-direction: column; }
+  .currentName button { inline-size: 100%; }
+}
+
+@media (--cp-xs) {
+  .inlineEditor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inlineEditor input { grid-column: 1 / -1; }
+  .inlineEditor button { inline-size: 100%; }
+}

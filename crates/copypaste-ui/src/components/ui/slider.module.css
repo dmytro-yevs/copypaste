@@ -1,0 +1,8 @@
+.root { position: relative; display: flex; inline-size: 100%; touch-action: none; user-select: none; align-items: center; }
+.root[data-disabled] { opacity: .5; }
+.track { position: relative; inline-size: 100%; block-size: calc(var(--s-2) - var(--stroke-2)); flex-grow: 1; overflow: hidden; border-radius: var(--r-pill); background: var(--elevated); }
+.range { position: absolute; block-size: 100%; background: var(--accent); }
+.thumb { display: block; inline-size: var(--icon-md); block-size: var(--icon-md); flex: none; border: var(--stroke-1) solid var(--accent); border-radius: var(--r-pill); outline: 0; background: var(--bg); box-shadow: var(--sh1); transition: box-shadow var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.thumb:hover { box-shadow: 0 0 0 var(--s-1) var(--accent); }
+.thumb:focus-visible { box-shadow: var(--sh-focus); }
+.thumb:disabled { pointer-events: none; }

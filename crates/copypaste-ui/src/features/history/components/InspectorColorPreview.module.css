@@ -1,0 +1,52 @@
+.root {
+    display: grid;
+    inline-size: min(100%, calc(var(--s-9) * 4));
+    min-inline-size: 0;
+    margin: 0;
+    justify-items: center;
+    gap: var(--s-3);
+}
+
+.swatch {
+    position: relative;
+    display: block;
+    inline-size: 100%;
+    max-inline-size: calc(var(--s-9) * 4);
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    box-sizing: border-box;
+    border: var(--stroke-1) solid var(--swatch-border);
+    border-radius: var(--r-card);
+    background-color: var(--card);
+    background-image:
+        linear-gradient(45deg, var(--raised) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--raised) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--raised) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--raised) 75%);
+    background-position:
+        0 0,
+        0 calc(var(--s-2) / 2),
+        calc(var(--s-2) / 2) calc(var(--s-2) / -2),
+        calc(var(--s-2) / -2) 0;
+    background-size: var(--s-2) var(--s-2);
+    box-shadow: var(--sh1);
+}
+
+.colorField {
+    position: absolute;
+    inset: var(--s-1);
+    display: block;
+    border-radius: calc(var(--r-card) - var(--s-1));
+    box-shadow: inset 0 var(--stroke-1) var(--swatch-highlight);
+}
+
+.label {
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    font-family: var(--f-mono);
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-strong);
+    line-height: var(--lh-tight);
+    text-align: center;
+}

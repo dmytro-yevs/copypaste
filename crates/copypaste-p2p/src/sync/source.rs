@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 
 use super::SyncError;
 use crate::protocol::{ItemSummary, SyncItem, SyncMessage};
+use crate::DeviceProfile;
 
 /// What one session moved. `skipped` counts remote versions declined: an LWW
 /// loser, a timestamp beyond the skew ceiling, a want that did not fit this
@@ -27,6 +28,7 @@ pub struct SyncOutcome {
     pub stats: SyncStats,
     pub peer_device_id: String,
     pub peer_device_name: String,
+    pub peer_profile: Option<DeviceProfile>,
     pub peer_listen_addr: Option<SocketAddr>,
     pub cursor: SyncCursor,
     pub applied_floor: Option<i64>,
@@ -70,6 +72,10 @@ impl SyncCursor {
 pub trait SyncSource {
     fn device_id(&self) -> String;
     fn device_name(&self) -> String;
+
+    fn device_profile(&self) -> DeviceProfile {
+        DeviceProfile::current()
+    }
 
     /// Summaries of everything eligible to sync. Live sensitive items excluded;
     /// payload-less sensitive tombstones included.

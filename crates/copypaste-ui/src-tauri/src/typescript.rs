@@ -3,8 +3,11 @@
 use std::path::Path;
 
 use copypaste_ipc::{
-    CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, DiagnosticCounters,
-    DiscoveredDevice, ErrorCode, ImportData, Liveness, PairingRole, PairingState, PeerInfo,
+    CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, DeviceClass,
+    DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
+    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresenceObservation,
+    DeviceProfileObservation, DiagnosticCounters, DiscoveredDevice, ErrorCode,
+    ExternalNetworkObservation, ImportData, Liveness, PairingRole, PairingState, PeerInfo,
     PrivateModeData, SensitiveFinding, SensitiveSpan, SettingsHealth, StatusData,
 };
 use ts_rs::{Config, ExportError, TS};
@@ -57,6 +60,16 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<PermissionItem>(&config, &mut output);
     declaration::<OnboardingPermissions>(&config, &mut output);
     declaration::<DiagnosticCounters>(&config, &mut output);
+    declaration::<DeviceObservationProvenance>(&config, &mut output);
+    declaration::<DeviceObservationTrust>(&config, &mut output);
+    declaration::<DevicePlatform>(&config, &mut output);
+    declaration::<DeviceClass>(&config, &mut output);
+    declaration::<DeviceProfileObservation>(&config, &mut output);
+    declaration::<DeviceEndpointObservation>(&config, &mut output);
+    declaration::<DeviceLatencyObservation>(&config, &mut output);
+    declaration::<DevicePresenceObservation>(&config, &mut output);
+    declaration::<ExternalNetworkObservation>(&config, &mut output);
+    declaration::<DeviceDetails>(&config, &mut output);
     declaration::<DiscoveredDevice>(&config, &mut output);
     declaration::<ErrorCode>(&config, &mut output);
     declaration::<TauriEventName>(&config, &mut output);

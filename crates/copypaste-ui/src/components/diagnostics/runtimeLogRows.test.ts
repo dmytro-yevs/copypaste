@@ -5,7 +5,7 @@ import {
   followHead,
   mergeFollowed,
   unionEvents,
-} from "@/components/diagnostics/runtimeLogRows";
+} from "@/features/diagnostics/model/runtimeLogRows";
 import type { RuntimeLogEvent, RuntimeLogPage } from "@/service/runtimeLogs";
 
 function event(timestamp_ms: number, message: string): RuntimeLogEvent {

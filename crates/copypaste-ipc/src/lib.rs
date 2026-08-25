@@ -40,10 +40,13 @@ pub use limits::{
     MAX_PAGE, MAX_PAGE_CONTENT_BYTES,
 };
 pub use payload::{
-    BackupData, CloudStatusData, CloudSyncData, DiagnosticCounters, DiscoveredData,
-    DiscoveredDevice, ExportData, ExportItem, ImagePreview, ImportData, Item, ItemPage,
-    PairingData, PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
-    PrivateModeData, SensitiveFinding, SensitiveSpan, StatusData, SyncResult,
+    BackupData, CloudStatusData, CloudSyncData, DeviceClass, DeviceDetails,
+    DeviceEndpointObservation, DeviceLatencyObservation, DeviceObservationProvenance,
+    DeviceObservationTrust, DevicePlatform, DevicePresenceObservation, DeviceProfileObservation,
+    DiagnosticCounters, DiscoveredData, DiscoveredDevice, ExportData, ExportItem,
+    ExternalNetworkObservation, ImagePreview, ImportData, Item, ItemPage, PairingData,
+    PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData,
+    SensitiveFinding, SensitiveSpan, StatusData, SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 
@@ -427,6 +430,7 @@ mod tests {
                         "private_mode_epoch":0}"#;
         let status: StatusData = serde_json::from_str(older).unwrap();
         assert!(status.device_name.is_empty());
+        assert!(status.listen_addr.is_none());
         assert!(!status.private_mode);
         assert_eq!(status.private_mode_epoch, 0);
         assert_eq!(status.counters, DiagnosticCounters::default());

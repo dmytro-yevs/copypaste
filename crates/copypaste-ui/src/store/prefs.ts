@@ -1,5 +1,5 @@
 /**
- * INV-21: an invalid `theme` must not discard a valid `accent`, so every field
+ * INV-21: one invalid appearance field must not discard the valid fields, so each
  * is parsed independently. INV-22: the external pre-paint bootstrap is
  * generated from the same appearance serialization contract used here.
  */
@@ -16,7 +16,7 @@ import {
   APPEARANCE_SERIALIZATION,
   parseAppearanceFields,
   unwrapPersistedPrefs,
-  type Accent,
+  type ColorTheme,
   type ThemePref,
   type Translucency,
 } from "@/lib/appearancePrefs";
@@ -24,8 +24,8 @@ import {
   DEFAULT_PREVIEW_LINES,
   MAX_PREVIEW_LINES,
   MIN_PREVIEW_LINES,
-} from "@/lib/layout";
-import { hasBridge } from "@/lib/ipcCall";
+} from "@/lib/previewDensity";
+import { hasNativeBridge } from "@/lib/ipcCall";
 
 export const STORAGE_KEY = APPEARANCE_SERIALIZATION.storageKey;
 const NATIVE_PREFERENCES_FILE = "preferences.json";
@@ -34,9 +34,9 @@ const nativePreferences = new LazyStore(NATIVE_PREFERENCES_FILE, {
 });
 
 export const THEMES = APPEARANCE_SERIALIZATION.themes;
-export const ACCENTS = APPEARANCE_SERIALIZATION.accents;
+export const COLOR_THEMES = APPEARANCE_SERIALIZATION.colorThemes;
 
-export type { Accent, ThemePref, Translucency };
+export type { ColorTheme, ThemePref, Translucency };
 
 export const HISTORY_DISPLAY_LIMITS = [
   100,
@@ -52,7 +52,7 @@ export const UNLIMITED_HISTORY_DISPLAY = 100_000;
 
 export interface Prefs {
   theme: ThemePref;
-  accent: Accent;
+  colorTheme: ColorTheme;
   translucency: Translucency;
   previewLines: number;
   previewLinesPopup: number;
@@ -73,7 +73,7 @@ export interface Prefs {
 export const DEFAULT_PREFS: Prefs = {
   ...APPEARANCE_SERIALIZATION.defaults,
   previewLines: DEFAULT_PREVIEW_LINES,
-  previewLinesPopup: 1,
+  previewLinesPopup: DEFAULT_PREVIEW_LINES,
   sortByDevice: false,
   historyDisplayLimit: 1000,
   warnBeforeReveal: true,
@@ -193,7 +193,7 @@ const browserStorage = {
 /** Android WebView storage may be evicted with its WebView profile. */
 const durableStorage: StateStorage<unknown> = {
   async getItem(name) {
-    if (!hasBridge()) return browserStorage.getItem(name);
+    if (!hasNativeBridge()) return browserStorage.getItem(name);
 
     try {
       const stored = await nativePreferences.get<string>(name);
@@ -212,7 +212,7 @@ const durableStorage: StateStorage<unknown> = {
   },
   async setItem(name, value) {
     browserStorage.setItem(name, value);
-    if (!hasBridge()) return;
+    if (!hasNativeBridge()) return;
 
     try {
       await nativePreferences.set(name, value);
@@ -223,7 +223,7 @@ const durableStorage: StateStorage<unknown> = {
   },
   async removeItem(name) {
     browserStorage.removeItem(name);
-    if (!hasBridge()) return;
+    if (!hasNativeBridge()) return;
 
     try {
       await nativePreferences.delete(name);
@@ -252,7 +252,9 @@ export const usePrefs = create<PrefsStore>()(
     }),
     {
       name: STORAGE_KEY,
+      version: 1,
       storage: createJSONStorage(() => durableStorage),
+      migrate: (persisted) => parsePrefs(persisted),
       partialize: (state) =>
         // Built from the known key list so an action can never be persisted,
         // and so a key removed from `Prefs` stops being written on the next
@@ -275,6 +277,6 @@ export const usePrefs = create<PrefsStore>()(
  *  infinite render loop that unmounts the app, not a performance smell. */
 export const selectAppearance = (s: PrefsStore) => ({
   theme: s.theme,
-  accent: s.accent,
+  colorTheme: s.colorTheme,
   translucency: s.translucency,
 });

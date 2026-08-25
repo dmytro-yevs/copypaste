@@ -1,0 +1,30 @@
+.root {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+}
+
+.root > * + * { margin-block-start: var(--s-2); }
+
+.heading { display: flex; min-inline-size: 0; flex-direction: column; }
+.heading > * + * { margin-block-start: var(--s-1); }
+
+.title {
+  padding-block-start: var(--s-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.description {
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+
+.root button { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+
+@container (max-width: $cpSm) {
+  .root [data-settings-search-target^="row:"] > :last-child {
+    inline-size: 100%;
+    justify-content: flex-end;
+  }
+}

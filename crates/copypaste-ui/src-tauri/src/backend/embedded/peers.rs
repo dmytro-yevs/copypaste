@@ -21,11 +21,13 @@
 //! pairing in one direction.
 
 use std::sync::Arc;
+use std::time::Instant;
 
+use copypaste_core::p2p_contract;
+use copypaste_core::sync::RoundGate;
 use copypaste_core::StoreSource;
 use copypaste_ipc::{
-    DiscoveredDevice, PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
-    SyncResult,
+    DiscoveredDevice, PairingInviteData, PairingProgressData, PeerInfo, SyncResult,
 };
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::{Peer, PeerStore};
@@ -34,12 +36,12 @@ use copypaste_p2p::{Node, NodeError, PairingInvite, PairingPhase, PairingStatus}
 use tokio::sync::watch;
 
 use super::open::Inner;
-use super::rows::peer_info;
 use crate::backend::{BackendError, Result};
 
 /// The node, plus the handle that stops its listener.
 pub(super) struct PeerNode {
     node: Arc<Node>,
+    rounds: RoundGate,
     /// Dropped with the backend, which ends the accept loop. Held rather than
     /// discarded because a `watch::Sender` that goes out of scope closes the
     /// channel and the listener would stop immediately.
@@ -95,6 +97,7 @@ impl PeerNode {
 
         Ok(Self {
             node,
+            rounds: RoundGate::new(),
             _shutdown: shutdown,
         })
     }
@@ -104,8 +107,16 @@ impl PeerNode {
             .peers()
             .list()
             .iter()
-            .map(|peer| peer_info(peer, self.node.find(&peer.pairing_id).is_some()))
+            .map(|peer| {
+                let discovered = self.node.find(&peer.pairing_id);
+                let authenticated = self.node.authenticated_profile(&peer.pairing_id);
+                p2p_contract::peer_info(peer, discovered.as_ref(), authenticated.as_ref())
+            })
             .collect()
+    }
+
+    pub(super) fn listen_addr(&self) -> Option<String> {
+        self.node.listen_addr()
     }
 
     pub(super) fn pair_create_invite(&self) -> Result<PairingInviteData> {
@@ -165,32 +176,12 @@ impl PeerNode {
             .then_some(status.pairing_id.as_deref())
             .flatten()
             .and_then(|pairing_id| self.node.peers().get(pairing_id))
-            .map(|peer| peer_info(&peer, self.node.find(&peer.pairing_id).is_some()));
-        let peer = status.peer.as_ref();
-        PairingProgressData {
-            pairing_id: status.pairing_id,
-            role: status.role.map(|role| match role {
-                copypaste_p2p::PairingRole::Initiator => PairingRole::Initiator,
-                copypaste_p2p::PairingRole::Responder => PairingRole::Responder,
-            }),
-            state: match status.phase {
-                PairingPhase::Idle => PairingState::Idle,
-                PairingPhase::WaitingForPeer => PairingState::WaitingForPeer,
-                PairingPhase::Handshaking => PairingState::Handshaking,
-                PairingPhase::AwaitingConfirmation => PairingState::AwaitingConfirmation,
-                PairingPhase::Confirmed => PairingState::Confirmed,
-                PairingPhase::Rejected => PairingState::Rejected,
-                PairingPhase::Cancelled => PairingState::Cancelled,
-                PairingPhase::TimedOut => PairingState::TimedOut,
-                PairingPhase::Failed => PairingState::Failed,
-            },
-            sas: status.sas,
-            peer_device_id: peer.map(|peer| peer.device_id.clone()),
-            peer_name: peer.map(|peer| peer.name.clone()),
-            peer_addr: peer.and_then(|peer| peer.addr.map(|addr| addr.to_string())),
-            known_device,
-            error_code: status.error.as_ref().map(node_error_code),
-        }
+            .map(|peer| {
+                let discovered = self.node.find(&peer.pairing_id);
+                let authenticated = self.node.authenticated_profile(&peer.pairing_id);
+                p2p_contract::peer_info(&peer, discovered.as_ref(), authenticated.as_ref())
+            });
+        p2p_contract::pairing_progress(status, known_device)
     }
 
     pub(super) fn unpair(&self, pairing_id: &str) -> Result<bool> {
@@ -242,6 +233,9 @@ impl PeerNode {
             None => self.node.peers().list(),
         };
 
+        // An explicit request queues behind an active request. Two outbound
+        // passes would dial the same peer and race the same sync cursor.
+        let _round = self.rounds.enter().await;
         let source = source(inner);
         let mut results = Vec::with_capacity(targets.len());
         for peer in &targets {
@@ -252,27 +246,13 @@ impl PeerNode {
 
     /// One peer, start to finish. Never returns `Err`: a failure is a field.
     async fn sync_one(&self, inner: &Arc<Inner>, source: &StoreSource, peer: &Peer) -> SyncResult {
-        match self.node.sync_one(peer, source).await {
-            Ok(outcome) => {
-                remember(inner, &outcome);
-                SyncResult {
-                    pairing_id: peer.pairing_id.clone(),
-                    name: outcome.peer_device_name,
-                    sent: u32::try_from(outcome.stats.sent).unwrap_or(u32::MAX),
-                    received: u32::try_from(outcome.stats.received).unwrap_or(u32::MAX),
-                    error: None,
-                    error_code: None,
-                }
-            }
-            Err(e) => SyncResult {
-                pairing_id: peer.pairing_id.clone(),
-                name: peer.name.clone(),
-                sent: 0,
-                received: 0,
-                error: Some(e.to_string()),
-                error_code: Some(node_error_code(&e)),
-            },
+        let started = Instant::now();
+        let result = self.node.sync_one(peer, source).await;
+        let duration = started.elapsed();
+        if let Ok(outcome) = &result {
+            remember(inner, outcome);
         }
+        p2p_contract::sync_result(peer, result, duration)
     }
 
     /// LAN devices, paired or not.
@@ -284,19 +264,16 @@ impl PeerNode {
         self.node
             .seen()
             .into_iter()
-            .map(|found| DiscoveredDevice {
+            .map(|found| {
                 // Resolved locally rather than taken from the advertisement:
                 // anyone on the LAN can claim any pairing id, and `paired`
                 // decides whether the UI offers "pair" or "sync"
                 // (`CopyPaste-vgpy`).
-                paired: found
+                let paired = found
                     .pairing_ids
                     .iter()
-                    .any(|id| self.node.peers().get(id).is_some()),
-                addr: found.addr.to_string(),
-                discovery_id: found.discovery_id,
-                name: found.name,
-                last_seen_ms: found.last_seen_ms,
+                    .any(|id| self.node.peers().get(id).is_some());
+                p2p_contract::discovered_device(found, paired)
             })
             .collect()
     }
@@ -379,28 +356,10 @@ fn remember(inner: &Arc<Inner>, outcome: &SyncOutcome) {
 /// as scrubbed internal context and never crosses the Tauri boundary.
 fn failed(error: NodeError) -> BackendError {
     BackendError::from_code(
-        Some(node_error_code(&error)),
+        Some(p2p_contract::node_error_code(&error)),
         None,
         Some(&error.to_string()),
     )
-}
-
-fn node_error_code(error: &NodeError) -> copypaste_ipc::ErrorCode {
-    use copypaste_ipc::ErrorCode;
-
-    match error {
-        NodeError::BadCode | NodeError::Handshake | NodeError::SelfPairing => {
-            ErrorCode::PairingCode
-        }
-        NodeError::PairingBusy => ErrorCode::RateLimited,
-        NodeError::NoPairing => ErrorCode::NotReady,
-        NodeError::BadAddress => ErrorCode::PairingAddress,
-        NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
-        NodeError::TooManyPairings => ErrorCode::PairingLimit,
-        NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
-        NodeError::PeerVersion => ErrorCode::PeerVersion,
-        NodeError::NoPeer => ErrorCode::PeerNotFound,
-    }
 }
 
 fn invite_data(invite: PairingInvite) -> PairingInviteData {
