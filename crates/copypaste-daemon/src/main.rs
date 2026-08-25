@@ -130,8 +130,8 @@ async fn main() -> anyhow::Result<()> {
 
     let source = clipboard::new_source(&data_dir).context("initialize the clipboard backend")?;
 
-    // Peer sync. The identity is minted in the database the store just
-    // migrated, so it must come second; the peer file and discovery do not
+    // Peer sync. The identity is minted in the database the store just opened,
+    // so it must come second; the peer file and discovery do not
     // depend on either.
     let hostname = gethostname::gethostname().to_string_lossy().into_owned();
     let meta = Meta::open(&store, &hostname).context("resolve this device's identity")?;

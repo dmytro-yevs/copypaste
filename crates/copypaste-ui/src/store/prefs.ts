@@ -21,14 +21,19 @@ import {
   type Translucency,
 } from "@/lib/appearancePrefs";
 import {
-  DEFAULT_PREVIEW_LINES,
   MAX_PREVIEW_LINES,
   MIN_PREVIEW_LINES,
 } from "@/lib/previewDensity";
+import {
+  DEFAULT_PREFS,
+  HISTORY_DISPLAY_LIMITS,
+  PREFERENCES_VERSION,
+  STORAGE_KEY,
+  UNLIMITED_HISTORY_DISPLAY,
+  type Prefs,
+} from "@/lib/preferenceContract";
 import { hasNativeBridge } from "@/lib/ipcCall";
 
-export const STORAGE_KEY = APPEARANCE_SERIALIZATION.storageKey;
-export const PREFERENCES_VERSION = APPEARANCE_SERIALIZATION.version;
 const NATIVE_PREFERENCES_FILE = "preferences.json";
 const nativePreferences = new LazyStore(NATIVE_PREFERENCES_FILE, {
   autoSave: false,
@@ -39,48 +44,14 @@ export const COLOR_THEMES = APPEARANCE_SERIALIZATION.colorThemes;
 
 export type { ColorTheme, ThemePref, Translucency };
 
-export const HISTORY_DISPLAY_LIMITS = [
-  100,
-  250,
-  500,
-  1000,
-  2500,
-  5000,
-  10_000,
-  100_000,
-] as const;
-export const UNLIMITED_HISTORY_DISPLAY = 100_000;
-
-export interface Prefs {
-  theme: ThemePref;
-  colorTheme: ColorTheme;
-  translucency: Translucency;
-  previewLines: number;
-  previewLinesPopup: number;
-  sortByDevice: boolean;
-  historyDisplayLimit: (typeof HISTORY_DISPLAY_LIMITS)[number];
-  /** Default on (n9gp). There is deliberately no "Mask sensitive data" toggle
-   *  beside it: the bridge drops the plaintext before it crosses into the
-   *  WebView, so nothing here *can* unmask an item without asking, and a toggle
-   *  that cannot be honoured is worse than none. */
-  warnBeforeReveal: boolean;
-  /** INV-35, inverted: the window is content-protected unless this is on. The
-   *  default matches what the window is created with, so a preference that
-   *  fails to load leaves the user protected. */
-  allowScreenshots: boolean;
-  onboardingComplete: boolean;
-}
-
-export const DEFAULT_PREFS: Prefs = {
-  ...APPEARANCE_SERIALIZATION.defaults,
-  previewLines: DEFAULT_PREVIEW_LINES,
-  previewLinesPopup: DEFAULT_PREVIEW_LINES,
-  sortByDevice: false,
-  historyDisplayLimit: 1000,
-  warnBeforeReveal: true,
-  allowScreenshots: false,
-  onboardingComplete: false,
+export {
+  DEFAULT_PREFS,
+  HISTORY_DISPLAY_LIMITS,
+  PREFERENCES_VERSION,
+  STORAGE_KEY,
+  UNLIMITED_HISTORY_DISPLAY,
 };
+export type { Prefs };
 
 /**
  * `safeParse` per field rather than `.catch()` on one object schema: INV-21
