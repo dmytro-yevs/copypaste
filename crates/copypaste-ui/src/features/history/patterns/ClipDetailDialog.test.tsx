@@ -5,6 +5,10 @@ import { TooltipProvider } from "@/components/ui";
 import { item } from "@/test/harness";
 import { ClipDetailDialog } from "./ClipDetailDialog";
 
+vi.mock("@/features/history/hooks/useImagePreview", () => ({
+  useImagePreview: () => ({ data: undefined, isPending: true, isError: false }),
+}));
+
 describe("ClipDetailDialog notices", () => {
   it("uses shared status notices for sync and sensitive-content warnings", () => {
     render(
@@ -43,5 +47,59 @@ describe("ClipDetailDialog notices", () => {
         .closest('[data-slot="surface"]'),
     ).toBeTruthy();
     expect(screen.getByText("Potentially sensitive content")).toBeTruthy();
+  });
+
+  it("uses the shared unavailable state instead of a failed body preview", () => {
+    render(
+      <TooltipProvider>
+        <ClipDetailDialog
+          item={item({ content: "short preview", truncated: true })}
+          origin={null}
+          initialExpanded
+          fullContent={null}
+          fullContentFailed
+          revealedContent={null}
+          revealPending={false}
+          onReveal={vi.fn()}
+          onHide={vi.fn()}
+          onCopy={vi.fn()}
+          onTogglePin={vi.fn()}
+          onDelete={vi.fn()}
+          onClose={vi.fn()}
+          onReturnFocus={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const unavailable = screen.getByRole("status");
+    expect(unavailable.textContent).toBe("Full contents could not be loaded.");
+    expect(screen.queryByText("short preview")).toBeNull();
+    expect(unavailable.getAttribute("data-slot")).toBe("preview-surface");
+  });
+
+  it("uses singular metadata and the shared image copy action", () => {
+    render(
+      <TooltipProvider>
+        <ClipDetailDialog
+          item={item({ content: "image", content_type: "image/png" })}
+          origin={null}
+          initialExpanded
+          fullContent={null}
+          fullContentFailed={false}
+          revealedContent={null}
+          revealPending={false}
+          onReveal={vi.fn()}
+          onHide={vi.fn()}
+          onCopy={vi.fn()}
+          onTogglePin={vi.fn()}
+          onDelete={vi.fn()}
+          onClose={vi.fn()}
+          onReturnFocus={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText(/ · Image$/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy image" })).toBeTruthy();
   });
 });

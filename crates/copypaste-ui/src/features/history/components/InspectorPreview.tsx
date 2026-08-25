@@ -3,14 +3,12 @@ import type { ReactNode } from "react";
 import { Icon } from "@/components/ui";
 import { HighlightedCode } from "@/features/history/components/HighlightedCode";
 import { InspectorColorPreview } from "@/features/history/components/InspectorColorPreview";
-import { clipTypeMetadata } from "@/features/history/model/clipPresentation";
+import {
+    clipTypeMetadata,
+    fileDisplayName,
+} from "@/features/history/model/clipPresentation";
 import type { Kind } from "@/lib/format";
 import styles from "./InspectorPreview.module.css";
-
-function fileName(content: string) {
-    const parts = content.trim().replace(/\\/g, "/").split("/").filter(Boolean);
-    return parts[parts.length - 1] || content;
-}
 
 function urlName(content: string) {
     try {
@@ -40,7 +38,7 @@ export function InspectorPreview({
             <div className={styles.file}>
                 <Icon name={type.icon} size="sm" />
                 <div>
-                    <strong>{fileName(content)}</strong>
+                    <strong>{fileDisplayName(content)}</strong>
                     <small>{content}</small>
                 </div>
             </div>

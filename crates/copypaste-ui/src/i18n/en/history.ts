@@ -74,6 +74,22 @@ export const history = {
     unknown: "Other",
   },
 
+  type: {
+    secret: "Sensitive",
+    image: "Image",
+    file: "File",
+    sourceFile: "Source file",
+    url: "Link",
+    mail: "Email",
+    path: "File path",
+    json: "JSON",
+    code: "Code",
+    color: "Color",
+    num: "Number",
+    text: "Text",
+    unknown: "Other",
+  },
+
   sort: {
     newest: "Newest first",
     oldest: "Oldest first",

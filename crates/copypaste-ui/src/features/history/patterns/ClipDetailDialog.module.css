@@ -77,10 +77,7 @@
 .contentRegion {
     inline-size: 100%;
     overflow: hidden;
-    border: var(--stroke-1) solid var(--border-strong);
-    border-radius: var(--r-ctl);
     outline: 0;
-    background: var(--panel);
 }
 
 .imageRegion:focus-visible,
@@ -92,32 +89,24 @@
     display: flex;
     min-block-size: calc(var(--s-9) * 4);
     max-block-size: calc(var(--s-9) * 8);
-    padding: var(--s-3);
     align-items: center;
     justify-content: center;
 }
 
 .contentRegion {
     min-block-size: var(--sz-iconbtn);
-    padding: var(--s-2);
     overflow: visible;
 }
 
 .codeRegion {
-    padding: 0;
-    border: 0;
     background: transparent;
 }
 
 .unavailable {
     min-block-size: calc(var(--s-9) * 4);
     display: grid;
-    padding: var(--s-6);
     place-items: center;
-    border: var(--stroke-1) solid var(--border);
-    border-radius: var(--r-card);
     color: var(--dim);
-    background: var(--panel);
     font-size: var(--fs-sm);
     text-align: center;
 }

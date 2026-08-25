@@ -12,7 +12,6 @@
     max-block-size: 100%;
     min-inline-size: 0;
     min-block-size: 0;
-    padding: calc(var(--s-3) + var(--stroke-2));
     overflow: hidden;
     background:
         radial-gradient(
@@ -127,6 +126,16 @@
 }
 .protectedLines i:last-child {
     inline-size: 58%;
+}
+.unavailable {
+    display: grid;
+    inline-size: 100%;
+    min-block-size: calc(var(--s-9) * 4);
+    padding: var(--s-6);
+    place-items: center;
+    color: var(--dim);
+    font-size: var(--fs-sm);
+    text-align: center;
 }
 .empty {
     display: grid;

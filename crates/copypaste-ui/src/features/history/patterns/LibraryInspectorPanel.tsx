@@ -1,18 +1,21 @@
 import {
     ActionButton,
-    DefinitionList,
-    DefinitionRow,
-    DefinitionTerm,
-    DefinitionValue,
-    TruncatedValue,
     DeviceMeta,
     InspectorShell,
+    MetadataLabel,
+    MetadataList,
+    MetadataRow,
+    MetadataValue,
+    PreviewSurface,
+    TruncatedValue,
 } from "@/components/shared";
-import { Button, Icon, Surface, iconComponent } from "@/components/ui";
+import { Button, Icon, iconComponent } from "@/components/ui";
 import { InspectorPreview } from "@/features/history/components/InspectorPreview";
 import {
+    clipCopyAction,
     clipSourceMetadata,
     clipTypeMetadata,
+    resolveClipBodyPresentation,
 } from "@/features/history/model/clipPresentation";
 import { originName, type OriginDevice } from "@/features/history/model/origin";
 import { ClipImageLoader } from "@/features/history/patterns/ClipImageLoader";
@@ -42,6 +45,7 @@ export function LibraryInspectorPanel({
     origin,
     revealedContent,
     fullContent,
+    fullContentFailed,
     revealPending,
     onReveal,
     onHide,
@@ -81,17 +85,17 @@ export function LibraryInspectorPanel({
     }
 
     const kind = kindOf(item);
+    const body = resolveClipBodyPresentation({
+        item,
+        fullContent,
+        fullContentFailed,
+        revealedContent,
+    });
     const source = clipSourceMetadata(item);
-    const type = clipTypeMetadata(kind, fullContent ?? item.content ?? "");
+    const content = body.state === "content" ? body.content : "";
+    const type = clipTypeMetadata(kind, content || item.content || "");
+    const copyAction = clipCopyAction(kind);
     const SourceIcon = iconComponent(source.icon);
-    const masked = item.is_sensitive && !revealed;
-    const potential = item.is_sensitive ? null : item.sensitive_finding;
-    const content =
-        potential?.redacted_preview ??
-        revealedContent ??
-        fullContent ??
-        item.content ??
-        "";
     const device = origin ? originName(origin) : t("common.unknown");
     const created = absoluteTime(item.created_at);
 
@@ -114,9 +118,9 @@ export function LibraryInspectorPanel({
                     <ActionButton
                         size="compactIcon"
                         variant="primary"
-                        icon="copy"
-                        aria-label={t("history.detail.copy")}
-                        title={t("history.detail.copy")}
+                        icon={copyAction.icon}
+                        aria-label={copyAction.label}
+                        title={copyAction.label}
                         onClick={() => onCopy(item)}
                     />
                     <ActionButton
@@ -146,13 +150,13 @@ export function LibraryInspectorPanel({
                 </>
             }
             metadata={
-                <DefinitionList>
+                <MetadataList density="compact">
                     {source.available ? (
-                        <DefinitionRow>
-                            <DefinitionTerm>
+                        <MetadataRow>
+                            <MetadataLabel>
                                 {t("history.inspector.application")}
-                            </DefinitionTerm>
-                            <DefinitionValue
+                            </MetadataLabel>
+                            <MetadataValue
                                 className={styles.applicationValue}
                             >
                                 <SourceAppIcon
@@ -162,78 +166,79 @@ export function LibraryInspectorPanel({
                                     size="xs"
                                 />
                                 <TruncatedValue value={source.label} />
-                            </DefinitionValue>
-                        </DefinitionRow>
+                            </MetadataValue>
+                        </MetadataRow>
                     ) : null}
-                    <DefinitionRow>
-                        <DefinitionTerm>
+                    <MetadataRow>
+                        <MetadataLabel>
                             {t("history.inspector.created")}
-                        </DefinitionTerm>
-                        <DefinitionValue>
+                        </MetadataLabel>
+                        <MetadataValue>
                             <TruncatedValue value={created} />
-                        </DefinitionValue>
-                    </DefinitionRow>
-                    <DefinitionRow>
-                        <DefinitionTerm>
+                        </MetadataValue>
+                    </MetadataRow>
+                    <MetadataRow>
+                        <MetadataLabel>
                             {t("history.inspector.device")}
-                        </DefinitionTerm>
-                        <DefinitionValue>
+                        </MetadataLabel>
+                        <MetadataValue>
                             <DeviceMeta
                                 label={device}
                                 kind={origin?.kind ?? "unknown"}
                             />
-                        </DefinitionValue>
-                    </DefinitionRow>
-                    <DefinitionRow>
-                        <DefinitionTerm>
+                        </MetadataValue>
+                    </MetadataRow>
+                    <MetadataRow>
+                        <MetadataLabel>
                             {t("history.inspector.type")}
-                        </DefinitionTerm>
-                        <DefinitionValue>
+                        </MetadataLabel>
+                        <MetadataValue>
                             <TruncatedValue value={type.label} />
-                        </DefinitionValue>
-                    </DefinitionRow>
-                    {kind !== "image" && !masked ? (
-                        <DefinitionRow>
-                            <DefinitionTerm>
+                        </MetadataValue>
+                    </MetadataRow>
+                    {kind !== "image" && body.state === "content" ? (
+                        <MetadataRow>
+                            <MetadataLabel>
                                 {t("history.inspector.characters")}
-                            </DefinitionTerm>
-                            <DefinitionValue>
+                            </MetadataLabel>
+                            <MetadataValue>
                                 {Array.from(content).length.toLocaleString()}
-                            </DefinitionValue>
-                        </DefinitionRow>
+                            </MetadataValue>
+                        </MetadataRow>
                     ) : null}
-                    <DefinitionRow>
-                        <DefinitionTerm>
+                    <MetadataRow>
+                        <MetadataLabel>
                             {t("history.inspector.savedAs")}
-                        </DefinitionTerm>
-                        <DefinitionValue>
+                        </MetadataLabel>
+                        <MetadataValue>
                             {t(
                                 item.pinned
                                     ? "history.inspector.pinned"
                                     : "history.inspector.historyItem",
                             )}
-                        </DefinitionValue>
-                    </DefinitionRow>
-                    <DefinitionRow>
-                        <DefinitionTerm>
+                        </MetadataValue>
+                    </MetadataRow>
+                    <MetadataRow>
+                        <MetadataLabel>
                             {t("history.inspector.cloudEligibility")}
-                        </DefinitionTerm>
-                        <DefinitionValue>
+                        </MetadataLabel>
+                        <MetadataValue>
                             {t(
                                 item.too_large_to_sync
                                     ? "history.inspector.tooLarge"
                                     : "history.inspector.eligible",
                             )}
-                        </DefinitionValue>
-                    </DefinitionRow>
-                </DefinitionList>
+                        </MetadataValue>
+                    </MetadataRow>
+                </MetadataList>
             }
         >
-            <Surface
+            <PreviewSurface
                 className={styles.preview}
                 elevation="flat"
                 border="subtle"
                 radius="md"
+                padding="compact"
             >
                 <div className={styles.previewLayout}>
                     <div className={styles.source}>
@@ -262,7 +267,7 @@ export function LibraryInspectorPanel({
                     </div>
                     <div className={styles.previewBody}>
                         <div className={styles.previewContent}>
-                            {masked ? (
+                            {body.state === "masked" ? (
                                 <Button
                                     type="button"
                                     variant="ghost"
@@ -290,6 +295,10 @@ export function LibraryInspectorPanel({
                                         )}
                                     </strong>
                                 </Button>
+                            ) : body.state === "unavailable" ? (
+                                <div role="status" className={styles.unavailable}>
+                                    {t("history.detail.fullBodyUnavailable")}
+                                </div>
                             ) : (
                                 <InspectorPreview
                                     kind={kind}
@@ -318,7 +327,7 @@ export function LibraryInspectorPanel({
                         </div>
                     </div>
                 </div>
-            </Surface>
+            </PreviewSurface>
         </InspectorShell>
     );
 }

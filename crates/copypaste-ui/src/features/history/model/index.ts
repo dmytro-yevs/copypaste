@@ -1,9 +1,14 @@
-export type { ClipKind } from "./clipKind";
 export {
+  clipCopyAction,
   clipSourceMetadata,
   clipTypeMetadata,
+  fileDisplayName,
+  historyKindFilterLabel,
+  resolveClipBodyPresentation,
 } from "./clipPresentation";
 export type {
+  ClipBodyPresentation,
+  ClipCopyActionPresentation,
   ClipSourceMetadata,
   ClipTypeMetadata,
 } from "./clipPresentation";

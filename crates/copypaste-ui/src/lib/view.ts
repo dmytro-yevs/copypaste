@@ -62,30 +62,10 @@ export const FILTERABLE_KINDS: readonly Kind[] = [
   "secret",
 ];
 
-const KIND_KEY = {
-  all: "history.kind.all",
-  text: "history.kind.text",
-  image: "history.kind.image",
-  file: "history.kind.file",
-  url: "history.kind.url",
-  mail: "history.kind.mail",
-  path: "history.kind.path",
-  code: "history.kind.code",
-  json: "history.kind.json",
-  num: "history.kind.num",
-  color: "history.kind.color",
-  secret: "history.kind.secret",
-  unknown: "history.kind.unknown",
-} as const satisfies Record<KindFilter, string>;
-
 const SORT_KEY = {
   newest: "history.sort.newest",
   oldest: "history.sort.oldest",
 } as const satisfies Record<SortOrder, string>;
-
-export function kindLabel(kind: KindFilter): string {
-  return t(KIND_KEY[kind]);
-}
 
 export function sortLabel(sort: SortOrder): string {
   return t(SORT_KEY[sort]);

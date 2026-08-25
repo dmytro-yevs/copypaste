@@ -11,6 +11,7 @@ import {
     historyKindOptions,
     historySortOptions,
 } from "@/features/history/model/libraryToolbarOptions";
+import { historyKindFilterLabel } from "@/features/history/model/clipPresentation";
 import type { OriginDevice } from "@/features/history/model/origin";
 import { ActiveControlBadge } from "@/features/history/patterns/ActiveControlBadge";
 import { BulkActionBar } from "@/features/history/patterns/BulkActionBar";
@@ -20,7 +21,6 @@ import {
     DEFAULT_VIEW,
     type SortOrder,
     type ViewOptions,
-    kindLabel,
 } from "@/lib/view";
 import styles from "./LibraryToolbar.module.css";
 
@@ -211,7 +211,7 @@ export function LibraryToolbar({
                                         aria-label={kindLabelText}
                                         values={view.kinds}
                                         items={kindItems}
-                                        allLabel={kindLabel("all")}
+                                        allLabel={historyKindFilterLabel("all")}
                                         leadingIcon="sliders"
                                         presentation="auto"
                                         onValuesChange={(kinds) =>
