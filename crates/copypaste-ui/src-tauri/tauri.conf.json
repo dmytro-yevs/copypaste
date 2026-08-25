@@ -48,19 +48,6 @@
       }
     }
   },
-  "plugins": {
-    "deep-link": {
-      "desktop": {
-        "schemes": ["copypaste"]
-      },
-      "mobile": [
-        {
-          "scheme": ["copypaste"],
-          "appLink": false
-        }
-      ]
-    }
-  },
   "bundle": {
     "active": true,
     "category": "Productivity",
