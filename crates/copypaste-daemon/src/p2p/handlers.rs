@@ -313,6 +313,7 @@ mod tests {
                     sas: None,
                     peer: None,
                     error: None,
+                    expires_in_ms: None,
                 },
             )
         };

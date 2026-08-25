@@ -87,6 +87,7 @@ mod tests {
             pairing_id: Some("ceremony-secret".into()),
             role: Some(PairingRole::Initiator),
             state,
+            expires_in_ms: (state == PairingState::AwaitingConfirmation).then_some(60_000),
             sas: Some("123456".into()),
             peer_device_id: Some("device-secret".into()),
             peer_name: Some("/Users/alice/Phone".into()),
