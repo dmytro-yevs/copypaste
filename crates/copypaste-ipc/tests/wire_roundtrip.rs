@@ -1,9 +1,9 @@
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, DiagnosticCounters,
     DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, ItemPage, Method, PairingData, PairingInviteData,
-    PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData, Request, Response,
-    ResponseData, SensitiveFinding, SensitiveSpan, StatusData, SyncResult, PROTOCOL_VERSION,
+    ImagePreview, ImportData, Item, ItemPage, Method, PairingInviteData, PairingProgressData,
+    PairingRole, PairingState, PeerInfo, PrivateModeData, Request, Response, ResponseData,
+    SensitiveFinding, SensitiveSpan, StatusData, SyncResult, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -71,7 +71,6 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::Item(_) => "item",
         ResponseData::ImagePreview(_) => "image_preview",
         ResponseData::Count(_) => "count",
-        ResponseData::Pairing(_) => "pairing",
         ResponseData::PairingInvite(_) => "pairing_invite",
         ResponseData::PairingProgress(_) => "pairing_progress",
         ResponseData::Peers(_) => "peers",
@@ -162,11 +161,6 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             height: 1,
         }),
         ResponseData::Count(1),
-        ResponseData::Pairing(PairingData {
-            code: "ABCD-EFGH".into(),
-            pairing_id: "peer-1".into(),
-            listen_addr: Some("192.0.2.1:47654".into()),
-        }),
         ResponseData::PairingInvite(PairingInviteData {
             code: "ABCD-EFGH".into(),
             pairing_id: "peer-1".into(),
@@ -214,10 +208,22 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 20);
+    assert_eq!(variants.len(), 19);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }
+}
+
+#[test]
+fn retired_pairing_response_shape_is_not_part_of_the_wire_contract() {
+    let retired = json!({
+        "pairing": {
+            "code": "ABCD-EFGH",
+            "pairing_id": "peer-1",
+            "listen_addr": "192.0.2.1:47654"
+        }
+    });
+    assert!(serde_json::from_value::<ResponseData>(retired).is_err());
 }
 
 #[test]
