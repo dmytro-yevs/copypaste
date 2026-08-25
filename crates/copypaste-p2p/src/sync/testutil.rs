@@ -126,9 +126,9 @@ impl TestSource {
             .values()
             .filter(|i| i.deleted || !sensitive.contains(&i.item_id))
             .map(|i| i.summary())
-            .filter(|s| super::session::summary_key(s) >= since_ms)
+            .filter(|s| super::summary::summary_key(s) >= since_ms)
             .collect();
-        v.sort_by_key(|s| (super::session::summary_key(s), s.item_id.clone()));
+        v.sort_by_key(|s| (super::summary::summary_key(s), s.item_id.clone()));
         let start = match after_id {
             None => 0,
             Some(id) => v
