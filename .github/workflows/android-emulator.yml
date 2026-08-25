@@ -82,7 +82,7 @@ on:
   # GitHub's workflow parser rejects YAML anchors, so the two lists are written
   # out twice and have to be kept identical by hand.
   push:
-    branches: [main, v2-main]
+    branches: [main]
     paths:
       - "crates/copypaste-ui/src/**"
       - "crates/copypaste-ui/src-tauri/**"
