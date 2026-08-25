@@ -15,11 +15,13 @@ use copypaste_ipc::{
 };
 use tracing::{error, warn};
 
+mod copy;
 mod wire;
 
-use self::wire::{decrypt_rows, to_wire, to_wire_and_plaintext};
+pub(super) use self::copy::{copy, copy_plain_text};
+use self::wire::{decrypt_rows, to_wire};
 use super::messages::{
-    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT,
+    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_EMPTY_CONTENT, MSG_ENCRYPT,
     MSG_IMAGE_PREVIEW, MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
 };
 use crate::capture::{self, IngestError};
@@ -137,56 +139,6 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
         }
         Err(e) => storage_error(id, "search", &e),
     }
-}
-
-pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
-    let row = match state.store.get(item_id) {
-        Ok(Some(row)) => row,
-        Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => return storage_error(id, "get", &e),
-    };
-
-    let content_type = row.content_type.clone();
-    let metadata = row
-        .payload_metadata
-        .as_deref()
-        .and_then(copypaste_core::FileMetadata::from_json);
-    if content_type == copypaste_ipc::content_type::FILE && metadata.is_none() {
-        return Response::err(id, ErrorCode::Internal, MSG_CLIPBOARD);
-    };
-    // One open, and it is the authenticating one: the plaintext the pasteboard
-    // receives is exactly the bytes that opened under this row's id as AAD.
-    let (item, plaintext) = match to_wire_and_plaintext(state, row) {
-        Ok(opened) => opened,
-        Err(e) => return decrypt_error(id, &e),
-    };
-
-    let write = if copypaste_ipc::content_type::is_binary(&content_type) {
-        state.clipboard().set_binary_contents(
-            &item.id,
-            &content_type,
-            &plaintext,
-            metadata.as_ref(),
-        )
-    } else {
-        state.clipboard().set_contents(&item.content)
-    };
-    if let Err(e) = write {
-        error!(error = ?e, "pasteboard write failed");
-        return Response::err(id, ErrorCode::Internal, MSG_CLIPBOARD);
-    }
-
-    Response::ok(id, ResponseData::Item(item))
-}
-
-/// Copy only the item's textual representation.
-///
-/// `Copy` and this verb happen to write the same native payload while v2 only
-/// captures text. Keeping the operation separate is nevertheless essential:
-/// ⌥Enter must remain an explicit plain-text request once richer clipboard
-/// payloads are supported.
-pub(super) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Response {
-    copy(state, id, item_id)
 }
 
 /// Produce a small PNG only when a history row needs to draw an image.
@@ -434,6 +386,27 @@ mod tests {
         }
     }
 
+    fn binary_item(
+        state: &AppState,
+        content_type: &str,
+        bytes: &[u8],
+        metadata: Option<&copypaste_core::FileMetadata>,
+    ) -> StoredItem {
+        copypaste_core::ingest_binary_into_with_capture_context(
+            &state.store,
+            &state.keyring,
+            bytes,
+            content_type,
+            copypaste_core::now_ms(),
+            false,
+            None,
+            metadata,
+            &state.settings.get(),
+        )
+        .unwrap()
+        .into_item()
+    }
+
     /// `MAX_PAGE` bounds a page's count and nothing about its size, so a page
     /// of large items serialised past the frame cap and reached the client as a
     /// decode error that took every item beside it down.
@@ -634,7 +607,7 @@ mod tests {
     /// content, and the clipboard is untouched by it.
     #[test]
     fn list_bounds_bodies_while_get_and_copy_still_answer_in_full() {
-        let (state, _dir) = test_state("list-preview");
+        let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("list-preview");
         let long = "x".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES * 3);
         let added = match add(&state, 1, &long).data {
             Some(ResponseData::Item(item)) => item,
@@ -672,6 +645,11 @@ mod tests {
             Some(ResponseData::Item(item)) => assert_eq!(item.content, long),
             other => panic!("{other:?}"),
         }
+        assert_eq!(
+            writes.entries(),
+            vec![crate::testutil::WrittenPayload::Text(long)],
+            "copy wrote the list preview instead of the authenticated full body"
+        );
     }
 
     #[test]
@@ -1003,6 +981,67 @@ mod tests {
             &STANDARD.decode(preview.png_base64).unwrap()[..8],
             b"\x89PNG\r\n\x1a\n"
         );
+    }
+
+    #[test]
+    fn native_copy_dispatches_bytes_while_plain_text_copy_refuses_display_labels() {
+        use crate::testutil::WrittenPayload;
+
+        let (state, _dir, writes) =
+            crate::testutil::test_state_watching_clipboard("native-copy-payloads");
+        let image_bytes = b"native image bytes";
+        let image = binary_item(
+            &state,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            image_bytes,
+            None,
+        );
+        let metadata =
+            copypaste_core::FileMetadata::new("report.bin", "application/octet-stream").unwrap();
+        let file_bytes = b"native file bytes";
+        let file = binary_item(
+            &state,
+            copypaste_ipc::content_type::FILE,
+            file_bytes,
+            Some(&metadata),
+        );
+        let unknown = binary_item(&state, "application/x-future", b"future bytes", None);
+
+        assert!(copy(&state, 1, &image.id).ok);
+        assert!(copy(&state, 2, &file.id).ok);
+        assert_eq!(
+            writes.entries(),
+            vec![
+                WrittenPayload::Image(image_bytes.to_vec()),
+                WrittenPayload::File {
+                    bytes: file_bytes.to_vec(),
+                    metadata: Some(metadata),
+                },
+            ]
+        );
+
+        for (request, item_id) in [(3, &image.id), (4, &file.id), (5, &unknown.id)] {
+            let response = copy_plain_text(&state, request, item_id);
+            assert_eq!(
+                response.error_code,
+                Some(ErrorCode::InvalidRequest),
+                "{item_id}"
+            );
+        }
+        let unknown_native = copy(&state, 6, &unknown.id);
+        assert_eq!(unknown_native.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(writes.count(), 2, "a display placeholder was written");
+
+        let listed = match list(&state, 7, 20, None).data {
+            Some(ResponseData::Page(page)) => page.items,
+            other => panic!("{other:?}"),
+        };
+        for expected in ["[image]", "[file]", "[unsupported]"] {
+            assert!(
+                listed.iter().any(|item| item.content == expected),
+                "{expected}"
+            );
+        }
     }
 
     #[test]
