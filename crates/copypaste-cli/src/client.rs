@@ -1225,12 +1225,12 @@ mod tests {
 
     #[test]
     fn peer_methods_serialise_to_the_documented_envelope() {
-        let json = serde_json::to_string(&Method::PairAccept {
+        let json = serde_json::to_string(&Method::PairJoin {
             code: "ABCD".into(),
             addr: "127.0.0.1:47654".into(),
         })
         .unwrap();
-        assert!(json.contains(r#""method":"pair_accept""#), "{json}");
+        assert!(json.contains(r#""method":"pair_join""#), "{json}");
         assert!(json.contains(r#""code":"ABCD""#), "{json}");
 
         let json = serde_json::to_string(&Method::SyncNow { pairing_id: None }).unwrap();

@@ -44,9 +44,9 @@ pub use payload::{
     DeviceEndpointObservation, DeviceLatencyObservation, DeviceObservationProvenance,
     DeviceObservationTrust, DevicePlatform, DevicePresenceObservation, DeviceProfileObservation,
     DiagnosticCounters, DiscoveredData, DiscoveredDevice, ExportData, ExportItem,
-    ExternalNetworkObservation, ImagePreview, ImportData, Item, ItemPage, PairingData,
-    PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData,
-    SensitiveFinding, SensitiveSpan, StatusData, SyncResult,
+    ExternalNetworkObservation, ImagePreview, ImportData, Item, ItemPage, PairingInviteData,
+    PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData, SensitiveFinding,
+    SensitiveSpan, StatusData, SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 
@@ -74,6 +74,13 @@ fn default_protocol_version() -> u32 {
 /// An enum rather than a method-name string plus untyped params: v1 dispatched
 /// 61 stringly-typed methods through a chain of `match` arms spread over 21
 /// files, and extracted params by hand. Here the compiler enumerates the cases.
+/// The pre-confirmation pairing operations are intentionally absent:
+/// ```compile_fail
+/// let _ = copypaste_ipc::Method::PairCreate { name: String::new() };
+/// ```
+/// ```compile_fail
+/// let _ = copypaste_ipc::Method::PairAccept { code: String::new(), addr: String::new() };
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Method {
@@ -200,17 +207,6 @@ pub enum Method {
     },
 
     // ---- peer-to-peer sync -------------------------------------------------
-    /// Legacy invite shape. Creates the same memory-only invitation as
-    /// [`Method::PairCreateInvite`].
-    PairCreate {
-        name: String,
-    },
-    /// Disabled legacy operation. New clients use [`Method::PairJoin`] and
-    /// [`Method::PairConfirm`].
-    PairAccept {
-        code: String,
-        addr: String,
-    },
     /// Create one in-memory invitation. Nothing is persisted until both peers
     /// explicitly confirm the handshake-bound SAS.
     PairCreateInvite,
