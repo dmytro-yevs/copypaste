@@ -3,7 +3,6 @@ export type { ActionButtonProps } from "./ActionButton";
 export { AppIcon } from "./AppIcon";
 export { BrandMark } from "./BrandMark";
 export { BrandLockup } from "./BrandLockup";
-export { DefinitionList, DefinitionRow, DefinitionTerm, DefinitionValue } from "./DefinitionList";
 export { DeviceMeta } from "./DeviceMeta";
 export type { DeviceMetaKind } from "./DeviceMeta";
 export { EmptyState } from "./EmptyState";
