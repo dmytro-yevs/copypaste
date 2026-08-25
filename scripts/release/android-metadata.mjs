@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { assertNoDeepLinks, projectNoDeepLinkConfigs } from "./product-config.mjs";
+import { assertNoDeepLinks } from "./product-config.mjs";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const uiPackagePath = join(repo, "crates/copypaste-ui/package.json");
@@ -28,14 +28,6 @@ function semver() {
 function readNoDeepLinkConfigs() {
   return Object.fromEntries(Object.entries(noDeepLinkPaths)
     .map(([name, path]) => [name, readFileSync(path, "utf8")]));
-}
-
-function syncNoDeepLinkConfigs() {
-  const source = readNoDeepLinkConfigs();
-  const projected = projectNoDeepLinkConfigs(source);
-  for (const [name, updated] of Object.entries(projected)) {
-    if (source[name] !== updated) writeFileSync(noDeepLinkPaths[name], updated);
-  }
 }
 
 export function versionCodeFor(input) {
@@ -200,7 +192,6 @@ export function resolveMetadata(versionOverride) {
 }
 
 function syncDerivatives() {
-  syncNoDeepLinkConfigs();
   const product = repositoryProduct();
   const versionName = product.versionName;
   const packagePath = uiPackagePath;
