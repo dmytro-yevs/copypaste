@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "gates": {
+    "rustfmt": {
+      "label": "cargo fmt --check",
+      "commands": [["cargo", "+{rust_version}", "fmt", "--all", "--check"]]
+    },
+    "clippy-workspace": {
+      "label": "clippy --workspace",
+      "commands": [["cargo", "+{rust_version}", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"]]
+    },
+    "clippy-embedded-backend": {
+      "label": "clippy embedded-backend",
+      "commands": [["cargo", "+{rust_version}", "clippy", "-p", "copypaste-ui", "--features", "embedded-backend", "--all-targets", "--locked", "--", "-D", "warnings"]]
+    },
+    "macos-types": {
+      "label": "macOS types self-test",
+      "commands": [["bash", "scripts/check-macos-types.sh", "--self-test"]]
+    },
+    "ipc-bindings": {
+      "label": "IPC bindings current",
+      "commands": [
+        ["bash", "crates/copypaste-ui/scripts/generate-ipc-bindings.sh", "--self-test"],
+        ["bash", "crates/copypaste-ui/scripts/generate-ipc-bindings.sh", "--check"]
+      ]
+    },
+    "feature-ledger": {
+      "label": "product feature ledger",
+      "commands": [
+        ["python3", "scripts/check-feature-ledger.py", "--self-test"],
+        ["python3", "scripts/check-feature-ledger.py"]
+      ]
+    },
+    "comment-budget": {
+      "label": "comment budget",
+      "commands": [["bash", "scripts/check-comments.sh"]]
+    },
+    "file-size-budget": {
+      "label": "file-size budget",
+      "commands": [
+        ["bash", "scripts/check-file-size-gate.sh", "--self-test"],
+        ["bash", "scripts/check-file-size-gate.sh"]
+      ]
+    },
+    "release-pipeline": {
+      "label": "release pipeline",
+      "commands": [["bash", "scripts/release/check.sh"]]
+    }
+  },
+  "profiles": {
+    "linux-ci-mirror": [
+      "rustfmt",
+      "clippy-workspace",
+      "clippy-embedded-backend",
+      "macos-types",
+      "ipc-bindings",
+      "feature-ledger",
+      "comment-budget",
+      "file-size-budget",
+      "release-pipeline"
+    ]
+  }
+}

@@ -54,7 +54,7 @@ jobs:
         with:
           toolchain: "1.96"
           components: rustfmt
-      - run: cargo +1.96 fmt --all --check
+      - run: python3 scripts/ci/run-gates.py --gate rustfmt
 
   feature-ledger:
     name: product feature ledger
@@ -64,9 +64,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: python3 -m pip install --requirement requirements-ci.txt
       - name: Reject incomplete features and unproven performance credits
-        run: |
-          python3 scripts/check-feature-ledger.py --self-test
-          python3 scripts/check-feature-ledger.py
+        run: python3 scripts/ci/run-gates.py --gate feature-ledger
 
   android-manifest:
     name: Android manifest guard
@@ -176,7 +174,7 @@ jobs:
       # scripts/comment-budget.txt holds the pre-existing debt and can only
       # shrink; a file over budget that is not in it fails here.
       - name: check-comments.sh
-        run: ./scripts/check-comments.sh
+        run: python3 scripts/ci/run-gates.py --gate comment-budget
 
   documentation:
     name: documentation
@@ -202,7 +200,7 @@ jobs:
       # The gate script holds EXEMPT, the parsing and its self-test, so that the
       # decision is testable rather than inline YAML nothing can execute.
       - name: check-file-size-gate.sh
-        run: ./scripts/check-file-size-gate.sh
+        run: python3 scripts/ci/run-gates.py --gate file-size-budget
 
   release-pipeline:
     name: release pipeline
@@ -257,7 +255,7 @@ jobs:
           shellcheck --version
           ruby --version
           python3 -m pip install --requirement requirements-ci.txt
-          ./scripts/release/check.sh
+          python3 scripts/ci/run-gates.py --gate release-pipeline --expect-command scripts/release/check.sh
 
   supabase-schema:
     name: Supabase schema and RLS
@@ -343,15 +341,13 @@ jobs:
         run: cargo +1.96 test --workspace --locked
 
       - name: generated TypeScript bindings are current
-        run: |
-          ./crates/copypaste-ui/scripts/generate-ipc-bindings.sh --self-test
-          ./crates/copypaste-ui/scripts/generate-ipc-bindings.sh --check
+        run: python3 scripts/ci/run-gates.py --gate ipc-bindings
 
       - name: cargo clippy --all-targets
         # Runs even when the tests fail, so one run reports both. Clippy is a
         # gate: warnings are denied.
         if: success() || failure()
-        run: cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings
+        run: python3 scripts/ci/run-gates.py --gate clippy-workspace
 
       - name: cargo clippy --features embedded-backend
         # `copypaste-ui`'s `embedded-backend` feature exists, in its own words,
@@ -360,7 +356,7 @@ jobs:
         # Without this step the whole Android path is dead text that no machine
         # ever compiles.
         if: success() || failure()
-        run: cargo +1.96 clippy -p copypaste-ui --features embedded-backend --all-targets --locked -- -D warnings
+        run: python3 scripts/ci/run-gates.py --gate clippy-embedded-backend
 
       - name: Android embedded backend contracts
         if: success() || failure()
@@ -380,7 +376,7 @@ jobs:
         # `--self-test` perturbs the generated crate and asserts the check
         # fails — otherwise this step is a green light that means nothing.
         if: success() || failure()
-        run: ./scripts/check-macos-types.sh --self-test
+        run: python3 scripts/ci/run-gates.py --gate macos-types
 
   # The Rust layer end to end, on Linux against the fake clipboard source.
   # Neither platform's shell, engine or pasteboard is involved; the layer that
@@ -801,6 +797,8 @@ jobs:
           -p copypaste-runtime-log
           -p copypaste-fs
           -p copypaste-clock
+          -p copypaste-feedback
+          -p copypaste-retry
 
   windows-native-test:
     name: Windows native assertions (x64)

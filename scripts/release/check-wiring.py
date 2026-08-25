@@ -7,7 +7,17 @@
 # Everything here is a mistake that only a real run would otherwise report, one
 # round trip at a time: an artifact name that does not match its producer, an
 # output nothing declares, a job that reads a file no job it depends on wrote.
-import json, pathlib, re, shlex, sys, yaml
+import copy, json, pathlib, re, shlex, subprocess, sys, yaml
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "ci"))
+
+from gate_registry import load_registry, workspace_contract
+
+from ci_contract import (
+    ci_rust_toolchain_holds,
+    portable_gate_contract_holds,
+    windows_workspace_shards_hold,
+)
 
 SELF_TEST = "--self-test" in sys.argv
 STRICT = "--strict" in sys.argv
@@ -34,69 +44,6 @@ def rec(cond, desc, detail=""):
 
 def steps(job):
     return job.get("steps") or []
-
-
-def windows_workspace_shards_hold(jobs):
-    test_names = ("windows-test-core", "windows-test-services", "windows-test-apps")
-    names = ("windows-clippy", *test_names, "windows-native-test")
-    shards = {name: jobs.get(name) or {} for name in names}
-    bodies = {
-        name: "\n".join(str(step.get("run") or "") for step in steps(job))
-        for name, job in shards.items()
-    }
-    caches = {
-        name: [step for step in steps(job)
-               if str(step.get("uses") or "").startswith("Swatinem/rust-cache")]
-        for name, job in shards.items()
-    }
-    root = pathlib.Path("Cargo.toml").read_text()
-    members_block = re.search(r"(?ms)^members\s*=\s*\[(.*?)^\]", root)
-    members = re.findall(r'"([^"]+)"', members_block.group(1) if members_block else "")
-    expected = set()
-    for member in members:
-        manifest = (pathlib.Path(member) / "Cargo.toml").read_text()
-        package = re.search(r'(?m)^name\s*=\s*"([^"]+)"', manifest)
-        if package:
-            expected.add(package.group(1))
-    selected = []
-    valid_commands = True
-    for name in test_names:
-        commands = []
-        for line in bodies[name].splitlines():
-            try:
-                argv = tuple(shlex.split(line.strip()))
-            except ValueError:
-                continue
-            if len(argv) >= 3 and argv[0] == "cargo" and argv[2] == "test":
-                commands.append(argv)
-        if len(commands) != 1:
-            valid_commands = False
-            continue
-        command = commands[0]
-        if "--locked" not in command or any(flag in command for flag in (
-            "--workspace", "--exclude", "--no-default-features", "--features", "--all-features"
-        )):
-            valid_commands = False
-        selected += [command[index + 1] for index, token in enumerate(command[:-1]) if token in ("-p", "--package")]
-    cache_keys = [
-        str((caches[name][0].get("with") or {}).get("shared-key", ""))
-        for name in names if len(caches[name]) == 1
-    ]
-    return (
-        shards["windows-clippy"].get("timeout-minutes") == 20
-        and shards["windows-native-test"].get("timeout-minutes") == 20
-        and all(shards[name].get("timeout-minutes") == 15 for name in test_names)
-        and all(len(caches[name]) == 1 for name in names)
-        and len(cache_keys) == len(names) == len(set(cache_keys))
-        and all((caches[name][0].get("with") or {}).get("save-if") is True
-                for name in (*test_names, "windows-native-test"))
-        and valid_commands and set(selected) == expected and len(selected) == len(expected)
-        and "cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings" in bodies["windows-clippy"]
-        and "pairing_presentation::windows::refusal_tests" in bodies["windows-native-test"]
-        and "crypto::keystore::" in bodies["windows-native-test"]
-        and "test:native-parity" in bodies["windows-native-test"]
-        and all("cargo +1.96 test --workspace --locked" not in body for body in bodies.values())
-    )
 
 
 def android_runner_local_artifact_transfers(jobs):
@@ -256,6 +203,19 @@ def min_major(rng):
 docs = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WF.glob("*.yml"))}
 text = {p.name: p.read_text() for p in sorted(WF.glob("*.yml"))}
 
+try:
+    WORKSPACE_PACKAGES, RUST_VERSION = workspace_contract(pathlib.Path.cwd())
+    WORKSPACE_METADATA_ERROR = ""
+except (KeyError, OSError, ValueError, subprocess.CalledProcessError) as error:
+    WORKSPACE_PACKAGES, RUST_VERSION = set(), ""
+    WORKSPACE_METADATA_ERROR = str(error)
+
+try:
+    CI_GATES = load_registry(pathlib.Path.cwd())
+    CI_GATES_ERROR = ""
+except (OSError, ValueError) as error:
+    CI_GATES, CI_GATES_ERROR = {}, str(error)
+
 
 release_jobs = docs["release.yml"].get("jobs") or {}
 gate = release_jobs.get("supabase-gate") or {}
@@ -272,9 +232,24 @@ rec("macos-cloud-evidence.sh artifacts/release-macos-cloud" in macos_smoke,
     "macOS smoke captures the cloud account lifecycle from the installed app")
 
 ci_jobs = docs["ci.yml"].get("jobs") or {}
-rec(windows_workspace_shards_hold(ci_jobs),
+rec(not WORKSPACE_METADATA_ERROR,
+    "Cargo metadata resolves the workspace package and Rust contracts",
+    WORKSPACE_METADATA_ERROR)
+rec(windows_workspace_shards_hold(ci_jobs, WORKSPACE_PACKAGES, RUST_VERSION),
     "ci.yml shards every Windows package under 15 minutes with isolated cache writers",
     "test shards must cover each workspace package once with default features and unique cache keys")
+toolchains_hold, toolchain_failures = ci_rust_toolchain_holds(docs["ci.yml"], RUST_VERSION)
+rec(toolchains_hold,
+    "ci.yml Rust pins equal Cargo rust-version",
+    "mismatched pins: {}".format(toolchain_failures))
+rec(not CI_GATES_ERROR and portable_gate_contract_holds(
+        CI_GATES,
+        "linux-ci-mirror",
+        pathlib.Path("scripts/prepush/wsl/verify.sh").read_text(),
+        ci_jobs,
+    ),
+    "CI and the WSL mirror select the same enforcing portable gate registry",
+    CI_GATES_ERROR or "a gate is missing, duplicated, or replaced by an advisory command")
 documentation = ci_jobs.get("documentation") or {}
 documentation_body = "\n".join(step.get("run") or "" for step in steps(documentation))
 rec("check-docs.py" in documentation_body,
@@ -1022,8 +997,7 @@ rec("--self-test" in ledger_check and "check-feature-ledger.py --self-test" in r
     "the feature-ledger schema carries a wired self-test",
     "the schema detector must prove its negative performance and cloud fixtures")
 ci_ledger_body = "\n".join(step.get("run") or "" for step in steps(ci_jobs.get("feature-ledger") or {}))
-rec("check-feature-ledger.py --self-test" in ci_ledger_body
-    and "check-feature-ledger.py" in ci_ledger_body,
+rec("scripts/ci/run-gates.py --gate feature-ledger" in ci_ledger_body,
     "ci.yml runs the feature-ledger provenance fixtures and guard",
     "CI must exercise the detector before trusting the ledger")
 release_ledger_body = "\n".join(step.get("run") or "" for step in steps(release_jobs.get("native-parity") or {}))
@@ -1055,7 +1029,8 @@ if SELF_TEST:
                 timeout=15, key="services"),
             "windows-test-apps": job(
                 "cargo +1.96 test --locked -p copypaste-ui -p copypaste-cli -p copypaste-ipc "
-                "-p copypaste-runtime-log -p copypaste-fs -p copypaste-clock",
+                "-p copypaste-runtime-log -p copypaste-fs -p copypaste-clock "
+                "-p copypaste-feedback -p copypaste-retry",
                 timeout=15, key="apps"),
             "windows-native-test": job(
                 "pairing_presentation::windows::refusal_tests\n"
@@ -1076,18 +1051,64 @@ if SELF_TEST:
     windows_budget_fixture["windows-test-core"]["timeout-minutes"] = 16
     for desc, held in (
         ("bounded package-complete Windows shards are accepted",
-         windows_workspace_shards_hold(windows_fixture)),
+         windows_workspace_shards_hold(windows_fixture, WORKSPACE_PACKAGES, RUST_VERSION)),
         ("duplicate Windows cache writers are rejected",
-         not windows_workspace_shards_hold(windows_cache_fixture)),
+         not windows_workspace_shards_hold(windows_cache_fixture, WORKSPACE_PACKAGES, RUST_VERSION)),
         ("reduced Windows workspace coverage is rejected",
-         not windows_workspace_shards_hold(windows_coverage_fixture)),
+         not windows_workspace_shards_hold(windows_coverage_fixture, WORKSPACE_PACKAGES, RUST_VERSION)),
         ("recombined Windows workspace work is rejected",
-         not windows_workspace_shards_hold(windows_combined_fixture)),
+         not windows_workspace_shards_hold(windows_combined_fixture, WORKSPACE_PACKAGES, RUST_VERSION)),
         ("a Windows test shard above its target is rejected",
-         not windows_workspace_shards_hold(windows_budget_fixture)),
+         not windows_workspace_shards_hold(windows_budget_fixture, WORKSPACE_PACKAGES, RUST_VERSION)),
     ):
         emit(held, "self-test: {}".format(desc),
              "the Windows workspace shard detector did not behave as stated")
+
+    local_gate_source = pathlib.Path("scripts/prepush/wsl/verify.sh").read_text()
+    ci_gate_fixture = {
+        gate_id: {"steps": [{"run": "python3 scripts/ci/run-gates.py --gate {}".format(gate_id)}]}
+        for gate_id in CI_GATES["profiles"]["linux-ci-mirror"]
+    }
+    missing_gate_fixture = copy.deepcopy(ci_gate_fixture)
+    missing_gate_fixture.pop("file-size-budget")
+    duplicate_gate_fixture = copy.deepcopy(ci_gate_fixture)
+    duplicate_gate_fixture["duplicate"] = {
+        "steps": [{"run": "python3 scripts/ci/run-gates.py --gate feature-ledger"}]
+    }
+    inert_gate_fixture = copy.deepcopy(ci_gate_fixture)
+    inert_gate_fixture["feature-ledger"]["steps"][0]["run"] = \
+        "echo python3 scripts/ci/run-gates.py --gate feature-ledger"
+    advisory_registry = copy.deepcopy(CI_GATES)
+    advisory_registry["gates"]["file-size-budget"]["commands"] = [
+        ["bash", "scripts/check-file-size.sh", "500"]
+    ]
+    for desc, held in (
+        ("the oversized-file fixture and enforcing gate reach both entry points",
+         portable_gate_contract_holds(
+             CI_GATES, "linux-ci-mirror", local_gate_source, ci_gate_fixture)),
+        ("a CI gate missing from the local profile is rejected",
+         not portable_gate_contract_holds(
+             CI_GATES, "linux-ci-mirror", local_gate_source, missing_gate_fixture)),
+        ("a duplicated CI gate is rejected",
+         not portable_gate_contract_holds(
+             CI_GATES, "linux-ci-mirror", local_gate_source, duplicate_gate_fixture)),
+        ("an inert mention of a CI gate is rejected",
+         not portable_gate_contract_holds(
+             CI_GATES, "linux-ci-mirror", local_gate_source, inert_gate_fixture)),
+        ("the advisory file-size checker cannot replace the enforcing gate",
+         not portable_gate_contract_holds(
+             advisory_registry, "linux-ci-mirror", local_gate_source, ci_gate_fixture)),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the portable gate registry detector did not behave as stated")
+
+    stale_toolchain_fixture = copy.deepcopy(docs["ci.yml"])
+    stale_toolchain_fixture["env"]["MSRV"] = "1.95"
+    stale_toolchain_holds, _ = ci_rust_toolchain_holds(
+        stale_toolchain_fixture, RUST_VERSION)
+    emit(not stale_toolchain_holds,
+         "self-test: a CI toolchain stale against Cargo rust-version is rejected",
+         "the CI toolchain detector accepted a stale MSRV")
 
     def probe(*runs_on):
         jobs = {"j{}".format(i): {"runs-on": r} for i, r in enumerate(runs_on)}
