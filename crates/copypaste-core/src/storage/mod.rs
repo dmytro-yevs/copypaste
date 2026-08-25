@@ -50,7 +50,6 @@ mod page;
 mod pinning;
 mod retention;
 mod schema;
-mod schema_upgrade;
 mod schema_verify;
 mod search;
 mod state;

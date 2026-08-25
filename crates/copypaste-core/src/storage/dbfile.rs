@@ -38,13 +38,12 @@ pub enum RestoreError {
 /// never a fallback to an unkeyed read (AGENTS.md rule 4).
 ///
 pub fn open_validated(path: &Path, db_key: &[u8; 32]) -> Result<Connection, StoreError> {
-    let mut conn = Connection::open_with_flags(
+    let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     apply_key(&conn, db_key)?;
     validate_key(&conn)?;
-    super::schema_upgrade::upgrade_if_legacy_v2(&mut conn)?;
     verify_schema(&conn)?;
     apply_connection_pragmas(&conn)?;
     Ok(conn)
@@ -250,6 +249,94 @@ mod tests {
             open_validated(&path, &KEY),
             Err(StoreError::InvalidKey)
         ));
+    }
+
+    #[test]
+    fn an_earlier_schema_is_refused_without_upgrade_or_repair() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        let conn = Connection::open(&path).unwrap();
+        apply_key(&conn, &KEY).unwrap();
+        validate_key(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE clipboard_items (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 content_ciphertext BLOB,
+                 nonce BLOB,
+                 content_type TEXT NOT NULL,
+                 content_hash TEXT NOT NULL DEFAULT '',
+                 is_sensitive INTEGER NOT NULL DEFAULT 0,
+                 pinned INTEGER NOT NULL DEFAULT 0,
+                 pin_order REAL,
+                 created_at INTEGER NOT NULL,
+                 deleted INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE INDEX idx_items_history
+                 ON clipboard_items(pinned DESC, pin_order, created_at DESC, id DESC)
+                 WHERE deleted = 0;
+             CREATE INDEX idx_items_hash
+                 ON clipboard_items(content_hash, created_at DESC)
+                 WHERE deleted = 0;
+             CREATE UNIQUE INDEX idx_items_dedup
+                 ON clipboard_items(content_hash, created_at / 60000)
+                 WHERE deleted = 0 AND content_hash <> '';
+             CREATE VIRTUAL TABLE clipboard_fts USING fts5(id UNINDEXED, content_text);
+             CREATE TABLE __rusqlite_migrations (
+                 version INTEGER PRIMARY KEY NOT NULL,
+                 applied_on TEXT NOT NULL
+             );
+             INSERT INTO clipboard_items (
+                 id, content_ciphertext, nonce, content_type, content_hash,
+                 is_sensitive, pinned, pin_order, created_at, deleted
+             ) VALUES (
+                 'keep-me', X'010203', X'040506', 'text/plain', 'hash',
+                 0, 0, NULL, 1234, 0
+             );
+             INSERT INTO clipboard_fts(rowid, id, content_text)
+             VALUES (1, 'keep-me', 'indexed marker');
+             INSERT INTO __rusqlite_migrations (version, applied_on)
+             VALUES (1, 'earlier-build');",
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(matches!(
+            open_validated(&path, &KEY),
+            Err(StoreError::InvalidSchema)
+        ));
+
+        let conn = Connection::open(&path).unwrap();
+        apply_key(&conn, &KEY).unwrap();
+        validate_key(&conn).unwrap();
+        let row: (Vec<u8>, Vec<u8>, i64) = conn
+            .query_row(
+                "SELECT content_ciphertext, nonce, created_at
+                 FROM clipboard_items WHERE id = 'keep-me'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (vec![1, 2, 3], vec![4, 5, 6], 1234));
+        let objects_added: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema
+                 WHERE name IN (
+                     'clipboard_live_count', 'sync_device_state', 'sync_device_name',
+                     'idx_items_sensitive_wipe', 'idx_items_syncable'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(objects_added, 0, "open must not upgrade an earlier schema");
+        let marker: String = conn
+            .query_row(
+                "SELECT applied_on FROM __rusqlite_migrations WHERE version = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker, "earlier-build");
     }
 
     #[test]
