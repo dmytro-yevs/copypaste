@@ -1024,12 +1024,15 @@ mod tests {
             let response = copy_plain_text(&state, request, item_id);
             assert_eq!(
                 response.error_code,
-                Some(ErrorCode::InvalidRequest),
+                Some(ErrorCode::UnsupportedContent),
                 "{item_id}"
             );
         }
         let unknown_native = copy(&state, 6, &unknown.id);
-        assert_eq!(unknown_native.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(
+            unknown_native.error_code,
+            Some(ErrorCode::UnsupportedContent)
+        );
         assert_eq!(writes.count(), 2, "a display placeholder was written");
 
         let listed = match list(&state, 7, 20, None).data {
