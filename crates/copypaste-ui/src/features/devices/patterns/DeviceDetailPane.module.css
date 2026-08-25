@@ -8,7 +8,16 @@
 .headingCopy { min-inline-size: 0; flex: 1; }
 .name { min-inline-size: 0; margin: 0; font-size: var(--fs-lg); overflow-wrap: anywhere; }
 .headingCopy > p { margin: var(--s-1) 0 0; color: var(--dim); font-size: var(--fs-xs); }
-.statList { margin: var(--s-4) 0 var(--s-5); }
+.statList {
+  display: grid;
+  margin: var(--s-4) 0 var(--s-5);
+  row-gap: var(--s-1);
+}
+
+.statList > * {
+  padding: var(--s-2) var(--s-1);
+  border-block-end-color: var(--border);
+}
 .actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
 .actions > * { inline-size: 100%; }
 

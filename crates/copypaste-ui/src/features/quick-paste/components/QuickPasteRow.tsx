@@ -1,7 +1,7 @@
 import { ActionButton } from "@/components/shared";
 import {
   Button,
-  ControlShortcut,
+  ShortcutBadge,
   Surface,
   TooltipContent,
   TooltipPortal,
@@ -149,9 +149,9 @@ export function QuickPasteRow({
         />
       </div>
       {shortcut !== null ? (
-        <ControlShortcut aria-hidden="true" className={styles.shortcut}>
+        <ShortcutBadge aria-hidden="true" className={styles.shortcut}>
           {shortcut}
-        </ControlShortcut>
+        </ShortcutBadge>
       ) : null}
       <ActionButton
         variant="ghost"
