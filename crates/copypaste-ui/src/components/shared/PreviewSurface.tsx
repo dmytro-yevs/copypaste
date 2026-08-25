@@ -14,5 +14,5 @@ const previewVariants = cva(styles.root, {
 });
 
 export function PreviewSurface({ className, padding, scroll, ...props }: ComponentProps<typeof Surface> & SurfaceVariants & VariantProps<typeof previewVariants>) {
-  return <Surface className={cn(previewVariants({ padding, scroll }), className)} {...props} />;
+  return <Surface data-slot="preview-surface" className={cn(previewVariants({ padding, scroll }), className)} {...props} />;
 }
