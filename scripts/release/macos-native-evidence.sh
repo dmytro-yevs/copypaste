@@ -123,6 +123,7 @@ python3 scripts/release/write-native-evidence.py \
   --commit "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
   --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
   --elapsed-ms "$((ready_ms - start_ms))" \
+  --feature-state devices=native-shell \
   --artifact screenshot=screenshot.png \
   --artifact accessibility=ax.log \
   --artifact measurement=latency.json
