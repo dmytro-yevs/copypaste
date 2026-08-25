@@ -7,52 +7,24 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import Ajv from "ajv";
 import { verifyWindowsFeatureEvidence } from "./windows-feature-evidence.mjs";
 
-const PLATFORM_REQUIREMENTS = {
-  macos: {
-    environment: "hosted-runner",
-    scenario: "native-launch",
-    budgetMs: 3000,
-    assertions: new Set([
-      "installed app launched",
-      "native accessibility tree is non-empty",
-      "native accessibility surface exposes a menu bar and named elements",
-    ]),
-    artifacts: new Set(["screenshot", "accessibility", "measurement"]),
-  },
-  android: {
-    environment: "emulator",
-    scenario: "release-webview-ready",
-    budgetMs: 115000,
-    assertions: new Set([
-      "signed release app launched",
-      "WebView accessibility content painted",
-      "release smoke assertions passed",
-    ]),
-    artifacts: new Set(["screenshot", "accessibility", "measurement"]),
-    optionalArtifacts: new Set(["diagnostic-log"]),
-  },
-  windows: {
-    environment: "hosted-runner",
-    scenario: "windows-installed-release",
-    budgetMs: 30000,
-    assertions: new Set([
-      "installer integrity passed",
-      "installed app launched",
-      "installed sidecar launched",
-      "named-pipe and clipboard passed",
-      "update feed contract matched signing mode",
-      "in-place update passed",
-      "feature-specific UI states captured",
-      "screenshot protection restored",
-      "uninstall passed",
-    ]),
-    artifacts: new Set(["screenshot", "accessibility", "test-log", "measurement", "feature-evidence"]),
-  },
-};
-
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+const FEATURE_STATE_PATTERN = /^([a-z0-9][a-z0-9_-]*):([a-z0-9][a-z0-9_-]*)=([a-z0-9][a-z0-9_-]*)$/;
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const policy = JSON.parse(
+  await readFile(path.join(scriptDirectory, "../../../config/native-evidence-policy.json"), "utf8"),
+);
+const PLATFORM_REQUIREMENTS = Object.fromEntries(
+  Object.entries(policy.platforms).map(([platform, requirement]) => [platform, {
+    environment: requirement.environment,
+    scenario: requirement.scenario,
+    budgetMs: requirement.budget_ms,
+    assertions: new Set(requirement.assertions),
+    artifacts: new Set(requirement.artifacts.required),
+    optionalArtifacts: new Set(requirement.artifacts.optional),
+    repeatableArtifacts: new Set(requirement.artifacts.repeatable),
+  }]),
+);
 const schema = JSON.parse(
   await readFile(path.join(scriptDirectory, "native-parity-evidence.schema.json"), "utf8"),
 );
@@ -64,11 +36,12 @@ function parseArguments(argv) {
   let commit;
   let runId;
   let windowsUpdaterState = "updater-configured";
+  let expectedFeatureStates;
 
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
     const value = argv[index + 1];
-    if (!["--evidence", "--require", "--commit", "--run-id", "--windows-updater-state"].includes(option) || value === undefined) {
+    if (!["--evidence", "--require", "--commit", "--run-id", "--windows-updater-state", "--expect-feature-state"].includes(option) || value === undefined) {
       throw new Error("invalid command-line arguments");
     }
     index += 1;
@@ -76,6 +49,12 @@ function parseArguments(argv) {
     if (option === "--commit") commit = value;
     if (option === "--run-id") runId = value;
     if (option === "--windows-updater-state") windowsUpdaterState = value;
+    if (option === "--expect-feature-state") {
+      if (!FEATURE_STATE_PATTERN.test(value)) throw new Error("invalid expected feature state");
+      expectedFeatureStates ??= new Set();
+      if (expectedFeatureStates.has(value)) throw new Error("duplicate expected feature state");
+      expectedFeatureStates.add(value);
+    }
     if (option === "--require") {
       for (const platform of value.split(",").filter(Boolean)) required.add(platform);
     }
@@ -93,7 +72,7 @@ function parseArguments(argv) {
   if (!["updater-configured", "updater-unconfigured"].includes(windowsUpdaterState)) {
     throw new Error("--windows-updater-state must be updater-configured or updater-unconfigured");
   }
-  return { commit, evidence, required, runId, windowsUpdaterState };
+  return { commit, evidence, expectedFeatureStates, required, runId, windowsUpdaterState };
 }
 
 function schemaErrors() {
@@ -132,9 +111,7 @@ async function verifyArtifacts(receiptPath, receipt, label) {
     ...(requirement.optionalArtifacts ?? []),
   ]);
   const kinds = new Set();
-  const repeatableKinds = receipt.platform === "windows"
-    ? new Set(["screenshot", "accessibility"])
-    : new Set();
+  const repeatableKinds = requirement.repeatableArtifacts;
   const declaredPaths = new Set();
   const resolvedPaths = new Set();
   const fileIdentities = new Set();
@@ -206,7 +183,14 @@ async function verifyArtifacts(receiptPath, receipt, label) {
   if (missing.length > 0) throw new Error(`${label} lacks ${missing.join(", ")} evidence`);
 }
 
-export async function validateEvidence({ commit, evidence, required, runId, windowsUpdaterState = "updater-configured" }) {
+export async function validateEvidence({
+  commit,
+  evidence,
+  expectedFeatureStates,
+  required,
+  runId,
+  windowsUpdaterState = "updater-configured",
+}) {
   if (!RUN_ID_PATTERN.test(runId ?? "")) throw new Error("expected workflow run ID is required");
   const receipts = new Map();
   let observedCommit = commit;
@@ -250,6 +234,24 @@ export async function validateEvidence({ commit, evidence, required, runId, wind
   const unexpected = [...actual].filter((platform) => !required.has(platform));
   if (missing.length > 0) throw new Error(`missing required evidence for ${missing.join(", ")}`);
   if (unexpected.length > 0) throw new Error(`unexpected evidence for ${unexpected.join(", ")}`);
+  const observedFeatureStates = new Set();
+  for (const receipt of receipts.values()) {
+    for (const featureState of receipt.feature_states ?? []) {
+      const identity = `${receipt.platform}:${featureState.feature_id}=${featureState.state}`;
+      if (observedFeatureStates.has(identity)) throw new Error(`duplicate feature state ${identity}`);
+      observedFeatureStates.add(identity);
+    }
+  }
+  if (expectedFeatureStates !== undefined) {
+    const missingFeatureStates = [...expectedFeatureStates].filter((identity) => !observedFeatureStates.has(identity));
+    const unexpectedFeatureStates = [...observedFeatureStates].filter((identity) => !expectedFeatureStates.has(identity));
+    if (missingFeatureStates.length > 0) {
+      throw new Error(`missing required feature states ${missingFeatureStates.join(", ")}`);
+    }
+    if (unexpectedFeatureStates.length > 0) {
+      throw new Error(`unexpected feature states ${unexpectedFeatureStates.join(", ")}`);
+    }
+  }
   return [...receipts.values()];
 }
 

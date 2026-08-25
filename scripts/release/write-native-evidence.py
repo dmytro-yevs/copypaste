@@ -4,34 +4,40 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
 
+from native_evidence_policy import load_policy
 from png_evidence import validate_png
 
 
-KINDS = {"screenshot", "accessibility", "measurement", "test-log", "diagnostic-log", "feature-evidence"}
+POLICY = load_policy()
+KINDS = set(POLICY["artifact_kinds"])
+PLATFORMS = POLICY["platforms"]
+FEATURE_STATE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def parser():
     result = argparse.ArgumentParser()
     result.add_argument("--output", required=True)
-    result.add_argument("--platform", choices=("macos", "android", "windows"), required=True)
+    result.add_argument("--platform", choices=tuple(PLATFORMS), required=True)
     result.add_argument(
         "--environment",
-        choices=("hosted-runner", "emulator", "physical-device"),
+        choices=tuple(POLICY["environments"]),
         required=True,
     )
     result.add_argument("--os-version", required=True)
     result.add_argument("--architecture", required=True)
     result.add_argument("--commit", default=os.environ.get("GITHUB_SHA"))
     result.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID"))
-    result.add_argument("--scenario", required=True)
+    result.add_argument("--scenario")
     result.add_argument("--elapsed-ms", type=int, required=True)
-    result.add_argument("--budget-ms", type=int, required=True)
+    result.add_argument("--budget-ms", type=int)
     result.add_argument("--assertion", action="append", default=[])
     result.add_argument("--artifact", action="append", default=[])
+    result.add_argument("--feature-state", action="append", default=[])
     return result
 
 
@@ -67,14 +73,25 @@ def artifact_record(root, value):
 
 def main():
     args = parser().parse_args()
+    requirement = PLATFORMS[args.platform]
     if not args.commit or len(args.commit) != 40 or any(c not in "0123456789abcdef" for c in args.commit):
         raise SystemExit("write-native-evidence: --commit must be a lowercase 40-character Git SHA")
     if not args.run_id:
         raise SystemExit("write-native-evidence: --run-id is required outside GitHub Actions")
-    if args.elapsed_ms < 0 or args.budget_ms < 1:
+    if args.elapsed_ms < 0:
         raise SystemExit("write-native-evidence: latency values are invalid")
-    if not args.assertion or not args.artifact:
-        raise SystemExit("write-native-evidence: assertions and artifacts are required")
+    if args.elapsed_ms > requirement["budget_ms"]:
+        raise SystemExit(f"write-native-evidence: {args.platform} latency exceeds native evidence policy")
+    if args.environment != requirement["environment"]:
+        raise SystemExit(f"write-native-evidence: {args.platform} release evidence requires {requirement['environment']}")
+    if args.scenario is not None and args.scenario != requirement["scenario"]:
+        raise SystemExit(f"write-native-evidence: {args.platform} scenario contradicts native evidence policy")
+    if args.budget_ms is not None and args.budget_ms != requirement["budget_ms"]:
+        raise SystemExit(f"write-native-evidence: {args.platform} budget contradicts native evidence policy")
+    if args.assertion and set(args.assertion) != set(requirement["assertions"]):
+        raise SystemExit(f"write-native-evidence: {args.platform} assertions contradict native evidence policy")
+    if not args.artifact:
+        raise SystemExit("write-native-evidence: artifacts are required")
 
     output = pathlib.Path(args.output)
     try:
@@ -85,22 +102,45 @@ def main():
         artifacts = [artifact_record(output.parent, item) for item in args.artifact]
     except ValueError as error:
         raise SystemExit(f"write-native-evidence: {error}") from None
+    artifact_policy = requirement["artifacts"]
+    kinds = [artifact["kind"] for artifact in artifacts]
+    allowed = set(artifact_policy["required"]) | set(artifact_policy["optional"])
+    missing = set(artifact_policy["required"]) - set(kinds)
+    unexpected = set(kinds) - allowed
+    duplicates = {kind for kind in kinds if kinds.count(kind) > 1} - set(artifact_policy["repeatable"])
+    if missing or unexpected or duplicates:
+        raise SystemExit("write-native-evidence: artifact set contradicts native evidence policy")
+
+    feature_states = []
+    for value in args.feature_state:
+        try:
+            feature_id, state = value.split("=", 1)
+        except ValueError:
+            raise SystemExit("write-native-evidence: feature state must use FEATURE_ID=STATE") from None
+        if not FEATURE_STATE_PATTERN.fullmatch(feature_id) or not FEATURE_STATE_PATTERN.fullmatch(state):
+            raise SystemExit("write-native-evidence: feature state identifiers are invalid")
+        feature_states.append({"feature_id": feature_id, "state": state})
+    identities = {(item["feature_id"], item["state"]) for item in feature_states}
+    if len(identities) != len(feature_states):
+        raise SystemExit("write-native-evidence: duplicate feature state")
 
     receipt = {
-        "schema_version": 1,
+        "schema_version": POLICY["receipt_schema_version"],
         "platform": args.platform,
         "environment": args.environment,
         "os_version": args.os_version,
         "architecture": args.architecture,
         "source": {"commit": args.commit, "run_id": args.run_id},
         "scenario": {
-            "name": args.scenario,
+            "name": requirement["scenario"],
             "elapsed_ms": args.elapsed_ms,
-            "budget_ms": args.budget_ms,
+            "budget_ms": requirement["budget_ms"],
         },
-        "assertions": args.assertion,
+        "assertions": requirement["assertions"],
         "artifacts": artifacts,
     }
+    if feature_states:
+        receipt["feature_states"] = feature_states
     try:
         with tempfile.NamedTemporaryFile("w", dir=output.parent, delete=False, encoding="utf-8") as temp:
             json.dump(receipt, temp, indent=2)
@@ -116,6 +156,8 @@ def self_test():
         from PIL import Image, ImageDraw
 
         root = pathlib.Path(directory)
+        (root / "accessibility.txt").write_text("named native accessibility node\n")
+        (root / "measurement.json").write_text('{"elapsed_ms":1}\n')
         good = root / "good.png"
         image = Image.new("RGB", (2, 2), (220, 38, 38))
         image.putpixel((1, 1), (255, 255, 255))
@@ -157,10 +199,9 @@ def self_test():
         }
         common = [
             sys.executable, __file__, "--platform", "android",
-            "--environment", "emulator", "--os-version", "API 33",
+            "--environment", "physical-device", "--os-version", "API 33",
             "--architecture", "x86_64", "--commit", "a" * 40,
-            "--run-id", "self-test", "--scenario", "release-webview-ready",
-            "--elapsed-ms", "1", "--budget-ms", "2", "--assertion", "passed",
+            "--run-id", "self-test", "--elapsed-ms", "1",
         ]
         for name, content in fixtures.items():
             screenshot = root / name
@@ -168,7 +209,12 @@ def self_test():
                 screenshot.write_bytes(content)
             receipt = root / f"{name}.json"
             result = subprocess.run(
-                common + ["--output", os.fspath(receipt), "--artifact", f"screenshot={name}"],
+                common + [
+                    "--output", os.fspath(receipt),
+                    "--artifact", f"screenshot={name}",
+                    "--artifact", "accessibility=accessibility.txt",
+                    "--artifact", "measurement=measurement.json",
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -178,6 +224,22 @@ def self_test():
                     raise SystemExit(f"valid PNG self-test failed: {result.stderr.strip()}")
             elif result.returncode == 0 or receipt.exists():
                 raise SystemExit(f"{name} produced a native evidence receipt")
+        emulator = list(common)
+        emulator[emulator.index("physical-device")] = "emulator"
+        emulator_receipt = root / "emulator.json"
+        result = subprocess.run(
+            emulator + [
+                "--output", os.fspath(emulator_receipt),
+                "--artifact", "screenshot=good.png",
+                "--artifact", "accessibility=accessibility.txt",
+                "--artifact", "measurement=measurement.json",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 or emulator_receipt.exists():
+            raise SystemExit("emulator produced a physical Android publication receipt")
     print("native evidence writer self-test passed")
 
 

@@ -6,6 +6,8 @@ import sys
 
 import yaml
 
+import native_evidence_wiring
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -123,35 +125,10 @@ def exact_command_occurrences(job, expected):
 def contract_errors(release, nightly, ci):
     errors = []
     jobs = release.get("jobs") or {}
-    gate = jobs.get("native-parity") or {}
     windows = jobs.get("windows") or {}
     publish = jobs.get("publish") or {}
 
-    if not {"macos", "android-smoke", "windows"} <= set(gate.get("needs") or []):
-        errors.append("native parity must wait for all three shipped platforms")
-    if not {"native-parity", "windows"} <= set(publish.get("needs") or []):
-        errors.append("publication must wait for Windows and native parity")
-    required_receipts = {
-        "release-macos-native-evidence",
-        "release-android-smoke-evidence",
-        "release-windows-native-evidence",
-    }
-    if not required_receipts <= downloads(gate):
-        errors.append("native parity must download all three release receipts")
-
-    gate_commands = commands(gate)
-    receipt_paths = (
-        "artifacts/native-parity/macos/native-evidence.json",
-        "artifacts/native-parity/android/native-evidence.json",
-        "artifacts/native-parity/windows/native-evidence.json",
-    )
-    if (
-        "--require macos,android,windows" not in gate_commands
-        or "--run-id ${{ github.run_id }}" not in gate_commands
-        or any(path not in gate_commands for path in receipt_paths)
-        or gate_commands.count("native-evidence.json") != 3
-    ):
-        errors.append("release gate must validate exactly three run-bound native receipts")
+    errors.extend(native_evidence_wiring.contract_errors(release))
 
     windows_commands = commands(windows)
     if (
@@ -330,6 +307,7 @@ def contract_errors(release, nightly, ci):
         errors.append("release Windows packaging must consume an x86_64 prebuilt sidecar artifact")
     requirements_producers = (
         (jobs.get("macos") or {}, "smoke-macos-dmg.sh", "release macOS evidence"),
+        (jobs.get("android-hardware") or {}, "android-smoke-release.sh", "release physical Android evidence"),
         (jobs.get("android-smoke") or {}, "android-release-emulator-legs.sh", "release Android API 36 evidence"),
         (jobs.get("android-smoke-api33") or {}, "android-smoke-release.sh", "release Android API 33 evidence"),
         (windows, "windows-native-evidence.ps1", "release Windows evidence"),
@@ -354,7 +332,7 @@ def contract_errors(release, nightly, ci):
 
 
 def self_test(release, nightly, ci):
-    failures = 0
+    failures = native_evidence_wiring.self_test(release)
 
     def move_install_after_test(value, job_name, marker):
         job_steps = value["jobs"][job_name]["steps"]

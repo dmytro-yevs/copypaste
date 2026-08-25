@@ -474,8 +474,16 @@ try {
             "screenshot protection restored"
             "uninstall passed"
         ) | Set-Content -LiteralPath $logPath -Encoding utf8
-        $measurement = @{ platform = "windows"; scenario = "installed-sidecar-ready"; p95_ms = 30000; samples_ms = @($timer.ElapsedMilliseconds) }
+        $policyScenario = (& python scripts/release/native_evidence_policy.py value --platform windows --field scenario).Trim()
+        Assert-True ($LASTEXITCODE -eq 0) "native evidence scenario policy is unavailable"
+        $policyBudget = [int]((& python scripts/release/native_evidence_policy.py value --platform windows --field budget_ms).Trim())
+        Assert-True ($LASTEXITCODE -eq 0) "native evidence budget policy is unavailable"
+        $measurement = @{ platform = "windows"; scenario = $policyScenario; p95_ms = $policyBudget; samples_ms = @($timer.ElapsedMilliseconds) }
         $measurement | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidencePath "latency.json") -Encoding utf8
+        [string[]]$featureStateArguments = @($featureStates | ForEach-Object {
+            "--feature-state"
+            "$($_.feature)=$($_.state)"
+        })
         python scripts/release/write-native-evidence.py `
             --output (Join-Path $evidencePath "native-evidence.json") `
             --platform windows `
@@ -484,18 +492,8 @@ try {
             --architecture $env:PROCESSOR_ARCHITECTURE `
             --commit $Commit `
             --run-id $RunId `
-            --scenario windows-installed-release `
             --elapsed-ms $timer.ElapsedMilliseconds `
-            --budget-ms 30000 `
-            --assertion "installer integrity passed" `
-            --assertion "installed app launched" `
-            --assertion "installed sidecar launched" `
-            --assertion "named-pipe and clipboard passed" `
-            --assertion "update feed contract matched signing mode" `
-            --assertion "in-place update passed" `
-            --assertion "feature-specific UI states captured" `
-            --assertion "screenshot protection restored" `
-            --assertion "uninstall passed" `
+            @featureStateArguments `
             --artifact screenshot=history/screenshot.png `
             --artifact accessibility=history/accessibility.json `
             --artifact screenshot=capture/screenshot.png `

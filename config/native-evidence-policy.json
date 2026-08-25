@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "receipt_schema_version": 1,
+  "environments": ["hosted-runner", "emulator", "physical-device"],
+  "artifact_kinds": [
+    "screenshot",
+    "accessibility",
+    "measurement",
+    "test-log",
+    "diagnostic-log",
+    "feature-evidence"
+  ],
+  "platforms": {
+    "macos": {
+      "environment": "hosted-runner",
+      "scenario": "native-launch",
+      "budget_ms": 3000,
+      "assertions": [
+        "installed app launched",
+        "native accessibility tree is non-empty",
+        "native accessibility surface exposes a menu bar and named elements"
+      ],
+      "artifacts": {
+        "required": ["screenshot", "accessibility", "measurement"],
+        "optional": [],
+        "repeatable": []
+      },
+      "release_artifact": "release-macos-native-evidence"
+    },
+    "android": {
+      "environment": "physical-device",
+      "scenario": "release-webview-ready",
+      "budget_ms": 115000,
+      "assertions": [
+        "signed release app launched",
+        "WebView accessibility content painted",
+        "release smoke assertions passed"
+      ],
+      "artifacts": {
+        "required": ["screenshot", "accessibility", "measurement"],
+        "optional": ["diagnostic-log"],
+        "repeatable": []
+      },
+      "release_artifact": "release-android-physical-evidence"
+    },
+    "windows": {
+      "environment": "hosted-runner",
+      "scenario": "windows-installed-release",
+      "budget_ms": 30000,
+      "assertions": [
+        "installer integrity passed",
+        "installed app launched",
+        "installed sidecar launched",
+        "named-pipe and clipboard passed",
+        "update feed contract matched signing mode",
+        "in-place update passed",
+        "feature-specific UI states captured",
+        "screenshot protection restored",
+        "uninstall passed"
+      ],
+      "artifacts": {
+        "required": ["screenshot", "accessibility", "test-log", "measurement", "feature-evidence"],
+        "optional": [],
+        "repeatable": ["screenshot", "accessibility"]
+      },
+      "release_artifact": "release-windows-native-evidence"
+    }
+  }
+}

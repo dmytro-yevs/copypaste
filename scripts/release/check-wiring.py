@@ -19,6 +19,8 @@ from ci_contract import (
     windows_workspace_shards_hold,
 )
 
+import native_evidence_wiring
+
 SELF_TEST = "--self-test" in sys.argv
 STRICT = "--strict" in sys.argv
 
@@ -725,15 +727,19 @@ if emu:
 
 release = docs.get("release.yml") or {}
 release_jobs = release.get("jobs") or {}
-hardware = release_jobs.get("android-hardware") or {}
-rec(not hardware, "release.yml does not wait on a physical arm64 Android runner",
-    "there is no labelled device runner; emulator smoke is the Android publish gate")
+hardware_valid, hardware_detail = native_evidence_wiring.physical_android_contract(release)
+rec(hardware_valid,
+    "release.yml requires physical arm64 Android evidence",
+    hardware_detail)
 publish_needs = (release_jobs.get("publish") or {}).get("needs") or []
 publish_needs = publish_needs if isinstance(publish_needs, list) else [publish_needs]
-rec("android-hardware" not in publish_needs,
-    "publishing does not require a physical Android hardware gate", repr(publish_needs))
+native_parity_needs = (release_jobs.get("native-parity") or {}).get("needs") or []
+native_parity_needs = native_parity_needs if isinstance(native_parity_needs, list) else [native_parity_needs]
+rec("android-hardware" in native_parity_needs and "native-parity" in publish_needs,
+    "publishing requires the physical Android hardware gate through native parity",
+    repr({"native-parity": native_parity_needs, "publish": publish_needs}))
 rec("android-smoke" in publish_needs,
-    "publishing requires the Android emulator smoke gate", repr(publish_needs))
+    "publishing retains the Android emulator compatibility gate", repr(publish_needs))
 
 release_smoke = release_jobs.get("android-smoke") or {}
 release_runner_scripts = [str((step.get("with") or {}).get("script", ""))

@@ -1225,6 +1225,53 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  android-hardware:
+    name: Validate published Android APK on a physical device
+    needs: [version, android]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: [self-hosted, linux, ARM64, android-device]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install native evidence Python dependencies
+        run: python3 -m pip install --requirement requirements-ci.txt
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android
+          path: dist
+
+      - name: Select the attached physical Android device
+        run: |
+          set -euo pipefail
+          mapfile -t devices < <(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
+          (( ${#devices[@]} == 1 )) || { echo "::error::Expected exactly one authorized Android device"; exit 1; }
+          serial="${devices[0]}"
+          [[ "$serial" != emulator-* ]] || { echo "::error::Emulator serial cannot produce publication evidence"; exit 1; }
+          qemu="$(adb -s "$serial" shell getprop ro.kernel.qemu | tr -d '\r')"
+          [[ "$qemu" != "1" ]] || { echo "::error::Emulated Android cannot produce publication evidence"; exit 1; }
+          echo "ANDROID_SERIAL=$serial" >> "$GITHUB_ENV"
+
+      - name: Verify and exercise the release artifact on hardware
+        env:
+          APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
+          SMOKE_OUT: artifacts/release-android-physical
+        run: |
+          set -euo pipefail
+          sidecar="${APK}.sha256"
+          [[ -f "$APK" && -f "$sidecar" ]] || { echo "::error::Android release artifact or digest is missing"; exit 1; }
+          ( cd dist && sha256sum --check "$(basename "$sidecar")" )
+          bash ./scripts/release/android-smoke-release.sh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-android-physical-evidence
+          path: artifacts/release-android-physical
+          if-no-files-found: error
+          retention-days: 14
+
   windows-sidecars:
     name: Build Windows sidecars
     needs: version
@@ -1365,7 +1412,7 @@ jobs:
 
   native-parity:
     name: Gate publication on native evidence
-    needs: [version, macos, android-smoke, windows]
+    needs: [version, macos, android-hardware, windows]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -1380,7 +1427,7 @@ jobs:
           path: artifacts/native-parity/macos
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: release-android-smoke-evidence
+          name: release-android-physical-evidence
           path: artifacts/native-parity/android
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -1395,14 +1442,21 @@ jobs:
         working-directory: crates/copypaste-ui
       - name: Validate release-native parity
         working-directory: crates/copypaste-ui
-        run: >-
-          npm run check:native-parity --
-          --require macos,android,windows
-          --commit ${{ github.sha }}
-          --run-id ${{ github.run_id }}
-          --evidence ${{ github.workspace }}/artifacts/native-parity/macos/native-evidence.json
-          --evidence ${{ github.workspace }}/artifacts/native-parity/android/native-evidence.json
-          --evidence ${{ github.workspace }}/artifacts/native-parity/windows/native-evidence.json
+        run: |
+          set -euo pipefail
+          expected=()
+          while IFS= read -r state; do
+            [[ -n "$state" ]] && expected+=(--expect-feature-state "$state")
+          done < <(python3 "$GITHUB_WORKSPACE/scripts/check-feature-ledger.py" --receipt-expectations)
+          (( ${#expected[@]} > 0 )) || { echo "::error::No verified feature-state expectations were produced"; exit 1; }
+          npm run check:native-parity -- \
+            --require macos,android,windows \
+            --commit ${{ github.sha }} \
+            --run-id ${{ github.run_id }} \
+            --evidence ${{ github.workspace }}/artifacts/native-parity/macos/native-evidence.json \
+            --evidence ${{ github.workspace }}/artifacts/native-parity/android/native-evidence.json \
+            --evidence ${{ github.workspace }}/artifacts/native-parity/windows/native-evidence.json \
+            "${expected[@]}"
 
   # Generate the cask and the formula from the artefacts that were actually
   # built, so the checksums come from the files being published rather than
