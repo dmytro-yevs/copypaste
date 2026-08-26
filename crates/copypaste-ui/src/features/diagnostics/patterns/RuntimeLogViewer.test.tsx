@@ -38,7 +38,9 @@ describe("RuntimeLogViewer errors", () => {
         );
 
         expect(screen.getByText("No runtime events match these filters.")).toBeTruthy();
-        expect(container.querySelector("[data-runtime-log-empty]")).toBeTruthy();
+        const empty = container.querySelector("[data-runtime-log-empty]");
+        expect(empty).toBeTruthy();
+        expect(empty?.querySelector("section")).toBeNull();
     });
 
     it("uses shared alert notices for feed loss signals", () => {
