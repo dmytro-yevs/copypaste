@@ -15,7 +15,7 @@
     },
     "toast": {
       "$value": 40,
-      "$description": "Below the scrim on purpose: a toast must never occlude an open dialog, and the undo toast in particular must sit under one (SCRH-12). v1 ordered these the other way round and had to special-case the undo toast."
+      "$description": "Below the scrim on purpose: a toast must never occlude an open dialog, and the undo toast in particular must sit under one (SCRH-12)."
     },
     "scrim": {
       "$value": 60,

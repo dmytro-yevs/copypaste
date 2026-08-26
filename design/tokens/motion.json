@@ -1,6 +1,11 @@
 {
   "motion": {
     "$description": "Motion: Tailwind v4's default transition duration and its ease-out curve, which is what shadcn's own animations are timed against. All three durations collapse to 0ms under prefers-reduced-motion (A11Y-11); that override is emitted into the generated CSS from the reducedMotion extension below, so the accessibility rule lives with the token rather than in a stylesheet someone has to remember.",
+    "dur-none": {
+      "$type": "duration",
+      "$value": "0ms",
+      "$description": "No delay. Use where a staged motion variable needs an explicit zero-valued first entry."
+    },
     "dur-fast": {
       "$type": "duration",
       "$value": "150ms",

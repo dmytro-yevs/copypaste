@@ -53,6 +53,7 @@
   --r-window: 14px;
   --r-empty-ic: 16px;
   --r-pill: 999px;
+  --dur-none: 0ms;
   --dur-fast: 150ms;
   --dur: 200ms;
   --dur-theme: 300ms;

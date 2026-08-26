@@ -1,6 +1,6 @@
 {
   "radius": {
-    "$description": "Corner radii: shadcn/ui's ramp, derived from its base --radius of 0.625rem (10px) as sm = base-4, md = base-2, lg = base, xl = base+4. v1 had a per-component radius for every component (7px chip, 9px input, 13px card); one ramp with four steps is what a component library expects, and it is what keeps a control nested in a row nested in a card looking like one system.",
+    "$description": "Corner radii: shadcn/ui's ramp, derived from its base --radius of 0.625rem (10px) as sm = base-4, md = base-2, lg = base, xl = base+4. One four-step ramp keeps a control nested in a row nested in a card looking like one system.",
     "$type": "dimension",
     "r-xs": {
       "$value": "4px",
@@ -20,7 +20,7 @@
     },
     "r-input": {
       "$value": "{radius.r-ctl}",
-      "$description": "Alias: fields share the control radius. v1 gave them their own 9px."
+      "$description": "Alias: fields share the control radius."
     },
     "r-row": {
       "$value": "10px",
