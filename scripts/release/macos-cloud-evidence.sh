@@ -120,7 +120,6 @@ launch_app() { # <unconfigured|configured>
 }
 
 open_cloud() {
-    mac_ax press "Settings" >/dev/null || return 1
     mac_wait_label "Sync" "$OUT/settings.txt" 15 || return 1
     mac_ax press "Sync" >/dev/null || return 1
     mac_wait_label "Cloud sync" "$OUT/cloud.txt" 15
