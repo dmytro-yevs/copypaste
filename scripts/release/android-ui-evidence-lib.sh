@@ -254,7 +254,7 @@ reach_settings_tab() { # <artifact> [timeout]
     while (( SECONDS - started < timeout )); do
         if dump_hierarchy "$artifact"; then
             [[ -n "$(action_center "$artifact" "Settings")" ]] && return 0
-            point="$(action_center "$artifact" "Skip setup")"
+            point="$(action_center "$artifact" "Explore first")"
             [[ -n "$point" ]] && sh_ input tap $point >/dev/null
         fi
         sleep 1
