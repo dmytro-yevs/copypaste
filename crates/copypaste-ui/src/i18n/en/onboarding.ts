@@ -53,8 +53,9 @@ export const onboarding = {
   },
 
   settings: {
-    title: "Show setup again",
-    description: "Opens the first-run steps. Your clipboard history is not changed.",
-    action: "Show setup",
+    sectionTitle: "Welcome",
+    title: "Welcome & setup",
+    description: "Review the welcome and first-run setup. Your clipboard history is not changed.",
+    action: "Open welcome",
   },
 } as const;

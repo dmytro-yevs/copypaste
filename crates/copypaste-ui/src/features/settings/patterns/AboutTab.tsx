@@ -6,6 +6,7 @@ import {
   MetadataList,
   MetadataRow,
   MetadataValue,
+  SettingsRow,
   SkeletonText,
 } from "@/components/shared";
 import {
@@ -22,6 +23,7 @@ import {
 } from "@/components/ui";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { UpdateRow } from "@/features/settings/components/UpdateRow";
+import { Section } from "@/features/settings/components/Section";
 import { statusService, useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
 import { appVersion as readAppVersion } from "@/lib/appVersion";
@@ -32,6 +34,7 @@ import {
   PRODUCT_REPOSITORY_URL,
 } from "@/lib/productLinks";
 import { usePrefs } from "@/store/prefs";
+import { useUi } from "@/store/ui";
 import styles from "./AboutTab.module.css";
 
 const REAL_BACKENDS = /pasteboard|nspasteboard|system/i;
@@ -57,6 +60,7 @@ export function AboutTab() {
   const { t } = useTranslation();
   const status = useStatus(statusService);
   const resetPrefs = usePrefs((state) => state.reset);
+  const openOnboarding = useUi((state) => state.openOnboarding);
   const [version, setVersion] = useState(__COPYPASTE_APP_VERSION__);
   const [resetOpen, setResetOpen] = useState(false);
   const resetDescriptionId = useId();
@@ -178,6 +182,17 @@ export function AboutTab() {
           ))}
         </div>
       </section>
+
+      <Section title={t("onboarding.settings.sectionTitle")}>
+        <SettingsRow
+          title={t("onboarding.settings.title")}
+          description={t("onboarding.settings.description")}
+        >
+          <Button variant="secondary" size="sm" onClick={openOnboarding}>
+            {t("onboarding.settings.action")}
+          </Button>
+        </SettingsRow>
+      </Section>
 
       <section
         className={styles.resetSection}
