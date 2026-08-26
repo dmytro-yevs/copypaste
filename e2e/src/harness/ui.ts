@@ -289,25 +289,26 @@ export async function byLabel(
 }
 
 /**
- * First launch owns the window until setup is skipped. History E2E is the
- * product shell, not the wizard.
+ * First launch owns the window until the welcome screen is dismissed. History
+ * E2E is the product shell, not the welcome flow.
  */
 export async function dismissFirstRun(browser: Browser): Promise<void> {
   await browser.waitUntil(
     async () => {
-      const skip = await browser.$("button=Explore first");
+      const explore = await browser.$("button=Explore first");
       const nav = await browser.$('nav[aria-label="Primary"]');
-      return (await skip.isExisting()) || (await nav.isExisting());
+      return (await explore.isExisting()) || (await nav.isExisting());
     },
     {
       timeout: 30_000,
       timeoutMsg: "neither Explore first nor the primary navigation appeared",
     },
   );
-  const skip = await browser.$("button=Explore first");
-  if (await skip.isExisting()) {
-    await skip.waitForClickable({ timeout: 15_000 });
-    await skip.click();
+  const explore = await browser.$("button=Explore first");
+  if (await explore.isExisting()) {
+    await explore.scrollIntoView({ block: "center", inline: "center" });
+    await explore.waitForClickable({ timeout: 15_000 });
+    await explore.click();
     await (await browser.$('nav[aria-label="Primary"]')).waitForExist({
       timeout: 15_000,
     });
