@@ -129,6 +129,20 @@
   animation-duration: calc(var(--dur) * 35);
 }
 .networkHub svg { inline-size: var(--s-8); block-size: var(--s-8); }
+.networkSecureBadge {
+  position: absolute;
+  inset-inline-end: calc(var(--s-1) * -1);
+  inset-block-end: calc(var(--s-1) * -1);
+  display: grid;
+  inline-size: var(--s-7);
+  block-size: var(--s-7);
+  place-items: center;
+  border: var(--stroke-2) solid var(--elevated);
+  border-radius: var(--r-pill);
+  color: var(--on-accent);
+  background: var(--ok);
+}
+.networkSecureBadge svg { inline-size: var(--icon-xs); block-size: var(--icon-xs); }
 .deviceNode {
   position: absolute;
   z-index: 2;
@@ -162,7 +176,7 @@
 @keyframes onboarding-card-float { 50% { translate: 0 calc(var(--s-1) * -1.75); } }
 @keyframes onboarding-device-float { 50% { translate: 0 calc(var(--s-1) * -1.5); } }
 
-@media (--cp-sm) {
+@media (--cp-md) {
   .welcome,
   .captureScene,
   .networkScene {
