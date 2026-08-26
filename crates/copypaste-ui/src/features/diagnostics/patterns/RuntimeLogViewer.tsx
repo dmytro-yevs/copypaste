@@ -4,7 +4,6 @@ import { toast } from "sonner";
 
 import {
     ActionButton,
-    EmptyState,
     IllustratedErrorState,
     InlineNotice,
     SearchField,
@@ -268,12 +267,13 @@ export function RuntimeLogViewer() {
                     }
                 />
             ) : events.length === 0 ? (
-                <div className={styles.emptyState} data-runtime-log-empty>
-                    <EmptyState
-                        compact
-                        icon="searchX"
-                        title={t("runtimeLog.noMatch")}
-                    />
+                <div
+                    className={styles.emptyState}
+                    data-runtime-log-empty
+                    role="status"
+                >
+                    <Icon name="searchX" size="lg" className={styles.emptyIcon} />
+                    <p className={styles.emptyCopy}>{t("runtimeLog.noMatch")}</p>
                 </div>
             ) : (
                 <>
