@@ -41,9 +41,19 @@ targetRules = ["generic-api-key"]
 regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.secret''']
 
 [[allowlists]]
+description = "Loopback browser-bridge fixture shared by the IPC and permission tests. The fixed hexadecimal value authenticates only their in-process mock."
+targetRules = ["generic-api-key"]
+regexes = ['''^0123456789abcdef0123456789abcdef$''']
+
+[[allowlists]]
+description = "Slack-shaped fixture in the publication-redaction test. The value is never sent and the assertion requires its exact bytes to disappear."
+targetRules = ["slack-bot-token"]
+regexes = ['''^xoxb-123456789[0]-1234567890ABCDE[F]$''']
+
+[[allowlists]]
 description = "Export/import e2e fixture. Deliberately not AKIAIOSFODNN7EXAMPLE, AWS's own published documentation key, which the default .+EXAMPLE allowlist already covers: the test asserts a credential smuggled in through an import is re-flagged, so the fixture has to clear that allowlist."
 targetRules = ["aws-access-token"]
-regexes = ['''AKIAIOSFODNN7SMUGGLE''']
+regexes = ['''^A[K]IAIOSFODNN7SMUGGLE$''']
 
 # The three below cannot be reshaped: each rule matches a *shape*, and the shape
 # is what the fixture exists to exercise. Manifest 07 measures these exact bytes,
