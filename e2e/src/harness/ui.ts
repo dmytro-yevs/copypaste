@@ -295,16 +295,16 @@ export async function byLabel(
 export async function dismissFirstRun(browser: Browser): Promise<void> {
   await browser.waitUntil(
     async () => {
-      const skip = await browser.$("button=Skip setup");
+      const skip = await browser.$("button=Explore first");
       const nav = await browser.$('nav[aria-label="Primary"]');
       return (await skip.isExisting()) || (await nav.isExisting());
     },
     {
       timeout: 30_000,
-      timeoutMsg: "neither Skip setup nor the primary navigation appeared",
+      timeoutMsg: "neither Explore first nor the primary navigation appeared",
     },
   );
-  const skip = await browser.$("button=Skip setup");
+  const skip = await browser.$("button=Explore first");
   if (await skip.isExisting()) {
     await skip.waitForClickable({ timeout: 15_000 });
     await skip.click();
