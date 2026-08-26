@@ -17,7 +17,7 @@ export const UI_DIR =
 
 /**
  * The app is a Tauri *dev* build unless it was built for release: a debug
- * binary loads `devUrl` (`http://localhost:1420`) rather than the bundled
+ * binary loads `devUrl` (`http://127.0.0.1:1420`) rather than the bundled
  * `frontendDist`. `strictPort` is set in vite.config.ts, so exactly one dev
  * server can exist per run — hence global setup owns it and test files do not.
  */

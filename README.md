@@ -122,7 +122,7 @@ npm run dev:web:daemon
 
 It starts a daemon and a loopback-only bridge on an ephemeral port. The bridge
 creates a one-run bearer token, allows requests only from Vite's
-`http://localhost:1420` origin, and exposes only the safe history/status/
+`http://127.0.0.1:1420` origin, and exposes only the safe history/status/
 settings/peer actions needed by the preview. It is not compiled into Tauri,
 release, or Android builds. The adapter deliberately refuses sensitive-item
 reveal, raw clipboard reads, file panels, and every production-only native
