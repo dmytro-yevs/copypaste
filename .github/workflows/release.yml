@@ -20,9 +20,7 @@ name: Release
 # UNVERIFIED
 # This project is developed on Linux. Every macOS-specific step below —
 # codesign, hdiutil, PlistBuddy, the Tauri macOS bundler, and whether the
-# resulting bundle actually launches — was written from documentation and from
-# v1's scripts on archive/v0.4.1-pre-rewrite. None of it has been executed on a
-# Mac. Treat the first run as an experiment and read the log.
+# resulting bundle launches — requires the native runner below.
 #
 # Why this is not cargo-dist
 # AGENTS.md rule 1 makes a maintained tool the default, so cargo-dist (now
@@ -1561,11 +1559,13 @@ jobs:
           bash scripts/release/android-updater-feed.sh --write-feed \
             "$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RELEASE_BASE_URL" \
             "$exe" "$win_sig" "$apk" "${apk}.sig" dist/latest.json
+          checksum_file="$(mktemp)"
           (
             cd dist
             find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' \
               | sort -z \
-              | xargs -0 sha256sum > SHA256SUMS
+              | xargs -0 sha256sum > "$checksum_file"
+            mv "$checksum_file" SHA256SUMS
           )
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

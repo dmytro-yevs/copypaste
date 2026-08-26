@@ -26,12 +26,19 @@ jobs:
     name: mutation gate (bash and python self-tests)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      NODE_PATH: ${{ github.workspace }}/crates/copypaste-ui/node_modules
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - name: Install release metadata dependencies
+        run: npm ci --prefix crates/copypaste-ui --ignore-scripts
 
       - name: Install the PNG decoder the evidence validators need
         run: python3 -m pip install --requirement requirements-ci.txt
