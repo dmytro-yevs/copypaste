@@ -1,17 +1,15 @@
 ## Highlights
 
-- Hardens Windows installer signing: validates the release certificate before
-  the build, bounds SignTool execution, verifies the signer and RFC 3161
-  timestamp, reports SignTool output on failure, and verifies project-generated
-  certificates under an explicit temporary trust anchor.
-- Retries transient initial Supabase Realtime connections within the existing
-  bounded cloud backoff budget.
-- Strengthens release evidence for signed Windows installers and in-place
-  updates, including signer identity, updater artifacts, and failure states.
-- Adds bounded Windows sidecar launch diagnostics that correlate process start
-  and stop events without leaking local paths into user-visible errors.
-- Pins the frontend toolchain consistently across release and platform CI to
-  reduce toolchain drift and shards expensive checks to keep CI bounded.
+- Refreshes the app shell, onboarding, settings, history states, and responsive
+  navigation so the same product flow works cleanly on desktop and Android.
+- Unifies clipboard permission, capture, source-app, and unsupported-state
+  handling across macOS, Android, and Windows while preserving native payloads.
+- Tightens device pairing and peer sync with shared deadlines, typed UI
+  contracts, and smaller protocol and session boundaries.
+- Makes v2 use only its own database and current contracts, removing retired
+  preference, pairing, deep-link, IPC, and prior-product compatibility paths.
+- Binds native release evidence to the exact commit and artifact, strengthens
+  redaction and Android manifest checks, and requires physical Android evidence.
 
 ## Not verified on this host
 
@@ -28,6 +26,13 @@ brew tap dmytro-yevs/copypaste
 brew install --cask copypaste     # the app
 brew install copypaste-cli        # the CLI and daemon
 ```
+
+The same release page also includes the Apple Silicon DMG for direct install.
+
+### Windows
+
+On Windows 10 or 11 (x86-64), download and run the
+`CopyPaste-…-windows-x86_64-setup.exe` asset from the release page.
 
 ### Android
 
