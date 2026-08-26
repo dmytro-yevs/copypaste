@@ -20,7 +20,14 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-log-report-lib.sh"
 
 metadata_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/android-metadata.mjs"
-APP_NAMESPACE="$(node "$metadata_tool" --field releaseApplicationId)"
+APP_NAMESPACE="$(node "$metadata_tool" --field releaseApplicationId)" || {
+    printf 'FATAL Android release application id could not be resolved\n' >&2
+    exit 1
+}
+[[ -n "$APP_NAMESPACE" ]] || {
+    printf 'FATAL Android release application id resolved empty\n' >&2
+    exit 1
+}
 PKG="${PKG:-$APP_NAMESPACE}"
 OUT="${SMOKE_OUT:-artifacts/android-smoke}"
 
