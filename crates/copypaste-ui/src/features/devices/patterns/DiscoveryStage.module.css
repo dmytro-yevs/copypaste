@@ -96,18 +96,48 @@
         var(--ease) infinite;
 }
 
-.errorBadge {
-    position: absolute;
-    inset-block-end: calc(var(--s-1) * -1);
-    inset-inline-end: calc(var(--s-1) * -1);
+.unavailable {
+    position: relative;
+    z-index: var(--z-sticky);
     display: grid;
-    inline-size: var(--s-5);
-    block-size: var(--s-5);
+    inline-size: min(calc(var(--s-9) * 7), calc(100% - var(--s-8)));
+    padding: var(--s-5);
+    grid-template-columns: var(--s-9) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--s-4);
+    border: var(--stroke-1) solid var(--status-error-border);
+    border-radius: var(--r-card);
+    background: var(--elevated);
+    box-shadow: var(--sh2);
+    text-align: start;
+}
+
+.unavailableIcon {
+    display: grid;
+    inline-size: var(--s-9);
+    block-size: var(--s-9);
     place-items: center;
-    border: var(--stroke-1) solid var(--card);
-    border-radius: var(--r-pill);
+    border-radius: var(--r-row);
     color: var(--err-strong);
     background: var(--status-error-bg);
+}
+
+.unavailableCopy {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--s-1);
+}
+
+.unavailableCopy strong {
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.unavailableCopy span {
+    color: var(--dim);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
 }
 
 .deviceLayer {

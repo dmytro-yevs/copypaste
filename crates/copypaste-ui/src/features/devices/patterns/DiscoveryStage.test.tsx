@@ -4,6 +4,26 @@ import { describe, expect, it, vi } from "vitest";
 import { DiscoveryStage } from "./DiscoveryStage";
 
 describe("DiscoveryStage radar", () => {
+    it("replaces the active radar with a static unavailable state", () => {
+        const { container } = render(
+            <DiscoveryStage state="error" devices={[]}>
+                <div>Not rendered</div>
+            </DiscoveryStage>,
+        );
+
+        expect(screen.getByRole("alert").textContent).toContain(
+            "Network discovery is unavailable",
+        );
+        expect(
+            screen.getByText("Devices on this network couldn’t be checked."),
+        ).toBeTruthy();
+        expect(
+            container.querySelector("[data-discovery-unavailable]"),
+        ).toBeTruthy();
+        expect(container.querySelector("[data-radar-sweep]")).toBeNull();
+        expect(container.querySelector("[data-radar-local-node]")).toBeNull();
+    });
+
     it("maps supplied devices to labeled radar cards and latency bands", () => {
         const onSelect = vi.fn();
         const { container, rerender } = render(
@@ -120,7 +140,7 @@ describe("DiscoveryStage radar", () => {
                 <div>Not rendered</div>
             </DiscoveryStage>,
         );
-        expect(container.querySelector("[data-radar-sweep]")).toBe(sweep);
+        expect(container.querySelector("[data-radar-sweep]")).toBeNull();
         expect(container.querySelector("[data-radar-local-node]")).toBe(
             localNode,
         );

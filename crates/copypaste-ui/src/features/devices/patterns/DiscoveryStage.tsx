@@ -131,7 +131,11 @@ export function DiscoveryStage({
                           : undefined
                 }
                 aria-atomic={role ? true : undefined}
-                aria-label={`${presentation.title} ${presentation.body}`}
+                aria-label={
+                    state === "error"
+                        ? undefined
+                        : `${presentation.title} ${presentation.body}`
+                }
             >
                 <div className={styles.radar} aria-label="Nearby device radar">
                     <svg
@@ -198,60 +202,79 @@ export function DiscoveryStage({
                                 />
                             ))}
                         </g>
-                        <g className={styles.sweep} data-radar-sweep>
-                            <path
-                                className={styles.sweepSector}
-                                data-radar-sweep-sector
-                                d="M50 50L103 39.7A54 54 0 0 1 103 60.3Z"
-                                fill="url(#discovery-sweep-fill)"
-                            />
-                        </g>
-                    </svg>
-                    <span
-                        className={styles.localNode}
-                        data-radar-local-node
-                        aria-hidden="true"
-                    >
-                        <BrandMark size="sidebar" />
-                        {state === "error" ? (
-                            <span className={styles.errorBadge}>
-                                <Icon name="wifiOff" size="xs" />
-                            </span>
+                        {busy ? (
+                            <g className={styles.sweep} data-radar-sweep>
+                                <path
+                                    className={styles.sweepSector}
+                                    data-radar-sweep-sector
+                                    d="M50 50L103 39.7A54 54 0 0 1 103 60.3Z"
+                                    fill="url(#discovery-sweep-fill)"
+                                />
+                            </g>
                         ) : null}
-                    </span>
-                    <span className={styles.deviceLayer}>
-                        {positioned.map(
-                            ({ device, distance, sector, motion }) => (
-                            <Button
-                                key={device.id}
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className={styles.radarDevice}
-                                data-sector={sector}
-                                data-distance={distance}
-                                data-selected={device.selected || undefined}
-                                style={motion}
-                                aria-pressed={device.selected}
-                                aria-label={`${device.name}. ${DEVICE_PLATFORM_LABELS[device.identity.platform]}. ${device.address}. ${typeof device.latencyMs !== "number" ? "Latency unavailable, shown in the unknown-distance band" : `${device.latencyMs} milliseconds`}. ${device.status}.`}
-                                onClick={device.onSelect}
+                    </svg>
+                    {state === "error" ? (
+                        <span
+                            className={styles.unavailable}
+                            data-discovery-unavailable
+                        >
+                            <span
+                                className={styles.unavailableIcon}
+                                aria-hidden="true"
                             >
-                                <span
-                                    className={styles.radarDeviceIcon}
-                                    aria-hidden="true"
-                                >
-                                    <DeviceKindIcon
-                                        identity={device.identity}
-                                        size="lg"
-                                    />
-                                </span>
-                                <span className={styles.radarDeviceCopy}>
-                                    <strong>{device.name}</strong>
-                                </span>
-                            </Button>
-                            ),
-                        )}
-                    </span>
+                                <Icon name="wifiOff" size="lg" />
+                            </span>
+                            <span className={styles.unavailableCopy}>
+                                <strong>{presentation.title}</strong>
+                                <span>{presentation.body}</span>
+                            </span>
+                        </span>
+                    ) : (
+                        <>
+                            <span
+                                className={styles.localNode}
+                                data-radar-local-node
+                                aria-hidden="true"
+                            >
+                                <BrandMark size="sidebar" />
+                            </span>
+                            <span className={styles.deviceLayer}>
+                                {positioned.map(
+                                    ({ device, distance, sector, motion }) => (
+                                        <Button
+                                            key={device.id}
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className={styles.radarDevice}
+                                            data-sector={sector}
+                                            data-distance={distance}
+                                            data-selected={device.selected || undefined}
+                                            style={motion}
+                                            aria-pressed={device.selected}
+                                            aria-label={`${device.name}. ${DEVICE_PLATFORM_LABELS[device.identity.platform]}. ${device.address}. ${typeof device.latencyMs !== "number" ? "Latency unavailable, shown in the unknown-distance band" : `${device.latencyMs} milliseconds`}. ${device.status}.`}
+                                            onClick={device.onSelect}
+                                        >
+                                            <span
+                                                className={styles.radarDeviceIcon}
+                                                aria-hidden="true"
+                                            >
+                                                <DeviceKindIcon
+                                                    identity={device.identity}
+                                                    size="lg"
+                                                />
+                                            </span>
+                                            <span
+                                                className={styles.radarDeviceCopy}
+                                            >
+                                                <strong>{device.name}</strong>
+                                            </span>
+                                        </Button>
+                                    ),
+                                )}
+                            </span>
+                        </>
+                    )}
                 </div>
             </div>
 

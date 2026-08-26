@@ -202,7 +202,7 @@
   }
 }
 
-@media (--cp-sm) {
+@media (--cp-md) {
   .root {
     min-block-size: 100%;
   }
