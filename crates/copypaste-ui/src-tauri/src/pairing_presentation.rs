@@ -1,7 +1,7 @@
 #[cfg(any(target_os = "android", target_os = "macos", target_os = "windows"))]
 use std::sync::Arc;
 
-use copypaste_ipc::{PairingInviteData, PairingProgressData};
+use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 #[cfg(any(target_os = "android", target_os = "windows"))]
 use tauri::{AppHandle, Manager as _};
 use zeroize::Zeroizing;
@@ -70,6 +70,7 @@ pub fn macos_ui(abort: NativeAbort) -> impl NativePairingUi {
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum PairingPresentationState {
+    Available,
     Presented,
     Unavailable,
 }
@@ -103,6 +104,7 @@ pub trait NativePairingUi: Send + Sync + 'static {
 
 pub struct PairingPresenter {
     native: Box<dyn NativePairingUi>,
+    available: bool,
 }
 
 impl Default for PairingPresenter {
@@ -119,7 +121,10 @@ impl Default for PairingPresenter {
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let native = Box::new(UnavailablePairingUi);
 
-        Self { native }
+        Self {
+            native,
+            available: cfg!(any(target_os = "macos", target_os = "windows")),
+        }
     }
 }
 
@@ -127,6 +132,19 @@ impl PairingPresenter {
     pub fn new(native: impl NativePairingUi) -> Self {
         Self {
             native: Box::new(native),
+            available: true,
+        }
+    }
+
+    /// Idle reports capability. An active ceremony exists only after its
+    /// protected native surface presented successfully.
+    pub fn state_for_progress(&self, state: PairingState) -> PairingPresentationState {
+        if !self.available {
+            PairingPresentationState::Unavailable
+        } else if state == PairingState::Idle {
+            PairingPresentationState::Available
+        } else {
+            PairingPresentationState::Presented
         }
     }
 
@@ -169,6 +187,45 @@ impl NativePairingUi for UnavailablePairingUi {
     }
 }
 
+#[cfg(test)]
+mod presenter_tests {
+    use super::*;
+
+    struct ConfiguredPairingUi;
+
+    impl NativePairingUi for ConfiguredPairingUi {
+        fn present_invite(&self, _invite: &PairingInviteData) -> NativePresentationOutcome {
+            NativePresentationOutcome::Unavailable
+        }
+
+        fn scan_invite(&self) -> Option<ScannedPairing> {
+            None
+        }
+
+        fn present_progress(&self, _progress: &PairingProgressData) -> PairingPresentationState {
+            PairingPresentationState::Unavailable
+        }
+
+        fn confirm(&self, _progress: &PairingProgressData) -> Option<PairingDecision> {
+            None
+        }
+    }
+
+    #[test]
+    fn configured_renderers_are_available_before_a_ceremony_starts() {
+        let presenter = PairingPresenter::new(ConfiguredPairingUi);
+
+        assert_eq!(
+            presenter.state_for_progress(PairingState::Idle),
+            PairingPresentationState::Available
+        );
+        assert_eq!(
+            presenter.state_for_progress(PairingState::WaitingForPeer),
+            PairingPresentationState::Presented
+        );
+    }
+}
+
 #[cfg(all(test, not(any(target_os = "macos", target_os = "windows"))))]
 mod tests {
     use super::*;
@@ -202,6 +259,10 @@ mod tests {
         assert_eq!(
             presenter.present_invite(&invite),
             NativePresentationOutcome::Unavailable
+        );
+        assert_eq!(
+            presenter.state_for_progress(PairingState::Idle),
+            PairingPresentationState::Unavailable
         );
         assert_eq!(
             presenter.present_progress(&progress()),

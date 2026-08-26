@@ -2,6 +2,8 @@ import type { Browser } from "./webview-guard.js";
 
 export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
 export const ROW = '[role="listitem"]';
+export const PRIMARY_NAVIGATION =
+  'aside[aria-label="Primary"], nav[aria-label="Primary"]';
 
 export interface RowBox {
   id: string;
@@ -223,12 +225,12 @@ export async function activeRowId(browser: Browser): Promise<string | null> {
 /**
  * Switch screens the way a user does.
  *
- * The nav is located first and the text selector applied to it: WebDriver has
- * no "CSS then text" syntax, and `nav[…] button=History` is rejected as one
+ * The landmark is located first and the text selector applied to it: WebDriver
+ * has no "CSS then text" syntax, and a combined selector is rejected as one
  * malformed selector rather than treated as two.
  */
 export async function gotoView(browser: Browser, label: string): Promise<void> {
-  const nav = await browser.$('nav[aria-label="Primary"]');
+  const nav = await browser.$(PRIMARY_NAVIGATION);
   await nav.waitForExist({ timeout: 15_000 });
   const button = await nav.$(`button=${label}`);
   await button.waitForClickable({ timeout: 15_000 });
@@ -294,8 +296,8 @@ export async function byLabel(
  */
 export async function dismissFirstRun(browser: Browser): Promise<void> {
   await browser.waitUntil(
-    async () => browser.execute(() => {
-      if (document.querySelector('nav[aria-label="Primary"]')) return true;
+    async () => browser.execute((primaryNavigation: string) => {
+      if (document.querySelector(primaryNavigation)) return true;
       const explore = Array.from(
         document.querySelectorAll<HTMLButtonElement>(
           '[data-onboarding-step="welcome"] button',
@@ -306,7 +308,7 @@ export async function dismissFirstRun(browser: Browser): Promise<void> {
       // disagree on hit-testing the tall welcome grid; tested actions do not.
       explore.click();
       return false;
-    }),
+    }, PRIMARY_NAVIGATION),
     {
       timeout: 30_000,
       timeoutMsg: "the welcome flow never yielded to primary navigation",

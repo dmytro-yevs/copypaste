@@ -66,7 +66,7 @@ let marker = "";
 
 beforeAll(async () => {
   app = await attachToApp();
-  await gotoView(app, "History");
+  await gotoView(app, "Library");
   marker = fixtureMarker("settings");
   seeded = await addItems(app, [`${marker} first fixture`, `${marker} second fixture`]);
   await reloadHistoryWith(app, `${marker} second fixture`);
@@ -84,7 +84,7 @@ beforeAll(async () => {
 }, 300_000);
 
 afterAll(async () => {
-  await gotoView(app, "History").catch(() => undefined);
+  await gotoView(app, "Library").catch(() => undefined);
   await resetHistoryFilters(app).catch(() => undefined);
   await cleanUpItems(app, seeded);
   await app?.detach();
@@ -285,7 +285,7 @@ describe("a preference that changes layout", () => {
 
   test("preview lines re-reserves every row (INV-5)", async () => {
     await setPreviewLines("Home", 1, "1 line");
-    await gotoView(app, "History");
+    await gotoView(app, "Library");
     await waitFor(
       async () => expectReservedFor(1, (await rowBoxes(app)).map((row) => row.height)),
       "rows never shrank to the one-line reservation",
@@ -294,7 +294,7 @@ describe("a preference that changes layout", () => {
 
     await gotoView(app, "Settings");
     await setPreviewLines("ArrowRight", 2, "2 lines");
-    await gotoView(app, "History");
+    await gotoView(app, "Library");
     await waitFor(
       async () => expectReservedFor(2, (await rowBoxes(app)).map((row) => row.height)),
       "rows never returned to the two-line reservation",

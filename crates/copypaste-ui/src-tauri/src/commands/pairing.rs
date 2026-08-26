@@ -104,9 +104,13 @@ pub async fn pair_scan_invite(
 }
 
 #[tauri::command]
-pub async fn pair_progress(backend: State<'_, SelectedBackend>) -> Result<PairingCeremony> {
+pub async fn pair_progress(
+    backend: State<'_, SelectedBackend>,
+    presenter: State<'_, PairingPresenter>,
+) -> Result<PairingCeremony> {
     backend.pair_progress().await.map(|progress| {
-        PairingCeremony::from_progress(progress, PairingPresentationState::Unavailable)
+        let presentation = presenter.state_for_progress(progress.state);
+        PairingCeremony::from_progress(progress, presentation)
     })
 }
 

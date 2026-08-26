@@ -144,7 +144,7 @@ wait_cleared_history() { # <artifact> [timeout] [dump function]
 
 open_history() { # <artifact>
     local artifact="$1" point
-    tap_selector "History" "$artifact" || return 1
+    tap_selector "Library" "$artifact" || return 1
     wait_history_state "$artifact" history_toolbar_holds || return 1
     point="$(action_center "$artifact" "Clear search")"
     [[ -z "$point" ]] || sh_ input tap $point >/dev/null
@@ -167,7 +167,7 @@ capture_screen() { # <name>
 # under its own stage.
 storage_stage_self_test() { # <temp>
     local temp="$1" verdict nav_open nav_starting
-    nav_open='<node text="Primary" bounds="[0,570][320,640]"><node text="History" bounds="[17,583][113,635]" enabled="true" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="true" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/></node>'
+    nav_open='<node text="Primary" bounds="[0,570][320,640]"><node text="Library" bounds="[17,583][113,635]" enabled="true" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="true" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/></node>'
     nav_starting="${nav_open//enabled=\"true\" clickable/enabled=\"false\" clickable}"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"0 items\" bounds=\"[12,126][52,142]\"/></node></hierarchy>" > "$temp/stuck-history.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\"/></node></hierarchy>" > "$temp/stuck-start.xml"
