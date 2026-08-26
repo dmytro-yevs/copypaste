@@ -23,7 +23,7 @@ let app: AndroidApp;
 
 beforeAll(async () => {
   app = await attachToApp();
-  await gotoView(app, "History");
+  await gotoView(app, "Library");
   await clearField(app, SEARCH);
   await waitForRows(app, 1);
 }, 180_000);
@@ -40,7 +40,7 @@ test("a tap moves between screens and the nav says which one is current", async 
     "the history list was still in the document on the Devices screen",
   );
 
-  await gotoView(app, "History");
+  await gotoView(app, "Library");
   await waitForRows(app, 1);
 });
 

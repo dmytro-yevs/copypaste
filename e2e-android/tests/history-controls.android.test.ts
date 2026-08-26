@@ -39,7 +39,7 @@ let marker = "";
 
 beforeAll(async () => {
   app = await attachToApp();
-  await gotoView(app, "History");
+  await gotoView(app, "Library");
 
   marker = fixtureMarker("controls");
   seeded = await addItems(app, [

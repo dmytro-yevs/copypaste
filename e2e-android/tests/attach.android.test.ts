@@ -44,7 +44,7 @@ test("the document is the app's, and it answers a DOM query", async () => {
       NAV,
     ),
   );
-  expect(nav).toEqual(expect.arrayContaining(["History", "Devices", "Settings"]));
+  expect(nav).toEqual(expect.arrayContaining(["Library", "Devices", "Settings"]));
 });
 
 test("the frontend mounted rather than merely painting", async () => {

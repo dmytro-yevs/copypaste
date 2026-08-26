@@ -62,7 +62,7 @@ let marker = "";
 
 beforeAll(async () => {
   app = await attachToApp();
-  await gotoView(app, "History");
+  await gotoView(app, "Library");
   marker = fixtureMarker("render");
 
   // Alternating lengths: INV-5 says the reservation is a function of the
