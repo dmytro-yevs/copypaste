@@ -1,6 +1,6 @@
 //! Item CRUD: everything that writes or reads a `clipboard_items` row without
 //! going through FTS or a retention sweep. Two invariants live here: layer 1 of
-//! the ADR-015 sensitive/FTS exclusion (in [`Store::insert_or_bump`]), and that
+//! the sensitive/FTS exclusion (in [`Store::insert_or_bump`]), and that
 //! a delete is a *tombstone*, not a row removal.
 
 use rusqlite::{params, OptionalExtension};
@@ -76,7 +76,7 @@ impl Store {
         E: From<StoreError>,
         F: FnOnce() -> Result<(Vec<u8>, Vec<u8>, Option<String>), E>,
     {
-        // ADR-015 layer 1: unconditional, and it ignores what the caller
+        // `CopyPaste-i6pp` layer 1: unconditional, and it ignores what the caller
         // passed. A sensitive item is never indexed.
         let indexable =
             !item.is_sensitive && copypaste_ipc::content_type::is_text(&item.content_type);

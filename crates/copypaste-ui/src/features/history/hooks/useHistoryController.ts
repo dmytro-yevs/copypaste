@@ -122,7 +122,7 @@ export function useHistoryController(pushLive: boolean): HistoryController {
     }
   }, [origins, view.devices]);
 
-  // No page walk while searching. v1 drove load-more until the whole history
+  // No page walk while searching. a page walk would load the whole history
   // was resident because its FTS was capped at the first page
   // (`CopyPaste-crh3.106`); v2's `search` is a whole-database FTS query of its
   // own, so a match at row 9,000 arrives in `serverItems` without loading —

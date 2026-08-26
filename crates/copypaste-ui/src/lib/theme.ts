@@ -2,7 +2,7 @@
  * The appearance axes on `<html>`, which every themed selector in
  * `design/dist/css` keys off.
  *
- * AT-53: the subscription is module-level and idempotent because v1
+ * AT-53: the subscription is module-level and idempotent because repeated application
  * accumulated a matchMedia listener on every re-apply (CopyPaste-g27b.20).
  */
 import {

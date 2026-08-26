@@ -76,9 +76,8 @@ fn to_wire_with(
 /// many.
 ///
 /// One unreadable row must not blank an entire page of history: the other items
-/// are still the user's data. But a page that is silently one item shorter, with
-/// the reason only in the daemon's log, is what v1 shipped and what
-/// `CopyPaste-00zz` fixed — the user sees fewer items and is told nothing. The
+/// are still the user's data. `CopyPaste-00zz`: a shortened page must carry the
+/// unreadable count instead of explaining it only in logs. The
 /// count goes back on the wire so a client can say "3 items could not be read".
 pub(super) fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
     let mut page = ItemPage {

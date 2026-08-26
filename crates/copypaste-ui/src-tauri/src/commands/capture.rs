@@ -32,8 +32,8 @@ pub fn capture_state(capture: State<'_, SelectedCapture>) -> CaptureSnapshot {
 ///
 /// The frontend calls this on every resume, not only at startup. A permission
 /// can lapse while the app is in the background — a reboot is the ordinary
-/// case, and app hibernation the rare one — and v1 shipped a cached state that
-/// never refreshed after a trip to system Settings.
+/// case, and app hibernation the rare one. Cached state must not survive a trip
+/// to system Settings.
 #[tauri::command]
 pub fn capture_refresh(app: AppHandle, capture: State<'_, SelectedCapture>) -> CaptureSnapshot {
     emit(&app, capture.refresh())

@@ -3,8 +3,7 @@
 //! # Why NNpsk0
 //!
 //! `NN` is the anonymous pattern: no static keys, so nothing to generate,
-//! distribute, pin, rotate or revoke and no certificate lifecycle — which is
-//! what v1 spent rustls + rcgen + two hand-written DER parsers on. `psk0` mixes
+//! distribute, pin, rotate or revoke and no certificate lifecycle. `psk0` mixes
 //! the pairing token into the chaining key *before* the first ephemeral is
 //! written, which buys three things:
 //!
@@ -21,7 +20,7 @@
 //! `NNpsk0` is *not* a PAKE and does not need to be: a PAKE protects a
 //! low-entropy human secret from an offline dictionary attack, and our token is
 //! 256 bits from the OS CSPRNG, so the dictionary does not exist (port manifest
-//! 02 §6.3 reaches the same conclusion about v1's OPAQUE).
+//! 02 §6.3).
 //!
 //! # A handshake cannot pin a task
 //!

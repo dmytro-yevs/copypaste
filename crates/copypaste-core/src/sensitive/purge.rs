@@ -1,7 +1,7 @@
 //! Re-deciding, for rows already in the search index, the one question that was
 //! only ever asked once.
 //!
-//! The three ADR-015 layers in [`crate::storage`] all run at capture, off a
+//! The three FTS-exclusion layers in [`crate::storage`] all run at capture, off a
 //! verdict the ruleset gave at that moment. A rule added afterwards never sees
 //! those rows again: their plaintext stays in `clipboard_fts` — the one table
 //! not under the item AEAD — for as long as the item lives. Two detector fixes
@@ -79,7 +79,7 @@ pub struct PurgeReport {
 /// every one whose text the *current* ruleset classifies above the floor.
 ///
 /// Two predicates because they catch different failures. The first (manifest 03
-/// S4, v1's migration v13) catches an index row that should never have been
+/// S4) catches an index row that should never have been
 /// written for a row already known to be sensitive; the second catches the row
 /// nobody knew about, which is the one a detector fix creates. Neither implies
 /// the other: a classified item's text may no longer match above the floor, and
@@ -462,7 +462,7 @@ mod tests {
         assert_eq!(purge_indexed_secrets(&s, &detector()).unwrap().purged, 0);
     }
 
-    /// Manifest 03 S4, v1's migration v13: an index row planted against an
+    /// Manifest 03 S4: an index row planted against an
     /// already-flagged item goes, and the current ruleset has no say in it.
     #[test]
     fn a_stale_index_row_for_a_flagged_item_is_purged() {

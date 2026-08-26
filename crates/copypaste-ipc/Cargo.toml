@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# The ONE model of the wire contract. v1 modelled it three times: typed DTOs the
+# The one model of the wire contract; no unimported DTO mirror or
 # CLI never imported, a duplicate in the daemon, and untyped Value poking in the
 # CLI. Both the daemon and the CLI depend on this crate and on nothing else for
 # wire types.

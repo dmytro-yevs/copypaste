@@ -58,7 +58,7 @@ pub enum Severity {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Finding {
     /// Stable rule id, e.g. `aws_access_key`. The label belongs to the rule
-    /// definition — v1 derived it by string-prefix dispatch on the name, so
+    /// definition; deriving it by string-prefix dispatch on the name, so
     /// renaming a rule silently changed its label (manifest §7.8).
     pub rule: &'static str,
     /// One of `credential`, `financial`, `personal_id`, `infrastructure`.

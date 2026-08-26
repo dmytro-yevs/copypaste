@@ -94,8 +94,8 @@ impl fmt::Debug for Peer {
     }
 }
 
-/// Hex for the PSK, because JSON has no byte type. `hex` is already a workspace
-/// dependency; port manifest 02 records ~6 sites where v1 hand-rolled it anyway.
+/// Hex for the PSK, because JSON has no byte type. `hex` is the workspace owner
+/// of that encoding.
 mod psk_hex {
     use super::TOKEN_LEN;
     use serde::de::Error as _;

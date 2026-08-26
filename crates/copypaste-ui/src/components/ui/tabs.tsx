@@ -39,7 +39,7 @@ function Tabs({ className, ...props }: ComponentProps<typeof TabsPrimitive.Root>
 
 /**
  * A11Y-15: the tab row **wraps** rather than scrolling. At the 720px minimum
- * window width v1 hid its last tab behind a scrollbar-less scroller
+ * window width must not hide its last tab behind a scrollbar-less scroller
  * (CopyPaste-g27b.31), so `flex-wrap` here is a requirement, not a preference —
  * `shell-reflow.test.tsx` asserts it.
  */
