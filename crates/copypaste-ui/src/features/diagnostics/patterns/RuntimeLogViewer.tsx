@@ -268,11 +268,13 @@ export function RuntimeLogViewer() {
                     }
                 />
             ) : events.length === 0 ? (
-                <EmptyState
-                    compact
-                    icon="searchX"
-                    title={t("runtimeLog.noMatch")}
-                />
+                <div className={styles.emptyState} data-runtime-log-empty>
+                    <EmptyState
+                        compact
+                        icon="searchX"
+                        title={t("runtimeLog.noMatch")}
+                    />
+                </div>
             ) : (
                 <>
                     <div
