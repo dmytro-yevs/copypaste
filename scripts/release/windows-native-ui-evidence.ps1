@@ -140,7 +140,7 @@ function Complete-WindowsFirstRun([Diagnostics.Process]$App) {
     Wait-Readiness "welcome dismissed or product shell" {
         $App.Refresh()
         if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
-        if ($null -ne (Get-UiaNamedElement $App "Settings" $true)) {
+        if ($null -ne (Get-UiaNamedElement $App "Preferences" $true)) {
             return New-ProbeReady $true
         }
         $explore = Get-UiaNamedElement $App "Explore first" $true
@@ -148,7 +148,7 @@ function Complete-WindowsFirstRun([Diagnostics.Process]$App) {
             Invoke-UiaElement $explore "Explore first"
             return New-ProbeNotReady "welcome dismissed"
         }
-        return New-ProbeNotReady "neither Explore first nor Settings is on screen"
+        return New-ProbeNotReady "neither Explore first nor Preferences is on screen"
     } { Get-UiaSummary $App } 20000 | Out-Null
 }
 

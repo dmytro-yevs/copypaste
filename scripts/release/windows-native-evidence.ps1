@@ -416,17 +416,17 @@ try {
     if ($evidencePath) {
         $featureStates = @()
         Complete-WindowsFirstRun $app
-        Invoke-UiaNamedControl $app "Settings" "Theme"
+        Invoke-UiaNamedControl $app "Preferences" "Theme"
         Invoke-UiaNamedControl $app "List" "Allow screenshots"
         Set-UiaScreenshots $app $true
-        Invoke-UiaNamedControl $app "History" "Clipboard history"
+        Invoke-UiaNamedControl $app "Library" "Clipboard history"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history"
-        Invoke-UiaNamedControl $app "Devices" "Ready to pair"
+        Invoke-UiaNamedControl $app "Connections" "Ready to pair"
         Invoke-UiaNamedControl $app "Connect a device" "Enter pairing code"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "desktop-pairing-entry" "Enter pairing code"
         [Windows.Forms.SendKeys]::SendWait("{ESC}")
         Wait-UiaName $app "Ready to pair" | Out-Null
-        Invoke-UiaNamedControl $app "Settings" "Theme"
+        Invoke-UiaNamedControl $app "Preferences" "Theme"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Theme"
         $updateText = if ($ExpectedSignature -eq "Valid") { "Check for updates" } else { "Updates aren't configured in this build." }
         $updateState = if ($ExpectedSignature -eq "Valid") { "updater-configured" } else { "updater-unconfigured" }
