@@ -33,7 +33,7 @@ export interface IpcCallOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
-const LOCAL_BRIDGE_ORIGIN = "http://localhost:1420";
+const LOCAL_BRIDGE_ORIGIN = "http://127.0.0.1:1420";
 const BRIDGE_START_TIMEOUT_MS = 120_000;
 const BRIDGE_RELOAD_INTERVAL_MS = 250;
 
