@@ -12,7 +12,7 @@ use crate::backend::{daemon::DaemonBackend, BackendError, UiBoundaryErrorCode};
 use crate::command_contract::UiCommandName;
 use crate::source_app_icon::SourceAppIconCache;
 
-pub(crate) const DEFAULT_VITE_ORIGIN: &str = "http://localhost:1420";
+pub(crate) const DEFAULT_VITE_ORIGIN: &str = "http://127.0.0.1:1420";
 pub(crate) const ENV_FILE: &str = "COPYPASTE_WEB_BRIDGE_ENV_FILE";
 pub(crate) const ENV_ORIGIN: &str = "COPYPASTE_WEB_BRIDGE_ORIGIN";
 

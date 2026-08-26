@@ -56,7 +56,7 @@ if ! wait_for_bridge_runtime; then
   exit 1
 fi
 # `tauri dev` starts Vite as a child. Passing the ephemeral bridge values into
-# that one process means the browser tab at localhost:1420 and the native
+# that one process means the browser tab at 127.0.0.1:1420 and the native
 # window use the same Vite server and the same daemon.
 . "$bridge_env"
 export VITE_COPYPASTE_WEB_BRIDGE_URL VITE_COPYPASTE_WEB_BRIDGE_TOKEN
