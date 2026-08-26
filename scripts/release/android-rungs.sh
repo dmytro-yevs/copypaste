@@ -233,7 +233,7 @@ else
 fi
 
 # Rule 4. A clipboard read that logs its result puts the clip in a buffer any
-# app holding READ_LOGS can tail, which is the mechanism v1 was built on.
+# app holding READ_LOGS can tail; this is the current ClipCascade signal.
 dump_logcat rung2
 if grep -aq "$CANARY_SHELL" "$OUT/rung2.log"; then
     bad "the clipboard read leaves no plaintext in logcat" \
@@ -371,8 +371,8 @@ group "3. The background capture service"
 # The service exists to keep the process alive while rung 2 is armed. With
 # setup absent nothing may arm, and the failure this guards against is a
 # service that runs anyway: an ongoing "Capturing from every app." notification
-# over a reader that is not there. CopyPaste-qzhu is the v1 bug of the same
-# shape — reporting working because a permission was present.
+# over a reader that is not there. `CopyPaste-qzhu` forbids reporting working
+# merely because a permission is present.
 
 start_out="$(sh_ am start-foreground-service -n "$PKG/$APP_NAMESPACE.CaptureService")"
 if grep -q 'not exported' <<<"$start_out"; then
