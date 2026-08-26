@@ -117,7 +117,12 @@ export function NetworkArtwork({ pairingLimit }: { pairingLimit: number }) {
         <path style={{ stroke: `url(#${gradientId})` }} d="M53 294 C83 238 112 201 150 173" />
       </svg>
 
-      <span className={styles.networkHub}><Icon name="cloudOff" weight="duotone" size="lg" /></span>
+      <span className={styles.networkHub}>
+        <Icon name="devices" weight="duotone" size="lg" />
+        <span className={styles.networkSecureBadge}>
+          <Icon name="lock" weight="fill" size="xs" />
+        </span>
+      </span>
       <DeviceNode className={styles.deviceMac} icon="laptop" />
       <DeviceNode className={styles.devicePhone} icon="mobile" />
       <DeviceNode className={styles.deviceTablet} icon="tablet" />
