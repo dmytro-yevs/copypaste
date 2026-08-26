@@ -73,7 +73,7 @@ function topRow(snapshot: ListSnapshot) {
 
 beforeAll(async () => {
   app = await attachToApp();
-  await gotoView(app, "History");
+  await gotoView(app, "Library");
   marker = fixtureMarker("anchor");
   seeded = await addItems(
     app,
