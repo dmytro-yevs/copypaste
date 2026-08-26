@@ -216,7 +216,7 @@ async fn pump(
                     Dispatch::Nothing => {}
                     Dispatch::Closed => return Exit::Disconnected,
                     Dispatch::Event(event) => {
-                        if tx.send(Ok(event)).await.is_err() {
+                        if tx.send(Ok(*event)).await.is_err() {
                             return Exit::Shutdown;
                         }
                     }

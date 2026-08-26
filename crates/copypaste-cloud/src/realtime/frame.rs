@@ -57,7 +57,7 @@ pub(super) fn parse_frame(text: &str) -> Result<Frame, RealtimeError> {
 
 /// What one inbound frame means to us.
 pub(super) enum Dispatch {
-    Event(RealtimeEvent),
+    Event(Box<RealtimeEvent>),
     Failed(RealtimeError),
     Closed,
     Nothing,
@@ -74,7 +74,7 @@ pub(super) fn dispatch(text: &str) -> Dispatch {
 
     match frame.event.as_str() {
         "postgres_changes" => match change_event(&frame.payload) {
-            Ok(Some(event)) => Dispatch::Event(event),
+            Ok(Some(event)) => Dispatch::Event(Box::new(event)),
             Ok(None) => Dispatch::Nothing,
             Err(e) => {
                 log_unparseable(text);
@@ -323,7 +323,7 @@ mod tests {
                 r#"["1","1","realtime:clipboard_items","postgres_changes",{{"data":{{"type":"INSERT","record":{}}}}}]"#,
                 row_json("item-5", false)
             )),
-            Dispatch::Event(RealtimeEvent::Insert(_))
+            Dispatch::Event(event) if matches!(*event, RealtimeEvent::Insert(_))
         ));
     }
 }
