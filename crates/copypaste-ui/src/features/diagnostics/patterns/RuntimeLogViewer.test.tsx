@@ -17,6 +17,30 @@ beforeEach(() => {
 });
 
 describe("RuntimeLogViewer errors", () => {
+    it("keeps the empty result inside the runtime-event surface", () => {
+        runtimeLogMock.mockReturnValue({
+            rows: [],
+            events: [],
+            isPending: false,
+            isError: false,
+            followFailed: false,
+            overrun: false,
+            hasNextPage: false,
+            isFetchingNextPage: false,
+            loadOlder: vi.fn(),
+            refetch: vi.fn(),
+        });
+
+        const { container } = render(
+            <TooltipProvider>
+                <RuntimeLogViewer />
+            </TooltipProvider>,
+        );
+
+        expect(screen.getByText("No runtime events match these filters.")).toBeTruthy();
+        expect(container.querySelector("[data-runtime-log-empty]")).toBeTruthy();
+    });
+
     it("uses shared alert notices for feed loss signals", () => {
         runtimeLogMock.mockReturnValue({
             rows: [],
