@@ -2,3 +2,5 @@
 config/gitleaks/gitleaks.toml text eol=lf
 config/gitleaks/LICENSE text eol=lf
 crates/copypaste-core/src/sensitive/rules_generated.rs text eol=lf
+config/sensitive-publication-redaction.json text eol=lf
+crates/copypaste-ui/src/styles/media.css text eol=lf
