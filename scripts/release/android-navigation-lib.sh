@@ -58,13 +58,12 @@ tap_landing() { # <post artifact> <control> [pre artifact]
 
 wait_app_navigable() { # <artifact> [timeout] [dump function]
     local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}" dump="${3:-dump_hierarchy}"
-    local started="$SECONDS" point
+    local started="$SECONDS"
     while (( SECONDS - started < timeout )); do
         if "$dump" "$artifact"; then
             app_navigation_holds "$artifact" && return 0
             if [[ "$dump" == dump_hierarchy ]]; then
-                point="$(action_center "$artifact" "Explore first")"
-                [[ -n "$point" ]] && sh_ input tap $point >/dev/null
+                tap_selector_scrolling "Explore first" "$artifact" up 8 || true
             fi
         fi
         sleep 1
