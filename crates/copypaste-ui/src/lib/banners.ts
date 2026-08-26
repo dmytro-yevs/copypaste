@@ -1,5 +1,5 @@
 /**
- * INV-17: only one alert banner is visible at a time. v1 de-conflicted four
+ * INV-17: only one alert banner is visible at a time. four independent banners would conflict
  * independent `role="alert"` mechanisms with a ternary chain, and when the
  * chain was wrong they stacked (CopyPaste-8ebg.39). One condition reaches the
  * banner now, so the chain that failed cannot be rebuilt by accident: a second

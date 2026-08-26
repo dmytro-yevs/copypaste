@@ -162,8 +162,8 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
 
 /// Say when a page was shortened, and by how much.
 ///
-/// v1 shortened the page and said nothing; the user saw fewer items with no
-/// explanation (`CopyPaste-00zz`). On stderr so a `--json` consumer and a pipe
+/// `CopyPaste-00zz`: a shortened page must report why it contains fewer items.
+/// On stderr so a `--json` consumer and a pipe
 /// are unaffected.
 fn warn_unreadable(skipped: u32) {
     if skipped > 0 {

@@ -1,8 +1,7 @@
 //! What the capture loop and the IPC server share.
 //!
-//! One `Arc`, no optional fields, built once in `main`. v1 grew a 38-field
-//! context with 13 `Arc<Mutex<Option<T>>>` slots and 20 builder methods, so no
-//! reader could tell which fields were populated at any given moment; the
+//! One `Arc`, no optional fields, built once in `main`. Optional shared slots
+//! would make readiness impossible to prove; the
 //! `Option`s existed only because construction was spread across the builders.
 
 use std::path::PathBuf;

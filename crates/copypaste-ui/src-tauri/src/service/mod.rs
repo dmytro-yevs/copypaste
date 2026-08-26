@@ -308,8 +308,8 @@ impl Supervisor {
 
     /// Wait for the daemon to answer, or for it to die trying.
     ///
-    /// `backon` rather than a sleep loop: the workspace already carries one
-    /// retry implementation and v1 grew six (AGENTS.md rule 1).
+    /// `backon` rather than a sleep loop: the workspace has one retry owner
+    /// (AGENTS.md rule 1).
     async fn await_ready<B: ServiceBackend>(&self, backend: &B) -> Result<()> {
         let policy = ExponentialBuilder::new()
             .with_min_delay(Duration::from_millis(50))

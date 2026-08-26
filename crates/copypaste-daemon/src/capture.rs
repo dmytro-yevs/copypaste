@@ -3,8 +3,8 @@
 //! The pipeline itself is [`copypaste_core::ingest_into`], re-exported here so
 //! this crate's callers name it where they always did. It lives in the core
 //! because Android links the core in-process and cannot depend on this crate,
-//! which is a binary with no `lib` target — and a second ingest is the defect
-//! v1 shipped, where the IPC path forgot the dedup probe.
+//! which is a binary with no `lib` target. A second ingest path could bypass
+//! dedup, secret detection, or retention.
 //!
 //! Manifest 01's data-loss rules that this file is responsible for:
 //!
@@ -34,8 +34,7 @@ use crate::AppState;
 ///
 /// The interval is read from the settings at every tick rather than captured
 /// into a `tokio::time::Interval` once. That is what makes `poll_interval_ms` a
-/// live setting: v1 had hot-reload for it and the parity audit records losing
-/// that as a consequence of losing config altogether.
+/// live setting.
 pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
     state.set_capture_running(true);
     info!(

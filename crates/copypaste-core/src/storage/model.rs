@@ -5,7 +5,7 @@
 
 use rusqlite::{ErrorCode, Row};
 
-/// The projection every read uses. Bound by *name*, never by position — v1
+/// The projection every read uses. Bound by *name*, never by position;
 /// maintained three parallel positional column lists and an off-by-one panic in
 /// the row mapper was the result (`CopyPaste-crh3.85`).
 macro_rules! item_columns {
@@ -228,9 +228,8 @@ pub(super) fn row_to_item(row: &Row<'_>, columns: &ItemColumns) -> rusqlite::Res
     })
 }
 
-// Both classifications match on the SQLite result code, never on a message
-// string: v1's migration runner string-matched `"duplicate column name"` and
-// broke when the wording changed.
+// Both classifications match on the SQLite result code, never on message text;
+// wording is not a stable database contract.
 
 pub(super) fn is_constraint_violation(err: &rusqlite::Error) -> bool {
     matches!(err, rusqlite::Error::SqliteFailure(e, _)

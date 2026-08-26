@@ -2,9 +2,8 @@
 //!
 //! One implementation, four callers: the daemon's clipboard poll loop, the
 //! daemon's `add` IPC method, its history import, and the Android backend that
-//! links this crate in-process. v1 had two ingest paths that drifted — the IPC
-//! one forgot the dedup probe, so `copypaste add` could insert a row the poll
-//! loop would have collapsed — and a second copy on the Android side would have
+//! links this crate in-process. One ingest path owns the dedup probe, so
+//! `copypaste add`, polling, import, and Android cannot disagree about a row.
 //! been the same defect with a new platform attached.
 //!
 //! Manifest 01's data-loss rule this file is responsible for: refusals are
@@ -563,7 +562,7 @@ mod tests {
     }
 
     /// The write-time layer of "a sensitive item never reaches the search
-    /// index" (manifest 03 ADR-015).
+    /// index" (manifest 03 S4).
     #[test]
     fn a_detected_secret_is_flagged_and_kept_out_of_the_index() {
         let f = fixture();

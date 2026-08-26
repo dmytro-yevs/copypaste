@@ -2,9 +2,8 @@
 //! changes take effect without a restart.
 //!
 //! Shared rather than daemon-private because three parties need the *same*
-//! answer: the daemon validates on write, the Settings UI wants to reject a bad
-//! value before it round-trips, and the CLI prints the bounds. v1 had the limits
-//! in one crate, the clamp in another and the UI's own guesses in a third.
+//! answer: the daemon validates on write, the Settings UI rejects a bad value
+//! before it round-trips, and the CLI prints the same bounds.
 //!
 //! # Two rules this module encodes
 //!
@@ -68,7 +67,7 @@ pub enum Liveness {
 
 /// Every daemon setting, with its effective value.
 ///
-/// Deliberately smaller than v1's 21 fields. What was dropped and why:
+/// Every field is live and user-settable. Excluded settings and why:
 ///
 /// * `auto_apply_synced_clip`, `paste_as_plain_text` — neither behavior is
 ///   implemented by the v2 capture contract.
@@ -249,8 +248,7 @@ fn range<T: PartialOrd + std::fmt::Display>(
 /// A change to one or more settings.
 ///
 /// Every field is optional so a client can set one without reading, editing and
-/// writing the whole record — v1's `set_config` took the full struct, which made
-/// two Settings tabs open at once a lost-update bug.
+/// writing the whole record; full-record replacement loses concurrent edits.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]

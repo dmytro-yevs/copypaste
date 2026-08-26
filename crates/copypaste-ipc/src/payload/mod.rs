@@ -19,7 +19,7 @@ use crate::health::SettingsHealth;
 
 /// One page of history, and how much of it could not be shown.
 ///
-/// `skipped_undecryptable` is on the wire because the alternative is what v1
+/// `skipped_undecryptable` is on the wire because the alternative
 /// shipped: a page silently one item shorter, with the reason only in the
 /// daemon's log (`CopyPaste-00zz`). A client that reads it can say "3 items
 /// could not be read"; a client that ignores it is no worse off than before.
@@ -443,7 +443,7 @@ pub struct Item {
     ///
     /// A property of the item and the cap, not of any particular round: it is
     /// true before the first sync attempt and stays true, which is the point —
-    /// v1 drew a warning on the row (`CopyPaste-f72f`) precisely so that an
+    /// `CopyPaste-f72f` requires a row warning precisely so that an
     /// item that will silently never arrive does not look like one that is
     /// still on its way.
     ///

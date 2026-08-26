@@ -2,7 +2,7 @@
 //!
 //! Built once, mutated afterwards: a refresh sets text on handles it already
 //! holds and moves the same handles in and out of the submenu, so nothing
-//! allocates a menu item per capture. v1 rebuilt its recent submenu every five
+//! allocates a menu item per capture. rebuilding the recent submenu every five
 //! seconds.
 //!
 //! The clipping ids live here because a `MenuItem` remembers only what it

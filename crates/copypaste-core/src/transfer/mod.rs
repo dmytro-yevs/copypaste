@@ -10,8 +10,7 @@
 //! # An export says what it left out
 //!
 //! Three counts come back beside the items, always, including when they are
-//! zero. v1 shipped `skipped_non_text` for exactly this reason
-//! (`CopyPaste-93yr`): a file that quietly contains fewer items than the history
+//! zero. `CopyPaste-93yr`: a file that quietly contains fewer items than the history
 //! it was taken from is worse than one that says so, because the user only
 //! finds out when they need it.
 //!

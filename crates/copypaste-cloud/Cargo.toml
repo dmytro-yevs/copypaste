@@ -13,9 +13,8 @@ test-endpoints = []
 name = "real_supabase"
 required-features = ["test-endpoints"]
 
-# Supabase replaces v1's bespoke relay: 12k lines of write-behind cache, custom
-# retry queue, SSE fan-out, supervisor and a second rate limiter, for a service
-# that already exists.
+# Supabase owns auth, Postgres, Realtime and RLS; this crate owns encrypted rows,
+# signatures, polling and merge policy.
 [dependencies]
 copypaste-clock = { path = "../copypaste-clock" }
 copypaste-core = { path = "../copypaste-core" }

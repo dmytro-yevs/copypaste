@@ -5,10 +5,8 @@
 //! the same codec the daemon uses, so there is exactly one framing
 //! implementation on each side of the socket.
 //!
-//! Responses are deserialised straight into [`Response`] / [`ResponseData`].
-//! v1's CLI walked `serde_json::Value` with 138 `.as_*()` calls that silently
-//! defaulted on a missing field; there is no `serde_json::Value` anywhere in
-//! this crate.
+//! Responses are deserialised straight into [`Response`] / [`ResponseData`]; a
+//! missing field is a typed decode failure, never a silent default.
 
 use crate::error::CliError;
 use backon::{ConstantBuilder, Retryable as _, Sleeper};
@@ -1161,7 +1159,7 @@ mod tests {
 
     #[test]
     fn a_wrong_shape_is_reported_rather_than_silently_defaulted() {
-        // v1 would have produced an empty list here via unwrap_or_default.
+        // `unwrap_or_default` would silently produce an empty list.
         let response: Response =
             serde_json::from_str(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#).unwrap();
         assert!(expect_page(into_data(response).unwrap()).is_err());

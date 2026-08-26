@@ -493,12 +493,12 @@ mod tests {
     #[test]
     fn serialised_internal_error_discloses_no_message_path_or_username() {
         let json = serde_json::to_string(&BackendError::internal(
-            "open /Users/alice/Library/Application Support/com.copypaste.CopyPaste/history.db failed",
+            "open /Users/alice/Library/Application Support/com.copypaste.CopyPaste/private.db failed",
         ))
         .unwrap();
         assert_eq!(json, r#"{"code":"internal","retryable":true}"#);
         assert!(!json.contains("alice"), "{json}");
-        assert!(!json.contains("history.db"), "{json}");
+        assert!(!json.contains("private.db"), "{json}");
     }
 
     #[test]

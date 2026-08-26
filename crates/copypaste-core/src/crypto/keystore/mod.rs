@@ -9,7 +9,7 @@
 //! minting a fresh secret.** A backend answers [`Lookup::Absent`] for that and
 //! for nothing else; every other failure is an error, because a secret that
 //! cannot be read is not the same as a secret that is not there, and minting
-//! over an existing one orphans the SQLCipher database. v1 matched `Err(_)`,
+//! over an existing one orphans the SQLCipher database. Matching `Err(_)`
 //! minted, and produced `SQLITE_NOTADB` plus a dead daemon.
 //!
 //! The mint *decision* is taken here rather than in each backend, so there is

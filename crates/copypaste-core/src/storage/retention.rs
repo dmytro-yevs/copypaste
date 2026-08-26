@@ -21,7 +21,7 @@ use super::store::Store;
 /// apart than this land in different buckets and the index lets both through;
 /// the application-level probe is what collapses them.
 ///
-/// A genuine 60-second interval. v1 bucketed on `(wall_time / 60)` where
+/// A genuine 60-second interval. Bucketing on `(wall_time / 60)` where
 /// `wall_time` is *milliseconds*, so its "minute" bucket was really 60 ms; that
 /// wart is reference-only now.
 pub const DEDUP_WINDOW_MS: i64 = 60_000;
@@ -160,7 +160,7 @@ impl Store {
     /// Enforces the history cap: hard-deletes the oldest unpinned items until at
     /// most `max_items` live items remain. Returns how many were removed.
     ///
-    /// Two rules carried from v1, both load-bearing:
+    /// Two load-bearing rules:
     ///
     /// * **Pinned items are never evicted** (I9). If pins alone exceed the cap,
     ///   the cap is simply not reached.
@@ -293,8 +293,7 @@ impl Store {
 ///
 /// One body for both callers: the bounded probe [`Store::find_recent_by_hash`]
 /// exposes, and the unbounded one [`Store::insert_or_bump`] runs inside its
-/// transaction with `i64::MIN`. v1 grew a second dedup lookup here and the two
-/// disagreed about tombstones.
+/// transaction with `i64::MIN`. One lookup owns tombstone handling.
 ///
 /// `deleted = 0` is mandatory: tombstones keep their `content_hash`, and without
 /// the filter a re-copy of a deleted item would match the tombstone and never
@@ -403,7 +402,7 @@ fn hard_delete_in_tx(tx: &Transaction<'_>, ids: &[String]) -> rusqlite::Result<u
 /// The content hash used for dedup: the **full** 64-character lowercase
 /// SHA-256 hex digest of the raw, pre-encryption bytes.
 ///
-/// Never truncate it. A v1 daemon helper cut the digest to 16 bytes / 32 hex
+/// Never truncate it. Truncating the digest to 16 bytes / 32 hex
 /// chars, which threw away second-preimage resistance for nothing
 /// (`CopyPaste-y4v1`). Hashing the content only — not the source app or any
 /// other metadata — is what makes the same text copied from two apps dedup.

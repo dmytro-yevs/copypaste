@@ -3,8 +3,7 @@
 //! Every rung 0 surface — the share sheet, the text-selection action, the
 //! Quick Settings tile — and rung 2's background listener end here, and all of
 //! them end at [`crate::backend::Backend::add`]. There is no second ingest
-//! path: `capture.rs` in the daemon records what happened when v1 had two
-//! ("the IPC one forgot the dedup probe"), and dedup, secret detection,
+//! path; dedup, secret detection,
 //! eviction and the size cap are all decisions this file must not re-make
 //! (AGENTS.md rule 1).
 //!

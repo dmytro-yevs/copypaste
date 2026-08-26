@@ -11,8 +11,7 @@
 //! [`CaptureHealth::Working`] is reachable only through
 //! [`CaptureModel::record_read`] — there is no setter, no constructor and no
 //! deserialiser that can produce it. A permission being present is not
-//! evidence that a read succeeds, and v1 shipped the opposite (`CopyPaste-qzhu`
-//! removed an optimistic `working = true`). Losing the reader clears the
+//! evidence that a read succeeds (`CopyPaste-qzhu`). Losing the reader clears the
 //! evidence as well as the grant, so a re-arm cannot inherit a claim made
 //! before a restart.
 
@@ -106,7 +105,7 @@ pub enum NotWorkingReason {
     NotArmed,
 }
 
-/// v1's four states, carried forward per the android doc §5 rule 2.
+/// The four states required by the Android capture contract §2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
@@ -764,7 +763,7 @@ mod tests {
             assert!(!text.contains('/'), "a path could hide here: {text}");
             assert!(
                 !text.contains("Accessibility"),
-                "v1 pointed users at a service that is not a clipboard exemption: {text}"
+                "current copy points at a service that is not a clipboard exemption: {text}"
             );
         }
     }

@@ -30,8 +30,8 @@ pub trait CaptureControl: Send + Sync + 'static {
 
     /// Re-ask the platform, then answer.
     ///
-    /// Called on every entry point, not just startup: the android doc's §5
-    /// rule 6, after v1 shipped a `remember(ctx)` that never refreshed once the
+    /// Called on every entry point, not just startup: the Android doc's §5
+    /// rule 6 forbids a cached result that never refreshes once the
     /// user came back from system Settings. A grant can also disappear while
     /// the app is in the background, which is the whole subject of this module.
     fn refresh(&self) -> CaptureSnapshot;

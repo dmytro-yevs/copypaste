@@ -11,8 +11,7 @@ use crate::AppState;
 /// `fake-file`).
 ///
 /// Manifest 01 §3.23 asks for the sound to be suppressed in test environments.
-/// v1's test was "is the key ephemeral"; v2 has a better one, because the fake
-/// clipboard is *exactly* the set of runs that are not a real user copying
+/// The fake clipboard is exactly the set of runs that are not a real user copying
 /// something — every `cargo test` and every demo script.
 const FAKE_BACKEND_PREFIX: &str = "fake";
 

@@ -1,7 +1,7 @@
 /**
  * No sentence is derived here: `headline` and `detail` arrive finished from
- * `capture::messages`, and a second wording keyed off `health` is the drift
- * that split v1's setup screen from its notification.
+ * `capture::messages`; a second wording keyed off `health` would let setup and
+ * notifications drift.
  */
 import type { CaptureHealth, CaptureNextStep, CaptureSnapshot } from "@/lib/ipc";
 

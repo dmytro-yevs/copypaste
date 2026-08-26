@@ -2,7 +2,7 @@
 //!
 //! Dispatch is a `match` on `copypaste_ipc::Method`. There is no string matching
 //! anywhere in this file: the compiler enumerates the operations, so adding one
-//! to the enum fails to build here until it is handled. v1 dispatched 61
+//! to the enum fails to build here until it is handled. string dispatch cannot prove
 //! stringly-typed verbs through a chain of fall-through `match` arms spread over
 //! 21 files, and a typo produced `unknown method` at runtime.
 
@@ -148,7 +148,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::CloudSyncNow
         // Transfer and database administration all read or write history.
         // `Restore` is manifest 04's "recovery escape hatch" and is gated here
-        // anyway, deliberately: v1 needed it ungated because it had a degraded
+        // anyway, deliberately: the degraded
         // mode to escape from, and v2 does not.
         | Method::Export { .. }
         | Method::Import { .. }

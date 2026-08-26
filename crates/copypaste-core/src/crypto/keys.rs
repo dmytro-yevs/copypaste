@@ -39,7 +39,7 @@ const INFO_ITEM_KEY: &[u8] = b"copypaste/v2/item-content-key";
 const ENV_EPHEMERAL: &str = "COPYPASTE_EPHEMERAL_KEY";
 
 /// Upper bound on a macOS Keychain load during startup (port manifest 02,
-/// I-22). The previous production implementation used the same deadline.
+/// I-22).
 #[cfg(any(target_os = "macos", test))]
 const KEYSTORE_LOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
@@ -439,9 +439,8 @@ mod tests {
 
     #[test]
     fn derived_keys_are_not_the_secret_itself() {
-        // v1's "the seed is the item key" quirk (port manifest 02, §3.2.3) was
-        // the single most easily-broken thing in that design. v2 derives both
-        // keys; neither is the stored secret.
+        // The database and item keys are domain-separated (manifest 02
+        // §3.2.3); neither may equal the stored secret.
         let ring = Keyring::from_secret(&SECRET_A);
         assert_ne!(*ring.db_key(), SECRET_A);
         assert_ne!(*ring.item_key().0.as_ref(), SECRET_A);

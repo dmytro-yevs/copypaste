@@ -192,9 +192,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      # A gate, not an annotation. `scripts/check-file-size.sh`'s header records
-      # v1's argument against a hard check — that it forces artificial splits —
-      # and AGENTS.md rule 5 already answers it: a file that is one indivisible
+      # A gate, not an annotation. AGENTS.md rule 5 answers the artificial-split
+      # concern: a file that is one indivisible
       # responsibility is exempt, provided its module header names what was
       # considered for extraction and why doing it would make the code worse.
       # The gate script holds EXEMPT, the parsing and its self-test, so that the

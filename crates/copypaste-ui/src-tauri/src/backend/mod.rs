@@ -76,7 +76,7 @@ pub struct CaptureWrite {
 
 /// A page of history, and what did not make it into one.
 ///
-/// `skipped_undecryptable` counts rows that were read and would not open. v1
+/// `skipped_undecryptable` counts rows that were read and would not open.
 /// returned it and v2 dropped it, so a user with three unreadable rows saw
 /// three fewer items and no explanation (parity finding 17, `CopyPaste-00zz`,
 /// manifest 03 Q10). A shorter page is not an error — the rows that did open

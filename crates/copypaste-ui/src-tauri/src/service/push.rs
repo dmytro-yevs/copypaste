@@ -1,7 +1,6 @@
 //! Turning the daemon's change stream into WebView events.
 //!
-//! Parity finding 15: v1's clients subscribed, v2's app polled every three
-//! seconds. Polling costs up to three seconds of lag on every copy and a
+//! Parity finding 15: polling costs up to three seconds of lag on every copy and a
 //! constant trickle of IPC on a machine nobody is touching.
 //!
 //! # Push accelerates, it does not replace

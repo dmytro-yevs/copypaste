@@ -1,4 +1,4 @@
-//! The FTS5 layer, and the ADR-015 enforcement that keeps sensitive content out
+//! The FTS5 layer and the `CopyPaste-i6pp` enforcement that keeps sensitive content out
 //! of it. Counted in one place:
 //!
 //! 1. **Write guard** — [`super::Store::insert`] drops any `search_text` on an
@@ -9,8 +9,7 @@
 //!    non-sensitive text item, so even a row planted directly in the FTS table
 //!    can never surface.
 //!
-//! All three are required: v1 shipped databases with plaintext passwords in FTS
-//! because one was missing. All three are also decided *at capture*, which is
+//! All three are required. They are decided *at capture*, which is
 //! what [`crate::sensitive::purge_indexed_secrets`] exists to correct — it reads
 //! the index through [`Store::indexed_texts`] and drops what the current ruleset
 //! calls a secret, whatever the row was flagged as when it arrived.
@@ -78,7 +77,7 @@ impl Store {
     /// Removes every index row without a live, non-sensitive text item,
     /// returning how many went.
     ///
-    /// Manifest 03 S4, which v1 discharged as migration v13: an index row for a
+    /// Manifest 03 S4: an index row for a
     /// flagged item is one the write guard should never have allowed, and it
     /// holds plaintext whatever the current ruleset would say about that
     /// plaintext now. Costs one indexed lookup per FTS row and no decryption, so it is the
@@ -224,7 +223,7 @@ pub(super) fn insert_fts_in_tx(
 /// Turns arbitrary user input into an FTS5 MATCH expression, or `None` when
 /// there is nothing left to search for.
 ///
-/// A whitelist tokenizer, not an escaper. Each rule was a reported v1 bug:
+/// A whitelist tokenizer, not an escaper. Each rule records a reported bug:
 ///
 /// * `-` becomes a space *first*: FTS5 reads `-bar` as a column filter and
 ///   errors with "no such column: bar", so `foo-bar` must become

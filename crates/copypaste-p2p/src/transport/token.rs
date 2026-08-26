@@ -176,8 +176,8 @@ impl PartialEq for PairingToken {
 
 impl Eq for PairingToken {}
 
-/// Prints the pairing id and nothing else. v1 had no `Debug` at all; a `Debug`
-/// structurally incapable of reaching the secret gets the same property while
+/// Prints the pairing id and nothing else. A `Debug` structurally incapable of
+/// reaching the secret keeps derived containers safe while
 /// letting the type sit inside a `#[derive(Debug)]` struct, which is where an
 /// accidental `{:?}` on a secret normally comes from.
 impl fmt::Debug for PairingToken {

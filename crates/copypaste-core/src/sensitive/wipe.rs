@@ -20,7 +20,7 @@
 //!
 //! # Why no `expires_at` column
 //!
-//! v1 carried one and paid for it three times: `CopyPaste-3e7y` (a sensitive row
+//! A stored expiry column creates three failure modes: `CopyPaste-3e7y` (a sensitive row
 //! with no `expires_at` outlived its TTL because two predicates disagreed),
 //! `CopyPaste-44rq.62` (backfill and delete in separate transactions) and
 //! `CopyPaste-8ebg.2` (a dedup bump inherited a deadline seconds away). All
@@ -47,9 +47,8 @@ pub const DEFAULT_SENSITIVE_TTL: Duration = Duration::from_secs(30);
 /// Auto-wipe off.
 ///
 /// A real value, never clamped up to a minimum (manifest 01 §3.17, bug P2).
-/// v1's own bug here was treating zero as a *duration*, which put the threshold
-/// at `now` and deleted every sensitive item on every tick — the exact opposite
-/// of the user's "turn it off".
+/// Treating zero as a duration puts the threshold at `now` and deletes every
+/// sensitive item, the exact opposite of "turn it off".
 pub const SENSITIVE_TTL_DISABLED: Duration = Duration::ZERO;
 
 const SENSITIVE_WIPE_PAGE: i64 = 64;

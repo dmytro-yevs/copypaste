@@ -27,8 +27,7 @@ pub const SLOTS: usize = 10;
 /// user had just copied, which reads as clippings going missing.
 pub const FETCH: u32 = 40;
 
-/// Longest menu label. v1's number, kept: past this a macOS menu grows wider
-/// than the screen it drops out of.
+/// Longest menu label; beyond this a macOS menu grows wider than its screen.
 const MAX_LABEL_CHARS: usize = 40;
 
 /// One clipping, as a menu is allowed to see it.

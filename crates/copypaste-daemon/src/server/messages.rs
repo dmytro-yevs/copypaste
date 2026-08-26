@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn no_message_names_a_file() {
         for message in ALL_MESSAGES {
-            for fragment in [".db", ".sqlite", ".sock", "clipboard.db", "~"] {
+            for fragment in [".db", ".sqlite", ".sock", "private.db", "~"] {
                 assert!(
                     !message.contains(fragment),
                     "client-visible message names a file: {message}"

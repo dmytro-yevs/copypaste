@@ -47,7 +47,7 @@ describe("structured IPC failures", () => {
     const failure = ipcFailure({
       code: "internal",
       retryable: false,
-      message: "open /Users/alice/private/history.db failed",
+      message: "open /Users/alice/private/private.db failed",
     });
     const exposed = `${failure.message} ${JSON.stringify(failure)} ${toFriendly(failure)}`;
     expect(exposed).not.toMatch(/alice|\/Users\/|history\.db|private/);
