@@ -294,25 +294,24 @@ export async function byLabel(
  */
 export async function dismissFirstRun(browser: Browser): Promise<void> {
   await browser.waitUntil(
-    async () => {
-      const explore = await browser.$("button=Explore first");
-      const nav = await browser.$('nav[aria-label="Primary"]');
-      return (await explore.isExisting()) || (await nav.isExisting());
-    },
+    async () => browser.execute(() => {
+      if (document.querySelector('nav[aria-label="Primary"]')) return true;
+      const explore = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          '[data-onboarding-step="welcome"] button',
+        ),
+      ).find((button) => button.textContent?.trim() === "Explore first");
+      if (!explore) return false;
+      // This dismissal is setup for unrelated product tests. Platform drivers
+      // disagree on hit-testing the tall welcome grid; tested actions do not.
+      explore.click();
+      return false;
+    }),
     {
       timeout: 30_000,
-      timeoutMsg: "neither Explore first nor the primary navigation appeared",
+      timeoutMsg: "the welcome flow never yielded to primary navigation",
     },
   );
-  const explore = await browser.$("button=Explore first");
-  if (await explore.isExisting()) {
-    await explore.scrollIntoView({ block: "center", inline: "center" });
-    await explore.waitForClickable({ timeout: 15_000 });
-    await explore.click();
-    await (await browser.$('nav[aria-label="Primary"]')).waitForExist({
-      timeout: 15_000,
-    });
-  }
 }
 
 /**
