@@ -642,8 +642,8 @@ mod tests {
         }
     }
 
-    /// I-18, I-39, T-30, T-33. §6.5 is why the counter is asserted and not just
-    /// the rejection: v1 wired a counter nothing read.
+    /// I-18, I-39, T-30, T-33. §6.5 requires the rejection counter to be
+    /// asserted and user-visible.
     #[test]
     #[ignore = "drives the real Windows clipboard"]
     fn text_over_the_cap_is_rejected_and_counted_and_the_boundary_is_kept() {

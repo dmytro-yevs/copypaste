@@ -4,9 +4,8 @@
 //! of a Noise `NNpsk0` channel ([`transport`]), so there are no certificates,
 //! no trust store and no pinning verifier — and no PAKE, because a PAKE
 //! protects a *low-entropy human secret* from an offline dictionary attack and
-//! a 256-bit CSPRNG token has no dictionary. v1 spent rustls, rcgen, a
-//! hand-written pinning verifier, two hand-rolled DER parsers and OPAQUE here;
-//! the full argument is in `transport/handshake.rs`.
+//! a 256-bit CSPRNG token has no dictionary. The full library choice is in
+//! `transport/handshake.rs`.
 //!
 //! # What crosses the wire
 //!

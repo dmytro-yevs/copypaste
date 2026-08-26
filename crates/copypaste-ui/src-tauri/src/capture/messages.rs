@@ -7,10 +7,8 @@
 //!
 //! Every string here is shown verbatim — `CaptureSnapshot::headline` is not a
 //! code the view translates — so each is a complete sentence, names no
-//! filesystem path (AGENTS.md rule 4), and points at nothing that does not
-//! work. v1's did the last of those wrong: it told users to "enable
-//! AccessibilityService instead", which is not a clipboard exemption and which
-//! v1 had not implemented.
+//! filesystem path (AGENTS.md rule 4), and points only at a working recovery
+//! action. AccessibilityService is not a clipboard exemption.
 
 use super::model::{CaptureHealth, NotGrantedReason, NotWorkingReason, Rung};
 
@@ -149,7 +147,7 @@ mod tests {
             assert!(!text.contains('/'), "a path could hide here: {text}");
             assert!(
                 !text.contains("Accessibility"),
-                "v1 pointed users at a service that is not a clipboard exemption: {text}"
+                "current copy points at a service that is not a clipboard exemption: {text}"
             );
         }
     }

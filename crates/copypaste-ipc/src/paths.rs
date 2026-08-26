@@ -1,6 +1,6 @@
 //! Where things live on disk.
 //!
-//! One resolver per path, in one place: v1 duplicated the socket path in three
+//! One resolver per path, in one place; duplicating the socket path across
 //! files and its own module doc admitted it.
 
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ const DATA_DIR_ENV: &str = "COPYPASTE_DATA_DIR";
 
 /// Where the daemon socket lives.
 ///
-/// One definition, used by the daemon and the CLI. v1 duplicated this logic in
+/// One definition, used by the daemon and the CLI; duplicating it in
 /// three places and the module doc admitted it.
 pub fn socket_path() -> PathBuf {
     socket_path_for_data_dir(None)

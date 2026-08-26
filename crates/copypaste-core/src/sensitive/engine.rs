@@ -47,16 +47,14 @@ const PREFILTER_COMPILED_SIZE_LIMIT: usize = 32 * 1024 * 1024;
 
 /// The compiled ruleset. Construct **once** and share it: `new()` compiles the
 /// generated regexes plus the prefilter, and this runs on the clipboard hot path
-/// (`CopyPaste-mnte`: v1 built the detector once per history page).
+/// (`CopyPaste-mnte`).
 pub struct Detector {
     /// Prefilter. One pass says which rules can possibly match; only those
     /// individual regexes are then run.
     set: RegexSet,
     /// Index-aligned with `set`, but each entry carries its own name,
     /// category, confidence and validator, so a partial compile can never
-    /// desync names from matches (manifest I8 — v1 needed a whole
-    /// degrade-to-empty mechanism to hold this invariant; here it is
-    /// structural, §7.6).
+    /// desync names from matches (manifest I8).
     rules: Vec<Rule>,
     /// Index-aligned with `rules`: what a match from this rule permits. Derived
     /// from the rule table at construction and never listed by hand, or a new
@@ -70,9 +68,8 @@ pub struct Detector {
     global_allowlists: Vec<CompiledAllowlist>,
 }
 
-/// The two shapes [`Detector::scan_normalised`] answers in. One implementation,
-/// because §7.4 records that v1's four overlapping "is it sensitive?" entry
-/// points were the defect — a second predicate is what must not exist.
+/// The two shapes [`Detector::scan_normalised`] answers in. One implementation
+/// keeps validators identical for first-match and all-match callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScanMode {
     /// Every validated match, ranked.
@@ -201,7 +198,7 @@ impl Detector {
 
     /// True when this text may be **deleted** automatically.
     ///
-    /// The one gate between detection and destruction. v1 collapsed it with
+    /// The one gate between detection and destruction. Collapsing it with
     /// [`Detector::is_sensitive`] three separate times (`AB-6a`, `PG-23`,
     /// `PG-3`) and destroyed unrecoverable user data each time; manifest I2
     /// keeps them apart, and [`Severity::Restricted`] is the band where they
@@ -266,8 +263,7 @@ struct Rule {
 impl Rule {
     /// Every match that passes this rule's validator, or just the first when
     /// the caller only needs to know whether one exists. No separate fast path:
-    /// v1's `RegexSet` shortcut skipped the value-strength validator and needed
-    /// a bespoke `generic_password_kv` case to compensate (§5.3). `first_only`
+    /// skipping the value-strength validator changes the verdict (§5.3). `first_only`
     /// stops the iteration, it does not weaken a single check.
     fn spans(
         &self,
@@ -456,9 +452,8 @@ pub(super) mod test_support {
         Detector::new().expect("ruleset compiles")
     }
 
-    /// All validated matches, ranked. Test-only: production has exactly one
-    /// verdict function and one label function (§7.4 — v1 shipped four
-    /// overlapping "is it sensitive?" entry points, three of them dead).
+    /// All validated matches, ranked. Test-only: production has one verdict
+    /// function and one label function.
     pub(in crate::sensitive) fn all_rules(det: &Detector, text: &str) -> Vec<&'static str> {
         det.scan_all(text)
             .iter()
@@ -559,9 +554,8 @@ pub(super) mod test_support {
         value.into_iter().collect()
     }
 
-    /// The benign corpus. §7.7: v1's `max(len * 5 / 100, 2)` budget tolerated
-    /// two unnamed FPs — `const password = prompt(...)` was one of them. v2
-    /// asserts **zero**; any accepted FP must be named here with a reason.
+    /// The benign corpus asserts zero unnamed false positives; any accepted
+    /// false positive must be named here with a reason.
     ///
     /// Shared with [`crate::sensitive::normalise`], which asserts NFKC is the
     /// identity on every entry.
@@ -677,12 +671,12 @@ mod tests {
             ("-----BEGIN OPENSSH PRIVATE KEY-----", Some("private_key")),
             ("-----BEGIN EC PRIVATE KEY-----", Some("private_key")),
             ("-----BEGIN PRIVATE KEY-----", Some("private_key")),
-            // Audit MED #5 — the ENCRYPTED header was a real miss in v1
+            // Audit MED #5 — the ENCRYPTED header was a real miss
             (
                 "garbage prefix\n-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFDjBABgkq",
                 Some("private_key"),
             ),
-            // Audit MED #5 — PuTTY .ppk was a real miss in v1
+            // Audit MED #5 — PuTTY .ppk was a real miss
             (
                 "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: rsa-key",
                 Some("putty_private_key"),
@@ -756,7 +750,7 @@ mod tests {
             ),
             (&azure, Some("azure_storage_key")),
             ("4111111111111111", Some("credit_card")),
-            // Audit MED #6 — a card embedded in text was a silent miss in v1
+            // Audit MED #6 — a card embedded in text was a silent miss
             (
                 "Customer card: 4111 1111 1111 1111 — expires 12/26",
                 Some("credit_card"),
@@ -1595,8 +1589,8 @@ mod tests {
         assert!(fired(&det, "alice@example.com # gitleaks:allow", "email"));
     }
 
-    /// §7.2: rank by confidence, not by declaration index. v1 returned the
-    /// lowest index, so this exact input was labelled "email".
+    /// Rank by confidence, not by declaration index; otherwise this exact
+    /// input is labelled "email".
     #[test]
     fn scan_ranks_by_confidence_not_declaration_order() {
         let det = detector();
@@ -1683,7 +1677,7 @@ mod tests {
         assert_eq!(&normalised[findings[0].byte_range()], normalised);
     }
 
-    /// §3.3's known gap in v1 was that the card check produced no span, so a
+    /// Audit MED #6: the card check must produce a span, or a
     /// card embedded in benign text could never be masked. It is a first-class
     /// rule here, and the restricted band is what lets the span exist without
     /// the item becoming deletable.

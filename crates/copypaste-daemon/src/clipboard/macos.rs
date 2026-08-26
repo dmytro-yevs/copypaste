@@ -66,7 +66,7 @@ const UTI_MARKERS: [&str; 3] = [
 ];
 
 /// §3.12 (CopyPaste-pbre): the invariant UTI strings are process-lifetime
-/// constants, built once and reused. v1 allocated ~12 fresh Cocoa strings on
+/// constants, built once and reused. allocating ~12 fresh Cocoa strings on
 /// every changed tick.
 ///
 /// A `thread_local` rather than a `static`: these are strong references, so
@@ -655,9 +655,8 @@ mod tests {
         );
     }
 
-    /// I-18, I-39, T-30, T-33. §6.5 is the reason the counter is asserted and
-    /// not just the rejection: v1 wired a counter that nothing read and that
-    /// the image path bypassed, so an oversized item vanished in silence.
+    /// I-18, I-39, T-30, T-33. §6.5 requires both rejection and a visible
+    /// counter; an oversized item may not vanish silently.
     #[test]
     #[ignore = "drives the real NSPasteboard"]
     fn text_over_the_cap_is_rejected_and_counted_and_the_boundary_is_kept() {

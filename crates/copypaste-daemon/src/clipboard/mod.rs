@@ -1,11 +1,10 @@
-//! The clipboard source port — the seam v1 never had.
+//! The clipboard source port — platform I/O ends at this seam.
 //!
 //! Port manifest 01 (`docs/rewrite/port-manifest/01-clipboard-capture.md`) is
 //! binding for v2's text-capture scope. Its image and file rules are reference.
 //!
-//! Its own top finding (§6.7) is that v1's monitor called
-//! `NSPasteboard.generalPasteboard` directly, so roughly two thirds of the
-//! invariants in §2 could not be tested at all — which is precisely why several
+//! The platform adapters do not own change state, so the invariants in §2 stay
+//! testable without a real pasteboard — which is precisely why several
 //! of them regressed. This module is the fix: one trait ([`ClipboardSource`]),
 //! one real backend, one fake, and the change-detection state machine written
 //! **once** and shared by both, so the rules that used to be untestable are
@@ -226,8 +225,8 @@ pub trait ClipboardSource: Send {
 
     /// How many changes were dropped for exceeding the size cap.
     ///
-    /// I-39 and §6.5: v1 wired a rejection counter that nothing ever read, and
-    /// the image path bypassed it entirely, so an oversized clipboard item was
+    /// I-39 and §6.5: the rejection counter is user-visible; otherwise an
+    /// oversized clipboard item is
     /// dropped in complete silence — indistinguishable from the daemon being
     /// broken. The counter is on the port so a status response can surface it.
     /// Defaulted so a backend may omit it, never so it can be forgotten.

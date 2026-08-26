@@ -9,8 +9,7 @@
 //! Three things it does not do, on purpose:
 //!
 //! * **It does not redefine the wire types.** [`copypaste_ipc::Method`] and
-//!   friends go straight onto the socket. v1 had three models of this contract;
-//!   there is one.
+//!   friends go straight onto the socket; there is one contract model.
 //! * **It does not frame bytes by hand.** Framing is
 //!   [`tokio_util::codec::LinesCodec`], the same codec the daemon and the CLI
 //!   use (AGENTS.md rule 1).
@@ -599,7 +598,7 @@ mod tests {
         ] {
             assert!(
                 !source.contains(verb),
-                "legacy operation {verb} is reachable"
+                "retired operation {verb} is reachable"
             );
         }
         for verb in [
