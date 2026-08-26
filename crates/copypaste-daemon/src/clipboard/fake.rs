@@ -390,7 +390,7 @@ mod tests {
 
     /// §3.2 / T-5 — the manifest's highest-value rule. Three copies with one
     /// poll: the intermediates are gone (NSPasteboard keeps no history) but the
-    /// survivor MUST be captured. v1 advanced the cursor and returned a
+    /// survivor MUST be captured. advancing the cursor and returning a
     /// burst-only result, so the most recent item was lost permanently.
     #[test]
     fn burst_does_not_eat_the_survivor() {
@@ -494,7 +494,7 @@ mod tests {
     }
 
     /// I-39 / §6.5 — an oversized value is rejected, counted, and acknowledged
-    /// (not re-offered forever). v1 dropped oversized images in complete
+    /// (not re-offered forever). dropping oversized images in complete
     /// silence.
     #[test]
     fn oversized_content_is_rejected_and_counted() {

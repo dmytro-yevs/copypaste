@@ -3,9 +3,8 @@
  * every mutation. All three carry the whole snapshot, so none has to guess what
  * the others changed.
  *
- * The refresh on resume is a requirement: on Android the grant disappears while
- * the app is backgrounded, and v1 shipped a cached permission state that never
- * re-read after a trip to system Settings.
+ * The refresh on resume is a requirement: Android can revoke a grant while the
+ * app is backgrounded, and a cached result stays wrong after system Settings.
  */
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

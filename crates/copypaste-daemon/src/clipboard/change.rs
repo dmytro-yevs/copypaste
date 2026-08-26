@@ -1,9 +1,7 @@
 //! Change detection — written once, used by every backend.
 //!
-//! This file is the point of the whole module. Port manifest 01 §6.7 found that
-//! v1's monitor called `NSPasteboard.generalPasteboard` directly, so roughly two
-//! thirds of the invariants in §2 could not be tested at all — which is
-//! precisely why several of them regressed. Everything here is pure state: a
+//! Port manifest 01 §6.7 requires pasteboard-independent change state so §2 can
+//! be tested without platform I/O. Everything here is pure state: a
 //! change-count cursor and one atomic cell. Both backends run *this* code, so
 //! I-2, I-3, I-4, §3.2 and the whole §3.3 sentinel protocol are verifiable by
 //! ordinary `cargo test` on a host with no window server.
@@ -31,7 +29,7 @@ const COUNT_NONE: i64 = -1;
 
 /// A self-write moves `changeCount` by exactly this much (§4).
 ///
-/// **Measured, not predicted.** The manifest recovered 2 from v1 —
+/// **Measured, not predicted.** The manifest fixes the value at 2 —
 /// `clearContents` (+1) then `set…:forType:` (+1) — and macos-14 moves by 1:
 /// the write lands in the generation `clearContents` opened. Arming the
 /// sentinel at `pre + 2` therefore missed our own paste-back, which came back
@@ -78,8 +76,8 @@ impl SelfWriteSentinel {
     /// Step 2 — arm at the count the write will carry, before the content is
     /// visible. The caller passes what `clearContents` returned.
     ///
-    /// * v1 stamped after the write, and a poll in that window recorded the item
-    ///   we had just pasted as a capture (Fix-4 / "DUP-ON-COPY").
+    /// * Stamping after the write lets a poll in that window recapture our own
+    ///   paste (Fix-4 / "DUP-ON-COPY").
     /// * An armed count *above* the write swallows whichever genuine copy lands
     ///   there. One at or below it can never match again — `consume_if` compares
     ///   for equality and `changeCount` only rises — so it is inert. That
@@ -188,7 +186,7 @@ impl ChangeTracker {
 //
 // This is the state machine the macOS backend runs; testing it here is what
 // makes I-2, I-3, I-4, §3.2 and the whole §3.3 sentinel protocol verifiable on a
-// host with no window server. v1 could not write any of these: it had no seam,
+// host with no window server. platform-free tests cover these states;
 // so its "contract tests" re-stated the rule in a comment and asserted something
 // trivially true (§6.7).
 

@@ -46,6 +46,6 @@ pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};
 
 /// Milliseconds since the Unix epoch.
 ///
-/// One helper, called everywhere. v1 had several time sources and a
-/// clock-skew bug that came from mixing them.
+/// One helper, called everywhere; mixing time sources breaks ordering under
+/// clock skew.
 pub use copypaste_clock::now_ms;

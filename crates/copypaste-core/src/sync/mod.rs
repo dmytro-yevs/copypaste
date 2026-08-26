@@ -9,9 +9,8 @@
 //!
 //! It is also what the cloud transport merges through. The comparator is
 //! [`copypaste_p2p::sync::merge_decision`] and it is called from exactly one
-//! place ([`merge::apply_remote_version`]), because v1's worst convergence bug
-//! was two transports comparing with two different comparators (manifest 05
-//! INV-C2).
+//! place ([`merge::apply_remote_version`]); two transport-specific comparators
+//! violate manifest 05 INV-C2.
 
 mod batch;
 mod merge;

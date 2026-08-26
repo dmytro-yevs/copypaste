@@ -19,7 +19,7 @@ pub struct CloudStatusData {
     /// A session is held for an account.
     pub signed_in: bool,
     /// The sync key is unlocked, so rows can actually be sealed and opened.
-    /// Distinct from `signed_in`: v1 could be signed in with no passphrase and
+    /// Distinct from `signed_in`: a session can exist without a passphrase and
     /// silently synced nothing.
     pub key_ready: bool,
     /// The signed-in account, as the user typed it.

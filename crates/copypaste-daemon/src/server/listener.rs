@@ -1,9 +1,8 @@
 //! The socket itself: binding it, guarding it, bounding it, and framing what
 //! arrives on it.
 //!
-//! Framing is `tokio_util::codec::LinesCodec`. v1 hand-rolled a two-pass,
-//! byte-scanning partial-JSON reader — it had to, because it wanted a
-//! method-aware size cap before the method was parseable. v2 has one cap
+//! Framing is `tokio_util::codec::LinesCodec`. The method-aware size cap remains
+//! custom because it must apply before a complete request is parseable. One cap
 //! (`copypaste_ipc::MAX_FRAME_BYTES`) and therefore no reason to look at bytes
 //! at all.
 //!

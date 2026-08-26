@@ -11,9 +11,8 @@
 //!   data loss as the worst outcome.
 //! * An existing file whose mode is wider than `0600` is reported at `warn`.
 //!
-//! v1 shipped this file with the OPAQUE `PasswordFile` in plaintext inside it,
-//! recorded by its own ADR-008 as an unresolved Medium finding
-//! (**CopyPaste-5lm**, port manifest 02 §3.7 and §6.3). v2 needs only the
+//! `CopyPaste-5lm` / manifest 02 §3.7 and §6.3: pairing secrets never share a
+//! plaintext peer file with verifier state. The current format needs only the
 //! 32-byte PSK, but the file is no less sensitive for being smaller.
 
 use std::collections::{BTreeMap, HashMap};

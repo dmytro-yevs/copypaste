@@ -35,7 +35,7 @@ class ClipSensitivityTest {
     }
 
     @Test
-    fun theLegacySensitiveExtraStringIsHonoured() {
+    fun theStringSensitiveExtraIsHonoured() {
         val clip = ClipData.newPlainText("label", "secret")
         val extras = PersistableBundle()
         extras.putBoolean("android.content.extra.IS_SENSITIVE", true)
