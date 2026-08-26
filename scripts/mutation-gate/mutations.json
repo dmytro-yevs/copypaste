@@ -422,21 +422,21 @@
         },
         {
           "name": "windows-package-coverage-not-required",
-          "file": "scripts/release/check-wiring.py",
-          "find": "        and valid_commands and set(selected) == expected and len(selected) == len(expected)\n",
+          "file": "scripts/release/ci_contract.py",
+          "find": "        and valid_commands\n        and set(selected) == expected_packages\n        and len(selected) == len(expected_packages)\n",
           "replace": "        and valid_commands\n",
           "expect": "FAIL|self-test: reduced Windows workspace coverage is rejected|"
         },
         {
           "name": "windows-cache-writers-may-collide",
-          "file": "scripts/release/check-wiring.py",
+          "file": "scripts/release/ci_contract.py",
           "find": "        and len(cache_keys) == len(names) == len(set(cache_keys))\n",
           "replace": "        and len(cache_keys) == len(names)\n",
           "expect": "FAIL|self-test: duplicate Windows cache writers are rejected|"
         },
         {
           "name": "windows-shard-target-not-enforced",
-          "file": "scripts/release/check-wiring.py",
+          "file": "scripts/release/ci_contract.py",
           "find": "        and all(shards[name].get(\"timeout-minutes\") == 15 for name in test_names)\n",
           "replace": "        and all(shards[name].get(\"timeout-minutes\") <= 20 for name in test_names)\n",
           "expect": "FAIL|self-test: a Windows test shard above its target is rejected|"
@@ -495,18 +495,18 @@
       "requires": ["python3"],
       "mutations": [
         {
-          "name": "sibling-module-commands-missed",
+          "name": "native-command-inventory-ignored",
           "file": "scripts/check-feature-ledger.py",
-          "find": "    return set(re.findall(r\"^\\s*(?:[a-z_]+::)+([a-z_]+),\", block, re.MULTILINE))",
-          "replace": "    return set(re.findall(r\"^\\s*([a-z_]+),\", block, re.MULTILINE))",
-          "expect": "FAIL|self-test: sibling-module Tauri commands are extracted|"
+          "find": "    return set(commands)",
+          "replace": "    return set()",
+          "expect": "FAIL|self-test: generated native commands are extracted|"
         },
         {
           "name": "unclassified-command-not-reported",
           "file": "scripts/check-feature-ledger.py",
-          "find": "    missing = sorted(shipped - set(classified))",
+          "find": "    missing = sorted(shipped - set(owners))",
           "replace": "    missing = []",
-          "expect": "FAIL|self-test: an omitted sibling-module command fails|"
+          "expect": "FAIL|self-test: an omitted generated command fails|"
         }
       ]
     },
@@ -519,15 +519,15 @@
       "mutations": [
         {
           "name": "parity-gate-need-not-wait-for-windows",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "    if not {\"macos\", \"android-smoke\", \"windows\"} <= set(gate.get(\"needs\") or []):",
+          "file": "scripts/release/native_evidence_wiring.py",
+          "find": "    if not {\"macos\", \"android-hardware\", \"windows\"} <= set(gate.get(\"needs\") or []):",
           "replace": "    if False:",
           "expect": "FAIL|missing Windows platform dependency fails|"
         },
         {
           "name": "windows-receipt-need-not-be-downloaded",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "    if not required_receipts <= downloads(gate):",
+          "file": "scripts/release/native_evidence_wiring.py",
+          "find": "    if not set(RELEASE_ARTIFACTS.values()) <= downloads(gate):",
           "replace": "    if False:",
           "expect": "FAIL|missing Windows evidence download fails|"
         },
