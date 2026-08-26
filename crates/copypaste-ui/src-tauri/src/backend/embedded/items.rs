@@ -213,6 +213,62 @@ fn clipboard_error(error: copypaste_core::ClipboardWriteError) -> BackendError {
     }
 }
 
+pub(super) async fn delete(backend: &EmbeddedBackend, id: &str) -> Result<()> {
+    let id = id.to_string();
+    backend
+        .blocking(move |inner| {
+            let mutation_started = copypaste_core::now_ms();
+            // An unknown id is not a successful no-op: callers must know that
+            // they deleted nothing, matching the daemon item contract.
+            match inner.state.store.delete(&id) {
+                Ok(true) => {
+                    inner.note_version_written(mutation_started);
+                    inner.note_local_version(mutation_started);
+                    inner.publish_items(false, 0);
+                    Ok(())
+                }
+                Ok(false) => Err(BackendError::NotFound(MSG_NO_ITEM)),
+                Err(_) => Err(BackendError::internal("that item could not be deleted")),
+            }
+        })
+        .await
+}
+
+pub(super) async fn set_pinned(backend: &EmbeddedBackend, id: &str, pinned: bool) -> Result<Item> {
+    let id = id.to_string();
+    backend
+        .blocking(move |inner| {
+            match inner.state.store.set_pinned(&id, pinned) {
+                Ok(true) => {}
+                Ok(false) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
+                Err(_) => return Err(BackendError::internal("that item could not be changed")),
+            }
+            inner.note_local_version(copypaste_core::now_ms());
+            inner.publish_items(false, 0);
+            inner.fetch(&id)
+        })
+        .await
+}
+
+pub(super) async fn reorder_pinned(backend: &EmbeddedBackend, ids: &[String]) -> Result<()> {
+    let ids = ids.to_vec();
+    backend
+        .blocking(move |inner| {
+            // The store owns stale/unpinned-id handling. A zero count remains
+            // success so a concurrent sync cannot invalidate the gesture.
+            let renumbered = inner
+                .state
+                .store
+                .reorder_pinned(&ids)
+                .map_err(|_| BackendError::internal("the pinned order could not be changed"))?;
+            if renumbered > 0 {
+                inner.publish_items(false, 0);
+            }
+            Ok(())
+        })
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::backend;
@@ -300,60 +356,4 @@ mod tests {
             assert!(labels.iter().any(|content| content == label), "{label}");
         }
     }
-}
-
-pub(super) async fn delete(backend: &EmbeddedBackend, id: &str) -> Result<()> {
-    let id = id.to_string();
-    backend
-        .blocking(move |inner| {
-            let mutation_started = copypaste_core::now_ms();
-            // An unknown id is not a successful no-op: callers must know that
-            // they deleted nothing, matching the daemon item contract.
-            match inner.state.store.delete(&id) {
-                Ok(true) => {
-                    inner.note_version_written(mutation_started);
-                    inner.note_local_version(mutation_started);
-                    inner.publish_items(false, 0);
-                    Ok(())
-                }
-                Ok(false) => Err(BackendError::NotFound(MSG_NO_ITEM)),
-                Err(_) => Err(BackendError::internal("that item could not be deleted")),
-            }
-        })
-        .await
-}
-
-pub(super) async fn set_pinned(backend: &EmbeddedBackend, id: &str, pinned: bool) -> Result<Item> {
-    let id = id.to_string();
-    backend
-        .blocking(move |inner| {
-            match inner.state.store.set_pinned(&id, pinned) {
-                Ok(true) => {}
-                Ok(false) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
-                Err(_) => return Err(BackendError::internal("that item could not be changed")),
-            }
-            inner.note_local_version(copypaste_core::now_ms());
-            inner.publish_items(false, 0);
-            inner.fetch(&id)
-        })
-        .await
-}
-
-pub(super) async fn reorder_pinned(backend: &EmbeddedBackend, ids: &[String]) -> Result<()> {
-    let ids = ids.to_vec();
-    backend
-        .blocking(move |inner| {
-            // The store owns stale/unpinned-id handling. A zero count remains
-            // success so a concurrent sync cannot invalidate the gesture.
-            let renumbered = inner
-                .state
-                .store
-                .reorder_pinned(&ids)
-                .map_err(|_| BackendError::internal("the pinned order could not be changed"))?;
-            if renumbered > 0 {
-                inner.publish_items(false, 0);
-            }
-            Ok(())
-        })
-        .await
 }

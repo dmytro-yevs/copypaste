@@ -97,11 +97,12 @@ pub struct DevicePresenceObservation {
     pub fresh_until_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(tag = "availability", rename_all = "snake_case")]
 pub enum ExternalNetworkObservation {
+    #[default]
     Unavailable,
     Available {
         value: String,
@@ -110,12 +111,6 @@ pub enum ExternalNetworkObservation {
         observed_at_ms: i64,
         fresh_until_ms: Option<i64>,
     },
-}
-
-impl Default for ExternalNetworkObservation {
-    fn default() -> Self {
-        Self::Unavailable
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
