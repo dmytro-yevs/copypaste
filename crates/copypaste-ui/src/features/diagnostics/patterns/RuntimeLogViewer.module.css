@@ -34,22 +34,34 @@
   color: var(--dim);
 }
 
-.log {
+.log,
+.logSkeleton,
+.emptyState {
   min-block-size: 0;
   flex: 1;
-  overflow-y: auto;
   border: var(--stroke-1) solid var(--border);
   border-radius: var(--r-ctl);
   background: var(--panel);
 }
 
+.log {
+  overflow-y: auto;
+}
+
 .logSkeleton {
-  min-block-size: 0;
-  flex: 1;
   overflow: hidden;
-  border: var(--stroke-1) solid var(--border);
-  border-radius: var(--r-ctl);
-  background: var(--panel);
+}
+
+.emptyState {
+  display: grid;
+  min-block-size: calc(var(--s-9) * 5);
+  padding: var(--s-4);
+  place-items: center;
+  overflow: hidden;
+}
+
+.emptyState > * {
+  margin: 0;
 }
 
 .skeletonRow {
