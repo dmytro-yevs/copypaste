@@ -430,7 +430,9 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: npm
-          cache-dependency-path: e2e-android/package-lock.json
+          cache-dependency-path: |
+            e2e-android/package-lock.json
+            crates/copypaste-ui/package-lock.json
 
       - name: Install the UI harness
         working-directory: e2e-android
@@ -439,6 +441,9 @@ jobs:
       - name: Audit harness dependencies
         working-directory: e2e-android
         run: npm audit --audit-level=high
+
+      - name: Install release metadata dependencies
+        run: npm ci --prefix crates/copypaste-ui --ignore-scripts
 
       - name: Resolve the debug application identity
         run: |

@@ -4,9 +4,6 @@ use super::{UiBoundaryErrorCode, UiError, UpdateProgress, UpdateStatus};
 use tauri::{ipc::Channel, AppHandle};
 
 #[cfg(target_os = "windows")]
-use tauri_plugin_updater::UpdaterExt as _;
-
-#[cfg(target_os = "windows")]
 pub(super) fn status(app: &AppHandle) -> UpdateStatus {
     if super::config::configured_for_app(app) {
         UpdateStatus::Ready
