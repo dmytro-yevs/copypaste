@@ -55,7 +55,7 @@ describe("Tauri bridge startup", () => {
 
   it("rejects another bridgeless page immediately", () => {
     expect(() =>
-      assertTauriBridge({ bridge: false, url: "http://localhost:1420/" }, false),
+      assertTauriBridge({ bridge: false, url: "http://127.0.0.1:1420/" }, false),
     ).toThrow(/no IPC is under test/);
   });
 });

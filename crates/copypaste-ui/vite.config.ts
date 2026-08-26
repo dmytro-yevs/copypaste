@@ -107,7 +107,7 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   clearScreen: false,
-  server: { port: 1420, strictPort: true },
+  server: { host: "127.0.0.1", port: 1420, strictPort: true },
   // The Android WebView is the one pinned into the emulator's system image, not
   // a Play-updated one, so both engines are measured rather than assumed: API 29
   // is Chromium 74 and API 24 is Chromium 53 (`scripts/webview-baseline.mjs`).

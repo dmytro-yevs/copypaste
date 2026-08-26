@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev:web",
     "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"
   },
   "app": {
@@ -36,8 +36,8 @@
         "frame-ancestors": ["'none'"]
       },
       "devCsp": {
-        "default-src": ["'self'", "http://localhost:1420"],
-        "connect-src": ["ipc:", "http://ipc.localhost", "http://localhost:1420", "ws://localhost:1420"],
+        "default-src": ["'self'", "http://127.0.0.1:1420"],
+        "connect-src": ["ipc:", "http://ipc.localhost", "http://127.0.0.1:1420", "ws://127.0.0.1:1420"],
         "img-src": ["'self'", "asset:", "http://asset.localhost", "data:", "blob:"],
         "style-src": ["'self'", "'unsafe-inline'"],
         "font-src": ["'self'", "data:"],
