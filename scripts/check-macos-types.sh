@@ -22,11 +22,10 @@
 #
 # The drift cost, stated
 # The generated crate mirrors the surface those two files reach for outside
-# themselves: `crypto::{CryptoError, KEY_LEN}`, `crypto::keys::random_secret`,
-# and the slice of `AppState` that `notify.rs` reads. If `keystore/mod.rs`
-# starts using something new from `super`, or `AppState` changes shape, this
-# check breaks — loudly, here, in seconds. That is the trade: a stub that can
-# go stale, against macOS-only code that nothing type-checks at all.
+# themselves: the crypto seam, clipboard payload variants and the slice of
+# `AppState` that `notify.rs` reads. The real feedback crate is a path
+# dependency. If one of those surfaces changes, this check breaks here. That is
+# the trade: an explicit stub that fails stale instead of unchecked macOS code.
 #
 # It is not a substitute for the `macos-check` job. It proves the code compiles
 # for Darwin; only a Mac proves it does anything.
@@ -141,6 +140,7 @@ edition = "2021"
 [dependencies]
 copypaste-ipc = { path = "$REPO_ROOT/crates/copypaste-ipc" }
 copypaste-core = { path = "copypaste-core-stub" }
+copypaste-feedback = { path = "$REPO_ROOT/crates/copypaste-feedback" }
 objc2 = "=$PIN_OBJC2"
 objc2-foundation = { version = "=$PIN_OBJC2_FOUNDATION", features = ["NSString", "NSData", "NSArray"] }
 objc2-app-kit = { version = "=$PIN_OBJC2_APP_KIT", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication"] }
@@ -198,6 +198,10 @@ EOF
 name = "copypaste-core"
 version = "0.0.0"
 edition = "2021"
+
+[dependencies]
+thiserror = "1"
+zeroize = { version = "1.7", features = ["derive"] }
 EOF
 
     cat > "$dir/copypaste-core-stub/src/lib.rs" <<'EOF'
@@ -220,6 +224,30 @@ impl FileMetadata {
     pub fn is_valid(&self) -> bool {
         Self::new(self.filename.clone(), self.mime_type.clone()).is_some()
     }
+}
+
+#[derive(Debug)]
+pub enum ClipboardPayload {
+    Text(zeroize::Zeroizing<String>),
+    Image {
+        content_type: String,
+        bytes: zeroize::Zeroizing<Vec<u8>>,
+    },
+    File {
+        bytes: zeroize::Zeroizing<Vec<u8>>,
+        metadata: Option<FileMetadata>,
+    },
+    Unsupported {
+        bytes: zeroize::Zeroizing<Vec<u8>>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ClipboardWriteError {
+    #[error("this clipboard cannot write that content type")]
+    UnsupportedContent,
+    #[error("the system clipboard could not be written")]
+    Failed,
 }
 
 pub fn binary_item_id(_bytes: &[u8]) -> String {
