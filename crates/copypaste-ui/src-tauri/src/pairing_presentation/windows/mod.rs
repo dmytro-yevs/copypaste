@@ -238,7 +238,7 @@ mod refusal_tests {
 
     use super::*;
     use crate::pairing_presentation::invite as codec;
-    use crate::pairing_presentation::{NativePairingUi, PairingDecision, PairingPresentationState};
+    use crate::pairing_presentation::{NativePairingUi, PairingDecision};
 
     /// What the window looked like when it asked to be excluded from capture.
     static ASKED: AtomicBool = AtomicBool::new(false);

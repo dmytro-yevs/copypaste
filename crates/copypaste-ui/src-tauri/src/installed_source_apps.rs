@@ -31,6 +31,7 @@ pub(crate) fn list() -> Result<Vec<InstalledSourceApp>> {
     Ok(Vec::new())
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn finish(
     mut apps: Vec<InstalledSourceApp>,
     ids_ignore_ascii_case: bool,
