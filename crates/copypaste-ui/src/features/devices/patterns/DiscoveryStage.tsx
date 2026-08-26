@@ -114,6 +114,7 @@ export function DiscoveryStage({
 }) {
     const presentation = copy[state];
     const busy = state === "checking" || state === "scanning";
+    const radarActive = state !== "error";
     const role = state === "error" ? "alert" : busy ? "status" : undefined;
     const positioned = positionedDevices(devices);
 
@@ -202,7 +203,7 @@ export function DiscoveryStage({
                                 />
                             ))}
                         </g>
-                        {busy ? (
+                        {radarActive ? (
                             <g className={styles.sweep} data-radar-sweep>
                                 <path
                                     className={styles.sweepSector}
