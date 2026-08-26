@@ -250,12 +250,11 @@ tap_selector() { # <selector> <artifact> [timeout]
 }
 
 reach_settings_tab() { # <artifact> [timeout]
-    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}" started="$SECONDS" point
+    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}" started="$SECONDS"
     while (( SECONDS - started < timeout )); do
         if dump_hierarchy "$artifact"; then
             [[ -n "$(action_center "$artifact" "Settings")" ]] && return 0
-            point="$(action_center "$artifact" "Explore first")"
-            [[ -n "$point" ]] && sh_ input tap $point >/dev/null
+            tap_selector_scrolling "Explore first" "$artifact" up 8 || true
         fi
         sleep 1
     done
