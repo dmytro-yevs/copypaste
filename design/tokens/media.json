@@ -1,0 +1,18 @@
+{
+  "media": {
+    "$description": "Intrinsic media geometry. These coordinates belong to an authored SVG viewBox, not to product layout spacing.",
+    "$type": "dimension",
+    "illustrated-error-antenna-origin-x": {
+      "$value": "144px"
+    },
+    "illustrated-error-antenna-origin-y": {
+      "$value": "42px"
+    },
+    "illustrated-error-tool-origin-x": {
+      "$value": "84px"
+    },
+    "illustrated-error-tool-origin-y": {
+      "$value": "110px"
+    }
+  }
+}
