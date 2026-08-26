@@ -56,6 +56,16 @@ function Get-UiaSnapshot([Windows.Automation.AutomationElement]$Root) {
     return Read-UiaSnapshot $elements { param($element) Read-UiaNode $element }
 }
 
+function Get-UiaSnapshotNames([Collections.IDictionary]$Snapshot) {
+    return @(
+        @($Snapshot["nodes"]) | ForEach-Object {
+            if ($_ -is [Collections.IDictionary] -and $_.Contains("name") -and $_["name"]) {
+                $_["name"]
+            }
+        } | Select-Object -First 40
+    )
+}
+
 # Diagnostics, so a partial read is described rather than rejected: this runs
 # while some other wait has already failed and is the only account of what the
 # app was showing.
@@ -63,7 +73,7 @@ function Get-UiaSummary([Diagnostics.Process]$App) {
     $root = Get-AppAutomationRoot $App
     if ($null -eq $root) { return "native window handle is not ready" }
     $snapshot = Get-UiaSnapshot $root
-    $names = @($snapshot.nodes | Where-Object { $_.name } | Select-Object -First 40 -ExpandProperty name)
+    $names = @(Get-UiaSnapshotNames $snapshot)
     return "UIA names: $($names -join ' | ') [$(Get-UiaSnapshotReport $snapshot)]"
 }
 
@@ -127,18 +137,18 @@ function Invoke-UiaElement([Windows.Automation.AutomationElement]$Element, [stri
 }
 
 function Complete-WindowsFirstRun([Diagnostics.Process]$App) {
-    Wait-Readiness "first-run skipped or product shell" {
+    Wait-Readiness "welcome dismissed or product shell" {
         $App.Refresh()
         if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
         if ($null -ne (Get-UiaNamedElement $App "Settings" $true)) {
             return New-ProbeReady $true
         }
-        $skip = Get-UiaNamedElement $App "Skip setup" $true
-        if ($null -ne $skip) {
-            Invoke-UiaElement $skip "Skip setup"
+        $explore = Get-UiaNamedElement $App "Explore first" $true
+        if ($null -ne $explore) {
+            Invoke-UiaElement $explore "Explore first"
             return New-ProbeNotReady "welcome dismissed"
         }
-        return New-ProbeNotReady "neither Skip setup nor Settings is on screen"
+        return New-ProbeNotReady "neither Explore first nor Settings is on screen"
     } { Get-UiaSummary $App } 20000 | Out-Null
 }
 
@@ -201,8 +211,10 @@ function Save-WindowsFeatureState(
     Assert-UiaSnapshotComplete $snapshot "$Feature/$State evidence"
     $nodes = $snapshot.nodes
     $markers = @($nodes | Where-Object {
-        $_.name -eq $ExpectedName -and $_.enabled -and -not $_.offscreen -and
-        $_.bounds.width -gt 0 -and $_.bounds.height -gt 0
+        if ($_ -isnot [Collections.IDictionary]) { return $false }
+        $bounds = $_["bounds"]
+        return $_["name"] -eq $ExpectedName -and $_["enabled"] -and -not $_["offscreen"] -and
+            $bounds -is [Collections.IDictionary] -and $bounds["width"] -gt 0 -and $bounds["height"] -gt 0
     })
     Assert-True ($markers.Count -gt 0) "$Feature evidence lacks a visible, enabled '$ExpectedName' marker"
     $relativeDirectory = if ($ArtifactDirectory) { Join-Path $Feature $ArtifactDirectory } else { $Feature }
@@ -241,6 +253,11 @@ function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) 
 
 function Test-WindowsUiEvidenceHelpers {
     Test-UiaSnapshotHelpers
+    $names = @(Get-UiaSnapshotNames ([ordered]@{
+        nodes = @([ordered]@{ name = "Explore first" }, [ordered]@{ control_type = "ControlType.Button" })
+    }))
+    Assert-True ($names.Count -eq 1 -and $names[0] -eq "Explore first") `
+        "UIA diagnostics did not tolerate a node without a name"
     Assert-True ((Get-UiaControlTypeName ([Windows.Automation.ControlType]::Button)) -eq "ControlType.Button") `
         "a registered control type was not read from the element"
     Assert-True ($null -eq (Get-UiaControlTypeName $null)) `

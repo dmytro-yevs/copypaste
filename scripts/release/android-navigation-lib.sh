@@ -63,7 +63,7 @@ wait_app_navigable() { # <artifact> [timeout] [dump function]
         if "$dump" "$artifact"; then
             app_navigation_holds "$artifact" && return 0
             if [[ "$dump" == dump_hierarchy ]]; then
-                point="$(action_center "$artifact" "Skip setup")"
+                point="$(action_center "$artifact" "Explore first")"
                 [[ -n "$point" ]] && sh_ input tap $point >/dev/null
             fi
         fi
