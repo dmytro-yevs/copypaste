@@ -108,7 +108,7 @@ export type PairingRole = "initiator" | "responder";
 
 export type PairingState = "idle" | "waiting_for_peer" | "handshaking" | "awaiting_confirmation" | "confirmed" | "rejected" | "cancelled" | "timed_out" | "failed";
 
-export type PairingPresentationState = "presented" | "unavailable";
+export type PairingPresentationState = "available" | "presented" | "unavailable";
 
 export type PairedDevice = { name: string, last_seen_ms: number, online: boolean, };
 

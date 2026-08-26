@@ -452,7 +452,7 @@ PY
 # the sign-in form that came back.
 sign_out_self_test() { # <temp>
     local temp="$1" primary card badge form toast
-    primary='<node text="Primary" bounds="[0,570][320,640]"><node text="History" bounds="[17,583][113,635]" enabled="true" clickable="true"/></node>'
+    primary='<node text="Primary" bounds="[0,570][320,640]"><node text="Library" bounds="[17,583][113,635]" enabled="true" clickable="true"/></node>'
     card='<node text="Cloud sync" bounds="[24,411][93,427]"/><node text="native@example.test" bounds="[184,479][296,493]"/>'
     form='<node text="Cloud account sign in" bounds="[24,346][296,546]"/><node text="Sign in" bounds="[24,502][296,546]" enabled="false" clickable="true"/>'
     badge='<node text="Connected" bounds="[109,412][168,426]"/>'

@@ -416,8 +416,8 @@ try {
     if ($evidencePath) {
         $featureStates = @()
         Complete-WindowsFirstRun $app
-        Invoke-UiaNamedControl $app "Preferences" "Theme"
-        Invoke-UiaNamedControl $app "List" "Allow screenshots"
+        Invoke-UiaNamedControl $app "Preferences" "Mode"
+        Invoke-UiaNamedControl $app "Privacy & retention" "Allow screenshots"
         Set-UiaScreenshots $app $true
         Invoke-UiaNamedControl $app "Library" "Clipboard history"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history"
@@ -426,19 +426,19 @@ try {
         $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "desktop-pairing-entry" "Enter pairing code"
         [Windows.Forms.SendKeys]::SendWait("{ESC}")
         Wait-UiaName $app "Ready to pair" | Out-Null
-        Invoke-UiaNamedControl $app "Preferences" "Theme"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Theme"
+        Invoke-UiaNamedControl $app "Preferences" "Mode"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Mode"
         $updateText = if ($ExpectedSignature -eq "Valid") { "Check for updates" } else { "Updates aren't configured in this build." }
         $updateState = if ($ExpectedSignature -eq "Valid") { "updater-configured" } else { "updater-unconfigured" }
         Invoke-UiaNamedControl $app "About" $updateText
         $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" $updateState $updateText $updateState
-        Invoke-UiaNamedControl $app "Service" "Background capture"
+        Invoke-UiaNamedControl $app "Clipboard behavior" "Background capture"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "service-capture-status" "Background capture"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "copy-feedback-setting" "Copy feedback sound" "copy-feedback-setting"
-        Invoke-UiaNamedControl $app "Sync" "Cloud server configuration"
+        Invoke-UiaNamedControl $app "Cloud sync" "Cloud server configuration"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured" "Cloud server configuration"
         Write-WindowsFeatureManifest $evidencePath $featureStates
-        Invoke-UiaNamedControl $app "List" "Allow screenshots"
+        Invoke-UiaNamedControl $app "Privacy & retention" "Allow screenshots"
         Set-UiaScreenshots $app $false
     }
 

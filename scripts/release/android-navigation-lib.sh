@@ -8,7 +8,7 @@
 # restart" for an app that was still fetching its history.
 set -uo pipefail
 
-NAVIGATION_TABS=(History Devices Settings)
+NAVIGATION_TABS=(Library Devices Settings)
 
 app_navigation_holds() { # <artifact>
     local tab
@@ -73,8 +73,8 @@ wait_app_navigable() { # <artifact> [timeout] [dump function]
 
 android_navigation_self_test() { # <temp>
     local temp="$1" nav_open nav_starting
-    nav_open='<node text="Primary" bounds="[0,570][320,640]"><node text="History" bounds="[17,583][113,635]" enabled="true" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="true" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/></node>'
-    nav_starting='<node text="Primary" bounds="[0,570][320,640]"><node text="History" bounds="[17,583][113,635]" enabled="false" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="false" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="false" clickable="true"/></node>'
+    nav_open='<node text="Primary" bounds="[0,570][320,640]"><node text="Library" bounds="[17,583][113,635]" enabled="true" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="true" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/></node>'
+    nav_starting='<node text="Primary" bounds="[0,570][320,640]"><node text="Library" bounds="[17,583][113,635]" enabled="false" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="false" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="false" clickable="true"/></node>'
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open</node></hierarchy>" > "$temp/navigable.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\" enabled=\"true\"/></node></hierarchy>" > "$temp/starting.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node><node text="Loading…" bounds="[29,405][291,434]" enabled="true"/></node></hierarchy>' > "$temp/shell-less.xml"
@@ -89,10 +89,10 @@ android_navigation_self_test() { # <temp>
         && bad "a missing tab bar is not navigable" \
         || ok "a missing tab bar is not navigable"
 
-    [[ "$(navigation_state "$temp/starting.xml")" == "History=disabled Devices=disabled Settings=disabled" ]] \
+    [[ "$(navigation_state "$temp/starting.xml")" == "Library=disabled Devices=disabled Settings=disabled" ]] \
         && ok "a still-starting shell reports disabled tabs" \
         || bad "a still-starting shell reports disabled tabs" "$(navigation_state "$temp/starting.xml")"
-    [[ "$(navigation_state "$temp/shell-less.xml")" == "History=absent Devices=absent Settings=absent" ]] \
+    [[ "$(navigation_state "$temp/shell-less.xml")" == "Library=absent Devices=absent Settings=absent" ]] \
         && ok "a shell that never rendered reports absent tabs" \
         || bad "a shell that never rendered reports absent tabs" "$(navigation_state "$temp/shell-less.xml")"
 

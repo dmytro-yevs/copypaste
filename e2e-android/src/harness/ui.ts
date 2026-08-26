@@ -68,18 +68,24 @@ export async function waitForRows(
 }
 
 /**
- * First launch owns the window until setup is skipped. History E2E is the
- * product shell, not the wizard — `data-navigation-ready` is not on the
- * onboarding root (API 36 ui=1, run 32251302258).
+ * First launch owns the window until the welcome flow is dismissed. History
+ * E2E is the product shell; `data-navigation-ready` is not on onboarding.
  */
 export async function dismissFirstRun(app: AndroidApp): Promise<void> {
   await waitFor(
     async () => {
       if ((await count(app, NAVIGATION_READY)) === 1) return true;
-      await tapWhere(app, null, "button", "Skip setup", -1);
-      return (await count(app, NAVIGATION_READY)) === 1;
+      return app.withPage((page) => page.evaluate(() => {
+        const explore = Array.from(
+          document.querySelectorAll<HTMLButtonElement>(
+            '[data-onboarding-step="welcome"] button',
+          ),
+        ).find((button) => button.textContent?.trim() === "Explore first");
+        explore?.click();
+        return document.querySelector('[data-navigation-ready="true"]') !== null;
+      }));
     },
-    "neither Skip setup nor settled navigation appeared",
+    "the welcome flow never yielded to settled navigation",
     60_000,
   );
 }
@@ -397,7 +403,7 @@ export async function reloadHistoryWith(
     "the WebView never mounted after reload",
     60_000,
   );
-  await gotoView(app, "History");
+  await gotoView(app, "Library");
   await resetHistoryFilters(app);
   await scrollListToTop(app);
   await waitFor(

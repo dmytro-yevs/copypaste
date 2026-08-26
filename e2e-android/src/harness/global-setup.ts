@@ -79,7 +79,7 @@ async function seed(secret: string, ordinary: string): Promise<void> {
     // The activity is `singleTask` and comes back exactly where it was left,
     // including a search filter from a previous run that would hide this run's
     // fixtures and read as "the item was never ingested".
-    await gotoView(app, "History");
+    await gotoView(app, "Library");
     await resetHistoryFilters(app);
 
     // One share at a time, each confirmed in the store before the next. Two

@@ -32,7 +32,7 @@ let seeded: string[] = [];
 
 beforeAll(async () => {
   app = await attachToApp();
-  await gotoView(app, "History");
+  await gotoView(app, "Library");
   await clearField(app, SEARCH);
   seeded = await addItems(app, [secret, ordinary]);
   await reloadHistoryWith(app, ordinary);
