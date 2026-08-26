@@ -25,7 +25,7 @@ cleanup() {
 }
 
 seed_onboarding_complete() { # [preferences.json]
-    # First-run wizard hides Settings. Seed the Tauri store the same way a
+    # The welcome flow hides Settings. Seed the Tauri store the same way a
     # completed setup would, so cloud evidence can open the Sync row.
     local path="${1:-$HOME/Library/Application Support/com.copypaste.app/preferences.json}"
     mkdir -p "$(dirname "$path")"

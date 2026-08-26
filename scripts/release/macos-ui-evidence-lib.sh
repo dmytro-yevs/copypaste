@@ -173,9 +173,9 @@ mac_reach_settings() { # <dump> [timeout]
     mac_ax enable >/dev/null 2>&1 || true
     while (( SECONDS - started < timeout )); do
         mac_ax find "Settings" > "$dump" 2>/dev/null && return 0
-        # First-run wizard replaces the shell; dismiss it before Settings exists.
-        if mac_ax find "Skip setup" > /dev/null 2>&1; then
-            mac_ax press "Skip setup" >/dev/null 2>&1 || true
+        # The welcome flow replaces the shell; dismiss it before Settings exists.
+        if mac_ax find "Explore first" > /dev/null 2>&1; then
+            mac_ax press "Explore first" >/dev/null 2>&1 || true
         fi
         # WKWebView AX can stay empty; the tray menu item still opens Settings.
         if mac_ax menu-press "Open Settings" >/dev/null 2>&1; then
