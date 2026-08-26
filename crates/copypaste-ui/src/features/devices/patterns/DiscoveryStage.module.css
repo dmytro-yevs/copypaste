@@ -151,7 +151,7 @@
 .radarDevice {
     --button-content-gap: var(--s-2);
     --radar-node-size: calc(var(--s-9) + var(--s-7) - var(--s-1));
-    --radar-entry-delay: 0ms;
+    --radar-entry-delay: var(--dur-none);
 
     inline-size: var(--radar-node-size);
     block-size: var(--radar-node-size);

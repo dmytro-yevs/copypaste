@@ -1,6 +1,6 @@
 {
   "space": {
-    "$description": "Spacing: Tailwind v4's 4px rhythm, adopted as-is. v1's ladder was 2/4/6/8/11/14/16/20/24 and its own comment insisted the odd steps were deliberate — that is what a hand-built scale looks like after two years of one-off adjustments. Ten control paddings (pad-btn, pad-field, pad-chip, pad-seg-btn, pad-kbd, …) are gone with it: shadcn components own their own padding, and re-specifying it here is how a second design system starts.",
+    "$description": "Spacing: Tailwind v4's 4px rhythm, adopted as-is. Shadcn components own their control padding; re-specifying it here would start a second design system.",
     "s-1": {
       "$type": "dimension",
       "$value": "4px"
