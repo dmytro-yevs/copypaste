@@ -172,7 +172,7 @@
   color: var(--faint);
 }
 
-.resetSection {
+.actionSection {
   display: grid;
   min-inline-size: 0;
   padding: var(--s-5) var(--s-1) 0;
@@ -182,28 +182,28 @@
   border-block-start: var(--stroke-1) solid var(--divider);
 }
 
-.resetCopy {
+.actionCopy {
   display: flex;
   min-inline-size: 0;
   flex-direction: column;
 }
 
-.resetCopy > * + * {
+.actionCopy > * + * {
   margin-block-start: var(--s-1);
 }
 
-.resetCopy h3,
-.resetCopy p {
+.actionCopy h3,
+.actionCopy p {
   margin: 0;
 }
 
-.resetCopy h3 {
+.actionCopy h3 {
   color: var(--text);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
 }
 
-.resetCopy p {
+.actionCopy p {
   color: var(--dim);
   font-size: var(--fs-xs);
   line-height: var(--lh-normal);
@@ -230,7 +230,7 @@
   .sectionTitle,
   .runtimeList > *,
   .openRow,
-  .resetSection {
+  .actionSection {
     padding-inline: var(--s-3);
   }
 }
@@ -247,11 +247,11 @@
     text-align: start;
   }
 
-  .resetSection {
+  .actionSection {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .resetAction {
+  .actionButton {
     inline-size: 100%;
   }
 }
