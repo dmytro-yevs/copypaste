@@ -124,6 +124,7 @@
   border-radius: 0;
   line-height: var(--lh-normal);
   text-align: start;
+  text-decoration: none;
   white-space: normal;
 }
 

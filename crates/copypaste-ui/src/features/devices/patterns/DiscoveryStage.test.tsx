@@ -140,7 +140,7 @@ describe("DiscoveryStage radar", () => {
                 <div>Not rendered</div>
             </DiscoveryStage>,
         );
-        expect(container.querySelector("[data-radar-sweep]")).toBeNull();
+        expect(container.querySelector("[data-radar-sweep]")).toBe(sweep);
         expect(container.querySelector("[data-radar-local-node]")).toBe(
             localNode,
         );
