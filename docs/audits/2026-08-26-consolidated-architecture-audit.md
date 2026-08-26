@@ -2,7 +2,7 @@
 
 Date: 2026-08-26
 
-Scope: release/evidence governance; History, Capture, and Onboarding; Rust/Tauri/TypeScript/Kotlin/native contracts; prior-product and compatibility surfaces
+Scope: release/evidence governance; History, Capture, and Onboarding; Rust/Tauri/TypeScript/Kotlin/native contracts; excluded-format surface
 
 Subject: the current working tree at the audit baseline
 
@@ -12,12 +12,12 @@ This document consolidates three read-only audits. Equivalent findings are group
 
 Two repository decisions control every recommendation:
 
-- The product opens one current database and must not probe, repair, migrate, or explain prior-product data (`AGENTS.md:49-52`; `docs/rewrite/target-architecture.md:198-202`).
-- Port-manifest **behaviour, security, accessibility, and recovered defect tests remain binding**. Prior-product byte layouts, migration ladders, legacy verbs, wire compatibility, and old visual design are reference only (`docs/rewrite/port-manifest/README.md:8-39`). Removing legacy support must not remove the behaviour that the manifests preserve.
+- The product opens only `copypaste-v2.db`; another filename or decoder is not a supported input.
+- Port-manifest **behaviour, security, accessibility, and recovered defect tests remain binding**. Excluded byte layouts, schema ladders, retired verbs, and visual values must not return.
 
 Severity means:
 
-- **High**: publication can accept invalid evidence, current behaviour can corrupt or misrepresent user data, or a prohibited prior-product path is active.
+- **High**: publication can accept invalid evidence, or current behaviour can corrupt or misrepresent user data.
 - **Medium**: independently authored contracts have already diverged or a fail-open gate can be satisfied without the intended behaviour.
 - **Low**: duplicate or dead surface whose present impact is bounded but which should be removed with its owning stream.
 
@@ -30,30 +30,31 @@ Severity means:
 
 These results describe the audited working tree, not a fresh execution by this consolidation.
 
-## Priority 0 — remove all prior-product and compatibility surface
+## Priority 0 — alternate product support is absent
 
-### P0 (High) — prohibited compatibility paths are active
+### P0 (closed) — no alternate product path remains
 
-The repository says there is one schema and no prior-product migration path, yet every validated database open calls `upgrade_if_legacy_v2` (`crates/copypaste-core/src/storage/dbfile.rs:35-50`). That upgrader detects older layouts, rebuilds tables and indexes, supplies missing columns, copies rows, and drops a migration table (`crates/copypaste-core/src/storage/schema_upgrade.rs:1-54`, `:57-147`). This is an active compatibility ladder, not historical documentation.
+The production open path applies the key and exact schema verification only.
+There is no `schema_upgrade.rs`, `upgrade_if_legacy_v2`, `LegacyDatabase`, or
+encounter detector. `Store::open` refuses a mismatched schema unchanged.
 
-The current IPC also retains prior pairing verbs and their implementations:
+Retired pairing verbs are not on the wire: `pair_create` and `pair_accept` fail
+decode. `ClipKind`, `DefinitionList`, and `InlineNotice.Icon` are absent.
 
-- `Method::PairCreate` and `Method::PairAccept` remain in the wire enum (`crates/copypaste-ipc/src/lib.rs:202-216`).
-- The daemon routes both and keeps a refusal handler for the one-step accept path (`crates/copypaste-daemon/src/server/dispatch.rs:129-138`, `:179-190`; `crates/copypaste-daemon/src/p2p/handlers.rs:33-65`).
-- The CLI still serializes `PairAccept`, and `Node::pair_create` remains a legacy alias (`crates/copypaste-cli/src/client.rs:1228`; `crates/copypaste-p2p/src/node/mod.rs:328-337`).
-
-Source-compatibility residue also remains inside the current UI: `ClipKind`/`clipKind` are no-op aliases (`crates/copypaste-ui/src/features/history/model/clipKind.ts:1-7`), `InlineNotice.Icon` is a dead component-valued compatibility branch (`crates/copypaste-ui/src/components/shared/InlineNotice.tsx:8-46`), and `DefinitionList` duplicates the canonical `MetadataList` while active consumers remain (`docs/ui-architecture.md:232-239`; `crates/copypaste-ui/src/components/shared/DefinitionList.tsx:1-30`). These are not prior-product file readers, but the requested maximum cleanup includes them.
-
-**Canonical result:** one current storage schema; one current IPC method set; one current component API. Remove `schema_upgrade`, its open hook and fixtures; remove the legacy pairing variants, CLI/daemon/node handlers, dispatch arms, tests and prose; migrate remaining `DefinitionList` consumers; remove no-op aliases and old-path exports. Remove dead `v2-main` filters and retarget active rule citations to `AGENTS.md` while touching their owners.
-
-Historical format sections in the port manifests may be deleted only after their still-binding behavioural/security assertions and defect IDs are moved into maintained specifications/tests. A broad text search is not a deletion plan: `@vitejs/plugin-legacy` supports old **WebView engines**, not the prior product, and `openai_legacy` is a live sensitive-key rule. Neither belongs to this purge unless the supported-platform contract changes.
+Remaining remnant surface was documentation and comments: the harvest header
+and deleted-tree source index in manifest 07, archaeology in the Android capture
+document, and source comments framed as another application. Current code such
+as `@vitejs/plugin-legacy` and the `openai_legacy` detector rule is unrelated and
+stays.
 
 **Fail-closed tests:**
 
-- An existing file whose schema differs from the canonical schema is rejected unchanged; no repair/probe path runs.
-- Repository search finds no `schema_upgrade`, `upgrade_if_legacy_v2`, `PairCreate`, `PairAccept`, `pair_create` alias, `ClipKind`, `clipKind`, `InlineNotice.Icon`, or old-path re-export in production.
-- The one current database filename, schema, key path, AEAD path, and method inventory remain covered.
-- Every behavioural/security/accessibility acceptance test retained from a historical manifest still passes after reference-format prose and fixtures are removed.
+- A mismatched schema is rejected unchanged; no repair or probe path runs.
+- Retired pairing request shapes fail before dispatch.
+- The one current database filename, schema, key path, AEAD path, and method
+  inventory remain covered.
+- Behavioural, security, accessibility, and detector acceptance tests remain
+  binding after archaeology prose is removed.
 
 ## High findings
 
@@ -154,7 +155,10 @@ The same surfaces also disagree on singular/filter labels and image copy label/i
 
 ### M8 — canonical UI primitives exist while features recreate them
 
-History draws raw preview `Surface` compositions rather than `PreviewSurface` and still uses `DefinitionList` instead of `MetadataList` (`crates/copypaste-ui/src/features/history/patterns/LibraryInspectorPanel.tsx:1-11`, `:149-232`; `crates/copypaste-ui/src/components/shared/PreviewSurface.tsx:1-17`; `crates/copypaste-ui/src/components/shared/MetadataList.tsx:1-53`). Capture and Devices independently implement the planned `StatusCard`. `AppIcon` and `ClipImage` duplicate PNG base64 decoding and object-URL lifecycle (`crates/copypaste-ui/src/components/shared/AppIcon.tsx:8-25`; `crates/copypaste-ui/src/features/history/components/ClipImage.tsx:17-57`). Dead `ClipKind` and `InlineNotice.Icon` remain.
+History uses `PreviewSurface` and `MetadataList`. Capture and Devices
+independently implement the planned `StatusCard`. `AppIcon` and `ClipImage`
+still duplicate PNG object-URL lifecycle. `ClipKind`, `DefinitionList`, and
+`InlineNotice.Icon` are absent.
 
 **Canonical owner:** existing `PreviewSurface`, `MetadataList`, a finite shared `StatusCard`, and one `usePngObjectUrl` result type. Migrate all consumers, then delete compatibility surfaces.
 
@@ -214,7 +218,7 @@ Cargo metadata, the Tauri plugin/capability/config, and Android manifest registe
 
 ## Required cross-cutting tests and evidence
 
-1. **Legacy absence:** exact-schema open, rejected mismatched schema, one current method inventory, no old database/method/component symbols, no historical fixture read path.
+1. **Alternate-format absence:** exact-schema open, rejected mismatched schema, one current method inventory, and no second database/method/component read path.
 2. **Release truth:** removed features own nothing; every verified feature/platform/state has one same-run receipt; physical Android is mandatory for publication; inert strings/comments do not count.
 3. **Clipboard:** text/image/file/unknown conformance; no placeholder paste; plain-text operation specified separately; real macOS/Windows and Android instrumentation evidence.
 4. **Pairing:** all states through one table; controlled-clock invite/SAS expiry; timeout != cancel; idempotent abort; protected, accessible native QR/SAS surfaces.
@@ -229,7 +233,7 @@ Cargo metadata, the Tauri plugin/capability/config, and Android manifest registe
 ```text
 0. Add negative characterization tests and freeze the current base
    |
-   +--> 1A. Remove prior-product storage/IPC/UI compatibility surface
+   +--> 1A. Already done: no alternate storage/IPC reader remains
    |
    +--> 1B. Add ledger schema, platform matrix, evidence policy,
    |        artifact manifest and CI gate registry (additive first)
@@ -251,7 +255,7 @@ Cargo metadata, the Tauri plugin/capability/config, and Android manifest registe
                            |
                            v
 5. Delete duplicate literals, regex parsers, overlapping validators,
-   historical-only fixtures/prose and temporary adapters
+   excluded-format prose and temporary adapters
                            |
                            v
 6. Run one full cross-platform evidence wave, then mark ledger states complete
@@ -265,9 +269,9 @@ Use ordinary isolated Git worktrees and branches; do not use Orca. The initial w
 
 | Stream | Exclusive primary paths / responsibility | Depends on | Deliverable |
 |---|---|---|---|
-| S1 Legacy storage purge | `copypaste-core/src/storage/{dbfile,schema_upgrade,schema_verify,...}` | negative tests | remove upgrader and all old-schema fixtures; exact reject-only open |
-| S2 Legacy IPC/CLI purge | `copypaste-ipc`, CLI client, daemon dispatch/peer handlers, node alias | negative tests | remove old pairing verbs and all reachability |
-| S3 UI compatibility purge | `components/shared` legacy APIs, History model barrel, remaining consumers | none | migrate `DefinitionList`; remove `ClipKind`, old icon prop and re-exports |
+| S1 Storage (closed) | `copypaste-core/src/storage/{dbfile,schema_verify,...}` | negative tests | exact reject-only open; no ladder |
+| S2 IPC (closed) | `copypaste-ipc`, CLI, daemon dispatch | negative tests | retired pairing verbs rejected |
+| S3 UI aliases (closed) | `components/shared`, History model | none | `DefinitionList` and `ClipKind` absent |
 | S4 Receipt and ledger truth | ledger schema/checker, evidence schema/writer/gate | policy files additive | feature/state receipts; removed owns nothing; physical environment policy |
 | S5 Physical Android publication | Android hardware scenario and release job | S4 | same-commit hardware receipt; emulator stays separate |
 | S6 Android manifest security | manifest checker and structured XML helper/tests | none | missing/malformed/comment fixtures fail closed |
@@ -293,7 +297,7 @@ Labels below refer to the three input audits: **R** release/evidence governance,
 
 | Consolidated finding | Source findings absorbed |
 |---|---|
-| P0 prohibited compatibility paths | requested top priority; U-L1/U-L7/U-L8; active storage/IPC evidence added from primary source |
+| P0 alternate product paths absent | requested top priority; U-L1/U-L7/U-L8; verified against production source |
 | H1 physical Android inverted gate | R-H1 |
 | H2 fail-open feature/evidence provenance | R-H2, R-H3, R-H4 |
 | H3 binary paste corruption | X-H1; U-M4 and X-M2 feed its content-class owner |
@@ -315,6 +319,9 @@ No generated file is an authoring target. Change the upstream Rust/schema/config
 
 ## Final assessment
 
-The immediate release blockers are the active compatibility paths, the inverted physical-Android gate, fail-open feature/evidence completion, binary paste corruption, and divergent pairing timeouts. The architectural debt beneath them has one repeated cause: production semantics are authored independently in Rust, TypeScript, Kotlin, JSON Schema, shell and workflow YAML.
+The immediate release blockers are the inverted physical-Android gate, fail-open feature/evidence completion, binary paste corruption, and divergent pairing timeouts. The architectural debt beneath them has one repeated cause: production semantics are authored independently in Rust, TypeScript, Kotlin, JSON Schema, shell and workflow YAML.
 
-The migration must therefore remove prior-product surface first, add negative tests before changing contracts, establish typed/machine-readable owners, switch consumers one boundary at a time, and delete mirrors only after a full cross-platform evidence wave is green. UI cleanup follows the same rule at a smaller scale: one body resolver, one presentation map, one primitive family, no compatibility aliases after the final consumer moves.
+Alternate readers are already absent. Add negative tests before changing
+contracts, establish typed machine-readable owners, switch consumers one
+boundary at a time, and delete mirrors only after a full cross-platform
+evidence wave is green.

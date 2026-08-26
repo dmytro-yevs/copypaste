@@ -1,6 +1,6 @@
 # Android clipboard access — what the platform allows, and which rung we ship first
 
-**Status:** proposed · 2026-07-30
+**Status:** current contract · 2026-07-30
 **Scope:** how CopyPaste for Android captures clipboard content, what we ask the
 user to do for it, and what we tell them when it stops working.
 **Related:** [ADR-0001](../adr/0001-macos-distribution-without-a-developer-id.md)
@@ -15,16 +15,14 @@ Ship a **four-rung ladder**, and present rung 0 first.
    capture, a share-sheet/text-selection target, a one-tap Quick Settings tile,
    and the Mac's history over sync. A new user who does not know what ADB is
    never has to.
-2. **Rung 2 (Shizuku) is the one upgrade we build.** It is the only path that
-   gives real background capture on an unrooted phone with no computer, and it
-   is a materially better mechanism than v1's — it reads the clipboard
-   *directly* as the shell UID, with a real change listener, instead of tailing
-   logcat for a denial message.
-3. **We do not port v1's `READ_LOGS`/logcat approach.** It is structurally dead
-   on Android 13+ (see below), and it was already reporting itself as broken in
-   v1.
-4. **We do not build an AccessibilityService.** Contrary to a decade of folklore
-   — including v1's own UI strings — it is *not* a clipboard exemption in AOSP.
+2. **Rung 2 is optional advanced capture.** Shizuku applies the grants used by
+   the current ClipCascade path; CopyPaste then owns the logcat/overlay runtime
+   and reports working only after a real read (`CopyPaste-qzhu`).
+3. **Direct shell-UID clipboard access is a platform spike, not a second
+   shipped reader.** The current implementation stays fail-closed where OEM or
+   Android policy prevents its granted runtime path.
+4. **We do not build an AccessibilityService.** Contrary to a decade of folklore,
+   it is *not* a clipboard exemption in AOSP.
    It would cost the user a scary permission and us a Play declaration, and it
    would not work.
 
@@ -61,14 +59,11 @@ Three consequences that are widely got wrong and that decide this document:
 - **An AccessibilityService is not on that list.** It never appears in
   `clipboardAccessAllowed`. An a11y service can read *text from view nodes* and
   can observe copy actions, which is where the folklore comes from, but it
-  cannot call `getPrimaryClip()` from the background. v1's settings screen told
-  users "Enable AccessibilityService instead" — that advice pointed at a service
-  v1 never even implemented, and it would not have worked.
+  cannot call `getPrimaryClip()` from the background.
 - **You cannot even learn that the clipboard changed.** `sendClipChangedBroadcast`
   runs the *same* `clipboardAccessAllowed` check per listener before dispatching,
   so `OnPrimaryClipChangedListener` is silent in the background. So is
-  `getPrimaryClipDescription()`. This is the whole reason v1 was reduced to
-  reading logcat: there is no legitimate change signal at all.
+  `getPrimaryClipDescription()`. There is no public background change signal.
 - **`READ_CLIPBOARD_IN_BACKGROUND` is `signature`** — so `adb shell pm grant`
   cannot grant it to us. *But* `com.android.shell` declares it
   (`packages/Shell/AndroidManifest.xml`) and is platform-signed, so it holds it.
@@ -95,7 +90,8 @@ Three consequences that are widely got wrong and that decide this document:
   [issuetracker 243904932](https://issuetracker.google.com/issues/243904932).
   *Marked: the 60-second window figure comes from those issue threads, not from
   official documentation.*) A clipboard monitor is in the background by
-  definition, so this closes v1's route completely.
+  definition, so unattended app-owned logcat access is not a supported platform
+  guarantee.
 - **Android 13 (API 33):** the clipboard auto-clears after a period.
 - **Android 15 (API 35):** `SYSTEM_ALERT_WINDOW` no longer exempts a
   foreground-service start unless an overlay is actually visible. It **still**
@@ -106,34 +102,19 @@ Three consequences that are widely got wrong and that decide this document:
   this removes the per-reboot restart for the on-device (localhost) case — see
   rung 2.
 
-## 2. What v1 did
+## 2. Current capture-state contract
 
-`archive/v0.4.1-pre-rewrite`, `android/app/src/main/java/com/copypaste/android/`:
+The app reports exactly four states:
 
-- **Permission:** `android.permission.READ_LOGS`
-  (`signature|privileged|development` — the `development` flag is why shell can
-  grant it), declared in the manifest so the grant is accepted.
-- **Command:** `adb shell pm grant com.copypaste.android android.permission.READ_LOGS`,
-  plus `adb shell appops set … SYSTEM_ALERT_WINDOW allow` and
-  `adb shell am force-stop …`, shown as three tap-to-copy rows in Settings.
-- **Mechanism** (`LogcatCaptureService.kt`, ~500 lines): tail
-  `logcat ClipboardService:E *:S`, match the *denial* line naming our own
-  package, debounce 1000 ms, then launch `ClipboardFloatingActivity` — a
-  transparent overlay activity that clears `FLAG_NOT_FOCUSABLE`, waits for the
-  layout pass, and reads the clip in the focus window. Copied from ClipCascade.
-- **Detection:** `checkSelfPermission(READ_LOGS)`, plus a `logcatCaptureWorking`
-  flag set only when a read actually returned a clip, yielding four states:
-  `NOT_GRANTED / DISABLED / GRANTED_NOT_WORKING / WORKING`.
-- **On loss:** the logcat stream ending set `logcatCaptureWorking = false` and
-  stopped the service. The user saw *"Status: granted but not working — Android
-  11+ may scope system logs. Enable AccessibilityService instead."* — buried in
-  Settings › Diagnostics, with no notification, pointing at a feature that did
-  not exist.
+- `NOT_GRANTED`
+- `DISABLED`
+- `GRANTED_NOT_WORKING`
+- `WORKING`
 
-Two things to carry forward and one to bury. Carry: the four-state status model,
-and the discipline of only reporting "working" after a read actually succeeded
-(v1 fixed a real bug, `CopyPaste-qzhu`, by removing an optimistic
-`working = true`). Bury: everything else.
+Permission presence alone never produces `WORKING`; only a successful read does
+(`CopyPaste-qzhu`). Loss of the runtime reader clears that proof and surfaces the
+fallback immediately. ClipCascade-named Kotlin is the current app-owned capture
+path, not a compatibility layer.
 
 ## 3. The ladder
 
@@ -240,12 +221,10 @@ not is worse than a visible refusal to capture.**
 
 Binding rules for the Android UI:
 
-1. **Capture state is visible wherever history is visible.** Not buried in a
-   diagnostics screen the way v1 buried it. The history list carries a
-   persistent, unmissable indication of which rung is live.
+1. **Capture state is visible wherever history is visible.** The history list
+   carries a persistent, unmissable indication of which rung is live.
 2. **"Working" means a read succeeded**, not that a permission is present.
-   Carry v1's four states (`NOT_GRANTED / DISABLED / GRANTED_NOT_WORKING /
-   WORKING`) and its `CopyPaste-qzhu` fix: never optimistically report working.
+   The four states above and `CopyPaste-qzhu` forbid optimistic success.
 3. **Loss is pushed, not polled.** Register a binder death recipient on
    Shizuku; on death, post a notification — *"Background capture stopped.
    CopyPaste is only saving what you copy inside the app. Tap to restart."* —
@@ -261,8 +240,8 @@ Binding rules for the Android UI:
    data model for this.
 6. **Check every entry point, not just startup:** `Shizuku.pingBinder()`,
    `canDrawOverlays()`, and permission state re-evaluated on every `onResume`
-   (v1's audit already caught a `remember(ctx)` that never refreshed after a
-   trip to system Settings). Note also that
+   (`CopyPaste-qzhu` also forbids a cached result after returning from system
+   Settings). Note also that
    [app hibernation](https://developer.android.com/topic/performance/app-hibernation)
    revokes permissions and force-stops apps unused for months — unlikely for
    this app, but the check is cheap.

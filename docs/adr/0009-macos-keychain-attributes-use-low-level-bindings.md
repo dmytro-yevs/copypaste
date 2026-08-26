@@ -24,4 +24,4 @@ entitlements that require an Apple team or provisioning profile.
 The secret remains outside the application data directory and is protected by
 the user's login Keychain. It does not claim device-only backup or iCloud-sync
 semantics. Release compatibility with the only supported macOS distribution
-path takes precedence over that v1 attribute requirement.
+path takes precedence over attributes that require Apple-managed signing.

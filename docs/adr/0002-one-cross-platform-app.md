@@ -107,10 +107,9 @@ user-facing error. A webview does not get to drop these any more than a native
 app did — it just has to satisfy them with DOM and ARIA instead of SwiftUI and
 TalkBack.
 
-**v1's visual design is still rejected.** `design/dist/` holds v1's palette
-value-for-value; it is not a fallback. The new look is still an undecided
-decision, and re-deriving v1's tokens by importing that directory is the
-outcome the manifest README warns against.
+`design/dist/` is generated from the current DTCG tokens and is not an authoring
+source. Visual changes begin in `design/tokens/` and pass the contrast and usage
+gates before generated CSS changes.
 
 ## Android has no daemon, and that does not change
 

@@ -2,8 +2,7 @@
 
 **Status:** accepted · 2026-07-30
 **Scope:** who starts, stops and supervises `copypaste-daemon` on macOS.
-**Supersedes nothing.** v1's ADR-014 reached the same conclusion by a different
-route; this is the v2 statement of it, against v2's distribution (ADR-0001).
+**Supersedes nothing.** This decision applies to the distribution in ADR-0001.
 
 ## Decision
 
@@ -76,9 +75,8 @@ into the user's `LaunchAgents`, keep it in step with the bundle's location
 across `brew upgrade`, and remove it on uninstall. The cask's `zap` cannot be
 relied on for the last of those (`brew uninstall` without `--zap` leaves it),
 so the failure mode is an agent pointing at a bundle that no longer exists,
-respawning nothing, forever. v1 hand-wrote exactly this plist plus an
-`install-agent.sh`; the formula now delegates it to Homebrew's `service` DSL,
-which is where that job belongs.
+respawning nothing, forever. The formula delegates service ownership to
+Homebrew's `service` DSL, which is where that job belongs.
 
 **`tauri-plugin-shell`'s sidecar mechanism.** It is the maintained way to ship a
 companion binary, and it was the first thing checked (AGENTS.md rule 1). Two

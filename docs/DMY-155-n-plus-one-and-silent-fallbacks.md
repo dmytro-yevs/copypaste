@@ -196,7 +196,7 @@
 |---|----------|-------|-------|
 | 32 | `crates/copypaste-cloud/src/sync/unreadable.rs:103-110` — `encode` empty string latent | SF | Serialization of `Vec<String>+u32+Option` cannot fail in practice. Latent. |
 | 33 | `crates/copypaste-p2p/src/node/pairing_ceremony.rs:299/303` — reject/cancel send dropped → TimedOut | SF | Cosmetic mislabel. Low. |
-| 34 | `crates/copypaste-p2p/src/sync/session.rs:160-162` — unparseable peer address → `last_addr: None` | SF | Edge case on legacy records; self-generated addresses parse. |
+| 34 | `crates/copypaste-p2p/src/sync/session.rs:160-162` — unparseable peer address → `last_addr: None` | SF | Edge case on malformed persisted addresses; self-generated addresses parse. |
 | 35 | `.github/workflows/release.yml:1137-1144` — missing `HOMEBREW_TAP_TOKEN` exits 0 | SF | Documented; maintainer copies files by hand. |
 | 36 | `scripts/check-macos-types.sh:37,65-68` — `replace_in_place` status dropped | SF | Self-correcting; weak. |
 

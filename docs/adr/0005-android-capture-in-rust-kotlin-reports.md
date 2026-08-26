@@ -58,9 +58,8 @@ to mislead someone.
 clipboard while it is in front. So the read `arm` takes, and every read the tile
 takes, prove that the clipboard is readable — not that it is readable in the
 background, which is the only thing `Working` claims. Counting them would turn
-the setup screen green at the exact moment it knows least. This is
-`CopyPaste-qzhu` in a subtler costume than the one v1 shipped, and
-`record_read` takes a `focused` flag because of it.
+the setup screen green at the exact moment it knows least. `CopyPaste-qzhu`
+requires `record_read` to carry the `focused` fact.
 
 **Kotlin owns the device-only runtime.** The app-owned reader (`ClipCascadeCapture`
 plus `ClipboardFloatingActivity`) depends on logcat, overlay focus and Android

@@ -10,23 +10,21 @@ version pins and the RustSec reasoning attached.
 
 ## Core and daemon
 
-| Concern | v1 (hand-rolled) | v2 |
-|---|---|---|
-| DB schema | `user_version` ladder + three layers of race guards | one transactional fresh schema; exact validation on every existing file |
-| Row mapping | positional column lists, hand-synced in three places | `rusqlite`'s `row.get("name")`, by name |
-| Connection pool | *(already correct)* | `r2d2` + `r2d2_sqlite` |
-| SQLCipher | *(inherent)* | `rusqlite` `bundled-sqlcipher` |
-| Retry / backoff | six implementations | one policy object |
-| Rate limiting | three implementations | *(not built)* |
-| Peer transport | TLS + a pinning verifier + two DER walkers | `snow` — Noise `NNpsk0` |
-| Device pairing | OPAQUE — an augmented PAKE for a symmetric problem | the Noise PSK itself |
-| Chunked AEAD | custom `CHUNK_FORMAT_V1` framing | `aead::stream` — *not built; items are sealed single-shot under a size cap* |
-| Frame codec | byte-scanning partial-JSON parser | `tokio_util::codec::LinesCodec` |
-| Task supervision | custom supervisor + four interval loops | `JoinSet` |
-| Data dirs | duplicated three times | `directories` |
-| Atomic file write | hand-rolled temp+rename | `tempfile` |
-| Telemetry | a 460-line PII scrubber duplicating our own detector | *(omitted)* |
-| Secret detection | 40 hand-tuned regexes | ruleset sourced from **gitleaks**, executed through `regex::RegexSet` |
+| Concern | Current choice |
+|---|---|
+| DB schema | one transactional schema with exact validation |
+| Row mapping | `rusqlite` named columns |
+| Connection pool | `r2d2` + `r2d2_sqlite` |
+| SQLCipher | `rusqlite` `bundled-sqlcipher` |
+| Retry / backoff | one shared policy |
+| Peer transport | `snow` — Noise `NNpsk0` |
+| Device pairing | the Noise PSK itself |
+| Payload AEAD | single-shot sealing under the maintained size cap |
+| Frame codec | `tokio_util::codec::LinesCodec` |
+| Task supervision | `JoinSet` |
+| Data dirs | `directories` |
+| Atomic file write | `tempfile` |
+| Secret detection | selected **gitleaks** rules through the in-process detector |
 
 **Why there is no TLS row.** The peer channel was going to be TLS with a
 fingerprint-pinning verifier and a balanced PAKE for pairing. Noise `NNpsk0`
@@ -51,10 +49,8 @@ three pieces of evidence:
 - Neither framework provides the parts that are actually hard here — readiness
   gating, degraded mode, per-method size caps, the pre-runtime takeover probe.
 
-The defect in v1 was never the protocol; it was modelling it three times and
-dispatching 61 stringly-typed methods across 21 files, with only 3 of ~15 typed
-DTOs ever imported. `copypaste-ipc` is the single source: daemon, CLI and the
-Tauri bridge compile against it, so drift is a build error.
+`copypaste-ipc` is the single source: daemon, CLI and the Tauri bridge compile
+against it, so contract drift is a build error.
 
 Two consequences worth stating:
 
@@ -62,15 +58,13 @@ Two consequences worth stating:
   size cap survives as a custom `Decoder` — it fixed a real RAM-amplification
   bug.
 - `PROTOCOL_VERSION` is `2`, and changing it is a decision rather than a breach.
-  Nothing has to interoperate with a prior-product client; the field stays
-  because a local socket needs a handshake that fails loudly when a stale
-  binary is left behind.
+  The field exists so a local socket handshake fails loudly when app and daemon
+  binaries disagree.
 
 ## Backend
 
-Drop v1's bespoke relay — 12k lines of write-behind cache, custom retry queue,
-SSE fan-out, supervisor and a second rate limiter. **Supabase** provides auth,
-Postgres, Realtime and RLS.
+**Supabase** provides auth, Postgres, Realtime and RLS. CopyPaste owns the
+encrypted row contract, signatures, polling cursor, and merge policy.
 
 Manifest 05's 17-row parity table finds this safe for correctness: the relay was
 never a per-device broker, since every device co-registered a *single* shared
@@ -117,7 +111,7 @@ chosen by a compile-time alias
 
 | Concern | Where it goes |
 |---|---|
-| List virtualisation, accessible reorder, overlays, focus management, styling, icons | The React ecosystem — `@tanstack/react-virtual`, `@dnd-kit/react`, Radix, Tailwind v4, shadcn/ui, `lucide-react`. Wrapping any of them in a house abstraction is the v1 mistake in a new language. |
+| List virtualisation, accessible reorder, overlays, focus management, styling, icons | The React ecosystem — `@tanstack/react-virtual`, `@dnd-kit/react`, Radix, Tailwind v4, shadcn/ui, `lucide-react`. Do not duplicate their state machines behind house abstractions. |
 | Server state — history, status, mutations | The Rust core over the IPC contract, via `@tanstack/react-query`. The app re-implements no polling, caching or merge; the daemon is the authority. |
 | Client state | `zustand`, and never a second copy of what the daemon owns. |
 | Menu bar, popover, global hotkey, launch at login | Tauri's own tray and window APIs, `tauri-plugin-global-shortcut`, `tauri-plugin-autostart`. The one thing `shell/` adds is a *policy*: refusing the shortcuts that would cost an Accessibility grant, which no upstream crate knows to do. |
@@ -135,15 +129,14 @@ below the boundary and are shared by both targets.
 reserving the full cap, the 15 accessibility requirements, sensitive content
 being absent from the view rather than covered over, no filesystem path in a
 user-facing error, and the 73 acceptance tests. Its *visual* half — palette,
-token values, scales, `design-reference.html` — is reference material: v1's look
-is not carried over.
+  token values, scales, and `design-reference.html` — is excluded from the
+  current visual system.
 
 ## Design tokens
 
 One DTCG source in `design/tokens/`, compiled by Style Dictionary to CSS custom
-properties and a Tailwind `@theme`. v1 kept a bespoke CSS system in step with a
-979-line reference HTML by way of a hand-written parity test, which is two
-sources of truth with a test between them.
+properties and a Tailwind `@theme`. Generated output is never an authoring
+source.
 
 The visual system is decided — shadcn/ui on Tailwind v4, zinc base in OKLCH —
 and the accessibility numbers are measured rather than asserted: `npm run check`
@@ -195,15 +188,14 @@ the better outcome.
 
 ## Constraints
 
-- **v2 opens only its own database filename.** Never open, migrate, or probe
-  prior-product files. No `LegacyDatabase`, encounter detection, or special
-  messaging about old versions.
+- **v2 opens only `copypaste-v2.db`.** Never open, migrate, or probe another
+  filename. No `LegacyDatabase`, encounter detection, or alternate decoder.
 - **No migration path may be retrofitted casually.** Adding one is a feature to
-  decide, and it is materially harder now the v1 formats have left the tree.
+  decide with its own acceptance tests.
 - **Keychain service and account names are fixed strings.** Renaming them
   orphans keys already written by a v2 build (manifest 02, I-10). A
   frozen-identifier test asserts it.
-- **The security properties survive the format change.** Fail closed on a wrong
+- **The security properties bind the only format.** Fail closed on a wrong
   key or a wrong AAD, never fall back to a plaintext read; the AAD binds item
   identity; key material is zeroized; comparisons are constant-time.
 - **Sensitive items never reach the search index**, and no error string shown to
@@ -211,5 +203,4 @@ the better outcome.
   local username.
 - **The port manifests are the acceptance criteria.** Read
   [`port-manifest/README.md`](port-manifest/README.md) first: it records which
-  sections stayed binding and which became reference material. Behaviour stayed;
-  formats did not.
+  behaviour is binding and excluded formats must not return.

@@ -21,8 +21,7 @@ Five links. Each is in the tree.
    02, I-10.
 3. An ad-hoc or unsigned binary's designated requirement **is its cdhash**, so
    the ACL on the item names the previous build and not this one. Manifest 02
-   §3.8 records this as v1's reason for defaulting to the file store unless the
-   binary carried a stable Team Identifier; `scripts/release/smoke-macos-dmg.sh`
+   §3.8 records the cdhash/ACL constraint. `scripts/release/smoke-macos-dmg.sh`
    re-signs the installed daemon and restarts it for the same reason, and
    reports rather than asserts the answer.
 4. The read **is** bounded: `Keyring::load_or_create` runs it through
@@ -109,9 +108,9 @@ the one that would settle testing-policy's "The Keychain item survives a
 re-signed binary (manifest 02 §3.8)". A second prompt after a rebuild refutes
 it.
 
-A code seam is not among these because there is nothing left to add: v1's
-`COPYPASTE_KEY_BACKEND=file` was the other half of the pair and v2 kept the half
-that matters.
+A second production key backend is not an alternative. The shipped path is the
+Keychain; the ephemeral key exists only behind the development measurement
+feature.
 
 ## What the run must hold fixed
 

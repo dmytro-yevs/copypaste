@@ -115,7 +115,7 @@ for f in "${MACOS_PATH_OWNERS[@]}"; do
     for retired in "${RETIRED_MACOS_PATHS[@]}"; do
         if grep -Fq "$retired" "$f"; then
             bad "$f does not name retired $retired" \
-                "macOS tooling must not read, preserve, or delete prior-product paths"
+                "macOS tooling must not read, preserve, or delete retired CopyPaste paths"
         else
             ok "$f does not name retired $retired"
         fi

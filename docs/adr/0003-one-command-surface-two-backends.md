@@ -72,9 +72,8 @@ a string is reachable by every component, the accessibility tree, devtools, a
 heap snapshot, and anything that serialises a props object into a log.
 
 Manifest 06 INV-10 requires sensitive content to be **absent** from the view
-rather than obscured over the top of it. A rule ("remember to blank `content`
-when `is_sensitive`") applied at each of nine commands is exactly the shape of
-defect the manifest records v1 shipping.
+rather than obscured over the top of it. A per-command "remember to blank
+`content`" rule cannot uphold that boundary.
 
 So `model::UiItem` has private fields and no public constructor. The only way to
 make one is `From<Item>`, which is total and drops the plaintext on the spot,
@@ -168,12 +167,10 @@ setting.
 `reorder_pinned` refuses on both platforms — `Store::reorder_pinned` exists, but
 this build has no `Backend` route to it yet (parity finding 19).
 
-### What has since been unblocked — the record of what it took
+### Shared ownership behind available operations
 
-This section previously treated add, pairing, sync, export and import as
-blocked. They now work through the moves this ADR called for, and the shape of
-the fix is worth keeping because the next refusal above will be resolved the
-same way.
+Add, pairing, sync, export, and import are available because their product
+logic lives below the backend boundary rather than in either adapter.
 
 * **`add`** — `capture::ingest` moved down into `copypaste_core::ingest`. One
   implementation, four callers.

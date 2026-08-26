@@ -35,4 +35,4 @@
 | | |
 |---|---|
 | [AGENTS.md](../AGENTS.md) | The working rules. |
-| [port-manifest/README](rewrite/port-manifest/README.md) | Which manifest sections are current requirements and which are reference material. Behaviour binds; retired formats and visuals do not. |
+| [port-manifest/README](rewrite/port-manifest/README.md) | Which manifest sections are current requirements. Behaviour binds; retired formats and visuals must not return. |

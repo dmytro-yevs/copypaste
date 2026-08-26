@@ -7,7 +7,7 @@
 - Tightens device pairing and peer sync with shared deadlines, typed UI
   contracts, and smaller protocol and session boundaries.
 - Makes v2 use only its own database and current contracts, removing retired
-  preference, pairing, deep-link, IPC, and prior-product compatibility paths.
+  preference, pairing, deep-link, and IPC compatibility paths.
 - Binds native release evidence to the exact commit and artifact, strengthens
   redaction and Android manifest checks, and requires physical Android evidence.
 

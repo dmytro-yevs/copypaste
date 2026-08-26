@@ -5,11 +5,10 @@
 **Reach for a maintained crate or package first. Writing the code yourself is
 the exceptional path and needs a written reason.**
 
-This rule exists because of a measured failure. The previous codebase carried a
-"prefer hand-rolling" norm — cited in source comments as a rule from a
-`CLAUDE.md` that had already been deleted from the repository. The norm outlived
-its own documentation, and by v0.4.1 an audit of all eight subsystems found the
-same wheel carved over and over:
+This rule exists because of a measured failure. An earlier tree of this
+repository carried a "prefer hand-rolling" norm that outlived its own
+documentation. An audit of all eight subsystems found the same wheel carved
+over and over:
 
 | Concept | Independent implementations |
 |---|---|
@@ -22,8 +21,8 @@ same wheel carved over and over:
 | hex encoding | ~6 sites — while `hex` was a dependency |
 
 None of these were decisions. Each was a local judgement that forty lines was
-cheaper than a dependency. Forty lines times thirty places is how a clipboard
-manager reached ~150k lines of Rust.
+cheaper than a dependency. Forty lines times thirty places is how the tree
+reached ~150k lines of Rust.
 
 **"It's only a few lines" is not a justification.** If you catch yourself
 writing that sentence, you are in the failure mode this rule was written for.
@@ -51,37 +50,33 @@ correct implementation was already present and merely un-imported.
 
 ## 2. The port manifests are the specification
 
-`docs/rewrite/port-manifest/` holds ~9,100 lines harvested from the previous
-implementation and its tests: roughly 500 acceptance tests and over 200
-recovered bug IDs, each recording a defect that was found and fixed in
-production.
+`docs/rewrite/port-manifest/` is the product requirement set (~3,400 lines):
+roughly 500 acceptance tests and over 200 recovered bug IDs, each recording a
+defect that was found and fixed in production.
 
 **Treat them as requirements, not history.** A subsystem is not done until the
 acceptance tests in its manifest pass. If you think a manifest rule is wrong,
 say so explicitly and change the manifest in the same commit — do not silently
 build something that contradicts it.
 
-Every manifest has a section listing complexity that looks gratuitous but is
-load-bearing. Read it before "cleaning up" anything.
+Read the “load-bearing” sections before “cleaning up” anything. Complexity that
+looks gratuitous is often a paid-for defect.
 
-**Not every manifest rule is binding — see rule 3.** Since v2 uses only its own
-formats, the parts that exist purely to preserve prior-product *formats* are now
-reference material: byte layouts, the migration ladder, `key_version` dispatch,
-and warts kept for bug-compatibility. What stays binding is everything about
-*behaviour* — the platform quirks, the security properties, the accessibility
-contract, the secret-detection ruleset, and the several hundred acceptance tests
-that encode bugs someone already paid for. `docs/rewrite/port-manifest/README.md`
-says which is which, per manifest.
+**Not every excluded column is a missing feature — see rule 3.** CopyPaste uses
+only its own formats. Byte layouts, schema ladders, `key_version` dispatch, and
+bug-compatibility with other ciphertext must not return. What binds is
+behaviour — the platform quirks, the security properties, the accessibility
+contract, the secret-detection ruleset, and the acceptance tests.
+`docs/rewrite/port-manifest/README.md` says which is which, per manifest.
 
 ## 3. v2 uses only its own database
 
-**v2 opens only its own DB filename.** Never open, migrate, or probe any prior
+**v2 opens only its own DB filename.** Never open, migrate, or probe any other
 product's files. Do not add `LegacyDatabase`, encounter detection, or special
-messaging about old versions — old installs are irrelevant.
+messaging about other versions.
 
-One schema, one key path, one AEAD path. Manifest format history is reference
-only (see rule 2). Do not add a migration path later without deciding it as a
-feature.
+One schema, one key path, one AEAD path. Do not add a migration path later
+without deciding it as a feature.
 
 ## 4. Correctness rules
 
@@ -89,11 +84,12 @@ feature.
   auto-deletion needs high confidence — a false positive destroys user data
   that is not recoverable.
 - **Sensitive items must never reach the search index.** Enforced at write time,
-  at read time, and by a purge migration for databases predating the rule.
+  at read time, and by a bounded purge that accounts for rules added after an
+  item was captured.
 - **Errors shown to users must never contain paths.** The daemon socket path
   discloses the local username.
-- **Fail closed on crypto.** A wrong key, a wrong AAD or a wrong key version
-  must produce an authentication failure, never a fallback read.
+- **Fail closed on crypto.** A wrong key or a wrong AAD must produce an
+  authentication failure, never a fallback read.
 
 ## 5. Module boundaries, not a line-count game
 
@@ -124,8 +120,8 @@ binding. It needs a module-header line naming the boundary considered and why
 it cannot be extracted. "It's cohesive" and "the files are small now" are not
 arguments: every god module feels cohesive to its author.
 
-v1 reached ~25 production files over 1000 lines — `daemon/p2p/mod.rs` at 2415,
-`ipc.rs` at ~12,500. Edits carried a blast radius across unrelated concerns and
+The earlier tree reached ~25 production files over 1000 lines —
+`daemon/p2p/mod.rs` at 2415, `ipc.rs` at ~12,500. Edits carried a blast radius across unrelated concerns and
 cohesive logic stayed buried instead of being reused, which is one of the ways
 the duplication in rule 1 accumulated. `scripts/check-file-size.sh` enforces
 the emergency ceiling; review enforces the actual boundary.
