@@ -1,6 +1,6 @@
 {
   "type": {
-    "$description": "Type scale: Tailwind v4's ladder, adopted as-is. v1 carried a fifteen-step ramp with half-pixel entries (9.5px, 12.5px, 13.5px); the halves were there because the ramp was hand-tuned per component rather than chosen once. Seven steps is the whole product. The two load-bearing derivations are noted below — the virtualiser's row-height model reads them (INV-5).",
+    "$description": "Type scale: Tailwind v4's seven-step ladder, adopted as-is. The two load-bearing derivations are noted below because the virtualiser's row-height model reads them (INV-5).",
     "f-ui": {
       "$type": "fontFamily",
       "$value": [
@@ -15,7 +15,7 @@
         "Segoe UI Emoji",
         "Noto Color Emoji"
       ],
-      "$description": "Tailwind v4's default `font-sans`. No webfont: the UI face is San Francisco on macOS and Roboto on Android, which is what makes one build read as native on both. v1 shipped Inter as the first entry and never bundled it."
+      "$description": "Tailwind v4's default `font-sans`. No webfont: the UI face is San Francisco on macOS and Roboto on Android, which makes one build read as native on both."
     },
     "f-mono": {
       "$type": "fontFamily",
@@ -69,7 +69,7 @@
     "fw-normal": {
       "$type": "fontWeight",
       "$value": 400,
-      "$description": "Tailwind `font-normal`. v1 used 450 because Inter at 400 was thin; a system face does not need the correction."
+      "$description": "Tailwind `font-normal`; system faces need no product-specific correction."
     },
     "fw-medium": {
       "$type": "fontWeight",
@@ -101,7 +101,7 @@
     "ls-none": {
       "$type": "dimension",
       "$value": "0em",
-      "$description": "Tailwind `tracking-normal`, and the body default. v1 tracked body text at -0.006em to compensate for Inter; a system face is drawn for its own metrics."
+      "$description": "Tailwind `tracking-normal`, and the body default. A system face is drawn for its own metrics."
     },
     "ls-wide": {
       "$type": "dimension",

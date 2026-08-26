@@ -136,7 +136,7 @@ for (const { path, source } of tokenFiles) {
     if (blurAllowed.includes(m[1])) continue;
     fail(path, `token ${m[1]}`, 'delete it; the content is absent, not filtered',
       'A blur token is the treatment INV-10 rules out — it asserts the plaintext is present '
-      + 'behind a filter. v1 had --mask-blur: 6px.');
+      + 'behind a filter.');
   }
 }
 notes.push(`no-blur-token                 clear (exempt: ${blurAllowed.join(', ')})`);
