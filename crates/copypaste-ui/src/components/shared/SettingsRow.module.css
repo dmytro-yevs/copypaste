@@ -19,20 +19,6 @@
 
 .root:last-child::after { display: none; }
 
-@keyframes search-highlight {
-  0%, 100% { background: transparent; box-shadow: none; }
-  35%, 70% {
-    background: var(--selected);
-    box-shadow: 0 0 0 var(--stroke-2) var(--selected-edge);
-  }
-}
-
-.root[data-settings-search-highlight="true"] {
-  border-radius: var(--r-ctl);
-  scroll-margin-block: var(--s-6);
-  animation: search-highlight var(--dur) var(--ease) 2;
-}
-
 .copy {
   display: flex;
   min-inline-size: 0;
@@ -57,12 +43,4 @@
 @container (max-width: $cpXs) {
   .root { grid-template-columns: minmax(0, 1fr); }
   .control { inline-size: 100%; justify-content: flex-end; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .root[data-settings-search-highlight="true"] {
-    animation: none;
-    background: var(--selected);
-    box-shadow: 0 0 0 var(--stroke-2) var(--selected-edge);
-  }
 }

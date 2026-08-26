@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
 import { useUi } from "@/store/ui";
@@ -21,7 +21,12 @@ vi.mock("@/hooks/useViewportMetrics", () => ({
 
 vi.mock("@/features/settings/patterns/settingsTabs", () => ({
   renderPreferenceSection: (section: string) => (
-    <div data-testid={`settings-section-${section}`} />
+    <div
+      data-testid={`settings-section-${section}`}
+      data-settings-search-target={
+        section === "clipboard" ? "row:Group by device" : undefined
+      }
+    />
   ),
 }));
 
@@ -83,4 +88,30 @@ it("opens Storage & history for an old data-transfer selection", async () => {
 
   expect(await screen.findByTestId("settings-section-storage")).toBeTruthy();
   expect(useUi.getState().settingsTab).toBeNull();
+});
+
+it("keeps a selected search destination highlighted long enough to find", async () => {
+  const timeout = vi.spyOn(window, "setTimeout");
+  render(
+    <TooltipProvider>
+      <SettingsScreen />
+    </TooltipProvider>,
+  );
+
+  const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.change(searchbox, { target: { value: "Group by device" } });
+  fireEvent.keyDown(searchbox, { key: "ArrowDown" });
+  await waitFor(() => {
+    expect(searchbox.getAttribute("aria-activedescendant")).toBeTruthy();
+  });
+  fireEvent.keyDown(searchbox, { key: "Enter" });
+
+  const target = await screen.findByTestId("settings-section-clipboard");
+  await waitFor(() => {
+    expect(target.dataset.settingsSearchHighlight).toBe("true");
+  });
+  expect(
+    target.style.getPropertyValue("--settings-search-highlight-duration"),
+  ).toBe("3200ms");
+  expect(timeout).toHaveBeenCalledWith(expect.any(Function), 3_200);
 });

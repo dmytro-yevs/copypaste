@@ -44,6 +44,15 @@ import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 import styles from "./SettingsScreen.module.css";
 
+const SEARCH_HIGHLIGHT_DURATION_MS = 3_200;
+const SEARCH_HIGHLIGHT_DURATION_PROPERTY = "--settings-search-highlight-duration";
+
+function clearSearchHighlight(target: HTMLElement | null) {
+  if (target === null) return;
+  delete target.dataset.settingsSearchHighlight;
+  target.style.removeProperty(SEARCH_HIGHLIGHT_DURATION_PROPERTY);
+}
+
 export function SettingsScreen() {
   const { t } = useTranslation();
   const viewportCompact = useViewportMetrics().sizeClass === "compact";
@@ -68,6 +77,7 @@ export function SettingsScreen() {
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const highlightTimer = useRef<number | undefined>(undefined);
+  const highlightedTarget = useRef<HTMLElement | null>(null);
   const contentViewportRef = useRef<HTMLDivElement>(null);
   const requestedTab = useUi((state) => state.settingsTab);
   const setSettingsTab = useUi((state) => state.setSettingsTab);
@@ -152,6 +162,7 @@ export function SettingsScreen() {
       if (highlightTimer.current !== undefined) {
         window.clearTimeout(highlightTimer.current);
       }
+      clearSearchHighlight(highlightedTarget.current);
     },
     [],
   );
@@ -174,14 +185,21 @@ export function SettingsScreen() {
         target.scrollIntoView({ behavior: "smooth", block: "center" });
         target.tabIndex = -1;
         target.focus({ preventScroll: true });
-        target.dataset.settingsSearchHighlight = "true";
         if (highlightTimer.current !== undefined) {
           window.clearTimeout(highlightTimer.current);
         }
+        clearSearchHighlight(highlightedTarget.current);
+        highlightedTarget.current = target;
+        target.style.setProperty(
+          SEARCH_HIGHLIGHT_DURATION_PROPERTY,
+          `${SEARCH_HIGHLIGHT_DURATION_MS}ms`,
+        );
+        target.dataset.settingsSearchHighlight = "true";
         highlightTimer.current = window.setTimeout(() => {
-          delete target.dataset.settingsSearchHighlight;
+          clearSearchHighlight(target);
+          highlightedTarget.current = null;
           highlightTimer.current = undefined;
-        }, 1800);
+        }, SEARCH_HIGHLIGHT_DURATION_MS);
       });
     });
   };
