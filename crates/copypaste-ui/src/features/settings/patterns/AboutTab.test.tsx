@@ -56,7 +56,14 @@ describe("About settings", () => {
     useUi.setState({ onboardingOpen: false });
     render(<AboutTab />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open welcome" }));
+    const welcome = screen.getByRole("button", { name: "Open welcome" });
+    const reset = screen.getByRole("button", { name: "Reset preferences" });
+
+    expect(welcome.closest("section")?.className).toBe(
+      reset.closest("section")?.className,
+    );
+    expect(welcome.className).not.toBe(reset.className);
+    fireEvent.click(welcome);
 
     expect(useUi.getState().onboardingOpen).toBe(true);
   });
