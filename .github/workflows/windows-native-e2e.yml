@@ -24,9 +24,13 @@ env:
 
 jobs:
   native-desktop:
-    name: WebView2, native bridge and Windows shell settings
+    name: WebView2, native bridge and Windows shell settings (${{ matrix.shard }}/2)
     runs-on: windows-2022
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -42,7 +46,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: windows-2022-1.96-native-e2e
+          shared-key: windows-2022-1.96-native-e2e-${{ matrix.shard }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -117,7 +121,7 @@ jobs:
       - name: Run Windows native desktop E2E
         id: native-e2e
         working-directory: e2e
-        run: npm run test:windows
+        run: npm run test:windows -- --shard=${{ matrix.shard }}/2
 
       # Global setup writes a run manifest before anything else can fail, so an
       # empty directory here means the harness lost its own diagnostics. That is
@@ -126,7 +130,7 @@ jobs:
         if: failure() && steps.native-e2e.conclusion == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: windows-native-e2e-logs
+          name: windows-native-e2e-logs-${{ matrix.shard }}
           path: ${{ env.COPYPASTE_E2E_RUN_ROOT }}/logs/**
           if-no-files-found: error
           retention-days: 7
