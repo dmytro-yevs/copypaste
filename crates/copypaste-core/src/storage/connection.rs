@@ -34,7 +34,7 @@ pub(super) fn write_tx(conn: &mut Connection) -> rusqlite::Result<Transaction<'_
 }
 
 /// WAL gives many concurrent readers and one writer; four connections is what
-/// the daemon needed in v1 (`CopyPaste-j8p`).
+/// required by the daemon (`CopyPaste-j8p`).
 const POOL_SIZE: u32 = 4;
 
 /// Per-connection pragmas, applied in order *after* `PRAGMA key`.

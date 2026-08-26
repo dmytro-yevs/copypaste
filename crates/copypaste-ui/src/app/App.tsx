@@ -67,7 +67,7 @@ export default function App() {
     });
   }, []);
 
-  // Subscribes *once*: v1 accumulated a matchMedia listener per re-apply
+  // Subscribes *once*: re-applying would accumulate matchMedia listeners
   // (CopyPaste-g27b.20).
   useEffect(() => {
     // Android has no window behind the activity to blur. Keep its app surface

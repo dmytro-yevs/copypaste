@@ -2,12 +2,12 @@
 //!
 //! One SQLCipher-encrypted SQLite file, one schema version, one r2d2 pool.
 //!
-//! # Carried over from v1 (port manifest 03)
+//! # Binding storage properties (port manifest 03)
 //!
-//! * **Sensitive items never reach the search index** (ADR-015). Three
+//! * **Sensitive items never reach the search index** (`CopyPaste-i6pp`). Three
 //!   enforcement layers, all required: the write guard in [`Store::insert`]
 //!   ([`items`]), the in-transaction re-read in `upsert_fts_in_tx` and the
-//!   `is_sensitive = 0` predicate on the search JOIN (both [`search`]). v1
+//!   `is_sensitive = 0` predicate on the search JOIN (both [`search`]).
 //!   shipped databases containing plaintext passwords in FTS because one layer
 //!   was missing. All three decide at capture, which is why
 //!   [`crate::sensitive::purge_indexed_secrets`] exists to revisit rows a later
@@ -72,7 +72,7 @@ pub(crate) use search::{indexed_texts_in, purge_from_index_in, purge_index_of_un
 
 /// Fixtures shared by every test module under `storage`. The direct-SQL helpers
 /// let a test assert what is *in* the FTS table rather than only what `search`
-/// returns — that is how a missing ADR-015 layer would be caught.
+/// returns — that is how a missing FTS-exclusion layer is caught.
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::{NewItem, Store};

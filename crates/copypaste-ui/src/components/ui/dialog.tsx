@@ -18,7 +18,7 @@ import {
 import styles from "./dialog.module.css";
 
 /**
- * A11Y-4 and INV-19 come from Radix, not from us. v1 hand-wrote the focus trap
+ * A11Y-4 and INV-19 come from Radix; do not hand-write the focus trap
  * and the scroll lock (`useFocusTrap`, `lib/dialog/scrollLock.ts`) and shipped
  * bugs in both.
  */

@@ -18,10 +18,8 @@
 //!
 //! # Why it is structural rather than a rule
 //!
-//! The obvious alternative is a rule — "remember to blank `content` when
-//! `is_sensitive`" — enforced by review at each of the nine commands that
-//! return items. That is the shape of defect manifest 06 records: v1 had the
-//! rule and shipped a path that forgot it.
+//! The obvious alternative is a per-command "remember to blank `content`"
+//! rule. Manifest 06 INV-10 requires a structural boundary instead.
 //!
 //! Instead:
 //!

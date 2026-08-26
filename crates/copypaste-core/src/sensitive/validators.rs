@@ -1,7 +1,7 @@
 //! The false-positive gates a regex match must survive before it counts.
 //!
 //! Each answers "the shape matched — is it actually a secret?", and each exists
-//! because a v1 rule without it deleted user data or missed a real credential.
+//! because a rule without it deleted user data or missed a real credential.
 //! No fast paths and no second copy of the same algorithm (§7.3).
 
 /// Characters in the §5.3 "special character" set. Note `$`, `#`, `%`, `/` and
@@ -14,8 +14,7 @@ const STRENGTH_SPECIALS: &str = "!@#$%^&*+/=";
 /// see `value_is_strong`.
 const CODE_SHAPED_CHARS: &[char] = &['(', ')', '\'', '"', '`', '<', '>'];
 
-/// Whole-value placeholder stopwords (gitleaks' allowlist model, §5.6 — v1 had
-/// none and called that its biggest structural gap). Matched against the
+/// Whole-value placeholder stopwords (gitleaks' allowlist model, §5.6). Matched against the
 /// **entire** value, case-insensitively, never as a substring: a substring
 /// match could suppress a real credential containing one of these sequences.
 const VALUE_STOPWORDS: &[&str] = &[
@@ -66,8 +65,7 @@ const VALUE_STOPWORDS: &[&str] = &[
 ///
 /// * **Code shape.** The benign corpus contains
 ///   `const password = prompt('enter password:');`, where group 1 captures
-///   `prompt('enter` — 13 characters, so criterion 1 calls it strong and v1
-///   auto-wiped it (one of the two FPs v1's 5 % budget absorbed, §7.7). A value
+///   `prompt('enter` — 13 characters, so criterion 1 alone calls it strong. A value
 ///   containing `(`, `)`, `'`, `"`, `` ` ``, `<`, `>`, or opening with
 ///   `$`/`${`/`{{` is code or a template reference, and biasing toward "not a
 ///   secret" is what AGENTS.md rule 4 and manifest I1 require. Neither the
@@ -214,7 +212,7 @@ mod tests {
         assert!(value_is_strong("changeme7f3a91bc2d"));
     }
 
-    /// §7.1: v1 ran `dotenv_secret` at 0.80 with no validator, so
+    /// DMY-162: running `dotenv_secret` at 0.80 with no validator, so
     /// `API_KEY=changeme` auto-wiped.
     #[test]
     fn dotenv_secret_is_value_gated() {
