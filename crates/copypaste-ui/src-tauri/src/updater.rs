@@ -40,23 +40,23 @@ pub fn update_status(app: AppHandle) -> UpdateStatus {
     let _ = &app;
     #[cfg(target_os = "windows")]
     {
-        return windows::status(&app);
+        windows::status(&app)
     }
     #[cfg(target_os = "macos")]
     {
-        return if macos::brew_path().is_some() {
+        if macos::brew_path().is_some() {
             UpdateStatus::Ready
         } else {
             UpdateStatus::Unconfigured
-        };
+        }
     }
     #[cfg(target_os = "android")]
     {
-        return if config::configured_for_app(&app) {
+        if config::configured_for_app(&app) {
             UpdateStatus::Ready
         } else {
             UpdateStatus::Unconfigured
-        };
+        }
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
     {
@@ -77,19 +77,19 @@ pub async fn check_for_update(
 
     #[cfg(target_os = "windows")]
     {
-        return windows::check(&app).await;
+        windows::check(&app).await
     }
     #[cfg(target_os = "macos")]
     {
         let _ = app;
-        return macos::check().await;
+        macos::check().await
     }
     #[cfg(target_os = "android")]
     {
         let Some(updater) = config::updater(&app, None, None)? else {
             return Ok(UpdateStatus::Unconfigured);
         };
-        return Ok(
+        Ok(
             match updater.check().await.map_err(|error| {
                 config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed)
             })? {
@@ -98,7 +98,7 @@ pub async fn check_for_update(
                 },
                 None => UpdateStatus::UpToDate,
             },
-        );
+        )
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
     {
@@ -121,11 +121,11 @@ pub async fn install_update(
 
     #[cfg(target_os = "windows")]
     {
-        return windows::install(&app, expected_version, progress).await;
+        windows::install(&app, expected_version, progress).await
     }
     #[cfg(target_os = "macos")]
     {
-        return macos::install(app, expected_version, progress).await;
+        macos::install(app, expected_version, progress).await
     }
     #[cfg(target_os = "android")]
     {
@@ -169,7 +169,7 @@ pub async fn install_update(
             .await
             .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateInstallFailed))?
             .map_err(UiError::from_boundary)?;
-        return Ok(UpdateStatus::UpToDate);
+        Ok(UpdateStatus::UpToDate)
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
     {

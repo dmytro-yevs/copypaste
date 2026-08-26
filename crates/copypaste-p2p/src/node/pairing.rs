@@ -409,7 +409,7 @@ fn remaining_ms(deadline: Instant, now: Instant) -> u64 {
     u64::try_from(remaining.as_millis())
         .unwrap_or(u64::MAX)
         .saturating_add(u64::from(
-            !remaining.is_zero() && remaining.subsec_nanos() % 1_000_000 != 0,
+            !remaining.is_zero() && !remaining.subsec_nanos().is_multiple_of(1_000_000),
         ))
 }
 

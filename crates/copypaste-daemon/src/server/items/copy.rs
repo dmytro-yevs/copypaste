@@ -11,7 +11,7 @@ use crate::AppState;
 pub(crate) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
     let (item, payload) = match fetch(state, id, item_id) {
         Ok(opened) => opened,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     if let Err(error) = state.clipboard().write_payload(&item.id, &payload) {
         return write_error(id, error);
@@ -23,7 +23,7 @@ pub(crate) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
 pub(crate) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Response {
     let (item, payload) = match fetch(state, id, item_id) {
         Ok(opened) => opened,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     if !matches!(payload, ClipboardPayload::Text(_)) {
         return unsupported(id);
@@ -38,13 +38,19 @@ fn fetch(
     state: &AppState,
     id: u64,
     item_id: &str,
-) -> Result<(copypaste_ipc::Item, ClipboardPayload), Response> {
+) -> Result<(copypaste_ipc::Item, ClipboardPayload), Box<Response>> {
     let row = match state.store.get(item_id) {
         Ok(Some(row)) => row,
-        Ok(None) => return Err(Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND)),
-        Err(error) => return Err(storage_error(id, "get", &error)),
+        Ok(None) => {
+            return Err(Box::new(Response::err(
+                id,
+                ErrorCode::NotFound,
+                MSG_NOT_FOUND,
+            )))
+        }
+        Err(error) => return Err(Box::new(storage_error(id, "get", &error))),
     };
-    to_wire_and_payload(state, row).map_err(|error| decrypt_error(id, &error))
+    to_wire_and_payload(state, row).map_err(|error| Box::new(decrypt_error(id, &error)))
 }
 
 fn write_error(id: u64, error: ClipboardWriteError) -> Response {
