@@ -23,9 +23,8 @@ const DIST = 'dist/';
 /**
  * How many leading path segments each top-level group contributes to nothing.
  * The remaining segments joined with `-` are the CSS custom property name, so
- * `color.raised-2` is `--raised-2` and `z.toast` is `--z-toast`. The names are
- * unchanged from v1 even though every value has changed, so port-manifest §8
- * still reads as a map of what exists — only its values are now reference.
+ * `color.raised-2` is `--raised-2` and `z.toast` is `--z-toast`. Stable names
+ * keep generated CSS and component consumers on one contract.
  */
 const GROUP_DROP = {
   color: 1,
@@ -37,6 +36,7 @@ const GROUP_DROP = {
   motion: 1,
   size: 1,
   layout: 1,
+  media: 1,
   z: 0,
   themes: 2, // themes.aurora.accent -> accent (emitted under its own selector)
   translucency: 2, // translucency.frosted.chrome-bg -> chrome-bg

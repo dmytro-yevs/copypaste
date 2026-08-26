@@ -1,6 +1,6 @@
 {
   "size": {
-    "$description": "Control, icon and stroke sizes, aligned to shadcn's control heights (h-8 / h-9 / h-10) and its size-4 icon default. Three tokens carry a `coarsePointer` extension and are re-emitted under @media (pointer: coarse); the rest are the same on both platforms. The switch, checkbox and selection-bar sizes v1 defined here are gone: those components come from the library now, and a token nobody reads is a value that drifts.",
+    "$description": "Control, icon and stroke sizes, aligned to shadcn's control heights (h-8 / h-9 / h-10) and its size-4 icon default. Three tokens carry a `coarsePointer` extension and are re-emitted under @media (pointer: coarse); the rest are the same on both platforms. Library components own switch, checkbox and selection-bar geometry; an unread token is a value that drifts.",
     "$type": "dimension",
     "icon-sm": {
       "$value": "14px",

@@ -63,8 +63,8 @@ export const CLASS_RULES = [
     why:
       'INV-10: a sensitive item\'s plaintext is absent, not obscured — the bridge sends ' +
       'content: null. A blur asserts the content is present behind a filter, which for a ' +
-      'screenshot, a screen recording or a shoulder is both a lie and a leak. v1 carried ' +
-      '--mask-blur: 6px; there is no blur token here and there must not be one.',
+      'screenshot, a screen recording or a shoulder is both a lie and a leak. ' +
+      'There is no blur token here and there must not be one.',
   },
   {
     id: 'hand-rolled-mask',
@@ -112,7 +112,7 @@ export const ALPHA_UTILITIES = [
   },
   {
     util: 'bg-card/60',
-    where: 'PairCreateDialog, the reveal overlay over the hidden pairing code',
+    where: 'PairingLauncherDialog, the reveal overlay over the hidden pairing code',
     measure: { fill: 'var(--card)', alpha: 0.6, fg: 'var(--text)', on: ['--elevated', '--card'] },
   },
   {
@@ -121,7 +121,7 @@ export const ALPHA_UTILITIES = [
     covered: 'the --ok-strong on a 15% --ok tint pairs',
   },
   { util: 'bg-warn/15', where: 'Badge warn, Banners, HistoryView', covered: 'the --warn-strong tint pairs' },
-  { util: 'bg-err/15', where: 'Badge error, Banners, PairAcceptDialog, QuickPasteApp', covered: 'the --err-strong tint pairs' },
+  { util: 'bg-err/15', where: 'Badge error, Banners, PairingLauncherDialog, QuickPasteApp', covered: 'the --err-strong tint pairs' },
   { util: 'bg-info/15', where: 'Badge info', covered: 'the --info-strong tint pairs' },
   {
     util: 'border-warn/20',

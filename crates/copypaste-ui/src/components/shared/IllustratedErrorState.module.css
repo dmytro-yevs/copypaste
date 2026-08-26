@@ -85,12 +85,12 @@
 }
 
 .antenna {
-  transform-origin: 144px 42px;
+  transform-origin: var(--illustrated-error-antenna-origin-x) var(--illustrated-error-antenna-origin-y);
   animation: illustrated-error-antenna var(--dur-progress) var(--ease) infinite alternate;
 }
 
 .tool {
-  transform-origin: 84px 110px;
+  transform-origin: var(--illustrated-error-tool-origin-x) var(--illustrated-error-tool-origin-y);
   animation: illustrated-error-tool var(--dur-progress) var(--ease) infinite alternate;
 }
 
