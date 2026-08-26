@@ -53,15 +53,27 @@
 }
 
 .emptyState {
-  display: grid;
+  display: flex;
   min-block-size: calc(var(--s-9) * 5);
   padding: var(--s-4);
-  place-items: center;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--s-3);
   overflow: hidden;
 }
 
-.emptyState > * {
+.emptyIcon {
+  color: var(--faint);
+}
+
+.emptyCopy {
+  max-inline-size: calc(var(--s-9) * 5);
   margin: 0;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  text-align: center;
 }
 
 .skeletonRow {
