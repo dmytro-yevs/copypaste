@@ -73,8 +73,8 @@ fi
 export VITE_COPYPASTE_WEB_BRIDGE_URL VITE_COPYPASTE_WEB_BRIDGE_TOKEN
 write_bridge_runtime
 cd "$ui_dir"
-if curl --silent --fail --max-time 1 http://localhost:1420/ >/dev/null 2>&1; then
-  echo "Vite is already running on http://localhost:1420/."
+if curl --silent --fail --max-time 1 http://127.0.0.1:1420/ >/dev/null 2>&1; then
+  echo "Vite is already running on http://127.0.0.1:1420/."
   echo "The open browser tab will attach to this bridge automatically."
   wait "$bridge_pid"
 else
