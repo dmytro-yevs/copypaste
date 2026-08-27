@@ -41,7 +41,7 @@ export function AndroidCaptureSetup() {
   const permissionReadFailed = permissions.error !== null;
   const captureWorking = capture.data?.health.state === "working";
   const busy =
-    permissions.isPending ||
+    permissions.isFetching ||
     request.isPending ||
     openSettings.isPending ||
     save.isPending ||
