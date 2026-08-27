@@ -19,6 +19,7 @@ import { ROW, count, rowBoxes, waitForRows } from "../src/harness/ui.js";
 const SELECTION_TOOLBAR =
   '[role="toolbar"][aria-label="Selection actions"]';
 const ROW_SELECTION = `${ROW} [role="checkbox"]`;
+const KIND_FILTER = 'button[aria-label^="Filter by kind,"]';
 
 let app: App;
 
@@ -71,6 +72,23 @@ async function controlBoxes(browser: App["browser"]) {
   })) as Array<{ label: string; present: boolean; width: number; height: number }>;
 }
 
+async function waitForKindMenu(expanded: boolean) {
+  const state = expanded ? "open" : "closed";
+  await app.browser.waitUntil(
+    async () => {
+      const trigger = await app.browser.$(KIND_FILTER);
+      return (
+        (await trigger.getAttribute("aria-expanded")) === String(expanded) &&
+        (await trigger.getAttribute("data-state")) === state
+      );
+    },
+    {
+      timeout: 5_000,
+      timeoutMsg: `kind filter did not reach its ${state} state`,
+    },
+  );
+}
+
 describe("the toolbar", () => {
   test("lays every control out with a real box", async () => {
     for (const control of await controlBoxes(app.browser)) {
@@ -90,6 +108,7 @@ describe("the toolbar", () => {
       'button[aria-label="Filter by kind, default: All kinds"]',
     );
     await defaultKindFilter.click();
+    await waitForKindMenu(true);
     const links = await app.browser.$(
       '//*[@role="menuitemcheckbox" and normalize-space(.)="Links"]',
     );
@@ -105,10 +124,8 @@ describe("the toolbar", () => {
       { timeout: 5_000, timeoutMsg: "the kind filter did not narrow the list" },
     );
 
-    // Put it back for the tests after this one.
-    await app.browser
-      .$('button[aria-label="Filter by kind, active: Links"]')
-      .click();
+    // Multi-select items keep the menu open so more than one kind can be
+    // chosen. Restore All from that open menu, then dismiss it explicitly.
     const allKinds = await app.browser.$(
       '//*[@role="menuitemcheckbox" and normalize-space(.)="All kinds"]',
     );
@@ -121,6 +138,9 @@ describe("the toolbar", () => {
           'button[aria-label="Filter by kind, default: All kinds"]',
         )).isExisting(),
     );
+    await waitForKindMenu(true);
+    await app.browser.keys(["Escape"]);
+    await waitForKindMenu(false);
   });
 });
 

@@ -1,3 +1,8 @@
+.tooltipAnchor {
+    display: inline-flex;
+    max-inline-size: 100%;
+}
+
 .trigger {
     --select-trigger-gap: var(--s-2);
 

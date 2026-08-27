@@ -1,3 +1,4 @@
+.tooltipAnchor { display: inline-flex; max-inline-size: 100%; }
 .trigger {
   position: relative;
   display: inline-flex;
