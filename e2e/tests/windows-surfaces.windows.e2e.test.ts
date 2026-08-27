@@ -32,7 +32,7 @@ afterAll(async () => {
 });
 
 async function openTab(label: string): Promise<void> {
-  await gotoView(app.browser, "Settings");
+  await gotoView(app.browser, "Preferences");
   const tab = await app.browser.$(`[role="tab"]=${label}`);
   await tab.waitForClickable({ timeout: 15_000 });
   await tab.click();
@@ -60,7 +60,7 @@ async function setClipboard(value: string): Promise<void> {
 
 describe("private mode and the native clipboard", () => {
   test("blocks capture until the setting is turned off", async () => {
-    await openTab("Service");
+    await openTab("Privacy & retention");
     const toggle = await app.browser.$("#private-mode");
     await toggle.waitForClickable({ timeout: 15_000 });
     expect(await toggle.getAttribute("aria-checked")).toBe("false");
@@ -96,7 +96,7 @@ describe("private mode and the native clipboard", () => {
 
 describe("desktop settings", () => {
   test("persists a native shortcut registration and restores the default", async () => {
-    await openTab("Shortcut");
+    await openTab("Shortcuts");
     const binding = await app.browser.$('[aria-label^="Current shortcut:"]');
     await binding.waitForClickable({ timeout: 15_000 });
     await binding.click();
@@ -121,7 +121,7 @@ describe("desktop settings", () => {
   });
 
   test("changes and restores the Windows launch-at-login registration", async () => {
-    await openTab("Shortcut");
+    await openTab("Shortcuts");
     const toggle = await app.browser.$("#open-at-login");
     await toggle.waitForClickable({ timeout: 15_000 });
     const initial = await toggle.getAttribute("aria-checked");
@@ -149,7 +149,7 @@ describe("fail-closed product surfaces", () => {
   });
 
   test("keeps cloud controls absent when no deployment is configured", async () => {
-    await openTab("Sync");
+    await openTab("Cloud sync");
     await waitForText(app.browser, "Not configured");
     expect(await app.browser.$$('form[aria-label="Cloud account sign in"]')).toHaveLength(
       0,
@@ -157,7 +157,7 @@ describe("fail-closed product surfaces", () => {
   });
 
   test("warns before readable export and destructive restore", async () => {
-    await openTab("Storage");
+    await openTab("Storage & history");
     await clickButton(app.browser, "Export…");
     await waitForText(app.browser, "Export your clipboard history?");
     const includeSensitive = await app.browser.$("#export-include-sensitive");
