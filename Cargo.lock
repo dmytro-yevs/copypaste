@@ -1122,6 +1122,7 @@ version = "2.0.0-alpha.33"
 dependencies = [
  "copypaste-clock",
  "copypaste-fs",
+ "copypaste-ipc",
  "criterion",
  "data-encoding",
  "futures-util",

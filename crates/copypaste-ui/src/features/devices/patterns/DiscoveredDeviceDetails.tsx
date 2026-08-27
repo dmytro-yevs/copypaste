@@ -10,6 +10,8 @@ import {
     DEVICE_PLATFORM_LABELS,
     type DeviceStatusPresentation,
 } from "@/features/devices/model/devicePresentation";
+import { observedPresence } from "@/features/devices/model/peerState";
+import { useTranslation } from "@/i18n";
 import { longAge } from "@/lib/format";
 import type {
     DeviceObservationProvenance,
@@ -39,9 +41,11 @@ export function DiscoveredDeviceDetails({
     device: DiscoveredDevice;
     status: DeviceStatusPresentation;
 }) {
+    const { t } = useTranslation();
     const details = device.details;
     const profile = details?.profile;
     const presence = details?.presence;
+    const presenceState = observedPresence(presence);
     const provenance = [
         profile?.provenance,
         details?.endpoint?.provenance,
@@ -87,7 +91,9 @@ export function DiscoveredDeviceDetails({
             rows: [
                 [
                     "LAN address / port",
-                    details?.endpoint?.lan_endpoint || device.addr || unavailable,
+                    details?.endpoint?.lan_endpoint ||
+                        device.addr ||
+                        unavailable,
                 ],
                 [
                     "Public IP",
@@ -117,11 +123,11 @@ export function DiscoveredDeviceDetails({
                 ],
                 [
                     "Network presence",
-                    presence
-                        ? presence.online
-                            ? "Seen on this network"
-                            : "Not currently discovered"
-                        : "Seen through network discovery",
+                    presenceState === "online"
+                        ? t("devices.detail.seen")
+                        : presenceState === "offline"
+                          ? t("devices.detail.notSeen")
+                          : t("devices.detail.notAvailable"),
                 ],
                 ["Discovery source", "mDNS network advertisement"],
                 ["Transport", "Local network discovery"],
@@ -144,7 +150,9 @@ export function DiscoveredDeviceDetails({
                 [
                     "Provenance",
                     provenance.length > 0
-                        ? provenance.map((value) => provenanceLabel[value]).join(" · ")
+                        ? provenance
+                              .map((value) => provenanceLabel[value])
+                              .join(" · ")
                         : "Unverified network advertisement",
                 ],
             ],
