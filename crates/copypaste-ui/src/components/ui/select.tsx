@@ -109,7 +109,9 @@ export function Select({
             onValueChange={onValueChange}
             disabled={disabled}
         >
-            <Tooltip content={accessibleLabel}>{trigger}</Tooltip>
+            <Tooltip content={accessibleLabel}>
+                <span className={styles.tooltipAnchor}>{trigger}</span>
+            </Tooltip>
             <SelectPrimitive.Portal>
                 <SelectPrimitive.Content
                     position="popper"
