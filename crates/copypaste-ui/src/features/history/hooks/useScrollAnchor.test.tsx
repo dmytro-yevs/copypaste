@@ -167,6 +167,40 @@ function setup(
 }
 
 describe("useScrollAnchor", () => {
+    it("releases the captured row before navigation scrolls elsewhere", () => {
+        const list = items(20);
+        const { element, result, rerender, fake } = setup(list, ROW * 15);
+        result.current.captureAnchor();
+
+        result.current.releaseAnchorForNavigation(0, element.scrollTop);
+        element.scrollTop = 0;
+        rerender({ current: list, size: ROW });
+
+        expect(fake.scrollToOffset).not.toHaveBeenCalled();
+        expect(element.scrollTop).toBe(0);
+    });
+
+    it("keeps the captured row when keyboard navigation does not scroll", () => {
+        const list = items(20);
+        const { element, result, rerender, fake } = setup(
+            list,
+            ROW * 5 + 17,
+        );
+        result.current.captureAnchor();
+
+        result.current.releaseAnchorForNavigation(
+            element.scrollTop,
+            element.scrollTop,
+        );
+        const prepended = [{ ...items(1)[0]!, id: "brand-new" }, ...list];
+        rerender({ current: prepended, size: ROW });
+
+        expect(fake.scrollToOffset).toHaveBeenLastCalledWith(
+            ROW * 6 + 17,
+            expect.objectContaining({ align: "start", behavior: "auto" }),
+        );
+    });
+
     it("keeps the item and intra-row offset through a prepend", () => {
         const list = items(20);
         const { result, rerender, fake } = setup(list, ROW * 5 + 17);
