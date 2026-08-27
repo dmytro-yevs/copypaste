@@ -22,6 +22,7 @@ export function item(over: Partial<Item> = {}): Item {
     id: "row-1",
     content: sensitive ? null : "an ordinary clipboard entry",
     content_type: "text/plain",
+    content_class: "text",
     created_at: 1_700_000_000_000,
     pinned: false,
     is_sensitive: sensitive,

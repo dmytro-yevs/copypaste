@@ -47,7 +47,8 @@
 ))]
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_ipc::{
-    DiscoveredDevice, ImagePreview, Item, PeerInfo, SensitiveFinding, StatusData, SyncResult,
+    ContentClass, DiscoveredDevice, ImagePreview, Item, PeerInfo, SensitiveFinding, StatusData,
+    SyncResult,
 };
 use serde::Serialize;
 
@@ -65,6 +66,7 @@ pub struct UiItem {
     /// plaintext was dropped before this value existed.
     content: Option<String>,
     content_type: String,
+    content_class: ContentClass,
     /// Milliseconds since the Unix epoch.
     created_at: i64,
     pinned: bool,
@@ -215,6 +217,7 @@ impl From<Item> for UiItem {
         Self {
             id: item.id,
             content,
+            content_class: copypaste_ipc::content_type::classify(&item.content_type),
             content_type: item.content_type,
             created_at: item.created_at,
             pinned: item.pinned,
@@ -385,6 +388,15 @@ mod tests {
         assert!(item.has_content());
         let json = serde_json::to_string(&item).unwrap();
         assert!(json.contains("hello"), "{json}");
+        assert!(json.contains(r#""content_class":"text""#), "{json}");
+    }
+
+    #[test]
+    fn unknown_content_type_crosses_as_other_without_a_ui_guess() {
+        let mut item = wire("future bytes", false);
+        item.content_type = "application/x-future".into();
+        let json = serde_json::to_string(&UiItem::from(item)).unwrap();
+        assert!(json.contains(r#""content_class":"other""#), "{json}");
     }
 
     #[test]
