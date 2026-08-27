@@ -16,9 +16,11 @@ import {
   ROW_SELECTION,
   SEARCH,
   SEARCH_DEFAULT_LABEL,
+  HISTORY_SEARCH_EXPANDED_ATTRIBUTE,
   clearField,
   count,
   gotoView,
+  interactableElementBox,
   openHistorySearch,
   reloadHistoryWith,
   tapButton,
@@ -61,24 +63,17 @@ afterAll(async () => {
 });
 
 async function controlBoxes() {
-  return app.withPage((page) =>
-    page.evaluate(
-      (labels: string[]) =>
-        labels.map((label) => {
-          const el = document.querySelector(
-            `[aria-label="${label}"]`,
-          ) as HTMLElement | null;
-          const rect = el?.getBoundingClientRect();
-          return {
-            label,
-            present: Boolean(el),
-            width: rect ? rect.width : 0,
-            height: rect ? rect.height : 0,
-            right: rect ? rect.right : 0,
-          };
-        }),
-      CONTROLS,
-    ),
+  return Promise.all(
+    CONTROLS.map(async (label) => {
+      const box = await interactableElementBox(app, `[aria-label="${label}"]`);
+      return {
+        label,
+        present: box !== null,
+        width: box?.width ?? 0,
+        height: box?.height ?? 0,
+        right: box?.right ?? 0,
+      };
+    }),
   );
 }
 
@@ -110,28 +105,26 @@ describe("the toolbar", () => {
 
   test("search replaces the control row at full width", async () => {
     await openHistorySearch(app);
+    const search = await interactableElementBox(app, SEARCH);
     const state = await app.withPage((page) =>
-      page.evaluate((searchSelector) => {
+      page.evaluate((expandedAttribute) => {
         const toolbar = document.querySelector(
           '[data-slot="history-toolbar"]',
         ) as HTMLElement;
-        const search = document.querySelector(searchSelector) as HTMLElement;
         const toolbarRect = toolbar.getBoundingClientRect();
-        const searchRect = search.getBoundingClientRect();
         return {
-          expanded: toolbar.dataset.searchOpen,
-          searchWidth: searchRect.width,
+          expanded: toolbar.hasAttribute(expandedAttribute),
           toolbarWidth: toolbarRect.width,
           filterPresent: Boolean(
             document.querySelector('[aria-label^="Filter by kind,"]'),
           ),
         };
-      }, SEARCH),
+      }, HISTORY_SEARCH_EXPANDED_ATTRIBUTE),
     );
 
-    expect(state.expanded).toBe("true");
+    expect(state.expanded).toBe(true);
     expect(state.filterPresent).toBe(false);
-    expect(state.searchWidth).toBeGreaterThan(state.toolbarWidth - 80);
+    expect(search?.width ?? 0).toBeGreaterThan(state.toolbarWidth - 80);
     await tapButton(app, "Close search");
   });
 
