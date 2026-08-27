@@ -157,11 +157,18 @@ if reach_settings_tab "$OUT/pairing-shell.xml" 30 \
     && tap_selector "Connect a device" "$OUT/pairing-launcher-action.xml" 15 \
     && wait_selector "Scan pairing code" "$OUT/pairing-entry.xml" 15; then
     if [[ -n "$(node_center "$OUT/pairing-entry.xml" "Show pairing code")" ]] \
+        && [[ -n "$(node_center "$OUT/pairing-entry.xml" "Scan pairing code")" ]] \
         && [[ -z "$(node_center "$OUT/pairing-entry.xml" "Enter pairing code")" ]]; then
         ok "Android offers Show pairing code and Scan pairing code"
     else
         bad "Android offers Show pairing code and Scan pairing code" \
             "the launcher did not expose the platform-specific pairing actions"
+    fi
+    if pairing_ax="$(PKG="$PKG" SMOKE_OUT="$OUT" NATIVE_AX_TREE="$OUT/pairing-entry.xml" \
+        "$(dirname "${BASH_SOURCE[0]}")/android-native-accessibility.sh" 2>&1)"; then
+        ok "the Android pairing entry is covered by the native accessibility surface: $pairing_ax"
+    else
+        bad "the Android pairing entry is covered by the native accessibility surface" "$pairing_ax"
     fi
     capture_png "$OUT/pairing-entry.png" \
         && ok "the Android pairing launcher screenshot is complete" \
