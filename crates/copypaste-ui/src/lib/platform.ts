@@ -18,6 +18,10 @@ const NATIVE_PLATFORMS = new Set<AppPlatform>([
 
 let platform: AppPlatform = "unknown";
 
+function isAndroidBuild(): boolean {
+  return import.meta.env.VITE_ANDROID_BUILD === "1";
+}
+
 function browserPreviewPlatform(): AppPlatform {
   if (typeof window === "undefined") return "browser";
   const requested = new URLSearchParams(window.location.search).get("platform");
@@ -26,25 +30,35 @@ function browserPreviewPlatform(): AppPlatform {
     : "browser";
 }
 
-export async function initializePlatform(): Promise<AppPlatform> {
+export function initializePlatform(): AppPlatform | Promise<AppPlatform> {
+  // The Android bundle is a maintained build capability, so it is stronger
+  // evidence than a permission probe that may be unavailable after force-stop.
+  // Resolve it before any component module reads currentPlatform().
+  if (isAndroidBuild()) {
+    platform = "android";
+    return platform;
+  }
   if (!hasNativeBridge()) {
     platform = browserPreviewPlatform();
     return platform;
   }
-  try {
-    const snapshot = await permissionSnapshot();
-    platform = NATIVE_PLATFORMS.has(snapshot.platform)
-      ? snapshot.platform
-      : "unknown";
-  } catch {
-    platform = "__TAURI_INTERNALS__" in window
-      ? "unknown"
-      : browserPreviewPlatform();
-  }
-  return platform;
+  return permissionSnapshot()
+    .then((snapshot) => {
+      platform = NATIVE_PLATFORMS.has(snapshot.platform)
+        ? snapshot.platform
+        : "unknown";
+      return platform;
+    })
+    .catch(() => {
+      platform = "__TAURI_INTERNALS__" in window
+        ? "unknown"
+        : browserPreviewPlatform();
+      return platform;
+    });
 }
 
 export function currentPlatform(): AppPlatform {
+  if (isAndroidBuild()) return "android";
   return platform === "unknown" && typeof window !== "undefined" && !hasNativeBridge()
     ? browserPreviewPlatform()
     : platform;
