@@ -44,8 +44,9 @@ class MainActivity : TauriActivity() {
     super.onContentChanged()
     // Tauri/Wry installs its RustWebView with setContentView, so this callback
     // reaches the actual host view synchronously before an accessibility dump.
-    findHostWebView(window.decorView)?.importantForAccessibility =
-      View.IMPORTANT_FOR_ACCESSIBILITY_YES
+    findHostWebView(window.decorView)?.let { webView ->
+      webView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+    }
   }
 
   private fun findHostWebView(view: View): WebView? {

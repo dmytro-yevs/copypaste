@@ -105,12 +105,13 @@ function StatefulLauncher({ pairing }: { pairing: PairingController }) {
 }
 
 describe("PairingLauncherDialog preview flows", () => {
-    it("names Android document dismissal and keeps scanner entry reachable", async () => {
+    it("keeps Android backdrop dismissal and scanner entry reachable", async () => {
         const pairing = controller();
         const onOpenChange = vi.fn();
         const user = userEvent.setup();
         const url = window.location.href;
         window.history.replaceState({}, "", "/?platform=android");
+        document.body.id = "application-shell";
         try {
             const { unmount } = render(launcher(pairing, onOpenChange));
 
@@ -121,9 +122,8 @@ describe("PairingLauncherDialog preview flows", () => {
             expect(overlay?.getAttribute("aria-label")).toBeNull();
             expect(overlay?.getAttribute("role")).toBeNull();
             expect(overlay?.style.pointerEvents).not.toBe("none");
-            expect(document.body.getAttribute("aria-label")).toBe(
-                "Dismiss pairing dialog",
-            );
+            expect(document.body.getAttribute("aria-label")).toBeNull();
+            expect(document.body.id).toBe("copypaste-pairing-dialog-open");
             expect(
                 screen.getByRole("button", { name: /Scan pairing code/ }),
             ).toBeTruthy();
@@ -132,9 +132,25 @@ describe("PairingLauncherDialog preview flows", () => {
             expect(onOpenChange).toHaveBeenCalledWith(false);
 
             unmount();
-            expect(document.body.getAttribute("aria-label")).toBeNull();
+            expect(document.body.id).toBe("application-shell");
         } finally {
-            document.body.removeAttribute("aria-label");
+            document.body.removeAttribute("id");
+            window.history.replaceState({}, "", url);
+        }
+    });
+
+    it("removes the Android pairing marker when the body had no id", () => {
+        const url = window.location.href;
+        window.history.replaceState({}, "", "/?platform=android");
+        document.body.removeAttribute("id");
+        try {
+            const { unmount } = render(launcher(controller(), vi.fn()));
+
+            expect(document.body.id).toBe("copypaste-pairing-dialog-open");
+            unmount();
+            expect(document.body.getAttribute("id")).toBeNull();
+        } finally {
+            document.body.removeAttribute("id");
             window.history.replaceState({}, "", url);
         }
     });

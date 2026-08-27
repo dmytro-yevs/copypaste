@@ -29,6 +29,8 @@ import styles from "./PairingLauncherDialog.module.css";
 
 type PairingFlow = "choices" | "host" | "join";
 
+const ANDROID_PAIRING_BODY_ID = "copypaste-pairing-dialog-open";
+
 const codeSchema = z
     .string()
     .trim()
@@ -106,13 +108,13 @@ export function PairingLauncherDialog({
 
     useEffect(() => {
         if (!android || !open) return;
-        const previousLabel = document.body.getAttribute("aria-label");
-        document.body.setAttribute("aria-label", "Dismiss pairing dialog");
+        const previousId = document.body.getAttribute("id");
+        document.body.id = ANDROID_PAIRING_BODY_ID;
         return () => {
-            if (previousLabel === null) {
-                document.body.removeAttribute("aria-label");
+            if (previousId === null) {
+                document.body.removeAttribute("id");
             } else {
-                document.body.setAttribute("aria-label", previousLabel);
+                document.body.id = previousId;
             }
         };
     }, [android, open]);

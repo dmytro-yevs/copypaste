@@ -19,6 +19,7 @@
     <string name="pairing_expires">Expires in %1$d seconds</string>
     <string name="pairing_cancel">Cancel</string>
     <string name="pairing_close">Close</string>
+    <string name="pairing_dismiss_label">Dismiss pairing dialog</string>
     <string name="pairing_checking_status">Checking pairing status…</string>
     <string name="pairing_progress_title">Pairing progress</string>
     <string name="pairing_idle">Pairing is ready.</string>
