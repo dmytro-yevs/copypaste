@@ -82,8 +82,8 @@ export function RevokeDialog({
           <AlertDialogCancel disabled={pending}>{t("common.cancel")}</AlertDialogCancel>
           <Button
             disabled={!acknowledged || pending}
-            aria-busy={pending || undefined}
-            tone="danger"
+            variant="danger"
+            state={pending ? "loading" : "normal"}
             onClick={() => {
               if (peer) void onConfirm(peer);
             }}

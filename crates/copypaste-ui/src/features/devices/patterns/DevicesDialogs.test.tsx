@@ -73,7 +73,9 @@ describe("DevicesDialogs", () => {
 
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     expectDisabled(screen.getByRole("button", { name: "Cancel" }));
-    expectDisabled(screen.getByRole("button", { name: "Unpairing…" }));
+    const action = screen.getByRole("button", { name: "Unpairing…" });
+    expectDisabled(action);
+    expect(action.getAttribute("data-state")).toBe("loading");
   });
 
   it("keeps an unpair failure inline and allows a retry", async () => {
@@ -107,7 +109,9 @@ describe("DevicesDialogs", () => {
     expectEnabled(screen.getByRole("button", { name: "Revoke" }));
 
     rerender(dialogs({ revokePeer: kitchenMac, revokePending: true }));
-    expectDisabled(screen.getByRole("button", { name: "Revoking…" }));
+    const action = screen.getByRole("button", { name: "Revoking…" });
+    expectDisabled(action);
+    expect(action.getAttribute("data-state")).toBe("loading");
     expectDisabled(screen.getByRole("button", { name: "Cancel" }));
     expectDisabled(screen.getByRole("checkbox"));
 
@@ -116,6 +120,39 @@ describe("DevicesDialogs", () => {
       "You can try revoking again.",
     );
     expectEnabled(screen.getByRole("button", { name: "Revoke" }));
+  });
+
+  it("closes revoke only after its acknowledged mutation succeeds", async () => {
+    const user = userEvent.setup();
+    let complete: (() => void) | undefined;
+
+    function RevokeLifecycle() {
+      const [currentPeer, setCurrentPeer] = useState<typeof kitchenMac | null>(
+        kitchenMac,
+      );
+      return dialogs({
+        revokePeer: currentPeer,
+        onCloseRevoke: () => setCurrentPeer(null),
+        onRevoke: () =>
+          new Promise<void>((resolve) => {
+            complete = () => {
+              setCurrentPeer(null);
+              resolve();
+            };
+          }),
+      });
+    }
+
+    render(<RevokeLifecycle />);
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Revoke" }));
+
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    complete?.();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
   });
 
   it("resets the revoke acknowledgement after close", async () => {
