@@ -53,6 +53,111 @@ const SECTIONS = [
 let app: AndroidApp;
 let seeded: string[] = [];
 let marker = "";
+let originalHistoryDisplayIndex: number | null = null;
+let originalProductTheme: string | null = null;
+
+async function historyDisplayIndex(): Promise<number> {
+  const state = await app.withPage((page) =>
+    page.evaluate(() => {
+      const slider = document.querySelector('[aria-label="History display limit"]');
+      return {
+        value: slider?.getAttribute("aria-valuenow") ?? "",
+        min: slider?.getAttribute("aria-valuemin") ?? "",
+        max: slider?.getAttribute("aria-valuemax") ?? "",
+      };
+    }),
+  );
+  const index = Number(state.value);
+  const min = Number(state.min);
+  const max = Number(state.max);
+  if (
+    !Number.isInteger(index) ||
+    !Number.isInteger(min) ||
+    !Number.isInteger(max) ||
+    index < min ||
+    index > max
+  ) {
+    throw new Error(`History display limit exposed invalid state ${JSON.stringify(state)}`);
+  }
+  return index;
+}
+
+async function setHistoryDisplayLimit(
+  index: number,
+  rendered?: string,
+): Promise<void> {
+  await gotoView(app, "Settings");
+  await openSettingsSection(app, "Clipboard behavior");
+  await app.withPage(async (page) => {
+    await page.click('[aria-label="History display limit"]');
+    await page.keyboard.press("Home");
+    for (let step = 0; step < index; step++) await page.keyboard.press("ArrowRight");
+  });
+  await waitFor(
+    async () => {
+      const state = await app.withPage((page) =>
+        page.evaluate(() => {
+          const slider = document.querySelector('[aria-label="History display limit"]');
+          return {
+            index: slider?.getAttribute("aria-valuenow") ?? "",
+            output: slider?.parentElement?.querySelector("output")?.textContent?.trim() ?? "",
+          };
+        }),
+      );
+      return state.index === String(index) &&
+        (rendered === undefined || state.output === rendered);
+    },
+    `the history display limit never reached index ${index}`,
+  );
+}
+
+async function restoreHistoryDisplayLimit(): Promise<void> {
+  if (originalHistoryDisplayIndex === null) return;
+  await setHistoryDisplayLimit(originalHistoryDisplayIndex);
+  originalHistoryDisplayIndex = null;
+}
+
+async function restoreProductTheme(): Promise<void> {
+  if (originalProductTheme === null) return;
+  const theme = originalProductTheme;
+  await gotoView(app, "Settings");
+  await openSettingsSection(app, "Appearance");
+  await tapElement(app, `[data-product-theme="${theme}"]`);
+  await waitFor(
+    async () =>
+      (await app.withPage((page) =>
+        page.evaluate(() => document.documentElement.dataset.theme ?? ""),
+      )) === theme,
+    `the original product theme ${JSON.stringify(theme)} was not restored`,
+  );
+  originalProductTheme = null;
+}
+
+async function attemptSettingsRestore(
+  name: string,
+  restore: () => Promise<void>,
+): Promise<void> {
+  try {
+    await restore();
+  } catch (error) {
+    console.warn(`settings cleanup could not restore ${name}: ${String(error)}`);
+  }
+}
+
+async function restoreAfterTest(
+  name: string,
+  restore: () => Promise<void>,
+  primaryFailure: unknown,
+): Promise<void> {
+  try {
+    await restore();
+  } catch (error) {
+    if (primaryFailure === undefined) throw error;
+    console.warn(
+      `settings cleanup also failed to restore ${name}: ${String(error)}`,
+    );
+  }
+}
 
 beforeAll(async () => {
   app = await attachToApp();
@@ -77,6 +182,8 @@ beforeAll(async () => {
 }, 300_000);
 
 afterAll(async () => {
+  await attemptSettingsRestore("History display limit", restoreHistoryDisplayLimit);
+  await attemptSettingsRestore("product theme", restoreProductTheme);
   await gotoView(app, "Library").catch(() => undefined);
   await resetHistoryFilters(app).catch(() => undefined);
   await cleanUpItems(app, seeded);
@@ -121,7 +228,7 @@ describe("the section index", () => {
     }
   });
 
-  test("names no filesystem path on any pane (INV-12)", async () => {
+  test("names no filesystem path on any pane (INV-20 / AT-24)", async () => {
     for (const label of await settingsSectionLabels(app)) {
       await openSettingsSection(app, label);
       expectNoFilesystemPath(await accessibleSurface(app));
@@ -131,120 +238,105 @@ describe("the section index", () => {
 });
 
 describe("a preference that limits only the visible list", () => {
-  async function setHistoryDisplayLimit(index: number, rendered: string): Promise<void> {
-    await openSettingsSection(app, "Clipboard behavior");
-    await app.withPage(async (page) => {
-      await page.click('[aria-label="History display limit"]');
-      await page.keyboard.press("Home");
-      for (let step = 0; step < index; step++) await page.keyboard.press("ArrowRight");
-    });
-    await waitFor(
-      async () => {
-        const state = await app.withPage((page) =>
-          page.evaluate(() => {
-            const slider = document.querySelector('[aria-label="History display limit"]');
-            return {
-              index: slider?.getAttribute("aria-valuenow") ?? "",
-              output: slider?.parentElement?.querySelector("output")?.textContent?.trim() ?? "",
-            };
-          }),
-        );
-        return state.index === String(index) && state.output === rendered;
-      },
-      `the history display limit never reached index ${index}`,
-    );
-  }
-
   test("caps rendering, never deletes, and survives a WebView reload", async () => {
-    await setHistoryDisplayLimit(0, "100");
-    await gotoView(app, "Library");
-    await waitForText(app, "Showing first 100 of 101 results");
-    expect((await storedItems(app)).filter((item) => item.content.includes(marker))).toHaveLength(101);
-
-    await app.withPage((page) => page.reload({ waitUntil: "domcontentloaded" }));
-    await waitFor(
-      async () =>
-        app.withPage((page) =>
-          page.evaluate(() => document.querySelectorAll("nav").length > 0),
-        ),
-      "the WebView never came back after the display-limit reload",
-      60_000,
-    );
     await gotoView(app, "Settings");
     await openSettingsSection(app, "Clipboard behavior");
-    expect(
-      await app.withPage((page) =>
-        page.evaluate(() =>
-          document
-            .querySelector('[aria-label="History display limit"]')
-            ?.getAttribute("aria-valuenow"),
-        ),
-      ),
-    ).toBe("0");
+    originalHistoryDisplayIndex = await historyDisplayIndex();
+    let primaryFailure: unknown;
+    try {
+      await setHistoryDisplayLimit(0, "100");
+      await gotoView(app, "Library");
+      await waitForText(app, "Showing first 100 of 101 results");
+      expect((await storedItems(app)).filter((item) => item.content.includes(marker))).toHaveLength(101);
 
-    await setHistoryDisplayLimit(3, "1,000");
+      await app.withPage((page) => page.reload({ waitUntil: "domcontentloaded" }));
+      await waitFor(
+        async () =>
+          app.withPage((page) =>
+            page.evaluate(() => document.querySelectorAll("nav").length > 0),
+          ),
+        "the WebView never came back after the display-limit reload",
+        60_000,
+      );
+      await gotoView(app, "Settings");
+      await openSettingsSection(app, "Clipboard behavior");
+      expect(await historyDisplayIndex()).toBe(0);
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      await restoreAfterTest(
+        "History display limit",
+        restoreHistoryDisplayLimit,
+        primaryFailure,
+      );
+    }
   }, 120_000);
 });
 
 describe("appearance", () => {
   /**
-   * INV-22, through the Tauri store plugin rather than a daemon: the value has
+   * INV-32 / AT-49, through the Tauri store plugin: the value has
    * to be written to `preferences.json` and read back by the bootstrap before
    * the reloaded document paints.
-   */
+  */
   test("survives a reload of the WebView", async () => {
     await openSettingsSection(app, "Appearance");
-    const initial = await app.withPage((page) =>
+    const initialProductTheme = await app.withPage((page) =>
       page.evaluate(() => document.documentElement.dataset.theme ?? ""),
     );
-    expect(["midnight", "aurora", "ember", "graphite"]).toContain(initial);
-    const selected = initial === "aurora" ? "ember" : "aurora";
-    await tapElement(app, `[data-product-theme="${selected}"]`);
-    await waitFor(
-      async () =>
-        (await app.withPage((page) =>
-          page.evaluate(() => document.documentElement.dataset.theme ?? ""),
-        )) === selected,
-      "the product theme never reached <html>",
-    );
+    expect(["midnight", "aurora", "ember", "graphite"]).toContain(initialProductTheme);
+    originalProductTheme = initialProductTheme;
+    const selected = initialProductTheme === "aurora" ? "ember" : "aurora";
+    let primaryFailure: unknown;
+    try {
+      await tapElement(app, `[data-product-theme="${selected}"]`);
+      await waitFor(
+        async () =>
+          (await app.withPage((page) =>
+            page.evaluate(() => document.documentElement.dataset.theme ?? ""),
+          )) === selected,
+        "the product theme never reached <html>",
+      );
 
-    await app.withPage((page) => page.evaluate(() => location.reload()));
-    await waitFor(
-      async () =>
-        (await app.withPage((page) =>
-          page.evaluate(() => document.querySelectorAll("nav").length),
-        )) > 0,
-      "the WebView never came back after a reload",
-      60_000,
-    );
+      await app.withPage((page) => page.evaluate(() => location.reload()));
+      await waitFor(
+        async () =>
+          (await app.withPage((page) =>
+            page.evaluate(() => document.querySelectorAll("nav").length),
+          )) > 0,
+        "the WebView never came back after a reload",
+        60_000,
+      );
 
-    expect(
-      await app.withPage((page) =>
-        page.evaluate(() => document.documentElement.dataset.theme),
-      ),
-    ).toBe(selected);
+      expect(
+        await app.withPage((page) =>
+          page.evaluate(() => document.documentElement.dataset.theme),
+        ),
+      ).toBe(selected);
 
-    await gotoView(app, "Settings");
-    await openSettingsSection(app, "Appearance");
-    const pressed = await app.withPage((page) =>
-      page.evaluate(
-        (theme) =>
-          document
-            .querySelector(`[data-product-theme="${theme}"]`)
-            ?.getAttribute("aria-pressed") ?? null,
-        selected,
-      ),
-    );
-    expect(pressed).toBe("true");
-
-    await tapElement(app, `[data-product-theme="${initial}"]`);
-    await waitFor(
-      async () =>
-        (await app.withPage((page) =>
-          page.evaluate(() => document.documentElement.dataset.theme ?? ""),
-        )) === initial,
-      "the original product theme was not restored",
-    );
+      await gotoView(app, "Settings");
+      await openSettingsSection(app, "Appearance");
+      const pressed = await app.withPage((page) =>
+        page.evaluate(
+          (theme) =>
+            document
+              .querySelector(`[data-product-theme="${theme}"]`)
+              ?.getAttribute("aria-pressed") ?? null,
+          selected,
+        ),
+      );
+      expect(pressed).toBe("true");
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      await restoreAfterTest(
+        "product theme",
+        restoreProductTheme,
+        primaryFailure,
+      );
+    }
   }, 180_000);
 });
 
