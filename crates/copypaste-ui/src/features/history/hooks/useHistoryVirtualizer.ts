@@ -82,7 +82,7 @@ export function useHistoryVirtualizer({
     useLayoutEffect(() => {
         virtualizer.measure();
     }, [compact, entryOrder, previewLines, virtualizer]);
-    const { captureAnchor } = useScrollAnchor({
+    const { captureAnchor, releaseAnchorForNavigation } = useScrollAnchor({
         scrollRef: listRef,
         virtualizer,
         items,
@@ -110,10 +110,20 @@ export function useHistoryVirtualizer({
                 (entry) =>
                     entry.type === "item" && entry.itemIndex === itemIndex,
             );
-            if (virtualIndex >= 0)
+            if (virtualIndex >= 0) {
+                const offset = virtualizer.getOffsetForIndex(
+                    virtualIndex,
+                    "auto",
+                );
+                if (offset)
+                    releaseAnchorForNavigation(
+                        offset[0],
+                        virtualizer.scrollOffset ?? 0,
+                    );
                 virtualizer.scrollToIndex(virtualIndex, { align: "auto" });
+            }
         },
-        [entries, virtualizer],
+        [entries, releaseAnchorForNavigation, virtualizer],
     );
     return {
         entries,
