@@ -49,25 +49,16 @@ function DialogContent({
     showCloseButton = true,
     closeLabel = "Close",
     overlayClassName,
-    overlayPointerEvents,
     presentation,
     ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean;
     closeLabel?: string;
     overlayClassName?: string;
-    overlayPointerEvents?: "auto" | "none";
 } & ModalFrameProps) {
     return (
         <DialogPortal data-slot="dialog-portal">
-            <DialogOverlay
-                className={overlayClassName}
-                style={
-                    overlayPointerEvents
-                        ? { pointerEvents: overlayPointerEvents }
-                        : undefined
-                }
-            />
+            <DialogOverlay className={overlayClassName} />
             <DialogPrimitive.Content
                 data-slot="dialog-content"
                 className={cn(modalFrameVariants({ presentation }), className)}

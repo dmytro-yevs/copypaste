@@ -104,6 +104,19 @@ export function PairingLauncherDialog({
         setCopyState("idle");
     }, [open]);
 
+    useEffect(() => {
+        if (!android || !open) return;
+        const previousLabel = document.body.getAttribute("aria-label");
+        document.body.setAttribute("aria-label", "Dismiss pairing dialog");
+        return () => {
+            if (previousLabel === null) {
+                document.body.removeAttribute("aria-label");
+            } else {
+                document.body.setAttribute("aria-label", previousLabel);
+            }
+        };
+    }, [android, open]);
+
     const close = (nextOpen: boolean) => {
         if (!nextOpen && active) pairing.run("cancel");
         onOpenChange(nextOpen);
@@ -167,7 +180,6 @@ export function PairingLauncherDialog({
     return (
         <Dialog open={open} onOpenChange={close}>
             <DialogContent
-                overlayPointerEvents={android ? "none" : undefined}
                 onCloseAutoFocus={(event) => {
                     if (!returnFocusRef?.current) return;
                     event.preventDefault();
