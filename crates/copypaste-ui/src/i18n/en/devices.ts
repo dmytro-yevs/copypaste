@@ -271,6 +271,8 @@ export const devices = {
     body: "This device will stop syncing with it. Unpairing is one-sided — the other device keeps its half of the pairing until it unpairs too. Nothing already synced is deleted, and you can pair these devices again later.",
     lost: "No longer have this device? Revoke it instead, so its pairing code can never be used again.",
     action: "Unpair",
+    pending: "Unpairing…",
+    failed: "{{error}} You can try unpairing again.",
   },
 
   /**
@@ -289,6 +291,8 @@ export const devices = {
     keptHistory: "Nothing already synced is deleted, here or on that device.",
     confirmLabel: "I understand this can't be undone",
     action: "Revoke",
+    pending: "Revoking…",
+    failed: "{{error}} You can try revoking again.",
   },
 
   toast: {
