@@ -137,6 +137,46 @@ def matching_event_path_filters(workflow):
     )
 
 
+def android_webview_accessibility_contract(build_task, extension, frontend, wrapper):
+    compact = re.sub(r"\s+", " ", build_task)
+    source = re.search(
+        r'val\s+(\w+)\s*=\s*File\(\s*project\.projectDir,\s*'
+        r'"src/main/rust-webview-accessibility\.kt\.inc",\s*\)\.readText\(\)',
+        compact,
+    )
+    if not source:
+        return False, "BuildTask.kt does not read the tracked RustWebView extension"
+    if not re.search(
+        r'environment\(\s*"WRY_RUSTWEBVIEW_CLASS_EXTENSION",\s*{}\s*\)'.format(
+            re.escape(source.group(1))
+        ),
+        compact,
+    ):
+        return False, "BuildTask.kt does not export the file it read to Wry"
+    if not re.search(r"override\s+fun\s+getAccessibilityNodeProvider\s*\(\s*\)", extension):
+        return False, "the Wry extension does not override getAccessibilityNodeProvider"
+    if not re.search(
+        r"\.wrap\(\s*super\.getAccessibilityNodeProvider\(\s*\)\s*\)", extension
+    ):
+        return False, "the Wry extension does not wrap the direct WebView provider"
+    frontend_marker = re.search(
+        r'const\s+ANDROID_PAIRING_BODY_ID\s*=\s*"([^"]+)"', frontend
+    )
+    native_marker = re.search(
+        r'const\s+val\s+PAIRING_BODY_ACCESSIBILITY_MARKER\s*=\s*"([^"]+)"',
+        wrapper,
+    )
+    if not frontend_marker or not native_marker:
+        return False, "the pairing marker is missing from the frontend or native matcher"
+    if "info.viewIdResourceName != PAIRING_BODY_ACCESSIBILITY_MARKER" not in wrapper:
+        return False, "the native matcher does not require the marker constant"
+    if frontend_marker.group(1) != native_marker.group(1):
+        return False, "frontend marker {!r} differs from native marker {!r}".format(
+            frontend_marker.group(1), native_marker.group(1)
+        )
+    return True, ""
+
+
 def retired_push_branch_violations(workflows, retired):
     violations = []
     for name, workflow in workflows.items():
@@ -586,6 +626,43 @@ def toolchain_component_checks(workflows, required):
 
 for check in toolchain_component_checks(docs, TEST_SPAWNED_COMPONENTS):
     rec(*check)
+
+# --- the generated Android WebView provider seam ---------------------------
+ANDROID_WEBVIEW_BUILD_TASK = pathlib.Path(
+    "crates/copypaste-ui/src-tauri/gen/android/buildSrc/src/main/java/"
+    "com/copypaste/app/kotlin/BuildTask.kt"
+)
+ANDROID_WEBVIEW_EXTENSION = pathlib.Path(
+    "crates/copypaste-ui/src-tauri/gen/android/app/src/main/"
+    "rust-webview-accessibility.kt.inc"
+)
+ANDROID_PAIRING_FRONTEND = pathlib.Path(
+    "crates/copypaste-ui/src/features/devices/patterns/PairingLauncherDialog.tsx"
+)
+ANDROID_PAIRING_WRAPPER = pathlib.Path(
+    "crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/"
+    "com/copypaste/app/PairingBackdropAccessibility.kt"
+)
+
+
+def read_contract_source(source):
+    return source.read_text() if source.is_file() else ""
+
+
+ANDROID_WEBVIEW_SOURCES = tuple(
+    read_contract_source(source)
+    for source in (
+        ANDROID_WEBVIEW_BUILD_TASK,
+        ANDROID_WEBVIEW_EXTENSION,
+        ANDROID_PAIRING_FRONTEND,
+        ANDROID_PAIRING_WRAPPER,
+    )
+)
+android_webview_held, android_webview_detail = \
+    android_webview_accessibility_contract(*ANDROID_WEBVIEW_SOURCES)
+rec(android_webview_held,
+    "Android pairing accessibility wraps Wry's direct provider seam",
+    android_webview_detail)
 
 # --- the Android NDK binutils wiring ---------------------------------------
 # openssl-src asks cc-rs for AR and RANLIB, and cc-rs falls back to
@@ -1078,6 +1155,58 @@ rec("check-feature-ledger.py" in release_ledger_body,
 
 # --- self-test: prove the runner-image detector fails when it should --------
 if SELF_TEST:
+    webview_build_task, webview_extension, pairing_frontend, pairing_wrapper = \
+        ANDROID_WEBVIEW_SOURCES
+    webview_contract_fixtures = (
+        (
+            "a renamed RustWebView extension file is rejected",
+            webview_build_task.replace(
+                "src/main/rust-webview-accessibility.kt.inc",
+                "src/main/missing-accessibility.kt.inc",
+            ),
+            webview_extension,
+            pairing_frontend,
+            pairing_wrapper,
+        ),
+        (
+            "an unexported RustWebView extension is rejected",
+            webview_build_task.replace(
+                "WRY_RUSTWEBVIEW_CLASS_EXTENSION",
+                "WRY_UNUSED_CLASS_EXTENSION",
+            ),
+            webview_extension,
+            pairing_frontend,
+            pairing_wrapper,
+        ),
+        (
+            "a deleted RustWebView extension is rejected",
+            webview_build_task,
+            "",
+            pairing_frontend,
+            pairing_wrapper,
+        ),
+        (
+            "a RustWebView extension without the direct provider is rejected",
+            webview_build_task,
+            webview_extension.replace("super.getAccessibilityNodeProvider()", "null"),
+            pairing_frontend,
+            pairing_wrapper,
+        ),
+        (
+            "a frontend and native pairing marker mismatch is rejected",
+            webview_build_task,
+            webview_extension,
+            pairing_frontend.replace(
+                "copypaste-pairing-dialog-open", "different-pairing-dialog"
+            ),
+            pairing_wrapper,
+        ),
+    )
+    for desc, *fixture in webview_contract_fixtures:
+        held, _ = android_webview_accessibility_contract(*fixture)
+        emit(not held, "self-test: {}".format(desc),
+             "the Android WebView provider detector accepted broken wiring")
+
     def windows_shard_fixture():
         def job(command, timeout=20, key="fixture"):
             return {
