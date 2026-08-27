@@ -105,12 +105,14 @@ function StatefulLauncher({ pairing }: { pairing: PairingController }) {
 }
 
 describe("PairingLauncherDialog preview flows", () => {
-    it("keeps the Android overlay inert and scanner entry reachable", () => {
+    it("names Android document dismissal and keeps scanner entry reachable", async () => {
         const pairing = controller();
+        const onOpenChange = vi.fn();
+        const user = userEvent.setup();
         const url = window.location.href;
         window.history.replaceState({}, "", "/?platform=android");
         try {
-            render(launcher(pairing));
+            const { unmount } = render(launcher(pairing, onOpenChange));
 
             const overlay = document.querySelector<HTMLElement>(
                 '[data-slot="dialog-overlay"]',
@@ -118,11 +120,21 @@ describe("PairingLauncherDialog preview flows", () => {
             expect(overlay).toBeTruthy();
             expect(overlay?.getAttribute("aria-label")).toBeNull();
             expect(overlay?.getAttribute("role")).toBeNull();
-            expect(overlay?.style.pointerEvents).toBe("none");
+            expect(overlay?.style.pointerEvents).not.toBe("none");
+            expect(document.body.getAttribute("aria-label")).toBe(
+                "Dismiss pairing dialog",
+            );
             expect(
                 screen.getByRole("button", { name: /Scan pairing code/ }),
             ).toBeTruthy();
+
+            await user.click(overlay as HTMLElement);
+            expect(onOpenChange).toHaveBeenCalledWith(false);
+
+            unmount();
+            expect(document.body.getAttribute("aria-label")).toBeNull();
         } finally {
+            document.body.removeAttribute("aria-label");
             window.history.replaceState({}, "", url);
         }
     });
