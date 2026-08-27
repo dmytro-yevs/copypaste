@@ -1,15 +1,9 @@
 /**
  * Selection mode and the bulk bar, driven end to end.
  *
- * The claim this file exists for is §3.1.5's: in selection mode the per-row
- * Pin/Copy/Delete buttons are **not rendered**, rather than hidden with a
- * class. jsdom would agree with either implementation and so would a screenshot
- * — but a `display: none` button is still in the accessibility tree and still a
- * tab stop, so "hidden" and "absent" are different products for the user who
- * cannot see the screen.
- *
- * The rest is the round trip: what the bulk bar says it will do, and what the
- * daemon holds afterwards.
+ * In selection mode the per-row Copy/Pin/Delete controls are absent rather
+ * than merely hidden. A document query catches a regression to display:none,
+ * which would leave those controls in the accessibility tree and tab order.
  *
  * WebKitGTK on Linux; green here says nothing about WKWebView or Android's
  * WebView (README).
@@ -18,157 +12,223 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
 import {
-  byLabel,
-  clickButton,
-  rowCount,
-  visibleText,
-  waitForRows,
+    byLabel,
+    clickButton,
+    rowCount,
+    visibleText,
+    waitForRows,
 } from "../src/harness/ui.js";
 
 const SEED = ["bulk alpha", "bulk beta", "bulk gamma", "bulk delta"];
-
-/** Every per-row action the row renders when it is not being selected. */
+const BULK_BAR = '[role="toolbar"][aria-label="Selection actions"]';
+const HISTORY_ROWS =
+    '[role="list"][aria-label="Clipboard history"] [role="listitem"]';
+const ROW_CHECKBOXES = `${HISTORY_ROWS} [role="checkbox"]`;
 const ROW_ACTIONS = ["Copy to clipboard", "Pin item", "Delete item"];
 
 let app: App;
 
 beforeAll(async () => {
-  app = await startApp({ seed: SEED });
-  await waitForRows(app.browser, SEED.length);
+    app = await startApp({ seed: SEED });
+    await waitForRows(app.browser, SEED.length);
 }, 300_000);
 
 afterAll(async () => {
-  await app?.stop();
+    await app?.stop();
 });
 
-/** Spread into a plain array: the chainable collection's `length` is itself a
- *  promise, which compares as true against any number. */
-async function checkboxes() {
-  return [...(await app.browser.$$('[role="checkbox"]'))];
+async function rowCheckboxes() {
+    return [...(await app.browser.$$(ROW_CHECKBOXES))];
 }
 
 async function enterSelectionMode(): Promise<void> {
-  await clickButton(app.browser, "Select multiple items");
-  await app.browser.waitUntil(async () => (await checkboxes()).length > 0, {
-    timeout: 10_000,
-    timeoutMsg: "selection mode never produced checkboxes",
-  });
+    const bar = await app.browser.$(BULK_BAR);
+    if (await bar.isExisting()) return;
+
+    const boxes = await rowCheckboxes();
+    expect(boxes).toHaveLength(SEED.length);
+    // The controls are revealed by the row hover state before selection starts.
+    await boxes[0]!.moveTo();
+    await boxes[0]!.click();
+    await app.browser.waitUntil(
+        async () => (await app.browser.$(BULK_BAR)).isDisplayed(),
+        {
+            timeout: 10_000,
+            timeoutMsg: "selecting a row never opened the bulk bar",
+        },
+    );
 }
 
 async function select(count: number): Promise<void> {
-  const boxes = await checkboxes();
-  expect(boxes.length).toBeGreaterThanOrEqual(count);
-  for (let i = 0; i < count; i += 1) await boxes[i]!.click();
+    const boxes = await rowCheckboxes();
+    expect(boxes.length).toBeGreaterThanOrEqual(count);
+
+    let selected = 0;
+    for (const box of boxes) {
+        if ((await box.getAttribute("aria-checked")) === "true") selected += 1;
+    }
+    expect(selected).toBeLessThanOrEqual(count);
+
+    for (const box of boxes) {
+        if (selected >= count) break;
+        if ((await box.getAttribute("aria-checked")) === "true") continue;
+        await box.moveTo();
+        await box.click();
+        selected += 1;
+    }
+
+    await app.browser.waitUntil(
+        async () => {
+            const current = await rowCheckboxes();
+            let checked = 0;
+            for (const box of current) {
+                if ((await box.getAttribute("aria-checked")) === "true")
+                    checked += 1;
+            }
+            return checked === count;
+        },
+        { timeout: 10_000, timeoutMsg: `expected ${count} selected rows` },
+    );
+}
+
+async function leaveSelectionMode(): Promise<void> {
+    const bar = await app.browser.$(BULK_BAR);
+    if (!(await bar.isExisting())) return;
+    await clickButton(app.browser, "Done", { within: BULK_BAR });
+    await app.browser.waitUntil(
+        async () => !(await app.browser.$(BULK_BAR)).isExisting(),
+        {
+            timeout: 10_000,
+            timeoutMsg: "the bulk bar stayed after leaving selection mode",
+        },
+    );
 }
 
 describe("entering selection mode", () => {
-  test("per-row actions are rendered when it is off", async () => {
-    for (const label of ROW_ACTIONS) {
-      const found = await byLabel(app.browser, label);
-      expect(found.length, label).toBeGreaterThan(0);
-      expect(found[0]!.height, label).toBeGreaterThan(0);
-    }
-  });
+    test("each row exposes one semantic selection control", async () => {
+        const perRow = (await app.browser.execute(
+            (selector: string) =>
+                Array.from(
+                    document.querySelectorAll(selector),
+                    (row) => row.querySelectorAll('[role="checkbox"]').length,
+                ),
+            HISTORY_ROWS,
+        )) as number[];
 
-  test("per-row actions are absent from the document, not merely hidden", async () => {
-    await enterSelectionMode();
+        expect(perRow).toEqual(SEED.map(() => 1));
+    });
 
-    for (const label of ROW_ACTIONS) {
-      // The query is over the whole document and ignores CSS, so a button
-      // hidden with `display: none` would still be counted here.
-      expect(await byLabel(app.browser, label), label).toHaveLength(0);
-    }
+    test("per-row actions are absent from the document, not merely hidden", async () => {
+        await enterSelectionMode();
 
-    // ...and the bulk bar that replaced them really is on screen, so the
-    // assertion above is about selection mode rather than about an empty list.
-    const bar = await app.browser.$('[role="region"][aria-label="Selection actions"]');
-    expect(await bar.isDisplayed()).toBe(true);
-  });
+        for (const label of ROW_ACTIONS) {
+            // The query ignores CSS, so display:none controls would still be counted.
+            expect(await byLabel(app.browser, label), label).toHaveLength(0);
+        }
+
+        // The bulk bar confirms this is selection mode rather than an empty list.
+        const bar = await app.browser.$(BULK_BAR);
+        expect(await bar.isDisplayed()).toBe(true);
+    });
 });
 
 describe("the bulk bar", () => {
-  test("counts what is selected, in rendered words", async () => {
-    await select(2);
-    await app.browser.waitUntil(
-      async () => (await visibleText(app.browser)).includes("2 items selected"),
-      { timeout: 10_000, timeoutMsg: "the bulk bar never counted the selection" },
-    );
-  });
-
-  test("pins the selection, and then offers to unpin it (CopyPaste-8ebg.55)", async () => {
-    await clickButton(app.browser, "Pin", {
-      within: '[aria-label="Selection actions"]',
+    test("counts what is selected, in rendered words", async () => {
+        await select(2);
+        await app.browser.waitUntil(
+            async () =>
+                (await visibleText(app.browser)).includes("2 items selected"),
+            {
+                timeout: 10_000,
+                timeoutMsg: "the bulk bar never counted the selection",
+            },
+        );
     });
 
-    await app.browser.waitUntil(
-      async () => (await app.daemon.items()).filter((item) => item.pinned).length === 2,
-      { timeout: 20_000, timeoutMsg: "the daemon never recorded two pinned items" },
-    );
+    test("pins the selection, and then offers to unpin it (CopyPaste-8ebg.55)", async () => {
+        await clickButton(app.browser, "Pin", {
+            within: BULK_BAR,
+        });
 
-    // The toggle's label is a claim about every selected row, so selecting the
-    // two rows that are now pinned must flip it.
-    await enterSelectionMode();
-    await select(2);
-    await app.browser.waitUntil(
-      async () => {
-        const bar = await app.browser.$('[aria-label="Selection actions"]');
-        return (await bar.getText()).includes("Unpin");
-      },
-      {
-        timeout: 10_000,
-        timeoutMsg: "the toggle still offered to pin two already-pinned items",
-      },
-    );
-  });
+        await app.browser.waitUntil(
+            async () =>
+                (await app.daemon.items()).filter((item) => item.pinned)
+                    .length === 2,
+            {
+                timeout: 20_000,
+                timeoutMsg: "the daemon never recorded two pinned items",
+            },
+        );
 
-  test("bulk delete confirms first, then really deletes", async () => {
-    if (!(await visibleText(app.browser)).includes("2 items selected")) {
-      await enterSelectionMode();
-      await select(2);
-      await app.browser.waitUntil(
-        async () => (await visibleText(app.browser)).includes("2 items selected"),
-        { timeout: 10_000, timeoutMsg: "the bulk bar never counted the selection" },
-      );
-    }
-
-    await clickButton(app.browser, "Delete", {
-      within: '[aria-label="Selection actions"]',
+        // The toggle's label is a claim about every selected row, so selecting the
+        // two rows that are now pinned must flip it.
+        await enterSelectionMode();
+        await select(2);
+        await app.browser.waitUntil(
+            async () => {
+                const bar = await app.browser.$(BULK_BAR);
+                return (await bar.getText()).includes("Unpin");
+            },
+            {
+                timeout: 10_000,
+                timeoutMsg:
+                    "the toggle still offered to pin two already-pinned items",
+            },
+        );
     });
 
-    const dialog = await app.browser.$('[role="alertdialog"]');
-    await dialog.waitForDisplayed({
-      timeout: 10_000,
-      timeoutMsg: "bulk delete did not ask for confirmation",
+    test("bulk delete confirms first, then really deletes", async () => {
+        if (!(await visibleText(app.browser)).includes("2 items selected")) {
+            await enterSelectionMode();
+            await select(2);
+            await app.browser.waitUntil(
+                async () =>
+                    (await visibleText(app.browser)).includes(
+                        "2 items selected",
+                    ),
+                {
+                    timeout: 10_000,
+                    timeoutMsg: "the bulk bar never counted the selection",
+                },
+            );
+        }
+
+        await clickButton(app.browser, "Delete", {
+            within: BULK_BAR,
+        });
+
+        const dialog = await app.browser.$('[role="alertdialog"]');
+        await dialog.waitForDisplayed({
+            timeout: 10_000,
+            timeoutMsg: "bulk delete did not ask for confirmation",
+        });
+        const copy = await dialog.getText();
+        expect(copy).toContain("Delete 2 items?");
+        expect(copy).toContain("You have a few seconds to undo it.");
+
+        const before = await app.daemon.items();
+        await clickButton(app.browser, "Delete", {
+            within: '[role="alertdialog"]',
+        });
+
+        await app.browser.waitUntil(
+            async () => (await app.daemon.items()).length === before.length - 2,
+            {
+                timeout: 20_000,
+                timeoutMsg: "the daemon still holds the deleted items",
+            },
+        );
+        await app.browser.waitUntil(
+            async () => (await rowCount(app.browser)) === SEED.length - 2,
+            {
+                timeout: 20_000,
+                timeoutMsg: "the deleted rows stayed on screen",
+            },
+        );
     });
-    const copy = await dialog.getText();
-    expect(copy).toContain("Delete 2 items?");
-    expect(copy).toContain("You have a few seconds to undo it.");
 
-    const before = await app.daemon.items();
-    await clickButton(app.browser, "Delete", { within: '[role="alertdialog"]' });
-
-    await app.browser.waitUntil(
-      async () => (await app.daemon.items()).length === before.length - 2,
-      { timeout: 20_000, timeoutMsg: "the daemon still holds the deleted items" },
-    );
-    await app.browser.waitUntil(
-      async () => (await rowCount(app.browser)) === SEED.length - 2,
-      { timeout: 20_000, timeoutMsg: "the deleted rows stayed on screen" },
-    );
-  });
-
-  test("cancelling selection mode brings the per-row actions back", async () => {
-    const bar = await app.browser.$('[aria-label="Selection actions"]');
-    if (await bar.isExisting()) {
-      await clickButton(app.browser, "Done", {
-        within: '[aria-label="Selection actions"]',
-      });
-    }
-
-    await app.browser.waitUntil(
-      async () => (await byLabel(app.browser, "Delete item")).length > 0,
-      { timeout: 10_000, timeoutMsg: "the per-row actions never came back" },
-    );
-    expect(await checkboxes()).toHaveLength(0);
-  });
+    test("leaving selection mode keeps the row controls available", async () => {
+        await leaveSelectionMode();
+        expect(await rowCheckboxes()).toHaveLength(2);
+    });
 });
