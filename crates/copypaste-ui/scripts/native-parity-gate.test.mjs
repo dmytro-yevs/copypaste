@@ -17,7 +17,7 @@ const WINDOWS_STATES = new Map([
   ["history", { state: "populated", name: "Clipboard history", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGO8o6bGwMDAxMDAoHzzJgARtAMB3qLZtwAAAABJRU5ErkJggg==" }],
   ["capture", { state: "service-capture-status", name: "Background capture", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGMUW+zFwMDAAKEAEOcCCBlQdmcAAAAASUVORK5CYII=" }],
   ["capture/copy-feedback-setting", { feature: "capture", state: "copy-feedback-setting", name: "Copy feedback sound", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGMIqDgRUnOGIaLhQkzLFQArGgaJKbubPAAAAABJRU5ErkJggg==" }],
-  ["devices", { state: "desktop-pairing-entry", name: "Enter pairing code", requiredNames: ["Show pairing code", "Enter pairing code"], png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGNUTX7NwMDAxMDAcGuOCAAUogMBx1ZqEgAAAABJRU5ErkJggg==" }],
+  ["devices", { state: "desktop-pairing-entry", name: "Add a CopyPaste device", requiredNames: ["Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel"], png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGNUTX7NwMDAxMDAcGuOCAAUogMBx1ZqEgAAAABJRU5ErkJggg==" }],
   ["settings-and-service", { state: "appearance", name: "Mode", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGOcbPyKgYGBiYGBIX2mNgAWpQLf2/uWLgAAAABJRU5ErkJggg==" }],
   ["settings-and-service/updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8DAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==" }],
   ["cloud-account", { state: "unconfigured", name: "Cloud server configuration", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPkmLiJgYGBiYGBQWz9XwARoQMR3PtkxgAAAABJRU5ErkJggg==" }],
@@ -410,15 +410,15 @@ async function restampAccessibility(receiptPath, mutate, feature) {
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
-test("rejects Windows desktop pairing evidence without both entry paths", () => withRoot(async (root) => {
+test("rejects Windows desktop pairing evidence without native entry controls", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "windows");
   await restampAccessibility(receiptPath, (accessibility) => {
-    accessibility.nodes = accessibility.nodes.filter((node) => node.name !== "Show pairing code");
+    accessibility.nodes = accessibility.nodes.filter((node) => node.name !== "Pair");
     accessibility.node_read.read = accessibility.nodes.length;
   }, "devices");
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
-    /lacks Show pairing code/,
+    /lacks Pair/,
   );
 }));
 

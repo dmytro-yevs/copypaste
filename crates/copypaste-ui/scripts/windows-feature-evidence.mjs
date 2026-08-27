@@ -9,8 +9,8 @@ const EXPECTED = new Map([
   ["devices/desktop-pairing-entry", {
     feature: "devices",
     state: "desktop-pairing-entry",
-    name: "Enter pairing code",
-    requiredNames: ["Show pairing code", "Enter pairing code"],
+    name: "Add a CopyPaste device",
+    requiredNames: ["Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel"],
     directory: "devices",
     direct: true,
   }],
