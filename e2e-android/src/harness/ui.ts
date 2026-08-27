@@ -2,7 +2,7 @@ import { sleep } from "./adb.js";
 import type { AndroidApp } from "./app.js";
 
 export const NAV = 'nav[aria-label="Primary"]';
-export const NAVIGATION_READY = '[data-navigation-ready="true"]';
+export const NAVIGATION_READY = `${NAV} button:not(:disabled):not([aria-disabled="true"])`;
 export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
 export const ROW = `${HISTORY_LIST} [role="listitem"]`;
 export const SEARCH = '[aria-label="Search clipboard history"]';
@@ -67,14 +67,43 @@ export async function waitForRows(
   );
 }
 
+export function allPrimaryNavigationButtonsReady(
+  buttons: ReadonlyArray<{ disabled: boolean; ariaDisabled: string | null }>,
+): boolean {
+  return (
+    buttons.length > 0 &&
+    buttons.every(
+      (button) => !button.disabled && button.ariaDisabled !== "true",
+    )
+  );
+}
+
+async function navigationIsReady(app: AndroidApp): Promise<boolean> {
+  const buttons = await app.withPage((page) =>
+    page.evaluate((nav) => {
+      const root = document.querySelector(nav);
+      return root
+        ? Array.from(
+            root.querySelectorAll<HTMLButtonElement>("button"),
+            (button) => ({
+              disabled: button.disabled,
+              ariaDisabled: button.getAttribute("aria-disabled"),
+            }),
+          )
+        : [];
+    }, NAV),
+  );
+  return allPrimaryNavigationButtonsReady(buttons);
+}
+
 /**
  * First launch owns the window until the welcome flow is dismissed. History
- * E2E is the product shell; `data-navigation-ready` is not on onboarding.
+ * E2E is the product shell; onboarding has no primary navigation landmark.
  */
 export async function dismissFirstRun(app: AndroidApp): Promise<void> {
   await waitFor(
     async () => {
-      if ((await count(app, NAVIGATION_READY)) === 1) return true;
+      if (await navigationIsReady(app)) return true;
       return app.withPage((page) => page.evaluate(() => {
         const explore = Array.from(
           document.querySelectorAll<HTMLButtonElement>(
@@ -82,7 +111,7 @@ export async function dismissFirstRun(app: AndroidApp): Promise<void> {
           ),
         ).find((button) => button.textContent?.trim() === "Explore first");
         explore?.click();
-        return document.querySelector('[data-navigation-ready="true"]') !== null;
+        return false;
       }));
     },
     "the welcome flow never yielded to settled navigation",
@@ -95,7 +124,7 @@ export async function dismissFirstRun(app: AndroidApp): Promise<void> {
 export async function gotoView(app: AndroidApp, label: string): Promise<void> {
   await dismissFirstRun(app);
   await waitFor(
-    async () => (await count(app, NAVIGATION_READY)) === 1,
+    () => navigationIsReady(app),
     "Android navigation never settled after capture health loaded",
     60_000,
   );
