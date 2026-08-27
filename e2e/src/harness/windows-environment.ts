@@ -53,17 +53,17 @@ export function parseVersion(output: string, what: string): string {
 export function assertMajorCompatibility(
   versions: WindowsEnvironmentVersions,
 ): void {
-  const builds = Object.fromEntries(
-    Object.entries(versions).map(([name, version]) => [name, firstThree(version)]),
-  );
-  const distinct = new Set(Object.values(builds));
-  if (distinct.size !== 1) {
+  const webview2Build = firstThree(versions.webview2);
+  const edgeDriverBuild = firstThree(versions.edgeDriver);
+  if (webview2Build !== edgeDriverBuild) {
     throw new Error(
-      `Edge/WebView2/EdgeDriver first-three-part versions are incompatible ` +
-        `(Edge ${builds.edge}, WebView2 ${builds.webview2}, ` +
-        `EdgeDriver ${builds.edgeDriver})`,
+      `WebView2 Runtime/EdgeDriver first-three-part versions are incompatible ` +
+        `(WebView2 ${webview2Build}, EdgeDriver ${edgeDriverBuild})`,
     );
   }
+
+  // Edge is diagnostic only: Tauri drives the WebView2 Runtime, not standalone Edge.
+  firstThree(versions.edge);
 }
 
 export async function probeWindowsEnvironment(
@@ -111,7 +111,7 @@ export async function probeWindowsEnvironment(
     );
     throw new WindowsEnvironmentProbeFailure(
       "Windows environment probe failed before the native E2E suite; " +
-        "Edge, WebView2 Runtime, and EdgeDriver must be installed and first-three-part-compatible.",
+        "WebView2 Runtime and EdgeDriver must be installed and first-three-part-compatible.",
       { cause },
     );
   }
