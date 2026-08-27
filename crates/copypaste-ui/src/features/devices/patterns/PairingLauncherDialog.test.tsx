@@ -85,7 +85,14 @@ describe("PairingLauncherDialog preview flows", () => {
         try {
             render(launcher(pairing));
 
-            expect(screen.getByLabelText("Dismiss pairing dialog")).toBeTruthy();
+            const overlay = document.querySelector<HTMLElement>(
+                '[data-slot="dialog-overlay"]',
+            );
+            expect(overlay).toBeTruthy();
+            expect(overlay?.getAttribute("aria-label")).toBe(
+                "Dismiss pairing dialog",
+            );
+            expect(overlay?.style.pointerEvents).toBe("none");
             expect(
                 screen.getByRole("button", { name: /Scan pairing code/ }),
             ).toBeTruthy();
