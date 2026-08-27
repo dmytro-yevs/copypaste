@@ -49,24 +49,24 @@ describe("Tauri WebDriver capabilities", () => {
 });
 
 describe("Windows environment probe", () => {
-  it("accepts matching Edge, WebView2, and EdgeDriver majors", () => {
+  it("accepts matching Edge, WebView2, and EdgeDriver build prefixes", () => {
     expect(() =>
       assertMajorCompatibility({
-        edge: "140.0.1.2",
-        webview2: "140.0.2.3",
-        edgeDriver: "140.0.3.4",
+        edge: "140.0.3485.54",
+        webview2: "140.0.3485.55",
+        edgeDriver: "140.0.3485.56",
       }),
     ).not.toThrow();
   });
 
-  it("rejects a mixed-major environment", () => {
+  it("rejects same-major versions with different builds", () => {
     expect(() =>
       assertMajorCompatibility({
-        edge: "140.0.1.2",
-        webview2: "139.0.2.3",
-        edgeDriver: "140.0.3.4",
+        edge: "140.0.3485.54",
+        webview2: "140.0.3486.1",
+        edgeDriver: "140.0.3485.56",
       }),
-    ).toThrow(/major versions are incompatible/);
+    ).toThrow(/first-three-part versions are incompatible/);
   });
 
   it("records compatible versions before the session probe", async () => {
@@ -75,13 +75,14 @@ describe("Windows environment probe", () => {
     try {
       await probeWindowsEnvironment({
         manifest,
-        powershell: async () => "Microsoft Edge 140.0.1.2|140.0.2.3",
-        driverVersion: async () => "Microsoft Edge WebDriver 140.0.3.4",
+        powershell: async () => "Microsoft Edge 140.0.3485.54",
+        driverVersion: async () => "Microsoft Edge WebDriver 140.0.3485.56",
+        webview2Version: "140.0.3485.55",
       });
       expect(readFileSync(manifest, "utf8")).toContain(
         "windowsEnvironmentProbe=ready",
       );
-      expect(readFileSync(manifest, "utf8")).toContain("edgeVersion=140.0.1.2");
+      expect(readFileSync(manifest, "utf8")).toContain("edgeVersion=140.0.3485.54");
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -93,8 +94,9 @@ describe("Windows environment probe", () => {
     try {
       const failure = await probeWindowsEnvironment({
         manifest,
-        powershell: async () => "Edge 140.0.1.2|139.0.2.3",
-        driverVersion: async () => "Microsoft Edge WebDriver 140.0.3.4",
+        powershell: async () => "Edge 140.0.3485.54",
+        driverVersion: async () => "Microsoft Edge WebDriver 140.0.3486.56",
+        webview2Version: "140.0.3485.55",
       }).then(() => undefined, (error: Error) => error);
       expect(failure?.name).toBe("WindowsEnvironmentProbeFailure");
       expect(failure?.message).toContain("before the native E2E suite");
