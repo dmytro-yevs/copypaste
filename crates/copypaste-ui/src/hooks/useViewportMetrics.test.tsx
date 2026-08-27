@@ -1,19 +1,33 @@
 import { act, render, screen } from "@testing-library/react";
+import { StrictMode, useLayoutEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type ObserverCallback = (entries: ResizeObserverEntry[]) => void;
 
 const { TestResizeObserver } = vi.hoisted(() => {
   class TestResizeObserver {
+    static instances: TestResizeObserver[] = [];
     static latest: TestResizeObserver | null = null;
+    readonly observed: Element[] = [];
+    readonly unobserved: Element[] = [];
+    disconnects = 0;
 
     constructor(readonly callback: ObserverCallback) {
+      TestResizeObserver.instances.push(this);
       TestResizeObserver.latest = this;
     }
 
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
+    observe(element: Element): void {
+      this.observed.push(element);
+    }
+
+    unobserve(element: Element): void {
+      this.unobserved.push(element);
+    }
+
+    disconnect(): void {
+      this.disconnects += 1;
+    }
 
     emit(entries: ResizeObserverEntry[]): void {
       this.callback(entries);
@@ -51,8 +65,31 @@ function Probe({ onRender }: { onRender: () => void }) {
   );
 }
 
+function ElementSubscriber({ element }: { element: HTMLDivElement }) {
+  const { ref } = useObservedElementSize<HTMLDivElement>();
+  useLayoutEffect(() => {
+    ref(element);
+    return () => {
+      ref(null);
+    };
+  }, [element, ref]);
+  return null;
+}
+
+function SharedElementProbe({ first, second }: { first: boolean; second: boolean }) {
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  return (
+    <>
+      <div data-testid="shared" ref={setElement} />
+      {element && first ? <ElementSubscriber element={element} /> : null}
+      {element && second ? <ElementSubscriber element={element} /> : null}
+    </>
+  );
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
+  TestResizeObserver.instances = [];
   TestResizeObserver.latest = null;
 });
 
@@ -91,5 +128,76 @@ describe("ViewportMetricsProvider", () => {
     expect(screen.getByTestId("viewport").textContent).toBe("800x800");
     expect(screen.getByTestId("observed").textContent).toBe("320x48");
     expect(renders).toHaveBeenCalledTimes(rendersAfterMount + 1);
+  });
+
+  it("cleans up and re-establishes the shared observer under StrictMode", () => {
+    const { unmount } = render(
+      <StrictMode>
+        <ViewportMetricsProvider>
+          <Probe onRender={() => {}} />
+        </ViewportMetricsProvider>
+      </StrictMode>,
+    );
+
+    expect(TestResizeObserver.instances).toHaveLength(2);
+    expect(TestResizeObserver.instances[0]?.disconnects).toBe(1);
+    expect(TestResizeObserver.instances[1]?.observed).toContain(document.documentElement);
+
+    unmount();
+
+    expect(TestResizeObserver.instances[1]?.disconnects).toBe(1);
+  });
+
+  it("cancels pending measurements before unmount", () => {
+    let scheduled: FrameRequestCallback | undefined;
+    const cancel = vi.spyOn(window, "cancelAnimationFrame");
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      scheduled = callback;
+      return 17;
+    });
+    const renders = vi.fn();
+    const { unmount } = render(
+      <ViewportMetricsProvider>
+        <Probe onRender={renders} />
+      </ViewportMetricsProvider>,
+    );
+    const observer = TestResizeObserver.latest;
+    const observed = screen.getByTestId("observed");
+    const rendersAfterMount = renders.mock.calls.length;
+
+    act(() => observer?.emit([metricsEntry(observed, 320, 48)]));
+    expect(scheduled).toBeTruthy();
+
+    unmount();
+    expect(cancel).toHaveBeenCalledWith(17);
+
+    act(() => scheduled?.(0));
+    expect(renders).toHaveBeenCalledTimes(rendersAfterMount);
+  });
+
+  it("retains an observed element until its final subscriber unmounts", () => {
+    const { rerender } = render(
+      <ViewportMetricsProvider>
+        <SharedElementProbe first second />
+      </ViewportMetricsProvider>,
+    );
+    const observer = TestResizeObserver.latest;
+    const shared = screen.getByTestId("shared");
+
+    expect(observer?.observed.filter((element) => element === shared)).toHaveLength(1);
+
+    rerender(
+      <ViewportMetricsProvider>
+        <SharedElementProbe first second={false} />
+      </ViewportMetricsProvider>,
+    );
+    expect(observer?.unobserved).not.toContain(shared);
+
+    rerender(
+      <ViewportMetricsProvider>
+        <SharedElementProbe first={false} second={false} />
+      </ViewportMetricsProvider>,
+    );
+    expect(observer?.unobserved).toContain(shared);
   });
 });
