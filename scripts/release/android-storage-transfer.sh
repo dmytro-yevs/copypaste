@@ -21,6 +21,8 @@ CANARY="CopyPasteStorageTransferT$(date +%s)-R$RANDOM"
 SEED_FILE="copypaste-seed.json"
 EXPORT_FILE="copypaste-export.json"
 INVALID_FILE="copypaste-invalid.json"
+SETTINGS_PREFERENCE_SECTIONS="Preference sections"
+STORAGE_SECTION_ACTION="Storage & history Stored items, cleanup, transfer and recovery"
 
 open_downloads() { # <artifact prefix>
     local prefix="$1" focus
@@ -58,7 +60,7 @@ restart_app() { # <stage>
 }
 
 settings_pane_holds() { # <artifact>
-    [[ -n "$(node_center_exact "$1" "Settings sections")" ]]
+    [[ -n "$(node_center_exact "$1" "$SETTINGS_PREFERENCE_SECTIONS")" ]]
 }
 
 storage_transfer_actions_holds() { # <artifact>
@@ -87,12 +89,13 @@ open_storage() { # <stage>
         bad "Settings opens at $stage" "$(tap_landing "$pane" Settings "$nav")"
         return 1
     }
-    tap_selector "Storage" "$tab" || {
-        bad "the Storage tab is actionable at $stage" "$(navigation_state "$pane")"
+    tap_selector "$STORAGE_SECTION_ACTION" "$tab" || {
+        bad "the Storage & history card is actionable at $stage" "$(navigation_state "$pane")"
         return 1
     }
     wait_history_state "$ready" storage_transfer_actions_holds || {
-        bad "Storage exposes its transfer actions at $stage" "$(tap_landing "$ready" Storage "$tab")"
+        bad "Storage & history exposes its transfer actions at $stage" \
+            "$(tap_landing "$ready" "$STORAGE_SECTION_ACTION" "$tab")"
         return 1
     }
 }
@@ -171,12 +174,13 @@ storage_stage_self_test() { # <temp>
     nav_starting="${nav_open//enabled=\"true\" clickable/enabled=\"false\" clickable}"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"0 items\" bounds=\"[12,126][52,142]\"/></node></hierarchy>" > "$temp/stuck-history.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\"/></node></hierarchy>" > "$temp/stuck-start.xml"
-    # Settings open and the transfer actions never rendered, with Storage already
+    # Settings open and the transfer actions never rendered, with the storage card
     # selected and not yet selected: the stage may only claim the transition when
     # it observed one, and `prepare_action`'s own dump is what it observes it in.
-    local sections="<node text=\"Settings sections\" bounds=\"[12,73][308,223]\"/>"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"Storage\" bounds=\"[217,126][284,170]\" enabled=\"true\" clickable=\"true\" selected=\"true\"/></node></hierarchy>" > "$temp/storage-empty-pane.xml"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"Storage\" bounds=\"[217,126][284,170]\" enabled=\"true\" clickable=\"true\" selected=\"false\"/></node></hierarchy>" > "$temp/storage-unselected.xml"
+    local sections="<node text=\"Preference sections\" bounds=\"[12,73][308,223]\"/>"
+    local storage_card="Storage &amp; history Stored items, cleanup, transfer and recovery"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"$storage_card\" bounds=\"[13,285][307,351]\" enabled=\"true\" clickable=\"true\" selected=\"true\"/></node></hierarchy>" > "$temp/storage-empty-pane.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"$storage_card\" bounds=\"[13,285][307,351]\" enabled=\"true\" clickable=\"true\" selected=\"false\"/></node></hierarchy>" > "$temp/storage-unselected.xml"
 
     verdict="$(
         OUT="$temp" WAIT_SECS=2
@@ -198,14 +202,14 @@ storage_stage_self_test() { # <temp>
         PASS=0 FAIL=0
         open_storage export
     )"
-    [[ "$verdict" == *"FAIL  Storage exposes its transfer actions at export"* \
+    [[ "$verdict" == *"FAIL  Storage & history exposes its transfer actions at export"* \
        && "$verdict" == *"already current before the tap"* \
        && "$verdict" != *"current now"* ]] \
         && ok "a stage whose tab was already current claims no transition" \
         || bad "a stage whose tab was already current claims no transition" "$verdict"
 
-    # The three dumps `open_storage` takes before its Storage tap see the tab
-    # unselected; every dump after it sees the pane it selected but never filled.
+    # The three dumps before the storage tap see the card unselected; every dump
+    # after it sees the section selected but never filled.
     verdict="$(
         OUT="$temp" WAIT_SECS=2
         sh_() { :; }
@@ -218,7 +222,7 @@ storage_stage_self_test() { # <temp>
         PASS=0 FAIL=0
         open_storage import
     )"
-    [[ "$verdict" == *"FAIL  Storage exposes its transfer actions at import"* \
+    [[ "$verdict" == *"FAIL  Storage & history exposes its transfer actions at import"* \
        && "$verdict" == *"was not current before the tap and is current now"* ]] \
         && ok "a stage that observed the tab change reports the transition" \
         || bad "a stage that observed the tab change reports the transition" "$verdict"
@@ -275,8 +279,8 @@ self_test_transfer() {
     ! grep -Eq '[0-9]([[:space:]-]?[0-9]){12,18}' <<<"$canary_sample" \
         && ok "the storage canary cannot look like a card number" \
         || bad "the storage canary cannot look like a card number" "$canary_sample"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage" bounds="[0,0][60,44]" enabled="true" clickable="true" selected="true"/><node text="Import history" bounds="[24,70][140,90]" enabled="true"/><node text="Import…" bounds="[0,0][0,0]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-title-only.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage" bounds="[0,0][60,44]" enabled="true" clickable="true" selected="true"/><node text="Export…" bounds="[20,80][120,124]" enabled="true" clickable="true"/><node text="Import…" bounds="[20,140][120,184]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[0,0][180,44]" enabled="true"/><node text="Import history" bounds="[24,70][140,90]" enabled="true"/><node text="Import…" bounds="[0,0][0,0]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-title-only.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[0,0][180,44]" enabled="true"/><node text="Export…" bounds="[20,80][120,124]" enabled="true" clickable="true"/><node text="Import…" bounds="[20,140][120,184]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-ready.xml"
     storage_transfer_actions_holds "$temp/storage-title-only.xml" \
         && bad "storage readiness requires actionable transfer buttons" \
         || ok "storage readiness requires actionable transfer buttons"
