@@ -1,7 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import {
-  type BulkOutcome,
   useBulkDelete,
   useBulkPin,
 } from "@/features/history/hooks/useHistoryMutations";
@@ -15,6 +14,7 @@ export interface HistorySelection {
   readonly selection: Selection;
   /** A bulk run is in flight, so the bar's controls are inert. */
   readonly busy: boolean;
+  readonly end: () => void;
   readonly togglePin: () => void;
   readonly confirmingDelete: boolean;
   readonly requestDelete: () => void;
@@ -26,22 +26,33 @@ export function useHistorySelection(
   items: readonly Item[],
 ): HistorySelection {
   const selection = useSelection(items);
-  const applyPinOutcome = useCallback(
-    (outcome: BulkOutcome) => selection.replace(outcome.failedIds),
-    [selection.replace],
-  );
-  const bulkPin = useBulkPin(applyPinOutcome);
+  const bulkPin = useBulkPin();
   const bulkDelete = useBulkDelete();
+  const running = useRef(false);
+  const [busy, setBusy] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const togglePin = useCallback(() => {
+    if (running.current) return;
     const selected = selection.items;
     const pinned = !selection.allPinned;
-    bulkPin.mutate({ items: selected, pinned });
+    running.current = true;
+    setBusy(true);
+    void bulkPin
+      .mutateAsync({ items: selected, pinned })
+      .then((outcome) => selection.replace(outcome.failedIds))
+      .catch(() => undefined)
+      .finally(() => {
+        running.current = false;
+        setBusy(false);
+      });
   }, [bulkPin, selection]);
 
   const confirmDelete = useCallback(() => {
+    if (running.current) return;
     const selected = selection.items;
+    running.current = true;
+    setBusy(true);
     void bulkDelete
       .mutateAsync(selected)
       .then((outcome) => {
@@ -49,12 +60,23 @@ export function useHistorySelection(
         else selection.replace(outcome.failedIds);
       })
       .catch(() => undefined)
-      .finally(() => setConfirmingDelete(false));
+      .finally(() => {
+        running.current = false;
+        setBusy(false);
+        setConfirmingDelete(false);
+      });
   }, [bulkDelete, selection]);
+
+  const end = useCallback(() => {
+    if (running.current) return;
+    setConfirmingDelete(false);
+    selection.clear();
+  }, [selection.clear]);
 
   return {
     selection,
-    busy: bulkPin.isPending || bulkDelete.isPending,
+    busy,
+    end,
     togglePin,
     confirmingDelete,
     requestDelete: useCallback(() => setConfirmingDelete(true), []),
