@@ -14,6 +14,8 @@ import { startApp, type App } from "../src/harness/app.js";
 import {
   byLabel,
   clickButton,
+  HISTORY_LIST,
+  ROW,
   rowCount,
   visibleText,
   waitForRows,
@@ -21,8 +23,7 @@ import {
 
 const SEED = ["bulk alpha", "bulk beta", "bulk gamma", "bulk delta"];
 const BULK_BAR = '[role="toolbar"][aria-label="Selection actions"]';
-const HISTORY_ROWS =
-  '[role="list"][aria-label="Clipboard history"] [role="listitem"]';
+const HISTORY_ROWS = `${HISTORY_LIST} ${ROW}`;
 const ROW_CHECKBOXES = `${HISTORY_ROWS} [role="checkbox"]`;
 const ROW_ACTIONS = ["Copy to clipboard", "Pin item", "Delete item"];
 
