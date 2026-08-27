@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod content_type;
+pub use content_type::ContentClass;
 pub mod error;
 pub mod health;
 pub mod limits;
