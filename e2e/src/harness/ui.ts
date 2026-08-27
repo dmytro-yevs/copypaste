@@ -1,7 +1,8 @@
 import type { Browser } from "./webview-guard.js";
 
 export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
-export const ROW = '[role="listitem"]';
+// Group separators also use listitem semantics, but only ids identify clipboard rows.
+export const ROW = '[role="listitem"][id^="history-row-"]';
 export const PRIMARY_NAVIGATION =
   'aside[aria-label="Primary"], nav[aria-label="Primary"]';
 
