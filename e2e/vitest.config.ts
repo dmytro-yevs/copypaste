@@ -17,7 +17,7 @@ export default defineConfig({
       process.platform === "win32"
         ? "native desktop (WebView2, Windows)"
         : "browser (WebKitGTK, Linux)",
-    include: ["tests/**/*.e2e.test.ts"],
+    include: ["tests/**/*.e2e.test.ts", "src/**/*.test.ts"],
     exclude:
       process.platform === "win32" ? [] : ["tests/**/*.windows.e2e.test.ts"],
     globalSetup: ["./src/harness/global-setup.ts"],

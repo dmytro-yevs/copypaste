@@ -14,6 +14,12 @@ import {
 } from "./env.js";
 import { startDaemon, type Daemon } from "./daemon.js";
 import { sleep, track, type Child } from "./process.js";
+import {
+  aggregateErrors,
+  createIdempotentStop,
+  runCleanup,
+  waitForPortsClosed,
+} from "./teardown.js";
 import { assertReallyRunning, type Browser } from "./webview-guard.js";
 import { dismissFirstRun } from "./ui.js";
 
@@ -64,11 +70,8 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   try {
     if (options.seed?.length) await daemon.addMany(options.seed);
   } catch (error) {
-    try {
-      await daemon.stop();
-    } finally {
-      await clipboard.restore();
-    }
+    const cleanupError = await runCleanup(() => daemon.stop(), () => clipboard.restore());
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
     throw error;
   }
 
@@ -106,11 +109,11 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   try {
     await waitForDriver(driverPort, driver);
   } catch (error) {
-    try {
-      await shutdown(driver, daemon, [driverPort, nativePort]);
-    } finally {
-      await clipboard.restore();
-    }
+    const cleanupError = await runCleanup(
+      () => shutdown(driver, daemon, [driverPort, nativePort]),
+      () => clipboard.restore(),
+    );
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
     throw error;
   }
 
@@ -132,12 +135,7 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       },
     });
   } catch (cause) {
-    try {
-      await shutdown(driver, daemon, [driverPort, nativePort]);
-    } finally {
-      await clipboard.restore();
-    }
-    throw new Error(
+    const sessionError = new Error(
       describeSessionFailure({
         budgetMs: sessionBudgetMs,
         elapsedMs: Date.now() - sessionStarted,
@@ -147,38 +145,38 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       }),
       { cause },
     );
+    const cleanupError = await runCleanup(
+      () => shutdown(driver, daemon, [driverPort, nativePort]),
+      () => clipboard.restore(),
+    );
+    if (cleanupError) throw aggregateErrors(sessionError, cleanupError);
+    throw sessionError;
   }
 
   const app: App = {
     browser,
     daemon,
-    stop: (() => {
-      let stopPromise: Promise<void> | undefined;
-      return () => {
-        if (stopPromise) return stopPromise;
-        stopPromise = (async () => {
-          // Every WebDriver call goes through the page's main thread, so a
-          // frozen app makes a polite close hang as surely as the probe does.
-          await Promise.race([
-            browser.deleteSession().catch(() => undefined),
-            sleep(SESSION_CLOSE_BUDGET_MS),
-          ]);
-          try {
-            await shutdown(driver, daemon, [driverPort, nativePort]);
-          } finally {
-            await clipboard.restore();
-          }
-        })();
-        return stopPromise;
-      };
-    })(),
+    stop: createIdempotentStop(async () => {
+      // Every WebDriver call goes through the page's main thread, so a
+      // frozen app makes a polite close hang as surely as the probe does.
+      await Promise.race([
+        browser.deleteSession().catch(() => undefined),
+        sleep(SESSION_CLOSE_BUDGET_MS),
+      ]);
+      const cleanupError = await runCleanup(
+        () => shutdown(driver, daemon, [driverPort, nativePort]),
+        () => clipboard.restore(),
+      );
+      if (cleanupError) throw cleanupError;
+    }),
   };
 
   try {
     await assertReallyRunning(browser, driver);
     await dismissFirstRun(browser);
   } catch (error) {
-    await app.stop();
+    const cleanupError = await runCleanup(app.stop);
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
     throw error;
   }
 
@@ -233,39 +231,12 @@ async function shutdown(
   daemon: Daemon,
   ports: readonly number[] = [],
 ): Promise<void> {
-  try {
-    await driver.stop();
-    await waitForPortsClosed(ports);
-  } finally {
-    await daemon.stop();
-  }
-}
-
-async function waitForPortsClosed(ports: readonly number[]): Promise<void> {
-  if (ports.length === 0) return;
-  const deadline = Date.now() + SESSION_CLOSE_BUDGET_MS;
-  for (;;) {
-    const open = await Promise.all(
-      ports.map(async (port) => {
-        try {
-          await fetch(`http://127.0.0.1:${port}/status`, {
-            signal: AbortSignal.timeout(500),
-          });
-          return true;
-        } catch {
-          return false;
-        }
-      }),
-    );
-    if (!open.some(Boolean)) return;
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `WebDriver ports remain open after ${SESSION_CLOSE_BUDGET_MS}ms: ` +
-          `${ports.join(", ")}`,
-      );
-    }
-    await sleep(100);
-  }
+  const cleanupError = await runCleanup(
+    () => driver.stop(),
+    () => waitForPortsClosed(ports, SESSION_CLOSE_BUDGET_MS),
+    () => daemon.stop(),
+  );
+  if (cleanupError) throw cleanupError;
 }
 
 /**
