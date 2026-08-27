@@ -235,7 +235,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                               onSelectAll: selection.selectAll,
                               onTogglePin: bulk.togglePin,
                               onDelete: bulk.requestDelete,
-                              onClose: selection.clear,
+                              onClose: bulk.end,
                           }
                         : undefined
                 }
