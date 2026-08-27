@@ -91,6 +91,44 @@ if candidates:
 PY
 }
 
+# Run 33124469586 kept an enabled below-fold control in the tree with no bounds.
+# Existence proves hydration; pointer actions still require selector_center.
+selector_exists() { # <xml> <selector alternatives separated by |> <exact|enabled-action>
+    python3 - "$1" "$2" "$3" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    raise SystemExit(1)
+selectors = [part.casefold() for part in sys.argv[2].split("|")]
+enabled_action = sys.argv[3] == "enabled-action"
+for node in root.iter("node"):
+    values = [(node.get(name) or "").casefold()
+              for name in ("text", "content-desc", "resource-id", "hint")]
+    exact = any(selector == value or value.endswith("/" + selector)
+                for selector in selectors for value in values if value)
+    if not exact:
+        continue
+    if enabled_action:
+        actionable = (node.get("clickable") == "true"
+                      or "documentsui" in (node.get("package") or "").casefold())
+        if not actionable or node.get("enabled", "true") == "false":
+            continue
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+node_exists_exact() { # <xml> <selector alternatives separated by |>
+    selector_exists "$1" "$2" exact
+}
+
+enabled_action_exists_exact() { # <xml> <selector alternatives separated by |>
+    selector_exists "$1" "$2" enabled-action
+}
+
 # Whether this device's `uiautomator dump` carries the `hint` attribute at all.
 #
 # AOSP's AccessibilityNodeInfoDumper gained `serializer.attribute("", "hint",
@@ -620,6 +658,18 @@ android_ui_self_test() {
     [[ -z "$(node_center "$temp/ui.xml" "Cloud sync")" ]] && ok "a clipped semantic node is not visible" || bad "a clipped semantic node is not visible"
     [[ -z "$(action_center "$temp/ui.xml" "Sign out")" ]] && ok "an action obscured by app navigation is not actionable" || bad "an action obscured by app navigation is not actionable"
     [[ -z "$(action_center "$temp/ui.xml" "Zero action")" ]] && ok "a zero-sized action is not actionable" || bad "a zero-sized action is not actionable"
+    enabled_action_exists_exact "$temp/ui.xml" "Zero action" \
+        && ok "an enabled offscreen action remains present in the accessibility tree" \
+        || bad "an enabled offscreen action remains present in the accessibility tree"
+    enabled_action_exists_exact "$temp/ui.xml" "Devices" \
+        && bad "a disabled action is not an enabled semantic control" \
+        || ok "a disabled action is not an enabled semantic control"
+    node_exists_exact "$temp/ui.xml" "Cloud sync" \
+        && ok "an exact semantic node can be present outside tappable geometry" \
+        || bad "an exact semantic node can be present outside tappable geometry"
+    node_exists_exact "$temp/ui.xml" "Cloud" \
+        && bad "semantic existence still rejects partial labels" \
+        || ok "semantic existence still rejects partial labels"
     point="$(action_center "$temp/ui.xml" "Settings")"
     [[ "$point" == "265 270" ]] && ok "an action inside app navigation remains actionable" || bad "an action inside app navigation remains actionable" "$point"
     [[ -z "$(action_center "$temp/ui.xml" "Devices")" ]] && ok "pending app navigation is not actionable" || bad "pending app navigation is not actionable"
