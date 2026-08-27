@@ -9,8 +9,9 @@ const EXPECTED = new Map([
   ["devices/desktop-pairing-entry", {
     feature: "devices",
     state: "desktop-pairing-entry",
-    name: "Add a CopyPaste device",
+    name: "Pairing code",
     requiredNames: ["Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel"],
+    requiredEnabledNames: ["Pairing code", "Pairing address", "Pair", "Cancel"],
     directory: "devices",
     direct: true,
   }],
@@ -174,7 +175,6 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
     for (const requiredName of expectedState.requiredNames ?? []) {
       if (!accessibility.nodes.some((node) => (
         node?.name === requiredName
-        && node.enabled === true
         && node.offscreen === false
         && Number.isFinite(node.bounds?.width)
         && Number.isFinite(node.bounds?.height)
@@ -182,6 +182,19 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
         && node.bounds.height > 0
       ))) {
         throw new Error(`${label} ${state.feature} accessibility lacks ${requiredName}`);
+      }
+    }
+    for (const requiredName of expectedState.requiredEnabledNames ?? []) {
+      if (!accessibility.nodes.some((node) => (
+        node?.name === requiredName
+        && node.enabled === true
+        && node.offscreen === false
+        && Number.isFinite(node.bounds?.width)
+        && Number.isFinite(node.bounds?.height)
+        && node.bounds.width > 0
+        && node.bounds.height > 0
+      ))) {
+        throw new Error(`${label} ${state.feature} accessibility lacks enabled ${requiredName}`);
       }
     }
   }
