@@ -27,7 +27,7 @@ beforeAll(async () => {
   // The failure under test is the transport one: the socket path is what
   // discloses the local username, and it is only in play once the daemon dies
   // under a running window.
-  await app.daemon.stop();
+  await app.daemon.kill();
 
   await app.browser.waitUntil(
     async () => (await accessibleSurface(app.browser)).includes("Background service unreachable"),
