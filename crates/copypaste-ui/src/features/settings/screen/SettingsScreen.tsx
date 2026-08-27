@@ -13,7 +13,7 @@ import {
   ScrollViewport,
 } from "@/components/layout";
 import { ScreenHeader } from "@/components/shared";
-import { VisuallyHidden } from "@/components/ui";
+import { Tabs, TabsContent, VisuallyHidden } from "@/components/ui";
 import {
   resolveSettingsSearch,
   SettingsSearchField,
@@ -256,25 +256,17 @@ export function SettingsScreen() {
               description="Choose a focused page for each part of CopyPaste."
               actions={search}
             />
-            <div className={styles.desktopBody}>
-              <SettingsNavigation
-                sections={sections}
-                active={desktopSection}
-                onSelect={(section) => {
-                  openSection(section);
-                }}
-              />
-              <section
-                role="tabpanel"
-                className={styles.content}
-                aria-label={activeDefinition?.label}
-              >
-                <h2 className={styles.panelTitle}>{activeDefinition?.label}</h2>
-                <div className={styles.sectionStack}>
-                  {renderPreferenceSection(desktopSection, controller)}
-                </div>
-              </section>
-            </div>
+            <Tabs value={desktopSection} onValueChange={(value) => openSection(value as PreferenceSection)}>
+              <div className={styles.desktopBody}>
+                <SettingsNavigation sections={sections} />
+                <TabsContent value={desktopSection} className={styles.content}>
+                  <h2 className={styles.panelTitle}>{activeDefinition?.label}</h2>
+                  <div className={styles.sectionStack}>
+                    {renderPreferenceSection(desktopSection, controller)}
+                  </div>
+                </TabsContent>
+              </div>
+            </Tabs>
           </Container>
         </ScrollViewport>
       )}
