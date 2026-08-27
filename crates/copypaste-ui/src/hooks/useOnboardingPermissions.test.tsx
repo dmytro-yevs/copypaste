@@ -201,4 +201,37 @@ describe("onboarding permission hydration", () => {
     expect(screen.getByText("granted")).toBeTruthy();
     expect(client.getQueryData(ONBOARDING_PERMISSIONS_KEY)).toEqual(granted);
   });
+
+  it("aborts a stale refresh when a permission mutation starts", async () => {
+    const user = userEvent.setup();
+    const lateSnapshot = deferred<typeof prompt>();
+    const mutation = deferred<typeof granted>();
+    let refreshSignal: AbortSignal | undefined;
+    mocks.permissionSnapshot
+      .mockResolvedValueOnce(prompt)
+      .mockImplementationOnce((options) => {
+        refreshSignal = options.signal;
+        return lateSnapshot.promise;
+      });
+    mocks.permissionRequest.mockReturnValue(mutation.promise);
+
+    render(<MutationRaceProbe />, { wrapper });
+    await waitFor(() => expect(screen.getByText("prompt")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByText("fetching")).toBeTruthy());
+    expect(refreshSignal?.aborted).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Request permission" }));
+    await waitFor(() => expect(mocks.permissionRequest).toHaveBeenCalledOnce());
+    expect(refreshSignal?.aborted).toBe(true);
+    mutation.resolve(granted);
+    await waitFor(() => expect(screen.getByText("granted")).toBeTruthy());
+
+    lateSnapshot.resolve(prompt);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.getByText("granted")).toBeTruthy();
+    expect(client.getQueryData(ONBOARDING_PERMISSIONS_KEY)).toEqual(granted);
+  });
 });
