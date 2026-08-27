@@ -36,6 +36,8 @@ interface Options {
     previewLines: number;
 }
 
+const OFFSET_EPSILON = 0.5;
+
 function nearestSurvivingId(
     previousIds: readonly (string | null)[],
     anchorIndex: number,
@@ -68,6 +70,19 @@ export function useScrollAnchor({
     const previousLayoutIds = useRef<readonly (string | null)[] | null>(null);
     const previousLines = useRef(previewLines);
     const previousMax = useRef<number | null>(null);
+
+    const releaseAnchor = useCallback(() => {
+        anchorRef.current = null;
+        appliedAnchorRef.current = null;
+        pendingScrollRef.current = null;
+    }, []);
+    const releaseAnchorForNavigation = useCallback(
+        (targetOffset: number, currentOffset: number) => {
+            if (Math.abs(targetOffset - currentOffset) > OFFSET_EPSILON)
+                releaseAnchor();
+        },
+        [releaseAnchor],
+    );
 
     /** Resolves rows outside the rendered window from the measurement table. */
     const captureAnchor = useCallback(() => {
@@ -177,7 +192,7 @@ export function useScrollAnchor({
         }
 
         const next = Math.min(Math.max(desired, 0), max);
-        if (Math.abs(next - element.scrollTop) > 0.5) {
+        if (Math.abs(next - element.scrollTop) > OFFSET_EPSILON) {
             // Keeps the DOM position and virtualizer offset in the same frame.
             pendingScrollRef.current = {
                 id: anchor?.id ?? null,
@@ -192,5 +207,5 @@ export function useScrollAnchor({
         }
     });
 
-    return { captureAnchor };
+    return { captureAnchor, releaseAnchorForNavigation };
 }
