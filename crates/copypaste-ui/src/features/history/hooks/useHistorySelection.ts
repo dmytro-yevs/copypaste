@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import {
+  type BulkOutcome,
   useBulkDelete,
   useBulkPin,
 } from "@/features/history/hooks/useHistoryMutations";
@@ -25,20 +26,18 @@ export function useHistorySelection(
   items: readonly Item[],
 ): HistorySelection {
   const selection = useSelection(items);
-  const bulkPin = useBulkPin();
+  const applyPinOutcome = useCallback(
+    (outcome: BulkOutcome) => selection.replace(outcome.failedIds),
+    [selection.replace],
+  );
+  const bulkPin = useBulkPin(applyPinOutcome);
   const bulkDelete = useBulkDelete();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const togglePin = useCallback(() => {
     const selected = selection.items;
     const pinned = !selection.allPinned;
-    void bulkPin
-      .mutateAsync({ items: selected, pinned })
-      .then((outcome) => {
-        if (outcome.failedIds.length === 0) selection.clear();
-        else selection.replace(outcome.failedIds);
-      })
-      .catch(() => undefined);
+    bulkPin.mutate({ items: selected, pinned });
   }, [bulkPin, selection]);
 
   const confirmDelete = useCallback(() => {

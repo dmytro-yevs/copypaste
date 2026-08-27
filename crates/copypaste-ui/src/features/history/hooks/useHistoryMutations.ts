@@ -73,12 +73,13 @@ function report(verb: keyof typeof BULK_KEYS, outcome: BulkOutcome) {
   else toast.warning(t(partial, { done: outcome.done, total: outcome.done + failed, failed }));
 }
 
-export function useBulkPin() {
+export function useBulkPin(applyOutcome: (outcome: BulkOutcome) => void) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ items, pinned }: { items: readonly Item[]; pinned: boolean }) =>
       runBulk(items, (item) => setPinned(item.id, pinned)),
     onSuccess: (outcome, { pinned }) => {
+      applyOutcome(outcome);
       report(pinned ? "pinned" : "unpinned", outcome);
       void invalidateHistoryQueries(qc);
     },
