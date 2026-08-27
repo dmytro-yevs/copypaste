@@ -7,7 +7,8 @@ import { items } from "@/test/harness";
 
 const bulkPin = vi.hoisted(() => ({
   isPending: false,
-  mutateAsync: vi.fn(),
+  mutate: vi.fn(),
+  applyOutcome: null as ((outcome: BulkOutcome) => void) | null,
 }));
 const bulkDelete = vi.hoisted(() => ({
   isPending: false,
@@ -15,25 +16,22 @@ const bulkDelete = vi.hoisted(() => ({
 }));
 
 vi.mock("./useHistoryMutations", () => ({
-  useBulkPin: () => bulkPin,
+  useBulkPin: (applyOutcome: (outcome: BulkOutcome) => void) => {
+    bulkPin.applyOutcome = applyOutcome;
+    return bulkPin;
+  },
   useBulkDelete: () => bulkDelete,
 }));
 
 describe("useHistorySelection", () => {
   beforeEach(() => {
-    bulkPin.mutateAsync.mockReset();
+    bulkPin.mutate.mockReset();
+    bulkPin.applyOutcome = null;
     bulkDelete.mutateAsync.mockReset();
   });
 
   it("clears a successful pin when the backend outcome arrives", async () => {
     const visible = items(2);
-    let resolvePin!: (outcome: BulkOutcome) => void;
-    bulkPin.mutateAsync.mockImplementation(
-      () =>
-        new Promise<BulkOutcome>((resolve) => {
-          resolvePin = resolve;
-        }),
-    );
     const { result } = renderHook(() => useHistorySelection(visible));
 
     act(() => {
@@ -42,23 +40,19 @@ describe("useHistorySelection", () => {
     });
     act(() => result.current.togglePin());
 
-    expect(bulkPin.mutateAsync).toHaveBeenCalledWith({
+    expect(bulkPin.mutate).toHaveBeenCalledWith({
       items: visible,
       pinned: true,
     });
     expect(result.current.selection.active).toBe(true);
 
-    act(() => resolvePin({ done: 2, failedIds: [] }));
+    act(() => bulkPin.applyOutcome?.({ done: 2, failedIds: [] }));
     await waitFor(() => expect(result.current.selection.active).toBe(false));
     expect(result.current.selection.selected).toEqual(new Set());
   });
 
   it("keeps only failed rows selected after a partial pin", async () => {
     const visible = items(2);
-    bulkPin.mutateAsync.mockResolvedValue({
-      done: 1,
-      failedIds: [visible[1]!.id],
-    });
     const { result } = renderHook(() => useHistorySelection(visible));
 
     act(() => {
@@ -66,6 +60,12 @@ describe("useHistorySelection", () => {
       result.current.selection.toggle(visible[1]!.id);
     });
     act(() => result.current.togglePin());
+    act(() =>
+      bulkPin.applyOutcome?.({
+        done: 1,
+        failedIds: [visible[1]!.id],
+      }),
+    );
 
     await waitFor(() =>
       expect([...result.current.selection.selected]).toEqual([visible[1]!.id]),
