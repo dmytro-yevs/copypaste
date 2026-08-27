@@ -13,6 +13,7 @@ interface Anchor {
     readonly id: string;
     /** Distance from the top of the anchored row to the viewport top. */
     readonly offset: number;
+    readonly index: number;
 }
 
 interface AppliedAnchor {
@@ -35,6 +36,21 @@ interface Options {
     previewLines: number;
 }
 
+function nearestSurvivingId(
+    previousIds: readonly (string | null)[],
+    anchorIndex: number,
+    currentIds: readonly (string | null)[],
+) {
+    const survivors = new Set(currentIds);
+    for (let distance = 1; distance < previousIds.length; distance += 1) {
+        const next = previousIds[anchorIndex + distance];
+        if (next && survivors.has(next)) return next;
+        const previous = previousIds[anchorIndex - distance];
+        if (previous && survivors.has(previous)) return previous;
+    }
+    return null;
+}
+
 export function useScrollAnchor({
     scrollRef,
     virtualizer,
@@ -49,6 +65,7 @@ export function useScrollAnchor({
     const previousAnchorIds = useRef<readonly (string | null)[] | undefined>(
         anchorIds,
     );
+    const previousLayoutIds = useRef<readonly (string | null)[] | null>(null);
     const previousLines = useRef(previewLines);
     const previousMax = useRef<number | null>(null);
 
@@ -89,7 +106,9 @@ export function useScrollAnchor({
         const id = ids[index];
         const measurement = virtualizer.measurementsCache[index];
         anchorRef.current =
-            id && measurement ? { id, offset: top - measurement.start } : null;
+            id && measurement
+                ? { id, offset: top - measurement.start, index }
+                : null;
         // A captured offset establishes a new point of interest. The next
         // layout pass may be a no-op, but must not reuse prior geometry.
         appliedAnchorRef.current = null;
@@ -106,18 +125,29 @@ export function useScrollAnchor({
         previousAnchorIds.current = anchorIds;
         const hadItems = previousItems.current !== null;
         previousItems.current = items;
-        const max = Math.max(
-            0,
-            virtualizer.getTotalSize() - element.clientHeight,
-        );
+        const ids = anchorIds ?? items.map((item) => item.id);
+        const priorIds = previousLayoutIds.current;
+        previousLayoutIds.current = ids;
+        const max = Math.max(0, element.scrollHeight - element.clientHeight);
         const maxChanged =
             previousMax.current !== null && previousMax.current !== max;
         previousMax.current = max;
         if (!hadItems) return;
 
-        const anchor = anchorRef.current;
-        const ids = anchorIds ?? items.map((item) => item.id);
-        const index = anchor ? ids.indexOf(anchor.id) : -1;
+        let anchor = anchorRef.current;
+        let index = anchor ? ids.indexOf(anchor.id) : -1;
+        if (anchor && index < 0 && priorIds) {
+            const fallbackId = nearestSurvivingId(
+                priorIds,
+                anchor.index,
+                ids,
+            );
+            if (fallbackId) {
+                index = ids.indexOf(fallbackId);
+                anchor = { ...anchor, id: fallbackId, index };
+                anchorRef.current = anchor;
+            }
+        }
         const measurement =
             index >= 0 ? virtualizer.measurementsCache[index] : undefined;
         const geometryChanged =
@@ -132,6 +162,10 @@ export function useScrollAnchor({
         let desired = element.scrollTop;
 
         if (anchor && measurement) {
+            if (anchor.index !== index) {
+                anchor = { ...anchor, index };
+                anchorRef.current = anchor;
+            }
             desired = measurement.start + anchor.offset;
             appliedAnchorRef.current = {
                 id: anchor.id,
@@ -139,7 +173,7 @@ export function useScrollAnchor({
             };
         } else {
             appliedAnchorRef.current = null;
-            // A deleted anchor falls through to the shrink clamp.
+            anchorRef.current = null;
         }
 
         const next = Math.min(Math.max(desired, 0), max);
