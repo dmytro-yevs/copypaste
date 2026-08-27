@@ -44,3 +44,31 @@ describe("HistoryContentState errors", () => {
         expect(diagnostics).toHaveBeenCalledOnce();
     });
 });
+
+describe("HistoryContentState empty history", () => {
+    it("explains that the service returned no clipboard items", () => {
+        render(
+            <HistoryContentState
+                loading={false}
+                errorKind={null}
+                searching={false}
+                filtered={false}
+                privateMode={false}
+                capturePaused={false}
+                query=""
+                hasMore={false}
+                onLoadMore={vi.fn()}
+                onRetry={vi.fn()}
+                onOpenCapture={vi.fn()}
+                onOpenDiagnostics={vi.fn()}
+                list={emptyList}
+            />,
+        );
+
+        const status = screen.getByRole("status");
+        expect(status.textContent).toContain("Nothing copied yet");
+        expect(status.textContent).toContain(
+            "Copy something and it will appear here.",
+        );
+    });
+});

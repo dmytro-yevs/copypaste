@@ -186,5 +186,11 @@ export function HistoryContentState({
         );
     }
 
-    return null;
+    return (
+        <InlineLibraryState
+            icon="library"
+            title={t("history.empty.none.title")}
+            body={t("history.empty.none.body")}
+        />
+    );
 }
