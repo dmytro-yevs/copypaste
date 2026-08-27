@@ -158,6 +158,39 @@ function Invoke-UiaNamedControl([Diagnostics.Process]$App, [string]$Name, [strin
     Wait-UiaName $App $ExpectedName | Out-Null
 }
 
+function Get-WindowsPairingEntryState(
+    [bool]$CodeVisible,
+    [bool]$AddressVisible,
+    [bool]$JoinVisible,
+    [bool]$JoinInvoked
+) {
+    if ($CodeVisible -and $AddressVisible) { return "ready" }
+    if ($JoinVisible -and -not $JoinInvoked) { return "invoke" }
+    return "wait"
+}
+
+function Open-WindowsPairingEntry([Diagnostics.Process]$App) {
+    $launcher = Wait-UiaName $App "Connect a device" $true
+    Invoke-UiaElement $launcher "Connect a device"
+    $transition = @{ join_invoked = $false }
+    Wait-Readiness "native pairing entry" {
+        $App.Refresh()
+        if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
+        $code = Get-UiaNamedElement $App "Pairing code"
+        $address = Get-UiaNamedElement $App "Pairing address"
+        $join = Get-UiaNamedElement $App "Enter pairing code" $true
+        switch (Get-WindowsPairingEntryState ($null -ne $code) ($null -ne $address) ($null -ne $join) $transition.join_invoked) {
+            "ready" { return New-ProbeReady $true }
+            "invoke" {
+                $transition.join_invoked = $true
+                Invoke-UiaElement $join "Enter pairing code"
+                return New-ProbeNotReady "the native pairing entry was requested"
+            }
+        }
+        return New-ProbeNotReady "neither the pairing launcher action nor the native pairing fields are visible"
+    } { Get-UiaSummary $App } 15000 | Out-Null
+}
+
 function Set-UiaScreenshots([Diagnostics.Process]$App, [bool]$Allow) {
     $element = Wait-UiaName $App "Allow screenshots" $true
     $pattern = $null
@@ -262,6 +295,14 @@ function Test-WindowsUiEvidenceHelpers {
         "a registered control type was not read from the element"
     Assert-True ($null -eq (Get-UiaControlTypeName $null)) `
         "a control type the client cannot name was given a name anyway"
+    Assert-True ((Get-WindowsPairingEntryState $true $true $false $false) -eq "ready") `
+        "both native pairing fields did not identify the entry state"
+    Assert-True ((Get-WindowsPairingEntryState $false $false $true $false) -eq "invoke") `
+        "the launcher action did not advance the pairing entry state"
+    Assert-True ((Get-WindowsPairingEntryState $false $false $true $true) -eq "wait") `
+        "the launcher action could be invoked more than once"
+    Assert-True ((Get-WindowsPairingEntryState $true $false $false $false) -eq "wait") `
+        "a partial native pairing form was accepted as ready"
     $occluded = [ordered]@{ foreground = $false; visible = $true; minimized = $false; capture_allowed = $true }
     Assert-True (-not (Test-WindowCaptureReady $occluded)) "an occluded window was accepted for capture"
     $protected = [ordered]@{ foreground = $true; visible = $true; minimized = $false; capture_allowed = $false }
