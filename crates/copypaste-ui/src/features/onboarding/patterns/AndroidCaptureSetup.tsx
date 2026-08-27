@@ -38,6 +38,7 @@ export function AndroidCaptureSetup() {
   const arm = useCaptureMutation();
   const notificationStatus = permissions.data?.notifications.status;
   const tileStatus = permissions.data?.tile.status;
+  const permissionReadFailed = permissions.error !== null;
   const captureWorking = capture.data?.health.state === "working";
   const busy =
     permissions.isPending ||
@@ -87,7 +88,7 @@ export function AndroidCaptureSetup() {
         icon="devices"
         title={t("onboarding.capture.addTile")}
         defaultDetail={t("onboarding.capture.addTileDetail")}
-        status={tileStatus}
+        status={permissionReadFailed ? "unavailable" : tileStatus}
         busy={busy}
         onRun={runPermission}
       />
@@ -96,7 +97,7 @@ export function AndroidCaptureSetup() {
         icon="alert"
         title={t("onboarding.capture.notifications")}
         defaultDetail={t("onboarding.capture.notificationsDetail")}
-        status={notificationStatus}
+        status={permissionReadFailed ? "unavailable" : notificationStatus}
         busy={busy}
         onRun={runPermission}
       />
