@@ -32,21 +32,20 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
 
   const pagination = (
     <div className={styles.dotsPosition}>
-      <div className={styles.dots} role="tablist" aria-label={t("onboarding.slidesLabel")}>
+      <nav className={styles.dots} aria-label={t("onboarding.slidesLabel")}>
         {Array.from({ length: SLIDE_COUNT }, (_, dotIndex) => (
           <Button
             key={dotIndex}
             type="button"
             variant="ghost"
             size="compactIcon"
-            role="tab"
             className={styles.dot}
             aria-label={t("onboarding.slideLabel", { current: dotIndex + 1, total: SLIDE_COUNT })}
-            aria-selected={dotIndex === index}
+            aria-current={dotIndex === index ? "step" : undefined}
             onClick={() => setIndex(dotIndex)}
           />
         ))}
-      </div>
+      </nav>
     </div>
   );
 

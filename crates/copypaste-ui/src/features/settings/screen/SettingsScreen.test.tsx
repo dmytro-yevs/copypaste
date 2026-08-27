@@ -5,17 +5,19 @@ import { TooltipProvider } from "@/components/ui";
 import { useUi } from "@/store/ui";
 import { SettingsScreen } from "./SettingsScreen";
 
+const viewport = vi.hoisted(() => ({
+  width: 390,
+  height: 800,
+  pointer: "coarse" as const,
+  sizeClass: "compact" as const,
+}));
+
 vi.mock("@/hooks/useViewportMetrics", () => ({
-  useViewportMetrics: () => ({
-    width: 390,
-    height: 800,
-    pointer: "coarse",
-    sizeClass: "compact",
-  }),
+  useViewportMetrics: () => viewport,
   useObservedElementSize: () => ({
     ref: () => {},
-    width: 390,
-    height: 800,
+    width: viewport.width,
+    height: viewport.height,
   }),
 }));
 
@@ -33,6 +35,12 @@ vi.mock("@/features/settings/patterns/settingsTabs", () => ({
 afterEach(() => {
   vi.restoreAllMocks();
   useUi.setState({ settingsTab: null });
+  Object.assign(viewport, {
+    width: 390,
+    height: 800,
+    pointer: "coarse",
+    sizeClass: "compact",
+  });
 });
 
 it("resets compact settings scroll when opening and leaving a detail", async () => {
@@ -114,4 +122,58 @@ it("keeps a selected search destination highlighted long enough to find", async 
     target.style.getPropertyValue("--settings-search-highlight-duration"),
   ).toBe("3200ms");
   expect(timeout).toHaveBeenCalledWith(expect.any(Function), 3_200);
+});
+
+it("connects settings tabs to their panels and supports roving keyboard navigation", async () => {
+  Object.assign(viewport, {
+    width: 1_024,
+    height: 800,
+    pointer: "fine",
+    sizeClass: "expanded",
+  });
+  render(
+    <TooltipProvider>
+      <SettingsScreen />
+    </TooltipProvider>,
+  );
+
+  const tablist = screen.getByRole("tablist", { name: "Preference sections" });
+  const appearance = screen.getByRole("tab", { name: "Appearance" });
+  const panel = screen.getByRole("tabpanel");
+  expect(tablist.contains(appearance)).toBe(true);
+  expect(panel.getAttribute("aria-labelledby")).toBe(appearance.id);
+  expect(appearance.getAttribute("aria-controls")).toBe(panel.id);
+
+  appearance.focus();
+  fireEvent.keyDown(appearance, { key: "ArrowRight" });
+  const clipboard = screen.getByRole("tab", { name: "Clipboard behavior" });
+  await waitFor(() => {
+    expect(document.activeElement).toBe(clipboard);
+    expect(clipboard.getAttribute("aria-selected")).toBe("true");
+  });
+
+  fireEvent.keyDown(clipboard, { key: "End" });
+  const about = screen.getByRole("tab", { name: "About" });
+  await waitFor(() => {
+    expect(document.activeElement).toBe(about);
+    expect(about.getAttribute("aria-selected")).toBe("true");
+  });
+
+  fireEvent.keyDown(about, { key: "Home" });
+  await waitFor(() => {
+    expect(document.activeElement).toBe(appearance);
+    expect(appearance.getAttribute("aria-selected")).toBe("true");
+  });
+
+  fireEvent.keyDown(appearance, { key: "ArrowLeft" });
+  await waitFor(() => {
+    expect(document.activeElement).toBe(about);
+    expect(about.getAttribute("aria-selected")).toBe("true");
+  });
+
+  fireEvent.keyDown(about, { key: "ArrowRight" });
+  await waitFor(() => {
+    expect(document.activeElement).toBe(appearance);
+    expect(appearance.getAttribute("aria-selected")).toBe("true");
+  });
 });
