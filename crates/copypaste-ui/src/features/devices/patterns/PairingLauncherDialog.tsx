@@ -168,6 +168,7 @@ export function PairingLauncherDialog({
         <Dialog open={open} onOpenChange={close}>
             <DialogContent
                 overlayAriaLabel="Dismiss pairing dialog"
+                overlayPointerEvents="none"
                 onCloseAutoFocus={(event) => {
                     if (!returnFocusRef?.current) return;
                     event.preventDefault();
