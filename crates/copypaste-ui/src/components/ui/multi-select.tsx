@@ -91,7 +91,9 @@ export function MultiSelect({
 
     return (
         <DropdownMenu>
-            <Tooltip content={accessibleLabel}>{trigger}</Tooltip>
+            <Tooltip content={accessibleLabel}>
+                <span className={styles.tooltipAnchor}>{trigger}</span>
+            </Tooltip>
             <DropdownMenuContent className={styles.content}>
                 <DropdownMenuCheckboxItem
                     checked={values.length === 0}
