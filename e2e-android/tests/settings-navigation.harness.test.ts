@@ -1,7 +1,12 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  settingsNavigationReady,
+  settingsPanelReady,
+  settingsScrollDelta,
+  settingsTriggerDecision,
   settingsViewLevel,
+  type SettingsTriggerSnapshot,
   type SettingsViewSnapshot,
 } from "../src/harness/settings.js";
 
@@ -13,7 +18,13 @@ describe("adaptive Preferences navigation", () => {
   }> = [
     {
       name: "compact category menu",
-      snapshot: { navigation: true, back: false, visiblePanels: [] },
+      snapshot: {
+        navigation: true,
+        back: false,
+        visiblePanels: [],
+        busyPanels: [],
+        scrollTop: 0,
+      },
       expected: "navigation",
     },
     {
@@ -22,6 +33,8 @@ describe("adaptive Preferences navigation", () => {
         navigation: false,
         back: true,
         visiblePanels: ["Storage & history"],
+        busyPanels: [],
+        scrollTop: 640,
       },
       expected: "detail",
     },
@@ -31,12 +44,20 @@ describe("adaptive Preferences navigation", () => {
         navigation: true,
         back: false,
         visiblePanels: ["Appearance"],
+        busyPanels: [],
+        scrollTop: 0,
       },
       expected: "navigation",
     },
     {
       name: "remount gap",
-      snapshot: { navigation: false, back: false, visiblePanels: [] },
+      snapshot: {
+        navigation: false,
+        back: false,
+        visiblePanels: [],
+        busyPanels: [],
+        scrollTop: null,
+      },
       expected: "neither",
     },
   ];
@@ -49,7 +70,83 @@ describe("adaptive Preferences navigation", () => {
 
   test("does not mistake a detached Back control for an open detail", () => {
     expect(
-      settingsViewLevel({ navigation: false, back: true, visiblePanels: [] }),
+      settingsViewLevel({
+        navigation: false,
+        back: true,
+        visiblePanels: [],
+        busyPanels: [],
+        scrollTop: 320,
+      }),
     ).toBe("neither");
+  });
+
+  test("requires compact Back to restore the actual viewport to the top", () => {
+    const restored: SettingsViewSnapshot = {
+      navigation: true,
+      back: false,
+      visiblePanels: [],
+      busyPanels: [],
+      scrollTop: 0,
+    };
+    expect(settingsNavigationReady(restored, true)).toBe(true);
+    expect(settingsNavigationReady({ ...restored, scrollTop: 480 }, true)).toBe(false);
+    expect(settingsNavigationReady({ ...restored, scrollTop: null }, true)).toBe(false);
+  });
+
+  test("waits for an opened panel to finish its asynchronous content", () => {
+    const opened: SettingsViewSnapshot = {
+      navigation: false,
+      back: true,
+      visiblePanels: ["Diagnostics"],
+      busyPanels: ["Diagnostics"],
+      scrollTop: 0,
+    };
+    expect(settingsPanelReady(opened, "Diagnostics")).toBe(false);
+    expect(settingsPanelReady({ ...opened, busyPanels: [] }, "Diagnostics")).toBe(true);
+    expect(settingsPanelReady({ ...opened, busyPanels: [] }, "About")).toBe(false);
+  });
+});
+
+describe("a Preferences category trigger", () => {
+  const actionable: SettingsTriggerSnapshot = {
+    exists: true,
+    disabled: false,
+    ariaDisabled: null,
+    width: 280,
+    height: 64,
+    top: 120,
+    viewportTop: 80,
+    viewportHeight: 640,
+    clipped: 0,
+    documentOverflow: 0,
+    centerInsideViewport: true,
+    centerHit: true,
+  };
+
+  test("taps an expanded tab whose centre owns the hit", () => {
+    expect(settingsTriggerDecision(actionable)).toBe("tap");
+  });
+
+  test("scrolls a lower compact category into the viewport before tapping", () => {
+    const lower = {
+      ...actionable,
+      top: 900,
+      viewportTop: 100,
+      viewportHeight: 600,
+      centerInsideViewport: false,
+      centerHit: false,
+    };
+    expect(settingsTriggerDecision(lower)).toBe("scroll");
+    expect(settingsScrollDelta(lower)).toBe(532);
+  });
+
+  test("does not tap through an element covering the category centre", () => {
+    expect(settingsTriggerDecision({ ...actionable, centerHit: false })).toBe("scroll");
+  });
+
+  test("does not treat absent or disabled controls as scroll work", () => {
+    expect(settingsTriggerDecision({ ...actionable, exists: false })).toBe("missing");
+    expect(settingsTriggerDecision({ ...actionable, disabled: true })).toBe("blocked");
+    expect(settingsTriggerDecision({ ...actionable, ariaDisabled: "true" })).toBe("blocked");
   });
 });
