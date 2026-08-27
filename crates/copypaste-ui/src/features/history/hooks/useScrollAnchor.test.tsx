@@ -15,15 +15,19 @@ function makeVirtualizer(
     element: HTMLDivElement,
     initialItems: readonly Item[],
     initialSize: number,
+    initialAnchorIds?: readonly (string | null)[],
+    initialTailClearance = 0,
 ) {
     let currentItems = initialItems;
     let size = initialSize;
-    let measurements = measure(currentItems, size);
+    let anchorIds = initialAnchorIds;
+    let tailClearance = initialTailClearance;
+    let measurements = measure(anchorIds ?? currentItems, size);
     const scrollToOffset = vi.fn((offset: number) => {
         element.scrollTop = offset;
     });
     const virtualizer = {
-        getTotalSize: () => currentItems.length * size,
+        getTotalSize: () => measurements.length * size,
         getVirtualItemForOffset: (offset: number) =>
             measurements[
                 Math.min(measurements.length - 1, Math.floor(offset / size))
@@ -37,18 +41,31 @@ function makeVirtualizer(
     return {
         virtualizer,
         scrollToOffset,
-        setGeometry(nextItems: readonly Item[], nextSize: number) {
+        getScrollHeight() {
+            return measurements.length * size + tailClearance;
+        },
+        setGeometry(
+            nextItems: readonly Item[],
+            nextSize: number,
+            nextAnchorIds?: readonly (string | null)[],
+            nextTailClearance = tailClearance,
+        ) {
             currentItems = nextItems;
             size = nextSize;
-            measurements = measure(currentItems, size);
+            anchorIds = nextAnchorIds;
+            tailClearance = nextTailClearance;
+            measurements = measure(anchorIds ?? currentItems, size);
         },
     };
 }
 
-function measure(list: readonly Item[], size: number) {
+function measure(list: readonly (Item | string | null)[], size: number) {
     return list.map((entry, index) => ({
         index,
-        key: entry.id,
+        key:
+            typeof entry === "object" && entry !== null
+                ? entry.id
+                : (entry ?? `group:${index}`),
         start: index * size,
         end: (index + 1) * size,
         size,
@@ -56,29 +73,97 @@ function measure(list: readonly Item[], size: number) {
     }));
 }
 
-function setup(list: readonly Item[], scrollTop: number) {
+function setup(
+    list: readonly Item[],
+    scrollTop: number,
+    {
+        anchorIds,
+        tailClearance = 0,
+        viewportHeight = VIEWPORT,
+    }: {
+        anchorIds?: readonly (string | null)[];
+        tailClearance?: number;
+        viewportHeight?: number;
+    } = {},
+) {
     const element = document.createElement("div");
-    Object.defineProperty(element, "clientHeight", { value: VIEWPORT });
+    Object.defineProperty(element, "clientHeight", { value: viewportHeight });
     element.scrollTop = scrollTop;
     document.body.appendChild(element);
 
     const scrollRef = createRef<HTMLDivElement>();
     (scrollRef as { current: HTMLDivElement }).current = element;
-    const fake = makeVirtualizer(element, list, ROW);
+    const fake = makeVirtualizer(
+        element,
+        list,
+        ROW,
+        anchorIds,
+        tailClearance,
+    );
+    Object.defineProperty(element, "scrollHeight", {
+        configurable: true,
+        get: () => fake.getScrollHeight(),
+    });
     const rendered = renderHook(
-        ({ current, size }: { current: readonly Item[]; size: number }) => {
-            fake.setGeometry(current, size);
+        ({
+            current,
+            size,
+            currentAnchorIds,
+            currentTailClearance,
+        }: {
+            current: readonly Item[];
+            size: number;
+            currentAnchorIds?: readonly (string | null)[];
+            currentTailClearance?: number;
+        }) => {
+            fake.setGeometry(
+                current,
+                size,
+                currentAnchorIds,
+                currentTailClearance,
+            );
             return useScrollAnchor({
                 scrollRef,
                 virtualizer: fake.virtualizer,
                 items: current,
+                anchorIds: currentAnchorIds,
                 previewLines: 2,
             });
         },
-        { initialProps: { current: list, size: ROW } },
+        {
+            initialProps: {
+                current: list,
+                size: ROW,
+                currentAnchorIds: anchorIds,
+                currentTailClearance: undefined as number | undefined,
+            },
+        },
     );
 
-    return { element, fake, ...rendered };
+    return {
+        element,
+        fake,
+        result: rendered.result,
+        unmount: rendered.unmount,
+        rerender({
+            current,
+            size,
+            currentAnchorIds,
+            currentTailClearance,
+        }: {
+            current: readonly Item[];
+            size: number;
+            currentAnchorIds?: readonly (string | null)[];
+            currentTailClearance?: number;
+        }) {
+            rendered.rerender({
+                current,
+                size,
+                currentAnchorIds,
+                currentTailClearance,
+            });
+        },
+    };
 }
 
 describe("useScrollAnchor", () => {
@@ -150,5 +235,69 @@ describe("useScrollAnchor", () => {
 
         expect(fake.scrollToOffset).toHaveBeenCalled();
         expect(element.scrollTop).toBe(4 * ROW - VIEWPORT);
+    });
+
+    it("uses the next surviving item when the anchored item is deleted", () => {
+        const list = items(20);
+        const { result, rerender, fake } = setup(list, ROW * 5 + 17);
+        result.current.captureAnchor();
+
+        const withoutAnchor = list.filter((_, index) => index !== 5);
+        rerender({ current: withoutAnchor, size: ROW });
+        rerender({ current: withoutAnchor, size: ROW + 10 });
+
+        expect(fake.scrollToOffset).toHaveBeenLastCalledWith(
+            (ROW + 10) * 5 + 17,
+            expect.objectContaining({ align: "start", behavior: "auto" }),
+        );
+    });
+
+    it("uses the previous surviving item when no later item survives", () => {
+        const list = items(20);
+        const { result, rerender, fake } = setup(list, ROW * 15 + 17, {
+            viewportHeight: 80,
+        });
+        result.current.captureAnchor();
+
+        rerender({ current: list.slice(0, 15), size: ROW });
+
+        expect(fake.scrollToOffset).toHaveBeenLastCalledWith(
+            ROW * 14 + 17,
+            expect.objectContaining({ align: "start", behavior: "auto" }),
+        );
+    });
+
+    it("uses prior grouped-row distance to select the nearest survivor", () => {
+        const list = items(3);
+        const ids = [null, list[0]!.id, list[1]!.id, null, list[2]!.id];
+        const { result, rerender, fake } = setup(list, ROW * 2 + 17, {
+            anchorIds: ids,
+            viewportHeight: 80,
+        });
+        result.current.captureAnchor();
+
+        rerender({
+            current: [list[0]!, list[2]!],
+            size: ROW,
+            currentAnchorIds: [null, list[0]!.id, null, list[2]!.id],
+        });
+
+        expect(fake.scrollToOffset).toHaveBeenLastCalledWith(
+            ROW + 17,
+            expect.objectContaining({ align: "start", behavior: "auto" }),
+        );
+    });
+
+    it("clamps when the load-more tail clearance is removed", () => {
+        const list = items(5);
+        const { element, result, rerender, fake } = setup(list, 250, {
+            tailClearance: 120,
+        });
+        result.current.captureAnchor();
+
+        rerender({ current: list, size: ROW, currentTailClearance: 0 });
+
+        expect(fake.scrollToOffset).toHaveBeenCalled();
+        expect(element.scrollTop).toBe(5 * ROW - VIEWPORT);
     });
 });
