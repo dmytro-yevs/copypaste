@@ -278,7 +278,10 @@ describe("preview scenario service", () => {
     const pendingHistory = intercept("list");
     store.getState().setResource("history", "empty");
 
-    await expect(intercept("status")).resolves.toMatchObject({ handled: true });
+    await expect(intercept("status")).resolves.toEqual({
+      handled: true,
+      value: expect.objectContaining({ item_count: 0 }),
+    });
     await expect(pendingHistory).resolves.toEqual({
       handled: true,
       value: {

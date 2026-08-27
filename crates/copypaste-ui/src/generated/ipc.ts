@@ -10,6 +10,8 @@ export type ConfigData = { private_mode: boolean, poll_interval_ms: number, hist
 
 export type ConfigPatch = { private_mode?: boolean | null, poll_interval_ms?: number | null, history_limit?: number | null, storage_quota_bytes?: number | null, retention_days?: number | null, dedup_window_secs?: number | null, max_text_size_bytes?: number | null, max_image_size_bytes?: number | null, max_file_size_bytes?: number | null, max_decoded_image_mb?: number | null, sensitive_ttl_secs?: number | null, excluded_app_bundle_ids?: Array<string> | null, lan_visibility?: boolean | null, sync_enabled?: boolean | null, notify_on_copy?: boolean | null, sound_on_copy?: boolean | null, };
 
+export type ContentClass = "text" | "image" | "file" | "other";
+
 export type CaptureRung = "desktop" | "in_app" | "shizuku";
 
 export type CaptureSource = "in_app" | "share" | "process_text" | "tile" | "background";
@@ -98,7 +100,7 @@ export type SensitiveSpan = { start: number, end: number, };
 
 export type SensitiveFinding = { label: string, spans: Array<SensitiveSpan>, spans_truncated: boolean, redacted_preview: string, };
 
-export type Item = { id: string, content: string | null, content_type: string, created_at: number, pinned: boolean, is_sensitive: boolean, sensitive_finding: SensitiveFinding | null, origin_device_id: string, origin_device_name: string | null, source_app_bundle_id: string | null, source_app_name: string | null, too_large_to_sync: boolean, truncated: boolean, };
+export type Item = { id: string, content: string | null, content_type: string, content_class: ContentClass, created_at: number, pinned: boolean, is_sensitive: boolean, sensitive_finding: SensitiveFinding | null, origin_device_id: string, origin_device_name: string | null, source_app_bundle_id: string | null, source_app_name: string | null, too_large_to_sync: boolean, truncated: boolean, };
 
 export type ItemPage = { items: Array<Item>, total: number, skipped_undecryptable: number, next_cursor: string | null, };
 
