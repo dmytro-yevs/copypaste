@@ -16,6 +16,10 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { startApp, type App } from "../src/harness/app.js";
 import { ROW, count, rowBoxes, waitForRows } from "../src/harness/ui.js";
 
+const SELECTION_TOOLBAR =
+  '[role="toolbar"][aria-label="Selection actions"]';
+const ROW_SELECTION = `${ROW} [role="checkbox"]`;
+
 let app: App;
 
 beforeAll(async () => {
@@ -37,19 +41,28 @@ afterAll(async () => {
 /** Every control the toolbar offers, sized as the engine laid it out. */
 async function controlBoxes(browser: App["browser"]) {
   return (await browser.execute(function () {
-    const labels = [
-      "Search clipboard history",
-      "Filter by kind",
-      "Sort order",
-      "Select multiple items",
+    const controls = [
+      {
+        label: "Search clipboard history, default",
+        selector:
+          '[role="searchbox"][aria-label="Search clipboard history, default"]',
+      },
+      {
+        label: "Filter by kind, default: All kinds",
+        selector:
+          'button[aria-label="Filter by kind, default: All kinds"]',
+      },
+      {
+        label: "Sort order, default: Newest first",
+        selector:
+          '[role="combobox"][aria-label="Sort order, default: Newest first"]',
+      },
     ];
-    return labels.map(function (label) {
-      const el = document.querySelector(
-        '[aria-label="' + label + '"]',
-      ) as HTMLElement | null;
+    return controls.map(function (control) {
+      const el = document.querySelector(control.selector) as HTMLElement | null;
       const rect = el?.getBoundingClientRect();
       return {
-        label,
+        label: control.label,
         present: Boolean(el),
         width: rect ? rect.width : 0,
         height: rect ? rect.height : 0,
@@ -75,14 +88,16 @@ describe("the toolbar", () => {
 
     await app.browser.executeAsync(function (done: () => void) {
       const trigger = document.querySelector(
-        '[aria-label="Filter by kind"]',
+        'button[aria-label="Filter by kind, default: All kinds"]',
       ) as HTMLButtonElement | null;
       trigger?.click();
       requestAnimationFrame(() => {
         (
-          document.querySelector(
-            '[role="option"][data-value="url"]',
-          ) as HTMLElement | null
+          Array.from(
+            document.querySelectorAll('[role="menuitemcheckbox"]'),
+          ).find((item) => item.textContent?.trim() === "Links") as
+            | HTMLElement
+            | undefined
         )?.click();
         done();
       });
@@ -96,14 +111,16 @@ describe("the toolbar", () => {
     // Put it back for the tests after this one.
     await app.browser.executeAsync(function (done: () => void) {
       const trigger = document.querySelector(
-        '[aria-label="Filter by kind"]',
+        'button[aria-label="Filter by kind, default: All kinds"]',
       ) as HTMLButtonElement | null;
       trigger?.click();
       requestAnimationFrame(() => {
         (
-          document.querySelector(
-            '[role="option"][data-value="all"]',
-          ) as HTMLElement | null
+          Array.from(
+            document.querySelectorAll('[role="menuitemcheckbox"]'),
+          ).find((item) => item.textContent?.trim() === "All kinds") as
+            | HTMLElement
+            | undefined
         )?.click();
         done();
       });
@@ -116,16 +133,18 @@ describe("the toolbar", () => {
 
 describe("selection mode", () => {
   test("shows checkboxes and a bulk bar, and neither overlaps the list", async () => {
-    await app.browser.$('[aria-label="Select multiple items"]').click();
+    const selectionEntry = await app.browser.$(ROW_SELECTION);
+    await selectionEntry.moveTo();
+    await selectionEntry.click();
 
     await app.browser.waitUntil(
-      async () => (await count(app.browser, '[role="checkbox"]')) > 0,
-      { timeout: 5_000, timeoutMsg: "no checkboxes appeared" },
+      async () => (await app.browser.$(SELECTION_TOOLBAR)).isDisplayed(),
+      { timeout: 5_000, timeoutMsg: "selection actions never appeared" },
     );
 
     const layout = (await app.browser.execute(function (rowSelector: string) {
       const bar = document.querySelector(
-        '[role="region"][aria-label="Selection actions"]',
+        '[role="toolbar"][aria-label="Selection actions"]',
       ) as HTMLElement | null;
       const firstRow = document.querySelector(rowSelector) as HTMLElement | null;
       const box = document.querySelector('[role="checkbox"]') as HTMLElement | null;
@@ -152,11 +171,12 @@ describe("selection mode", () => {
     expect(layout.checkbox!.width).toBeGreaterThan(8);
   });
 
-  test("leaves the mode again without stranding the checkboxes", async () => {
-    await app.browser.$('[aria-label="Leave selection mode"]').click();
+  test("leaves selection mode with row selection entries available", async () => {
+    await app.browser.$(`${SELECTION_TOOLBAR} [aria-label="Done"]`).click();
     await app.browser.waitUntil(
-      async () => (await count(app.browser, '[role="checkbox"]')) === 0,
-      { timeout: 5_000, timeoutMsg: "the checkboxes stayed after leaving" },
+      async () => !(await app.browser.$(SELECTION_TOOLBAR)).isExisting(),
+      { timeout: 5_000, timeoutMsg: "selection mode stayed active after Done" },
     );
+    expect(await count(app.browser, ROW_SELECTION)).toBe(4);
   });
 });
