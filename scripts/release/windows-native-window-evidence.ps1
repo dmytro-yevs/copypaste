@@ -42,6 +42,41 @@ function Test-WindowCaptureReady($State) {
     return $State.foreground -and $State.visible -and -not $State.minimized -and $State.capture_allowed
 }
 
+function Get-WindowActivationPlan($State) {
+    return [ordered]@{
+        restore = [bool]$State.minimized
+        activate = -not [bool]$State.foreground
+    }
+}
+
+function New-WindowCaptureObservation([string]$Phase, $State) {
+    return [ordered]@{
+        phase = $Phase
+        handle = [int64]$State.handle
+        foreground = [bool]$State.foreground
+        visible = [bool]$State.visible
+        minimized = [bool]$State.minimized
+        capture_allowed = [bool]$State.capture_allowed
+        display_affinity = [int64]$State.display_affinity
+    }
+}
+
+function Write-WindowCaptureObservation(
+    [Diagnostics.Process]$App,
+    [string]$Path,
+    [string]$Phase,
+    $State = $null
+) {
+    if (-not $Path) { return }
+    $App.Refresh()
+    if ($null -eq $State) {
+        $State = Get-WindowCaptureState $App.MainWindowHandle
+    }
+    $record = New-WindowCaptureObservation $Phase $State
+    $record["utc"] = [DateTime]::UtcNow.ToString("o")
+    $record | ConvertTo-Json -Compress | Add-Content -LiteralPath $Path -Encoding utf8
+}
+
 function Get-ClientCaptureBounds([IntPtr]$Handle) {
     [int]$x = 0
     [int]$y = 0
@@ -61,9 +96,18 @@ function Wait-ForegroundWindow([Diagnostics.Process]$App) {
         if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
         $handle = $App.MainWindowHandle
         if ($handle -eq [IntPtr]::Zero) { return New-ProbeNotReady "the app has published no native window handle" }
-        [CopyPasteNativeWindowEvidence]::ShowWindowAsync($handle, 9) | Out-Null
-        [CopyPasteNativeWindowEvidence]::SetForegroundWindow($handle) | Out-Null
         $state = Get-WindowCaptureState $handle
+        $plan = Get-WindowActivationPlan $state
+        if ($plan.restore) {
+            # Run 33124469581 lost WDA_NONE while probing a settled HWND.
+            [CopyPasteNativeWindowEvidence]::ShowWindowAsync($handle, 9) | Out-Null
+        }
+        if ($plan.activate) {
+            [CopyPasteNativeWindowEvidence]::SetForegroundWindow($handle) | Out-Null
+        }
+        if ($plan.restore -or $plan.activate) {
+            $state = Get-WindowCaptureState $handle
+        }
         if (Test-WindowCaptureReady $state) { return New-ProbeReady $state }
         return New-ProbeNotReady "foreground=$($state.foreground) visible=$($state.visible) minimized=$($state.minimized) display affinity=$($state.display_affinity)"
     } {
@@ -74,7 +118,13 @@ function Wait-ForegroundWindow([Diagnostics.Process]$App) {
     }
 }
 
-function Save-WindowImage([Diagnostics.Process]$App, [string]$Path) {
+function Save-WindowImage(
+    [Diagnostics.Process]$App,
+    [string]$Path,
+    [string]$CaptureTracePath = "",
+    [string]$ObservationPhase = "capture"
+) {
+    Write-WindowCaptureObservation $App $CaptureTracePath "$ObservationPhase/pre-activation"
     $captureState = Wait-ForegroundWindow $App
     $handle = [IntPtr]$captureState.handle
     $bounds = Get-ClientCaptureBounds $handle
@@ -83,6 +133,7 @@ function Save-WindowImage([Diagnostics.Process]$App, [string]$Path) {
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
         $immediateState = Get-WindowCaptureState $handle
+        Write-WindowCaptureObservation $App $CaptureTracePath "$ObservationPhase/pre-capture" $immediateState
         Assert-True (Test-WindowCaptureReady $immediateState) "CopyPaste lost foreground immediately before capture"
         $graphics.CopyFromScreen($bounds.x, $bounds.y, 0, 0, $bitmap.Size)
         $bitmap.Save($Path, [Drawing.Imaging.ImageFormat]::Png)
