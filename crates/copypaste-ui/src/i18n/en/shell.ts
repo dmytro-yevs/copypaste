@@ -19,6 +19,19 @@ export const shell = {
 
   service: {
     diagnostics: "Open diagnostics",
+    checking: {
+      title: "Checking the clipboard service…",
+      body: "CopyPaste is checking whether the background service is available.",
+    },
+    running: {
+      title: "The clipboard service is running",
+      refreshing: "CopyPaste is refreshing your clipboard history.",
+      retry: "The service is available, but clipboard history still hasn't loaded. Try again or open diagnostics.",
+    },
+    unhealthy: {
+      title: "The clipboard service isn't responding correctly",
+      body: "CopyPaste found the service, but couldn't read its status. Try again or open diagnostics.",
+    },
     outOfDate: {
       title: "The background service is out of date",
       body: "The clipboard service has a different version. Quit and reopen CopyPaste to update it.",
