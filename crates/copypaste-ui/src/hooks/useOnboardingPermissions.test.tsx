@@ -4,13 +4,21 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useOnboardingPermissions } from "./useOnboardingPermissions";
+import {
+  ONBOARDING_PERMISSIONS_KEY,
+  useOnboardingPermissions,
+  usePermissionRequest,
+} from "./useOnboardingPermissions";
 
 const mocks = vi.hoisted(() => ({
+  permissionOpenSettings: vi.fn(),
+  permissionRequest: vi.fn(),
   permissionSnapshot: vi.fn(),
 }));
 
 vi.mock("@/lib/ipc", () => ({
+  permissionOpenSettings: mocks.permissionOpenSettings,
+  permissionRequest: mocks.permissionRequest,
   permissionSnapshot: mocks.permissionSnapshot,
 }));
 
@@ -29,11 +37,34 @@ const granted = {
   clipboardStatus: "not_required",
 } as const;
 
+const prompt = {
+  ...granted,
+  notifications: { ...granted.notifications, status: "prompt" },
+} as const;
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((onResolve) => {
+    resolve = onResolve;
+  });
+  return { promise, resolve };
+}
+
+let client: QueryClient;
+
 function wrapper({ children }: { children: ReactNode }) {
-  const client = new QueryClient({
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+function makeClient(): QueryClient {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
 function StartupProbe() {
@@ -47,6 +78,7 @@ function StartupProbe() {
     <main>
       <h1>App shell</h1>
       <output>{state}</output>
+      <span>{permissions.isFetching ? "fetching" : "idle"}</span>
       <span>{permissions.data?.notifications.status ?? "no-snapshot"}</span>
       <button type="button" onClick={() => void permissions.refetch()}>
         Refresh
@@ -55,7 +87,27 @@ function StartupProbe() {
   );
 }
 
+function MutationRaceProbe() {
+  const permissions = useOnboardingPermissions();
+  const request = usePermissionRequest();
+  return (
+    <main>
+      <output>{permissions.data?.notifications.status ?? "no-snapshot"}</output>
+      <span>{permissions.isFetching ? "fetching" : "idle"}</span>
+      <button type="button" onClick={() => request.mutate("notifications")}>
+        Request permission
+      </button>
+      <button type="button" onClick={() => void permissions.refetch()}>
+        Refresh
+      </button>
+    </main>
+  );
+}
+
 beforeEach(() => {
+  client = makeClient();
+  mocks.permissionOpenSettings.mockReset();
+  mocks.permissionRequest.mockReset();
   mocks.permissionSnapshot.mockReset();
 });
 
@@ -68,6 +120,27 @@ describe("onboarding permission hydration", () => {
     expect(screen.getByRole("heading", { name: "App shell" })).toBeTruthy();
     expect(screen.getByText("pending")).toBeTruthy();
     expect(screen.getByText("no-snapshot")).toBeTruthy();
+  });
+
+  it("aborts an unmounted snapshot and ignores its late result", async () => {
+    const late = deferred<typeof granted>();
+    let signal: AbortSignal | undefined;
+    mocks.permissionSnapshot.mockImplementation((options) => {
+      signal = options.signal;
+      return late.promise;
+    });
+
+    const mounted = render(<StartupProbe />, { wrapper });
+    await waitFor(() => expect(mocks.permissionSnapshot).toHaveBeenCalledOnce());
+    expect(signal?.aborted).toBe(false);
+
+    mounted.unmount();
+    expect(signal?.aborted).toBe(true);
+    late.resolve(granted);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(client.getQueryData(ONBOARDING_PERMISSIONS_KEY)).toBeUndefined();
   });
 
   it("recovers from a failed snapshot on a successful refresh", async () => {
@@ -96,5 +169,36 @@ describe("onboarding permission hydration", () => {
 
     await waitFor(() => expect(screen.getByText("error")).toBeTruthy());
     expect(screen.getByText("granted")).toBeTruthy();
+  });
+
+  it("fences a refresh started while a permission mutation is pending", async () => {
+    const user = userEvent.setup();
+    const lateSnapshot = deferred<typeof prompt>();
+    const mutation = deferred<typeof granted>();
+    let refreshSignal: AbortSignal | undefined;
+    mocks.permissionSnapshot
+      .mockResolvedValueOnce(prompt)
+      .mockImplementationOnce((options) => {
+        refreshSignal = options.signal;
+        return lateSnapshot.promise;
+      });
+    mocks.permissionRequest.mockReturnValue(mutation.promise);
+
+    render(<MutationRaceProbe />, { wrapper });
+    await waitFor(() => expect(screen.getByText("prompt")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Request permission" }));
+    await waitFor(() => expect(mocks.permissionRequest).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByText("fetching")).toBeTruthy());
+
+    mutation.resolve(granted);
+    await waitFor(() => expect(screen.getByText("granted")).toBeTruthy());
+    expect(refreshSignal?.aborted).toBe(true);
+    lateSnapshot.resolve(prompt);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.getByText("granted")).toBeTruthy();
+    expect(client.getQueryData(ONBOARDING_PERMISSIONS_KEY)).toEqual(granted);
   });
 });

@@ -15,7 +15,7 @@ export const ONBOARDING_PERMISSIONS_KEY = ["onboarding-permissions"] as const;
 export function useOnboardingPermissions() {
   return useQuery<OnboardingPermissions>({
     queryKey: ONBOARDING_PERMISSIONS_KEY,
-    queryFn: permissionSnapshot,
+    queryFn: ({ signal }) => permissionSnapshot({ signal }),
     enabled: hasNativeBridge() || isAndroidPlatform(),
     retry: false,
   });
@@ -25,7 +25,19 @@ export function usePermissionRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: OnboardingPermissionId) => permissionRequest(id),
-    onSuccess: (fresh) => qc.setQueryData(ONBOARDING_PERMISSIONS_KEY, fresh),
+    onMutate: async () => {
+      await qc.cancelQueries({
+        queryKey: ONBOARDING_PERMISSIONS_KEY,
+        exact: true,
+      });
+    },
+    onSuccess: async (fresh) => {
+      await qc.cancelQueries({
+        queryKey: ONBOARDING_PERMISSIONS_KEY,
+        exact: true,
+      });
+      qc.setQueryData(ONBOARDING_PERMISSIONS_KEY, fresh);
+    },
   });
 }
 
@@ -33,6 +45,18 @@ export function usePermissionOpenSettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: OnboardingPermissionId) => permissionOpenSettings(id),
-    onSuccess: (fresh) => qc.setQueryData(ONBOARDING_PERMISSIONS_KEY, fresh),
+    onMutate: async () => {
+      await qc.cancelQueries({
+        queryKey: ONBOARDING_PERMISSIONS_KEY,
+        exact: true,
+      });
+    },
+    onSuccess: async (fresh) => {
+      await qc.cancelQueries({
+        queryKey: ONBOARDING_PERMISSIONS_KEY,
+        exact: true,
+      });
+      qc.setQueryData(ONBOARDING_PERMISSIONS_KEY, fresh);
+    },
   });
 }
