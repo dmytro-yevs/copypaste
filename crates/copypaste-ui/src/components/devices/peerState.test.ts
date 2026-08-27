@@ -114,7 +114,7 @@ describe("a failure this screen watched happen", () => {
         },
         NOW,
       ),
-    ).toBe("away");
+    ).toBe("failing");
     expect(
       peerState(
         offlinePeer,

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
+import { observedPresence } from "@/features/devices/model/peerState";
 import type {
   CaptureSnapshot,
   Item,
@@ -82,15 +83,32 @@ export function status(over: Partial<StatusData> = {}): StatusData {
   };
 }
 
-export function peer(over: Partial<PeerInfo> = {}): PeerInfo {
-  return {
+export function peer(over: Partial<PeerInfo> = {}, now = Date.now()): PeerInfo {
+  const state = over.online === false ? "offline" : "online";
+  const fixture: PeerInfo = {
     pairing_id: "pair-1",
     name: "Kitchen Mac",
     last_addr: "192.168.1.24:7420",
     last_seen_ms: 1_700_000_000_000,
-    online: true,
+    online: false,
+    details: {
+      profile: null,
+      endpoint: null,
+      latency: null,
+      presence: {
+        state,
+        last_seen_ms: 1_700_000_000_000,
+        provenance: "observed",
+        trust: "local",
+        observed_at_ms: 0,
+        fresh_until_ms: Number.MAX_SAFE_INTEGER,
+      },
+      public_ip: { availability: "unavailable" },
+      geo: { availability: "unavailable" },
+    },
     ...over,
   };
+  return { ...fixture, online: observedPresence(fixture.details?.presence, now) === "online" };
 }
 
 export function probe(over: Partial<ShizukuProbe> = {}): ShizukuProbe {
