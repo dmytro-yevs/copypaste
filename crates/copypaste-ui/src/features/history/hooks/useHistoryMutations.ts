@@ -78,9 +78,9 @@ export function useBulkPin() {
   return useMutation({
     mutationFn: ({ items, pinned }: { items: readonly Item[]; pinned: boolean }) =>
       runBulk(items, (item) => setPinned(item.id, pinned)),
-    onSuccess: async (outcome, { pinned }) => {
+    onSuccess: (outcome, { pinned }) => {
       report(pinned ? "pinned" : "unpinned", outcome);
-      await invalidateHistoryQueries(qc);
+      void invalidateHistoryQueries(qc);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });

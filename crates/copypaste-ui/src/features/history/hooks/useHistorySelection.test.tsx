@@ -25,7 +25,7 @@ describe("useHistorySelection", () => {
     bulkDelete.mutateAsync.mockReset();
   });
 
-  it("clears a successful pin only after the reordered history settles", async () => {
+  it("clears a successful pin when the backend outcome arrives", async () => {
     const visible = items(2);
     let resolvePin!: (outcome: BulkOutcome) => void;
     bulkPin.mutateAsync.mockImplementation(
@@ -34,10 +34,7 @@ describe("useHistorySelection", () => {
           resolvePin = resolve;
         }),
     );
-    const { result, rerender } = renderHook(
-      ({ shown }) => useHistorySelection(shown),
-      { initialProps: { shown: visible } },
-    );
+    const { result } = renderHook(() => useHistorySelection(visible));
 
     act(() => {
       result.current.selection.toggle(visible[0]!.id);
@@ -50,14 +47,6 @@ describe("useHistorySelection", () => {
       pinned: true,
     });
     expect(result.current.selection.active).toBe(true);
-
-    rerender({
-      shown: visible.map((item) => ({ ...item, pinned: true })).reverse(),
-    });
-    expect(result.current.selection.items.map((item) => item.id)).toEqual([
-      visible[1]!.id,
-      visible[0]!.id,
-    ]);
 
     act(() => resolvePin({ done: 2, failedIds: [] }));
     await waitFor(() => expect(result.current.selection.active).toBe(false));

@@ -214,9 +214,10 @@ describe("the bulk bar", () => {
       },
     );
 
-    // Bulk actions release selection on success. The pin write also moves the
-    // rows into the pinned section, so the next selection must target their
-    // stable ids rather than assuming the old row positions.
+    // Bulk actions release selection when every write succeeds. The refresh
+    // that moves rows into the pinned section must not hold that UI state
+    // hostage, so the next selection targets stable ids after both claims
+    // have independently become true.
     await app.browser.waitUntil(
       async () => !(await app.browser.$(BULK_BAR)).isExisting(),
       {
