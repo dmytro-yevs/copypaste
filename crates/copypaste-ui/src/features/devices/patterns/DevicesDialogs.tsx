@@ -68,8 +68,8 @@ export function DevicesDialogs({
             <AlertDialogCancel disabled={unpairPending}>{t("common.cancel")}</AlertDialogCancel>
             <Button
               disabled={unpairPending}
-              aria-busy={unpairPending || undefined}
-              tone="danger"
+              variant="danger"
+              state={unpairPending ? "loading" : "normal"}
               onClick={() => {
                 if (unpairPeer) void onUnpair(unpairPeer);
               }}
