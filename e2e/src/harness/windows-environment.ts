@@ -25,22 +25,12 @@ export interface WindowsEnvironmentProbeOptions {
   powershell?: typeof powershell;
   driver?: string;
   driverVersion?: () => Promise<string>;
+  webview2Version?: string;
 }
 
 const VERSION_TIMEOUT_MS = 15_000;
 
-const VERSION_SCRIPT = String.raw`
-$product = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-$keys = @(
-  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$product"
-  "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$product"
-)
-$versions = @($keys | ForEach-Object {
-  (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
-} | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Sort-Object -Unique)
-if ($versions.Count -ne 1) { throw "expected one installed WebView2 Runtime version" }
-$runtime = [string]$versions[0]
-
+const EDGE_VERSION_SCRIPT = String.raw`
 $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
 $edgePaths = @(
   (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe")
@@ -51,8 +41,7 @@ $edgeVersions = @($edgePaths | ForEach-Object {
   (Get-Item -LiteralPath $_).VersionInfo.ProductVersion
 } | Where-Object { $_ } | Sort-Object -Unique)
 if ($edgeVersions.Count -ne 1) { throw "expected one installed Microsoft Edge version" }
-
-Write-Output "$($edgeVersions[0])|$runtime"
+Write-Output $edgeVersions[0]
 `;
 
 export function parseVersion(output: string, what: string): string {
@@ -64,15 +53,15 @@ export function parseVersion(output: string, what: string): string {
 export function assertMajorCompatibility(
   versions: WindowsEnvironmentVersions,
 ): void {
-  const majors = Object.fromEntries(
-    Object.entries(versions).map(([name, version]) => [name, major(version)]),
+  const builds = Object.fromEntries(
+    Object.entries(versions).map(([name, version]) => [name, firstThree(version)]),
   );
-  const distinct = new Set(Object.values(majors));
+  const distinct = new Set(Object.values(builds));
   if (distinct.size !== 1) {
     throw new Error(
-      `Edge/WebView2/EdgeDriver major versions are incompatible ` +
-        `(Edge ${majors.edge}, WebView2 ${majors.webview2}, ` +
-        `EdgeDriver ${majors.edgeDriver})`,
+      `Edge/WebView2/EdgeDriver first-three-part versions are incompatible ` +
+        `(Edge ${builds.edge}, WebView2 ${builds.webview2}, ` +
+        `EdgeDriver ${builds.edgeDriver})`,
     );
   }
 }
@@ -82,11 +71,16 @@ export async function probeWindowsEnvironment(
 ): Promise<WindowsEnvironmentVersions> {
   const runPowerShell = options.powershell ?? powershell;
   const driver = options.driver ?? NATIVE_DRIVER;
+  const webview2Version =
+    options.webview2Version ?? process.env.COPYPASTE_WEBVIEW2_RUNTIME_VERSION;
   try {
-    const [edgeAndRuntime, driverResult] = await Promise.all([
+    if (!webview2Version) {
+      throw new Error("COPYPASTE_WEBVIEW2_RUNTIME_VERSION is unset");
+    }
+    const [edgeOutput, driverResult] = await Promise.all([
       runPowerShell(
-        VERSION_SCRIPT,
-        "the Edge/WebView2 version probe",
+        EDGE_VERSION_SCRIPT,
+        "the Microsoft Edge version probe",
         VERSION_TIMEOUT_MS,
       ),
       options.driverVersion
@@ -95,13 +89,9 @@ export async function probeWindowsEnvironment(
             (result) => result.stdout,
           ),
     ]);
-    const [edgeOutput, webview2Output] = edgeAndRuntime.trim().split("|");
-    if (!edgeOutput || !webview2Output) {
-      throw new Error("the Edge/WebView2 version probe returned incomplete output");
-    }
     const versions = {
       edge: parseVersion(edgeOutput, "Microsoft Edge"),
-      webview2: parseVersion(webview2Output, "WebView2 Runtime"),
+      webview2: parseVersion(webview2Version, "WebView2 Runtime"),
       edgeDriver: parseVersion(driverResult, "Edge WebDriver"),
     };
     assertMajorCompatibility(versions);
@@ -121,7 +111,7 @@ export async function probeWindowsEnvironment(
     );
     throw new WindowsEnvironmentProbeFailure(
       "Windows environment probe failed before the native E2E suite; " +
-        "Edge, WebView2 Runtime, and EdgeDriver must be installed and major-compatible.",
+        "Edge, WebView2 Runtime, and EdgeDriver must be installed and first-three-part-compatible.",
       { cause },
     );
   }
@@ -151,10 +141,12 @@ export async function probeTauriSession<T extends { stop(): Promise<void> }>(
   }
 }
 
-function major(version: string): number {
-  const value = Number.parseInt(version.split(".")[0] ?? "", 10);
-  if (!Number.isSafeInteger(value)) throw new Error(`invalid version ${version}`);
-  return value;
+function firstThree(version: string): string {
+  const parts = version.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) {
+    throw new Error(`invalid version ${version}`);
+  }
+  return parts.slice(0, 3).join(".");
 }
 
 function describe(cause: unknown): string {
