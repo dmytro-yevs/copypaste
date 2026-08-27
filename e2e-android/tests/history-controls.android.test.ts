@@ -13,12 +13,16 @@ import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { rowBoxes } from "../src/harness/list.js";
 import {
+  ROW_SELECTION,
   SEARCH,
+  SEARCH_DEFAULT_LABEL,
   clearField,
   count,
   gotoView,
+  openHistorySearch,
   reloadHistoryWith,
   tapButton,
+  tapElement,
   waitFor,
   waitForRows,
 } from "../src/harness/ui.js";
@@ -26,11 +30,9 @@ import {
 /** Every control the toolbar offers. Named by what a screen reader reads, so
  *  a control that loses its name fails here too. */
 const CONTROLS = [
-  "Search clipboard history",
-  "Filter by kind",
-  "Sort order",
-  "Select multiple items",
-  "Clear clipboard history",
+  SEARCH_DEFAULT_LABEL,
+  "Filter by kind, default: All kinds",
+  "Sort order, default: Newest first",
 ];
 
 let app: AndroidApp;
@@ -82,21 +84,11 @@ async function controlBoxes() {
 
 /** Use the authored listbox rather than reaching through the control. */
 async function chooseKind(value: string): Promise<void> {
-  await app.withPage((page) =>
-    page.evaluate(async (kind: string) => {
-      const trigger = document.querySelector(
-        '[aria-label="Filter by kind"]',
-      ) as HTMLButtonElement | null;
-      trigger?.click();
-      await new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve)),
-      );
-      (
-        document.querySelector(
-          `[role="option"][data-value="${kind}"]`,
-        ) as HTMLElement | null
-      )?.click();
-    }, value),
+  await tapElement(app, 'button[aria-label^="Filter by kind,"]');
+  await tapElement(
+    app,
+    '[role="menuitemcheckbox"]',
+    value === "url" ? "Links" : "All kinds",
   );
 }
 
@@ -117,7 +109,7 @@ describe("the toolbar", () => {
   });
 
   test("search replaces the control row at full width", async () => {
-    await tapButton(app, "Search clipboard history");
+    await openHistorySearch(app);
     const state = await app.withPage((page) =>
       page.evaluate((searchSelector) => {
         const toolbar = document.querySelector(
@@ -131,7 +123,7 @@ describe("the toolbar", () => {
           searchWidth: searchRect.width,
           toolbarWidth: toolbarRect.width,
           filterPresent: Boolean(
-            document.querySelector('[aria-label="Filter by kind"]'),
+            document.querySelector('[aria-label^="Filter by kind,"]'),
           ),
         };
       }, SEARCH),
@@ -174,18 +166,29 @@ describe("the toolbar", () => {
 
 describe("selection mode", () => {
   test("leaves the mode again without stranding the checkboxes", async () => {
-    await tapButton(app, "Select multiple items");
+    const before = await count(app, ROW_SELECTION);
+    expect(before).toBeGreaterThan(0);
+    await tapElement(app, ROW_SELECTION);
     await waitFor(
-      async () => (await count(app, '[role="checkbox"]')) > 0,
-      "no checkboxes appeared",
+      async () =>
+        (await count(
+          app,
+          '[role="toolbar"][aria-label="Selection actions"]',
+        )) === 1,
+      "selection actions never appeared",
     );
 
     await tapButton(app, "Done", {
-      within: '[role="region"][aria-label="Selection actions"]',
+      within: '[role="toolbar"][aria-label="Selection actions"]',
     });
     await waitFor(
-      async () => (await count(app, '[role="checkbox"]')) === 0,
-      "the checkboxes stayed after leaving",
+      async () =>
+        (await count(
+          app,
+          '[role="toolbar"][aria-label="Selection actions"]',
+        )) === 0,
+      "selection mode stayed active after Done",
     );
+    expect(await count(app, ROW_SELECTION)).toBe(before);
   });
 });

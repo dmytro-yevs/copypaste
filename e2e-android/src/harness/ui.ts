@@ -5,7 +5,10 @@ export const NAV = 'nav[aria-label="Primary"]';
 export const NAVIGATION_READY = `${NAV} button:not(:disabled):not([aria-disabled="true"])`;
 export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
 export const ROW = `${HISTORY_LIST} [role="listitem"]`;
-export const SEARCH = '[aria-label="Search clipboard history"]';
+export const ROW_SELECTION = `${ROW} [role="checkbox"]`;
+export const SEARCH_DEFAULT_LABEL = "Search clipboard history, default";
+export const SEARCH =
+  '[role="searchbox"][aria-label^="Search clipboard history,"]';
 export const MASKED_ROW =
   '[aria-label="Sensitive item, hidden — activate to reveal"]';
 
@@ -300,17 +303,17 @@ export async function tapButton(
   );
 }
 
-/** The nth match of a selector, for controls a label cannot tell apart — the
- *  per-row selection checkboxes are all named the same thing. */
-export async function tapNth(
+/** Tap the first reachable match, including row-scoped controls without a
+ * stable label shared across fixtures. */
+export async function tapElement(
   app: AndroidApp,
   selector: string,
-  index: number,
+  label: string | null = null,
   timeout = 15_000,
 ): Promise<void> {
   await waitFor(
-    () => tapWhere(app, null, selector, null, index),
-    `no tappable ${selector} at index ${index}`,
+    () => tapWhere(app, null, selector, label, -1),
+    `no tappable ${selector}${label ? ` labelled ${JSON.stringify(label)}` : ""}`,
     timeout,
   );
 }
@@ -365,36 +368,41 @@ export async function clearField(
 
 /** Restore the toolbar state a shared device may retain between files or runs. */
 export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
-  await app.withPage((page) =>
-    page.evaluate(async () => {
-      for (const [label, first] of [
-        ["Filter by kind", "all"],
-        ["Sort order", "newest"],
-      ] as const) {
-        const trigger = document.querySelector(
-          `[aria-label="${label}"]`,
-        ) as HTMLButtonElement | null;
-        if (!trigger || trigger.dataset.value === first) continue;
-        trigger.click();
-        await new Promise((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(resolve)),
-        );
-        (
-          document.querySelector(
-            `[role="option"][data-value="${first}"]`,
-          ) as HTMLElement | null
-        )?.click();
-      }
-    }),
-  );
-  const searchControl = await byLabel(app, "Search clipboard history");
-  if (searchControl[0]?.tag === "BUTTON") {
-    await tapButton(app, "Search clipboard history");
+  const kind = 'button[aria-label^="Filter by kind,"]';
+  if ((await count(app, `${kind}[data-active-filter]`)) > 0) {
+    await tapElement(app, kind);
+    await tapElement(app, '[role="menuitemcheckbox"]', "All kinds");
   }
+  const sort = '[role="combobox"][aria-label^="Sort order,"]';
+  if ((await count(app, `${sort}[data-active-filter]`)) > 0) {
+    await tapElement(app, sort);
+    await tapElement(app, '[role="option"][data-value="newest"]');
+  }
+  await openHistorySearch(app);
   await clearField(app, SEARCH);
   if ((await byLabel(app, "Close search")).length > 0) {
     await tapButton(app, "Close search");
   }
+}
+
+export async function openHistorySearch(app: AndroidApp): Promise<void> {
+  const visible = await app.withPage((page) =>
+    page.evaluate((selector) => {
+      const field = document.querySelector(selector) as HTMLElement | null;
+      if (!field) return false;
+      const rect = field.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }, SEARCH),
+  );
+  if (visible) return;
+  await tapElement(
+    app,
+    'button[aria-label^="Search clipboard history,"]',
+  );
+  await waitFor(
+    async () => (await count(app, SEARCH)) === 1,
+    "the search field never opened",
+  );
 }
 
 /**
@@ -407,7 +415,7 @@ export async function filterHistoryTo(
   expectedText: string,
 ): Promise<void> {
   await resetHistoryFilters(app);
-  await tapButton(app, "Search clipboard history");
+  await openHistorySearch(app);
   await typeInto(app, SEARCH, query);
   await waitFor(
     async () =>

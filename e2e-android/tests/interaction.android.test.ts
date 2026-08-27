@@ -10,6 +10,8 @@ import {
   count,
   gotoView,
   rowCount,
+  openHistorySearch,
+  resetHistoryFilters,
   typeInto,
   visibleText,
   waitFor,
@@ -24,7 +26,7 @@ let app: AndroidApp;
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
-  await clearField(app, SEARCH);
+  await resetHistoryFilters(app);
   await waitForRows(app, 1);
 }, 180_000);
 
@@ -48,6 +50,7 @@ test("typing into search filters the list the engine laid out", async () => {
   const before = await rowCount(app);
   expect(before).toBeGreaterThan(1);
 
+  await openHistorySearch(app);
   await typeInto(app, SEARCH, `HARNESS${nonce}`);
   await waitFor(
     async () =>

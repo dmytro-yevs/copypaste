@@ -14,18 +14,25 @@ import {
   expectNoRawError,
   outerHtml,
 } from "../src/harness/leaks.js";
-import { count, gotoView, visibleText, waitFor } from "../src/harness/ui.js";
+import {
+  count,
+  gotoView,
+  tapButton,
+  tapElement,
+  visibleText,
+  waitFor,
+} from "../src/harness/ui.js";
 
 /** DMY-48: this leg asserted the string "Nearby devices", which the screen has
  *  never rendered — its heading reads "Discovered on your network". The region
  *  is anchored on the heading that labels it and asserted against the copy the
  *  screen actually shows — see DevicesView.test.tsx, which pins both. */
-const DISCOVERED = 'section[aria-labelledby="discovered-devices-heading"]';
+const DISCOVERED = 'section[aria-labelledby="network-devices-heading"]';
 const DISCOVERED_HEADING = "Discovered on your network";
 const HEADER = "header.chrome";
 const PAIRING_CODE = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}\b/;
 const SECURITY_CODE = /\b[0-9A-F]{6}\b/;
-const ACTIONS = ["Show pairing code", "Scan pairing code"];
+const PAIRING_ACTIONS = ["Show pairing code", "Scan pairing code"];
 
 let app: AndroidApp;
 
@@ -36,7 +43,7 @@ beforeAll(async () => {
     async () => {
       const text = await visibleText(app);
       return (
-        text.includes("This device") &&
+        text.includes("Your devices") &&
         text.includes(DISCOVERED_HEADING) &&
         (await count(app, DISCOVERED)) === 1
       );
@@ -49,7 +56,7 @@ afterAll(async () => {
   await app?.detach();
 });
 
-async function actionBoxes() {
+async function pairingActionBoxes() {
   return app.withPage((page) =>
     page.evaluate(
       (scope: string, labels: string[]) => {
@@ -68,17 +75,26 @@ async function actionBoxes() {
           };
         });
       },
-      HEADER,
-      ACTIONS,
+      '[role="dialog"]',
+      PAIRING_ACTIONS,
     ),
+  );
+}
+
+async function openPairingChoices(): Promise<void> {
+  if ((await count(app, '[role="dialog"]')) > 0) return;
+  await tapButton(app, "Connect a device", { within: HEADER });
+  await waitFor(
+    async () => (await count(app, '[role="dialog"]')) === 1,
+    "the pairing choices never opened",
   );
 }
 
 describe("the screen", () => {
   test("describes this device and its paired-device region", async () => {
     const text = await visibleText(app);
-    expect(text).toContain("This device");
-    expect(text).toContain("Paired devices");
+    expect(text).toContain("Your devices");
+    expect(text).toContain("Cloud connection");
     expect(text).toContain(DISCOVERED_HEADING);
     expect(await count(app, DISCOVERED)).toBe(1);
     expectNoRawError(await outerHtml(app));
@@ -86,31 +102,18 @@ describe("the screen", () => {
   });
 
   test("offers both native pairing ceremonies", async () => {
+    await openPairingChoices();
     const text = await visibleText(app);
-    const surface = await app.withPage((page) =>
-      page.evaluate(
-        (scope: string, labels: string[]) => {
-          const root = document.querySelector(scope);
-          return labels.every((label) =>
-            Array.from(root?.querySelectorAll("button") ?? []).some(
-              (node) => node.getAttribute("aria-label") === label,
-            ),
-          );
-        },
-        HEADER,
-        ACTIONS,
-      ),
-    );
-
-    expect(surface).toBe(true);
-    expect(text).not.toContain("Ready to pair");
+    expect(text).toContain("Show pairing code");
+    expect(text).toContain("Scan pairing code");
   });
 
   test("lays both pairing controls out as reachable touch targets", async () => {
+    await openPairingChoices();
     const width = await app.withPage((page) =>
       page.evaluate(() => document.documentElement.clientWidth),
     );
-    for (const action of await actionBoxes()) {
+    for (const action of await pairingActionBoxes()) {
       expect(action.present, action.label).toBe(true);
       expect(action.width, action.label).toBeGreaterThan(0);
       expect(action.height, action.label).toBeGreaterThanOrEqual(44);
@@ -121,6 +124,7 @@ describe("the screen", () => {
 
 describe("the native security boundary", () => {
   test("keeps pairing credentials and comparison codes out of the WebView", async () => {
+    await openPairingChoices();
     const surface = await app.withPage((page) =>
       page.evaluate((selector: string) => {
         const root = document.querySelector(selector) as HTMLElement | null;
@@ -129,11 +133,12 @@ describe("the native security boundary", () => {
           credentialNodes:
             root?.querySelectorAll("input, output, canvas, [data-pairing-secret]").length ?? 0,
         };
-      }, HEADER),
+      }, '[role="dialog"]'),
     );
 
     expect(surface.text).not.toMatch(PAIRING_CODE);
     expect(surface.text).not.toMatch(SECURITY_CODE);
     expect(surface.credentialNodes).toBe(0);
+    await tapElement(app, '[data-slot="dialog-close"]');
   });
 });

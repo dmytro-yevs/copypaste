@@ -21,6 +21,7 @@ import { addItems, cleanUpItems, storedItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { rowBoxes } from "../src/harness/list.js";
 import {
+  ROW_SELECTION,
   SEARCH,
   byLabel,
   count,
@@ -28,15 +29,15 @@ import {
   gotoView,
   rowCount,
   tapButton,
-  tapNth,
+  tapElement,
   visibleText,
   waitFor,
   waitForRows,
   waitForText,
 } from "../src/harness/ui.js";
 
-const BULK_BAR = '[role="region"][aria-label="Selection actions"]';
-const CHECKBOX = '[role="checkbox"]';
+const BULK_BAR = '[role="toolbar"][aria-label="Selection actions"]';
+const CHECKBOX = ROW_SELECTION;
 
 /** The per-row surface as Android renders it, and the actions the dialog
  *  behind it offers. Both must be absent while a selection is being made. */
@@ -67,15 +68,16 @@ afterAll(async () => {
 });
 
 async function enterSelectionMode(): Promise<void> {
+  if ((await count(app, BULK_BAR)) > 0) return;
   // A dialog left open by a failing assertion would otherwise swallow the tap
   // and report itself as "selection mode never produced checkboxes".
   if ((await count(app, '[role="dialog"]')) > 0) {
     await tapButton(app, "Cancel", { within: '[role="dialog"]' }).catch(() => undefined);
   }
-  await tapButton(app, "Select multiple items");
+  await tapElement(app, CHECKBOX);
   await waitFor(
-    async () => (await count(app, CHECKBOX)) > 0,
-    "selection mode never produced checkboxes",
+    async () => (await count(app, BULK_BAR)) === 1,
+    "selecting a row never opened the bulk bar",
   );
 }
 
@@ -83,8 +85,8 @@ async function leaveSelectionMode(): Promise<void> {
   if ((await count(app, BULK_BAR)) === 0) return;
   await tapButton(app, "Done", { within: BULK_BAR });
   await waitFor(
-    async () => (await count(app, CHECKBOX)) === 0,
-    "the checkboxes stayed after leaving selection mode",
+    async () => (await count(app, BULK_BAR)) === 0,
+    "selection mode stayed active after Done",
   );
 }
 
@@ -110,7 +112,43 @@ async function waitForDialogText(): Promise<string> {
  *  covered is a checkbox the user cannot tick. */
 async function select(n: number): Promise<void> {
   expect(await count(app, CHECKBOX)).toBeGreaterThanOrEqual(n);
-  for (let i = 0; i < n; i += 1) await tapNth(app, CHECKBOX, i);
+  while ((await count(app, `${CHECKBOX}[aria-checked="true"]`)) < n) {
+    await tapElement(app, `${CHECKBOX}:not([aria-checked="true"])`);
+  }
+  await waitFor(
+    async () => (await count(app, `${CHECKBOX}[aria-checked="true"]`)) === n,
+    `expected ${n} selected rows`,
+  );
+}
+
+async function selectedRowIds(): Promise<string[]> {
+  return app.withPage((page) =>
+    page.evaluate(
+      (selector) =>
+        Array.from(document.querySelectorAll(selector), (checkbox) =>
+          checkbox
+            .closest('[role="listitem"]')
+            ?.id.replace(/^history-row-/, ""),
+        ).filter((id): id is string => Boolean(id)),
+      `${CHECKBOX}[aria-checked="true"]`,
+    ),
+  );
+}
+
+async function selectIds(ids: readonly string[]): Promise<void> {
+  for (const id of ids) {
+    const selector = `#history-row-${id} [role="checkbox"]`;
+    if ((await count(app, `${selector}[aria-checked="true"]`)) === 0) {
+      await tapElement(app, selector);
+    }
+  }
+  await waitFor(
+    async () => {
+      const selected = (await selectedRowIds()).sort();
+      return selected.join("\u0000") === [...ids].sort().join("\u0000");
+    },
+    "the expected rows were not selected",
+  );
 }
 
 describe("entering selection mode", () => {
@@ -183,6 +221,8 @@ describe("the bulk bar", () => {
   });
 
   test("pins the selection, and then offers to unpin it (CopyPaste-8ebg.55)", async () => {
+    const pinnedIds = await selectedRowIds();
+    expect(pinnedIds).toHaveLength(2);
     await tapButton(app, "Pin", { within: BULK_BAR });
     await waitFor(
       async () =>
@@ -192,11 +232,15 @@ describe("the bulk bar", () => {
       "the store never recorded two pinned items",
       20_000,
     );
+    await waitFor(
+      async () => (await count(app, BULK_BAR)) === 0,
+      "pinning did not clear the bulk selection",
+    );
 
     // The toggle's label is a claim about every selected row, so selecting the
     // two rows that are now pinned must flip it.
     await enterSelectionMode();
-    await select(2);
+    await selectIds(pinnedIds);
     await waitFor(
       async () => (await visibleText(app)).includes("Unpin"),
       "the toggle still offered to pin two already-pinned items",
@@ -212,7 +256,9 @@ describe("the bulk bar", () => {
 
     const copy = await visibleText(app);
     expect(copy).toContain("Delete 2 items?");
-    expect(copy).toContain("You have a few seconds to undo it.");
+    expect(copy).toContain(
+      "This permanently removes the selected clipboard items.",
+    );
 
     // The two rows the checkboxes ticked, by the text they render. Never a row
     // count: the virtualiser draws a fixed window, so deleting two rows pulls
@@ -252,6 +298,6 @@ describe("the bulk bar", () => {
       async () => (await byLabel(app, ROW_TRIGGER)).length > 0,
       "the per-row action trigger never came back",
     );
-    expect(await count(app, CHECKBOX)).toBe(0);
+    expect(await count(app, CHECKBOX)).toBeGreaterThan(0);
   });
 });
