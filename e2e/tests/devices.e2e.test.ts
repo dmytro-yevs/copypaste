@@ -25,6 +25,7 @@ import { clickButton, gotoView, visibleText, waitForText } from "../src/harness/
 interface PairingData {
   code: string;
   pairing_id: string;
+  listen_addr: string | null;
   expires_in_secs: number;
 }
 
@@ -277,6 +278,16 @@ async function waitForManualSync(): Promise<void> {
   );
 }
 
+function pairingUri(invite: PairingData): string {
+  const uri = new URL("copypaste://pair");
+  uri.searchParams.set("code", invite.code);
+  uri.searchParams.set("id", invite.pairing_id);
+  if (invite.listen_addr !== null) {
+    uri.searchParams.set("addr", invite.listen_addr);
+  }
+  return uri.toString();
+}
+
 describe("native-safe pairing", () => {
   test("offers both native entry points", async () => {
     await openPairingChoices();
@@ -307,20 +318,28 @@ describe("native-safe pairing", () => {
   /** The credential must be absent from the document, not merely unrendered: a
    *  blur, a `display: none` or an `aria-label` all leave it in `outerHTML`. */
   test("never lets a pairing credential reach the page", async () => {
-    const minted = await other.json<PairingData>(["pair", "create"]);
+    const minted = await app.daemon.json<PairingData>(["pair", "create"]);
+    const uri = pairingUri(minted);
     try {
       await clickButton(app.browser, "Refresh");
 
       const html = await outerHtml(app.browser);
-      expect(html).not.toContain(minted.code);
-      expect(html).not.toContain(minted.code.replace(/-/g, ""));
-      expect(html).not.toContain("copypaste://pair");
+      const surface = await accessibleSurface(app.browser);
+      for (const secret of [minted.code, minted.code.replace(/-/g, ""), uri]) {
+        expect(html).not.toContain(secret);
+        expect(surface).not.toContain(secret);
+      }
     } finally {
-      await other.json<PairingProgress>(["pair", "cancel"]);
+      await app.daemon.json<PairingProgress>(["pair", "cancel"]);
     }
   });
 
   test("executes native pairing and handles its platform boundary", async () => {
+    if (process.platform !== "linux" && process.platform !== "win32") {
+      throw new Error(
+        `native pairing E2E is only wired for Linux WebKitGTK and Windows WebView2 (got ${process.platform})`,
+      );
+    }
     await openPairingChoices();
     await clickButton(app.browser, "Show pairing code");
 
@@ -328,6 +347,9 @@ describe("native-safe pairing", () => {
       const waiting = await waitForPairing(app.daemon, "waiting_for_peer");
       expect(waiting.state).toBe("waiting_for_peer");
 
+      // This is backend cleanup, not evidence that the native Close action
+      // invoked the abort callback. That behavior belongs to the Windows
+      // native pairing gate.
       const cancelled = await app.daemon.json<PairingProgress>([
         "pair",
         "cancel",
@@ -340,6 +362,9 @@ describe("native-safe pairing", () => {
     }
 
     const surface = await accessibleSurface(app.browser);
+    if (process.platform === "linux") {
+      expect(surface).toMatch(/protected pairing view didn't open/i);
+    }
     expectNoFilesystemPath(surface);
     expectNoRawError(surface);
     const html = await outerHtml(app.browser);
