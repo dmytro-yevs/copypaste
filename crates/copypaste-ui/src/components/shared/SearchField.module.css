@@ -15,7 +15,11 @@
   flex: 1;
 }
 
-.input::-webkit-search-cancel-button { display: none; }
+.input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
 
 .overlay { min-inline-size: 0; }
 
