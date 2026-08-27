@@ -11,6 +11,7 @@ import { IllustratedErrorState } from "@/components/shared";
 import { Button, Icon, type IconName } from "@/components/ui";
 import { HistoryLoadingState } from "@/features/history/patterns/HistoryLoadingState";
 import { HistoryList } from "@/features/history/patterns/HistoryList";
+import { ServiceOfflineState } from "@/features/history/patterns/ServiceOfflineState";
 import { useTranslation } from "@/i18n";
 import { type ErrorKind, friendlyError } from "@/lib/errors";
 import styles from "./HistoryContentState.module.css";
@@ -114,11 +115,7 @@ export function HistoryContentState({
             );
         case "offline":
             return (
-                <IllustratedErrorState
-                    title={t("history.empty.failed.title")}
-                    body={friendlyError("offline")}
-                    actions={<>{retryAction}{diagnosticsAction}</>}
-                />
+                <ServiceOfflineState onOpenDiagnostics={onOpenDiagnostics} />
             );
         case "not_ready":
             return (

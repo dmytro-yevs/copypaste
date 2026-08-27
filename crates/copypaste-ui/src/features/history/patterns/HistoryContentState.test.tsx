@@ -16,7 +16,7 @@ describe("HistoryContentState errors", () => {
         const { container } = render(
             <HistoryContentState
                 loading={false}
-                errorKind="offline"
+                errorKind="timeout"
                 searching={false}
                 filtered={false}
                 privateMode={false}
