@@ -6,6 +6,7 @@ vi.mock("../src/harness/adb.js", () => ({
 
 import {
   allPrimaryNavigationButtonsReady,
+  anyElementRendered,
   NAV,
   NAVIGATION_READY,
 } from "../src/harness/ui.js";
@@ -40,5 +41,29 @@ describe("primary navigation readiness", () => {
         { disabled: false, ariaDisabled: null },
       ]),
     ).toBe(false);
+  });
+});
+
+describe("compact history search readiness", () => {
+  test("accepts the visible overlay beside the hidden inline field", () => {
+    expect(
+      anyElementRendered([
+        { width: 0, height: 0 },
+        { width: 272, height: 44 },
+      ]),
+    ).toBe(true);
+  });
+
+  test("does not accept a toolbar whose search fields are all hidden", () => {
+    expect(
+      anyElementRendered([
+        { width: 0, height: 0 },
+        { width: 272, height: 0 },
+      ]),
+    ).toBe(false);
+  });
+
+  test("accepts the single inline field at wider toolbar widths", () => {
+    expect(anyElementRendered([{ width: 320, height: 44 }])).toBe(true);
   });
 });

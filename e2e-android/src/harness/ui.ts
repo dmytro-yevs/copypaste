@@ -196,6 +196,31 @@ export interface LabelledBox {
   text: string;
 }
 
+export interface ElementBox {
+  width: number;
+  height: number;
+}
+
+export function anyElementRendered(boxes: readonly ElementBox[]): boolean {
+  return boxes.some((box) => box.width > 0 && box.height > 0);
+}
+
+async function elementBoxes(
+  app: AndroidApp,
+  selector: string,
+): Promise<ElementBox[]> {
+  return app.withPage((page) =>
+    page.evaluate(
+      (query) =>
+        Array.from(document.querySelectorAll(query), (node) => {
+          const rect = node.getBoundingClientRect();
+          return { width: rect.width, height: rect.height };
+        }),
+      selector,
+    ),
+  );
+}
+
 /** Every element carrying this accessible name, with the box it was laid out
  *  at — so "present" and "rendered" are told apart. The query ignores CSS, so a
  *  control hidden with `display: none` is still counted. */
@@ -386,21 +411,13 @@ export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
 }
 
 export async function openHistorySearch(app: AndroidApp): Promise<void> {
-  const visible = await app.withPage((page) =>
-    page.evaluate((selector) => {
-      const field = document.querySelector(selector) as HTMLElement | null;
-      if (!field) return false;
-      const rect = field.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    }, SEARCH),
-  );
-  if (visible) return;
+  if (anyElementRendered(await elementBoxes(app, SEARCH))) return;
   await tapElement(
     app,
     'button[aria-label^="Search clipboard history,"]',
   );
   await waitFor(
-    async () => (await count(app, SEARCH)) === 1,
+    async () => anyElementRendered(await elementBoxes(app, SEARCH)),
     "the search field never opened",
   );
 }
