@@ -6,6 +6,7 @@ import type {
 } from "@/lib/ipc";
 import {
     peerLastSyncAt,
+    peerPresence,
     peerState,
     unsettledFailure,
     type PeerHealth,
@@ -131,6 +132,13 @@ export function peerStatus(
     syncing: boolean,
 ): DeviceStatusPresentation {
     if (syncing) return { label: "Syncing", tone: "busy" };
+    if (peerPresence(peer) === "unknown") {
+        return {
+            label: "Presence unknown",
+            tone: "neutral",
+            detail: "Current network presence is unavailable.",
+        };
+    }
 
     switch (peerState(peer, health)) {
         case "synced":

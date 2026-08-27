@@ -253,6 +253,7 @@ export const devices = {
     retryOne: "Try syncing with {{name}} again",
     online: "On this network",
     offline: "Not seen on this network",
+    unknown: "Network presence unknown",
     syncOne: "Sync with {{name}} now",
     syncOneHint: "Sync with this device now",
     syncAction: "Sync now",

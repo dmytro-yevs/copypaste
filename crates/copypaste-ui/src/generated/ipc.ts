@@ -66,7 +66,9 @@ export type DeviceEndpointObservation = { lan_endpoint: string, provenance: Devi
 
 export type DeviceLatencyObservation = { connect_latency_ms: number, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
 
-export type DevicePresenceObservation = { online: boolean, last_seen_ms: number, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
+export type DevicePresence = "online" | "offline" | "unknown";
+
+export type DevicePresenceObservation = { state: DevicePresence, last_seen_ms: number, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
 
 export type ExternalNetworkObservation = { "availability": "unavailable" } | { "availability": "available", value: string, provenance: DeviceObservationProvenance, trust: DeviceObservationTrust, observed_at_ms: number, fresh_until_ms: number | null, };
 

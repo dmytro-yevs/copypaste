@@ -5,9 +5,9 @@
 //! contract both expose.
 
 use copypaste_ipc::{
-    DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceObservationProvenance,
-    DeviceObservationTrust, DevicePlatform, DevicePresenceObservation, DeviceProfileObservation,
-    ErrorCode, PairingProgressData, PairingRole, PairingState, PeerInfo, SyncResult,
+    DeviceDetails, DeviceEndpointObservation, DeviceObservationProvenance, DeviceObservationTrust,
+    DevicePresence, DevicePresenceObservation, DeviceProfileObservation, ErrorCode,
+    PairingProgressData, PairingRole, PairingState, PeerInfo, SyncResult,
 };
 use copypaste_p2p::discovery::{DiscoveredPeer, PEER_TTL};
 use copypaste_p2p::peers::Peer;
@@ -39,7 +39,7 @@ pub fn discovered_device(found: DiscoveredPeer, paired: bool) -> copypaste_ipc::
             fresh_until_ms: Some(fresh_until_ms),
         }),
         presence: Some(DevicePresenceObservation {
-            online: true,
+            state: discovery_presence_state(&found, crate::now_ms()),
             last_seen_ms: found.last_seen_ms,
             provenance: DeviceObservationProvenance::Observed,
             trust: DeviceObservationTrust::Local,
@@ -65,7 +65,8 @@ pub fn peer_info(
     authenticated: Option<&AuthenticatedDeviceProfile>,
 ) -> PeerInfo {
     let now = crate::now_ms();
-    let online = discovered.is_some();
+    let presence = peer_presence(peer, discovered, now);
+    let online = presence.is_current_online_at(now);
     let (profile, profile_trust, profile_at, profile_fresh) = match authenticated {
         Some(observed) => (
             Some(&observed.profile),
@@ -122,14 +123,7 @@ pub fn peer_info(
                 profile_fresh,
             )),
             endpoint,
-            presence: Some(DevicePresenceObservation {
-                online,
-                last_seen_ms: peer.last_seen_ms,
-                provenance: DeviceObservationProvenance::Observed,
-                trust: DeviceObservationTrust::Local,
-                observed_at_ms: now,
-                fresh_until_ms: Some(now.saturating_add(PRESENCE_FRESH_MS)),
-            }),
+            presence: Some(presence),
             ..DeviceDetails::default()
         }),
     }
@@ -154,7 +148,7 @@ pub fn local_device_details(display_name: &str, endpoint: Option<&str>) -> Devic
             fresh_until_ms: Some(now.saturating_add(PRESENCE_FRESH_MS)),
         }),
         presence: Some(DevicePresenceObservation {
-            online: true,
+            state: DevicePresence::Online,
             last_seen_ms: now,
             provenance: DeviceObservationProvenance::Observed,
             trust: DeviceObservationTrust::Local,
@@ -177,19 +171,8 @@ fn profile_observation(
         display_name: display_name.to_string(),
         app_version: profile.app_version,
         protocol_version: profile.protocol_version,
-        platform: match profile.platform {
-            copypaste_p2p::DevicePlatform::Macos => DevicePlatform::Macos,
-            copypaste_p2p::DevicePlatform::Windows => DevicePlatform::Windows,
-            copypaste_p2p::DevicePlatform::Android => DevicePlatform::Android,
-            copypaste_p2p::DevicePlatform::Unknown => DevicePlatform::Unknown,
-        },
-        device_class: match profile.device_class {
-            copypaste_p2p::DeviceClass::Desktop => DeviceClass::Desktop,
-            copypaste_p2p::DeviceClass::Laptop => DeviceClass::Laptop,
-            copypaste_p2p::DeviceClass::Phone => DeviceClass::Phone,
-            copypaste_p2p::DeviceClass::Tablet => DeviceClass::Tablet,
-            copypaste_p2p::DeviceClass::Unknown => DeviceClass::Unknown,
-        },
+        platform: profile.platform,
+        device_class: profile.device_class,
         os_name: profile.os_name,
         os_version: profile.os_version,
         model: profile.model,
@@ -197,6 +180,44 @@ fn profile_observation(
         trust,
         observed_at_ms,
         fresh_until_ms,
+    }
+}
+
+fn discovery_presence_state(found: &DiscoveredPeer, now_ms: i64) -> DevicePresence {
+    let ttl_ms = i64::try_from(PEER_TTL.as_millis()).unwrap_or(i64::MAX);
+    (now_ms.saturating_sub(found.last_seen_ms) < ttl_ms)
+        .then_some(DevicePresence::Online)
+        .unwrap_or(DevicePresence::Unknown)
+}
+
+fn peer_presence(
+    peer: &Peer,
+    discovered: Option<&DiscoveredPeer>,
+    now_ms: i64,
+) -> DevicePresenceObservation {
+    match discovered {
+        Some(found) if discovery_presence_state(found, now_ms) == DevicePresence::Online => {
+            DevicePresenceObservation {
+                state: DevicePresence::Online,
+                last_seen_ms: found.last_seen_ms,
+                provenance: DeviceObservationProvenance::Observed,
+                trust: DeviceObservationTrust::Local,
+                observed_at_ms: found.last_seen_ms,
+                fresh_until_ms: Some(
+                    found
+                        .last_seen_ms
+                        .saturating_add(i64::try_from(PEER_TTL.as_millis()).unwrap_or(i64::MAX)),
+                ),
+            }
+        }
+        _ => DevicePresenceObservation {
+            state: DevicePresence::Unknown,
+            last_seen_ms: peer.last_seen_ms,
+            provenance: DeviceObservationProvenance::Observed,
+            trust: DeviceObservationTrust::Local,
+            observed_at_ms: peer.last_seen_ms,
+            fresh_until_ms: None,
+        },
     }
 }
 
@@ -290,11 +311,14 @@ pub fn node_error_code(error: &NodeError) -> ErrorCode {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
     use super::*;
+    use copypaste_p2p::discovery::PEER_TTL;
     use copypaste_p2p::sync::{SyncCursor, SyncStats};
     use copypaste_p2p::transport::TOKEN_LEN;
 
-    fn peer() -> Peer {
+    fn sync_peer() -> Peer {
         Peer {
             pairing_id: "peer-1".into(),
             name: "Phone".into(),
@@ -324,7 +348,7 @@ mod tests {
     #[test]
     fn successful_sync_projects_a_saturated_size_refusal_count() {
         let result = sync_result(
-            &peer(),
+            &sync_peer(),
             Ok(outcome((u32::MAX as usize).saturating_add(1))),
             std::time::Duration::ZERO,
         );
@@ -333,7 +357,67 @@ mod tests {
 
     #[test]
     fn failed_sync_keeps_size_refusal_count_unknown() {
-        let result = sync_result(&peer(), Err(NodeError::Timeout), std::time::Duration::ZERO);
+        let result = sync_result(
+            &sync_peer(),
+            Err(NodeError::Timeout),
+            std::time::Duration::ZERO,
+        );
         assert_eq!(result.skipped_too_large, None);
+    }
+
+    fn peer() -> Peer {
+        Peer {
+            pairing_id: "peer-1".to_string(),
+            name: "Phone".to_string(),
+            psk: [1; TOKEN_LEN],
+            last_addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 47_654)),
+            last_seen_ms: 10,
+        }
+    }
+
+    fn discovered(last_seen_ms: i64) -> DiscoveredPeer {
+        DiscoveredPeer {
+            discovery_id: "discovery-1".to_string(),
+            pairing_ids: vec!["peer-1".to_string()],
+            name: "Phone".to_string(),
+            profile: None,
+            addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 47_654),
+            last_seen_ms,
+        }
+    }
+
+    #[test]
+    fn peer_online_is_derived_from_a_current_positive_observation() {
+        let now = crate::now_ms();
+        let peer = peer();
+        let found = discovered(now);
+        let info = peer_info(&peer, Some(&found), None);
+        let presence = info.details.as_ref().unwrap().presence.as_ref().unwrap();
+
+        assert_eq!(presence.state, DevicePresence::Online);
+        assert!(info.online);
+        assert!(presence.is_current_online_at(crate::now_ms()));
+        let encoded = serde_json::to_value(info).unwrap();
+        assert_eq!(encoded["online"], true);
+        assert_eq!(encoded["details"]["presence"]["state"], "online");
+    }
+
+    #[test]
+    fn absent_or_stale_discovery_fails_closed_to_unknown() {
+        let now = crate::now_ms();
+        let peer = peer();
+        let stale =
+            discovered(now.saturating_sub(i64::try_from(PEER_TTL.as_millis()).unwrap_or(i64::MAX)));
+
+        for found in [None, Some(&stale)] {
+            let info = peer_info(&peer, found, None);
+            let presence = info.details.as_ref().unwrap().presence.as_ref().unwrap();
+
+            assert_eq!(presence.state, DevicePresence::Unknown);
+            assert!(!info.online);
+            let encoded = serde_json::to_value(info).unwrap();
+            assert_eq!(encoded["online"], false);
+            assert_eq!(encoded["details"]["presence"]["state"], "unknown");
+        }
     }
 }

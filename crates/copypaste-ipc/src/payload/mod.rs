@@ -18,8 +18,8 @@ mod device;
 pub use cloud::{CloudStatusData, CloudSyncData};
 pub use device::{
     DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
-    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresenceObservation,
-    DeviceProfileObservation, ExternalNetworkObservation,
+    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresence,
+    DevicePresenceObservation, DeviceProfileObservation, ExternalNetworkObservation,
 };
 
 use crate::health::SettingsHealth;
@@ -235,7 +235,7 @@ pub struct PairingProgressData {
     pub error_code: Option<crate::ErrorCode>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct PeerInfo {
@@ -246,7 +246,6 @@ pub struct PeerInfo {
     /// True when the peer is currently visible on the network. Discovery is a
     /// convenience, so `false` means "not seen", never "unreachable".
     pub online: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typescript", ts(optional))]
     pub details: Option<DeviceDetails>,
 }

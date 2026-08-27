@@ -37,6 +37,7 @@ export type {
   DeviceObservationProvenance,
   DeviceObservationTrust,
   DevicePlatform,
+  DevicePresence,
   DevicePresenceObservation,
   DeviceProfileObservation,
   DiscoveredDevice,

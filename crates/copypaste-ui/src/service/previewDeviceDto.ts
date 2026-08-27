@@ -30,8 +30,10 @@ function externalObservation(
 }
 
 export function previewDeviceDetails(device: PreviewDevice): DeviceDetails {
-    const observedAt = Date.now() - device.lastSeenAgeMs;
+    const now = Date.now();
+    const observedAt = now - device.lastSeenAgeMs;
     const freshUntil = observedAt + 15_000;
+    const presence = device.online && now <= freshUntil ? "online" : "unknown";
     const trust: DeviceObservationTrust = device.paired
         ? "authenticated"
         : "unverified";
@@ -68,7 +70,7 @@ export function previewDeviceDetails(device: PreviewDevice): DeviceDetails {
                       fresh_until_ms: freshUntil,
                   },
         presence: {
-            online: device.online,
+            state: presence,
             last_seen_ms: observedAt,
             provenance: "observed",
             trust: "local",

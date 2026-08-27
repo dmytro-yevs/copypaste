@@ -18,6 +18,7 @@ import {
 } from "@/features/devices/model/devicePresentation";
 import type { ManualSyncAttempt } from "@/features/devices/model/peerState";
 import { DeviceNameField } from "@/features/devices/patterns/DeviceNameField";
+import { peerPresence } from "@/features/devices/model/peerState";
 import { DiscoveredDeviceDetails } from "@/features/devices/patterns/DiscoveredDeviceDetails";
 import { useTranslation } from "@/i18n";
 import { longAge } from "@/lib/format";
@@ -80,6 +81,7 @@ export function DeviceDetailPane({
 }: DeviceDetailPaneProps) {
   const { t } = useTranslation();
   if (target === null) return null;
+  const peerPresenceState = target.kind === "peer" ? peerPresence(target.peer) : "unknown";
 
   const platform = target.identity.platform === "unknown"
     ? t("devices.detail.notReported")
@@ -130,7 +132,13 @@ export function DeviceDetailPane({
           ],
           [
             t("devices.peer.networkLabel"),
-            t(target.peer.online ? "devices.detail.seen" : "devices.detail.notSeen"),
+            t(
+              peerPresenceState === "online"
+                ? "devices.detail.seen"
+                : peerPresenceState === "offline"
+                  ? "devices.detail.notSeen"
+                  : "devices.detail.notAvailable",
+            ),
           ],
           [t("devices.peer.lastSyncLabel"), lastSync],
           [

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 copypaste-clock = { path = "../copypaste-clock" }
 copypaste-fs = { path = "../copypaste-fs" }
+copypaste-ipc = { path = "../copypaste-ipc" }
 snow.workspace = true
 mdns-sd.workspace = true
 os_info.workspace = true

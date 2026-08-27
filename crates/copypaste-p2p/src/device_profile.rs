@@ -2,43 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use copypaste_ipc::{DeviceClass, DevicePlatform};
+
 use crate::protocol::PROTOCOL_VERSION;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DevicePlatform {
-    Macos,
-    Windows,
-    Android,
-    #[default]
-    Unknown,
-}
-
-impl DevicePlatform {
-    #[must_use]
-    pub const fn current() -> Self {
-        if cfg!(target_os = "macos") {
-            Self::Macos
-        } else if cfg!(target_os = "windows") {
-            Self::Windows
-        } else if cfg!(target_os = "android") {
-            Self::Android
-        } else {
-            Self::Unknown
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeviceClass {
-    Desktop,
-    Laptop,
-    Phone,
-    Tablet,
-    #[default]
-    Unknown,
-}
 
 /// Claims made by a device about itself. Trust comes from the channel carrying
 /// the value: mDNS is unverified, while the same value inside Noise is

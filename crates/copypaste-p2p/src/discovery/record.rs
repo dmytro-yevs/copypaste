@@ -134,11 +134,11 @@ fn add_profile_properties(txt: &mut HashMap<String, String>, profile: &DevicePro
     }
     txt.insert(
         TXT_KEY_PLATFORM.to_string(),
-        platform_name(profile.platform).to_string(),
+        profile.platform.wire_name().to_string(),
     );
     txt.insert(
         TXT_KEY_DEVICE_CLASS.to_string(),
-        device_class_name(profile.device_class).to_string(),
+        profile.device_class.wire_name().to_string(),
     );
     for (key, value) in [
         (TXT_KEY_OS_NAME, profile.os_name.as_ref()),
@@ -215,19 +215,14 @@ fn parse_profile(txt: &TxtProperties) -> Option<DeviceProfile> {
     let protocol_version = txt
         .get_property_val_str(TXT_KEY_PROTOCOL_VERSION)
         .and_then(|value| value.parse::<u32>().ok());
-    let platform = match txt.get_property_val_str(TXT_KEY_PLATFORM) {
-        Some("macos") => DevicePlatform::Macos,
-        Some("windows") => DevicePlatform::Windows,
-        Some("android") => DevicePlatform::Android,
-        _ => DevicePlatform::Unknown,
-    };
-    let device_class = match txt.get_property_val_str(TXT_KEY_DEVICE_CLASS) {
-        Some("desktop") => DeviceClass::Desktop,
-        Some("laptop") => DeviceClass::Laptop,
-        Some("phone") => DeviceClass::Phone,
-        Some("tablet") => DeviceClass::Tablet,
-        _ => DeviceClass::Unknown,
-    };
+    let platform = txt
+        .get_property_val_str(TXT_KEY_PLATFORM)
+        .map(DevicePlatform::from_wire_name)
+        .unwrap_or_default();
+    let device_class = txt
+        .get_property_val_str(TXT_KEY_DEVICE_CLASS)
+        .map(DeviceClass::from_wire_name)
+        .unwrap_or_default();
     let os_name = profile_text(txt, TXT_KEY_OS_NAME);
     let os_version = profile_text(txt, TXT_KEY_OS_VERSION);
     let model = profile_text(txt, TXT_KEY_MODEL);
@@ -253,25 +248,6 @@ fn parse_profile(txt: &TxtProperties) -> Option<DeviceProfile> {
 fn profile_text(txt: &TxtProperties, key: &str) -> Option<String> {
     txt.get_property_val_str(key)
         .and_then(sanitise_display_name)
-}
-
-const fn platform_name(platform: DevicePlatform) -> &'static str {
-    match platform {
-        DevicePlatform::Macos => "macos",
-        DevicePlatform::Windows => "windows",
-        DevicePlatform::Android => "android",
-        DevicePlatform::Unknown => "unknown",
-    }
-}
-
-const fn device_class_name(class: DeviceClass) -> &'static str {
-    match class {
-        DeviceClass::Desktop => "desktop",
-        DeviceClass::Laptop => "laptop",
-        DeviceClass::Phone => "phone",
-        DeviceClass::Tablet => "tablet",
-        DeviceClass::Unknown => "unknown",
-    }
 }
 
 /// A candidate device from one resolved mDNS service. This deliberately

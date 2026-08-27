@@ -363,14 +363,17 @@ export function createPreviewInterceptor(
                 handled: true,
                 value: scenario.devices
                     .filter((device) => device.paired)
-                    .map((device) => ({
-                        pairing_id: device.id,
-                        name: device.name,
-                        last_addr: previewDeviceAddress(device),
-                        last_seen_ms: Date.now() - device.lastSeenAgeMs,
-                        online: device.online,
-                        details: previewDeviceDetails(device),
-                    })),
+                    .map((device) => {
+                        const details = previewDeviceDetails(device);
+                        return {
+                            pairing_id: device.id,
+                            name: device.name,
+                            last_addr: previewDeviceAddress(device),
+                            last_seen_ms: Date.now() - device.lastSeenAgeMs,
+                            online: details.presence?.state === "online",
+                            details,
+                        };
+                    }),
             };
         }
         if (command === "unpair" || command === "revoke") {
