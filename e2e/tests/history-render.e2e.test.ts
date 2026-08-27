@@ -213,9 +213,15 @@ describe("keyboard navigation", () => {
 
     await browser.waitUntil(
       async () =>
-        (await browser.execute(
-          () => document.activeElement?.getAttribute("aria-label") ?? "",
-        )) === "Search clipboard history",
+        (await browser.execute(() => {
+          const active = document.activeElement;
+          return (
+            active?.getAttribute("role") === "searchbox" &&
+            active
+              .getAttribute("aria-label")
+              ?.startsWith("Search clipboard history,") === true
+          );
+        })) === true,
       { timeout: 10_000, timeoutMsg: "Ctrl+F did not focus the search field" },
     );
   });
