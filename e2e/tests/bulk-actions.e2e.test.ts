@@ -12,8 +12,8 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
 import {
-  byLabel,
   clickButton,
+  count,
   HISTORY_LIST,
   ROW,
   rowCount,
@@ -156,9 +156,28 @@ describe("entering selection mode", () => {
     await enterSelectionMode();
 
     for (const label of ROW_ACTIONS) {
-      // The query ignores CSS, so display:none controls would still be counted.
-      expect(await byLabel(app.browser, label), label).toHaveLength(0);
+      // Scope the document query to history rows: the desktop inspector keeps
+      // its legitimate action for the active item during selection mode.
+      // `count` ignores CSS, so display:none controls would still be counted.
+      expect(
+        await count(app.browser, `${HISTORY_ROWS} [aria-label="${label}"]`),
+        label,
+      ).toBe(0);
     }
+
+    // Keep the accessibility guarantee explicit: no row action remains in a
+    // history row's DOM, rather than merely being visually hidden.
+    expect(
+      await app.browser.execute((selector: string) => {
+        const rows = Array.from(document.querySelectorAll(selector));
+        return rows.every(
+          (row) =>
+            row.querySelectorAll(
+              '[aria-label="Copy to clipboard"], [aria-label="Pin item"], [aria-label="Delete item"]',
+            ).length === 0,
+        );
+      }, HISTORY_ROWS),
+    ).toBe(true);
 
     // The bulk bar confirms this is selection mode rather than an empty list.
     const bar = await app.browser.$(BULK_BAR);
