@@ -225,14 +225,15 @@ export async function activeRowId(browser: Browser): Promise<string | null> {
 /**
  * Switch screens the way a user does.
  *
- * The landmark is located first and the text selector applied to it: WebDriver
- * has no "CSS then text" syntax, and a combined selector is rejected as one
- * malformed selector rather than treated as two.
+ * The landmark is located first and its navigation button is selected by the
+ * accessible name exposed by the product shell. WebDriver has no "CSS then
+ * text" syntax, and a combined selector is rejected as one malformed selector
+ * rather than treated as two.
  */
 export async function gotoView(browser: Browser, label: string): Promise<void> {
   const nav = await browser.$(PRIMARY_NAVIGATION);
   await nav.waitForExist({ timeout: 15_000 });
-  const button = await nav.$(`button=${label}`);
+  const button = await nav.$(`button[aria-label="${label}"]`);
   await button.waitForClickable({ timeout: 15_000 });
   await button.click();
   await browser.waitUntil(
@@ -291,7 +292,7 @@ export async function byLabel(
 }
 
 /**
- * First launch owns the window until the welcome screen is dismissed. History
+ * First launch owns the window until the welcome screen is dismissed. Library
  * E2E is the product shell, not the welcome flow.
  */
 export async function dismissFirstRun(browser: Browser): Promise<void> {
