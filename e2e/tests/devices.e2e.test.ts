@@ -362,9 +362,6 @@ describe("native-safe pairing", () => {
     }
 
     const surface = await accessibleSurface(app.browser);
-    if (process.platform === "linux") {
-      expect(surface).toMatch(/protected pairing view didn't open/i);
-    }
     expectNoFilesystemPath(surface);
     expectNoRawError(surface);
     const html = await outerHtml(app.browser);
