@@ -197,7 +197,7 @@ describe("preview scenario service", () => {
             fresh_until_ms: 2_011_000,
           },
           presence: {
-            online: true,
+            state: "online",
             last_seen_ms: 1_996_000,
             provenance: "observed",
             trust: "local",
@@ -228,6 +228,19 @@ describe("preview scenario service", () => {
     await expect(intercept("rescan")).resolves.toMatchObject({
       handled: true,
       value: [{ details: { latency: { connect_latency_ms: 32 } } }],
+    });
+  });
+
+  it("fails closed to unknown when a preview discovery observation is stale", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+    const store = createPreviewScenarioStore(null);
+    const intercept = createPreviewInterceptor(store);
+
+    store.getState().addDevice({ ...PHONE, lastSeenAgeMs: 15_001 });
+
+    await expect(intercept("discovered")).resolves.toMatchObject({
+      handled: true,
+      value: [{ details: { presence: { state: "unknown" } } }],
     });
   });
 

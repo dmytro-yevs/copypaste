@@ -3,6 +3,7 @@ import { Badge, Button, Surface } from "@/components/ui";
 import {
   type PeerHealth,
   type PeerState,
+  peerPresence,
   peerState,
   unsettledFailure,
 } from "@/features/devices/model/peerState";
@@ -65,6 +66,7 @@ export function PeerRow({
 }: PeerRowProps) {
   const { t } = useTranslation();
   const state = peerState(peer, health);
+  const presenceState = peerPresence(peer);
   const { variant, icon: StateIcon } = BADGE[state];
   const failure = unsettledFailure(peer, health);
 
@@ -72,7 +74,12 @@ export function PeerRow({
     peer.last_seen_ms > 0
       ? t("devices.peer.lastSynced", { age: longAge(peer.last_seen_ms) })
       : t("devices.peer.neverSynced");
-  const presence = t(peer.online ? "devices.peer.online" : "devices.peer.offline");
+  const presence =
+    presenceState === "online"
+      ? t("devices.peer.online")
+      : presenceState === "offline"
+        ? t("devices.peer.offline")
+        : t("devices.peer.unknown");
 
   return (
     <Surface asChild elevation="raised" border="subtle" radius="md">

@@ -5,10 +5,11 @@ use std::path::Path;
 use copypaste_ipc::{
     CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, ContentClass,
     DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
-    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresenceObservation,
-    DeviceProfileObservation, DiagnosticCounters, DiscoveredDevice, ErrorCode, EventKind,
-    ExternalNetworkObservation, ImportData, Liveness, PairingRole, PairingState, PeerInfo,
-    PrivateModeData, SensitiveFinding, SensitiveSpan, SettingsHealth, StatusData,
+    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresence,
+    DevicePresenceObservation, DeviceProfileObservation, DiagnosticCounters, DiscoveredDevice,
+    ErrorCode, EventKind, ExternalNetworkObservation, ImportData, Liveness, PairingRole,
+    PairingState, PeerInfo, PrivateModeData, SensitiveFinding, SensitiveSpan, SettingsHealth,
+    StatusData,
 };
 use copypaste_runtime_log::{
     LogLevel as RuntimeLogLevel, Process as RuntimeLogProcess, RuntimeEvent as RuntimeLogEvent,
@@ -81,6 +82,7 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<DeviceProfileObservation>(&config, &mut output);
     declaration::<DeviceEndpointObservation>(&config, &mut output);
     declaration::<DeviceLatencyObservation>(&config, &mut output);
+    declaration::<DevicePresence>(&config, &mut output);
     declaration::<DevicePresenceObservation>(&config, &mut output);
     declaration::<ExternalNetworkObservation>(&config, &mut output);
     declaration::<DeviceDetails>(&config, &mut output);

@@ -5,10 +5,10 @@
  *    the end of a successful session. `0` means never contacted.
  *  - `last_addr` is set only by the side that dialled, so a device paired by
  *    handing out a code here is never dialled from here.
- *  - `online` is an mDNS record: `false` means "not seen", not "unreachable".
+ *  - `online` is a derived compatibility projection, never the presence authority.
  */
 import { classifyError, type ErrorKind } from "@/lib/errors";
-import type { PeerInfo, SyncResult } from "@/lib/ipc";
+import type { DevicePresence, DevicePresenceObservation, PeerInfo, SyncResult } from "@/lib/ipc";
 
 /**
  * `copypaste_p2p::peers::MAX_PAIRINGS`, which is not on the wire.
@@ -97,6 +97,28 @@ export function peerLastSyncAt(peer: PeerInfo): number | null {
   return peer.last_seen_ms > 0 ? peer.last_seen_ms : null;
 }
 
+export function peerPresence(
+  peer: PeerInfo,
+  now: number = Date.now(),
+): DevicePresence {
+  return observedPresence(peer.details?.presence, now);
+}
+
+export function observedPresence(
+  presence: DevicePresenceObservation | null | undefined,
+  now: number = Date.now(),
+): DevicePresence {
+  if (
+    !presence ||
+    presence.observed_at_ms > now ||
+    presence.fresh_until_ms === null ||
+    now > presence.fresh_until_ms
+  ) {
+    return "unknown";
+  }
+  return presence.state;
+}
+
 /** A never-synced peer has no durable age on the current wire, so it cannot be
  *  classified as stalled. */
 export function peerIsStalled(
@@ -138,7 +160,8 @@ export function peerState(
       failure.kind === "protocol_mismatch" ||
       failure.kind === "peer_not_found" ||
       failure.kind === "key_unusable" ||
-      failure.kind === "peer_failed")
+      failure.kind === "peer_failed" ||
+      failure.kind === "peer_unreachable")
   ) {
     return "failing";
   }
@@ -149,7 +172,7 @@ export function peerState(
     return "synced";
   }
   if (peerLastSyncAt(peer) === null) return "waiting";
-  if (!peer.online || failure?.kind === "peer_unreachable") return "away";
+  if (peerPresence(peer, now) === "offline") return "away";
   if (peerIsStalled(peer, now)) return "stalled";
   if (peer.last_addr === null) return "inbound";
   return "synced";
