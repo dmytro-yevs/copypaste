@@ -111,7 +111,8 @@ describe("import", () => {
     await waitForRows(app.browser, 3, 45_000);
     await app.browser.waitUntil(
       async () =>
-        (await app.browser.$$('[aria-label^="Sensitive item, hidden"]').length) >= 2,
+        (await app.browser.$$('button[aria-label^="Sensitive item, hidden"]').length) >=
+          2,
       {
         timeout: 45_000,
         interval: 500,
@@ -126,7 +127,9 @@ describe("import", () => {
   });
 
   test("and it never reaches the search index", async () => {
-    const search = await app.browser.$('[aria-label="Search clipboard history"]');
+    const search = await app.browser.$(
+      '[role="searchbox"][aria-label="Search clipboard history, default"]',
+    );
     await search.setValue(SMUGGLED.slice(0, 12));
     await waitForText(app.browser, "No results for", 20_000);
     await expectSecretAbsent(app.browser, SMUGGLED);
