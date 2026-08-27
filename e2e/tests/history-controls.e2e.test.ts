@@ -111,7 +111,7 @@ describe("the toolbar", () => {
     // Put it back for the tests after this one.
     await app.browser.executeAsync(function (done: () => void) {
       const trigger = document.querySelector(
-        'button[aria-label="Filter by kind, default: All kinds"]',
+        'button[aria-label^="Filter by kind, active:"]',
       ) as HTMLButtonElement | null;
       trigger?.click();
       requestAnimationFrame(() => {
