@@ -11,18 +11,40 @@ set -eu
 staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
 [ -n "$staged" ] || exit 0
 
-command -v cargo >/dev/null 2>&1 || exit 0
+if ! command -v cargo >/dev/null 2>&1; then
+    printf 'pre-commit: cargo is required to check staged Rust files\n' >&2
+    exit 1
+fi
 
 root=$(git rev-parse --show-toplevel)
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+fmt_output=$(mktemp)
+fmt_error=$(mktemp)
+fmt_paths=$(mktemp)
+trap 'rm -f "$fmt_output" "$fmt_error" "$fmt_paths"' EXIT
 
 cd "$root"
-cargo fmt --all -- --check 2>/dev/null \
-    | sed -n 's|^Diff in \(.*\):[0-9][0-9]*:$|\1|p' \
-    | sed "s|^$root/||" | sort -u > "$tmp"
+fmt_rc=0
+if cargo fmt --all -- --check >"$fmt_output" 2>"$fmt_error"; then
+    :
+else
+    fmt_rc=$?
+fi
 
-bad=$(printf '%s\n' "$staged" | sort -u | grep -Fx -f "$tmp" || true)
+# cargo fmt uses exit 1 both for formatting differences and for tool errors.
+# Keep the former scoped to staged files, but reject the latter explicitly.
+awk -v root="$root/" '
+    /^Diff in / {
+        path = $0
+        sub(/^Diff in /, "", path)
+        if (path !~ /:[0-9][0-9]*:$/) next
+        sub(/:[0-9][0-9]*:$/, "", path)
+        if (index(path, root) == 1) path = substr(path, length(root) + 1)
+        print path
+    }
+' "$fmt_output" > "$fmt_paths"
+sort -u "$fmt_paths" -o "$fmt_paths"
+
+bad=$(printf '%s\n' "$staged" | sort -u | grep -Fx -f "$fmt_paths" || true)
 
 [ -z "$bad" ] || {
     printf 'rustfmt would change these staged files:\n'             >&2
@@ -30,6 +52,13 @@ bad=$(printf '%s\n' "$staged" | sort -u | grep -Fx -f "$tmp" || true)
     printf 'Run: rustfmt --edition 2021 <file> && git add <file>\n' >&2
     exit 1
 }
+
+if [ "$fmt_rc" -ne 0 ]; then
+    if [ -s "$fmt_error" ] || [ ! -s "$fmt_paths" ]; then
+        printf 'pre-commit: cargo fmt --check failed; refusing commit\n' >&2
+        exit 1
+    fi
+fi
 
 # Reject a staged file that is over a rule 8 comment budget.
 #
