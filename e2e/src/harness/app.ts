@@ -37,6 +37,15 @@ export interface StartOptions {
   sessionTimeoutMs?: number;
 }
 
+/** Keep ephemeral selections ordered: concurrent probes can pick the same port. */
+export async function allocateDriverPorts(
+  allocatePort: () => Promise<number> = freePort,
+): Promise<readonly [driverPort: number, nativePort: number]> {
+  const driverPort = await allocatePort();
+  const nativePort = await allocatePort();
+  return [driverPort, nativePort];
+}
+
 /**
  * DMY-54, run 31379514744: the job's first app launch aborted at 60s while the
  * next file opened its session in seconds. A first WebView2 start pays for a new
@@ -64,7 +73,8 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   try {
     daemon = await startDaemon();
   } catch (error) {
-    await clipboard.restore();
+    const cleanupError = await runCleanup(() => clipboard.restore());
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
     throw error;
   }
   try {
@@ -75,8 +85,18 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
     throw error;
   }
 
-  const driverPort = await freePort();
-  const nativePort = await freePort();
+  let driverPort: number;
+  let nativePort: number;
+  try {
+    [driverPort, nativePort] = await allocateDriverPorts();
+  } catch (error) {
+    const cleanupError = await runCleanup(
+      () => daemon.stop(),
+      () => clipboard.restore(),
+    );
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
+    throw error;
+  }
 
   // tauri-driver 2.0.6 takes no pass-through for the native driver's own log
   // flags, and it drops msedgedriver's stdout while forwarding its stderr
