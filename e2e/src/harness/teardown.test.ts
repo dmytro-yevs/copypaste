@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateErrors,
   createIdempotentStop,
+  runCleanup,
   waitForPortsClosed,
 } from "./teardown.js";
 
@@ -60,6 +61,37 @@ describe("harness teardown", () => {
     expect(combined.errors[0]).toBe(startup);
     expect(combined.errors[1]).toBe(cleanup);
     expect(combined.message).toMatch(/^session startup failed\n/);
+  });
+
+  it("runs daemon cleanup before clipboard restore and retains both failures", async () => {
+    const events: string[] = [];
+    const daemonFailure = new Error("daemon stop failed");
+    const clipboardFailure = new Error("clipboard restore failed");
+
+    const cleanupError = await runCleanup(
+      async () => {
+        events.push("daemon");
+        throw daemonFailure;
+      },
+      async () => {
+        events.push("clipboard");
+        throw clipboardFailure;
+      },
+    );
+
+    expect(events).toEqual(["daemon", "clipboard"]);
+    expect(cleanupError).toBeInstanceOf(AggregateError);
+    const combined = aggregateErrors(
+      new Error("port allocation failed"),
+      cleanupError,
+    );
+    expect(combined.errors[0]).toEqual(
+      expect.objectContaining({ message: "port allocation failed" }),
+    );
+    expect((combined.errors[1] as AggregateError).errors).toEqual([
+      daemonFailure,
+      clipboardFailure,
+    ]);
   });
 });
 
