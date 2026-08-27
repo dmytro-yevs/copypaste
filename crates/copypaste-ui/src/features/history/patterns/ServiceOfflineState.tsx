@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -30,23 +30,90 @@ export function ServiceOfflineState({
         queryFn: serviceState,
         retry: false,
     });
-    const [busy, setBusy] = useState(false);
+    const [operation, setOperation] = useState<
+        "recover" | "refresh" | "state" | null
+    >(null);
+    const operationRunning = useRef(false);
+    const matchingRefreshAttempted = useRef(false);
+    const [matchingRefreshSettled, setMatchingRefreshSettled] = useState(false);
 
-    async function recover(action: () => Promise<ServiceState>) {
-        setBusy(true);
-        try {
-            const state = await action();
-            queryClient.setQueryData(SERVICE_STATE_KEY, state);
-            await Promise.all([
+    const invalidateConsumers = useCallback(
+        () =>
+            Promise.all([
                 invalidateHistoryQueries(queryClient),
                 queryClient.invalidateQueries({ queryKey: STATUS_KEY }),
-            ]);
-        } catch (raw) {
-            toast.error(toFriendly(raw), { id: "service-recovery" });
+            ]),
+        [queryClient],
+    );
+
+    const runExclusive = useCallback(
+        async (
+            kind: "recover" | "refresh" | "state",
+            action: () => Promise<void>,
+        ) => {
+            if (operationRunning.current) return;
+            operationRunning.current = true;
+            setOperation(kind);
+            try {
+                await action();
+            } catch (raw) {
+                toast.error(toFriendly(raw), { id: "service-recovery" });
+            } finally {
+                operationRunning.current = false;
+                setOperation(null);
+            }
+        },
+        [],
+    );
+
+    const invalidateMatchingConsumers = useCallback(async () => {
+        setMatchingRefreshSettled(false);
+        try {
+            await invalidateConsumers();
         } finally {
-            setBusy(false);
+            setMatchingRefreshSettled(true);
         }
+    }, [invalidateConsumers]);
+
+    async function recover(action: () => Promise<ServiceState>) {
+        await runExclusive("recover", async () => {
+            const next = await action();
+            const matches = next.state === "running" && next.matches_app;
+            if (matches) matchingRefreshAttempted.current = true;
+            queryClient.setQueryData(SERVICE_STATE_KEY, next);
+            if (matches) await invalidateMatchingConsumers();
+        });
     }
+
+    const refreshConsumers = useCallback(
+        () => runExclusive("refresh", invalidateMatchingConsumers),
+        [invalidateMatchingConsumers, runExclusive],
+    );
+
+    const retryState = useCallback(
+        () =>
+            runExclusive("state", async () => {
+                const result = await service.refetch();
+                if (result.error) throw result.error;
+            }),
+        [runExclusive, service],
+    );
+
+    const state = service.data;
+    const matchesApp = state?.state === "running" && state.matches_app;
+
+    useEffect(() => {
+        if (!matchesApp) {
+            matchingRefreshAttempted.current = false;
+            setMatchingRefreshSettled(false);
+            return;
+        }
+        if (matchingRefreshAttempted.current) return;
+        matchingRefreshAttempted.current = true;
+        void refreshConsumers();
+    }, [matchesApp, refreshConsumers]);
+
+    const busy = operation !== null || service.isFetching;
 
     const diagnostics = (
         <Button variant="ghost" size="sm" onClick={onOpenDiagnostics}>
@@ -54,28 +121,106 @@ export function ServiceOfflineState({
             {t("shell.service.diagnostics")}
         </Button>
     );
-    const state = service.data;
 
-    if (state?.state === "running" && !state.matches_app) {
+    if (service.isPending) {
+        return (
+            <EmptyState
+                icon="plug"
+                tone="attention"
+                busy
+                title={t("shell.service.checking.title")}
+                body={t("shell.service.checking.body")}
+                secondary={diagnostics}
+                secondaryPlacement="attached"
+            />
+        );
+    }
+
+    if (service.isError) {
         return (
             <EmptyState
                 icon="alert"
-                tone="attention"
+                tone="danger"
                 busy={busy}
-                title={t("shell.service.outOfDate.title")}
-                body={t("shell.service.outOfDate.body")}
+                title={t("shell.service.unhealthy.title")}
+                body={toFriendly(service.error)}
+                action={{
+                    label: t("common.tryAgain"),
+                    icon: "refresh",
+                    disabled: busy,
+                    onClick: () => void retryState(),
+                }}
+                secondary={diagnostics}
+                secondaryPlacement="attached"
+            />
+        );
+    }
+
+    if (state === undefined) {
+        return (
+            <EmptyState
+                icon="alert"
+                tone="danger"
+                busy={busy}
+                title={t("shell.service.unhealthy.title")}
+                body={t("shell.service.unhealthy.body")}
+                action={{
+                    label: t("common.tryAgain"),
+                    icon: "refresh",
+                    disabled: busy,
+                    onClick: () => void retryState(),
+                }}
+                secondary={diagnostics}
+                secondaryPlacement="attached"
+            />
+        );
+    }
+
+    if (state.state === "unhealthy") {
+        return (
+            <EmptyState
+                icon="alert"
+                tone="danger"
+                busy={busy}
+                title={t("shell.service.unhealthy.title")}
+                body={t("shell.service.unhealthy.body")}
+                action={{
+                    label: t("common.tryAgain"),
+                    icon: "refresh",
+                    disabled: busy,
+                    onClick: () => void retryState(),
+                }}
+                secondary={diagnostics}
+                secondaryPlacement="attached"
+            />
+        );
+    }
+
+    if (matchesApp) {
+        const refreshing =
+            operation === "recover" ||
+            operation === "refresh" ||
+            !matchingRefreshSettled;
+        return (
+            <EmptyState
+                icon="plug"
+                tone="attention"
+                busy={refreshing}
+                title={t("shell.service.running.title")}
+                body={t(
+                    refreshing
+                        ? "shell.service.running.refreshing"
+                        : "shell.service.running.retry",
+                )}
                 action={
-                    state.ours
-                        ? {
-                              label: t(
-                                  busy
-                                      ? "shell.service.outOfDate.restarting"
-                                      : "shell.service.outOfDate.restart",
-                              ),
-                              icon: "play",
-                              onClick: () => void recover(restartService),
+                    refreshing
+                        ? undefined
+                        : {
+                              label: t("common.tryAgain"),
+                              icon: "refresh",
+                              disabled: busy,
+                              onClick: () => void refreshConsumers(),
                           }
-                        : undefined
                 }
                 secondary={diagnostics}
                 secondaryPlacement="attached"
@@ -83,7 +228,31 @@ export function ServiceOfflineState({
         );
     }
 
-    if (state?.state === "not_installed") {
+    if (state.state === "running") {
+        return (
+            <EmptyState
+                icon="alert"
+                tone="attention"
+                busy={busy}
+                title={t("shell.service.outOfDate.title")}
+                body={t("shell.service.outOfDate.body")}
+                action={{
+                    label: t(
+                        busy
+                            ? "shell.service.outOfDate.restarting"
+                            : "shell.service.outOfDate.restart",
+                    ),
+                    icon: "play",
+                    disabled: busy,
+                    onClick: () => void recover(restartService),
+                }}
+                secondary={diagnostics}
+                secondaryPlacement="attached"
+            />
+        );
+    }
+
+    if (state.state === "not_installed") {
         return (
             <EmptyState
                 icon="alert"
@@ -110,6 +279,7 @@ export function ServiceOfflineState({
                         : "shell.service.stopped.start",
                 ),
                 icon: "play",
+                disabled: busy,
                 onClick: () => void recover(startService),
             }}
             secondary={diagnostics}

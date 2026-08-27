@@ -126,9 +126,8 @@ export function useSetPrivateMode() {
   });
 }
 
-/** Refuses for a service this app did not start (ADR-0004): that is an answer,
- *  not a failure to work around — whoever started it another way is the one who
- *  can restart it. */
+/** Restart is an IPC shutdown followed by the bundled service. An adopted
+ *  service is never signalled or killed by process id (ADR-0004). */
 export function useRestartService() {
   const qc = useQueryClient();
   return useMutation<ServiceState, unknown, void>({
