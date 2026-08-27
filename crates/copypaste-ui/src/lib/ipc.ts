@@ -293,8 +293,8 @@ export function startService(): Promise<ServiceState> {
   return call(UI_COMMANDS.start_service);
 }
 
-/** Stops what this app started and starts it again. Refuses for a service it
- *  did not start — see ADR-0004. */
+/** Shuts down a live service through IPC and starts the bundled version.
+ *  Adopted services are never signalled or killed by process id (ADR-0004). */
 export function restartService(): Promise<ServiceState> {
   return call(UI_COMMANDS.restart_service);
 }
