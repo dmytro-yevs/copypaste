@@ -17,11 +17,10 @@ import {
   waitForText,
 } from "../src/harness/ui.js";
 
-const TABS = [
+const SHARED_SECTIONS = [
   "Appearance",
   "Clipboard behavior",
   "Privacy & retention",
-  "Shortcuts",
   "Device sync",
   "Cloud sync",
   "Storage & history",
@@ -29,6 +28,10 @@ const TABS = [
   "Runtime events",
   "About",
 ];
+const TABS =
+  process.platform === "win32"
+    ? [...SHARED_SECTIONS.slice(0, 3), "Shortcuts", ...SHARED_SECTIONS.slice(3)]
+    : SHARED_SECTIONS;
 
 let app: App;
 
@@ -52,7 +55,8 @@ async function settingsNavigation() {
   if (await navigation.isExisting()) return navigation;
 
   const back = await app.browser.$('button[aria-label="Back to Preferences"]');
-  await back.waitForClickable({ timeout: 15_000 });
+  await back.waitForDisplayed({ timeout: 15_000 });
+  expect(await back.isEnabled()).toBe(true);
   await back.click();
   navigation = await app.browser.$('[aria-label="Preference sections"]');
   await navigation.waitForDisplayed({ timeout: 15_000 });
@@ -164,7 +168,9 @@ describe("the sections", () => {
             left: rect.left,
             right: rect.right,
             width: rect.width,
-            text: (node as HTMLElement).innerText,
+            text:
+              node.querySelector("strong")?.textContent?.trim() ??
+              (node as HTMLElement).innerText.trim(),
           };
         },
       ) as Array<{
@@ -194,6 +200,7 @@ describe("the sections", () => {
     expect(row).not.toBeNull();
     expect(row!.overflow).toBeLessThanOrEqual(1);
     expect(row!.tabs).toHaveLength(TABS.length);
+    expect(row!.tabs.map((tab) => tab.text)).toEqual(TABS);
     for (const tab of row!.tabs) {
       expect(tab.width, tab.text).toBeGreaterThan(0);
       expect(tab.left, tab.text).toBeGreaterThanOrEqual(row!.left - 1);
