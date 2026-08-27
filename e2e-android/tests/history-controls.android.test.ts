@@ -106,24 +106,38 @@ describe("the toolbar", () => {
   test("search replaces the control row at full width", async () => {
     await openHistorySearch(app);
     const search = await interactableElementBox(app, SEARCH);
+    const filter = await interactableElementBox(
+      app,
+      '[aria-label^="Filter by kind,"]',
+    );
     const state = await app.withPage((page) =>
       page.evaluate((expandedAttribute) => {
         const toolbar = document.querySelector(
           '[data-slot="history-toolbar"]',
         ) as HTMLElement;
+        const siblings = toolbar.querySelector(
+          ':scope > [aria-hidden="true"]',
+        ) as HTMLElement | null;
         const toolbarRect = toolbar.getBoundingClientRect();
         return {
           expanded: toolbar.hasAttribute(expandedAttribute),
           toolbarWidth: toolbarRect.width,
-          filterPresent: Boolean(
-            document.querySelector('[aria-label^="Filter by kind,"]'),
+          filterMounted: Boolean(
+            toolbar.querySelector('[aria-label^="Filter by kind,"]'),
           ),
+          siblingsHidden: siblings?.getAttribute("aria-hidden"),
+          siblingsVisibility: siblings
+            ? getComputedStyle(siblings).visibility
+            : null,
         };
       }, HISTORY_SEARCH_EXPANDED_ATTRIBUTE),
     );
 
     expect(state.expanded).toBe(true);
-    expect(state.filterPresent).toBe(false);
+    expect(state.filterMounted).toBe(true);
+    expect(state.siblingsHidden).toBe("true");
+    expect(state.siblingsVisibility).toBe("hidden");
+    expect(filter).toBeNull();
     expect(search?.width ?? 0).toBeGreaterThan(state.toolbarWidth - 80);
     await tapButton(app, "Close search");
   });
