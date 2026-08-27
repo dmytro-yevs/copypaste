@@ -64,8 +64,9 @@ settings_pane_holds() { # <artifact>
 }
 
 storage_transfer_actions_holds() { # <artifact>
-    [[ -n "$(action_center "$1" "Export…")" ]] \
-        && [[ -n "$(action_center "$1" "Import…")" ]]
+    node_exists_exact "$1" "Storage & history" \
+        && enabled_action_exists_exact "$1" "Export…" \
+        && enabled_action_exists_exact "$1" "Import…"
 }
 
 # Four stages open this pane, and every one of them wrote the same three
@@ -105,8 +106,8 @@ history_toolbar_holds() { # <artifact>
 }
 
 history_unfiltered_holds() { # <artifact>
-    [[ -n "$(node_center_exact "$1" "Search clipboard history, default")" ]] \
-        && [[ -z "$(node_center_exact "$1" "Clear search")" ]]
+    node_exists_exact "$1" "Search clipboard history, default" \
+        && ! node_exists_exact "$1" "Clear search"
 }
 
 # Two authored titles mean "this history is empty", and which one the app shows
@@ -125,9 +126,9 @@ ERROR_CATALOGUE="crates/copypaste-ui/src/i18n/en/common.ts"
 
 cleared_history_holds() { # <artifact>
     history_unfiltered_holds "$1" \
-        && [[ -n "$(node_center_exact "$1" "$EMPTY_HISTORY_TITLES")" ]] \
-        && [[ -n "$(node_center_exact "$1" "0 items")" ]] \
-        && [[ -z "$(node_center_exact "$1" "$CANARY")" ]]
+        && node_exists_exact "$1" "$EMPTY_HISTORY_TITLES" \
+        && node_exists_exact "$1" "0 items" \
+        && ! node_exists_exact "$1" "$CANARY"
 }
 
 history_state_holds() { # <artifact> <predicate> <dump function>
@@ -252,9 +253,9 @@ self_test_transfer() {
     android_navigation_self_test "$temp"
     storage_stage_self_test "$temp"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, active" bounds="[0,0][200,40]"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" bounds=\"[0,0][200,40]\"/><node text=\"0 items\" bounds=\"[280,0][340,40]\"/><node text=\"$CANARY\" bounds=\"[0,50][300,90]\"/></hierarchy>" > "$temp/delayed.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/paused.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" bounds=\"[0,0][200,40]\"/><node text=\"0 items\" bounds=\"[15,141][16,143]\"/><node text=\"$CANARY\"/></hierarchy>" > "$temp/delayed.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="0 items" bounds="[15,141][16,143]"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="0 items" bounds="[15,141][16,143]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/paused.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Waiting for the key store" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/locked.xml"
     cleared_history_holds "$temp/filtered.xml" \
         && bad "a retained zero-result search cannot prove cleared history" \
@@ -280,13 +281,24 @@ self_test_transfer() {
         && ok "the storage canary cannot look like a card number" \
         || bad "the storage canary cannot look like a card number" "$canary_sample"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[0,0][180,44]" enabled="true"/><node text="Import history" bounds="[24,70][140,90]" enabled="true"/><node text="Import…" bounds="[0,0][0,0]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-title-only.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[0,0][180,44]" enabled="true"/><node text="Export…" bounds="[20,80][120,124]" enabled="true" clickable="true"/><node text="Import…" bounds="[20,140][120,184]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="false" clickable="true"/></node></hierarchy>' > "$temp/storage-disabled.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="CopyPaste" class="android.webkit.WebView" enabled="true" bounds="[0,0][320,640]"/></hierarchy>' > "$temp/blank-webview.xml"
     storage_transfer_actions_holds "$temp/storage-title-only.xml" \
         && bad "storage readiness requires actionable transfer buttons" \
         || ok "storage readiness requires actionable transfer buttons"
     storage_transfer_actions_holds "$temp/storage-ready.xml" \
-        && ok "storage readiness accepts visible transfer actions" \
-        || bad "storage readiness accepts visible transfer actions"
+        && ok "storage readiness accepts an enabled transfer action below the fold" \
+        || bad "storage readiness accepts an enabled transfer action below the fold"
+    storage_transfer_actions_holds "$temp/storage-disabled.xml" \
+        && bad "storage readiness rejects a disabled transfer action" \
+        || ok "storage readiness rejects a disabled transfer action"
+    storage_transfer_actions_holds "$temp/blank-webview.xml" \
+        && bad "a blank WebView is not a ready storage pane" \
+        || ok "a blank WebView is not a ready storage pane"
+    cleared_history_holds "$temp/blank-webview.xml" \
+        && bad "a blank WebView is not a cleared history" \
+        || ok "a blank WebView is not a cleared history"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node text=\"Notifications alt+T\" bounds=\"[12,572][308,572]\"><node text=\"CopyPaste $IMPORT_FAILURE_COPY. Try again.\" bounds=\"[49,524][263,563]\"/></node></hierarchy>" > "$temp/rejected.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Notifications alt+T" bounds="[12,572][308,572]"><node text="Imported 1 item" bounds="[49,524][263,563]"/></node></hierarchy>' > "$temp/accepted.xml"
     ui_fixtures "$temp/rejected.xml"
