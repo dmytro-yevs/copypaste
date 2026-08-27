@@ -126,19 +126,39 @@ export async function probeTauriSession<T extends { stop(): Promise<void> }>(
     session = await start();
     appendFileSync(manifest, "tauriSessionProbe=ready\n");
   } catch (cause) {
-    appendFileSync(
-      manifest,
-      `tauriSessionProbe=failed\n` +
-        `tauriSessionProbeError=${describe(cause)}\n`,
-    );
+    appendSessionFailure(manifest, "startup", cause);
     throw new WindowsEnvironmentProbeFailure(
       "Windows environment probe failed: Tauri could not establish a ready WebView2 session; " +
         "the native suite was not started.",
       { cause },
     );
   } finally {
-    await session?.stop();
+    if (session) {
+      try {
+        await session.stop();
+      } catch (cause) {
+        appendSessionFailure(manifest, "cleanup", cause);
+        throw new WindowsEnvironmentProbeFailure(
+          "Windows environment probe failed during Tauri session cleanup; " +
+            "the native suite was not started.",
+          { cause },
+        );
+      }
+    }
   }
+}
+
+function appendSessionFailure(
+  manifest: string,
+  phase: "startup" | "cleanup",
+  cause: unknown,
+): void {
+  appendFileSync(
+    manifest,
+    `tauriSessionProbe=failed\n` +
+      `tauriSessionProbeFailure=${phase}\n` +
+      `tauriSessionProbe${phase === "cleanup" ? "Cleanup" : ""}Error=${describe(cause)}\n`,
+  );
 }
 
 function firstThree(version: string): string {
