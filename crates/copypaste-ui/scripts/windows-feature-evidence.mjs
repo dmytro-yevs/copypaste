@@ -14,7 +14,7 @@ const EXPECTED = new Map([
     directory: "devices",
     direct: true,
   }],
-  ["settings-and-service/appearance", { feature: "settings-and-service", state: "appearance", name: "Theme", directory: "settings-and-service", direct: true }],
+  ["settings-and-service/appearance", { feature: "settings-and-service", state: "appearance", name: "Mode", directory: "settings-and-service", direct: true }],
   ["cloud-account/unconfigured", { feature: "cloud-account", state: "unconfigured", name: "Cloud server configuration", directory: "cloud-account", direct: true }],
 ]);
 
