@@ -50,6 +50,7 @@ function DialogContent({
     closeLabel = "Close",
     overlayClassName,
     overlayAriaLabel,
+    overlayPointerEvents,
     presentation,
     ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & {
@@ -57,12 +58,18 @@ function DialogContent({
     closeLabel?: string;
     overlayClassName?: string;
     overlayAriaLabel?: string;
+    overlayPointerEvents?: "auto" | "none";
 } & ModalFrameProps) {
     return (
         <DialogPortal data-slot="dialog-portal">
             <DialogOverlay
                 className={overlayClassName}
                 aria-label={overlayAriaLabel}
+                style={
+                    overlayPointerEvents
+                        ? { pointerEvents: overlayPointerEvents }
+                        : undefined
+                }
             />
             <DialogPrimitive.Content
                 data-slot="dialog-content"
