@@ -99,37 +99,38 @@ android_navigation_self_test() { # <temp>
     # Screens where the destination marker is absent while the source control is
     # still actionable — the ordinary state after a tap that landed. What
     # separates the two cases is the state *before* the tap, so both are built.
-    local sections='<node text="Settings sections" bounds="[12,73][308,223]"/><node text="Appearance" bounds="[17,78][110,122]" enabled="true" clickable="true" selected="false"/>'
-    local storage_on='<node text="Storage" bounds="[217,126][284,170]" enabled="true" clickable="true" selected="true"/>'
-    local storage_off='<node text="Storage" bounds="[217,126][284,170]" enabled="true" clickable="true" selected="false"/>'
+    local sections='<node text="Preference sections" bounds="[12,73][308,544]"/><node text="Appearance Light, dark, color theme and translucency" bounds="[13,0][307,27]" enabled="true" clickable="true" selected="false"/>'
+    local storage_action="Storage & history Stored items, cleanup, transfer and recovery"
+    local storage_on='<node text="Storage &amp; history Stored items, cleanup, transfer and recovery" bounds="[13,285][307,351]" enabled="true" clickable="true" selected="true"/>'
+    local storage_off='<node text="Storage &amp; history Stored items, cleanup, transfer and recovery" bounds="[13,285][307,351]" enabled="true" clickable="true" selected="false"/>'
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections$storage_on</node></hierarchy>" > "$temp/storage-current.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections$storage_off</node></hierarchy>" > "$temp/storage-not-current.xml"
 
     # Selected before the tap and selected after it: a swallowed tap reads
     # exactly like a delivered one, so neither may be claimed.
-    [[ "$(tap_landing "$temp/storage-current.xml" Storage "$temp/storage-current.xml")" \
+    [[ "$(tap_landing "$temp/storage-current.xml" "$storage_action" "$temp/storage-current.xml")" \
        == *"already current before the tap; the pane did not render"* ]] \
         && ok "a control current before its tap is not credited with a transition" \
         || bad "a control current before its tap is not credited with a transition" \
-               "$(tap_landing "$temp/storage-current.xml" Storage "$temp/storage-current.xml")"
-    [[ "$(tap_landing "$temp/storage-current.xml" Storage "$temp/storage-not-current.xml")" \
+               "$(tap_landing "$temp/storage-current.xml" "$storage_action" "$temp/storage-current.xml")"
+    [[ "$(tap_landing "$temp/storage-current.xml" "$storage_action" "$temp/storage-not-current.xml")" \
        == *"was not current before the tap and is current now"* ]] \
         && ok "a control that became current reports the transition" \
         || bad "a control that became current reports the transition" \
-               "$(tap_landing "$temp/storage-current.xml" Storage "$temp/storage-not-current.xml")"
-    [[ "$(tap_landing "$temp/storage-current.xml" Storage)" == *"is current and the pane did not render"* ]] \
+               "$(tap_landing "$temp/storage-current.xml" "$storage_action" "$temp/storage-not-current.xml")"
+    [[ "$(tap_landing "$temp/storage-current.xml" "$storage_action")" == *"is current and the pane did not render"* ]] \
         && ok "with no pre-state a current control is reported, not explained" \
         || bad "with no pre-state a current control is reported, not explained" \
-               "$(tap_landing "$temp/storage-current.xml" Storage)"
+               "$(tap_landing "$temp/storage-current.xml" "$storage_action")"
     [[ "$(tap_landing "$temp/navigable.xml" Settings "$temp/navigable.xml")" != *"tap"* ]] \
         && ok "an always-actionable primary tab claims nothing about its tap" \
         || bad "an always-actionable primary tab claims nothing about its tap" \
                "$(tap_landing "$temp/navigable.xml" Settings "$temp/navigable.xml")"
-    [[ "$(tap_landing "$temp/storage-current.xml" Appearance "$temp/storage-not-current.xml")" \
+    [[ "$(tap_landing "$temp/storage-current.xml" "Appearance Light, dark, color theme and translucency" "$temp/storage-not-current.xml")" \
        != *"current now"* ]] \
         && ok "an unselected sibling tab is not credited with the tap" \
         || bad "an unselected sibling tab is not credited with the tap" \
-               "$(tap_landing "$temp/storage-current.xml" Appearance "$temp/storage-not-current.xml")"
+               "$(tap_landing "$temp/storage-current.xml" "Appearance Light, dark, color theme and translucency" "$temp/storage-not-current.xml")"
     [[ "$(tap_landing "$temp/shell-less.xml" Settings "$temp/navigable.xml")" == *"not on screen"* ]] \
         && ok "a control that is absent is reported as absent" \
         || bad "a control that is absent is reported as absent" \
