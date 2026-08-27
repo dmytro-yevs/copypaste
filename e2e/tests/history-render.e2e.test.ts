@@ -11,17 +11,20 @@ import {
 
 const COUNT = 120;
 
-/** `rowHeight(2)` from crates/copypaste-ui/src/lib/layout.ts, duplicated
- *  deliberately: a test that imports the constant cannot catch it changing. */
-const ROW_HEIGHT = 88;
+/** Current text-card geometry, including the virtual row's wrapper chrome.
+ *  Duplicated deliberately: a test that imports the metrics cannot catch them
+ *  changing. Mounted rows are intrinsic: one line is 77px, while the complete
+ *  three-line preview cap is 119px. */
+const SHORT_ROW_HEIGHT = 77;
+const LONG_ROW_HEIGHT = 119;
 
 const LONG = "long ".repeat(400);
 
 function seed(): string[] {
   const items: string[] = [];
   for (let i = 0; i < COUNT; i += 1) {
-    // Alternating lengths: INV-5 says the reservation is a function of the
-    // setting, so both must reserve identically.
+    // Alternating lengths: INV-5 exercises intrinsic measurement and the
+    // conservative three-line cap across both content shapes.
     items.push(i % 2 === 0 ? `item ${i} short` : `item ${i} ${LONG}`);
   }
   return items;
@@ -47,7 +50,10 @@ describe("the virtualiser", () => {
 
   test("reserves the full list height so the scrollbar is real", async () => {
     const { totalSize, scrollHeight, clientHeight } = await scroller(app.browser);
-    expect(totalSize).toBeCloseTo(COUNT * ROW_HEIGHT, 0);
+    // Unmounted rows retain the conservative three-line estimate; mounted
+    // rows replace it with their measured intrinsic height.
+    expect(totalSize).toBeGreaterThan(COUNT * SHORT_ROW_HEIGHT);
+    expect(totalSize).toBeLessThanOrEqual(COUNT * LONG_ROW_HEIGHT);
     expect(scrollHeight).toBeGreaterThan(clientHeight);
   });
 
@@ -58,15 +64,24 @@ describe("the virtualiser", () => {
 });
 
 describe("row geometry (INV-5)", () => {
-  test("over-reserves: a 2000-character clip reserves what a 5-word clip does", async () => {
+  test("measures intrinsic rows within the conservative preview cap", async () => {
     const rows = await rowBoxes(app.browser);
     const heights = new Set(rows.map((row) => Math.round(row.height)));
-    expect([...heights]).toEqual([ROW_HEIGHT]);
+    expect([...heights].sort((a, b) => a - b)).toEqual([
+      SHORT_ROW_HEIGHT,
+      LONG_ROW_HEIGHT,
+    ]);
 
     const long = rows.filter((row) => row.text.includes("long long"));
     const short = rows.filter((row) => row.text.includes("short"));
     expect(long.length).toBeGreaterThan(0);
     expect(short.length).toBeGreaterThan(0);
+    expect(
+      long.every((row) => Math.round(row.height) === LONG_ROW_HEIGHT),
+    ).toBe(true);
+    expect(
+      short.every((row) => Math.round(row.height) === SHORT_ROW_HEIGHT),
+    ).toBe(true);
   });
 
   test("rows never overlap", async () => {
