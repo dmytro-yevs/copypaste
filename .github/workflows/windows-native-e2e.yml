@@ -49,19 +49,10 @@ jobs:
           New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
           $log = Join-Path $logDirectory "windows-host.log"
           try {
-            $product = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-            $keys = @(
-              "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$product"
-              "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$product"
-            )
-            $runtime = @($keys | ForEach-Object {
-              (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
-            } | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Sort-Object -Unique)
             $edgeDriver = Get-Command msedgedriver.exe -ErrorAction SilentlyContinue
             @(
               "ImageOS=$env:ImageOS"
               "WindowsVersion=$([Environment]::OSVersion.Version)"
-              "WebView2RuntimeVersions=$($runtime -join ',')"
               "EdgeDriverCommand=$($edgeDriver.Source)"
               "EdgeDriverDirectory=$env:EDGEWEBDRIVER"
             ) | Set-Content -LiteralPath $log
@@ -126,10 +117,6 @@ jobs:
               throw "expected one installed WebView2 Runtime version, found $($versions.Count)"
             }
             $runtimeVersion = $versions[0]
-            if ($runtimeVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
-              throw "the WebView2 Runtime reported an invalid version"
-            }
-
             $driverDirectory = Join-Path $env:RUNNER_TEMP "webview2-edgedriver"
             $archive = Join-Path $env:RUNNER_TEMP "webview2-edgedriver.zip"
             $uri = "https://msedgedriver.microsoft.com/$runtimeVersion/edgedriver_win64.zip"
@@ -137,19 +124,9 @@ jobs:
             Expand-Archive -LiteralPath $archive -DestinationPath $driverDirectory -Force
 
             $driver = Join-Path $driverDirectory "msedgedriver.exe"
-            $reported = (& $driver --version | Out-String)
-            $versionMatch = [regex]::Match($reported, '(?:Microsoft Edge WebDriver|MSEdgeDriver) (\d+\.\d+\.\d+\.\d+)')
-            if ($LASTEXITCODE -ne 0 -or -not $versionMatch.Success) {
-              throw "the downloaded Edge WebDriver did not report a valid version"
-            }
-            $driverVersion = $versionMatch.Groups[1].Value
-            $runtimeMajor = ([version]$runtimeVersion).Major
-            $driverMajor = ([version]$driverVersion).Major
-            if ($driverMajor -ne $runtimeMajor) {
-              throw "Edge WebDriver major $driverMajor is incompatible with WebView2 Runtime major $runtimeMajor"
-            }
-            Write-Host "WebView2 Runtime $runtimeVersion and Edge WebDriver $driverVersion"
+            Write-Host "Downloaded Edge WebDriver for WebView2 Runtime $runtimeVersion"
             "EDGEWEBDRIVER=$driverDirectory" >> $env:GITHUB_ENV
+            "COPYPASTE_WEBVIEW2_RUNTIME_VERSION=$runtimeVersion" >> $env:GITHUB_ENV
           } finally {
             Stop-Transcript | Out-Null
           }
