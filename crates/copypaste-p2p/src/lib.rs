@@ -27,7 +27,8 @@ pub mod protocol;
 pub mod sync;
 pub mod transport;
 
-pub use device_profile::{AuthenticatedDeviceProfile, DeviceClass, DevicePlatform, DeviceProfile};
+pub use copypaste_ipc::{DeviceClass, DevicePlatform};
+pub use device_profile::{AuthenticatedDeviceProfile, DeviceProfile};
 pub use node::{
     Node, NodeError, PairingInvite, PairingPeer, PairingPhase, PairingRole, PairingStatus,
     PAIRING_CONFIRM_TIMEOUT, PAIRING_INVITE_TTL,

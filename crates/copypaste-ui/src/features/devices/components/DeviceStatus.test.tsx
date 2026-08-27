@@ -45,7 +45,7 @@ describe("device status presentation", () => {
           fresh_until_ms: null,
         },
         presence: {
-          online: true,
+          state: "online",
           last_seen_ms: 1_800_000_000_000,
           provenance: "observed",
           trust: "local",
