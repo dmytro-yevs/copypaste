@@ -5,6 +5,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type RefCallback,
   type ReactNode,
@@ -19,6 +20,10 @@ export type SizeClass = "compact" | "expanded";
 interface ElementSize {
   width: number;
   height: number;
+}
+
+function sameSize(left: ElementSize, right: ElementSize): boolean {
+  return left.width === right.width && left.height === right.height;
 }
 
 interface ViewportMetrics extends ElementSize {
@@ -64,6 +69,34 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
   const [observerRef] = useState<{
     current: MaintainedResizeObserver | null;
   }>(() => ({ current: null }));
+  const pendingMeasurements = useRef(new Map<Element, ElementSize>());
+  const publishedMeasurements = useRef(new Map<Element, ElementSize>());
+  const frame = useRef<number | null>(null);
+
+  const flushMeasurements = useCallback(() => {
+    frame.current = null;
+    const measurements = [...pendingMeasurements.current];
+    pendingMeasurements.current.clear();
+    for (const [element, size] of measurements) {
+      const previous = publishedMeasurements.current.get(element);
+      if (previous && sameSize(previous, size)) continue;
+      publishedMeasurements.current.set(element, size);
+      if (element === document.documentElement) {
+        setViewport((current) => (sameSize(current, size) ? current : size));
+      }
+      const subscribers = registry.get(element);
+      if (!subscribers) continue;
+      for (const subscriber of subscribers) subscriber(size);
+    }
+  }, [registry]);
+
+  const queueMeasurement = useCallback((element: Element, size: ElementSize) => {
+    const pending = pendingMeasurements.current.get(element);
+    if (pending && sameSize(pending, size)) return;
+    pendingMeasurements.current.set(element, size);
+    if (frame.current !== null) return;
+    frame.current = window.requestAnimationFrame(flushMeasurements);
+  }, [flushMeasurements]);
 
   const observe = useCallback((element: Element, subscriber: SizeSubscriber) => {
     let subscribers = registry.get(element);
@@ -74,12 +107,16 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
     }
     subscribers.add(subscriber);
     const bounds = element.getBoundingClientRect();
-    subscriber({ width: bounds.width, height: bounds.height });
+    const size = { width: bounds.width, height: bounds.height };
+    publishedMeasurements.current.set(element, size);
+    subscriber(size);
     return () => {
       const current = registry.get(element);
       current?.delete(subscriber);
       if (current?.size === 0) {
         registry.delete(element);
+        pendingMeasurements.current.delete(element);
+        publishedMeasurements.current.delete(element);
         observerRef.current?.unobserve(element);
       }
     };
@@ -89,30 +126,36 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement;
     const observer = new MaintainedResizeObserver((entries) => {
       for (const entry of entries) {
-        if (entry.target === root) {
-          setViewport({
-            width: root.clientWidth || entry.contentRect.width,
-            height: root.clientHeight || entry.contentRect.height,
-          });
-        }
-        const subscribers = registry.get(entry.target);
-        if (!subscribers) continue;
-        const size = {
-          width: entry.contentRect.width,
-          height: entry.contentRect.height,
-        };
-        for (const subscriber of subscribers) subscriber(size);
+        const size = entry.target === root
+          ? {
+              width: root.clientWidth || entry.contentRect.width,
+              height: root.clientHeight || entry.contentRect.height,
+            }
+          : {
+              width: entry.contentRect.width,
+              height: entry.contentRect.height,
+            };
+        queueMeasurement(entry.target, size);
       }
     });
     observerRef.current = observer;
     observer.observe(root);
     for (const element of registry.keys()) observer.observe(element);
-    setViewport(windowSize());
+    setViewport((current) => {
+      const size = windowSize();
+      return sameSize(current, size) ? current : size;
+    });
     return () => {
       observerRef.current = null;
       observer.disconnect();
+      if (frame.current !== null) {
+        window.cancelAnimationFrame(frame.current);
+        frame.current = null;
+      }
+      pendingMeasurements.current.clear();
+      publishedMeasurements.current.clear();
     };
-  }, [observerRef, registry]);
+  }, [observerRef, queueMeasurement, registry]);
 
   useEffect(() => {
     if (!pointerMedia) return;
