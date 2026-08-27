@@ -149,7 +149,7 @@ describe("PairingLauncherDialog preview flows", () => {
         const { rerender } = render(launcher(pairing));
 
         fireEvent.click(
-            screen.getByRole("button", { name: /Enter pairing code/ }),
+            screen.getByRole("button", { name: "Enter pairing code" }),
         );
         const connect = screen.getByRole("button", { name: "Connect" });
         expect((connect as HTMLButtonElement).disabled).toBe(true);
