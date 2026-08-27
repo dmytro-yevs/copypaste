@@ -7,7 +7,7 @@
  */
 import type { ComponentProps, ReactNode } from "react";
 
-import { IllustratedErrorState } from "@/components/shared";
+import { IllustratedErrorState, InlineNotice } from "@/components/shared";
 import { Button, Icon, type IconName } from "@/components/ui";
 import { HistoryLoadingState } from "@/features/history/patterns/HistoryLoadingState";
 import { HistoryList } from "@/features/history/patterns/HistoryList";
@@ -94,7 +94,28 @@ export function HistoryContentState({
         );
     }
 
-    if (list.items.length > 0) return <HistoryList {...list} />;
+    if (list.items.length > 0) {
+        return (
+            <>
+                {errorKind === "offline" ? (
+                    <InlineNotice
+                        role="status"
+                        tone="warning"
+                        icon="plug"
+                        action={
+                            <span className={styles.inlineActions}>
+                                {retryAction}
+                                {diagnosticsAction}
+                            </span>
+                        }
+                    >
+                        {t("shell.service.stopped.title")}
+                    </InlineNotice>
+                ) : null}
+                <HistoryList {...list} />
+            </>
+        );
+    }
 
     switch (errorKind) {
         case "key_unusable":
