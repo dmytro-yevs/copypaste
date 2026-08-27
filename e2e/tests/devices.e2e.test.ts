@@ -284,23 +284,27 @@ async function waitForRosterRemoval(
 ): Promise<void> {
   const expectedLabel =
     `more device pairing${expectedCapacity === 1 ? "" : "s"} available.`;
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    const observed = await readRosterState(pairingId);
-    if (
-      !observed.peerPresent &&
-      observed.capacity === String(expectedCapacity) &&
-      observed.capacityLabel === expectedLabel
-    ) {
-      return;
-    }
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `device roster did not remove ${pairingId} and return capacity to ` +
-          `${expectedCapacity}; last state: ${JSON.stringify(observed)}`,
-      );
-    }
-    await sleep(100);
+  let observed: RosterState | undefined;
+  try {
+    await app.browser.waitUntil(
+      async () => {
+        observed = await readRosterState(pairingId);
+        return (
+          !observed.peerPresent &&
+          observed.capacity === String(expectedCapacity) &&
+          observed.capacityLabel === expectedLabel
+        );
+      },
+      {
+        timeout: 20_000,
+        timeoutMsg: `device roster did not return capacity to ${expectedCapacity}`,
+      },
+    );
+  } catch {
+    throw new Error(
+      `device roster did not remove ${pairingId} and return capacity to ` +
+        `${expectedCapacity}; last state: ${JSON.stringify(observed)}`,
+    );
   }
 }
 
