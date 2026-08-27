@@ -11,6 +11,13 @@ on:
         default: false
         type: boolean
 
+# Scheduled evidence must remain visible when someone starts a manual spot
+# check, and a second run of either kind must wait instead of cancelling the
+# run that owns its evidence.
+concurrency:
+  group: native-nightly-${{ github.event_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 

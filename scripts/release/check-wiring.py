@@ -209,6 +209,25 @@ def dispatch_spot_check_holds(jobs):
     )
 
 
+def nightly_concurrency_holds(workflow):
+    concurrency = workflow.get("concurrency")
+    if not isinstance(concurrency, dict):
+        return False
+    group = concurrency.get("group")
+    if not isinstance(group, str) or "github.event_name" not in group:
+        return False
+    groups = {
+        event: re.sub(
+            r"\$\{\{\s*github\.event_name\s*\}\}", event, group
+        )
+        for event in ("schedule", "workflow_dispatch")
+    }
+    return (
+        groups["schedule"] != groups["workflow_dispatch"]
+        and concurrency.get("cancel-in-progress") is False
+    )
+
+
 def closure(jobs, name):
     seen, stack = set(), list(as_list(jobs.get(name, {}).get("needs")))
     while stack:
@@ -231,6 +250,11 @@ def min_major(rng):
 
 docs = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WF.glob("*.yml"))}
 text = {p.name: p.read_text() for p in sorted(WF.glob("*.yml"))}
+
+nightly_workflow = docs.get("native-nightly.yml") or {}
+rec(nightly_concurrency_holds(nightly_workflow),
+    "native-nightly.yml isolates scheduled and manual evidence",
+    "group must include github.event_name and cancel-in-progress must be false")
 
 try:
     WORKSPACE_PACKAGES, RUST_VERSION = workspace_contract(pathlib.Path.cwd())
@@ -407,6 +431,13 @@ for check in runner_image_checks(docs):
 def job_timeout_checks(workflows, maximum=20):
     for wf, doc in workflows.items():
         for jn, job in (doc.get("jobs") or {}).items():
+            if "uses" in job:
+                # A reusable caller has no runner of its own. Its callee owns
+                # the timeout, so classify it separately from an unbounded job.
+                yield (True,
+                       "{}: {} delegates its timeout to a reusable workflow".format(wf, jn),
+                       "the called workflow owns the runner budget")
+                continue
             if "runs-on" not in job:
                 continue
             timeout = job.get("timeout-minutes")
@@ -669,7 +700,7 @@ if emu:
             and any(p.startswith("crates/copypaste-ipc") for p in paths),
             f"android-emulator.yml {event} filter covers the shared frontend and the wire contract",
             "a path filter that omits them hides cross-platform breakage")
-    nightly_jobs = (docs.get("native-nightly.yml") or {}).get("jobs") or {}
+    nightly_jobs = nightly_workflow.get("jobs") or {}
     rec("workflow_call" in triggers and "workflow_dispatch" in triggers,
         "android-emulator.yml is reusable and dispatchable",
         "expected workflow_call and workflow_dispatch triggers: {}".format(sorted(triggers)))
@@ -1193,6 +1224,26 @@ if SELF_TEST:
     ):
         emit(held, "self-test: {}".format(desc),
              "the job timeout detector did not behave as stated")
+
+    current_nightly = docs.get("native-nightly.yml") or {}
+    shared_group_nightly = copy.deepcopy(current_nightly)
+    shared_group_nightly["concurrency"]["group"] = "native-nightly"
+    cancelling_nightly = copy.deepcopy(current_nightly)
+    cancelling_nightly["concurrency"]["cancel-in-progress"] = True
+    missing_nightly_concurrency = copy.deepcopy(current_nightly)
+    missing_nightly_concurrency.pop("concurrency", None)
+    for desc, held in (
+        ("the nightly workflow isolates scheduled and manual groups",
+         nightly_concurrency_holds(current_nightly)),
+        ("a shared nightly group is rejected",
+         not nightly_concurrency_holds(shared_group_nightly)),
+        ("cancelling nightly concurrency is rejected",
+         not nightly_concurrency_holds(cancelling_nightly)),
+        ("missing nightly concurrency is rejected",
+         not nightly_concurrency_holds(missing_nightly_concurrency)),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the nightly concurrency detector did not behave as stated")
 
     def components_probe(components, run="cargo +1.96 test --workspace --locked"):
         setup = {"uses": "dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c"}
