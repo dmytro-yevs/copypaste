@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,8 +40,21 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
   }
 
-  override fun onWebViewCreate(webView: WebView) {
-    webView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+  override fun onContentChanged() {
+    super.onContentChanged()
+    // Tauri/Wry installs its RustWebView with setContentView, so this callback
+    // reaches the actual host view synchronously before an accessibility dump.
+    findHostWebView(window.decorView)?.importantForAccessibility =
+      View.IMPORTANT_FOR_ACCESSIBILITY_YES
+  }
+
+  private fun findHostWebView(view: View): WebView? {
+    if (view is WebView) return view
+    if (view !is ViewGroup) return null
+    for (index in 0 until view.childCount) {
+      findHostWebView(view.getChildAt(index))?.let { return it }
+    }
+    return null
   }
 
   /**
