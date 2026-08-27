@@ -1,5 +1,6 @@
 import { sleep } from "./adb.js";
 import type { AndroidApp } from "./app.js";
+import type { Page } from "puppeteer-core";
 
 export const NAV = 'nav[aria-label="Primary"]';
 export const NAVIGATION_READY = `${NAV} button:not(:disabled):not([aria-disabled="true"])`;
@@ -9,6 +10,7 @@ export const ROW_SELECTION = `${ROW} [role="checkbox"]`;
 export const SEARCH_DEFAULT_LABEL = "Search clipboard history, default";
 export const SEARCH =
   '[role="searchbox"][aria-label^="Search clipboard history,"]';
+export const HISTORY_SEARCH_EXPANDED_ATTRIBUTE = "data-search-expanded";
 export const MASKED_ROW =
   '[aria-label="Sensitive item, hidden — activate to reveal"]';
 
@@ -201,24 +203,97 @@ export interface ElementBox {
   height: number;
 }
 
+interface ElementCandidate extends ElementBox {
+  disabled: boolean;
+  ariaDisabled: string | null;
+  ownsCenter: boolean;
+  x: number;
+  y: number;
+  right: number;
+}
+
+interface InteractableElement extends ElementCandidate {
+  index: number;
+}
+
 export function anyElementRendered(boxes: readonly ElementBox[]): boolean {
   return boxes.some((box) => box.width > 0 && box.height > 0);
 }
 
-async function elementBoxes(
+export function firstInteractableElementIndex(
+  candidates: readonly Pick<
+    ElementCandidate,
+    "width" | "height" | "disabled" | "ariaDisabled" | "ownsCenter"
+  >[],
+): number {
+  return candidates.findIndex(
+    (candidate) =>
+      candidate.width > 0 &&
+      candidate.height > 0 &&
+      !candidate.disabled &&
+      candidate.ariaDisabled !== "true" &&
+      candidate.ownsCenter,
+  );
+}
+
+async function firstInteractableElement(
+  page: Page,
+  selector: string,
+): Promise<InteractableElement | null> {
+  const candidates = await page.evaluate(
+    (query) =>
+      Array.from(document.querySelectorAll(query), (node) => {
+        const target = node as HTMLElement;
+        const rect = target.getBoundingClientRect();
+        const x = rect.x + rect.width / 2;
+        const y = rect.y + rect.height / 2;
+        return {
+          disabled: target.matches(":disabled"),
+          ariaDisabled: target.getAttribute("aria-disabled"),
+          width: rect.width,
+          height: rect.height,
+          x,
+          y,
+          right: rect.right,
+          ownsCenter:
+            rect.width > 0 &&
+            rect.height > 0 &&
+            target.contains(document.elementFromPoint(x, y)),
+        };
+      }),
+    selector,
+  );
+  const index = firstInteractableElementIndex(candidates);
+  return index < 0 ? null : { ...candidates[index], index };
+}
+
+async function withInteractableElement<T>(
   app: AndroidApp,
   selector: string,
-): Promise<ElementBox[]> {
-  return app.withPage((page) =>
-    page.evaluate(
-      (query) =>
-        Array.from(document.querySelectorAll(query), (node) => {
-          const rect = node.getBoundingClientRect();
-          return { width: rect.width, height: rect.height };
-        }),
-      selector,
-    ),
-  );
+  action: (page: Page, element: InteractableElement) => Promise<T>,
+): Promise<T> {
+  return app.withPage(async (page) => {
+    const element = await firstInteractableElement(page, selector);
+    if (!element)
+      throw new Error(`no interactable element matched ${selector}`);
+    return action(page, element);
+  });
+}
+
+export async function interactableElementBox(
+  app: AndroidApp,
+  selector: string,
+): Promise<(ElementBox & { right: number }) | null> {
+  return app.withPage(async (page) => {
+    const element = await firstInteractableElement(page, selector);
+    return element
+      ? {
+          width: element.width,
+          height: element.height,
+          right: element.right,
+        }
+      : null;
+  });
 }
 
 /** Every element carrying this accessible name, with the box it was laid out
@@ -347,11 +422,13 @@ export async function fieldValue(
   app: AndroidApp,
   selector: string,
 ): Promise<string> {
-  return app.withPage((page) =>
-    page.evaluate((query) => {
-      const node = document.querySelector(query) as HTMLInputElement | null;
-      return node?.value ?? "";
-    }, selector),
+  return withInteractableElement(app, selector, (page, element) =>
+    page.evaluate(
+      (query, index) =>
+        (document.querySelectorAll(query)[index] as HTMLInputElement).value,
+      selector,
+      element.index,
+    ),
   );
 }
 
@@ -362,8 +439,8 @@ export async function typeInto(
   selector: string,
   text: string,
 ): Promise<void> {
-  await app.withPage(async (page) => {
-    await page.click(selector);
+  await withInteractableElement(app, selector, async (page, element) => {
+    await page.mouse.click(element.x, element.y);
     await page.keyboard.type(text, { delay: 20 });
   });
 }
@@ -379,8 +456,8 @@ export async function clearField(
 ): Promise<void> {
   const current = await fieldValue(app, selector);
   if (!current) return;
-  await app.withPage(async (page) => {
-    await page.click(selector);
+  await withInteractableElement(app, selector, async (page, element) => {
+    await page.mouse.click(element.x, element.y);
     await page.keyboard.press("End");
     for (let i = 0; i < current.length; i++)
       await page.keyboard.press("Backspace");
@@ -411,13 +488,10 @@ export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
 }
 
 export async function openHistorySearch(app: AndroidApp): Promise<void> {
-  if (anyElementRendered(await elementBoxes(app, SEARCH))) return;
-  await tapElement(
-    app,
-    'button[aria-label^="Search clipboard history,"]',
-  );
+  if (await interactableElementBox(app, SEARCH)) return;
+  await tapElement(app, 'button[aria-label^="Search clipboard history,"]');
   await waitFor(
-    async () => anyElementRendered(await elementBoxes(app, SEARCH)),
+    async () => (await interactableElementBox(app, SEARCH)) !== null,
     "the search field never opened",
   );
 }
