@@ -198,7 +198,9 @@ describe("the bulk bar", () => {
     });
     const copy = await dialog.getText();
     expect(copy).toContain("Delete 2 items?");
-    expect(copy).toContain("You have a few seconds to undo it.");
+    expect(copy).toContain(
+      "This permanently removes the selected clipboard items.",
+    );
 
     const before = await app.daemon.items();
     await clickButton(app.browser, "Delete", {
