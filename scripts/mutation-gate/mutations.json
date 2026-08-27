@@ -185,9 +185,9 @@
         {
           "name": "webview-surface-not-required",
           "file": "scripts/release/android-native-accessibility.sh",
-          "find": "if not any(\"WebView\" in name for name in classes):",
+          "find": "if not webviews:",
           "replace": "if False:",
-          "expect": "self-test failed: invalid fixture passed"
+          "expect": "self-test failed: invalid fixture reached the wrong rejection"
         },
         {
           "name": "named-node-floor-removed",

@@ -49,14 +49,16 @@ class FixtureScratch:
         self.pristine = {}
 
     def seed(self, rel, text):
-        (self.root / rel).write_text(text, encoding="utf-8", newline="")
+        with (self.root / rel).open("w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
         self.pristine[rel] = text
 
     def read(self, rel):
         return (self.root / rel).read_text(encoding="utf-8")
 
     def write(self, rel, text):
-        (self.root / rel).write_text(text, encoding="utf-8", newline="")
+        with (self.root / rel).open("w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
 
     def restore(self, rel):
         self.write(rel, self.pristine[rel])
