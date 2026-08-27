@@ -124,6 +124,20 @@ describe("compact history search readiness", () => {
     );
   });
 
+  test("rejects a mounted control that CSS keeps out of hit testing", () => {
+    expect(
+      firstInteractableElementIndex([
+        {
+          width: 120,
+          height: 44,
+          disabled: false,
+          ariaDisabled: null,
+          ownsCenter: false,
+        },
+      ]),
+    ).toBe(-1);
+  });
+
   test("does not accept a toolbar whose search fields are all hidden", () => {
     expect(
       anyElementRendered([
