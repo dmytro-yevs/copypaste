@@ -251,6 +251,34 @@ function peerCardSelector(pairingId: string): string {
   return `button[data-device-selection-key="peer:${pairingId}"]`;
 }
 
+async function waitForPairingCapacity(expected: number): Promise<void> {
+  const expectedCopy =
+    `${expected} more device pairing${expected === 1 ? "" : "s"} available.`;
+  await app.browser.waitUntil(
+    async () => {
+      const note = await app.browser.$(
+        'section[aria-labelledby="your-devices-heading"] > p',
+      );
+      return (
+        (await note.isExisting()) &&
+        (await note.getText()).replace(/\s+/g, " ").trim() === expectedCopy
+      );
+    },
+    {
+      timeout: 20_000,
+      timeoutMsg: `pairing capacity did not return to ${expected}`,
+    },
+  );
+}
+
+async function waitForPeerRemoval(pairingId: string): Promise<void> {
+  await app.browser.$(peerCardSelector(pairingId)).waitForExist({
+    reverse: true,
+    timeout: 20_000,
+    timeoutMsg: `peer ${pairingId} remained in the device roster`,
+  });
+}
+
 async function openPeerDetails(peer: Pick<PeerInfo, "pairing_id" | "name">) {
   const details = await app.browser.$('section[aria-label$=" details"]');
   if (await details.isDisplayed()) {
@@ -564,10 +592,8 @@ describe("unpairing", () => {
       },
       { timeout: 20_000, timeoutMsg: "the peer store still holds the device" },
     );
-    await waitForText(app.browser, "16 more device pairings available.");
-    expect(
-      await app.browser.$(peerCardSelector(paired.pairing_id)).isExisting(),
-    ).toBe(false);
+    await waitForPeerRemoval(paired.pairing_id);
+    await waitForPairingCapacity(16);
   });
 });
 
@@ -597,9 +623,7 @@ describe("revoking", () => {
         ),
       { timeout: 20_000, timeoutMsg: "the revoked peer remained in the store" },
     );
-    await waitForText(app.browser, "16 more device pairings available.");
-    expect(
-      await app.browser.$(peerCardSelector(minted.pairing_id)).isExisting(),
-    ).toBe(false);
+    await waitForPeerRemoval(minted.pairing_id);
+    await waitForPairingCapacity(16);
   });
 });
