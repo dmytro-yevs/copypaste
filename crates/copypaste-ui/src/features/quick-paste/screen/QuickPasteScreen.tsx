@@ -35,10 +35,12 @@ import { kindOf } from "@/lib/format";
 import styles from "./QuickPasteScreen.module.css";
 const LIMIT = 100;
 
-function searchLabel(item: Item): string {
+export function quickPasteSearchLabel(item: Item): string {
   if (item.is_sensitive) return "••••••••";
-  if (kindOf(item) === "image") return t("quickPaste.row.image");
-  if (item.content_type.toLowerCase() === "file") return t("quickPaste.row.file");
+  const kind = kindOf(item);
+  if (kind === "image") return t("quickPaste.row.image");
+  if (kind === "file") return t("quickPaste.row.file");
+  if (kind === "unknown") return t("quickPaste.row.unsupported");
   if (item.sensitive_finding) return item.sensitive_finding.redacted_preview;
   return item.content ?? "";
 }
@@ -74,7 +76,7 @@ export function QuickPasteScreen() {
   const { refetch } = history;
 
   const items = useMemo(
-    () => rankFuzzy(history.data?.items ?? [], query, (item) => [searchLabel(item)]),
+    () => rankFuzzy(history.data?.items ?? [], query, (item) => [quickPasteSearchLabel(item)]),
     [history.data?.items, query],
   );
   const originMarks = useMemo(

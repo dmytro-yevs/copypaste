@@ -147,7 +147,12 @@ pub(super) fn image_preview(state: &AppState, id: u64, item_id: &str) -> Respons
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
         Err(error) => return storage_error(id, "image_preview", &error),
     };
-    if row.is_sensitive || !row.content_type.starts_with("image/") {
+    if row.is_sensitive
+        || !matches!(
+            copypaste_ipc::content_type::classify(&row.content_type),
+            copypaste_ipc::ContentClass::Image
+        )
+    {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
     }
     let bytes = match copypaste_core::open_binary(
@@ -1157,6 +1162,16 @@ mod tests {
         .into_item();
 
         let response = image_preview(&state, 1, &image.id);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(response.error.as_deref(), Some(MSG_IMAGE_PREVIEW));
+    }
+
+    #[test]
+    fn image_preview_refuses_an_unknown_content_class() {
+        let (state, _dir) = test_state("image-preview-unknown");
+        let unknown = binary_item(&state, "application/x-future", b"future bytes", None);
+
+        let response = image_preview(&state, 1, &unknown.id);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         assert_eq!(response.error.as_deref(), Some(MSG_IMAGE_PREVIEW));
     }

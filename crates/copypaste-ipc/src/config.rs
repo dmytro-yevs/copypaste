@@ -452,9 +452,9 @@ impl ConfigData {
     #[must_use]
     pub fn capture_limit_bytes(&self, content_type: &str) -> u64 {
         let configured = match crate::content_type::classify(content_type) {
-            crate::content_type::Kind::Text => self.max_text_size_bytes,
-            crate::content_type::Kind::Image => self.max_image_size_bytes,
-            crate::content_type::Kind::File | crate::content_type::Kind::Other => {
+            crate::content_type::ContentClass::Text => self.max_text_size_bytes,
+            crate::content_type::ContentClass::Image => self.max_image_size_bytes,
+            crate::content_type::ContentClass::File | crate::content_type::ContentClass::Other => {
                 self.max_file_size_bytes
             }
         };

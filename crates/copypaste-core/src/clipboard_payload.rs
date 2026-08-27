@@ -29,33 +29,33 @@ pub enum ClipboardPayload {
 impl ClipboardPayload {
     /// Authenticate and classify one stored row.
     ///
-    /// `copypaste_ipc::content_type::Kind` remains the one vocabulary owner.
+    /// `copypaste_ipc::ContentClass` remains the one vocabulary owner.
     /// This type lives in `copypaste-core` because that crate already owns both
     /// `StoredItem` and its text/binary AEAD readers; adding a platform crate or
     /// a second decryption adapter would duplicate that trust boundary.
     pub fn open(row: &StoredItem, key: &ItemKey) -> Result<Self, CryptoError> {
-        use copypaste_ipc::content_type::Kind;
+        use copypaste_ipc::ContentClass;
 
         let binary = || open_binary(&row.content_ciphertext, key, &row.id);
         match copypaste_ipc::content_type::classify(&row.content_type) {
-            Kind::Text => {
+            ContentClass::Text => {
                 let bytes = decrypt(&row.content_ciphertext, &row.nonce, key, &row.id)?;
                 Ok(Self::Text(Zeroizing::new(
                     String::from_utf8_lossy(&bytes).into_owned(),
                 )))
             }
-            Kind::Image => Ok(Self::Image {
+            ContentClass::Image => Ok(Self::Image {
                 content_type: row.content_type.clone(),
                 bytes: binary()?,
             }),
-            Kind::File => Ok(Self::File {
+            ContentClass::File => Ok(Self::File {
                 bytes: binary()?,
                 metadata: row
                     .payload_metadata
                     .as_deref()
                     .and_then(FileMetadata::from_json),
             }),
-            Kind::Other => Ok(Self::Unsupported { bytes: binary()? }),
+            ContentClass::Other => Ok(Self::Unsupported { bytes: binary()? }),
         }
     }
 

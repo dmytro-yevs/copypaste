@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::{open_binary, origin_or, thumbnail_png, ClipboardPayload, StoredItem};
-use copypaste_ipc::{ImagePreview, Item};
+use copypaste_ipc::{ContentClass, ImagePreview, Item};
 
 use super::open::Inner;
 use crate::backend::{BackendError, Page, Result};
@@ -21,6 +21,13 @@ pub(super) const MSG_CONTENT_TOO_LARGE: &str =
 
 pub(super) fn bound_item_preview(item: &mut Item) {
     item.truncated = copypaste_ipc::limits::bound_preview(&mut item.content);
+}
+
+fn supports_image_preview(content_type: &str) -> bool {
+    matches!(
+        copypaste_ipc::content_type::classify(content_type),
+        ContentClass::Image
+    )
 }
 
 impl Inner {
@@ -157,7 +164,7 @@ impl Inner {
             Ok(None) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
             Err(_) => return Err(BackendError::internal("history could not be read")),
         };
-        if row.is_sensitive || !row.content_type.starts_with("image/") {
+        if row.is_sensitive || !supports_image_preview(&row.content_type) {
             return Err(BackendError::Invalid("That image preview is unavailable."));
         }
         let bytes = open_binary(
@@ -240,5 +247,15 @@ mod tests {
         let shown = serde_json::to_string(&error.ui_error()).unwrap();
         assert!(!shown.contains("plaintext that must not escape"), "{shown}");
         assert!(!shown.contains(&item.id), "{shown}");
+    }
+
+    #[test]
+    fn image_preview_eligibility_uses_the_canonical_content_class() {
+        assert!(supports_image_preview(
+            copypaste_ipc::content_type::IMAGE_PNG
+        ));
+        assert!(supports_image_preview("image/webp"));
+        assert!(!supports_image_preview("application/x-future"));
+        assert!(!supports_image_preview(copypaste_ipc::content_type::FILE));
     }
 }

@@ -86,27 +86,15 @@ const RULES: ReadonlyArray<readonly [Kind, RegExp]> = [
 ];
 
 /**
- * Best-effort kind for the row glyph. `content_type` from the daemon wins when
- * it says something specific; otherwise the shape of the text decides. This is
- * decorative only — it never gates redaction, which keys on `is_sensitive`.
+ * The Rust-owned class chooses the base kind. Text can gain a display-only
+ * decoration from its contents, but an unfamiliar binary type stays unknown.
  */
 export function kindOf(item: Item): Kind {
   if (item.is_sensitive) return "secret";
-  if (item.content === null) return "unknown";
-
-  const declared = item.content_type.toLowerCase();
-  if (declared.startsWith("image/")) return "image";
-  if (
-    declared.startsWith("application/") &&
-    !declared.includes("json") &&
-    !declared.includes("code")
-  ) {
-    return "file";
-  }
-  if (declared.startsWith("file/") || declared.includes("file")) return "file";
-  if (declared.includes("json")) return "json";
-  if (declared.includes("url") || declared.includes("uri")) return "url";
-  if (declared.includes("code")) return "code";
+  if (item.content_class === "image") return "image";
+  if (item.content_class === "file") return "file";
+  if (item.content_class === "other" || item.content === null)
+    return "unknown";
 
   const trimmed = item.content.trim();
   if (!trimmed) return "text";

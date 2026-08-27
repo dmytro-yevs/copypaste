@@ -131,13 +131,13 @@ function pairingCeremony(scenario: PreviewScenario): PairingCeremony {
     };
 }
 
-function statusFixture(): StatusData {
+function statusFixture(emptyHistory: boolean): StatusData {
     return {
         device_name: "Preview device",
         version: __COPYPASTE_APP_VERSION__,
         protocol_version: 2,
         listen_addr: "192.168.1.20:49200",
-        item_count: 1,
+        item_count: emptyHistory ? 0 : 1,
         capture_running: true,
         clipboard_backend: "preview clipboard",
         private_mode: false,
@@ -180,6 +180,7 @@ function historyFixture(empty: boolean): ItemPage {
                 id: "preview-item",
                 content: "Preview clipboard content",
                 content_type: "text/plain",
+                content_class: "text",
                 created_at: Date.now() - 30_000,
                 pinned: false,
                 is_sensitive: false,
@@ -330,7 +331,10 @@ export function createPreviewInterceptor(
             throw new IpcFailure("not_ready", true);
         }
         if (scenario.daemon === "up" && command === "status") {
-            return { handled: true, value: statusFixture() };
+            return {
+                handled: true,
+                value: statusFixture(scenario.resources.history === "empty"),
+            };
         }
 
         if (NETWORK_COMMANDS.has(command)) {

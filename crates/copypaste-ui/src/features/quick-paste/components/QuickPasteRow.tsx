@@ -20,10 +20,12 @@ import { t } from "@/i18n";
 import { kindOf } from "@/lib/format";
 import styles from "./QuickPasteRow.module.css";
 
-function label(item: Item) {
+export function quickPasteRowLabel(item: Item) {
   if (item.is_sensitive) return t("quickPaste.row.sensitive");
-  if (kindOf(item) === "image") return t("quickPaste.row.image");
-  if (item.content_type.toLowerCase() === "file") return t("quickPaste.row.file");
+  const kind = kindOf(item);
+  if (kind === "image") return t("quickPaste.row.image");
+  if (kind === "file") return t("quickPaste.row.file");
+  if (kind === "unknown") return t("quickPaste.row.unsupported");
   if (item.sensitive_finding) {
     return item.sensitive_finding.redacted_preview.trim() || t("quickPaste.row.empty");
   }
@@ -59,11 +61,13 @@ export function QuickPasteRow({
 }: QuickPasteRowProps) {
   const kind = kindOf(item);
   const image = kind === "image";
-  const text = label(item);
+  const text = quickPasteRowLabel(item);
   const source = clipSourceMetadata(item);
   const potentiallySensitive = !item.is_sensitive && item.sensitive_finding !== null;
-  const canPreview = !item.is_sensitive && !potentiallySensitive;
-  const cardContent = potentiallySensitive
+  const canPreview = !item.is_sensitive && !potentiallySensitive && kind !== "unknown";
+  const cardContent = kind === "unknown"
+    ? text
+    : potentiallySensitive
     ? item.sensitive_finding?.redacted_preview ?? ""
     : item.content ?? "";
   const preview = image ? (

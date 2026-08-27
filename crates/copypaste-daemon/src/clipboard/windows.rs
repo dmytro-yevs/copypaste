@@ -336,7 +336,7 @@ impl ClipboardSource for WindowsClipboard {
         }
         if !matches!(
             copypaste_ipc::content_type::classify(content_type),
-            copypaste_ipc::content_type::Kind::Image
+            copypaste_ipc::ContentClass::Image
         ) {
             return Err(ClipboardWriteError::UnsupportedContent);
         }

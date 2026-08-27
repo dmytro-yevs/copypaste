@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use copypaste_ipc::{
-    CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, DeviceClass,
-    DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
+    CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, ContentClass,
+    DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
     DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresenceObservation,
     DeviceProfileObservation, DiagnosticCounters, DiscoveredDevice, ErrorCode, EventKind,
     ExternalNetworkObservation, ImportData, Liveness, PairingRole, PairingState, PeerInfo,
@@ -53,6 +53,7 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<CloudSyncData>(&config, &mut output);
     declaration::<ConfigData>(&config, &mut output);
     declaration::<ConfigPatch>(&config, &mut output);
+    declaration::<ContentClass>(&config, &mut output);
     declaration::<Rung>(&config, &mut output);
     declaration::<CaptureSource>(&config, &mut output);
     declaration::<NotGrantedReason>(&config, &mut output);

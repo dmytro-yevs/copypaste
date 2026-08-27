@@ -35,9 +35,16 @@ pub const FILE: &str = "file";
 /// client should render it as "unsupported" rather than guess.
 pub const KNOWN: &[&str] = &[TEXT, RICH_TEXT, HTML, IMAGE_PNG, IMAGE_TIFF, FILE];
 
-/// The capture-limit class for a content type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
+/// The authoritative presentation and capture-limit class for a content type.
+///
+/// The raw wire type stays open so a newer peer can preserve an unfamiliar
+/// payload. Clients receive this closed class beside it and must not infer a
+/// more specific base category from the raw value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+#[serde(rename_all = "snake_case")]
+pub enum ContentClass {
     Text,
     Image,
     File,
@@ -48,15 +55,15 @@ pub enum Kind {
 
 /// Classify a wire content type once for every capture-size gate.
 #[must_use]
-pub fn classify(content_type: &str) -> Kind {
+pub fn classify(content_type: &str) -> ContentClass {
     if is_text(content_type) {
-        Kind::Text
+        ContentClass::Text
     } else if content_type.starts_with("image/") {
-        Kind::Image
+        ContentClass::Image
     } else if content_type == FILE {
-        Kind::File
+        ContentClass::File
     } else {
-        Kind::Other
+        ContentClass::Other
     }
 }
 
@@ -115,13 +122,13 @@ mod tests {
     #[test]
     fn every_capture_type_has_one_limit_class() {
         for ct in [TEXT, RICH_TEXT, HTML, "text/plain"] {
-            assert_eq!(classify(ct), Kind::Text, "{ct}");
+            assert_eq!(classify(ct), ContentClass::Text, "{ct}");
         }
         for ct in [IMAGE_PNG, IMAGE_TIFF, "image/webp"] {
-            assert_eq!(classify(ct), Kind::Image, "{ct}");
+            assert_eq!(classify(ct), ContentClass::Image, "{ct}");
         }
-        assert_eq!(classify(FILE), Kind::File);
-        assert_eq!(classify("application/x-future"), Kind::Other);
+        assert_eq!(classify(FILE), ContentClass::File);
+        assert_eq!(classify("application/x-future"), ContentClass::Other);
     }
 
     /// An unknown type must not be mistaken for text: a client that renders a
