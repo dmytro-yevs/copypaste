@@ -72,7 +72,10 @@ export function track(proc: ResultPromise, logPath?: string): Child {
       if (done) return;
       signal("SIGTERM");
       await Promise.race([proc.catch(() => undefined), sleep(5_000)]);
-      signal("SIGKILL");
+      if (!done) {
+        signal("SIGKILL");
+        await proc.catch(() => undefined);
+      }
     },
   };
 }
