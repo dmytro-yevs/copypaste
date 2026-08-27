@@ -5,33 +5,43 @@ import { useEffect, useState } from "react";
 
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  Button,
   Checkbox,
   Label,
 } from "@/components/ui";
+import { InlineNotice } from "@/components/shared";
 import { useTranslation } from "@/i18n";
+import { toFriendly } from "@/lib/errors";
 import type { PeerInfo } from "@/lib/ipc";
 import styles from "./RevokeDialog.module.css";
 
 interface RevokeDialogProps {
   peer: PeerInfo | null;
+  pending: boolean;
+  error: unknown | null;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (peer: PeerInfo) => void;
+  onConfirm: (peer: PeerInfo) => Promise<void>;
 }
 
-export function RevokeDialog({ peer, onOpenChange, onConfirm }: RevokeDialogProps) {
+export function RevokeDialog({
+  peer,
+  pending,
+  error,
+  onOpenChange,
+  onConfirm,
+}: RevokeDialogProps) {
   const { t } = useTranslation();
   const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
-    if (peer === null) setAcknowledged(false);
-  }, [peer]);
+    setAcknowledged(false);
+  }, [peer?.pairing_id]);
 
   const name = peer?.name ?? t("devices.peer.thisDevice");
 
@@ -55,22 +65,31 @@ export function RevokeDialog({ peer, onOpenChange, onConfirm }: RevokeDialogProp
           <Checkbox
             id="revoke-ack"
             checked={acknowledged}
+            disabled={pending}
             onCheckedChange={(state) => setAcknowledged(state === true)}
           />
           <Label htmlFor="revoke-ack" className={styles.label}>
             {t("devices.revoke.confirmLabel")}
           </Label>
         </div>
+        {error !== null ? (
+          <InlineNotice tone="danger" role="alert">
+            {t("devices.revoke.failed", { error: toFriendly(error) })}
+          </InlineNotice>
+        ) : null}
 
         <AlertDialogFooter>
-          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={!acknowledged}
-            variant="danger"
-            onClick={() => peer && onConfirm(peer)}
+          <AlertDialogCancel disabled={pending}>{t("common.cancel")}</AlertDialogCancel>
+          <Button
+            disabled={!acknowledged || pending}
+            aria-busy={pending || undefined}
+            tone="danger"
+            onClick={() => {
+              if (peer) void onConfirm(peer);
+            }}
           >
-            {t("devices.revoke.action")}
-          </AlertDialogAction>
+            {pending ? t("devices.revoke.pending") : t("devices.revoke.action")}
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
