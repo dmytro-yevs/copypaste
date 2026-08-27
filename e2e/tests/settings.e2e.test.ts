@@ -1,9 +1,9 @@
 /**
  * Preferences: the sections, and the controls that leave the screen.
  *
- * The app's own preferences are round-tripped because they have a layout
- * consequence — preview lines feeds INV-5's row reservation, and appearance has
- * to survive a reload (INV-22). The daemon's are round-tripped through the
+ * The app's own preferences are round-tripped because they change what the
+ * user sees — the history display limit must not delete items, and appearance
+ * has to survive a reload (INV-22). The daemon's are round-tripped through the
  * daemon, since the screen writing them is the only thing that can be wrong.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -11,9 +11,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { startApp, type App } from "../src/harness/app.js";
 import { accessibleSurface, expectNoFilesystemPath } from "../src/harness/leaks.js";
 import {
-  clickButton,
   gotoView,
-  rowBoxes,
   visibleText,
   waitForRows,
   waitForText,
@@ -32,17 +30,15 @@ const TABS = [
   "About",
 ];
 
-/** `rowHeight(n)` from `lib/layout.ts`, duplicated deliberately: a test that
- *  imported the function could not catch it changing. */
-const ROW_HEIGHT = { 1: 67, 2: 88 } as const;
-
 let app: App;
 
 const config = () =>
   app.daemon.json<{ config: { retention_days: number } }>(["config", "show"]);
 
 beforeAll(async () => {
-  app = await startApp({ seed: ["a settings fixture", "another one"] });
+  app = await startApp({
+    seed: Array.from({ length: 101 }, (_, index) => `a settings fixture ${index}`),
+  });
   await waitForRows(app.browser, 2);
   await gotoView(app.browser, "Preferences");
 }, 300_000);
@@ -148,11 +144,14 @@ describe("the tabs", () => {
 });
 
 describe("the service's own settings", () => {
-  test("a value chosen on the screen reaches the daemon", async () => {
+  test("a value chosen on the screen reaches and persists in the daemon", async () => {
     await openTab("Privacy & retention");
-    const select = await app.browser.$('select[aria-label="Drop items older than"]');
+    const select = await app.browser.$(
+      '[role="combobox"][aria-label^="Drop items older than"]',
+    );
     await select.waitForDisplayed({ timeout: 10_000 });
-    await select.selectByAttribute("value", "30");
+    await select.click();
+    await app.browser.$('[role="option"][data-value="30"]').click();
 
     // Read it back out of the daemon, not out of the control that wrote it.
     await app.browser.waitUntil(
@@ -167,38 +166,19 @@ describe("the service's own settings", () => {
   });
 });
 
-describe("a preference that changes layout", () => {
-  test("preview lines re-reserves every row (INV-5)", async () => {
+describe("a preference that changes the visible list", () => {
+  test("history display limit caps the list without deleting history", async () => {
     await openTab("Clipboard behavior");
-    const thumb = await app.browser.$('[aria-label="Preview lines"]');
-    await thumb.click();
-
+    const limit = await app.browser.$(
+      '[role="slider"][aria-label="History display limit"]',
+    );
+    await limit.click();
     await app.browser.keys(["Home"]);
-    await waitForText(app.browser, "1 line");
+    await waitForText(app.browser, "100");
 
     await gotoView(app.browser, "Library");
-    await app.browser.waitUntil(
-      async () => {
-        const rows = await rowBoxes(app.browser);
-        return rows.length > 0 && rows.every((row) => Math.round(row.height) === ROW_HEIGHT[1]);
-      },
-      { timeout: 15_000, timeoutMsg: "rows never shrank to the one-line reservation" },
-    );
-
-    await gotoView(app.browser, "Preferences");
-    await openTab("Clipboard behavior");
-    await (await app.browser.$('[aria-label="Preview lines"]')).click();
-    await app.browser.keys(["ArrowRight"]);
-    await waitForText(app.browser, "2 lines");
-
-    await gotoView(app.browser, "Library");
-    await app.browser.waitUntil(
-      async () => {
-        const rows = await rowBoxes(app.browser);
-        return rows.length > 0 && rows.every((row) => Math.round(row.height) === ROW_HEIGHT[2]);
-      },
-      { timeout: 15_000, timeoutMsg: "rows never returned to the two-line reservation" },
-    );
+    await waitForText(app.browser, "Showing first 100 of 101 results");
+    expect(await app.daemon.items()).toHaveLength(101);
   });
 });
 
@@ -206,14 +186,14 @@ describe("appearance", () => {
   test("survives a reload of the window (INV-22)", async () => {
     await gotoView(app.browser, "Preferences");
     await openTab("Appearance");
-    await clickButton(app.browser, "Teal");
+    await (await app.browser.$('[data-product-theme="aurora"]')).click();
 
     await app.browser.waitUntil(
       async () =>
         (await app.browser.execute(
-          () => document.documentElement.dataset.accent ?? "",
-        )) === "teal",
-      { timeout: 10_000, timeoutMsg: "the accent never reached <html>" },
+          () => document.documentElement.dataset.theme ?? "",
+        )) === "aurora",
+      { timeout: 10_000, timeoutMsg: "the theme never reached <html>" },
     );
 
     await app.browser.execute(() => location.reload());
@@ -227,13 +207,13 @@ describe("appearance", () => {
 
     // Persisted, and applied to the document that has just been painted.
     expect(
-      await app.browser.execute(() => document.documentElement.dataset.accent),
-    ).toBe("teal");
+      await app.browser.execute(() => document.documentElement.dataset.theme),
+    ).toBe("aurora");
 
     await gotoView(app.browser, "Preferences");
     await openTab("Appearance");
-    const teal = await app.browser.$('[aria-label="Teal"]');
-    expect(await teal.getAttribute("aria-pressed")).toBe("true");
+    const aurora = await app.browser.$('[data-product-theme="aurora"]');
+    expect(await aurora.getAttribute("aria-pressed")).toBe("true");
   });
 });
 
@@ -244,12 +224,12 @@ describe("with the service down", () => {
     await openTab("Appearance");
 
     // Nothing on this pane needs the daemon, so it must still be operable.
-    await clickButton(app.browser, "Rose");
+    await (await app.browser.$('[data-product-theme="ember"]')).click();
     await app.browser.waitUntil(
       async () =>
         (await app.browser.execute(
-          () => document.documentElement.dataset.accent ?? "",
-        )) === "rose",
+          () => document.documentElement.dataset.theme ?? "",
+        )) === "ember",
       { timeout: 10_000, timeoutMsg: "Settings stopped working when the service did" },
     );
   });
