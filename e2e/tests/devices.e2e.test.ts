@@ -296,6 +296,7 @@ describe("native-safe pairing", () => {
       return document.querySelectorAll(
         'output, #pairing-code, #pairing-address,' +
           ' #pairing-security-code, canvas, img[alt="Pairing QR code"],' +
+          ' img[alt="QR code"], svg[role="img"][aria-label="Pairing QR code"],' +
           ' [data-pairing-secret]',
       ).length;
     })) as number;
@@ -319,14 +320,30 @@ describe("native-safe pairing", () => {
     }
   });
 
-  test("keeps native pairing presentation outside the page", async () => {
+  test("executes native pairing and handles its platform boundary", async () => {
     await openPairingChoices();
+    await clickButton(app.browser, "Show pairing code");
+
+    if (process.platform === "win32") {
+      const waiting = await waitForPairing(app.daemon, "waiting_for_peer");
+      expect(waiting.state).toBe("waiting_for_peer");
+
+      const cancelled = await app.daemon.json<PairingProgress>([
+        "pair",
+        "cancel",
+      ]);
+      expect(cancelled.state).toBe("cancelled");
+      await waitForPairing(app.daemon, "cancelled");
+    } else {
+      const cancelled = await waitForPairing(app.daemon, "cancelled");
+      expect(cancelled.state).toBe("cancelled");
+    }
+
     const surface = await accessibleSurface(app.browser);
-    expect(surface).toContain("Show pairing code");
-    expect(surface).toContain("Enter pairing code");
     expectNoFilesystemPath(surface);
     expectNoRawError(surface);
-    await closePairingChoices();
+    const html = await outerHtml(app.browser);
+    expect(html).not.toMatch(/Pairing QR code|pairing-security-code/i);
   });
 });
 
@@ -401,21 +418,24 @@ describe("a known device", () => {
 
   test("shows a failure and recovers after reconnect", async () => {
     await other.kill();
+    const details = await openPeerDetails(paired);
     await clickButton(app.browser, "Sync now", {
       within: `section[aria-label="${paired.name} details"]`,
     });
     await waitForText(app.browser, "Sync failed", 45_000);
+    const status = await details.$('[data-slot="device-status"]');
+    expect(await status.getAttribute("data-tone")).toBe("danger");
 
     await other.restart();
     await clickButton(app.browser, "Sync now", {
       within: `section[aria-label="${paired.name} details"]`,
     });
     await app.browser.waitUntil(
-      async () =>
-        (await app.browser.$(
-          `section[aria-label="${paired.name} details"]`,
-        )).getText().then((text) => text.includes("Synced")),
-      { timeout: 45_000, timeoutMsg: "the browser did not show sync recovery" },
+      async () => (await status.getAttribute("data-tone")) === "ready",
+      {
+        timeout: 45_000,
+        timeoutMsg: "the browser did not show a new post-reconnect sync state",
+      },
     );
     expectNoRawError(await outerHtml(app.browser));
   });
