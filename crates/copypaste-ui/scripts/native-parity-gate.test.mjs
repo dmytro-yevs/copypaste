@@ -18,7 +18,7 @@ const WINDOWS_STATES = new Map([
   ["capture", { state: "service-capture-status", name: "Background capture", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGMUW+zFwMDAAKEAEOcCCBlQdmcAAAAASUVORK5CYII=" }],
   ["capture/copy-feedback-setting", { feature: "capture", state: "copy-feedback-setting", name: "Copy feedback sound", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGMIqDgRUnOGIaLhQkzLFQArGgaJKbubPAAAAABJRU5ErkJggg==" }],
   ["devices", { state: "desktop-pairing-entry", name: "Enter pairing code", requiredNames: ["Show pairing code", "Enter pairing code"], png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGNUTX7NwMDAxMDAcGuOCAAUogMBx1ZqEgAAAABJRU5ErkJggg==" }],
-  ["settings-and-service", { state: "appearance", name: "Theme", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGOcbPyKgYGBiYGBIX2mNgAWpQLf2/uWLgAAAABJRU5ErkJggg==" }],
+  ["settings-and-service", { state: "appearance", name: "Mode", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGOcbPyKgYGBiYGBIX2mNgAWpQLf2/uWLgAAAABJRU5ErkJggg==" }],
   ["settings-and-service/updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8DAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==" }],
   ["cloud-account", { state: "unconfigured", name: "Cloud server configuration", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPkmLiJgYGBiYGBQWz9XwARoQMR3PtkxgAAAABJRU5ErkJggg==" }],
 ]);
