@@ -5,6 +5,10 @@ export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
 export const ROW = '[role="listitem"][id^="history-row-"]';
 export const PRIMARY_NAVIGATION =
   'aside[aria-label="Primary"], nav[aria-label="Primary"]';
+const HISTORY_SEARCHBOX =
+  '[role="searchbox"][aria-label^="Search clipboard history,"]';
+const HISTORY_SEARCH_TRIGGER =
+  'button[aria-controls][aria-label^="Search clipboard history,"]';
 
 export interface RowBox {
   id: string;
@@ -214,6 +218,49 @@ export async function focusList(browser: Browser): Promise<void> {
   await browser.execute(function (selector: string) {
     (document.querySelector(selector) as HTMLElement).focus();
   }, HISTORY_LIST);
+}
+
+/**
+ * Focus the search input a user can operate at the current toolbar width.
+ * Compact history keeps the inline input in the DOM but exposes search through
+ * a button and a second overlay input, so selecting the first matching input
+ * can target a zero-sized control. Interaction remains real WebDriver input.
+ */
+export async function openHistorySearch(browser: Browser) {
+  let search = await displayedElement(browser, HISTORY_SEARCHBOX);
+  if (!search) {
+    const trigger = await browser.$(HISTORY_SEARCH_TRIGGER);
+    await trigger.waitForClickable({
+      timeout: 15_000,
+      timeoutMsg: "the compact history search trigger was not clickable",
+    });
+    await trigger.click();
+    await browser.waitUntil(
+      async () => (await displayedElement(browser, HISTORY_SEARCHBOX)) !== null,
+      {
+        timeout: 15_000,
+        timeoutMsg: "the compact history search input did not render",
+      },
+    );
+    search = await displayedElement(browser, HISTORY_SEARCHBOX);
+  }
+  if (!search) throw new Error("history search has no rendered input");
+  await search.waitForClickable({
+    timeout: 15_000,
+    timeoutMsg: "the rendered history search input was not interactable",
+  });
+  await search.click();
+  if (!(await search.isFocused())) {
+    throw new Error("the rendered history search input did not receive focus");
+  }
+  return search;
+}
+
+async function displayedElement(browser: Browser, selector: string) {
+  for (const element of await browser.$$(selector)) {
+    if (await element.isDisplayed()) return element;
+  }
+  return null;
 }
 
 export async function activeRowId(browser: Browser): Promise<string | null> {

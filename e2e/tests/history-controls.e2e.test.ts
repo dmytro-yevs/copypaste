@@ -46,7 +46,8 @@ async function controlBoxes(browser: App["browser"]) {
       {
         label: "Search clipboard history, default",
         selector:
-          '[role="searchbox"][aria-label="Search clipboard history, default"]',
+          '[role="searchbox"][aria-label="Search clipboard history, default"], ' +
+          'button[aria-controls][aria-label="Search clipboard history, default"]',
       },
       {
         label: "Filter by kind, default: All kinds",
@@ -60,11 +61,18 @@ async function controlBoxes(browser: App["browser"]) {
       },
     ];
     return controls.map(function (control) {
-      const el = document.querySelector(control.selector) as HTMLElement | null;
+      const matches = Array.from(
+        document.querySelectorAll<HTMLElement>(control.selector),
+      );
+      const el =
+        matches.find((candidate) => {
+          const box = candidate.getBoundingClientRect();
+          return box.width > 0 && box.height > 0;
+        }) ?? matches[0] ?? null;
       const rect = el?.getBoundingClientRect();
       return {
         label: control.label,
-        present: Boolean(el),
+        present: matches.length > 0,
         width: rect ? rect.width : 0,
         height: rect ? rect.height : 0,
       };
