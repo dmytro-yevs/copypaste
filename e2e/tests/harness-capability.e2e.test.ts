@@ -125,6 +125,33 @@ describe("Windows environment probe", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("fails closed when session cleanup rejects after readiness", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-windows-probe-test-"));
+    const manifest = path.join(directory, "run.log");
+    try {
+      const failure = await probeTauriSession(
+        async () => ({
+          async stop() {
+            throw new Error("driver cleanup failed");
+          },
+        }),
+        manifest,
+      ).then(() => undefined, (error: Error) => error);
+      const written = readFileSync(manifest, "utf8");
+      expect(failure?.name).toBe("WindowsEnvironmentProbeFailure");
+      expect(failure?.message).toContain("during Tauri session cleanup");
+      expect(written).toContain("tauriSessionProbe=ready");
+      expect(written).toContain("tauriSessionProbe=failed");
+      expect(written).toContain("tauriSessionProbeFailure=cleanup");
+      expect(written).toContain("tauriSessionProbeCleanupError=driver cleanup failed");
+      expect(written.lastIndexOf("tauriSessionProbe=failed")).toBeGreaterThan(
+        written.lastIndexOf("tauriSessionProbe=ready"),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Tauri bridge startup", () => {
