@@ -30,6 +30,15 @@ validate_api_level() {
     printf '%s\n' "$probe"
 }
 
+run_required_leg() { # <name> <command...>
+    local name="$1" status
+    shift
+    "$@" && return 0
+    status=$?
+    printf '::error::%s failed (exit %s); later emulator legs were not run\n' "$name" "$status" >&2
+    return "$status"
+}
+
 self_test() {
     local failures=0
 
@@ -94,42 +103,60 @@ self_test() {
         bad "API 36 is recognized" "result: $result"
     fi
 
-    printf '\n%d passed, %d failed\n' $((6 - failures)) "$failures"
+    local observed=""
+    fixture_leg() {
+        observed+="$1 "
+        [[ "$1" != broken ]]
+    }
+    if run_required_leg first fixture_leg first >/dev/null 2>&1 \
+        && run_required_leg broken fixture_leg broken >/dev/null 2>&1 \
+        && run_required_leg unreachable fixture_leg unreachable >/dev/null 2>&1; then
+        bad "a failed emulator leg stops the sequence"
+    elif [[ "$observed" == "first broken " ]]; then
+        ok "a failed emulator leg stops the sequence"
+    else
+        bad "a failed emulator leg stops the sequence" "observed: $observed"
+    fi
+
+    printf '\n%d passed, %d failed\n' $((7 - failures)) "$failures"
     [[ $failures -eq 0 ]]
+}
+
+run_emulator_legs() {
+    run_required_leg "Android smoke" "$here/android-smoke.sh" || return 1
+    run_required_leg "Android harness unit tests" npm --prefix e2e-android run test:harness || return 1
+    run_required_leg "Android WebView E2E" npm --prefix e2e-android test || return 1
+    SMOKE_OUT=artifacts/android-storage TRANSFER_REQUIRE_RUN_AS=1 \
+        run_required_leg "Android storage transfer" "$here/android-storage-transfer.sh" || return 1
+    APK_UNCONFIGURED="$APK" CLOUD_OUT=artifacts/android-cloud-unconfigured \
+        run_required_leg "Android unconfigured cloud evidence" \
+            "$here/android-cloud-evidence.sh" --unconfigured || return 1
+
+    # A failed adb probe once became a sentence that compared unequal to 36,
+    # silently skipping the API-36 rung. Keep status and output separate.
+    local api_probe api_status api_level
+    if api_probe="$(adb shell getprop ro.build.version.sdk 2>&1 | tr -d '\r')"; then
+        api_status=0
+    else
+        api_status=$?
+    fi
+    if ! api_level="$(validate_api_level "$api_probe" "$api_status")"; then
+        printf '::error::%s\n' "$api_level" >&2
+        return 1
+    fi
+    if [[ "$api_level" == 36 ]]; then
+        APK='' SMOKE_OUT=artifacts/android-rungs \
+            run_required_leg "Android API 36 clipboard rung" \
+                "$here/android-rungs.sh" || return 1
+    else
+        printf '  rungs: not applicable (API %s, target 36)\n' "$api_level"
+    fi
+    printf '\n== all required emulator legs passed ==\n'
 }
 
 case "${1:-}" in
     --self-test) self_test ;;
-    "")
-        "$here/android-smoke.sh"; smoke=$?
-        npm --prefix e2e-android run test:harness && npm --prefix e2e-android test; ui=$?
-        SMOKE_OUT=artifacts/android-storage TRANSFER_REQUIRE_RUN_AS=1 \
-            "$here/android-storage-transfer.sh"; storage=$?
-        APK_UNCONFIGURED="$APK" CLOUD_OUT=artifacts/android-cloud-unconfigured \
-            "$here/android-cloud-evidence.sh" --unconfigured; cloud=$?
-
-        # API-36 rung: fail closed when adb/API probing fails; record explicit
-        # run/not-applicable receipts. A probe that failed or returned a
-        # sentence was previously treated as "not 36" and skipped with rungs=0,
-        # so the rungs assertion never ran and the gate passed with no evidence
-        # that the clipboard-uid claim was checked.
-        rungs=0
-        api_probe="$(adb shell getprop ro.build.version.sdk 2>&1 | tr -d '\r')"
-        api_status=$?
-        if ! api_level="$(validate_api_level "$api_probe" "$api_status")"; then
-            echo "::error::$api_level"
-            rungs=1
-        elif [[ "$api_level" == 36 ]]; then
-            APK='' SMOKE_OUT=artifacts/android-rungs "$here/android-rungs.sh"; rungs=$?
-        else
-            echo "  rungs: not applicable (API $api_level, target 36)"
-        fi
-
-        printf '\n== emulator legs: smoke=%s ui=%s storage=%s cloud=%s rungs=%s ==\n' \
-            "$smoke" "$ui" "$storage" "$cloud" "$rungs"
-        [ "$smoke" -eq 0 ] && [ "$ui" -eq 0 ] && [ "$storage" -eq 0 ] && \
-            [ "$cloud" -eq 0 ] && [ "$rungs" -eq 0 ]
-        ;;
+    "") run_emulator_legs ;;
     *)
         printf 'usage: %s [--self-test]\n' "$0" >&2; exit 2 ;;
 esac
