@@ -1,4 +1,6 @@
+import { useRef, useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { PairingController } from "@/features/pairing/hooks/usePairing";
@@ -60,7 +62,10 @@ function controller(
     } as PairingController;
 }
 
-function launcher(pairing: PairingController) {
+function launcher(
+    pairing: PairingController,
+    onOpenChange: (open: boolean) => void = vi.fn(),
+) {
     return (
         <TooltipProvider>
             <PairingLauncherDialog
@@ -69,7 +74,7 @@ function launcher(pairing: PairingController) {
                 preview
                 disabled={false}
                 pairing={pairing}
-                onOpenChange={vi.fn()}
+                onOpenChange={onOpenChange}
                 onCreate={vi.fn()}
                 onJoin={vi.fn()}
             />
@@ -77,8 +82,30 @@ function launcher(pairing: PairingController) {
     );
 }
 
+function StatefulLauncher({ pairing }: { pairing: PairingController }) {
+    const [open, setOpen] = useState(true);
+    const returnFocusRef = useRef<HTMLButtonElement>(null);
+
+    return (
+        <TooltipProvider>
+            <button ref={returnFocusRef}>Launch pairing</button>
+            <PairingLauncherDialog
+                open={open}
+                available
+                preview
+                disabled={false}
+                pairing={pairing}
+                onOpenChange={setOpen}
+                onCreate={vi.fn()}
+                onJoin={vi.fn()}
+                returnFocusRef={returnFocusRef}
+            />
+        </TooltipProvider>
+    );
+}
+
 describe("PairingLauncherDialog preview flows", () => {
-    it("names the dismissible backdrop while keeping scanner entry reachable", () => {
+    it("keeps the Android overlay inert and scanner entry reachable", () => {
         const pairing = controller();
         const url = window.location.href;
         window.history.replaceState({}, "", "/?platform=android");
@@ -89,9 +116,8 @@ describe("PairingLauncherDialog preview flows", () => {
                 '[data-slot="dialog-overlay"]',
             );
             expect(overlay).toBeTruthy();
-            expect(overlay?.getAttribute("aria-label")).toBe(
-                "Dismiss pairing dialog",
-            );
+            expect(overlay?.getAttribute("aria-label")).toBeNull();
+            expect(overlay?.getAttribute("role")).toBeNull();
             expect(overlay?.style.pointerEvents).toBe("none");
             expect(
                 screen.getByRole("button", { name: /Scan pairing code/ }),
@@ -100,6 +126,44 @@ describe("PairingLauncherDialog preview flows", () => {
             window.history.replaceState({}, "", url);
         }
     });
+
+    it("preserves default backdrop dismissal outside Android", async () => {
+        const onOpenChange = vi.fn();
+        const user = userEvent.setup();
+        render(launcher(controller(), onOpenChange));
+
+        const overlay = document.querySelector<HTMLElement>(
+            '[data-slot="dialog-overlay"]',
+        );
+        expect(overlay).toBeTruthy();
+        expect(overlay?.style.pointerEvents).not.toBe("none");
+        await user.click(overlay as HTMLElement);
+
+        expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+
+    it.each(["Escape", "close button"])(
+        "cancels an active ceremony and restores focus after %s dismissal",
+        async (dismissal) => {
+            const pairing = controller({ ceremony: waiting });
+            render(<StatefulLauncher pairing={pairing} />);
+
+            if (dismissal === "Escape") {
+                fireEvent.keyDown(screen.getByRole("dialog"), {
+                    key: "Escape",
+                });
+            } else {
+                fireEvent.click(screen.getByRole("button", { name: "Close" }));
+            }
+
+            expect(pairing.run).toHaveBeenCalledWith("cancel");
+            await waitFor(() => {
+                expect(document.activeElement?.textContent).toBe(
+                    "Launch pairing",
+                );
+            });
+        },
+    );
 
     it("opens a host flow with QR, short code, address, and waiting state", () => {
         const pairing = controller();
@@ -114,7 +178,9 @@ describe("PairingLauncherDialog preview flows", () => {
         rerender(
             launcher(controller({ ceremony: waiting, previewInvite: invite })),
         );
-        expect(screen.getByRole("img", { name: "Pairing QR code" })).toBeTruthy();
+        expect(
+            screen.getByRole("img", { name: "Pairing QR code" }),
+        ).toBeTruthy();
         expect(screen.getByText("482 916")).toBeTruthy();
         expect(screen.getByText("192.168.1.20:49200")).toBeTruthy();
         expect(screen.getByText("Waiting for the other device…")).toBeTruthy();
@@ -125,7 +191,9 @@ describe("PairingLauncherDialog preview flows", () => {
         const originalClipboard = navigator.clipboard;
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
-            value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+            value: {
+                writeText: vi.fn().mockRejectedValue(new Error("denied")),
+            },
         });
         const pairing = controller();
         const { rerender } = render(launcher(pairing));
