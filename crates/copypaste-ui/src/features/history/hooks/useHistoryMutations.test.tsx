@@ -33,8 +33,7 @@ describe("useBulkPin", () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-    const applyOutcome = vi.fn();
-    const { result } = renderHook(() => useBulkPin(applyOutcome), { wrapper });
+    const { result } = renderHook(() => useBulkPin(), { wrapper });
     const target = item();
     let outcome: Awaited<ReturnType<typeof result.current.mutateAsync>> | null =
       null;
@@ -49,10 +48,6 @@ describe("useBulkPin", () => {
 
     await waitFor(() => expect(outcome).toEqual({ done: 1, failedIds: [] }));
     expect(setPinned).toHaveBeenCalledWith(target.id, true);
-    expect(applyOutcome).toHaveBeenCalledWith({ done: 1, failedIds: [] });
     expect(invalidateHistoryQueries).toHaveBeenCalledWith(client);
-    expect(applyOutcome.mock.invocationCallOrder[0]).toBeLessThan(
-      invalidateHistoryQueries.mock.invocationCallOrder[0]!,
-    );
   });
 });
