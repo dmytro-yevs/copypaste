@@ -191,7 +191,11 @@ function Open-WindowsPairingEntry([Diagnostics.Process]$App) {
     } { Get-UiaSummary $App } 15000 | Out-Null
 }
 
-function Set-UiaScreenshots([Diagnostics.Process]$App, [bool]$Allow) {
+function Set-UiaScreenshots(
+    [Diagnostics.Process]$App,
+    [bool]$Allow,
+    [string]$CaptureTracePath = ""
+) {
     $element = Wait-UiaName $App "Allow screenshots" $true
     $pattern = $null
     if (-not $element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) {
@@ -201,7 +205,7 @@ function Set-UiaScreenshots([Diagnostics.Process]$App, [bool]$Allow) {
     $toggle = [Windows.Automation.TogglePattern]$pattern
     $expected = if ($Allow) { [Windows.Automation.ToggleState]::On } else { [Windows.Automation.ToggleState]::Off }
     if ($toggle.Current.ToggleState -ne $expected) { $toggle.Toggle() }
-    Wait-Readiness "Allow screenshots=$Allow native state" {
+    $state = Wait-Readiness "Allow screenshots=$Allow native state" {
         $App.Refresh()
         if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
         try {
@@ -218,7 +222,8 @@ function Set-UiaScreenshots([Diagnostics.Process]$App, [bool]$Allow) {
     } {
         $state = Get-WindowCaptureState $App.MainWindowHandle
         @(Get-UiaSummary $App; "display affinity=$($state.display_affinity)")
-    } 15000 | Out-Null
+    } 15000
+    Write-WindowCaptureObservation $App $CaptureTracePath "screenshots/after-toggle" $state
 }
 
 function New-EvidenceFileRecord([string]$Root, [string]$RelativePath) {
@@ -236,7 +241,8 @@ function Save-WindowsFeatureState(
     [string]$Feature,
     [string]$State,
     [string]$ExpectedName,
-    [string]$ArtifactDirectory = ""
+    [string]$ArtifactDirectory = "",
+    [string]$CaptureTracePath = ""
 ) {
     Wait-UiaName $App $ExpectedName | Out-Null
     $root = Get-AppAutomationRoot $App
@@ -255,7 +261,7 @@ function Save-WindowsFeatureState(
     [IO.Directory]::CreateDirectory($directory) | Out-Null
     $screenshot = Join-Path $relativeDirectory "screenshot.png"
     $accessibility = Join-Path $relativeDirectory "accessibility.json"
-    $window = Save-WindowImage $App (Join-Path $EvidenceRoot $screenshot)
+    $window = Save-WindowImage $App (Join-Path $EvidenceRoot $screenshot) $CaptureTracePath "$Feature/$State"
     [ordered]@{
         schema_version = 2
         feature = $Feature
@@ -307,4 +313,19 @@ function Test-WindowsUiEvidenceHelpers {
     Assert-True (-not (Test-WindowCaptureReady $occluded)) "an occluded window was accepted for capture"
     $protected = [ordered]@{ foreground = $true; visible = $true; minimized = $false; capture_allowed = $false }
     Assert-True (-not (Test-WindowCaptureReady $protected)) "a capture-protected window was accepted for capture"
+    $settled = [ordered]@{ foreground = $true; visible = $true; minimized = $false }
+    $settledPlan = Get-WindowActivationPlan $settled
+    Assert-True (-not $settledPlan.restore -and -not $settledPlan.activate) `
+        "a settled window was mutated before capture"
+    $minimized = [ordered]@{ foreground = $false; visible = $true; minimized = $true }
+    $minimizedPlan = Get-WindowActivationPlan $minimized
+    Assert-True ($minimizedPlan.restore -and $minimizedPlan.activate) `
+        "a minimized background window was not restored and activated"
+    $observation = New-WindowCaptureObservation "fixture/pre-capture" ([ordered]@{
+        handle = 41; foreground = $true; visible = $true; minimized = $false
+        capture_allowed = $true; display_affinity = 0
+    })
+    Assert-True ($observation.phase -eq "fixture/pre-capture" -and $observation.handle -eq 41 -and
+        $observation.capture_allowed -and $observation.display_affinity -eq 0) `
+        "capture-affinity diagnostics lost the measured fixture state"
 }
