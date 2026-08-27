@@ -86,47 +86,40 @@ describe("the toolbar", () => {
     const before = await rowBoxes(app.browser);
     expect(before.length).toBe(4);
 
-    await app.browser.executeAsync(function (done: () => void) {
-      const trigger = document.querySelector(
-        'button[aria-label="Filter by kind, default: All kinds"]',
-      ) as HTMLButtonElement | null;
-      trigger?.click();
-      requestAnimationFrame(() => {
-        (
-          Array.from(
-            document.querySelectorAll('[role="menuitemcheckbox"]'),
-          ).find((item) => item.textContent?.trim() === "Links") as
-            | HTMLElement
-            | undefined
-        )?.click();
-        done();
-      });
-    });
+    const defaultKindFilter = await app.browser.$(
+      'button[aria-label="Filter by kind, default: All kinds"]',
+    );
+    await defaultKindFilter.click();
+    const links = await app.browser.$(
+      '//*[@role="menuitemcheckbox" and normalize-space(.)="Links"]',
+    );
+    await links.waitForClickable({ timeout: 5_000 });
+    await links.click();
 
     await app.browser.waitUntil(
-      async () => (await rowBoxes(app.browser)).length === 2,
+      async () =>
+        (await rowBoxes(app.browser)).length === 2 &&
+        (await app.browser.$(
+          'button[aria-label="Filter by kind, active: Links"]',
+        )).isExisting(),
       { timeout: 5_000, timeoutMsg: "the kind filter did not narrow the list" },
     );
 
     // Put it back for the tests after this one.
-    await app.browser.executeAsync(function (done: () => void) {
-      const trigger = document.querySelector(
-        'button[aria-label^="Filter by kind, active:"]',
-      ) as HTMLButtonElement | null;
-      trigger?.click();
-      requestAnimationFrame(() => {
-        (
-          Array.from(
-            document.querySelectorAll('[role="menuitemcheckbox"]'),
-          ).find((item) => item.textContent?.trim() === "All kinds") as
-            | HTMLElement
-            | undefined
-        )?.click();
-        done();
-      });
-    });
+    await app.browser
+      .$('button[aria-label="Filter by kind, active: Links"]')
+      .click();
+    const allKinds = await app.browser.$(
+      '//*[@role="menuitemcheckbox" and normalize-space(.)="All kinds"]',
+    );
+    await allKinds.waitForClickable({ timeout: 5_000 });
+    await allKinds.click();
     await app.browser.waitUntil(
-      async () => (await rowBoxes(app.browser)).length === 4,
+      async () =>
+        (await rowBoxes(app.browser)).length === 4 &&
+        (await app.browser.$(
+          'button[aria-label="Filter by kind, default: All kinds"]',
+        )).isExisting(),
     );
   });
 });
