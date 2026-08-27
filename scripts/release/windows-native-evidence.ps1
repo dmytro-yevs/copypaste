@@ -423,7 +423,7 @@ try {
         $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history"
         Invoke-UiaNamedControl $app "Connections" "Connect a device"
         Open-WindowsPairingEntry $app
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "desktop-pairing-entry" "Add a CopyPaste device"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "desktop-pairing-entry" "Pairing code"
         [Windows.Forms.SendKeys]::SendWait("{ESC}")
         Wait-UiaName $app "Connect a device" | Out-Null
         Invoke-UiaNamedControl $app "Preferences" "Mode"
