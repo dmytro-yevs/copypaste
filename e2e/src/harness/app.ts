@@ -40,6 +40,7 @@ export interface StartOptions {
  * would hide a product crash behind a second attempt.
  */
 const COLD_SESSION_BUDGET_MS = 120_000;
+const SESSION_CLOSE_BUDGET_MS = 10_000;
 
 /**
  * No GPU or software-rendering flags are set here, and none are needed:
@@ -106,7 +107,7 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
     await waitForDriver(driverPort, driver);
   } catch (error) {
     try {
-      await shutdown(driver, daemon);
+      await shutdown(driver, daemon, [driverPort, nativePort]);
     } finally {
       await clipboard.restore();
     }
@@ -132,7 +133,7 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
     });
   } catch (cause) {
     try {
-      await shutdown(driver, daemon);
+      await shutdown(driver, daemon, [driverPort, nativePort]);
     } finally {
       await clipboard.restore();
     }
@@ -151,20 +152,26 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   const app: App = {
     browser,
     daemon,
-    async stop() {
-      // Every WebDriver call goes through the page's main thread, so a frozen
-      // app makes a polite session close hang as surely as the probe does.
-      // Killing the driver is what actually reclaims the process.
-      await Promise.race([
-        browser.deleteSession().catch(() => undefined),
-        sleep(10_000),
-      ]);
-      try {
-        await shutdown(driver, daemon);
-      } finally {
-        await clipboard.restore();
-      }
-    },
+    stop: (() => {
+      let stopPromise: Promise<void> | undefined;
+      return () => {
+        if (stopPromise) return stopPromise;
+        stopPromise = (async () => {
+          // Every WebDriver call goes through the page's main thread, so a
+          // frozen app makes a polite close hang as surely as the probe does.
+          await Promise.race([
+            browser.deleteSession().catch(() => undefined),
+            sleep(SESSION_CLOSE_BUDGET_MS),
+          ]);
+          try {
+            await shutdown(driver, daemon, [driverPort, nativePort]);
+          } finally {
+            await clipboard.restore();
+          }
+        })();
+        return stopPromise;
+      };
+    })(),
   };
 
   try {
@@ -221,9 +228,44 @@ async function waitForDriver(port: number, driver: Child): Promise<void> {
   }
 }
 
-async function shutdown(driver: Child, daemon: Daemon): Promise<void> {
-  await driver.stop();
-  await daemon.stop();
+async function shutdown(
+  driver: Child,
+  daemon: Daemon,
+  ports: readonly number[] = [],
+): Promise<void> {
+  try {
+    await driver.stop();
+    await waitForPortsClosed(ports);
+  } finally {
+    await daemon.stop();
+  }
+}
+
+async function waitForPortsClosed(ports: readonly number[]): Promise<void> {
+  if (ports.length === 0) return;
+  const deadline = Date.now() + SESSION_CLOSE_BUDGET_MS;
+  for (;;) {
+    const open = await Promise.all(
+      ports.map(async (port) => {
+        try {
+          await fetch(`http://127.0.0.1:${port}/status`, {
+            signal: AbortSignal.timeout(500),
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    );
+    if (!open.some(Boolean)) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `WebDriver ports remain open after ${SESSION_CLOSE_BUDGET_MS}ms: ` +
+          `${ports.join(", ")}`,
+      );
+    }
+    await sleep(100);
+  }
 }
 
 /**
