@@ -387,4 +387,45 @@ mod refusal_tests {
             "a refused entry window still validated something"
         );
     }
+
+    #[test]
+    #[ignore = "opens real native Windows pairing windows"]
+    fn user_dismissal_aborts_invite_and_status_windows() {
+        fn wait_for_abort(aborted: &AtomicBool) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while !aborted.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(
+                aborted.load(Ordering::Acquire),
+                "native dismissal did not abort"
+            );
+        }
+
+        let invite = invite();
+        let invite_aborted = std::sync::Arc::new(AtomicBool::new(false));
+        let invite_abort = invite_aborted.clone();
+        let invite_window = super::invite::spawn(
+            codec::encode_native_invite(&invite).expect("invite payload"),
+            Zeroizing::new(invite.code),
+            Zeroizing::new(invite.listen_addr.expect("listen address")),
+            invite.expires_in_secs,
+            accept,
+            std::sync::Arc::new(move || invite_abort.store(true, Ordering::Release)),
+            std::sync::Arc::new(|| {}),
+        )
+        .expect("native invite window");
+        invite_window.close_from_user_for_test();
+        wait_for_abort(&invite_aborted);
+
+        let status_aborted = std::sync::Arc::new(AtomicBool::new(false));
+        let status_abort = status_aborted.clone();
+        let status_window = super::status::spawn(
+            &awaiting_confirmation(),
+            std::sync::Arc::new(move || status_abort.store(true, Ordering::Release)),
+        )
+        .expect("native status window");
+        status_window.close_from_user_for_test();
+        wait_for_abort(&status_aborted);
+    }
 }
