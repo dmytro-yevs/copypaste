@@ -251,32 +251,57 @@ function peerCardSelector(pairingId: string): string {
   return `button[data-device-selection-key="peer:${pairingId}"]`;
 }
 
-async function waitForPairingCapacity(expected: number): Promise<void> {
-  const expectedCopy =
-    `${expected} more device pairing${expected === 1 ? "" : "s"} available.`;
-  await app.browser.waitUntil(
-    async () => {
-      const note = await app.browser.$(
-        'section[aria-labelledby="your-devices-heading"] > p',
-      );
-      return (
-        (await note.isExisting()) &&
-        (await note.getText()).replace(/\s+/g, " ").trim() === expectedCopy
-      );
-    },
-    {
-      timeout: 20_000,
-      timeoutMsg: `pairing capacity did not return to ${expected}`,
-    },
-  );
+interface RosterState {
+  peerPresent: boolean;
+  capacity: string | null;
+  capacityLabel: string | null;
 }
 
-async function waitForPeerRemoval(pairingId: string): Promise<void> {
-  await app.browser.$(peerCardSelector(pairingId)).waitForExist({
-    reverse: true,
-    timeout: 20_000,
-    timeoutMsg: `peer ${pairingId} remained in the device roster`,
-  });
+async function readRosterState(pairingId: string): Promise<RosterState> {
+  return (await app.browser.execute(function (expectedPairingId) {
+    const peerPresent = Array.from(
+      document.querySelectorAll("button[data-device-selection-key]"),
+    ).some(
+      (card) =>
+        card.getAttribute("data-device-selection-key") ===
+        `peer:${expectedPairingId}`,
+    );
+    const note = document.querySelector(
+      'section[aria-labelledby="your-devices-heading"] > p',
+    );
+    return {
+      peerPresent,
+      capacity: note?.querySelector("strong")?.textContent?.trim() ?? null,
+      capacityLabel:
+        note?.querySelector("strong + span")?.textContent?.trim() ?? null,
+    };
+  }, pairingId)) as RosterState;
+}
+
+async function waitForRosterRemoval(
+  pairingId: string,
+  expectedCapacity: number,
+): Promise<void> {
+  const expectedLabel =
+    `more device pairing${expectedCapacity === 1 ? "" : "s"} available.`;
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const observed = await readRosterState(pairingId);
+    if (
+      !observed.peerPresent &&
+      observed.capacity === String(expectedCapacity) &&
+      observed.capacityLabel === expectedLabel
+    ) {
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `device roster did not remove ${pairingId} and return capacity to ` +
+          `${expectedCapacity}; last state: ${JSON.stringify(observed)}`,
+      );
+    }
+    await sleep(100);
+  }
 }
 
 async function openPeerDetails(peer: Pick<PeerInfo, "pairing_id" | "name">) {
@@ -592,8 +617,7 @@ describe("unpairing", () => {
       },
       { timeout: 20_000, timeoutMsg: "the peer store still holds the device" },
     );
-    await waitForPeerRemoval(paired.pairing_id);
-    await waitForPairingCapacity(16);
+    await waitForRosterRemoval(paired.pairing_id, 16);
   });
 });
 
@@ -623,7 +647,6 @@ describe("revoking", () => {
         ),
       { timeout: 20_000, timeoutMsg: "the revoked peer remained in the store" },
     );
-    await waitForPeerRemoval(minted.pairing_id);
-    await waitForPairingCapacity(16);
+    await waitForRosterRemoval(minted.pairing_id, 16);
   });
 });
