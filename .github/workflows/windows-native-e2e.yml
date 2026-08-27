@@ -40,6 +40,35 @@ jobs:
           # Node's os.tmpdir() and runner temp differ on hosted Windows runners.
           "COPYPASTE_E2E_RUN_ROOT=$env:RUNNER_TEMP\cp-e2e" >> $env:GITHUB_ENV
 
+      - name: Capture Windows WebView2 host diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $logDirectory = Join-Path $env:COPYPASTE_E2E_RUN_ROOT "logs"
+          New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+          $log = Join-Path $logDirectory "windows-host.log"
+          try {
+            $product = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+            $keys = @(
+              "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$product"
+              "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$product"
+            )
+            $runtime = @($keys | ForEach-Object {
+              (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
+            } | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Sort-Object -Unique)
+            $edgeDriver = Get-Command msedgedriver.exe -ErrorAction SilentlyContinue
+            @(
+              "ImageOS=$env:ImageOS"
+              "WindowsVersion=$([Environment]::OSVersion.Version)"
+              "WebView2RuntimeVersions=$($runtime -join ',')"
+              "EdgeDriverCommand=$($edgeDriver.Source)"
+              "EdgeDriverDirectory=$env:EDGEWEBDRIVER"
+            ) | Set-Content -LiteralPath $log
+          } catch {
+            "Windows host diagnostic capture failed: $($_.Exception.Message)" | Set-Content -LiteralPath $log
+          }
+
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
@@ -81,56 +110,60 @@ jobs:
       - name: Install the WebView2-matched Edge driver
         shell: pwsh
         run: |
-          $product = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-          $keys = @(
-            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$product"
-            "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$product"
-          )
-          $versions = @($keys | ForEach-Object {
-            (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
-          } | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Sort-Object -Unique)
-          if ($versions.Count -ne 1) {
-            throw "expected one installed WebView2 Runtime version, found $($versions.Count)"
-          }
-          $runtimeVersion = $versions[0]
-          if ($runtimeVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
-            throw "the WebView2 Runtime reported an invalid version"
-          }
+          $ErrorActionPreference = "Stop"
+          $log = Join-Path $env:COPYPASTE_E2E_RUN_ROOT "logs\webview2-driver-install.log"
+          Start-Transcript -LiteralPath $log -Force | Out-Null
+          try {
+            $product = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+            $keys = @(
+              "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$product"
+              "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$product"
+            )
+            $versions = @($keys | ForEach-Object {
+              (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
+            } | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Sort-Object -Unique)
+            if ($versions.Count -ne 1) {
+              throw "expected one installed WebView2 Runtime version, found $($versions.Count)"
+            }
+            $runtimeVersion = $versions[0]
+            if ($runtimeVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+              throw "the WebView2 Runtime reported an invalid version"
+            }
 
-          $driverDirectory = Join-Path $env:RUNNER_TEMP "webview2-edgedriver"
-          $archive = Join-Path $env:RUNNER_TEMP "webview2-edgedriver.zip"
-          $uri = "https://msedgedriver.microsoft.com/$runtimeVersion/edgedriver_win64.zip"
-          Invoke-WebRequest -Uri $uri -OutFile $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $driverDirectory -Force
+            $driverDirectory = Join-Path $env:RUNNER_TEMP "webview2-edgedriver"
+            $archive = Join-Path $env:RUNNER_TEMP "webview2-edgedriver.zip"
+            $uri = "https://msedgedriver.microsoft.com/$runtimeVersion/edgedriver_win64.zip"
+            Invoke-WebRequest -Uri $uri -OutFile $archive
+            Expand-Archive -LiteralPath $archive -DestinationPath $driverDirectory -Force
 
-          $driver = Join-Path $driverDirectory "msedgedriver.exe"
-          $reported = (& $driver --version | Out-String)
-          $versionMatch = [regex]::Match($reported, 'Microsoft Edge WebDriver (\d+\.\d+\.\d+\.\d+)')
-          if ($LASTEXITCODE -ne 0 -or -not $versionMatch.Success) {
-            throw "the downloaded Edge WebDriver did not report a valid version"
+            $driver = Join-Path $driverDirectory "msedgedriver.exe"
+            $reported = (& $driver --version | Out-String)
+            $versionMatch = [regex]::Match($reported, '(?:Microsoft Edge WebDriver|MSEdgeDriver) (\d+\.\d+\.\d+\.\d+)')
+            if ($LASTEXITCODE -ne 0 -or -not $versionMatch.Success) {
+              throw "the downloaded Edge WebDriver did not report a valid version"
+            }
+            $driverVersion = $versionMatch.Groups[1].Value
+            $runtimeMajor = ([version]$runtimeVersion).Major
+            $driverMajor = ([version]$driverVersion).Major
+            if ($driverMajor -ne $runtimeMajor) {
+              throw "Edge WebDriver major $driverMajor is incompatible with WebView2 Runtime major $runtimeMajor"
+            }
+            Write-Host "WebView2 Runtime $runtimeVersion and Edge WebDriver $driverVersion"
+            "EDGEWEBDRIVER=$driverDirectory" >> $env:GITHUB_ENV
+          } finally {
+            Stop-Transcript | Out-Null
           }
-          $driverVersion = $versionMatch.Groups[1].Value
-          $runtimeMajor = ([version]$runtimeVersion).Major
-          $driverMajor = ([version]$driverVersion).Major
-          if ($driverMajor -ne $runtimeMajor -or $driverVersion -ne $runtimeVersion) {
-            throw "Edge WebDriver does not exactly match the WebView2 Runtime"
-          }
-          Write-Host "WebView2 Runtime and Edge WebDriver: $runtimeVersion"
-          "EDGEWEBDRIVER=$driverDirectory" >> $env:GITHUB_ENV
 
       - name: Run Windows native desktop E2E
         id: native-e2e
         working-directory: e2e
         run: npm run test:windows -- --shard=${{ matrix.shard }}/2
 
-      # Global setup writes a run manifest before anything else can fail, so an
-      # empty directory here means the harness lost its own diagnostics. That is
-      # the defect this step exists to report, not a condition to ignore.
-      - name: Upload native E2E logs on failure
-        if: failure() && steps.native-e2e.conclusion == 'failure'
+      - name: Upload native E2E diagnostics
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: windows-native-e2e-logs-${{ matrix.shard }}
+          name: windows-native-e2e-diagnostics-${{ matrix.shard }}
           path: ${{ env.COPYPASTE_E2E_RUN_ROOT }}/logs/**
           if-no-files-found: error
           retention-days: 7

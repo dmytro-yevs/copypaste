@@ -13,6 +13,11 @@ import {
   assertTauriBridge,
   assertTauriBrowserName,
 } from "../src/harness/webview-guard.js";
+import {
+  assertMajorCompatibility,
+  probeTauriSession,
+  probeWindowsEnvironment,
+} from "../src/harness/windows-environment.js";
 
 describe("Tauri WebDriver capabilities", () => {
   it("accepts WebView2 only on Windows", () => {
@@ -41,6 +46,83 @@ describe("Tauri WebDriver capabilities", () => {
       );
     },
   );
+});
+
+describe("Windows environment probe", () => {
+  it("accepts matching Edge, WebView2, and EdgeDriver majors", () => {
+    expect(() =>
+      assertMajorCompatibility({
+        edge: "140.0.1.2",
+        webview2: "140.0.2.3",
+        edgeDriver: "140.0.3.4",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a mixed-major environment", () => {
+    expect(() =>
+      assertMajorCompatibility({
+        edge: "140.0.1.2",
+        webview2: "139.0.2.3",
+        edgeDriver: "140.0.3.4",
+      }),
+    ).toThrow(/major versions are incompatible/);
+  });
+
+  it("records compatible versions before the session probe", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-windows-probe-test-"));
+    const manifest = path.join(directory, "run.log");
+    try {
+      await probeWindowsEnvironment({
+        manifest,
+        powershell: async () => "Microsoft Edge 140.0.1.2|140.0.2.3",
+        driverVersion: async () => "Microsoft Edge WebDriver 140.0.3.4",
+      });
+      expect(readFileSync(manifest, "utf8")).toContain(
+        "windowsEnvironmentProbe=ready",
+      );
+      expect(readFileSync(manifest, "utf8")).toContain("edgeVersion=140.0.1.2");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies a failed compatibility probe as an environment failure", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-windows-probe-test-"));
+    const manifest = path.join(directory, "run.log");
+    try {
+      const failure = await probeWindowsEnvironment({
+        manifest,
+        powershell: async () => "Edge 140.0.1.2|139.0.2.3",
+        driverVersion: async () => "Microsoft Edge WebDriver 140.0.3.4",
+      }).then(() => undefined, (error: Error) => error);
+      expect(failure?.name).toBe("WindowsEnvironmentProbeFailure");
+      expect(failure?.message).toContain("before the native E2E suite");
+      expect(readFileSync(manifest, "utf8")).toContain(
+        "windowsEnvironmentProbe=failed",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("closes the app after a ready-session probe", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-windows-probe-test-"));
+    let stopped = false;
+    try {
+      await probeTauriSession(
+        async () => ({
+          async stop() {
+            stopped = true;
+          },
+        }),
+        path.join(directory, "run.log"),
+      );
+      expect(stopped).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Tauri bridge startup", () => {
