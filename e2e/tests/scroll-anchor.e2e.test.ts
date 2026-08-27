@@ -37,12 +37,15 @@ test("a prepend keeps the row under the viewport top where it was (INV-1)", asyn
   const { browser } = app;
 
   await scrollTo(browser, 2_400);
-  const before = topRow(
-    await settledList(browser, (list) => list.scrollTop > 2_000 && list.rows.length > 0, {
+  const beforeSnapshot = await settledList(
+    browser,
+    (list) => list.scrollTop > 2_000 && list.rows.length > 0,
+    {
       timeout: 10_000,
       describe: "the list did not come to rest scrolled past 2000px",
-    }),
+    },
   );
+  const before = topRow(beforeSnapshot);
   expect(before.row.text).toContain("anchor item");
 
   await app.daemon.add("a brand new clipping that arrives while scrolled");
@@ -50,7 +53,8 @@ test("a prepend keeps the row under the viewport top where it was (INV-1)", asyn
   const after = topRow(
     await settledList(
       browser,
-      (list) => list.totalSize >= (COUNT + 1) * 84 - 1 && list.rows.length > 0,
+      (list) =>
+        list.totalSize > beforeSnapshot.totalSize && list.rows.length > 0,
       {
         timeout: 30_000,
         describe: "the poll never picked up the new item, or the list height never grew",
