@@ -69,6 +69,10 @@ storage_transfer_actions_holds() { # <artifact>
         && enabled_action_exists_exact "$1" "Import…"
 }
 
+tap_storage_import() { # <artifact>
+    tap_scrolling "Import…" "$1" up
+}
+
 # Four stages open this pane, and every one of them wrote the same three
 # artifacts: run 31634096676 failed at the first stage and published the third
 # stage's screens, so which step had failed was no longer in the evidence.
@@ -106,8 +110,28 @@ history_toolbar_holds() { # <artifact>
 }
 
 history_unfiltered_holds() { # <artifact>
-    node_exists_exact "$1" "Search clipboard history, default" \
+    enabled_node_exists_exact "$1" "Search clipboard history, default" \
         && ! node_exists_exact "$1" "Clear search"
+}
+
+history_item_count_holds() { # <artifact>
+    python3 - "$1" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    raise SystemExit(1)
+counts = []
+for node in root.iter("node"):
+    for name in ("text", "content-desc", "hint"):
+        match = re.fullmatch(r"(\d+) items?", (node.get(name) or "").casefold())
+        if match:
+            counts.append(int(match.group(1)))
+raise SystemExit(0 if not counts or all(count == 0 for count in counts) else 1)
+PY
 }
 
 # Two authored titles mean "this history is empty", and which one the app shows
@@ -127,7 +151,7 @@ ERROR_CATALOGUE="crates/copypaste-ui/src/i18n/en/common.ts"
 cleared_history_holds() { # <artifact>
     history_unfiltered_holds "$1" \
         && node_exists_exact "$1" "$EMPTY_HISTORY_TITLES" \
-        && node_exists_exact "$1" "0 items" \
+        && history_item_count_holds "$1" \
         && ! node_exists_exact "$1" "$CANARY"
 }
 
@@ -246,17 +270,32 @@ storage_stage_self_test() { # <temp>
         || bad "each stage keeps its own screen instead of overwriting the last one's"
 }
 
+storage_import_scroll_fixture_holds() { # <temp>
+    (
+        local temp="$1"
+        ui_fixtures "$temp/storage-import-below-fold.xml" "$temp/storage-import-visible.xml"
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { [[ "$1" == up ]] && ui_fixture_scroll; }
+        sh_() { UI_FIXTURE_TAPS=$((UI_FIXTURE_TAPS + 1)); }
+        tap_storage_import "$temp/storage-import-observed.xml" \
+            && [[ $UI_FIXTURE_SCROLLS -eq 1 && $UI_FIXTURE_TAPS -eq 1 ]]
+    )
+}
+
 self_test_transfer() {
     local temp CANARY="CopyPasteStorageTransferFixture"
     android_ui_self_test
     temp="$(mktemp -d)"
     android_navigation_self_test "$temp"
     storage_stage_self_test "$temp"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, active" bounds="[0,0][200,40]"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" bounds=\"[0,0][200,40]\"/><node text=\"0 items\" bounds=\"[15,141][16,143]\"/><node text=\"$CANARY\"/></hierarchy>" > "$temp/delayed.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="0 items" bounds="[15,141][16,143]"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="0 items" bounds="[15,141][16,143]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/paused.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Waiting for the key store" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/locked.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, active" bounds="[0,0][200,40]" enabled="true"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]" enabled="true"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" bounds=\"[0,0][200,40]\" enabled=\"true\"/><node text=\"0 items\" bounds=\"[15,141][16,143]\"/><node text=\"$CANARY\"/></hierarchy>" > "$temp/delayed.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="true"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="true"/><node text="0 items" bounds="[15,141][16,143]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/paused.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="true"/><node text="3 items" bounds="[15,141][16,143]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/nonzero.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="false"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/search-disabled.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/search-missing-enabled.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="true"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Waiting for the key store" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/locked.xml"
     cleared_history_holds "$temp/filtered.xml" \
         && bad "a retained zero-result search cannot prove cleared history" \
         || ok "a retained zero-result search cannot prove cleared history"
@@ -269,6 +308,15 @@ self_test_transfer() {
     cleared_history_holds "$temp/paused.xml" \
         && ok "a paused-capture empty history is also cleared" \
         || bad "a paused-capture empty history is also cleared"
+    cleared_history_holds "$temp/nonzero.xml" \
+        && bad "a present nonzero count is not cleared history" \
+        || ok "a present nonzero count is not cleared history"
+    cleared_history_holds "$temp/search-disabled.xml" \
+        && bad "a disabled default search is not settled history" \
+        || ok "a disabled default search is not settled history"
+    cleared_history_holds "$temp/search-missing-enabled.xml" \
+        && bad "default search needs explicit enabled evidence" \
+        || ok "default search needs explicit enabled evidence"
     cleared_history_holds "$temp/locked.xml" \
         && bad "an unreadable history is not a cleared one" \
         || ok "an unreadable history is not a cleared one"
@@ -283,7 +331,10 @@ self_test_transfer() {
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[0,0][180,44]" enabled="true"/><node text="Import history" bounds="[24,70][140,90]" enabled="true"/><node text="Import…" bounds="[0,0][0,0]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-title-only.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-ready.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="false" clickable="true"/></node></hierarchy>' > "$temp/storage-disabled.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" clickable="true"/></node></hierarchy>' > "$temp/storage-missing-enabled.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="CopyPaste" class="android.webkit.WebView" enabled="true" bounds="[0,0][320,640]"/></hierarchy>' > "$temp/blank-webview.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-import-below-fold.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Import…" bounds="[192,420][291,465]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-import-visible.xml"
     storage_transfer_actions_holds "$temp/storage-title-only.xml" \
         && bad "storage readiness requires actionable transfer buttons" \
         || ok "storage readiness requires actionable transfer buttons"
@@ -293,6 +344,9 @@ self_test_transfer() {
     storage_transfer_actions_holds "$temp/storage-disabled.xml" \
         && bad "storage readiness rejects a disabled transfer action" \
         || ok "storage readiness rejects a disabled transfer action"
+    storage_transfer_actions_holds "$temp/storage-missing-enabled.xml" \
+        && bad "storage readiness requires explicit enabled actions" \
+        || ok "storage readiness requires explicit enabled actions"
     storage_transfer_actions_holds "$temp/blank-webview.xml" \
         && bad "a blank WebView is not a ready storage pane" \
         || ok "a blank WebView is not a ready storage pane"
@@ -314,6 +368,12 @@ self_test_transfer() {
         && [[ "$UI_FIXTURE_INDEX" == 3 ]] \
         && ok "clear readiness waits through retained search and delayed convergence" \
         || bad "clear readiness waits through retained search and delayed convergence"
+    storage_import_scroll_fixture_holds "$temp" \
+        && ok "seed import scrolls up and reacquires the below-fold action" \
+        || bad "seed import scrolls up and reacquires the below-fold action"
+    storage_import_scroll_fixture_holds "$temp" \
+        && ok "post-clear import scrolls up and reacquires the below-fold action" \
+        || bad "post-clear import scrolls up and reacquires the below-fold action"
     rm -rf "$temp"
     printf '\n%d transfer selector tests passed, %d failed\n' "$PASS" "$FAIL"
     [[ $FAIL -eq 0 ]]
@@ -361,7 +421,7 @@ PY
 restart_app seed-launch
 if ! open_storage seed-import; then
     note "the seeded import through the picker" "Storage never opened at seed-import"
-elif ! tap_selector "Import…" "$OUT/seed-import-action.xml"; then
+elif ! tap_storage_import "$OUT/seed-import-action.xml"; then
     bad "Storage exposes import for the seed"
 else
     sleep 2
@@ -418,7 +478,7 @@ fi
 if ! open_storage import; then
     note "the import through the picker" "Storage never opened at import"
 else
-    tap_scrolling "Import…" "$OUT/import-action.xml" down || bad "Storage exposes the import action"
+    tap_storage_import "$OUT/import-action.xml" || bad "Storage exposes the import action"
     sleep 2
     open_downloads import-picker || bad "Downloads is selectable in the open picker"
     tap_selector "$EXPORT_FILE" "$OUT/import-file.xml" 15 || bad "the exported document is selectable"
