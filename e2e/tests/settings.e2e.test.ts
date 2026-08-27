@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
 import { accessibleSurface, expectNoFilesystemPath } from "../src/harness/leaks.js";
+import { retryResponsiveInteraction } from "../src/harness/responsive-interaction.js";
 import {
   gotoView,
   visibleText,
@@ -50,46 +51,76 @@ afterAll(async () => {
   await app?.stop();
 });
 
-async function settingsNavigation() {
-  let navigation = await app.browser.$('[aria-label="Preference sections"]');
-  if (await navigation.isExisting()) return navigation;
+type SettingsNavigationControl =
+  | { kind: "navigation"; element: WebdriverIO.Element }
+  | { kind: "back"; element: WebdriverIO.Element };
 
-  const back = await app.browser.$('button[aria-label="Back to Preferences"]');
-  await back.waitForDisplayed({ timeout: 15_000 });
-  expect(await back.isEnabled()).toBe(true);
-  await back.click();
-  navigation = await app.browser.$('[aria-label="Preference sections"]');
-  await navigation.waitForDisplayed({ timeout: 15_000 });
-  return navigation;
+async function displayed(selector: string) {
+  for (const element of await app.browser.$$(selector)) {
+    if (await element.isDisplayed()) return element;
+  }
+  return null;
+}
+
+async function withSettingsNavigation(
+  action: (navigation: WebdriverIO.Element) => Promise<boolean>,
+  timeoutMsg: string,
+): Promise<void> {
+  await retryResponsiveInteraction<SettingsNavigationControl>({
+    acquire: async () => {
+      const navigation = await displayed('[aria-label="Preference sections"]');
+      if (navigation) return { kind: "navigation", element: navigation };
+      const back = await displayed('button[aria-label="Back to Preferences"]');
+      return back ? { kind: "back", element: back } : null;
+    },
+    interact: async (current) => {
+      if (current.kind === "navigation") return action(current.element);
+      expect(await current.element.isEnabled()).toBe(true);
+      await current.element.click();
+      return false;
+    },
+    waitUntil: async (attempt) => {
+      await app.browser.waitUntil(attempt, { timeout: 15_000, timeoutMsg });
+    },
+  });
 }
 
 async function openSection(label: string): Promise<void> {
-  const navigation = await settingsNavigation();
-  const tab = await navigation.$(`[role="tab"]=${label}`);
-  const usesTabs = await tab.isExisting();
-  const trigger = usesTabs
-    ? tab
-    : await navigation.$(`.//button[.//strong[normalize-space(.)="${label}"]]`);
-  await trigger.waitForClickable({ timeout: 15_000 });
-  await trigger.click();
+  await withSettingsNavigation(async (navigation) => {
+    const tab = await navigation.$(`[role="tab"]=${label}`);
+    const trigger = (await tab.isDisplayed())
+      ? tab
+      : await navigation.$(`.//button[.//strong[normalize-space(.)="${label}"]]`);
+    if (!(await trigger.isClickable())) return false;
+    await trigger.click();
+    return true;
+  }, `the ${label} section control never became interactable`);
   await app.browser.waitUntil(
     async () => {
-      const selected =
-        !usesTabs ||
-        (await trigger.getAttribute("aria-selected")) === "true";
-      const opened =
-        (await app.browser.execute(function (sectionLabel: string) {
-          return Array.from(
-            document.querySelectorAll<HTMLElement>(
-              'section[aria-label], [role="tabpanel"][aria-label]',
-            ),
-          ).some(
-            (section) =>
-              section.getAttribute("aria-label") === sectionLabel &&
-              section.getClientRects().length > 0,
-          );
-        }, label)) === true;
-      return selected && opened;
+      return (await app.browser.execute(function (sectionLabel: string) {
+        const visible = (element: Element) =>
+          element.getClientRects().length > 0;
+        const selectedDesktopTab = Array.from(
+          document.querySelectorAll<HTMLElement>('[role="tab"]'),
+        ).find(
+          (tab) =>
+            tab.textContent?.trim() === sectionLabel && visible(tab),
+        );
+        const opened = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            'section[aria-label], [role="tabpanel"][aria-label]',
+          ),
+        ).some(
+          (section) =>
+            section.getAttribute("aria-label") === sectionLabel &&
+            visible(section),
+        );
+        return (
+          opened &&
+          (!selectedDesktopTab ||
+            selectedDesktopTab.getAttribute("aria-selected") === "true")
+        );
+      }, label)) as boolean;
     },
     { timeout: 10_000, timeoutMsg: `the ${label} section never opened` },
   );
@@ -153,39 +184,7 @@ describe("the sections", () => {
   });
 
   test("the navigation keeps every section reachable without horizontal overflow", async () => {
-    await settingsNavigation();
-    const row = (await app.browser.execute(function () {
-      const list = document.querySelector(
-        '[aria-label="Preference sections"]',
-      ) as HTMLElement | null;
-      if (!list) return null;
-      const box = list.getBoundingClientRect();
-      const tabs = Array.prototype.map.call(
-        list.querySelectorAll("button"),
-        function (node) {
-          const rect = (node as HTMLElement).getBoundingClientRect();
-          return {
-            left: rect.left,
-            right: rect.right,
-            width: rect.width,
-            text:
-              node.querySelector("strong")?.textContent?.trim() ??
-              (node as HTMLElement).innerText.trim(),
-          };
-        },
-      ) as Array<{
-        left: number;
-        right: number;
-        width: number;
-        text: string;
-      }>;
-      return {
-        overflow: list.scrollWidth - list.clientWidth,
-        left: box.left,
-        right: box.right,
-        tabs,
-      };
-    })) as {
+    let row: {
       overflow: number;
       left: number;
       right: number;
@@ -195,7 +194,39 @@ describe("the sections", () => {
         width: number;
         text: string;
       }>;
-    } | null;
+    } | null = null;
+    await withSettingsNavigation(async () => {
+      row = (await app.browser.execute(function () {
+        const list = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            '[aria-label="Preference sections"]',
+          ),
+        ).find((candidate) => candidate.getClientRects().length > 0);
+        if (!list) return null;
+        const box = list.getBoundingClientRect();
+        const tabs = Array.prototype.map.call(
+          list.querySelectorAll("button"),
+          function (node) {
+            const rect = (node as HTMLElement).getBoundingClientRect();
+            return {
+              left: rect.left,
+              right: rect.right,
+              width: rect.width,
+              text:
+                node.querySelector("strong")?.textContent?.trim() ??
+                (node as HTMLElement).innerText.trim(),
+            };
+          },
+        );
+        return {
+          overflow: list.scrollWidth - list.clientWidth,
+          left: box.left,
+          right: box.right,
+          tabs,
+        };
+      })) as typeof row;
+      return row !== null;
+    }, "the settings navigation never became measurable");
 
     expect(row).not.toBeNull();
     expect(row!.overflow).toBeLessThanOrEqual(1);
