@@ -42,21 +42,55 @@ async function rowCheckboxes() {
   return [...(await app.browser.$$(ROW_CHECKBOXES))];
 }
 
-async function enterSelectionMode(): Promise<void> {
+async function enterSelectionMode(firstId?: string): Promise<void> {
   const bar = await app.browser.$(BULK_BAR);
   if (await bar.isExisting()) return;
 
-  const boxes = await rowCheckboxes();
-  expect(boxes).toHaveLength(SEED.length);
   // The controls are revealed by the row hover state before selection starts.
-  await boxes[0]!.moveTo();
-  await boxes[0]!.click();
+  if (firstId) {
+    const row = await app.browser.$(`#history-row-${firstId}`);
+    const box = await row.$('[role="checkbox"]');
+    await box.moveTo();
+    await box.click();
+  } else {
+    const boxes = await rowCheckboxes();
+    expect(boxes).toHaveLength(SEED.length);
+    await boxes[0]!.moveTo();
+    await boxes[0]!.click();
+  }
   await app.browser.waitUntil(
     async () => (await app.browser.$(BULK_BAR)).isDisplayed(),
     {
       timeout: 10_000,
       timeoutMsg: "selecting a row never opened the bulk bar",
     },
+  );
+}
+
+async function selectedRowIds(): Promise<string[]> {
+  return (await app.browser.execute(
+    (selector: string) =>
+      Array.from(document.querySelectorAll(selector))
+        .filter((row) => row.getAttribute("aria-checked") === "true")
+        .map((row) => row.id.replace(/^history-row-/, "")),
+    HISTORY_ROWS,
+  )) as string[];
+}
+
+async function selectIds(ids: readonly string[]): Promise<void> {
+  for (const id of ids) {
+    const row = await app.browser.$(`#history-row-${id}`);
+    const checkbox = await row.$('[role="checkbox"]');
+    if ((await checkbox.getAttribute("aria-checked")) === "true") continue;
+    await checkbox.moveTo();
+    await checkbox.click();
+  }
+
+  const expected = [...ids].sort();
+  await app.browser.waitUntil(
+    async () =>
+      (await selectedRowIds()).sort().join("\u0000") === expected.join("\u0000"),
+    { timeout: 10_000, timeoutMsg: "the expected rows were not selected" },
   );
 }
 
@@ -145,6 +179,9 @@ describe("the bulk bar", () => {
   });
 
   test("pins the selection, and then offers to unpin it (CopyPaste-8ebg.55)", async () => {
+    const pinnedIds = await selectedRowIds();
+    expect(pinnedIds).toHaveLength(2);
+
     await clickButton(app.browser, "Pin", {
       within: BULK_BAR,
     });
@@ -158,10 +195,39 @@ describe("the bulk bar", () => {
       },
     );
 
+    // Bulk actions release selection on success. The pin write also moves the
+    // rows into the pinned section, so the next selection must target their
+    // stable ids rather than assuming the old row positions.
+    await app.browser.waitUntil(
+      async () => !(await app.browser.$(BULK_BAR)).isExisting(),
+      {
+        timeout: 10_000,
+        timeoutMsg: "pinning did not clear the bulk selection",
+      },
+    );
+    await app.browser.waitUntil(
+      async () => {
+        for (const id of pinnedIds) {
+          const row = await app.browser.$(`#history-row-${id}`);
+          if (
+            !(await row.isExisting()) ||
+            !(await row.getText()).includes("Pinned")
+          ) {
+            return false;
+          }
+        }
+        return true;
+      },
+      {
+        timeout: 10_000,
+        timeoutMsg: "the pinned rows never reached the rendered history",
+      },
+    );
+
     // The toggle's label is a claim about every selected row, so selecting the
-    // two rows that are now pinned must flip it.
-    await enterSelectionMode();
-    await select(2);
+    // same two rows after their reorder must flip it.
+    await enterSelectionMode(pinnedIds[0]);
+    await selectIds(pinnedIds);
     await app.browser.waitUntil(
       async () => {
         const bar = await app.browser.$(BULK_BAR);
