@@ -415,31 +415,35 @@ try {
     $timer.Stop()
     if ($evidencePath) {
         $featureStates = @()
+        $captureTrace = Join-Path $failureDirectory "capture-affinity.jsonl"
         Complete-WindowsFirstRun $app
         Invoke-UiaNamedControl $app "Preferences" "Mode"
         Invoke-UiaNamedControl $app "Privacy & retention" "Allow screenshots"
-        Set-UiaScreenshots $app $true
+        Write-WindowCaptureObservation $app $captureTrace "screenshots/before-toggle"
+        Set-UiaScreenshots $app $true $captureTrace
+        Write-WindowCaptureObservation $app $captureTrace "history/before-navigation"
         Invoke-UiaNamedControl $app "Library" "Clipboard history"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history"
+        Write-WindowCaptureObservation $app $captureTrace "history/after-navigation"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history" "" $captureTrace
         Invoke-UiaNamedControl $app "Connections" "Connect a device"
         Open-WindowsPairingEntry $app
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "desktop-pairing-entry" "Pairing code"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "desktop-pairing-entry" "Pairing code" "" $captureTrace
         [Windows.Forms.SendKeys]::SendWait("{ESC}")
         Wait-UiaName $app "Connect a device" | Out-Null
         Invoke-UiaNamedControl $app "Preferences" "Mode"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Mode"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Mode" "" $captureTrace
         $updateText = if ($ExpectedSignature -eq "Valid") { "Check for updates" } else { "Updates aren't configured in this build." }
         $updateState = if ($ExpectedSignature -eq "Valid") { "updater-configured" } else { "updater-unconfigured" }
         Invoke-UiaNamedControl $app "About" $updateText
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" $updateState $updateText $updateState
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" $updateState $updateText $updateState $captureTrace
         Invoke-UiaNamedControl $app "Clipboard behavior" "Background capture"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "service-capture-status" "Background capture"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "copy-feedback-setting" "Copy feedback sound" "copy-feedback-setting"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "service-capture-status" "Background capture" "" $captureTrace
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "copy-feedback-setting" "Copy feedback sound" "copy-feedback-setting" $captureTrace
         Invoke-UiaNamedControl $app "Cloud sync" "Cloud server configuration"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured" "Cloud server configuration"
+        $featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured" "Cloud server configuration" "" $captureTrace
         Write-WindowsFeatureManifest $evidencePath $featureStates
         Invoke-UiaNamedControl $app "Privacy & retention" "Allow screenshots"
-        Set-UiaScreenshots $app $false
+        Set-UiaScreenshots $app $false $captureTrace
     }
 
     Stop-Process -Id $app.Id -Force
