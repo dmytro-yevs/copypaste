@@ -16,6 +16,7 @@ afterEach(() => {
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   invoke.mockReset();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("Android permission preview", () => {
@@ -63,5 +64,29 @@ describe("Android permission preview", () => {
     });
     expect(info).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("forwards cancellation to the caller-facing native boundary", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    invoke.mockReturnValue(new Promise(() => {}));
+    const controller = new AbortController();
+
+    const outcome = permissionSnapshot({ signal: controller.signal });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(outcome).rejects.toMatchObject({
+      code: "cancelled",
+      retryable: false,
+    });
+    expect(invoke).toHaveBeenCalledWith("permission_snapshot", undefined);
+    expect(info.mock.calls.map(([, detail]) => detail)).toEqual([
+      { phase: "started", durationMs: expect.any(Number) },
+      { phase: "failed", durationMs: expect.any(Number) },
+    ]);
   });
 });

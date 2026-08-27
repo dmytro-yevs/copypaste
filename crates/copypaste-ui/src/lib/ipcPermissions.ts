@@ -7,7 +7,7 @@ import type {
 } from "@/generated/ipc";
 import { UI_COMMANDS } from "@/generated/ipc";
 import type { ReadonlyDeep } from "type-fest";
-import { call, hasWebBridge } from "./ipcCall";
+import { call, hasWebBridge, type IpcCallOptions } from "./ipcCall";
 
 export type PermissionHost = GeneratedPermissionHost;
 export type OnboardingPermissionId = GeneratedPermissionId;
@@ -44,11 +44,14 @@ function isAndroidWebPreview(): boolean {
     new URLSearchParams(window.location.search).get("platform") === "android";
 }
 
-export function permissionSnapshot(): Promise<OnboardingPermissions> {
+export function permissionSnapshot(
+  options: Pick<IpcCallOptions, "signal"> = {},
+): Promise<OnboardingPermissions> {
   if (isAndroidWebPreview()) return Promise.resolve(androidPreviewPermissions);
   const startedAt = Date.now();
   reportPermissionSnapshot("started", startedAt);
   return call(UI_COMMANDS.permission_snapshot, undefined, {
+    signal: options.signal,
     timeoutMs: PERMISSION_SNAPSHOT_TIMEOUT_MS,
   }).then(
     (snapshot) => {
