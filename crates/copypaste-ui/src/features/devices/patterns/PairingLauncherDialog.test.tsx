@@ -78,6 +78,22 @@ function launcher(pairing: PairingController) {
 }
 
 describe("PairingLauncherDialog preview flows", () => {
+    it("names the dismissible backdrop while keeping scanner entry reachable", () => {
+        const pairing = controller();
+        const url = window.location.href;
+        window.history.replaceState({}, "", "/?platform=android");
+        try {
+            render(launcher(pairing));
+
+            expect(screen.getByLabelText("Dismiss pairing dialog")).toBeTruthy();
+            expect(
+                screen.getByRole("button", { name: /Scan pairing code/ }),
+            ).toBeTruthy();
+        } finally {
+            window.history.replaceState({}, "", url);
+        }
+    });
+
     it("opens a host flow with QR, short code, address, and waiting state", () => {
         const pairing = controller();
         const { rerender } = render(launcher(pairing));
