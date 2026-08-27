@@ -1,5 +1,5 @@
 /**
- * Settings: the tabs, and the preferences that leave the screen.
+ * Preferences: the sections, and the controls that leave the screen.
  *
  * The app's own preferences are round-tripped because they have a layout
  * consequence — preview lines feeds INV-5's row reservation, and appearance has
@@ -21,12 +21,14 @@ import {
 
 const TABS = [
   "Appearance",
-  "List",
-  "Shortcut",
-  "Service",
-  "Sync",
-  "Storage",
+  "Clipboard behavior",
+  "Privacy & retention",
+  "Shortcuts",
+  "Device sync",
+  "Cloud sync",
+  "Storage & history",
   "Diagnostics",
+  "Runtime events",
   "About",
 ];
 
@@ -42,7 +44,7 @@ const config = () =>
 beforeAll(async () => {
   app = await startApp({ seed: ["a settings fixture", "another one"] });
   await waitForRows(app.browser, 2);
-  await gotoView(app.browser, "Settings");
+  await gotoView(app.browser, "Preferences");
 }, 300_000);
 
 afterAll(async () => {
@@ -147,7 +149,7 @@ describe("the tabs", () => {
 
 describe("the service's own settings", () => {
   test("a value chosen on the screen reaches the daemon", async () => {
-    await openTab("Service");
+    await openTab("Privacy & retention");
     const select = await app.browser.$('select[aria-label="Drop items older than"]');
     await select.waitForDisplayed({ timeout: 10_000 });
     await select.selectByAttribute("value", "30");
@@ -160,21 +162,21 @@ describe("the service's own settings", () => {
   });
 
   test("storage reports what the service holds", async () => {
-    await openTab("Storage");
+    await openTab("Storage & history");
     expect(await visibleText(app.browser)).toContain("Items stored");
   });
 });
 
 describe("a preference that changes layout", () => {
   test("preview lines re-reserves every row (INV-5)", async () => {
-    await openTab("List");
+    await openTab("Clipboard behavior");
     const thumb = await app.browser.$('[aria-label="Preview lines"]');
     await thumb.click();
 
     await app.browser.keys(["Home"]);
     await waitForText(app.browser, "1 line");
 
-    await gotoView(app.browser, "History");
+    await gotoView(app.browser, "Library");
     await app.browser.waitUntil(
       async () => {
         const rows = await rowBoxes(app.browser);
@@ -183,13 +185,13 @@ describe("a preference that changes layout", () => {
       { timeout: 15_000, timeoutMsg: "rows never shrank to the one-line reservation" },
     );
 
-    await gotoView(app.browser, "Settings");
-    await openTab("List");
+    await gotoView(app.browser, "Preferences");
+    await openTab("Clipboard behavior");
     await (await app.browser.$('[aria-label="Preview lines"]')).click();
     await app.browser.keys(["ArrowRight"]);
     await waitForText(app.browser, "2 lines");
 
-    await gotoView(app.browser, "History");
+    await gotoView(app.browser, "Library");
     await app.browser.waitUntil(
       async () => {
         const rows = await rowBoxes(app.browser);
@@ -202,7 +204,7 @@ describe("a preference that changes layout", () => {
 
 describe("appearance", () => {
   test("survives a reload of the window (INV-22)", async () => {
-    await gotoView(app.browser, "Settings");
+    await gotoView(app.browser, "Preferences");
     await openTab("Appearance");
     await clickButton(app.browser, "Teal");
 
@@ -228,7 +230,7 @@ describe("appearance", () => {
       await app.browser.execute(() => document.documentElement.dataset.accent),
     ).toBe("teal");
 
-    await gotoView(app.browser, "Settings");
+    await gotoView(app.browser, "Preferences");
     await openTab("Appearance");
     const teal = await app.browser.$('[aria-label="Teal"]');
     expect(await teal.getAttribute("aria-pressed")).toBe("true");
@@ -238,7 +240,7 @@ describe("appearance", () => {
 describe("with the service down", () => {
   test("the client-owned settings still work", async () => {
     await app.daemon.kill();
-    await gotoView(app.browser, "Settings");
+    await gotoView(app.browser, "Preferences");
     await openTab("Appearance");
 
     // Nothing on this pane needs the daemon, so it must still be operable.
@@ -253,7 +255,7 @@ describe("with the service down", () => {
   });
 
   test("the panes that do need it say so without naming a path", async () => {
-    for (const label of ["About", "Storage", "Sync"]) {
+    for (const label of ["About", "Storage & history", "Cloud sync"]) {
       await openTab(label);
       const pane = await panel();
       expect(pane!.text.length, label).toBeGreaterThan(20);

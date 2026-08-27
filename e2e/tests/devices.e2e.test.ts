@@ -1,5 +1,5 @@
 /**
- * The Devices security boundary and established-device management.
+ * The Connections security boundary and established-device management.
  *
  * A second real daemon and the CLI establish the peer fixture; that setup is
  * not browser coverage for the native renderer. The browser proves that it can
@@ -191,7 +191,7 @@ beforeAll(async () => {
   expect(existsSync(path.join(app.daemon.dataHome, "peers.json"))).toBe(true);
   expect(existsSync(path.join(other.dataHome, "peers.json"))).toBe(true);
 
-  await gotoView(app.browser, "Devices");
+  await gotoView(app.browser, "Connections");
   await waitForText(app.browser, paired.name);
 }, 300_000);
 
