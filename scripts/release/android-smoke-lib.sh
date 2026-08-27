@@ -167,12 +167,13 @@ PY
 # itself: run 2 had the node with nothing under it and a 2 KB screenshot, while
 # run 1 had eleven Views, six Buttons and four TextViews under it.
 #
-# Named descendants rather than a node count, because an empty document still
-# exposes a bare View or two. And Chromium's own error page is text-bearing —
-# a failed asset load would otherwise read as a painted UI — so its wording is
-# reported here and refused by the caller.
+# Authored descendants rather than a raw node count, because Chromium exposes
+# the WebView title, the React root and the pairing-provider marker before
+# React has rendered any product UI. Run 33124469586 published exactly that
+# tree and passed with a blank screenshot. The threshold mirrors the native
+# accessibility gate without making hydration depend on that separate gate.
 #
-# Prints: <descendants> <named> <first named string>
+# Prints: <descendants> <authored> <named> <interactive> <first named string>
 webview_content() {   # <uiautomator dump>
     python3 - "$1" <<'PY'
 import sys, xml.etree.ElementTree as ET
@@ -180,20 +181,57 @@ import sys, xml.etree.ElementTree as ET
 try:
     root = ET.parse(sys.argv[1]).getroot()
 except Exception as e:
-    print("0 0 unparsable:", str(e)[:60])
+    print("0 0 0 0 unparsable:", str(e)[:60])
     sys.exit(0)
 
 webs = [n for n in root.iter("node") if n.get("class") == "android.webkit.WebView"]
 if not webs:
-    print("0 0 no WebView node in the dump")
+    print("0 0 0 0 no WebView node in the dump")
     sys.exit(0)
 
-# Every WebView node, not the first: run 3's dump held two, and which of them
-# carries the document is not something to depend on.
-kids = [k for w in webs for k in list(w.iter("node"))[1:]]
-names = [t for n in kids for t in ((n.get("text") or "").strip(), (n.get("content-desc") or "").strip()) if t]
-print(len(kids), len(names), (names[0] if names else "")[:60])
+# Every WebView node, not the first: dumps can contain a host WebView wrapped
+# around Chromium's virtual WebView. De-duplicate descendants reachable from
+# both nodes.
+kids = []
+seen = set()
+for webview in webs:
+    for node in list(webview.iter("node"))[1:]:
+        if id(node) not in seen:
+            kids.append(node)
+            seen.add(id(node))
+
+def is_shell(node):
+    return (
+        node.get("class") == "android.webkit.WebView"
+        or node.get("resource-id") in {"root", "copypaste-pairing-dialog-open"}
+    )
+
+def node_names(node):
+    return [
+        value
+        for value in (
+            (node.get("text") or "").strip(),
+            (node.get("content-desc") or "").strip(),
+            (node.get("hint") or "").strip(),
+        )
+        if value
+    ]
+
+def is_interactive(node):
+    if any(node.get(attribute) == "true" for attribute in ("clickable", "long-clickable", "checkable")):
+        return True
+    return node.get("focusable") == "true" and node.get("scrollable") != "true"
+
+authored = [node for node in kids if not is_shell(node)]
+named_nodes = [node for node in authored if node_names(node)]
+names = [value for node in named_nodes for value in node_names(node)]
+interactive = [node for node in authored if is_interactive(node)]
+print(len(kids), len(authored), len(named_nodes), len(interactive), (names[0] if names else "")[:60])
 PY
+}
+
+webview_hydrated() { # <authored descendants> <names> <interactive nodes>
+    (( $1 >= 3 && $2 >= 3 && $3 >= 1 ))
 }
 
 # Chromium's error page, which is text-bearing and would otherwise satisfy any
@@ -444,13 +482,17 @@ wake_screen() {
 # 33s and 38s after `am start`.
 assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
     local timeout="$1" launched_at="$2" dump="$3" png="$4"
-    local painted_at="" kids=0 named=0 first="" dumps=0 shot=0 nodes poll_started="$SECONDS"
+    local painted_at="" kids=0 authored=0 named=0 interactive=0 first=""
+    local dumps=0 shot=0 nodes poll_started="$SECONDS"
 
     while (( SECONDS - poll_started < timeout )); do
         if dump_hierarchy "$dump"; then
             dumps=$((dumps + 1))
-            read -r kids named first <<<"$(webview_content "$dump")"
-            if (( named > 0 )); then painted_at=$((SECONDS - launched_at)); break; fi
+            read -r kids authored named interactive first <<<"$(webview_content "$dump")"
+            if webview_hydrated "$authored" "$named" "$interactive"; then
+                painted_at=$((SECONDS - launched_at))
+                break
+            fi
         fi
         sleep 2
     done
@@ -480,7 +522,7 @@ assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
         # than a guessed one, and a paint that slows down is visible before it
         # fails.
         probe "how long the UI took to paint" \
-              "${painted_at}s after am start, ${named} named nodes under the WebView, first: ${first}"
+              "${painted_at}s after am start, ${authored} authored descendants, ${named} names, ${interactive} interactive; first: ${first}"
     elif [[ -n "$painted_at" ]]; then
         bad "the WebView painted a UI with content" \
             "it painted Chromium's error page in ${painted_at}s: ${first} — the app cannot load its own assets"
@@ -491,7 +533,7 @@ assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
             "uiautomator produced no dump in ${timeout}s, so native paint could not be observed; screenshot $shot bytes"
     else
         bad "the WebView painted a UI with content" \
-            "$dumps dumps over ${timeout}s and the WebView subtree held $kids nodes, $named named; screenshot $shot bytes (${first})"
+            "$dumps dumps over ${timeout}s and the WebView subtree held $kids descendants, $authored authored, $named named, $interactive interactive; require at least 3 authored, 3 named and 1 interactive; screenshot $shot bytes (${first})"
     fi
 }
 
@@ -631,54 +673,93 @@ self_test() {
 
     android_screencap_self_test "$t"
 
-    # Shaped after the two runs' hierarchy dumps: run 1 exposed the DOM as
-    # named children of the WebView node, run 2 exposed the same chrome with
-    # the WebView node a leaf.
+    # The root-only fixture is the causal artifact from run 33124469586, reduced
+    # to the nodes that reached this detector. The positive fixtures retain the
+    # authored node shapes from that run's API 33 onboarding and pairing
+    # evidence and an API 36 History artifact.
     local head='<?xml version="1.0" encoding="UTF-8" standalone="yes" ?><hierarchy rotation="0">'
     local shell_open='<node class="android.widget.FrameLayout" package="com.copypaste.app"><node class="android.widget.LinearLayout">'
     local shell_close='</node></node></hierarchy>'
 
-    printf '%s%s<node class="android.webkit.WebView"><node class="android.view.View" text="" content-desc=""/><node class="android.widget.TextView" text="Clipboard history" content-desc=""/><node class="android.widget.Button" text="" content-desc="Search"/></node>%s' \
+    printf '%s%s<node class="android.webkit.WebView"><node class="android.view.View" text="" content-desc=""/><node class="android.widget.TextView" text="Clipboard history" content-desc=""/><node class="android.widget.TextView" text="2 items"/><node class="android.widget.Button" text="" content-desc="Search" clickable="true"/></node>%s' \
         "$head" "$shell_open" "$shell_close" > "$t/paint-run1.xml"
-    read -r kids named first <<<"$(webview_content "$t/paint-run1.xml")"
-    [[ "$kids" -eq 3 && "$named" -eq 2 && "$first" == "Clipboard history" ]] \
-        && ok "a painted WebView reports its named descendants" \
-        || bad "a painted WebView reports its named descendants" "got '$kids $named $first'"
+    read -r kids authored named interactive first <<<"$(webview_content "$t/paint-run1.xml")"
+    [[ "$kids" -eq 4 && "$authored" -eq 4 && "$named" -eq 3 && "$interactive" -eq 1 && "$first" == "Clipboard history" ]] \
+        && webview_hydrated "$authored" "$named" "$interactive" \
+        && ok "a painted WebView reports authored names and interaction" \
+        || bad "a painted WebView reports authored names and interaction" "got '$kids $authored $named $interactive $first'"
 
     printf '%s%s<node class="android.webkit.WebView"/>%s' "$head" "$shell_open" "$shell_close" > "$t/paint-run2.xml"
-    read -r kids named _ <<<"$(webview_content "$t/paint-run2.xml")"
-    [[ "$kids" -eq 0 && "$named" -eq 0 ]] \
+    read -r kids authored named interactive _ <<<"$(webview_content "$t/paint-run2.xml")"
+    [[ "$kids" -eq 0 && "$authored" -eq 0 && "$named" -eq 0 && "$interactive" -eq 0 ]] \
         && ok "run 2's empty WebView is not a painted UI" \
-        || bad "run 2's empty WebView is not a painted UI" "got '$kids $named'"
+        || bad "run 2's empty WebView is not a painted UI" "got '$kids $authored $named $interactive'"
 
     # An empty document still exposes a View or two, which is why the predicate
     # counts named nodes and not nodes.
     printf '%s%s<node class="android.webkit.WebView"><node class="android.view.View" text="" content-desc=""/></node>%s' \
         "$head" "$shell_open" "$shell_close" > "$t/paint-empty.xml"
-    read -r kids named _ <<<"$(webview_content "$t/paint-empty.xml")"
-    [[ "$kids" -eq 1 && "$named" -eq 0 ]] \
+    read -r kids authored named interactive _ <<<"$(webview_content "$t/paint-empty.xml")"
+    [[ "$kids" -eq 1 && "$authored" -eq 1 && "$named" -eq 0 && "$interactive" -eq 0 ]] \
         && ok "an unnamed subtree is not a painted UI" \
-        || bad "an unnamed subtree is not a painted UI" "got '$kids $named'"
+        || bad "an unnamed subtree is not a painted UI" "got '$kids $authored $named $interactive'"
 
-    printf '%s%s<node class="android.webkit.WebView"/><node class="android.webkit.WebView"><node class="android.widget.TextView" text="CopyPaste"/></node>%s' \
+    printf '%s%s<node class="android.webkit.WebView"/><node class="android.webkit.WebView"><node class="android.widget.TextView" text="History"/><node class="android.widget.TextView" text="2 items"/><node class="android.widget.Button" text="Search" clickable="true"/></node>%s' \
         "$head" "$shell_open" "$shell_close" > "$t/paint-two-webviews.xml"
-    read -r kids named first <<<"$(webview_content "$t/paint-two-webviews.xml")"
-    [[ "$kids" -eq 1 && "$named" -eq 1 && "$first" == "CopyPaste" ]] \
+    read -r kids authored named interactive first <<<"$(webview_content "$t/paint-two-webviews.xml")"
+    [[ "$kids" -eq 3 && "$authored" -eq 3 && "$named" -eq 3 && "$interactive" -eq 1 && "$first" == "History" ]] \
         && ok "content under the second of two WebView nodes still counts" \
-        || bad "content under the second of two WebView nodes still counts" "got '$kids $named $first'"
+        || bad "content under the second of two WebView nodes still counts" "got '$kids $authored $named $interactive $first'"
+
+    printf '%s%s<node class="android.webkit.WebView"><node class="android.webkit.WebView" text="CopyPaste"><node class="android.widget.TextView" resource-id="root"/></node></node>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-artifact-root-only.xml"
+    read -r kids authored named interactive _ <<<"$(webview_content "$t/paint-artifact-root-only.xml")"
+    [[ "$kids" -eq 2 && "$authored" -eq 0 && "$named" -eq 0 && "$interactive" -eq 0 ]] \
+        && ! webview_hydrated "$authored" "$named" "$interactive" \
+        && ok "run 33124469586's titled WebView and React root are not hydration" \
+        || bad "run 33124469586's titled WebView and React root are not hydration" "got '$kids $authored $named $interactive'"
+
+    printf '%s%s<node class="android.webkit.WebView"><node class="android.webkit.WebView" text="CopyPaste"><node class="android.view.View" resource-id="root"/><node class="android.view.View" resource-id="copypaste-pairing-dialog-open" content-desc="Dismiss pairing dialog" clickable="true"/></node></node>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-provider-only.xml"
+    read -r kids authored named interactive _ <<<"$(webview_content "$t/paint-provider-only.xml")"
+    [[ "$kids" -eq 3 && "$authored" -eq 0 && "$named" -eq 0 && "$interactive" -eq 0 ]] \
+        && ! webview_hydrated "$authored" "$named" "$interactive" \
+        && ok "the pairing provider marker alone is not React hydration" \
+        || bad "the pairing provider marker alone is not React hydration" "got '$kids $authored $named $interactive'"
+
+    printf '%s%s<node class="android.webkit.WebView" text="CopyPaste"><node class="android.view.View" resource-id="root"/><node class="android.widget.TextView" text="WELCOME"/><node class="android.widget.TextView" text="Your clipboard finally remembers."/><node class="android.widget.Button" text="Set up capture" clickable="true"/></node>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-onboarding.xml"
+    read -r _ authored named interactive _ <<<"$(webview_content "$t/paint-onboarding.xml")"
+    webview_hydrated "$authored" "$named" "$interactive" \
+        && ok "the API 33 onboarding artifact is hydrated" \
+        || bad "the API 33 onboarding artifact is hydrated" "got '$authored $named $interactive'"
+
+    printf '%s%s<node class="android.webkit.WebView" text="CopyPaste"><node class="android.view.View" resource-id="root"/><node class="android.view.View" text="Primary"/><node class="android.widget.Button" text="Devices" clickable="true"/><node class="android.widget.Button" text="Library" clickable="true"/><node class="android.widget.Button" text="Settings" clickable="true"/></node>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-history.xml"
+    read -r _ authored named interactive _ <<<"$(webview_content "$t/paint-history.xml")"
+    webview_hydrated "$authored" "$named" "$interactive" \
+        && ok "the API 36 History artifact is hydrated" \
+        || bad "the API 36 History artifact is hydrated" "got '$authored $named $interactive'"
+
+    printf '%s%s<node class="android.webkit.WebView" text="CopyPaste"><node class="android.view.View" resource-id="root"/><node class="android.view.View" resource-id="copypaste-pairing-dialog-open" content-desc="Dismiss pairing dialog" clickable="true"/><node class="android.app.Dialog" text="Connect a device"/><node class="android.widget.TextView" text="Choose how to open the protected pairing flow on this device."/><node class="android.widget.Button" text="Show pairing code" clickable="true"/><node class="android.widget.Button" text="Scan pairing code" clickable="true"/></node>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-pairing.xml"
+    read -r _ authored named interactive _ <<<"$(webview_content "$t/paint-pairing.xml")"
+    webview_hydrated "$authored" "$named" "$interactive" \
+        && ok "the API 33 pairing artifact is hydrated without its provider marker" \
+        || bad "the API 33 pairing artifact is hydrated without its provider marker" "got '$authored $named $interactive'"
 
     printf '%s%s<node class="android.widget.TextView" text="Not a WebView"/>%s' \
         "$head" "$shell_open" "$shell_close" > "$t/paint-nowebview.xml"
-    read -r kids named first <<<"$(webview_content "$t/paint-nowebview.xml")"
+    read -r kids authored named interactive first <<<"$(webview_content "$t/paint-nowebview.xml")"
     [[ "$kids" -eq 0 && "$named" -eq 0 ]] \
         && ok "text outside the WebView does not count" \
-        || bad "text outside the WebView does not count" "got '$kids $named $first'"
+        || bad "text outside the WebView does not count" "got '$kids $authored $named $interactive $first'"
 
     printf 'not xml at all' > "$t/paint-broken.xml"
-    read -r kids named _ <<<"$(webview_content "$t/paint-broken.xml")"
+    read -r kids authored named interactive _ <<<"$(webview_content "$t/paint-broken.xml")"
     [[ "$kids" -eq 0 ]] \
         && ok "an unparsable dump is not a painted UI" \
-        || bad "an unparsable dump is not a painted UI" "got '$kids $named'"
+        || bad "an unparsable dump is not a painted UI" "got '$kids $authored $named $interactive'"
 
     looks_like_error_page "Webpage not available" \
         && ok "Chromium's error page is refused" \

@@ -283,7 +283,7 @@
     },
     {
       "id": "android-smoke",
-      "verifies": "the on-device smoke detectors: our native code, the devtools socket, and the wry JNI scan",
+      "verifies": "the on-device smoke detectors: React hydration, native code, the devtools socket, and the wry JNI scan",
       "command": ["bash", "scripts/release/android-smoke.sh", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["bash", "python3", "node", "awk"],
@@ -315,6 +315,20 @@
           "find": "    for name in setWebContentsDebuggingEnabled setWebViewClient setWebChromeClient; do",
           "replace": "    for name in setWebContentsDebuggingEnabled; do",
           "expect": "FAIL  a release library reports no devtools call and both neighbours"
+        },
+        {
+          "name": "webview-shell-counted-as-react-hydration",
+          "file": "scripts/release/android-smoke-lib.sh",
+          "find": "    (( $1 >= 3 && $2 >= 3 && $3 >= 1 ))",
+          "replace": "    return 0",
+          "expect": "FAIL  run 33124469586's titled WebView and React root are not hydration"
+        },
+        {
+          "name": "pairing-provider-marker-counted-as-authored-content",
+          "file": "scripts/release/android-smoke-lib.sh",
+          "find": "        or node.get(\"resource-id\") in {\"root\", \"copypaste-pairing-dialog-open\"}",
+          "replace": "        or node.get(\"resource-id\") == \"root\"",
+          "expect": "FAIL  the pairing provider marker alone is not React hydration"
         }
       ]
     },
