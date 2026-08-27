@@ -66,30 +66,27 @@ export function useRescan() {
 }
 
 export function useUnpair() {
+  return useDestructivePeerMutation(unpair, "devices.toast.unpaired");
+}
+
+/** Unpairing and revocation differ in their daemon effects, but a confirmation
+ * owns either operation until it has a terminal outcome. */
+function useDestructivePeerMutation(
+  operation: (pairingId: string) => Promise<void>,
+  successMessage: "devices.toast.unpaired" | "devices.toast.revoked",
+) {
   const qc = useQueryClient();
   return useMutation<void, unknown, PeerInfo>({
-    mutationFn: (peer) => unpair(peer.pairing_id),
+    mutationFn: (peer) => operation(peer.pairing_id),
     onSuccess: (_data, peer) => {
-      toast.success(t("devices.toast.unpaired", { name: peer.name }));
+      toast.success(t(successMessage, { name: peer.name }));
       void qc.invalidateQueries({ queryKey: PEERS_KEY });
     },
-    onError: (raw) => toast.error(toFriendly(raw)),
   });
 }
 
-/** `unpair` stops this device syncing and leaves the pairing code working; this
- *  bars the pairing id for good. The confirmation lives in the view, and
- *  reaching here *is* the confirmation. */
 export function useRevoke() {
-  const qc = useQueryClient();
-  return useMutation<void, unknown, PeerInfo>({
-    mutationFn: (peer) => revokeDevice(peer.pairing_id),
-    onSuccess: (_data, peer) => {
-      toast.success(t("devices.toast.revoked", { name: peer.name }));
-      void qc.invalidateQueries({ queryKey: PEERS_KEY });
-    },
-    onError: (raw) => toast.error(toFriendly(raw)),
-  });
+  return useDestructivePeerMutation(revokeDevice, "devices.toast.revoked");
 }
 
 export function useRenameDevice() {
