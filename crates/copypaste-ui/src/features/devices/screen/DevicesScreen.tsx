@@ -183,6 +183,32 @@ export function DevicesScreen() {
                 setHealth((previous) => noteSync(previous, results)),
         });
     };
+    const closeUnpair = () => {
+        if (unpair.isPending) return;
+        unpair.reset();
+        setConfirmUnpair(null);
+    };
+    const closeRevoke = () => {
+        if (revoke.isPending) return;
+        revoke.reset();
+        setConfirmRevoke(null);
+    };
+    const submitUnpair = async (peer: PeerInfo) => {
+        try {
+            await unpair.mutateAsync(peer);
+            setConfirmUnpair(null);
+        } catch {
+            // The mutation error remains in the confirmation where it can be retried.
+        }
+    };
+    const submitRevoke = async (peer: PeerInfo) => {
+        try {
+            await revoke.mutateAsync(peer);
+            setConfirmRevoke(null);
+        } catch {
+            // The mutation error remains in the confirmation where it can be retried.
+        }
+    };
 
     const openPairing = () => {
         setConnectingDiscoveryId(null);
@@ -438,13 +464,14 @@ export function DevicesScreen() {
             <DevicesDialogs
                 unpairPeer={confirmUnpair}
                 revokePeer={confirmRevoke}
-                onCloseUnpair={() => setConfirmUnpair(null)}
-                onUnpair={(peer) => unpair.mutate(peer)}
-                onCloseRevoke={() => setConfirmRevoke(null)}
-                onRevoke={(peer) => {
-                    revoke.mutate(peer);
-                    setConfirmRevoke(null);
-                }}
+                unpairPending={unpair.isPending}
+                unpairError={unpair.error}
+                revokePending={revoke.isPending}
+                revokeError={revoke.error}
+                onCloseUnpair={closeUnpair}
+                onUnpair={submitUnpair}
+                onCloseRevoke={closeRevoke}
+                onRevoke={submitRevoke}
             />
         </Screen>
     );
