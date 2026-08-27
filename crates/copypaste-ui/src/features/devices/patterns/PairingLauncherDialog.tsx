@@ -1,5 +1,6 @@
 import {
     useEffect,
+    useId,
     useMemo,
     useState,
     type FormEvent,
@@ -67,6 +68,8 @@ export function PairingLauncherDialog({
 }: PairingLauncherDialogProps) {
     const { t } = useTranslation();
     const android = isAndroidPlatform();
+    const showDescriptionId = useId();
+    const joinDescriptionId = useId();
     const [flow, setFlow] = useState<PairingFlow>("choices");
     const [code, setCode] = useState("");
     const [address, setAddress] = useState("");
@@ -192,6 +195,8 @@ export function PairingLauncherDialog({
                             type="button"
                             variant="ghost"
                             disabled={disabled}
+                            aria-label="Show pairing code"
+                            aria-describedby={showDescriptionId}
                             onClick={chooseHost}
                             className={styles.choice}
                         >
@@ -200,7 +205,7 @@ export function PairingLauncherDialog({
                             </span>
                             <span className={styles.copy}>
                                 <strong>Show pairing code</strong>
-                                <small>
+                                <small id={showDescriptionId}>
                                     {preview
                                         ? "Show a QR code, short code and address."
                                         : "Open a protected code on this device."}
@@ -212,6 +217,12 @@ export function PairingLauncherDialog({
                             type="button"
                             variant="ghost"
                             disabled={disabled}
+                            aria-label={
+                                android
+                                    ? t("devices.pairing.join")
+                                    : t("devices.pairing.joinTitle")
+                            }
+                            aria-describedby={joinDescriptionId}
                             onClick={chooseJoin}
                             className={styles.choice}
                         >
@@ -227,7 +238,7 @@ export function PairingLauncherDialog({
                                         ? t("devices.pairing.join")
                                         : t("devices.pairing.joinTitle")}
                                 </strong>
-                                <small>
+                                <small id={joinDescriptionId}>
                                     {android
                                         ? t("devices.pairing.joinHint")
                                         : t("devices.pairing.joinBody")}
