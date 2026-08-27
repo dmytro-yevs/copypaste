@@ -142,9 +142,17 @@ describe("desktop settings", () => {
 });
 
 describe("fail-closed product surfaces", () => {
-  test("names the updater as unconfigured in unsigned builds", async () => {
+  test("hides unavailable updater controls in unsigned builds", async () => {
     await openTab("About");
-    await waitForText(app.browser, "Updates aren't configured in this build.");
+    await app.browser.waitUntil(
+      async () =>
+        (await app.browser.$$('[data-settings-search-target="row:App updates"]').length) ===
+        0,
+      {
+        timeout: 15_000,
+        timeoutMsg: "the unavailable updater row remained visible",
+      },
+    );
     expect(await app.browser.$$("button=Check for updates")).toHaveLength(0);
   });
 
@@ -177,14 +185,31 @@ describe("fail-closed product surfaces", () => {
 
   test("collects redacted Windows diagnostics and runtime events", async () => {
     await openTab("Diagnostics");
-    await waitForText(app.browser, "windows-system-clipboard", 30_000);
     expectNoFilesystemPath(
       await accessibleSurface(app.browser),
       app.daemon.dataHome,
     );
 
-    const events = await app.browser.$('[role="tab"]=Runtime events');
-    await events.click();
+    await clickButton(app.browser, "Open", {
+      within: '[data-settings-search-target="section:Support"]',
+    });
+    const report = await app.browser.$('[data-slot="dialog-content"]');
+    await report.waitForDisplayed({ timeout: 15_000 });
+    await waitForText(app.browser, "windows-system-clipboard", 30_000);
+    expect(await report.getText()).toContain("CopyPaste diagnostics");
+    expectNoFilesystemPath(
+      await accessibleSurface(app.browser),
+      app.daemon.dataHome,
+    );
+    await clickButton(app.browser, "Close", {
+      within: '[data-slot="dialog-content"]',
+    });
+    await app.browser.waitUntil(
+      async () => (await app.browser.$$('[data-slot="dialog-content"]').length) === 0,
+      { timeout: 15_000, timeoutMsg: "the diagnostics report did not close" },
+    );
+
+    await openTab("Runtime events");
     const log = await app.browser.$(
       '[role="log"][aria-label="Runtime event list"]',
     );
