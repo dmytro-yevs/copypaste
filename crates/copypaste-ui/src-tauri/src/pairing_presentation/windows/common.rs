@@ -30,6 +30,13 @@ impl CloseHandle {
             self.window.close();
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn close_from_user_for_test(&self) {
+        if self.window.hwnd().IsWindow() {
+            self.window.close();
+        }
+    }
 }
 
 pub(super) fn abort_if_user_dismissed(programmatic: &AtomicBool, abort: &NativeAbort) {
