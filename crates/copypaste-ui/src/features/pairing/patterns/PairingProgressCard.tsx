@@ -95,7 +95,27 @@ export function PairingProgressCard({
 
         {showActions ? (
           <div className={styles.actions}>
-            {semantics.active ? (
+            {clientError !== null ? (
+              <>
+                {onClose ? (
+                  <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+                    {t("common.close")}
+                  </Button>
+                ) : null}
+                {clientError.retry && pairing.canRetry ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={!pairing.protectedPresentationAvailable}
+                    onClick={pairing.retry}
+                  >
+                    <Icon name="refresh" aria-hidden="true" />
+                    {t("common.tryAgain")}
+                  </Button>
+                ) : null}
+              </>
+            ) : semantics.active ? (
               <>
                 <Button
                   type="button"
@@ -132,7 +152,7 @@ export function PairingProgressCard({
                     {t("common.close")}
                   </Button>
                 ) : null}
-                {(clientError?.retry ?? semantics.retry) && pairing.canRetry ? (
+                {semantics.retry && pairing.canRetry ? (
                   <Button
                     type="button"
                     size="sm"
