@@ -8,12 +8,13 @@
  * moving, and the pair that comes back fails an invariant the app never
  * violated.
  */
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, cleanUpItems, deleteItems, storedItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { scrollTo, settledList, type ListSnapshot } from "../src/harness/list.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   gotoView,
   filterHistoryTo,
@@ -71,7 +72,7 @@ function topRow(snapshot: ListSnapshot) {
   return { row, scrollTop: snapshot.scrollTop, intra: snapshot.scrollTop - row.start };
 }
 
-beforeAll(async () => {
+beforeAllWithEvidence("scroll-anchor", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
   marker = fixtureMarker("anchor");

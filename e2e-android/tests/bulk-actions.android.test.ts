@@ -14,12 +14,13 @@
  * surface it is asked of is not, which is the reason this is not a copy of
  * `e2e/tests/bulk-actions.e2e.test.ts`.
  */
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, cleanUpItems, storedItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { rowBoxes } from "../src/harness/list.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   ROW_SELECTION,
   SEARCH,
@@ -48,7 +49,7 @@ let app: AndroidApp;
 let seeded: string[] = [];
 let marker = "";
 
-beforeAll(async () => {
+beforeAllWithEvidence("bulk-actions", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
 
