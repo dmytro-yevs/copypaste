@@ -1,7 +1,10 @@
 import { InlineNotice } from "@/components/shared";
 import { Button, Icon, Surface } from "@/components/ui";
 import type { PairingController } from "@/features/pairing/hooks/usePairing";
-import { pairingPresentation } from "@/features/pairing/model/pairingPresentation";
+import {
+  pairingClientErrorPresentation,
+  pairingPresentation,
+} from "@/features/pairing/model/pairingPresentation";
 import { useTranslation } from "@/i18n";
 import styles from "./PairingProgressCard.module.css";
 
@@ -24,8 +27,9 @@ export function PairingProgressCard({
 }: PairingProgressCardProps) {
   const { t } = useTranslation();
   const presentation = pairingPresentation(pairing.ceremony);
+  const clientError = pairingClientErrorPresentation(pairing.error);
   const { semantics } = presentation;
-  const failed = semantics.terminal && semantics.message_id !== "paired";
+  const failed = clientError !== null || (semantics.terminal && semantics.message_id !== "paired");
 
   if (
     hideIdle &&
@@ -44,35 +48,39 @@ export function PairingProgressCard({
         aria-busy={pairing.isChecking || pairing.isPending || undefined}
         className={styles.root}
         data-compact={compact || undefined}
-        data-tone={semantics.tone}
+        data-tone={clientError?.tone ?? semantics.tone}
       >
         <span
           className={styles.iconWell}
-          data-state={semantics.message_id}
+          data-state={clientError === null ? semantics.message_id : "client_error"}
           aria-hidden="true"
         >
-          {pairing.isChecking || pairing.isPending || semantics.active ? (
+          {pairing.isChecking || pairing.isPending || (clientError === null && semantics.active) ? (
             <Icon name="spinner" className={styles.spinner} />
           ) : (
-            <Icon name={presentation.icon} />
+            <Icon name={clientError?.icon ?? presentation.icon} />
           )}
         </span>
 
         <div
-          role={semantics.live}
-          aria-live={semantics.live === "alert" ? "assertive" : "polite"}
+          role={clientError?.live ?? semantics.live}
+          aria-live={(clientError?.live ?? semantics.live) === "alert" ? "assertive" : "polite"}
           aria-atomic="true"
           className={styles.copy}
         >
           <p className={styles.title}>
-            {pairing.isChecking
+            {clientError !== null
+              ? clientError.title
+              : pairing.isChecking
               ? t("devices.pairing.progress.checking")
               : pairing.isPending
                 ? t("devices.pairing.progress.opening")
                 : t(presentation.titleKey)}
           </p>
           <p className={styles.body}>
-            {presentation.deviceName === undefined
+            {clientError !== null
+              ? clientError.body
+              : presentation.deviceName === undefined
               ? t(presentation.bodyKey)
               : t("devices.pairing.semantic.paired.device", {
                   name: presentation.deviceName,
@@ -124,7 +132,7 @@ export function PairingProgressCard({
                     {t("common.close")}
                   </Button>
                 ) : null}
-                {semantics.retry && pairing.canRetry ? (
+                {(clientError?.retry ?? semantics.retry) && pairing.canRetry ? (
                   <Button
                     type="button"
                     size="sm"

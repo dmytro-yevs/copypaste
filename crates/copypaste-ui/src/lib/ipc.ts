@@ -71,6 +71,7 @@ export type {
 } from "@/generated/ipc";
 
 export { CURRENT_PROTOCOL_VERSION } from "@/generated/ipc";
+export { PAIRING_SEMANTICS_BY_STATE } from "@/generated/ipc";
 
 /** Stable UI name retained for the Rust `ImportData` response DTO. */
 export type ImportReport = ImportData;
