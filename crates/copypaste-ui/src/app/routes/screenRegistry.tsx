@@ -19,19 +19,35 @@ const screenLoaders: ScreenLoaders = {
 interface ScreenDefinition {
   label: "nav.history" | "nav.connections" | "nav.preferences" | "capture.title";
   render: (pushLive: boolean) => ReactNode;
+  reset: () => void;
+}
+
+function createLazyScreen<Props extends object>(loader: () => Promise<{ default: ComponentType<Props> }>) {
+  let LazyScreen = lazy(loader);
+
+  function Screen(props: Props) {
+    const CurrentScreen = LazyScreen;
+    return <CurrentScreen {...props} />;
+  }
+
+  return {
+    render: (props: Props) => <Screen {...props} />,
+    reset: () => {
+      LazyScreen = lazy(loader);
+    },
+  };
 }
 
 export function createScreenRegistry(loaders: ScreenLoaders): Record<View, ScreenDefinition> {
-  const LibraryScreen = lazy(loaders.history);
-  const DevicesScreen = lazy(loaders.devices);
-  const SettingsScreen = lazy(loaders.settings);
-  const CaptureScreen = lazy(loaders.capture);
-
+  const history = createLazyScreen(loaders.history);
+  const devices = createLazyScreen(loaders.devices);
+  const settings = createLazyScreen(loaders.settings);
+  const capture = createLazyScreen(loaders.capture);
   return {
-    history: { label: "nav.history", render: (pushLive) => <LibraryScreen pushLive={pushLive} /> },
-    devices: { label: "nav.connections", render: () => <DevicesScreen /> },
-    settings: { label: "nav.preferences", render: () => <SettingsScreen /> },
-    capture: { label: "capture.title", render: () => <CaptureScreen /> },
+    history: { label: "nav.history", render: (pushLive) => history.render({ pushLive }), reset: history.reset },
+    devices: { label: "nav.connections", render: () => devices.render({}), reset: devices.reset },
+    settings: { label: "nav.preferences", render: () => settings.render({}), reset: settings.reset },
+    capture: { label: "capture.title", render: () => capture.render({}), reset: capture.reset },
   };
 }
 

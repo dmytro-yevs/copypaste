@@ -115,11 +115,12 @@ export default defineConfig({
   // `scripts/check-webview-baseline.mjs` holds each emitted chunk to the engine
   // that will load it.
   build: {
-    // Run 33131597896 rendered route CSS but never fired the custom-protocol
-    // link event Vite awaits before importing its chunk. Android loads one
-    // static sheet; JavaScript routes stay split and independently lazy.
+    // Run 33131597896 stayed in Suspense where Vite's generated helper awaits
+    // route CSS link events. Android avoids that unobservable protocol seam;
+    // JavaScript routes stay split and independently lazy.
     cssCodeSplit: !androidBuild,
     cssTarget: LEGACY_CSS_TARGET,
     emptyOutDir: true,
+    manifest: "route-manifest.json",
   },
 });

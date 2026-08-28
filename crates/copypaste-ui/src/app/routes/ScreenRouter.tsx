@@ -12,7 +12,7 @@ export function ScreenRouter({ pushLive }: { pushLive: boolean }) {
   const screen = screenRegistry[view];
   const label = t(screen.label);
   return (
-    <Boundary key={view} label={label} layout="screen">
+    <Boundary key={view} label={label} layout="screen" onReset={screen.reset}>
       <Suspense
         fallback={
           <RouteLoadingState
