@@ -193,6 +193,9 @@ test("scroll offset is never left past the end when the list shrinks (INV-6)", a
   expect(after.rows.length).toBeGreaterThan(0);
   expect(
     renderedRowsCoverViewport(after),
-    `rendered rows do not cover ${after.scrollTop}..${after.scrollTop + after.clientHeight}`,
+    `rendered rows do not cover virtual content ${after.scrollTop}..${Math.min(
+      after.scrollTop + after.clientHeight,
+      after.totalSize,
+    )}`,
   ).toBe(true);
 }, 180_000);
