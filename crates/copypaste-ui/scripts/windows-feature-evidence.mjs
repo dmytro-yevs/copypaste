@@ -11,6 +11,7 @@ const EXPECTED = new Map([
     feature: "devices",
     state: "desktop-pairing-entry",
     name: "Pairing code",
+    requiredRootName: "Add a CopyPaste device",
     requiredNames: ["Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel"],
     requiredEnabledNames: ["Pairing code", "Pairing address", "Pair", "Cancel"],
     requiredPasswordNames: ["Pairing code", "Pairing address"],
@@ -220,8 +221,24 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
     ))) {
       throw new Error(`${label} ${state.feature} accessibility contains raw or secret-like nodes`);
     }
+    const rootNode = accessibility.nodes[0];
+    if (expectedType === "protected-accessibility" && (
+      rootNode?.name !== expectedState.requiredRootName
+      || rootNode.control_type !== "ControlType.Window"
+      || rootNode.is_password !== false
+      || rootNode.offscreen !== false
+      || !Number.isFinite(rootNode.bounds?.width)
+      || !Number.isFinite(rootNode.bounds?.height)
+      || rootNode.bounds.width <= 0
+      || rootNode.bounds.height <= 0
+    )) {
+      throw new Error(`${label} ${state.feature} accessibility does not prove its protected UIA root`);
+    }
+    const searchableNodes = expectedType === "protected-accessibility"
+      ? accessibility.nodes.slice(1)
+      : accessibility.nodes;
     const marker = Array.isArray(accessibility.nodes)
-      ? accessibility.nodes.find((node) => (
+      ? searchableNodes.find((node) => (
         node?.name === expectedState.name
         && node.enabled === true
         && node.offscreen === false
@@ -235,7 +252,8 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
       throw new Error(`${label} ${state.feature} accessibility does not prove its expected UI state`);
     }
     for (const requiredName of expectedState.requiredNames ?? []) {
-      if (!accessibility.nodes.some((node) => (
+      if (requiredName === expectedState.requiredRootName) continue;
+      if (!searchableNodes.some((node) => (
         node?.name === requiredName
         && node.offscreen === false
         && Number.isFinite(node.bounds?.width)
@@ -247,7 +265,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
       }
     }
     for (const requiredName of expectedState.requiredEnabledNames ?? []) {
-      if (!accessibility.nodes.some((node) => (
+      if (!searchableNodes.some((node) => (
         node?.name === requiredName
         && node.enabled === true
         && node.offscreen === false
@@ -260,7 +278,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
       }
     }
     for (const requiredName of expectedState.requiredPasswordNames ?? []) {
-      if (!accessibility.nodes.some((node) => (
+      if (!searchableNodes.some((node) => (
         node?.name === requiredName
         && node.is_password === true
         && node.enabled === true
