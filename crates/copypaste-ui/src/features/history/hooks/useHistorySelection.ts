@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   useBulkDelete,
@@ -22,6 +22,26 @@ export interface HistorySelection {
   readonly confirmDelete: () => void;
 }
 
+interface PinRun {
+  readonly token: number;
+  readonly ids: readonly string[];
+  readonly pinned: boolean;
+  readonly active: boolean;
+}
+
+function sameIds(left: ReadonlySet<string>, right: readonly string[]): boolean {
+  return left.size === right.length && right.every((id) => left.has(id));
+}
+
+function unreconciledPinIds(
+  items: readonly Item[],
+  ids: readonly string[],
+  pinned: boolean,
+): string[] {
+  const current = new Map(items.map((item) => [item.id, item.pinned]));
+  return ids.filter((id) => current.get(id) !== pinned);
+}
+
 export function useHistorySelection(
   items: readonly Item[],
 ): HistorySelection {
@@ -29,27 +49,84 @@ export function useHistorySelection(
   const bulkPin = useBulkPin();
   const bulkDelete = useBulkDelete();
   const running = useRef(false);
+  const nextPinToken = useRef(0);
+  const pinRun = useRef<PinRun | null>(null);
+  const currentItems = useRef(items);
+  currentItems.current = items;
   const [busy, setBusy] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const finishPin = useCallback(
+    (started: PinRun, reportedFailedIds: readonly string[] | null) => {
+      const current = pinRun.current;
+      if (current === null || current.token !== started.token) return;
+
+      const reported =
+        reportedFailedIds === null ? null : new Set(reportedFailedIds);
+      const candidates =
+        reported === null
+          ? current.ids
+          : current.ids.filter((id) => reported.has(id));
+      const remaining = unreconciledPinIds(
+        currentItems.current,
+        candidates,
+        current.pinned,
+      );
+
+      selection.replace(remaining);
+      pinRun.current =
+        remaining.length === 0
+          ? null
+          : { ...current, ids: remaining, active: false };
+      running.current = false;
+      setBusy(false);
+    },
+    [selection.replace],
+  );
+
+  useEffect(() => {
+    const current = pinRun.current;
+    if (current === null) return;
+    if (!current.active && !sameIds(selection.selected, current.ids)) {
+      pinRun.current = null;
+      return;
+    }
+
+    const remaining = unreconciledPinIds(items, current.ids, current.pinned);
+    if (remaining.length === current.ids.length) return;
+
+    pinRun.current = { ...current, ids: remaining };
+    selection.replace(remaining);
+  }, [busy, items, selection.replace, selection.selected]);
 
   const togglePin = useCallback(() => {
     if (running.current) return;
     const selected = selection.items;
     const pinned = !selection.allPinned;
+    const started: PinRun = {
+      token: ++nextPinToken.current,
+      ids: selected.map((item) => item.id),
+      pinned,
+      active: true,
+    };
+    pinRun.current = started;
     running.current = true;
     setBusy(true);
+    let reportedFailedIds: readonly string[] | null = null;
     void bulkPin
       .mutateAsync({ items: selected, pinned })
-      .then((outcome) => selection.replace(outcome.failedIds))
-      .catch(() => undefined)
-      .finally(() => {
-        running.current = false;
-        setBusy(false);
-      });
-  }, [bulkPin, selection]);
+      .then(
+        (outcome) => {
+          reportedFailedIds = outcome.failedIds;
+        },
+        () => undefined,
+      )
+      .finally(() => finishPin(started, reportedFailedIds));
+  }, [bulkPin, finishPin, selection]);
 
   const confirmDelete = useCallback(() => {
     if (running.current) return;
+    pinRun.current = null;
     const selected = selection.items;
     running.current = true;
     setBusy(true);
@@ -69,6 +146,7 @@ export function useHistorySelection(
 
   const end = useCallback(() => {
     if (running.current) return;
+    pinRun.current = null;
     setConfirmingDelete(false);
     selection.clear();
   }, [selection.clear]);

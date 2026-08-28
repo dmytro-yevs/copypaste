@@ -80,7 +80,8 @@ describe("useHistorySelection", () => {
         .reverse()
         .map((entry) => ({ ...entry, pinned: true })),
     });
-    expect(result.current.selection.active).toBe(true);
+    expect(result.current.selection.active).toBe(false);
+    expect(result.current.busy).toBe(true);
 
     await act(async () => run.resolve({ done: 2, failedIds: [] }));
     await waitFor(() => expect(result.current.selection.active).toBe(false));
