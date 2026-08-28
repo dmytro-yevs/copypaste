@@ -268,6 +268,135 @@ def nightly_concurrency_holds(workflow):
     )
 
 
+PR_PUSH_OR_RUN = (
+    "${{ github.event.pull_request.number || "
+    "(github.event_name == 'push' && github.ref_name) || github.run_id }}"
+)
+ACTIVE_CHANGE_CANCEL = (
+    "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+)
+GATE_CONCURRENCY = {
+    "ci.yml": "ci",
+    "browser-webkitgtk.yml": "browser",
+    "windows-native-e2e.yml": "windows-native-e2e",
+    "mutation-gate.yml": "mutation-gate",
+    "supply-chain.yml": "supply-chain",
+}
+
+
+def event_triggers(workflow):
+    return workflow.get(True) or workflow.get("on") or {}
+
+
+def checks_merge_queue(workflow):
+    merge_group = event_triggers(workflow).get("merge_group")
+    return isinstance(merge_group, dict) and merge_group.get("types") == ["checks_requested"]
+
+
+def concurrency_policy_failures(workflows):
+    failures = []
+    for name, slug in GATE_CONCURRENCY.items():
+        workflow = workflows.get(name) or {}
+        concurrency = workflow.get("concurrency") or {}
+        expected = "{}-${{{{ github.event_name }}}}-{}".format(slug, PR_PUSH_OR_RUN)
+        if concurrency.get("group") != expected:
+            failures.append("{} must use {}".format(name, expected))
+        if concurrency.get("cancel-in-progress") != ACTIVE_CHANGE_CANCEL:
+            failures.append("{} may cancel only pull_request and push".format(name))
+        if not checks_merge_queue(workflow):
+            failures.append("{} must run for merge_group checks_requested".format(name))
+
+    android = workflows.get("android-emulator.yml") or {}
+    android_concurrency = android.get("concurrency") or {}
+    android_group = (
+        "android-emulator-${{ github.event_name }}-" + PR_PUSH_OR_RUN + "-"
+        "${{ github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36' }}-"
+        "${{ inputs.target || 'google_apis' }}"
+    )
+    if android_concurrency.get("group") != android_group:
+        failures.append("android-emulator.yml must isolate event, change, API sweep, and target")
+    if android_concurrency.get("cancel-in-progress") != ACTIVE_CHANGE_CANCEL:
+        failures.append("android-emulator.yml may cancel only pull_request and push")
+    if not checks_merge_queue(android):
+        failures.append("android-emulator.yml must run for merge_group checks_requested")
+
+    release = (workflows.get("release.yml") or {}).get("concurrency") or {}
+    release_group = (
+        "release-${{ github.event_name == 'workflow_dispatch' && "
+        "format('v{0}', inputs.version) || github.ref_name }}"
+    )
+    if release.get("group") != release_group:
+        failures.append("release.yml must serialize the normalized tag or dispatch version")
+    if release.get("cancel-in-progress") is not False:
+        failures.append("release.yml must not cancel release evidence")
+
+    nightly = workflows.get("native-nightly.yml") or {}
+    if not nightly_concurrency_holds(nightly):
+        failures.append("native-nightly.yml must isolate schedule and dispatch without cancellation")
+    if (workflows.get("secret-scan.yml") or {}).get("concurrency") is not None:
+        failures.append("secret-scan.yml must inherit the caller's concurrency")
+    return failures
+
+
+def synthetic_bucket(slug, event, run_id, pull_request=None, ref_name=None,
+                     api_level=None, target=None):
+    change = pull_request if event == "pull_request" else (
+        ref_name if event == "push" else run_id
+    )
+    fields = [slug, event, str(change)]
+    if slug == "android-emulator":
+        fields += ["sweep" if event == "schedule" else (api_level or "36"),
+                   target or "google_apis"]
+    return "-".join(fields)
+
+
+def synthetic_cancels(event):
+    return event in {"pull_request", "push"}
+
+
+def synthetic_release_bucket(event, ref_name=None, version=None):
+    normalized = "v{}".format(version) if event == "workflow_dispatch" else ref_name
+    return "release-{}".format(normalized)
+
+
+def synthetic_concurrency_table_holds():
+    pr_one = synthetic_bucket("ci", "pull_request", 10, pull_request=41)
+    pr_update = synthetic_bucket("ci", "pull_request", 11, pull_request=41)
+    pr_other = synthetic_bucket("ci", "pull_request", 12, pull_request=42)
+    push_one = synthetic_bucket("ci", "push", 20, ref_name="main")
+    push_update = synthetic_bucket("ci", "push", 21, ref_name="main")
+    merge_one = synthetic_bucket("ci", "merge_group", 30, ref_name="gh-readonly-queue/main/a")
+    merge_two = synthetic_bucket("ci", "merge_group", 31, ref_name="gh-readonly-queue/main/b")
+    dispatch = synthetic_bucket("supply-chain", "workflow_dispatch", 40, ref_name="main")
+    schedule = synthetic_bucket("supply-chain", "schedule", 41, ref_name="main")
+    android_api = synthetic_bucket(
+        "android-emulator", "workflow_dispatch", 50, api_level="34", target="google_apis")
+    android_other_api = synthetic_bucket(
+        "android-emulator", "workflow_dispatch", 50, api_level="36", target="google_apis")
+    android_other_target = synthetic_bucket(
+        "android-emulator", "workflow_dispatch", 50, api_level="34", target="aosp_atd")
+    android_sweep = synthetic_bucket(
+        "android-emulator", "schedule", 60, api_level="34", target="google_apis")
+    return all((
+        pr_one == pr_update,
+        pr_one != pr_other,
+        pr_one != synthetic_bucket("browser", "pull_request", 10, pull_request=41),
+        push_one == push_update,
+        merge_one != merge_two,
+        dispatch != schedule,
+        android_api != android_other_api,
+        android_api != android_other_target,
+        android_sweep.endswith("-sweep-google_apis"),
+        synthetic_release_bucket("push", ref_name="v2.0.0")
+        == synthetic_release_bucket("workflow_dispatch", version="2.0.0"),
+        synthetic_cancels("pull_request"),
+        synthetic_cancels("push"),
+        not synthetic_cancels("merge_group"),
+        not synthetic_cancels("workflow_dispatch"),
+        not synthetic_cancels("schedule"),
+    ))
+
+
 def closure(jobs, name):
     seen, stack = set(), list(as_list(jobs.get(name, {}).get("needs")))
     while stack:
@@ -295,6 +424,12 @@ nightly_workflow = docs.get("native-nightly.yml") or {}
 rec(nightly_concurrency_holds(nightly_workflow),
     "native-nightly.yml isolates scheduled and manual evidence",
     "group must include github.event_name and cancel-in-progress must be false")
+concurrency_failures = concurrency_policy_failures(docs)
+rec(not concurrency_failures,
+    "workflow concurrency isolates events and preserves merge-queue evidence",
+    "; ".join(concurrency_failures))
+rec(synthetic_concurrency_table_holds(),
+    "workflow concurrency synthetic event table preserves only intended supersession")
 
 try:
     WORKSPACE_PACKAGES, RUST_VERSION = workspace_contract(pathlib.Path.cwd())
@@ -1222,6 +1357,85 @@ rec("check-feature-ledger.py" in release_ledger_body,
 # --- self-test: prove the runner-image detector fails when it should --------
 if SELF_TEST:
     current_supply = docs.get("supply-chain.yml") or {}
+
+    def concurrency_fixture(mutator):
+        fixture = copy.deepcopy(docs)
+        mutator(fixture)
+        return bool(concurrency_policy_failures(fixture))
+
+    def change_group(fixture, name, old, new):
+        group = fixture[name]["concurrency"]["group"]
+        fixture[name]["concurrency"]["group"] = group.replace(old, new)
+
+    concurrency_fixtures = (
+        (
+            "a bare ref concurrency key is rejected",
+            lambda fixture: fixture["ci.yml"]["concurrency"].update(
+                group="ci-${{ github.ref }}"),
+        ),
+        (
+            "a workflow-derived concurrency slug is rejected",
+            lambda fixture: change_group(fixture, "ci.yml", "ci-", "${{ github.workflow }}-"),
+        ),
+        (
+            "a missing merge-queue trigger is rejected",
+            lambda fixture: event_triggers(fixture["browser-webkitgtk.yml"]).pop(
+                "merge_group", None),
+        ),
+        (
+            "merge-queue evidence may not be cancelled",
+            lambda fixture: fixture["windows-native-e2e.yml"]["concurrency"].update(
+                **{"cancel-in-progress": True}),
+        ),
+        (
+            "nightly schedule and dispatch may not share a group",
+            lambda fixture: fixture["native-nightly.yml"]["concurrency"].update(
+                group="native-nightly-${{ github.ref }}"),
+        ),
+        (
+            "Android concurrency retains the schedule sweep discriminator",
+            lambda fixture: change_group(
+                fixture, "android-emulator.yml",
+                "github.event_name == 'schedule' && 'sweep' || ", ""),
+        ),
+        (
+            "Android concurrency retains the API discriminator",
+            lambda fixture: change_group(
+                fixture, "android-emulator.yml",
+                "${{ github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36' }}-",
+                ""),
+        ),
+        (
+            "Android concurrency retains the target discriminator",
+            lambda fixture: change_group(
+                fixture, "android-emulator.yml", "-${{ inputs.target || 'google_apis' }}", ""),
+        ),
+        (
+            "release concurrency uses the normalized version",
+            lambda fixture: fixture["release.yml"]["concurrency"].update(
+                group="release-${{ github.ref }}"),
+        ),
+        (
+            "release evidence may not be cancelled",
+            lambda fixture: fixture["release.yml"]["concurrency"].update(
+                **{"cancel-in-progress": True}),
+        ),
+        (
+            "the reusable secret scan may not own caller concurrency",
+            lambda fixture: fixture["secret-scan.yml"].update(concurrency={
+                "group": "secret-scan-${{ github.run_id }}",
+                "cancel-in-progress": False,
+            }),
+        ),
+    )
+    emit(not concurrency_policy_failures(docs),
+         "self-test: current workflow concurrency policy holds",
+         "; ".join(concurrency_policy_failures(docs)))
+    emit(synthetic_concurrency_table_holds(),
+         "self-test: synthetic concurrency event table holds")
+    for desc, mutate in concurrency_fixtures:
+        emit(concurrency_fixture(mutate), "self-test: {}".format(desc),
+             "the workflow concurrency detector accepted a broken fixture")
 
     def broken_deny(mutator):
         fixture = copy.deepcopy(current_supply)

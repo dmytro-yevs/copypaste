@@ -23,6 +23,8 @@ on:
   # No branch filter: a dependency change on a stacked or release branch has
   # the same advisory surface as one onto main.
   pull_request:
+  merge_group:
+    types: [checks_requested]
   schedule:
     # Mondays, 06:17 UTC. Off the hour so this is not queued behind everyone
     # else's midnight cron.
@@ -30,8 +32,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: supply-chain-${{ github.ref }}
-  cancel-in-progress: true
+  group: supply-chain-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read

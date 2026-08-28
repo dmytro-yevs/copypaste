@@ -407,6 +407,83 @@
       "requires": ["python3"],
       "mutations": [
         {
+          "name": "bare-ref-concurrency-accepted",
+          "file": ".github/workflows/ci.yml",
+          "find": "  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}\n",
+          "replace": "  group: ci-${{ github.ref }}\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "workflow-name-concurrency-slug-accepted",
+          "file": ".github/workflows/ci.yml",
+          "find": "  group: ci-${{ github.event_name }}-",
+          "replace": "  group: ${{ github.workflow }}-${{ github.event_name }}-",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "missing-merge-group-trigger-accepted",
+          "file": ".github/workflows/browser-webkitgtk.yml",
+          "find": "  merge_group:\n    types: [checks_requested]\n",
+          "replace": "",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "merge-group-cancellation-accepted",
+          "file": ".github/workflows/windows-native-e2e.yml",
+          "find": "  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}\n",
+          "replace": "  cancel-in-progress: true\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "nightly-events-may-collide",
+          "file": ".github/workflows/native-nightly.yml",
+          "find": "  group: native-nightly-${{ github.event_name }}\n",
+          "replace": "  group: native-nightly-${{ github.ref }}\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "android-schedule-sweep-not-distinct",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36'",
+          "replace": "inputs.api-level || '36'",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "android-api-concurrency-not-distinct",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "-${{ github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36' }}",
+          "replace": "",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "android-target-concurrency-not-distinct",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "-${{ inputs.target || 'google_apis' }}\n",
+          "replace": "\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "release-ref-used-as-version",
+          "file": ".github/workflows/release.yml",
+          "find": "  group: release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}\n",
+          "replace": "  group: release-${{ github.ref }}\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "release-cancellation-accepted",
+          "file": ".github/workflows/release.yml",
+          "find": "  cancel-in-progress: false\n",
+          "replace": "  cancel-in-progress: true\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "secret-scan-owns-caller-concurrency",
+          "file": ".github/workflows/secret-scan.yml",
+          "find": "permissions:\n  contents: read\n",
+          "replace": "concurrency:\n  group: secret-scan-${{ github.run_id }}\n  cancel-in-progress: false\n\npermissions:\n  contents: read\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
           "name": "unknown-runner-label-accepted",
           "file": "scripts/release/check-wiring.py",
           "find": "            yield (family is not None,",

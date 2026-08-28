@@ -23,11 +23,13 @@ on:
   # No branch filter: this layer owns shared React behaviour, and a pull
   # request onto a stacked or release branch changes the same code.
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
-  group: browser-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: browser-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
