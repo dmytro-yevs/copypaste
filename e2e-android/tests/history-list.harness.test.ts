@@ -23,12 +23,48 @@ const SHRUNK_ARTIFACT: ListSnapshot = {
   })),
 };
 
+const PADDED_SHRINK_ARTIFACT: ListSnapshot = {
+  frame: 252,
+  scrollTop: 4849,
+  scrollHeight: 5256,
+  clientHeight: 407,
+  totalSize: 5172,
+  rows: Array.from({ length: 8 }, (_, index) => ({
+    id: `item-${112 - index}`,
+    start: 4556 + index * 77,
+    height: 77,
+    active: false,
+    text: `anchor item ${112 - index}`,
+  })),
+};
+
 describe("Android History artifact geometry", () => {
   test("recognises the actual clamp instead of a stale estimated total", () => {
     expect(maxScrollTop(SHRUNK_ARTIFACT)).toBe(4723);
     expect(SHRUNK_ARTIFACT.scrollTop).toBe(maxScrollTop(SHRUNK_ARTIFACT));
     expect(SHRUNK_ARTIFACT.totalSize).toBeGreaterThan(2799);
     expect(renderedRowsCoverViewport(SHRUNK_ARTIFACT)).toBe(true);
+  });
+
+  test("covers virtual content while excluding measured trailing padding", () => {
+    expect(PADDED_SHRINK_ARTIFACT.scrollTop).toBe(
+      maxScrollTop(PADDED_SHRINK_ARTIFACT),
+    );
+    expect(
+      PADDED_SHRINK_ARTIFACT.scrollTop + PADDED_SHRINK_ARTIFACT.clientHeight,
+    ).toBe(PADDED_SHRINK_ARTIFACT.scrollHeight);
+    expect(PADDED_SHRINK_ARTIFACT.scrollHeight).toBeGreaterThan(
+      PADDED_SHRINK_ARTIFACT.totalSize,
+    );
+    expect(renderedRowsCoverViewport(PADDED_SHRINK_ARTIFACT)).toBe(true);
+  });
+
+  test("rejects an unexplained gap between rendered rows", () => {
+    const rows = PADDED_SHRINK_ARTIFACT.rows.map((row) => ({ ...row }));
+    rows[5] = { ...rows[5]!, start: rows[5]!.start + 1 };
+    expect(
+      renderedRowsCoverViewport({ ...PADDED_SHRINK_ARTIFACT, rows }),
+    ).toBe(false);
   });
 
   test("excludes the Today heading from intrinsic item geometry", () => {
