@@ -426,8 +426,8 @@ try {
         Write-WindowCaptureObservation $app $captureTrace "history/after-navigation"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history" "" $captureTrace
         Invoke-UiaNamedControl $app "Connections" "Connect a device"
-        Open-WindowsPairingEntry $app
         $pairingNames = @("Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel")
+        Open-WindowsPairingEntry $app $pairingNames
         $featureStates += Save-WindowsProtectedFeatureState `
             $app $evidencePath "devices" "desktop-pairing-entry" "Pairing code" `
             $pairingNames $pairingNames @("Pairing code", "Pairing address") "" $captureTrace

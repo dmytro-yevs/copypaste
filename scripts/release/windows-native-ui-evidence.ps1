@@ -7,6 +7,7 @@ Add-Type -AssemblyName UIAutomationTypes
 . (Join-Path $PSScriptRoot "windows-readiness-lib.ps1")
 . (Join-Path $PSScriptRoot "windows-uia-snapshot-lib.ps1")
 . (Join-Path $PSScriptRoot "windows-native-window-evidence.ps1")
+. (Join-Path $PSScriptRoot "windows-native-protected-evidence.ps1")
 
 function Get-AppAutomationRoot([Diagnostics.Process]$App) {
     $App.Refresh()
@@ -54,60 +55,6 @@ function Get-UiaSnapshot([Windows.Automation.AutomationElement]$Root) {
         [Windows.Automation.Condition]::TrueCondition
     ))
     return Read-UiaSnapshot $elements { param($element) Read-UiaNode $element }
-}
-
-function New-ProtectedUiaNode(
-    [AllowNull()][string]$Name,
-    [AllowNull()][string]$ControlType,
-    [bool]$Enabled,
-    [bool]$Offscreen,
-    $Bounds,
-    [bool]$IsPassword,
-    [string[]]$AllowedNames
-) {
-    return [ordered]@{
-        name = if ($Name -in $AllowedNames) { $Name } else { $null }
-        control_type = $ControlType
-        enabled = $Enabled
-        offscreen = $Offscreen
-        bounds = $Bounds
-        is_password = $IsPassword
-    }
-}
-
-function Read-ProtectedUiaNode(
-    [Windows.Automation.AutomationElement]$Element,
-    [string[]]$AllowedNames
-) {
-    $bounds = $Element.Current.BoundingRectangle
-    $coordinates = @($bounds.X, $bounds.Y, $bounds.Width, $bounds.Height)
-    $serializedBounds = if (@($coordinates | Where-Object { [double]::IsNaN($_) -or [double]::IsInfinity($_) }).Count -eq 0) {
-        [ordered]@{ x = $bounds.X; y = $bounds.Y; width = $bounds.Width; height = $bounds.Height }
-    } else {
-        $null
-    }
-    return New-ProtectedUiaNode `
-        $Element.Current.Name `
-        (Get-UiaControlTypeName $Element.Current.ControlType) `
-        $Element.Current.IsEnabled `
-        $Element.Current.IsOffscreen `
-        $serializedBounds `
-        $Element.Current.IsPassword `
-        $AllowedNames
-}
-
-function Get-ProtectedUiaSnapshot(
-    [Windows.Automation.AutomationElement]$Root,
-    [string[]]$AllowedNames
-) {
-    $elements = @($Root) + @($Root.FindAll(
-        [Windows.Automation.TreeScope]::Descendants,
-        [Windows.Automation.Condition]::TrueCondition
-    ))
-    return Read-UiaSnapshot $elements {
-        param($element)
-        Read-ProtectedUiaNode $element $AllowedNames
-    }
 }
 
 function Get-UiaSnapshotNames([Collections.IDictionary]$Snapshot) {
@@ -223,26 +170,31 @@ function Get-WindowsPairingEntryState(
     return "wait"
 }
 
-function Open-WindowsPairingEntry([Diagnostics.Process]$App) {
+function Open-WindowsPairingEntry([Diagnostics.Process]$App, [string[]]$AllowedNames) {
     $launcher = Wait-UiaName $App "Connect a device" $true
     Invoke-UiaElement $launcher "Connect a device"
     $transition = @{ join_invoked = $false }
+    $diagnosticNames = @($AllowedNames) + @("Enter pairing code")
     Wait-Readiness "native pairing entry" {
-        $App.Refresh()
-        if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
-        $code = Get-UiaNamedElement $App "Pairing code"
-        $address = Get-UiaNamedElement $App "Pairing address"
-        $join = Get-UiaNamedElement $App "Enter pairing code" $true
-        switch (Get-WindowsPairingEntryState ($null -ne $code) ($null -ne $address) ($null -ne $join) $transition.join_invoked) {
-            "ready" { return New-ProbeReady $true }
-            "invoke" {
-                $transition.join_invoked = $true
-                Invoke-UiaElement $join "Enter pairing code"
-                return New-ProbeNotReady "the native pairing entry was requested"
+        try {
+            $App.Refresh()
+            if ($App.HasExited) { return New-ProbeInvariant "the installed app exited" }
+            $code = Get-UiaNamedElement $App "Pairing code"
+            $address = Get-UiaNamedElement $App "Pairing address"
+            $join = Get-UiaNamedElement $App "Enter pairing code" $true
+            switch (Get-WindowsPairingEntryState ($null -ne $code) ($null -ne $address) ($null -ne $join) $transition.join_invoked) {
+                "ready" { return New-ProbeReady $true }
+                "invoke" {
+                    $transition.join_invoked = $true
+                    Invoke-UiaElement $join "Enter pairing code"
+                    return New-ProbeNotReady "the native pairing entry was requested"
+                }
             }
+            return New-ProbeNotReady "the allowlisted native pairing controls are not ready"
+        } catch {
+            return New-ProbeTransient "protected accessibility is temporarily unavailable"
         }
-        return New-ProbeNotReady "neither the pairing launcher action nor the native pairing fields are visible"
-    } { Get-UiaSummary $App } 15000 | Out-Null
+    } { Get-ProtectedUiaSummary $App $diagnosticNames } 15000 | Out-Null
 }
 
 function Set-UiaScreenshots(
@@ -286,21 +238,6 @@ function New-EvidenceFileRecord([string]$Root, [string]$RelativePath) {
         path = $RelativePath.Replace('\', '/')
         sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         bytes = (Get-Item -LiteralPath $path).Length
-    }
-}
-
-function New-WindowsProtectedStateRecord(
-    [string]$Feature,
-    [string]$State,
-    [string]$ExpectedName,
-    $Accessibility
-) {
-    return [ordered]@{
-        type = "protected-accessibility"
-        feature = $Feature
-        state = $State
-        expected_name = $ExpectedName
-        accessibility = $Accessibility
     }
 }
 
@@ -354,64 +291,6 @@ function Save-WindowsFeatureState(
     }
 }
 
-function Save-WindowsProtectedFeatureState(
-    [Diagnostics.Process]$App,
-    [string]$EvidenceRoot,
-    [string]$Feature,
-    [string]$State,
-    [string]$ExpectedName,
-    [string[]]$AllowedNames,
-    [string[]]$RequiredNames,
-    [string[]]$RequiredPasswordNames,
-    [string]$ArtifactDirectory = "",
-    [string]$CaptureTracePath = ""
-) {
-    foreach ($name in $RequiredNames) {
-        Wait-UiaName $App $name | Out-Null
-    }
-    $window = Wait-ProtectedForegroundWindow $App
-    Write-WindowCaptureObservation $App $CaptureTracePath "$Feature/$State/protected" $window
-    $snapshot = Get-ProtectedUiaSnapshot (Get-AppAutomationRoot $App) $AllowedNames
-    Assert-UiaSnapshotComplete $snapshot "$Feature/$State protected evidence"
-    $nodes = @($snapshot.nodes)
-    $retried = @($snapshot.retried | ForEach-Object {
-        [ordered]@{ index = [int]$_.index; attempts = [int]$_.attempts }
-    })
-    foreach ($name in $RequiredNames) {
-        $matches = @($nodes | Where-Object {
-            $bounds = $_["bounds"]
-            $_["name"] -eq $name -and $_["enabled"] -and -not $_["offscreen"] -and
-                $bounds -is [Collections.IDictionary] -and $bounds["width"] -gt 0 -and $bounds["height"] -gt 0
-        })
-        Assert-True ($matches.Count -gt 0) "$Feature protected evidence lacks visible, enabled '$name'"
-    }
-    foreach ($name in $RequiredPasswordNames) {
-        $matches = @($nodes | Where-Object {
-            $_["name"] -eq $name -and $_["is_password"]
-        })
-        Assert-True ($matches.Count -gt 0) "$Feature protected evidence lacks IsPassword=true for '$name'"
-    }
-    $relativeDirectory = if ($ArtifactDirectory) { Join-Path $Feature $ArtifactDirectory } else { $Feature }
-    $directory = Join-Path $EvidenceRoot $relativeDirectory
-    [IO.Directory]::CreateDirectory($directory) | Out-Null
-    $accessibility = Join-Path $relativeDirectory "accessibility.json"
-    [ordered]@{
-        schema_version = 2
-        feature = $Feature
-        state = $State
-        expected_name = $ExpectedName
-        window = $window
-        node_read = [ordered]@{
-            complete = $true
-            read = $nodes.Count
-            retried = $retried
-        }
-        nodes = $nodes
-    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceRoot $accessibility) -Encoding utf8
-    return New-WindowsProtectedStateRecord `
-        $Feature $State $ExpectedName (New-EvidenceFileRecord $EvidenceRoot $accessibility)
-}
-
 function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) {
     [ordered]@{ schema_version = 2; states = $States } |
         ConvertTo-Json -Depth 8 |
@@ -443,8 +322,11 @@ function Test-WindowsUiEvidenceHelpers {
     Assert-True (-not (Test-WindowCaptureReady $protected)) "a capture-protected window was accepted for capture"
     $protected["display_affinity"] = 17
     Assert-True (Test-WindowProtectedReady $protected) "WDA_EXCLUDEFROMCAPTURE was not accepted as protected"
-    $protected["display_affinity"] = 0
-    Assert-True (-not (Test-WindowProtectedReady $protected)) "WDA_NONE was accepted as protected"
+    $unprotected = [ordered]@{
+        foreground = $true; visible = $true; minimized = $false
+        capture_allowed = $true; display_affinity = 0
+    }
+    Assert-True (-not (Test-WindowProtectedReady $unprotected)) "WDA_NONE was accepted as protected"
     $settled = [ordered]@{ foreground = $true; visible = $true; minimized = $false }
     $settledPlan = Get-WindowActivationPlan $settled
     Assert-True (-not $settledPlan.restore -and -not $settledPlan.activate) `
@@ -469,6 +351,43 @@ function Test-WindowsUiEvidenceHelpers {
     Assert-True ($null -eq $redacted.name) "protected accessibility retained an unapproved name"
     $record = New-WindowsProtectedStateRecord "devices" "entry" "Pairing code" ([ordered]@{ path = "accessibility.json" })
     Assert-True (-not $record.Contains("screenshot")) "protected state record bound a screenshot"
+    $secret = "pairing-secret-0123456789"
+    $privatePath = "C:\Users\private\pairing-secret.txt"
+    $unsafeSnapshot = [ordered]@{
+        nodes = @([ordered]@{
+            name = $secret; control_type = "ControlType.Edit"; enabled = $true
+            offscreen = $false; bounds = [ordered]@{ x = 0; y = 0; width = 1; height = 1 }
+            is_password = $true; value = "192.0.2.1:48654"; peer_text = "Unverified peer"
+        })
+        unreadable = @([ordered]@{ index = 1; attempts = 3; reason = $privatePath })
+        retried = @([ordered]@{ index = 0; attempts = 2; last_failure = $privatePath })
+    }
+    $summary = Get-ProtectedUiaSnapshotSummary $unsafeSnapshot @("Pairing code")
+    $unsafePattern = "pairing-secret|192\.0\.2\.1|Unverified peer|private"
+    Assert-True (-not ($summary -match $unsafePattern)) `
+        "protected failure diagnostics exposed a secret or local path"
+    $document = New-WindowsProtectedAccessibilityDocument "devices" "entry" "Pairing code" `
+        $protected $unsafeSnapshot @("Pairing code")
+    $serialized = $document | ConvertTo-Json -Depth 8
+    Assert-True (-not ($serialized -match $unsafePattern)) `
+        "protected accessibility artifact exposed a secret or local path"
+    Assert-True ($null -eq $document.nodes[0].name -and -not $document.node_read.retried[0].Contains("last_failure")) `
+        "protected accessibility artifact did not project onto its safe schema"
+    $failureText = try {
+        Wait-Readiness "protected fixture" { New-ProbeNotReady "allowlisted controls not ready" } `
+            { Get-ProtectedUiaSnapshotSummary $unsafeSnapshot @("Pairing code") } 0 | Out-Null
+    } catch { $_.Exception.Message }
+    Assert-True ($failureText -match "protected UIA" -and -not ($failureText -match $unsafePattern)) `
+        "protected wait failure exposed a secret or local path"
+    $pairingSourceParts = ${function:Open-WindowsPairingEntry}.ToString() -split `
+        [regex]::Escape('Invoke-UiaElement $launcher "Connect a device"'), 2
+    Assert-True ($pairingSourceParts.Count -eq 2) "native pairing entry launch boundary is missing"
+    $afterPairingLaunch = $pairingSourceParts[1]
+    Assert-True (-not ($afterPairingLaunch -match "Get-UiaSummary|Wait-UiaName")) `
+        "native pairing entry retained raw UIA failure diagnostics after launch"
+    $protectedSaver = ${function:Save-WindowsProtectedFeatureState}.ToString()
+    Assert-True (-not ($protectedSaver -match "Get-UiaSummary|Wait-UiaName|Assert-UiaSnapshotComplete")) `
+        "protected evidence retained raw UIA wait or snapshot diagnostics"
     Assert-True (-not (${function:Read-ProtectedUiaNode}.ToString() -match "ValuePattern")) `
         "protected accessibility queried ValuePattern"
 }
