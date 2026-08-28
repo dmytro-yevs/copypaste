@@ -5,7 +5,7 @@
  * This suite therefore proves the WebView offers both ceremonies and reports
  * progress without acquiring a credential surface of its own.
  */
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import {
@@ -14,6 +14,7 @@ import {
   expectNoRawError,
   outerHtml,
 } from "../src/harness/leaks.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   count,
   gotoView,
@@ -36,7 +37,7 @@ const PAIRING_ACTIONS = ["Show pairing code", "Scan pairing code"];
 
 let app: AndroidApp;
 
-beforeAll(async () => {
+beforeAllWithEvidence("devices", async () => {
   app = await attachToApp();
   await gotoView(app, "Devices");
   await waitFor(

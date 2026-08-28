@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, expect, inject, test } from "vitest";
+import { afterAll, expect, inject, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { ordinaryFor } from "../src/harness/fixtures.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   HISTORY_LIST,
   ROW,
@@ -23,7 +24,7 @@ const ordinary = ordinaryFor(nonce);
 
 let app: AndroidApp;
 
-beforeAll(async () => {
+beforeAllWithEvidence("interaction", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
   await resetHistoryFilters(app);

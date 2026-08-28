@@ -7,12 +7,13 @@
  * box model and WebKitGTK is not this engine, so neither of the other two
  * layers is evidence for it here.
  */
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { listSnapshot, rowBoxes, settledList } from "../src/harness/list.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   ROW,
   SEARCH,
@@ -60,7 +61,7 @@ let app: AndroidApp;
 let seeded: string[] = [];
 let marker = "";
 
-beforeAll(async () => {
+beforeAllWithEvidence("history-render", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
   marker = fixtureMarker("render");
