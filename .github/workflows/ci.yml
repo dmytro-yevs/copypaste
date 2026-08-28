@@ -18,11 +18,13 @@ on:
   # the macOS layer (docs/rewrite/testing-policy.md), and a pull request onto a
   # stacked or release branch changes the same code.
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 # No job in this workflow needs to write anything, and none of them reads a
 # secret. Least privilege is the default here and the release workflow is the

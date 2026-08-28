@@ -120,14 +120,16 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/android-emulator.yml"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   # The event is in the group because the nightly and a manual dispatch share
   # the default branch's ref, and a cancelled run reports as cancelled rather
   # than failed — so one silently erasing the other's Android signal is
   # invisible.
-  group: android-emulator-${{ github.ref }}-${{ github.event_name }}-${{ inputs.api-level || '36' }}
-  cancel-in-progress: true
+  group: android-emulator-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}-${{ github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36' }}-${{ inputs.target || 'google_apis' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
