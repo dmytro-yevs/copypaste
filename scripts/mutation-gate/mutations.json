@@ -925,8 +925,8 @@
         {
           "name": "protected-pairing-binds-a-screenshot",
           "file": "scripts/release/windows-native-protected-evidence.ps1",
-          "find": "        accessibility = $Accessibility\n",
-          "replace": "        screenshot = $Accessibility\n        accessibility = $Accessibility\n",
+          "find": "        accessibility = $Accessibility",
+          "replace": "        screenshot = $Accessibility; accessibility = $Accessibility",
           "expect": "protected state record bound a screenshot"
         },
         {
