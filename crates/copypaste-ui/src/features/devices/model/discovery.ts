@@ -177,7 +177,7 @@ export function discoveredDeviceDetails(
                 [t("devices.presentation.discovery.lanAddress"), details?.endpoint?.lan_endpoint || device.addr || unavailable],
                 [t("devices.presentation.discovery.publicIp"), details?.public_ip.availability === "available" ? details.public_ip.value : unavailable],
                 [t("devices.presentation.discovery.location"), details?.geo.availability === "available" ? details.geo.value : unavailable],
-                [t("devices.presentation.discovery.latency"), details?.latency ? t("devices.presentation.discovery.latencyValue", { value: details.latency.connect_latency_ms.toLocaleString() }) : unavailable],
+                [t("devices.presentation.discovery.latency"), details?.latency ? t("devices.presentation.discovery.latencyValue", { latency: details.latency.connect_latency_ms.toLocaleString() }) : unavailable],
                 [t("devices.discovered.lastSeen"), presence?.last_seen_ms ? relativeAge(presence.last_seen_ms) : device.last_seen_ms > 0 ? relativeAge(device.last_seen_ms) : unavailable],
                 [t("devices.presentation.discovery.networkPresence"), t(`devices.presentation.discovery.presence.${presenceState}`)],
                 [t("devices.presentation.discovery.source"), t("devices.presentation.discovery.sourceValue")],
