@@ -427,9 +427,14 @@ try {
         $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history" "" $captureTrace
         Invoke-UiaNamedControl $app "Connections" "Connect a device"
         Open-WindowsPairingEntry $app
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "devices" "desktop-pairing-entry" "Pairing code" "" $captureTrace
+        $pairingNames = @("Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel")
+        $featureStates += Save-WindowsProtectedFeatureState `
+            $app $evidencePath "devices" "desktop-pairing-entry" "Pairing code" `
+            $pairingNames $pairingNames @("Pairing code", "Pairing address") "" $captureTrace
         [Windows.Forms.SendKeys]::SendWait("{ESC}")
         Wait-UiaName $app "Connect a device" | Out-Null
+        $restoredShell = Wait-ForegroundWindow $app
+        Write-WindowCaptureObservation $app $captureTrace "devices/after-close" $restoredShell
         Invoke-UiaNamedControl $app "Preferences" "Mode"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Mode" "" $captureTrace
         $updateText = if ($ExpectedSignature -eq "Valid") { "Check for updates" } else { "Updates aren't configured in this build." }
@@ -502,7 +507,6 @@ try {
             --artifact accessibility=history/accessibility.json `
             --artifact screenshot=capture/screenshot.png `
             --artifact accessibility=capture/accessibility.json `
-            --artifact screenshot=devices/screenshot.png `
             --artifact accessibility=devices/accessibility.json `
             --artifact screenshot=settings-and-service/screenshot.png `
             --artifact accessibility=settings-and-service/accessibility.json `
