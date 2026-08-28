@@ -408,13 +408,28 @@ describe("preview scenario service", () => {
       failure: "failed",
       cancelled: "cancelled",
     };
+    const expectedMessage: Record<
+      PreviewPairingPhase,
+      PairingCeremony["semantics"]["message_id"]
+    > = {
+      idle: "ready",
+      invite: "waiting_for_peer",
+      code: "waiting_for_peer",
+      confirm: "compare_codes",
+      connecting: "securing_connection",
+      success: "paired",
+      failure: "failed",
+      cancelled: "cancelled",
+    };
 
     for (const phase of Object.keys(expected) as PreviewPairingPhase[]) {
       store.getState().setPairing(phase, PHONE.id);
       const result = await intercept("pair_progress");
       expect(result.handled).toBe(true);
       if (result.handled) {
-        expect((result.value as PairingCeremony).state).toBe(expected[phase]);
+        const ceremony = result.value as PairingCeremony;
+        expect(ceremony.state).toBe(expected[phase]);
+        expect(ceremony.semantics.message_id).toBe(expectedMessage[phase]);
       }
     }
 

@@ -18,9 +18,9 @@
 }
 
 .iconWell svg { inline-size: var(--icon-md); block-size: var(--icon-md); }
-.iconWell[data-state="confirmed"] { color: var(--ok-strong); }
-.iconWell[data-state="failed"],
-.iconWell[data-state="timed_out"] { color: var(--err-strong); }
+.root[data-tone="success"] .iconWell { color: var(--ok-strong); }
+.root[data-tone="warning"] .iconWell { color: var(--warn-strong); }
+.root[data-tone="danger"] .iconWell { color: var(--err-strong); }
 
 .copy { min-inline-size: 0; flex: 1; }
 .title { font-size: var(--fs-sm); font-weight: var(--fw-medium); overflow-wrap: anywhere; }

@@ -4,7 +4,8 @@ use tauri::State;
 
 use crate::backend::{PairingBackend, Result};
 use crate::pairing_presentation::{
-    NativePresentationOutcome, PairingDecision, PairingPresentationState, PairingPresenter,
+    resolve_pairing_semantics, NativePresentationOutcome, PairingDecision,
+    PairingPresentationState, PairingPresenter, PairingSemantics,
 };
 use crate::SelectedBackend;
 
@@ -15,6 +16,7 @@ pub struct PairingCeremony {
     ceremony_id: Option<String>,
     role: Option<PairingRole>,
     state: PairingState,
+    semantics: PairingSemantics,
     presentation: PairingPresentationState,
     known_device: Option<PairedDevice>,
     error: Option<crate::backend::UiError>,
@@ -34,6 +36,7 @@ impl PairingCeremony {
         progress: PairingProgressData,
         presentation: PairingPresentationState,
     ) -> Self {
+        let semantics = resolve_pairing_semantics(progress.state, progress.error_code);
         let known_device = if progress.state == PairingState::Confirmed {
             progress.known_device.map(|peer| PairedDevice {
                 name: peer.name,
@@ -47,6 +50,7 @@ impl PairingCeremony {
             ceremony_id: progress.pairing_id,
             role: progress.role,
             state: progress.state,
+            semantics,
             presentation,
             known_device,
             error: progress
@@ -60,6 +64,7 @@ impl PairingCeremony {
             ceremony_id: None,
             role: None,
             state: PairingState::Idle,
+            semantics: resolve_pairing_semantics(PairingState::Idle, None),
             presentation: PairingPresentationState::Unavailable,
             known_device: None,
             error: None,

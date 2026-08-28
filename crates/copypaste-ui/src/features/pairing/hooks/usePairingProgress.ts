@@ -1,10 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  isPairingActive,
-  PAIRING_POLL_MS,
-  pairingQueryKey,
-} from "@/features/pairing/model/pairingSession";
+import { PAIRING_POLL_MS, pairingQueryKey } from "@/features/pairing/model/pairingSession";
 import { getPairingProgress, type PairingCeremony } from "@/lib/ipc";
 
 interface PairingProgressOptions {
@@ -41,6 +37,6 @@ export function usePairingProgress({
     retry: false,
     staleTime: PAIRING_POLL_MS,
     refetchInterval: (query) =>
-      isPairingActive(query.state.data?.state) ? PAIRING_POLL_MS : false,
+      query.state.data?.semantics.active ? PAIRING_POLL_MS : false,
   });
 }
