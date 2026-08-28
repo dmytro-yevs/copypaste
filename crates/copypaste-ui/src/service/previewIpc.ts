@@ -81,6 +81,8 @@ const PAIRING_STATES: Record<PreviewPairingPhase, PairingCeremony["state"]> = {
     confirm: "awaiting_confirmation",
     connecting: "handshaking",
     success: "confirmed",
+    rejected: "rejected",
+    timed_out: "timed_out",
     failure: "failed",
     cancelled: "cancelled",
 };
@@ -426,7 +428,7 @@ export function createPreviewInterceptor(
             return { handled: true, value: pairingCeremony(scenario) };
         }
         if (command === "pair_reject") {
-            scenario = pairingTransition(store, "failure");
+            scenario = pairingTransition(store, "rejected");
             return { handled: true, value: pairingCeremony(scenario) };
         }
         if (command === "pair_cancel") {
