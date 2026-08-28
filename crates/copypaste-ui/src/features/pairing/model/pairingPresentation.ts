@@ -4,6 +4,8 @@ import type {
   PairingMessageId,
   PairingSemantics,
 } from "@/lib/ipc";
+import { classifyError, friendlyError } from "@/lib/errors";
+import { t } from "@/i18n";
 
 export interface PairingPresentation {
   readonly semantics: PairingSemantics;
@@ -47,4 +49,27 @@ export function pairingPresentation(
 
 export function pairingIsActive(ceremony: PairingCeremony | undefined): boolean {
   return ceremony?.semantics.active ?? false;
+}
+
+export interface PairingClientErrorPresentation {
+  readonly title: string;
+  readonly body: string;
+  readonly icon: "alert";
+  readonly tone: "danger";
+  readonly live: "alert";
+  readonly retry: true;
+}
+
+export function pairingClientErrorPresentation(
+  error: unknown,
+): PairingClientErrorPresentation | null {
+  if (error === null || error === undefined) return null;
+  return {
+    title: t("common.error"),
+    body: friendlyError(classifyError(error)),
+    icon: "alert",
+    tone: "danger",
+    live: "alert",
+    retry: true,
+  };
 }

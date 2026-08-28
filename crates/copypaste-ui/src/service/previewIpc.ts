@@ -2,10 +2,10 @@ import type {
     CloudStatusData,
     ItemPage,
     PairingCeremony,
-    PairingSemantics,
     ServiceState,
     StatusData,
 } from "@/lib/ipc";
+import { PAIRING_SEMANTICS_BY_STATE } from "@/lib/ipc";
 import type { PreviewPairingInvite } from "@/lib/ipc";
 import { IpcFailure } from "@/lib/errors";
 import {
@@ -85,16 +85,6 @@ const PAIRING_STATES: Record<PreviewPairingPhase, PairingCeremony["state"]> = {
     cancelled: "cancelled",
 };
 
-const PAIRING_SEMANTICS: Record<PreviewPairingPhase, PairingSemantics> = {
-    idle: { message_id: "ready", icon: "shieldCheck", tone: "neutral", live: "status", active: false, terminal: false, needs_devices: false, review_secure: false, retry: false },
-    invite: { message_id: "waiting_for_peer", icon: "spinner", tone: "info", live: "status", active: true, terminal: false, needs_devices: false, review_secure: false, retry: false },
-    code: { message_id: "waiting_for_peer", icon: "spinner", tone: "info", live: "status", active: true, terminal: false, needs_devices: false, review_secure: false, retry: false },
-    confirm: { message_id: "compare_codes", icon: "shieldCheck", tone: "warning", live: "status", active: true, terminal: false, needs_devices: true, review_secure: true, retry: false },
-    connecting: { message_id: "securing_connection", icon: "spinner", tone: "info", live: "status", active: true, terminal: false, needs_devices: true, review_secure: false, retry: false },
-    success: { message_id: "paired", icon: "checkCircle", tone: "success", live: "status", active: false, terminal: true, needs_devices: false, review_secure: false, retry: false },
-    failure: { message_id: "failed", icon: "alert", tone: "danger", live: "alert", active: false, terminal: true, needs_devices: false, review_secure: false, retry: true },
-    cancelled: { message_id: "cancelled", icon: "close", tone: "neutral", live: "status", active: false, terminal: true, needs_devices: false, review_secure: false, retry: true },
-};
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
@@ -127,7 +117,7 @@ function pairingCeremony(scenario: PreviewScenario): PairingCeremony {
         ceremony_id: scenario.pairing === "idle" ? null : "preview-ceremony",
         role: scenario.pairing === "idle" ? null : "initiator",
         state: PAIRING_STATES[scenario.pairing],
-        semantics: PAIRING_SEMANTICS[scenario.pairing],
+        semantics: PAIRING_SEMANTICS_BY_STATE[PAIRING_STATES[scenario.pairing]],
         presentation: "presented",
         known_device:
             device === undefined
