@@ -24,6 +24,7 @@ import {
   settingsPanel,
   settingsSectionGeometry,
   settingsSectionLabels,
+  settingsSliderIndex,
 } from "../src/harness/settings.js";
 import {
   filterHistoryTo,
@@ -60,26 +61,17 @@ async function historyDisplayIndex(): Promise<number> {
   const state = await app.withPage((page) =>
     page.evaluate(() => {
       const slider = document.querySelector('[aria-label="History display limit"]');
+      const row = slider?.closest("[data-settings-search-target]");
       return {
-        value: slider?.getAttribute("aria-valuenow") ?? "",
-        min: slider?.getAttribute("aria-valuemin") ?? "",
-        max: slider?.getAttribute("aria-valuemax") ?? "",
+        exists: slider !== null,
+        index: slider?.getAttribute("aria-valuenow") ?? null,
+        min: slider?.getAttribute("aria-valuemin") ?? null,
+        max: slider?.getAttribute("aria-valuemax") ?? null,
+        output: row?.querySelector("output")?.textContent?.trim() ?? null,
       };
     }),
   );
-  const index = Number(state.value);
-  const min = Number(state.min);
-  const max = Number(state.max);
-  if (
-    !Number.isInteger(index) ||
-    !Number.isInteger(min) ||
-    !Number.isInteger(max) ||
-    index < min ||
-    index > max
-  ) {
-    throw new Error(`History display limit exposed invalid state ${JSON.stringify(state)}`);
-  }
-  return index;
+  return settingsSliderIndex(state);
 }
 
 async function setHistoryDisplayLimit(
@@ -93,21 +85,26 @@ async function setHistoryDisplayLimit(
     await page.keyboard.press("Home");
     for (let step = 0; step < index; step++) await page.keyboard.press("ArrowRight");
   });
+  let observed: { index: string | null; output: string | null } | null = null;
   await waitFor(
     async () => {
-      const state = await app.withPage((page) =>
+      observed = await app.withPage((page) =>
         page.evaluate(() => {
           const slider = document.querySelector('[aria-label="History display limit"]');
+          const row = slider?.closest("[data-settings-search-target]");
           return {
-            index: slider?.getAttribute("aria-valuenow") ?? "",
-            output: slider?.parentElement?.querySelector("output")?.textContent?.trim() ?? "",
+            index: slider?.getAttribute("aria-valuenow") ?? null,
+            output: row?.querySelector("output")?.textContent?.trim() ?? null,
           };
         }),
       );
-      return state.index === String(index) &&
-        (rendered === undefined || state.output === rendered);
+      return observed.index === String(index) &&
+        (rendered === undefined || observed.output === rendered);
     },
-    `the history display limit never reached index ${index}`,
+    () =>
+      `the history display limit never reached index ${index}` +
+      `${rendered === undefined ? "" : ` with output ${JSON.stringify(rendered)}`}: ` +
+      JSON.stringify(observed),
   );
 }
 
