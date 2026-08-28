@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-import { Badge, Button, Icon } from "@/components/ui";
+import { Badge, Button, Icon, type IconName } from "@/components/ui";
 import { FieldFeedback, SkeletonText } from "@/components/shared";
 import { Section } from "@/features/settings/components/Section";
 import { cloudConnectionPresentation } from "@/features/devices";
@@ -9,7 +9,33 @@ import { CloudAccountForm } from "@/features/settings/patterns/cloud/CloudAccoun
 import { CloudConnectedControls } from "@/features/settings/patterns/cloud/CloudConnectedControls";
 import { CloudEndpointForm } from "@/features/settings/patterns/cloud/CloudEndpointForm";
 import { useTranslation } from "@/i18n";
+import type { CloudStatusData } from "@/lib/ipc";
 import styles from "./CloudSyncSettings.module.css";
+
+export interface CloudSettingsPresentation {
+  readonly icon: IconName;
+  readonly iconOwner: "device" | "settings";
+}
+
+export function cloudSettingsPresentation(
+  status: CloudStatusData | undefined,
+  queryFailed: boolean,
+  loading: boolean,
+): CloudSettingsPresentation {
+  const device = () => ({
+    icon: cloudConnectionPresentation(status, queryFailed, loading).icon,
+    iconOwner: "device" as const,
+  });
+  const connected = Boolean(status?.signed_in && status.key_ready);
+  const attention = Boolean(status?.last_error || status?.unreadable_uploads);
+
+  if (loading) return device();
+  if (queryFailed) return { icon: "alert", iconOwner: "settings" };
+  if (connected && !attention) return device();
+  if (connected) return { icon: "shieldCheck", iconOwner: "settings" };
+  if (status?.configured) return device();
+  return { icon: "cloud", iconOwner: "settings" };
+}
 
 export function CloudSyncSettings() {
   const { t } = useTranslation();
@@ -20,7 +46,7 @@ export function CloudSyncSettings() {
   const { cloud, status } = controller;
   const configured = Boolean(status?.configured);
   const connected = Boolean(status?.signed_in && status.key_ready);
-  const deviceCloud = cloudConnectionPresentation(
+  const cloudPresentation = cloudSettingsPresentation(
     status,
     cloud.isError,
     cloud.isLoading,
@@ -71,13 +97,7 @@ export function CloudSyncSettings() {
       {badge}
     </Badge>
   );
-  const statusIcon =
-    deviceCloud.state === "checking" ||
-    deviceCloud.state === "unavailable" ||
-    deviceCloud.state === "signed-out" ||
-    deviceCloud.state === "healthy"
-      ? deviceCloud.icon
-      : "cloud";
+  const statusIcon = cloudPresentation.icon;
 
   return (
     <Section

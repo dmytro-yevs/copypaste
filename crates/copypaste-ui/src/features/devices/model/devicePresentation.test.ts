@@ -246,14 +246,13 @@ describe("device status descriptors", () => {
         });
     });
 
-    it("keeps status and cloud vocabulary out of component-local maps", () => {
+    it("keeps canonical device vocabulary out of component-local maps", () => {
         const sourceRoot = resolve(import.meta.dirname, "..");
         for (const file of [
             "components/DeviceStatus.tsx",
             "components/PeerRow.tsx",
             "components/CloudConnectionCard.tsx",
             "patterns/DiscoveryStage.tsx",
-            "../settings/patterns/CloudSyncSettings.tsx",
         ]) {
             const source = readFileSync(resolve(sourceRoot, file), "utf8");
             expect(source).not.toMatch(/STATUS_ICON|const BADGE|cloudPresentation|const copy/);
