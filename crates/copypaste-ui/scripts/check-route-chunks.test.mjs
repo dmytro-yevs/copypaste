@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { ROUTE_CHUNK_PREFIXES, routeChunkErrors } from "./check-route-chunks.mjs";
+import {
+  ROUTE_CHUNK_PREFIXES,
+  RouteChunkTopologyError,
+  routeChunkErrors,
+  runRouteChunkGate,
+} from "./check-route-chunks.mjs";
 
 function fixture({ android, staticRoutes = false }) {
   const manifest = {};
@@ -43,6 +51,16 @@ function fixture({ android, staticRoutes = false }) {
   };
 }
 
+function writeDist(input, manifest = JSON.stringify(input.manifest)) {
+  const root = mkdtempSync(join(tmpdir(), "copypaste-route-gate-"));
+  const assetRoot = join(root, "assets");
+  mkdirSync(assetRoot);
+  for (const asset of input.assets) writeFileSync(join(assetRoot, asset), "");
+  writeFileSync(join(root, "index.html"), input.indexHtml);
+  writeFileSync(join(root, "route-manifest.json"), manifest);
+  return root;
+}
+
 test("accepts dynamic routes with one statically loaded Android stylesheet", () => {
   assert.deepEqual(routeChunkErrors(fixture({ android: true })), []);
 });
@@ -62,4 +80,56 @@ test("rejects an App graph that statically imports every route", () => {
   const errors = routeChunkErrors(fixture({ android: true, staticRoutes: true }));
   assert.ok(errors.some((error) => error.includes("is not a dynamic import")));
   assert.ok(errors.some((error) => error.includes("is also statically imported")));
+});
+
+test("removes the temporary manifest after a reported topology error", () => {
+  const input = fixture({ android: true, staticRoutes: true });
+  const root = writeDist(input);
+  try {
+    assert.throws(
+      () => runRouteChunkGate({ android: true, root }),
+      (error) => error instanceof RouteChunkTopologyError,
+    );
+    assert.equal(existsSync(join(root, "route-manifest.json")), false);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("removes the temporary manifest after a JSON parse error", () => {
+  const input = fixture({ android: true });
+  const root = writeDist(input, "{");
+  try {
+    assert.throws(() => runRouteChunkGate({ android: true, root }), SyntaxError);
+    assert.equal(existsSync(join(root, "route-manifest.json")), false);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("reports a cleanup failure only when there is no earlier gate error", () => {
+  const input = fixture({ android: true });
+  const root = writeDist(input);
+  const cleanupError = new Error("manifest cleanup failed");
+  try {
+    assert.throws(
+      () => runRouteChunkGate({ android: true, root, removeManifest: () => { throw cleanupError; } }),
+      cleanupError,
+    );
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("does not mask a topology error when cleanup also fails", () => {
+  const input = fixture({ android: true, staticRoutes: true });
+  const root = writeDist(input);
+  try {
+    assert.throws(
+      () => runRouteChunkGate({ android: true, root, removeManifest: () => { throw new Error("cleanup failed"); } }),
+      (error) => error instanceof RouteChunkTopologyError,
+    );
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
 });

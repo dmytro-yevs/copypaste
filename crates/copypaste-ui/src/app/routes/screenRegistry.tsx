@@ -38,7 +38,7 @@ function createLazyScreen<Props extends object>(loader: () => Promise<{ default:
   };
 }
 
-export function createScreenRegistry(loaders: ScreenLoaders): Record<View, ScreenDefinition> {
+function createScreenRegistry(loaders: ScreenLoaders): Record<View, ScreenDefinition> {
   const history = createLazyScreen(loaders.history);
   const devices = createLazyScreen(loaders.devices);
   const settings = createLazyScreen(loaders.settings);

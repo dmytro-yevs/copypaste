@@ -55,23 +55,55 @@ export function routeChunkErrors({ android, assets, indexHtml, manifest }) {
   return errors;
 }
 
-function main() {
-  const root = fileURLToPath(new URL("../dist", import.meta.url));
+export class RouteChunkTopologyError extends Error {
+  constructor(errors) {
+    super(errors.join("\n"));
+    this.errors = errors;
+  }
+}
+
+export function runRouteChunkGate({
+  android,
+  root,
+  removeManifest = (path) => rmSync(path, { force: true }),
+}) {
   const assetRoot = join(root, "assets");
   const manifestPath = join(root, "route-manifest.json");
-  const errors = routeChunkErrors({
-    android: process.env.VITE_ANDROID_BUILD === "1",
-    assets: readdirSync(assetRoot),
-    indexHtml: readFileSync(join(root, "index.html"), "utf8"),
-    manifest: JSON.parse(readFileSync(manifestPath, "utf8")),
-  });
-  if (errors.length > 0) {
-    for (const error of errors) console.error(`FAIL ${error}`);
+  let failure;
+  try {
+    const errors = routeChunkErrors({
+      android,
+      assets: readdirSync(assetRoot),
+      indexHtml: readFileSync(join(root, "index.html"), "utf8"),
+      manifest: JSON.parse(readFileSync(manifestPath, "utf8")),
+    });
+    if (errors.length > 0) failure = new RouteChunkTopologyError(errors);
+  } catch (error) {
+    failure = error;
+  } finally {
+    try {
+      removeManifest(manifestPath);
+    } catch (cleanupError) {
+      if (failure === undefined) failure = cleanupError;
+    }
+  }
+  if (failure !== undefined) throw failure;
+}
+
+function main() {
+  const android = process.env.VITE_ANDROID_BUILD === "1";
+  try {
+    runRouteChunkGate({
+      android,
+      root: fileURLToPath(new URL("../dist", import.meta.url)),
+    });
+  } catch (error) {
+    const errors = error instanceof RouteChunkTopologyError ? error.errors : [String(error)];
+    for (const message of errors) console.error(`FAIL ${message}`);
     process.exitCode = 1;
     return;
   }
-  rmSync(manifestPath);
-  console.log(`ok   ${process.env.VITE_ANDROID_BUILD === "1" ? "Android" : "standard"} route chunks`);
+  console.log(`ok   ${android ? "Android" : "standard"} route chunks`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) main();
