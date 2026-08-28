@@ -1,41 +1,15 @@
 import { useId } from "react";
 
-import { Badge, Button, Icon, type IconName } from "@/components/ui";
+import { Badge, Button, Icon } from "@/components/ui";
 import { FieldFeedback, SkeletonText } from "@/components/shared";
 import { Section } from "@/features/settings/components/Section";
-import { cloudConnectionPresentation } from "@/features/devices";
 import { useCloudAccountController } from "@/features/settings/hooks/useCloudAccountController";
+import { cloudSettingsPresentation } from "@/features/settings/model/cloudPresentation";
 import { CloudAccountForm } from "@/features/settings/patterns/cloud/CloudAccountForm";
 import { CloudConnectedControls } from "@/features/settings/patterns/cloud/CloudConnectedControls";
 import { CloudEndpointForm } from "@/features/settings/patterns/cloud/CloudEndpointForm";
 import { useTranslation } from "@/i18n";
-import type { CloudStatusData } from "@/lib/ipc";
 import styles from "./CloudSyncSettings.module.css";
-
-export interface CloudSettingsPresentation {
-  readonly icon: IconName;
-  readonly iconOwner: "device" | "settings";
-}
-
-export function cloudSettingsPresentation(
-  status: CloudStatusData | undefined,
-  queryFailed: boolean,
-  loading: boolean,
-): CloudSettingsPresentation {
-  const device = () => ({
-    icon: cloudConnectionPresentation(status, queryFailed, loading).icon,
-    iconOwner: "device" as const,
-  });
-  const connected = Boolean(status?.signed_in && status.key_ready);
-  const attention = Boolean(status?.last_error || status?.unreadable_uploads);
-
-  if (loading) return device();
-  if (queryFailed) return { icon: "alert", iconOwner: "settings" };
-  if (connected && !attention) return device();
-  if (connected) return { icon: "shieldCheck", iconOwner: "settings" };
-  if (status?.configured) return device();
-  return { icon: "cloud", iconOwner: "settings" };
-}
 
 export function CloudSyncSettings() {
   const { t } = useTranslation();
