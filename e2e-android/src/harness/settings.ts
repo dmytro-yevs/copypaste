@@ -29,12 +29,48 @@ export function settingsNavigationReady(
     (!afterBack || (snapshot.scrollTop !== null && snapshot.scrollTop <= 1));
 }
 
+export type SettingsNavigationAction = "ready" | "restore" | "back" | "wait";
+
+export function settingsNavigationAction(
+  snapshot: SettingsViewSnapshot,
+  backRequested: boolean,
+): SettingsNavigationAction {
+  if (settingsNavigationReady(snapshot, backRequested)) return "ready";
+  if (settingsViewLevel(snapshot) !== "detail" || backRequested) return "wait";
+  if (snapshot.scrollTop !== null && snapshot.scrollTop > 1) return "restore";
+  return "back";
+}
+
 export function settingsPanelReady(
   snapshot: SettingsViewSnapshot,
   label: string,
 ): boolean {
   return snapshot.visiblePanels.includes(label) &&
     !snapshot.busyPanels.includes(label);
+}
+
+export interface SettingsSliderSnapshot {
+  exists: boolean;
+  index: string | null;
+  min: string | null;
+  max: string | null;
+  output: string | null;
+}
+
+export function settingsSliderIndex(snapshot: SettingsSliderSnapshot): number {
+  if (!snapshot.exists || snapshot.index === null || snapshot.index === "" ||
+      snapshot.min === null || snapshot.min === "" ||
+      snapshot.max === null || snapshot.max === "") {
+    throw new Error(`History display limit exposed invalid state ${JSON.stringify(snapshot)}`);
+  }
+  const index = Number(snapshot.index);
+  const min = Number(snapshot.min);
+  const max = Number(snapshot.max);
+  if (!Number.isInteger(index) || !Number.isInteger(min) ||
+      !Number.isInteger(max) || index < min || index > max) {
+    throw new Error(`History display limit exposed invalid state ${JSON.stringify(snapshot)}`);
+  }
+  return index;
 }
 
 export interface SettingsTriggerSnapshot {
@@ -108,14 +144,31 @@ async function settingsView(app: AndroidApp): Promise<SettingsViewSnapshot> {
   );
 }
 
+async function restoreSettingsViewport(app: AndroidApp): Promise<void> {
+  await app.withPage((page) =>
+    page.evaluate((backSelector) => {
+      const back = document.querySelector(backSelector);
+      let viewport = back?.parentElement ?? null;
+      while (viewport && !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY)) {
+        viewport = viewport.parentElement;
+      }
+      if (!viewport) return;
+      viewport.scrollTop = 0;
+      viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    }, SETTINGS_BACK),
+  );
+}
+
 export async function ensureSettingsNavigation(app: AndroidApp): Promise<void> {
   let backRequested = false;
   await waitFor(
     async () => {
       const snapshot = await settingsView(app);
-      const level = settingsViewLevel(snapshot);
-      if (settingsNavigationReady(snapshot, backRequested)) return true;
-      if (level === "detail" && !backRequested) {
+      const action = settingsNavigationAction(snapshot, backRequested);
+      if (action === "ready") return true;
+      if (action === "restore") {
+        await restoreSettingsViewport(app);
+      } else if (action === "back") {
         backRequested = true;
         await tapButton(app, "Back to Preferences");
       }
