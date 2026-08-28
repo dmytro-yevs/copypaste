@@ -312,6 +312,17 @@ mod native_pairing_source_contracts {
         assert!(macos.contains("Pairing code"));
         assert!(macos.contains("Pairing address"));
         assert!(macos.contains("setSelectable(false)"));
+        for required in [
+            "setAccessibilityProtectedContent(true)",
+            "NSWindowSharingType::NSWindowSharingNone",
+            "Security code: {spoken}",
+            "for (index, digit) in sas.chars().enumerate()",
+            "NativeAbort",
+            "let abort = self.abort.clone()",
+            "(self.abort)()",
+        ] {
+            assert!(macos.contains(required), "missing macOS guard: {required}");
+        }
 
         let windows = production(include_str!("pairing_presentation/windows/entry.rs"));
         assert_eq!(windows.matches("co::ES::PASSWORD").count(), 2);
@@ -338,6 +349,18 @@ mod native_pairing_source_contracts {
         assert!(macos.contains("ModalDeadline::arm"));
         assert!(macos.contains("abortModal"));
         assert!(macos.contains("PairingDecision::Refresh"));
+        let progress = macos
+            .split("fn present_progress")
+            .nth(1)
+            .and_then(|body| body.split("fn confirm").next())
+            .expect("macOS progress implementation");
+        assert!(progress.contains("AwaitingConfirmation"));
+        assert!(progress.contains("(self.abort)()"));
+        assert!(
+            progress.find("AwaitingConfirmation").unwrap()
+                < progress.find("(self.abort)()").unwrap(),
+            "awaiting confirmation must return before Close aborts the ceremony"
+        );
 
         let windows_invite = production(include_str!("pairing_presentation/windows/invite.rs"));
         assert!(windows_invite.contains("SetWindowText(\"\")"));

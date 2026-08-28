@@ -17,6 +17,7 @@ pub enum PairingMessageId {
     IncompatibleVersion,
     Unreachable,
     Busy,
+    Limit,
     Failed,
 }
 
@@ -106,7 +107,8 @@ fn failed_message(error: Option<ErrorCode>) -> PairingMessageId {
         Some(ErrorCode::PairingAddress | ErrorCode::PeerUnreachable) => {
             PairingMessageId::Unreachable
         }
-        Some(ErrorCode::RateLimited | ErrorCode::PairingLimit) => PairingMessageId::Busy,
+        Some(ErrorCode::RateLimited) => PairingMessageId::Busy,
+        Some(ErrorCode::PairingLimit) => PairingMessageId::Limit,
         Some(
             ErrorCode::NotFound
             | ErrorCode::InvalidRequest
@@ -257,6 +259,17 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             false,
             true,
         ),
+        PairingMessageId::Limit => semantic(
+            message_id,
+            PairingIcon::Alert,
+            PairingTone::Warning,
+            PairingLive::Alert,
+            false,
+            true,
+            false,
+            false,
+            false,
+        ),
         PairingMessageId::Failed => semantic(
             message_id,
             PairingIcon::Alert,
@@ -345,6 +358,10 @@ pub(super) fn native_copy(message_id: PairingMessageId) -> NativeCopy {
         PairingMessageId::Busy => NativeCopy {
             title: "Pairing is busy",
             detail: "Another pairing is already in progress.",
+        },
+        PairingMessageId::Limit => NativeCopy {
+            title: "Pairing limit reached",
+            detail: "Remove or revoke a paired device before trying again.",
         },
         PairingMessageId::Failed => NativeCopy {
             title: "Pairing failed",
@@ -442,6 +459,7 @@ mod tests {
             PairingMessageId::IncompatibleVersion,
             PairingMessageId::Unreachable,
             PairingMessageId::Busy,
+            PairingMessageId::Limit,
             PairingMessageId::Failed,
         ] {
             let copy = native_copy(message_id);
@@ -453,5 +471,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn busy_and_limit_have_distinct_remedies() {
+        let busy = resolve_pairing_semantics(PairingState::Failed, Some(ErrorCode::RateLimited));
+        let limit = resolve_pairing_semantics(PairingState::Failed, Some(ErrorCode::PairingLimit));
+        assert_eq!(busy.message_id, PairingMessageId::Busy);
+        assert!(busy.retry);
+        assert_eq!(limit.message_id, PairingMessageId::Limit);
+        assert!(!limit.retry);
+        assert_ne!(
+            native_copy(busy.message_id).detail,
+            native_copy(limit.message_id).detail
+        );
     }
 }
