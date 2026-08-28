@@ -263,4 +263,39 @@ mod tests {
             assert!(!json.contains(forbidden), "pairing material leaked: {json}");
         }
     }
+
+    #[test]
+    fn failed_ceremony_serialization_uses_the_typed_retry_policy() {
+        for code in [
+            ErrorCode::ContentTooLarge,
+            ErrorCode::RateLimited,
+            ErrorCode::AuthFailed,
+            ErrorCode::PairingCode,
+            ErrorCode::PeerVersion,
+            ErrorCode::PeerUnreachable,
+            ErrorCode::PeerFailed,
+            ErrorCode::Internal,
+            ErrorCode::NotReady,
+            ErrorCode::KeyLocked,
+        ] {
+            let ceremony = PairingCeremony::from_progress(
+                PairingProgressData {
+                    pairing_id: None,
+                    role: None,
+                    state: PairingState::Failed,
+                    expires_in_ms: None,
+                    sas: None,
+                    peer_device_id: None,
+                    peer_name: None,
+                    peer_addr: None,
+                    known_device: None,
+                    error_code: Some(code),
+                },
+                PairingPresentationState::Presented,
+            );
+            let value = serde_json::to_value(ceremony).unwrap();
+            assert_eq!(value["semantics"]["retry"], code.retryable());
+            assert_eq!(value["error"]["retryable"], code.retryable());
+        }
+    }
 }
