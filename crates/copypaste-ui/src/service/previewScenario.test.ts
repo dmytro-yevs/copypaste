@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PAIRING_SEMANTICS_BY_STATE, type PairingCeremony } from "@/lib/ipc";
+import { DEVICE_PRESENCE_OPTIONS } from "@/devtools/PreviewScenarioControls";
+import { previewObservedPresence } from "@/service/previewDeviceDto";
 import { createPreviewInterceptor } from "@/service/previewIpc";
 import {
   createPreviewScenarioStore,
@@ -24,7 +26,7 @@ const PHONE: PreviewDevice = {
   publicIp: null,
   location: null,
   lastSeenAgeMs: 2_000,
-  online: true,
+  presence: "online",
   paired: false,
 };
 
@@ -44,7 +46,7 @@ const WINDOWS_PC: PreviewDevice = {
   publicIp: "203.0.113.31",
   location: "Kyiv, Ukraine",
   lastSeenAgeMs: 4_000,
-  online: true,
+  presence: "online",
   paired: false,
 };
 
@@ -57,6 +59,30 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+const STORAGE_KEY = "copypaste.dev.preview-scenario";
+
+function persistedScenario(devices: readonly unknown[]) {
+  return {
+    mode: "scenario",
+    daemon: "live",
+    network: "live",
+    resources: {
+      history: "live",
+      discovery: "success",
+      logs: "live",
+      cloud: "live",
+    },
+    pairing: "idle",
+    pairingDeviceId: null,
+    devices,
+  };
+}
+
+function legacyDevice(device: PreviewDevice, online: boolean) {
+  const { presence: _presence, ...legacy } = device;
+  return { ...legacy, online };
+}
 
 describe("preview scenario service", () => {
   it("persists device edits for the session and clears them on Reset to Live", () => {
@@ -77,6 +103,9 @@ describe("preview scenario service", () => {
     store.getState().startPairing(PHONE.id);
 
     const restored = createPreviewScenarioStore(window.sessionStorage);
+    expect(
+      JSON.parse(window.sessionStorage.getItem(STORAGE_KEY) ?? "{}"),
+    ).toMatchObject({ version: 2 });
     expect(restored.getState().scenario).toMatchObject({
       pairing: "invite",
       pairingDeviceId: PHONE.id,
@@ -103,6 +132,61 @@ describe("preview scenario service", () => {
     restored.getState().resetToLive();
     expect(createPreviewScenarioStore(window.sessionStorage).getState().scenario.mode)
       .toBe("live");
+  });
+
+  it("migrates only unambiguous current legacy presence and rejects invalid storage", () => {
+    window.sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        scenario: persistedScenario([
+          legacyDevice(PHONE, true),
+          legacyDevice({ ...PHONE, id: "legacy-offline" }, false),
+          legacyDevice(
+            { ...PHONE, id: "legacy-stale", lastSeenAgeMs: 15_001 },
+            true,
+          ),
+        ]),
+      }),
+    );
+
+    expect(
+      createPreviewScenarioStore(window.sessionStorage).getState().scenario
+        .devices,
+    ).toEqual([
+      PHONE,
+      { ...PHONE, id: "legacy-offline", presence: "unknown" },
+      {
+        ...PHONE,
+        id: "legacy-stale",
+        lastSeenAgeMs: 15_001,
+        presence: "unknown",
+      },
+    ]);
+
+    window.sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 3,
+        scenario: persistedScenario([PHONE]),
+      }),
+    );
+    expect(
+      createPreviewScenarioStore(window.sessionStorage).getState().scenario
+        .mode,
+    ).toBe("live");
+
+    window.sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        scenario: persistedScenario([legacyDevice(PHONE, true)]),
+      }),
+    );
+    expect(
+      createPreviewScenarioStore(window.sessionStorage).getState().scenario
+        .mode,
+    ).toBe("live");
   });
 
   it("shows an added device immediately through discovery IPC", async () => {
@@ -231,17 +315,98 @@ describe("preview scenario service", () => {
     });
   });
 
-  it("fails closed to unknown when a preview discovery observation is stale", async () => {
+  it.each(["online", "offline"] as const)(
+    "fails closed to unknown when a %s preview discovery observation is stale",
+    async (presence) => {
+      vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+      const store = createPreviewScenarioStore(null);
+      const intercept = createPreviewInterceptor(store);
+
+      store.getState().addDevice({ ...PHONE, presence, lastSeenAgeMs: 15_001 });
+
+      await expect(intercept("discovered")).resolves.toMatchObject({
+        handled: true,
+        value: [{ details: { presence: { state: "unknown" } } }],
+      });
+    },
+  );
+
+  it.each(["online", "offline", "unknown"] as const)(
+    "preserves a current generated %s presence",
+    async (presence) => {
+      vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+      const store = createPreviewScenarioStore(null);
+      const intercept = createPreviewInterceptor(store);
+
+      store.getState().addDevice({ ...PHONE, presence });
+
+      await expect(intercept("discovered")).resolves.toMatchObject({
+        handled: true,
+        value: [{ details: { presence: { state: presence } } }],
+      });
+    },
+  );
+
+  it("fails closed for future, missing, and unbounded observations", () => {
+    const now = 2_000_000;
+    expect(previewObservedPresence("online", now + 1, now + 15_000, now)).toBe(
+      "unknown",
+    );
+    expect(
+      previewObservedPresence("offline", undefined, now + 15_000, now),
+    ).toBe("unknown");
+    expect(previewObservedPresence("online", now, null, now)).toBe("unknown");
+  });
+
+  it("derives compatibility online only from the emitted presence details", async () => {
     vi.spyOn(Date, "now").mockReturnValue(2_000_000);
     const store = createPreviewScenarioStore(null);
     const intercept = createPreviewInterceptor(store);
-
-    store.getState().addDevice({ ...PHONE, lastSeenAgeMs: 15_001 });
-
-    await expect(intercept("discovered")).resolves.toMatchObject({
-      handled: true,
-      value: [{ details: { presence: { state: "unknown" } } }],
+    for (const presence of ["online", "offline", "unknown"] as const) {
+      store.getState().addDevice({
+        ...PHONE,
+        id: `paired-${presence}`,
+        presence,
+        paired: true,
+      });
+    }
+    store.getState().addDevice({
+      ...PHONE,
+      id: "paired-stale-offline",
+      presence: "offline",
+      paired: true,
+      lastSeenAgeMs: 15_001,
     });
+
+    await expect(intercept("peers")).resolves.toMatchObject({
+      handled: true,
+      value: [
+        {
+          pairing_id: "paired-online",
+          online: true,
+          details: { presence: { state: "online" } },
+        },
+        {
+          pairing_id: "paired-offline",
+          online: false,
+          details: { presence: { state: "offline" } },
+        },
+        {
+          pairing_id: "paired-unknown",
+          online: false,
+          details: { presence: { state: "unknown" } },
+        },
+        {
+          pairing_id: "paired-stale-offline",
+          online: false,
+          details: { presence: { state: "unknown" } },
+        },
+      ],
+    });
+  });
+
+  it("offers all generated presence states to preview add and edit controls", () => {
+    expect(DEVICE_PRESENCE_OPTIONS).toEqual(["online", "offline", "unknown"]);
   });
 
   it("marks unpaired claims unverified and absent external data unavailable", async () => {

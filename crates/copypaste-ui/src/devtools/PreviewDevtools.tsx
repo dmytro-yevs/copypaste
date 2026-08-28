@@ -5,11 +5,13 @@ import { useStore } from "zustand";
 import { Button, Icon } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
+    DEVICE_PRESENCE_OPTIONS,
     DEVICE_TYPE_OPTIONS,
     DeviceControls,
     PLATFORM_OPTIONS,
     SelectControl,
 } from "@/devtools/PreviewScenarioControls";
+import type { DevicePresence } from "@/lib/ipc";
 import {
     type PreviewDeviceType,
     type PreviewPairingPhase,
@@ -49,6 +51,7 @@ export default function PreviewDevtools() {
     const [platform, setPlatform] = useState<PreviewPlatform>("unknown");
     const [lanIp, setLanIp] = useState("192.168.1.24");
     const [port, setPort] = useState(49_200);
+    const [presence, setPresence] = useState<DevicePresence>("online");
 
     useEffect(
         () =>
@@ -113,7 +116,7 @@ export default function PreviewDevtools() {
             location: null,
             latencyMs: 32,
             lastSeenAgeMs: 0,
-            online: true,
+            presence,
             paired: false,
         });
         setId("");
@@ -284,6 +287,14 @@ export default function PreviewDevtools() {
                                     options={PLATFORM_OPTIONS}
                                     onChange={(value) =>
                                         setPlatform(value as PreviewPlatform)
+                                    }
+                                />
+                                <SelectControl
+                                    label="Presence"
+                                    value={presence}
+                                    options={DEVICE_PRESENCE_OPTIONS}
+                                    onChange={(value) =>
+                                        setPresence(value as DevicePresence)
                                     }
                                 />
                                 <label className={styles.field}>

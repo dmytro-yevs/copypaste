@@ -5,6 +5,7 @@ import {
     type PreviewPlatform,
     previewScenarioStore,
 } from "@/service/previewScenario";
+import type { DevicePresence } from "@/lib/ipc";
 import styles from "./PreviewDevtools.module.css";
 
 export const PLATFORM_OPTIONS: readonly PreviewPlatform[] = [
@@ -19,6 +20,12 @@ export const DEVICE_TYPE_OPTIONS: readonly PreviewDeviceType[] = [
     "laptop",
     "phone",
     "tablet",
+    "unknown",
+];
+
+export const DEVICE_PRESENCE_OPTIONS: readonly DevicePresence[] = [
+    "online",
+    "offline",
     "unknown",
 ];
 
@@ -226,16 +233,14 @@ export function DeviceControls({ device }: { device: PreviewDevice }) {
                 />
             </label>
             <span className={styles.deviceActions}>
-                <label className={styles.check}>
-                    <input
-                        type="checkbox"
-                        checked={device.online}
-                        onChange={(event) =>
-                            update({ online: event.target.checked })
-                        }
-                    />
-                    <span>Online</span>
-                </label>
+                <SelectControl
+                    label="Presence"
+                    value={device.presence}
+                    options={DEVICE_PRESENCE_OPTIONS}
+                    onChange={(value) =>
+                        update({ presence: value as DevicePresence })
+                    }
+                />
                 <label className={styles.check}>
                     <input
                         type="checkbox"

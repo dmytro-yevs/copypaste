@@ -1,13 +1,34 @@
 import type {
     DeviceDetails,
     DeviceObservationTrust,
+    DevicePresence,
     DiscoveredDevice,
     ExternalNetworkObservation,
 } from "@/lib/ipc";
 import type { PreviewDevice } from "@/service/previewScenario";
+import { PREVIEW_PRESENCE_FRESHNESS_MS } from "@/service/previewScenario";
 
 export function previewDeviceAddress(device: PreviewDevice): string {
     return `${device.lanIp}:${device.port}`;
+}
+
+export function previewObservedPresence(
+    state: DevicePresence,
+    observedAt: number | null | undefined,
+    freshUntil: number | null | undefined,
+    now: number = Date.now(),
+): DevicePresence {
+    if (
+        observedAt === null ||
+        observedAt === undefined ||
+        observedAt > now ||
+        freshUntil === null ||
+        freshUntil === undefined ||
+        now > freshUntil
+    ) {
+        return "unknown";
+    }
+    return state;
 }
 
 function externalObservation(
@@ -32,8 +53,13 @@ function externalObservation(
 export function previewDeviceDetails(device: PreviewDevice): DeviceDetails {
     const now = Date.now();
     const observedAt = now - device.lastSeenAgeMs;
-    const freshUntil = observedAt + 15_000;
-    const presence = device.online && now <= freshUntil ? "online" : "unknown";
+    const freshUntil = observedAt + PREVIEW_PRESENCE_FRESHNESS_MS;
+    const presence = previewObservedPresence(
+        device.presence,
+        observedAt,
+        freshUntil,
+        now,
+    );
     const trust: DeviceObservationTrust = device.paired
         ? "authenticated"
         : "unverified";

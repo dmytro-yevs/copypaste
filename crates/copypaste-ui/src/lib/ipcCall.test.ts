@@ -332,7 +332,7 @@ describe("IPC call lifecycle", () => {
       publicIp: null,
       location: null,
       lastSeenAgeMs: 1_000,
-      online: true,
+      presence: "online",
       paired: false,
     });
 
