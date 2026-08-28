@@ -46,7 +46,7 @@ describe("DiscoveredDeviceDetails", () => {
                     label: "Not paired",
                     tone: "neutral",
                     busy: false,
-                    live: "off",
+                    a11y: {},
                 }}
             />,
         );
