@@ -12,12 +12,13 @@
  * detail at a time (DMY-154 / A11Y-15); wider windows use a tablist and panel.
  * The harness follows either shape while holding the same section contract.
  */
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { accessibleSurface, expectNoFilesystemPath } from "../src/harness/leaks.js";
 import { addItems, cleanUpItems, storedItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   ensureSettingsNavigation,
   openSettingsSection,
@@ -156,7 +157,7 @@ async function restoreAfterTest(
   }
 }
 
-beforeAll(async () => {
+beforeAllWithEvidence("settings", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
   marker = fixtureMarker("settings");
