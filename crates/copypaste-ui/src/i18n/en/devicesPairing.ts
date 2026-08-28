@@ -39,45 +39,6 @@ export const pairing = {
   joinCode: "Pairing code",
   joinAddress: "Pairing address",
   joinAction: "Start pairing",
-  state: {
-    idle: {
-      title: "Ready to pair",
-      body: "Show a code for another device, or scan the code shown there.",
-    },
-    waiting: {
-      title: "Waiting for the other device",
-      body: "The pairing code is shown only in the protected native view.",
-    },
-    handshaking: {
-      title: "Connecting securely",
-      body: "Keep both devices nearby while they work out a shared security code.",
-    },
-    confirm: {
-      title: "Compare the security codes",
-      body: "Open the protected view on both devices. Confirm only when the codes match exactly.",
-    },
-    confirmed: {
-      title: "Device paired",
-      body: "The device is now in your paired-device list.",
-      device: "{{name}} is now paired and ready to sync.",
-    },
-    rejected: {
-      title: "Pairing rejected",
-      body: "The codes didn't match, so neither device was saved.",
-    },
-    cancelled: {
-      title: "Pairing cancelled",
-      body: "Neither device was saved. You can start again when you're ready.",
-    },
-    timedOut: {
-      title: "Pairing timed out",
-      body: "Keep both devices on the same network, show a fresh code, and try again.",
-    },
-    failed: {
-      title: "Pairing couldn't finish",
-      body: "No device was saved. Check both devices and try again.",
-    },
-  },
   semantic: {
     ready: {
       title: "Pair another device",

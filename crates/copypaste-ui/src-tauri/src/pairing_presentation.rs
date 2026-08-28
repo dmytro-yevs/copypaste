@@ -6,6 +6,7 @@ use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 use tauri::{AppHandle, Manager as _};
 use zeroize::Zeroizing;
 
+mod native_copy;
 pub(crate) mod semantics;
 pub use semantics::{resolve_pairing_semantics, PairingSemantics};
 

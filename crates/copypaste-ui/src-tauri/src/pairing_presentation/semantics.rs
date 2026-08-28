@@ -70,12 +70,6 @@ pub struct PairingSemantics {
     pub retry: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct NativeCopy {
-    pub title: &'static str,
-    pub detail: &'static str,
-}
-
 pub fn resolve_pairing_semantics(
     state: PairingState,
     error: Option<ErrorCode>,
@@ -309,68 +303,6 @@ const fn semantic(
     }
 }
 
-pub(super) fn native_copy(message_id: PairingMessageId) -> NativeCopy {
-    match message_id {
-        PairingMessageId::Ready => NativeCopy {
-            title: "Pair a device",
-            detail: "No device pairing is in progress.",
-        },
-        PairingMessageId::WaitingForPeer => NativeCopy {
-            title: "Waiting for a device",
-            detail: "Waiting for the other device to join.",
-        },
-        PairingMessageId::SecuringConnection => NativeCopy {
-            title: "Securing the connection",
-            detail: "Keep both devices nearby while CopyPaste establishes a secure connection.",
-        },
-        PairingMessageId::CompareCodes => NativeCopy {
-            title: "Compare security codes",
-            detail: "Confirm the code in the native security prompt.",
-        },
-        PairingMessageId::Paired => NativeCopy {
-            title: "Paired",
-            detail: "The device was paired successfully.",
-        },
-        PairingMessageId::Rejected => NativeCopy {
-            title: "Pairing rejected",
-            detail: "The security codes did not match, so no pairing was saved.",
-        },
-        PairingMessageId::Cancelled => NativeCopy {
-            title: "Pairing cancelled",
-            detail: "No pairing was saved.",
-        },
-        PairingMessageId::TimedOut => NativeCopy {
-            title: "Pairing timed out",
-            detail: "Check that both devices are on the same network and try again.",
-        },
-        PairingMessageId::CodeMismatch => NativeCopy {
-            title: "Pairing didn't match",
-            detail: "The security codes did not match. No device was paired.",
-        },
-        PairingMessageId::IncompatibleVersion => NativeCopy {
-            title: "Pairing couldn't finish",
-            detail: "The other device uses an incompatible version. No device was paired.",
-        },
-        PairingMessageId::Unreachable => NativeCopy {
-            title: "Pairing couldn't finish",
-            detail:
-                "Could not reach the other device. Check that both devices are on the same network.",
-        },
-        PairingMessageId::Busy => NativeCopy {
-            title: "Pairing is busy",
-            detail: "Another pairing is already in progress.",
-        },
-        PairingMessageId::Limit => NativeCopy {
-            title: "Pairing limit reached",
-            detail: "Remove or revoke a paired device before trying again.",
-        },
-        PairingMessageId::Failed => NativeCopy {
-            title: "Pairing failed",
-            detail: "Pairing failed. No device was paired.",
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,7 +321,17 @@ mod tests {
         ];
         for state in states {
             let semantics = resolve_pairing_semantics(state, None);
-            assert_ne!(native_copy(semantics.message_id).title, "");
+            assert!(matches!(
+                semantics.message_id,
+                PairingMessageId::Ready
+                    | PairingMessageId::WaitingForPeer
+                    | PairingMessageId::SecuringConnection
+                    | PairingMessageId::CompareCodes
+                    | PairingMessageId::Paired
+                    | PairingMessageId::Rejected
+                    | PairingMessageId::Cancelled
+                    | PairingMessageId::TimedOut
+            ));
         }
         for error in [
             ErrorCode::NotFound,
@@ -412,7 +354,15 @@ mod tests {
             ErrorCode::Internal,
         ] {
             let semantics = resolve_pairing_semantics(PairingState::Failed, Some(error));
-            assert_ne!(native_copy(semantics.message_id).detail, "");
+            assert!(matches!(
+                semantics.message_id,
+                PairingMessageId::CodeMismatch
+                    | PairingMessageId::IncompatibleVersion
+                    | PairingMessageId::Unreachable
+                    | PairingMessageId::Busy
+                    | PairingMessageId::Limit
+                    | PairingMessageId::Failed
+            ));
         }
     }
 
@@ -446,35 +396,6 @@ mod tests {
     }
 
     #[test]
-    fn native_copy_is_closed_and_secret_free() {
-        for message_id in [
-            PairingMessageId::Ready,
-            PairingMessageId::WaitingForPeer,
-            PairingMessageId::SecuringConnection,
-            PairingMessageId::CompareCodes,
-            PairingMessageId::Paired,
-            PairingMessageId::Rejected,
-            PairingMessageId::Cancelled,
-            PairingMessageId::TimedOut,
-            PairingMessageId::CodeMismatch,
-            PairingMessageId::IncompatibleVersion,
-            PairingMessageId::Unreachable,
-            PairingMessageId::Busy,
-            PairingMessageId::Limit,
-            PairingMessageId::Failed,
-        ] {
-            let copy = native_copy(message_id);
-            let visible = format!("{} {}", copy.title, copy.detail);
-            for forbidden in ["/", "\\\\", "123456", "secret", "token"] {
-                assert!(
-                    !visible.to_ascii_lowercase().contains(forbidden),
-                    "{visible}"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn busy_and_limit_have_distinct_remedies() {
         let busy = resolve_pairing_semantics(PairingState::Failed, Some(ErrorCode::RateLimited));
         let limit = resolve_pairing_semantics(PairingState::Failed, Some(ErrorCode::PairingLimit));
@@ -482,10 +403,7 @@ mod tests {
         assert!(!busy.retry);
         assert_eq!(limit.message_id, PairingMessageId::Limit);
         assert!(!limit.retry);
-        assert_ne!(
-            native_copy(busy.message_id).detail,
-            native_copy(limit.message_id).detail
-        );
+        assert_ne!(busy.message_id, limit.message_id);
     }
 
     #[test]
