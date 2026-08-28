@@ -414,10 +414,10 @@
           "expect": "FAIL|self-test: current workflow concurrency policy holds|"
         },
         {
-          "name": "workflow-name-concurrency-slug-accepted",
+          "name": "missing-event-concurrency-discriminator-accepted",
           "file": ".github/workflows/ci.yml",
           "find": "  group: ci-${{ github.event_name }}-",
-          "replace": "  group: ${{ github.workflow }}-${{ github.event_name }}-",
+          "replace": "  group: ci-",
           "expect": "FAIL|self-test: current workflow concurrency policy holds|"
         },
         {
@@ -442,10 +442,10 @@
           "expect": "FAIL|self-test: current workflow concurrency policy holds|"
         },
         {
-          "name": "android-schedule-sweep-not-distinct",
+          "name": "android-manual-runs-share-ref",
           "file": ".github/workflows/android-emulator.yml",
-          "find": "github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36'",
-          "replace": "inputs.api-level || '36'",
+          "find": "|| github.run_id }}",
+          "replace": "|| github.ref_name }}",
           "expect": "FAIL|self-test: current workflow concurrency policy holds|"
         },
         {
@@ -463,9 +463,16 @@
           "expect": "FAIL|self-test: current workflow concurrency policy holds|"
         },
         {
+          "name": "prefixed-release-input-double-prefixed",
+          "file": ".github/workflows/release.yml",
+          "find": "  group: release-${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}\n",
+          "replace": "  group: release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
           "name": "release-ref-used-as-version",
           "file": ".github/workflows/release.yml",
-          "find": "  group: release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}\n",
+          "find": "  group: release-${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}\n",
           "replace": "  group: release-${{ github.ref }}\n",
           "expect": "FAIL|self-test: current workflow concurrency policy holds|"
         },
@@ -477,10 +484,10 @@
           "expect": "FAIL|self-test: current workflow concurrency policy holds|"
         },
         {
-          "name": "secret-scan-owns-caller-concurrency",
+          "name": "secret-scan-shares-cancelling-caller-group",
           "file": ".github/workflows/secret-scan.yml",
           "find": "permissions:\n  contents: read\n",
-          "replace": "concurrency:\n  group: secret-scan-${{ github.run_id }}\n  cancel-in-progress: false\n\npermissions:\n  contents: read\n",
+          "replace": "concurrency:\n  group: secret-scan-${{ github.ref_name }}\n  cancel-in-progress: true\n\npermissions:\n  contents: read\n",
           "expect": "FAIL|self-test: current workflow concurrency policy holds|"
         },
         {
