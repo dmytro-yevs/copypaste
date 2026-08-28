@@ -96,11 +96,11 @@ export const settings = {
     },
     allowScreenshots: {
       title: "Allow screenshots",
-      description: "Lets CopyPaste appear in captures and app previews.",
+      description: "Lets the CopyPaste shell and Quick Paste appear in captures and app previews. Pairing prompts stay protected.",
       /** Shown only while the protection is off, because that is when it is a
        *  fact about the screen rather than a hypothetical. */
       warning:
-        "Anything shown here can now be recorded, including a secret you reveal.",
+        "Shell and Quick Paste content can now be recorded, including a secret you reveal. Pairing prompts stay protected.",
     },
   },
 

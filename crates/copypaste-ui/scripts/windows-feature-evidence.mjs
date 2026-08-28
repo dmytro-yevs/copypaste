@@ -7,11 +7,13 @@ const EXPECTED = new Map([
   ["capture/service-capture-status", { feature: "capture", state: "service-capture-status", name: "Background capture", directory: "capture", direct: true }],
   ["capture/copy-feedback-setting", { feature: "capture", state: "copy-feedback-setting", name: "Copy feedback sound", directory: "capture/copy-feedback-setting", direct: false }],
   ["devices/desktop-pairing-entry", {
+    type: "protected-accessibility",
     feature: "devices",
     state: "desktop-pairing-entry",
     name: "Pairing code",
     requiredNames: ["Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel"],
     requiredEnabledNames: ["Pairing code", "Pairing address", "Pair", "Cancel"],
+    requiredPasswordNames: ["Pairing code", "Pairing address"],
     directory: "devices",
     direct: true,
   }],
@@ -25,11 +27,16 @@ const UPDATER_STATES = new Map([
 ]);
 
 const RECORD_KEYS = ["bytes", "path", "sha256"];
-const STATE_KEYS = ["accessibility", "expected_name", "feature", "screenshot", "state"];
+const VISUAL_STATE_KEYS = ["accessibility", "expected_name", "feature", "screenshot", "state", "type"];
+const PROTECTED_STATE_KEYS = ["accessibility", "expected_name", "feature", "state", "type"];
 const ACCESSIBILITY_KEYS = ["expected_name", "feature", "node_read", "nodes", "schema_version", "state", "window"];
 const NODE_READ_KEYS = ["complete", "read", "retried"];
+const PROTECTED_RETRY_KEYS = ["attempts", "index"];
 const WINDOW_KEYS = ["capture_allowed", "capture_bounds", "display_affinity", "foreground", "handle", "minimized", "visible"];
+const PROTECTED_WINDOW_KEYS = ["capture_allowed", "display_affinity", "foreground", "handle", "minimized", "visible"];
+const PROTECTED_NODE_KEYS = ["bounds", "control_type", "enabled", "is_password", "name", "offscreen"];
 const BOUNDS_KEYS = ["height", "kind", "width", "x", "y"];
+const NODE_BOUNDS_KEYS = ["height", "width", "x", "y"];
 
 function parseJson(bytes) {
   return JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/, ""));
@@ -40,6 +47,22 @@ function exactKeys(value, expected) {
     && typeof value === "object"
     && !Array.isArray(value)
     && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
+}
+
+function validProtectedNode(node, allowedNames) {
+  const bounds = node?.bounds;
+  return exactKeys(node, PROTECTED_NODE_KEYS)
+    && (node.name === null || allowedNames.includes(node.name))
+    && (node.control_type === null || /^ControlType\.[A-Za-z]+$/.test(node.control_type))
+    && typeof node.enabled === "boolean"
+    && typeof node.offscreen === "boolean"
+    && typeof node.is_password === "boolean"
+    && (bounds === null || (
+      exactKeys(bounds, NODE_BOUNDS_KEYS)
+      && Object.values(bounds).every(Number.isFinite)
+      && bounds.width >= 0
+      && bounds.height >= 0
+    ));
 }
 
 async function verifyFile(root, record, expectedPath, label) {
@@ -74,7 +97,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
   } catch {
     throw new Error(`${label} feature evidence is not readable JSON`);
   }
-  if (!exactKeys(manifest, ["schema_version", "states"]) || manifest.schema_version !== 1 || !Array.isArray(manifest.states)) {
+  if (!exactKeys(manifest, ["schema_version", "states"]) || manifest.schema_version !== 2 || !Array.isArray(manifest.states)) {
     throw new Error(`${label} feature evidence has an invalid envelope`);
   }
   if (manifest.states.length !== expected.size) throw new Error(`${label} must capture the exact Windows feature state set`);
@@ -84,26 +107,37 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
   const screenshotIdentities = new Set();
   for (const state of manifest.states) {
     const identity = `${state?.feature}/${state?.state}`;
-    if (!exactKeys(state, STATE_KEYS) || observed.has(identity)) {
+    const expectedState = expected.get(identity);
+    const expectedType = expectedState?.type ?? "visual";
+    const stateKeys = expectedType === "protected-accessibility" ? PROTECTED_STATE_KEYS : VISUAL_STATE_KEYS;
+    if (!exactKeys(state, stateKeys) || observed.has(identity)) {
       throw new Error(`${label} contains an invalid or duplicate Windows feature state`);
     }
     observed.add(identity);
-    const expectedState = expected.get(identity);
-    if (!expectedState || state.expected_name !== expectedState.name) {
+    if (!expectedState || state.type !== expectedType || state.expected_name !== expectedState.name) {
       throw new Error(`${label} contains an unknown or wrong Windows feature state ${identity}`);
     }
     const prefix = `${expectedState.directory}/`;
-    for (const [kind, record] of [["screenshot", state.screenshot], ["accessibility", state.accessibility]]) {
+    const records = expectedType === "visual"
+      ? [["screenshot", state.screenshot], ["accessibility", state.accessibility]]
+      : [["accessibility", state.accessibility]];
+    for (const [kind, record] of records) {
       const declared = receipt.artifacts.find((artifact) => artifact.kind === kind && artifact.path === record.path);
       if (expectedState.direct && (!declared || declared.sha256 !== record.sha256 || declared.bytes !== record.bytes)) {
         throw new Error(`${label} does not directly register ${state.feature} ${kind} evidence`);
       }
     }
-    if (screenshotIdentities.has(state.screenshot.sha256)) {
-      throw new Error(`${label} reuses a screenshot identity across Windows feature states`);
+    if (expectedType === "visual") {
+      if (screenshotIdentities.has(state.screenshot.sha256)) {
+        throw new Error(`${label} reuses a screenshot identity across Windows feature states`);
+      }
+      screenshotIdentities.add(state.screenshot.sha256);
+      await verifyFile(root, state.screenshot, `${prefix}screenshot.png`, `${label} ${state.feature} screenshot`);
+    } else if (receipt.artifacts.some((artifact) => (
+      artifact.kind === "screenshot" && artifact.path.startsWith(prefix)
+    ))) {
+      throw new Error(`${label} protected ${state.feature} evidence binds a screenshot`);
     }
-    screenshotIdentities.add(state.screenshot.sha256);
-    await verifyFile(root, state.screenshot, `${prefix}screenshot.png`, `${label} ${state.feature} screenshot`);
     const accessibilityBytes = await verifyFile(
       root,
       state.accessibility,
@@ -122,26 +156,40 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
       || accessibility.feature !== state.feature
       || accessibility.state !== state.state
       || accessibility.expected_name !== state.expected_name
-      || !exactKeys(accessibility.window, WINDOW_KEYS)
+      || !exactKeys(
+        accessibility.window,
+        expectedType === "protected-accessibility" ? PROTECTED_WINDOW_KEYS : WINDOW_KEYS,
+      )
       || !Number.isInteger(accessibility.window.handle)
       || accessibility.window.handle < 1
       || accessibility.window.foreground !== true
       || accessibility.window.visible !== true
       || accessibility.window.minimized !== false
-      || accessibility.window.capture_allowed !== true
-      || accessibility.window.display_affinity !== 0
-      || !exactKeys(accessibility.window.capture_bounds, BOUNDS_KEYS)
-      || accessibility.window.capture_bounds.kind !== "client"
-      || !Number.isInteger(accessibility.window.capture_bounds.x)
-      || !Number.isInteger(accessibility.window.capture_bounds.y)
-      || !Number.isInteger(accessibility.window.capture_bounds.width)
-      || !Number.isInteger(accessibility.window.capture_bounds.height)
-      || accessibility.window.capture_bounds.width < 1
-      || accessibility.window.capture_bounds.height < 1
-      || accessibility.window.capture_bounds.width > 16384
-      || accessibility.window.capture_bounds.height > 16384
     ) {
       throw new Error(`${label} ${state.feature} accessibility describes the wrong state`);
+    }
+    if (expectedType === "visual") {
+      if (
+        accessibility.window.capture_allowed !== true
+        || accessibility.window.display_affinity !== 0
+        || !exactKeys(accessibility.window.capture_bounds, BOUNDS_KEYS)
+        || accessibility.window.capture_bounds.kind !== "client"
+        || !Number.isInteger(accessibility.window.capture_bounds.x)
+        || !Number.isInteger(accessibility.window.capture_bounds.y)
+        || !Number.isInteger(accessibility.window.capture_bounds.width)
+        || !Number.isInteger(accessibility.window.capture_bounds.height)
+        || accessibility.window.capture_bounds.width < 1
+        || accessibility.window.capture_bounds.height < 1
+        || accessibility.window.capture_bounds.width > 16384
+        || accessibility.window.capture_bounds.height > 16384
+      ) {
+        throw new Error(`${label} ${state.feature} accessibility describes the wrong visual state`);
+      }
+    } else if (
+      accessibility.window.capture_allowed !== false
+      || accessibility.window.display_affinity !== 17
+    ) {
+      throw new Error(`${label} ${state.feature} accessibility is not capture-protected`);
     }
     // A node the capture could not read used to be dropped, so a subset of the
     // tree arrived here indistinguishable from the whole of it. The count is
@@ -157,6 +205,20 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
       || accessibility.node_read.read !== accessibility.nodes.length
     ) {
       throw new Error(`${label} ${state.feature} accessibility is a partial snapshot`);
+    }
+    if (expectedType === "protected-accessibility" && accessibility.node_read.retried.some((retry) => (
+      !exactKeys(retry, PROTECTED_RETRY_KEYS)
+      || !Number.isInteger(retry.index)
+      || retry.index < 0
+      || !Number.isInteger(retry.attempts)
+      || retry.attempts < 2
+    ))) {
+      throw new Error(`${label} ${state.feature} accessibility contains raw retry diagnostics`);
+    }
+    if (expectedType === "protected-accessibility" && accessibility.nodes.some((node) => (
+      !validProtectedNode(node, expectedState.requiredNames ?? [])
+    ))) {
+      throw new Error(`${label} ${state.feature} accessibility contains raw or secret-like nodes`);
     }
     const marker = Array.isArray(accessibility.nodes)
       ? accessibility.nodes.find((node) => (
@@ -195,6 +257,20 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
         && node.bounds.height > 0
       ))) {
         throw new Error(`${label} ${state.feature} accessibility lacks enabled ${requiredName}`);
+      }
+    }
+    for (const requiredName of expectedState.requiredPasswordNames ?? []) {
+      if (!accessibility.nodes.some((node) => (
+        node?.name === requiredName
+        && node.is_password === true
+        && node.enabled === true
+        && node.offscreen === false
+        && Number.isFinite(node.bounds?.width)
+        && Number.isFinite(node.bounds?.height)
+        && node.bounds.width > 0
+        && node.bounds.height > 0
+      ))) {
+        throw new Error(`${label} ${state.feature} accessibility lacks protected ${requiredName}`);
       }
     }
   }
