@@ -47,7 +47,7 @@ describe("selection diagnostics", () => {
       clipboardContent: "private copied text",
       rawPath: "/Users/person/private/database.sqlite",
       nested: {
-        secret: "xoxb-1234567890-private",
+        secret: "redaction sentinel",
         label: "Done",
       },
     });
