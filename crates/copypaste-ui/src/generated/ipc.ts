@@ -131,7 +131,7 @@ export const PAIRING_SEMANTICS_BY_STATE = {
   "rejected": {"message_id":"rejected","icon":"close","tone":"warning","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
   "cancelled": {"message_id":"cancelled","icon":"close","tone":"neutral","live":"status","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
   "timed_out": {"message_id":"timed_out","icon":"alert","tone":"warning","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
-  "failed": {"message_id":"failed","icon":"alert","tone":"danger","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
+  "failed": {"message_id":"failed","icon":"alert","tone":"danger","live":"alert","active":false,"terminal":false,"needs_devices":false,"review_secure":false,"retry":false},
 } as const satisfies Record<PairingState, PairingSemantics>;
 
 export type PairingPresentationState = "available" | "presented" | "unavailable";
