@@ -42,6 +42,11 @@ function Test-WindowCaptureReady($State) {
     return $State.foreground -and $State.visible -and -not $State.minimized -and $State.capture_allowed
 }
 
+function Test-WindowProtectedReady($State) {
+    return $State.foreground -and $State.visible -and -not $State.minimized -and
+        -not $State.capture_allowed -and $State.display_affinity -eq 17
+}
+
 function Get-WindowActivationPlan($State) {
     return [ordered]@{
         restore = [bool]$State.minimized
@@ -115,6 +120,33 @@ function Wait-ForegroundWindow([Diagnostics.Process]$App) {
         $handle = $App.MainWindowHandle
         $state = Get-WindowCaptureState $handle
         "expected HWND $($handle.ToInt64()); foreground HWND $([CopyPasteNativeWindowEvidence]::GetForegroundWindow().ToInt64()); visible=$($state.visible); minimized=$($state.minimized); display affinity=$($state.display_affinity)"
+    }
+}
+
+function Wait-ProtectedForegroundWindow([Diagnostics.Process]$App) {
+    return Wait-Readiness "protected CopyPaste window foreground readiness" {
+        $App.Refresh()
+        if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
+        $handle = $App.MainWindowHandle
+        if ($handle -eq [IntPtr]::Zero) { return New-ProbeNotReady "the app has published no native window handle" }
+        $state = Get-WindowCaptureState $handle
+        $plan = Get-WindowActivationPlan $state
+        if ($plan.restore) {
+            [CopyPasteNativeWindowEvidence]::ShowWindowAsync($handle, 9) | Out-Null
+        }
+        if ($plan.activate) {
+            [CopyPasteNativeWindowEvidence]::SetForegroundWindow($handle) | Out-Null
+        }
+        if ($plan.restore -or $plan.activate) {
+            $state = Get-WindowCaptureState $handle
+        }
+        if (Test-WindowProtectedReady $state) { return New-ProbeReady $state }
+        return New-ProbeNotReady "foreground=$($state.foreground) visible=$($state.visible) minimized=$($state.minimized) display affinity=$($state.display_affinity)"
+    } {
+        $App.Refresh()
+        $handle = $App.MainWindowHandle
+        $state = Get-WindowCaptureState $handle
+        "expected protected HWND $($handle.ToInt64()); foreground HWND $([CopyPasteNativeWindowEvidence]::GetForegroundWindow().ToInt64()); visible=$($state.visible); minimized=$($state.minimized); display affinity=$($state.display_affinity)"
     }
 }
 
