@@ -16,7 +16,12 @@ import { afterAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { accessibleSurface, expectNoFilesystemPath } from "../src/harness/leaks.js";
-import { addItems, cleanUpItems, storedItems } from "../src/harness/bridge.js";
+import {
+  addItems,
+  cleanUpItems,
+  missingFixtureIds,
+  storedItems,
+} from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
@@ -245,7 +250,7 @@ describe("a preference that limits only the visible list", () => {
       await setHistoryDisplayLimit(0, "100");
       await gotoView(app, "Library");
       await waitForText(app, "Showing first 100 of 101 results");
-      expect((await storedItems(app)).filter((item) => item.content.includes(marker))).toHaveLength(101);
+      expect(missingFixtureIds(await storedItems(app), seeded)).toEqual([]);
 
       await app.withPage((page) => page.reload({ waitUntil: "domcontentloaded" }));
       await waitFor(
