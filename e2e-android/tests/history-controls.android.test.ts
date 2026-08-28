@@ -17,6 +17,12 @@ import {
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
+import {
+  controlledMenuReached,
+  sameSortedItemIds,
+  sortedItemIds,
+  withCleanupPreservingPrimary,
+} from "../src/harness/history-controls.js";
 import { itemRows, rowBoxes } from "../src/harness/list.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
@@ -97,34 +103,31 @@ async function controlBoxes() {
 async function waitForKindMenu(expanded: boolean): Promise<void> {
   const state = expanded ? "open" : "closed";
   await waitFor(
-    async () =>
-      app.withPage((page) =>
-        page.evaluate(
-          (selector, expected, expectedState) => {
-            const trigger = document.querySelector(selector);
-            const menuId = trigger?.getAttribute("aria-controls");
-            const menu = menuId ? document.getElementById(menuId) : null;
-            return (
-              trigger?.getAttribute("aria-expanded") === String(expected) &&
-              trigger?.getAttribute("data-state") === expectedState &&
-              (expected
-                ? menu?.getAttribute("role") === "menu" &&
-                  menu.getAttribute("data-state") === "open"
-                : menu === null)
-            );
-          },
-          KIND_FILTER,
-          expanded,
-          state,
-        ),
-      ),
+    async () => {
+      const snapshot = await app.withPage((page) =>
+        page.evaluate((selector) => {
+          const trigger = document.querySelector(selector);
+          const menuId = trigger?.getAttribute("aria-controls");
+          const menu = menuId ? document.getElementById(menuId) : null;
+          return {
+            ariaExpanded: trigger?.getAttribute("aria-expanded") ?? null,
+            triggerState: trigger?.getAttribute("data-state") ?? null,
+            menuPresent: menu !== null,
+            menuRole: menu?.getAttribute("role") ?? null,
+            menuState: menu?.getAttribute("data-state") ?? null,
+          };
+        }, KIND_FILTER),
+      );
+      return controlledMenuReached(snapshot, expanded);
+    },
     `kind filter did not reach its exact ${state} state`,
   );
 }
 
 async function closeKindMenu(): Promise<void> {
-  if ((await count(app, `${KIND_FILTER}[aria-expanded="true"]`)) === 0) return;
-  await app.withPage((page) => page.keyboard.press("Escape"));
+  if ((await count(app, `${KIND_FILTER}[aria-expanded="true"]`)) > 0) {
+    await app.withPage((page) => page.keyboard.press("Escape"));
+  }
   await waitForKindMenu(false);
 }
 
@@ -197,38 +200,44 @@ describe("the toolbar", () => {
   });
 
   test("filtering by kind removes the rows that do not match", async () => {
-    const before = itemRows(await rowBoxes(app));
-    expect(before.length).toBeGreaterThanOrEqual(4);
+    const beforeIds = sortedItemIds(
+      itemRows(await rowBoxes(app)).map((row) => row.id),
+    );
+    expect(beforeIds.length).toBeGreaterThanOrEqual(4);
 
     await tapElement(app, KIND_FILTER);
     await waitForKindMenu(true);
-    try {
-      await tapElement(app, '[role="menuitemcheckbox"]', "Links");
-      await waitFor(async () => {
-        const rows = itemRows(await rowBoxes(app));
-        return (
-          rows.length > 0 &&
-          rows.every((row) => row.text.includes("https://example.com"))
-        );
-      }, "the kind filter left rows that are not links on screen");
+    await withCleanupPreservingPrimary(
+      async () => {
+        await tapElement(app, '[role="menuitemcheckbox"]', "Links");
+        await waitFor(async () => {
+          const rows = itemRows(await rowBoxes(app));
+          return (
+            rows.length > 0 &&
+            rows.every((row) => row.text.includes("https://example.com"))
+          );
+        }, "the kind filter left rows that are not links on screen");
 
-      // MultiSelect prevents item selection from closing its Radix portal.
-      // Restore All from that live menu; the trigger is occluded until Escape.
-      await waitForKindMenu(true);
-      await tapElement(app, '[role="menuitemcheckbox"]', "All kinds");
-      await waitFor(
-        async () =>
-          itemRows(await rowBoxes(app)).length >= before.length &&
-          (await count(
-            app,
-            'button[aria-label="Filter by kind, default: All kinds"]',
-          )) === 1,
-        "clearing the kind filter never restored the list",
-      );
-      await waitForKindMenu(true);
-    } finally {
-      await closeKindMenu();
-    }
+        // MultiSelect prevents item selection from closing its Radix portal.
+        // Restore All from that live menu; the trigger is occluded until Escape.
+        await waitForKindMenu(true);
+        await tapElement(app, '[role="menuitemcheckbox"]', "All kinds");
+        await waitFor(async () => {
+          const restoredIds = itemRows(await rowBoxes(app)).map(
+            (row) => row.id,
+          );
+          return (
+            sameSortedItemIds(beforeIds, restoredIds) &&
+            (await count(
+              app,
+              'button[aria-label="Filter by kind, default: All kinds"]',
+            )) === 1
+          );
+        }, "clearing the kind filter never restored the exact list");
+        await waitForKindMenu(true);
+      },
+      closeKindMenu,
+    );
   });
 });
 
