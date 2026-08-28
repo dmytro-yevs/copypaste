@@ -5,14 +5,16 @@ import { STATUS_POLL_MS } from "@/lib/scheduling";
 import {
   getPairingProgress,
   hasBridge,
-  type PairingState,
+  type PairingCeremony,
 } from "@/lib/ipc";
 import { useUi } from "@/store/ui";
 
 const INBOUND_PAIRING_KEY = ["pairing", "inbound"] as const;
 
-export function inboundPairingNeedsDevices(state: PairingState): boolean {
-  return state === "handshaking" || state === "awaiting_confirmation";
+export function inboundPairingNeedsDevices(
+  ceremony: PairingCeremony | undefined,
+): boolean {
+  return ceremony?.semantics.needs_devices ?? false;
 }
 
 export function useInboundPairingNav() {
@@ -28,8 +30,7 @@ export function useInboundPairingNav() {
   });
 
   useEffect(() => {
-    const state = progress.data?.state;
-    if (state === undefined || view === "devices") return;
-    if (inboundPairingNeedsDevices(state)) setView("devices");
-  }, [progress.data?.state, setView, view]);
+    if (view === "devices") return;
+    if (inboundPairingNeedsDevices(progress.data)) setView("devices");
+  }, [progress.data, setView, view]);
 }

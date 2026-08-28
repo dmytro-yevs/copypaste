@@ -112,11 +112,21 @@ export type PairingRole = "initiator" | "responder";
 
 export type PairingState = "idle" | "waiting_for_peer" | "handshaking" | "awaiting_confirmation" | "confirmed" | "rejected" | "cancelled" | "timed_out" | "failed";
 
+export type PairingMessageId = "ready" | "waiting_for_peer" | "securing_connection" | "compare_codes" | "paired" | "rejected" | "cancelled" | "timed_out" | "code_mismatch" | "incompatible_version" | "unreachable" | "busy" | "failed";
+
+export type PairingIcon = "shieldCheck" | "spinner" | "checkCircle" | "close" | "alert" | "wifiOff";
+
+export type PairingTone = "neutral" | "info" | "success" | "warning" | "danger";
+
+export type PairingLive = "status" | "alert";
+
+export type PairingSemantics = { message_id: PairingMessageId, icon: PairingIcon, tone: PairingTone, live: PairingLive, active: boolean, terminal: boolean, needs_devices: boolean, review_secure: boolean, retry: boolean, };
+
 export type PairingPresentationState = "available" | "presented" | "unavailable";
 
 export type PairedDevice = { name: string, last_seen_ms: number, online: boolean, };
 
-export type PairingCeremony = { ceremony_id: string | null, role: PairingRole | null, state: PairingState, presentation: PairingPresentationState, known_device: PairedDevice | null, error: UiError | null, };
+export type PairingCeremony = { ceremony_id: string | null, role: PairingRole | null, state: PairingState, semantics: PairingSemantics, presentation: PairingPresentationState, known_device: PairedDevice | null, error: UiError | null, };
 
 export type PeerInfo = { pairing_id: string, name: string, last_addr: string | null, last_seen_ms: number, online: boolean, details?: DeviceDetails, };
 

@@ -1,10 +1,8 @@
-import { Icon } from "@/components/ui/icon";
 import { InlineNotice } from "@/components/shared";
-import { Button, Surface } from "@/components/ui";
+import { Button, Icon, Surface } from "@/components/ui";
 import type { PairingController } from "@/features/pairing/hooks/usePairing";
-import { isPairingActive } from "@/features/pairing/model/pairingSession";
-import { classifyError, friendlyError } from "@/lib/errors";
-import type { PairingCeremony } from "@/lib/ipc";
+import { pairingPresentation } from "@/features/pairing/model/pairingPresentation";
+import { useTranslation } from "@/i18n";
 import styles from "./PairingProgressCard.module.css";
 
 interface PairingProgressCardProps {
@@ -16,60 +14,6 @@ interface PairingProgressCardProps {
   onClose?: () => void;
 }
 
-function copyFor(ceremony: PairingCeremony | undefined) {
-  switch (ceremony?.state ?? "idle") {
-    case "waiting_for_peer":
-      return {
-        title: "Waiting for the other device…",
-        body: "Keep the protected pairing surface open on both devices.",
-      };
-    case "handshaking":
-      return {
-        title: "Establishing a private connection…",
-        body: "CopyPaste is verifying the pairing request.",
-      };
-    case "awaiting_confirmation":
-      return {
-        title: "Confirm on the protected pairing surface",
-        body: "Compare the security code there. The code is never shown in this page.",
-      };
-    case "confirmed":
-      return {
-        title: "Device paired",
-        body: ceremony?.known_device
-          ? `${ceremony.known_device.name} is ready to sync.`
-          : "The device is ready to sync.",
-      };
-    case "rejected":
-      return {
-        title: "Pairing didn’t match",
-        body: "Nothing was paired. Start again when both devices are ready.",
-      };
-    case "cancelled":
-      return {
-        title: "Pairing cancelled",
-        body: "No device was added.",
-      };
-    case "timed_out":
-      return {
-        title: "Pairing code expired",
-        body: "Start again to create a new protected pairing session.",
-      };
-    case "failed":
-      return {
-        title: "Pairing failed",
-        body: ceremony?.error
-          ? friendlyError(classifyError(ceremony.error))
-          : "CopyPaste couldn’t finish pairing.",
-      };
-    case "idle":
-      return {
-        title: "Pair another device",
-        body: "Pairing codes and security comparisons open in a protected native surface.",
-      };
-  }
-}
-
 export function PairingProgressCard({
   pairing,
   hideIdle = false,
@@ -78,127 +22,128 @@ export function PairingProgressCard({
   onDone,
   onClose,
 }: PairingProgressCardProps) {
-  const state = pairing.ceremony?.state ?? "idle";
-  const active = isPairingActive(state);
-  const terminal =
-    state === "rejected" ||
-    state === "cancelled" ||
-    state === "timed_out" ||
-    state === "failed";
-  const copy = copyFor(pairing.ceremony);
+  const { t } = useTranslation();
+  const presentation = pairingPresentation(pairing.ceremony);
+  const { semantics } = presentation;
+  const failed = semantics.terminal && semantics.message_id !== "paired";
 
-  if (hideIdle && state === "idle" && !pairing.isChecking && !pairing.isPending && pairing.error === null) {
+  if (
+    hideIdle &&
+    semantics.message_id === "ready" &&
+    !pairing.isChecking &&
+    !pairing.isPending &&
+    pairing.error === null
+  ) {
     return null;
   }
 
-  const visibleError = pairing.error
-    ? friendlyError(classifyError(pairing.error))
-    : null;
-  const failed = terminal || visibleError !== null;
-
   return (
-    <Surface
-      asChild
-      elevation="raised"
-      border="subtle"
-      radius="md"
-    >
+    <Surface asChild elevation="raised" border="subtle" radius="md">
       <section
         aria-label="Pairing progress"
         aria-busy={pairing.isChecking || pairing.isPending || undefined}
         className={styles.root}
         data-compact={compact || undefined}
+        data-tone={semantics.tone}
       >
-        <span className={styles.iconWell} data-state={state} aria-hidden="true">
-          {visibleError || state === "failed" ? (
-            <Icon name="alert" />
-          ) : pairing.isChecking || pairing.isPending || active ? (
+        <span
+          className={styles.iconWell}
+          data-state={semantics.message_id}
+          aria-hidden="true"
+        >
+          {pairing.isChecking || pairing.isPending || semantics.active ? (
             <Icon name="spinner" className={styles.spinner} />
-          ) : failed ? (
-            <Icon name="close" />
-          ) : state === "confirmed" ? (
-            <Icon name="checkCircle" />
           ) : (
-            <Icon name="shieldCheck" />
+            <Icon name={presentation.icon} />
           )}
         </span>
 
         <div
-          role={visibleError || state === "failed" ? "alert" : "status"}
-          aria-live={visibleError || state === "failed" ? "assertive" : state === "confirmed" ? "polite" : undefined}
+          role={semantics.live}
+          aria-live={semantics.live === "alert" ? "assertive" : "polite"}
           aria-atomic="true"
           className={styles.copy}
         >
           <p className={styles.title}>
             {pairing.isChecking
-              ? "Checking pairing status…"
+              ? t("devices.pairing.progress.checking")
               : pairing.isPending
-                ? "Opening protected pairing…"
-                : copy.title}
+                ? t("devices.pairing.progress.opening")
+                : t(presentation.titleKey)}
           </p>
           <p className={styles.body}>
-            {visibleError ?? copy.body}
+            {presentation.deviceName === undefined
+              ? t(presentation.bodyKey)
+              : t("devices.pairing.semantic.paired.device", {
+                  name: presentation.deviceName,
+                })}
           </p>
-          {pairing.presentation === "unavailable" && active ? (
+          {pairing.presentation === "unavailable" && semantics.active ? (
             <InlineNotice tone="warning" icon="alert">
-              The protected pairing surface is unavailable. Cancel and try again.
+              {t("devices.pairing.presentationUnavailable")}
             </InlineNotice>
           ) : null}
         </div>
 
-        {showActions ? <div className={styles.actions}>
-          {active ? (
-            <>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={pairing.isPending}
-                aria-busy={pairing.isPending || undefined}
-                onClick={() => pairing.run("cancel")}
-              >
-                {pairing.pendingAction === "cancel" ? "Cancelling…" : "Cancel"}
+        {showActions ? (
+          <div className={styles.actions}>
+            {semantics.active ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={pairing.isPending}
+                  aria-busy={pairing.isPending || undefined}
+                  onClick={() => pairing.run("cancel")}
+                >
+                  {pairing.pendingAction === "cancel"
+                    ? t("devices.pairing.cancelling")
+                    : t("common.cancel")}
+                </Button>
+                {semantics.review_secure ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={
+                      pairing.isPending || !pairing.protectedPresentationAvailable
+                    }
+                    aria-busy={pairing.pendingAction === "present" || undefined}
+                    onClick={() => pairing.run("present")}
+                  >
+                    <Icon name="shieldCheck" aria-hidden="true" />
+                    {t("devices.pairing.reviewSecure")}
+                  </Button>
+                ) : null}
+              </>
+            ) : failed ? (
+              <>
+                {onClose ? (
+                  <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+                    {t("common.close")}
+                  </Button>
+                ) : null}
+                {semantics.retry && pairing.canRetry ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={!pairing.protectedPresentationAvailable}
+                    onClick={pairing.retry}
+                  >
+                    <Icon name="refresh" aria-hidden="true" />
+                    {t("common.tryAgain")}
+                  </Button>
+                ) : null}
+              </>
+            ) : semantics.message_id === "paired" && onDone ? (
+              <Button type="button" size="sm" onClick={onDone}>
+                {t("common.done")}
               </Button>
-              {state === "awaiting_confirmation" ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={pairing.isPending || !pairing.protectedPresentationAvailable}
-                  aria-busy={pairing.pendingAction === "present" || undefined}
-                  onClick={() => pairing.run("present")}
-                >
-                  <Icon name="shieldCheck" aria-hidden="true" />
-                  Review securely
-                </Button>
-              ) : null}
-            </>
-          ) : failed ? (
-            <>
-              {onClose && visibleError === null ? (
-                <Button type="button" size="sm" variant="ghost" onClick={onClose}>
-                  Close
-                </Button>
-              ) : null}
-              {pairing.canRetry ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={!pairing.protectedPresentationAvailable}
-                  onClick={pairing.retry}
-                >
-                  <Icon name="refresh" aria-hidden="true" />
-                  Try again
-                </Button>
-              ) : null}
-            </>
-          ) : state === "confirmed" && onDone ? (
-            <Button type="button" size="sm" onClick={onDone}>
-              Done
-            </Button>
-          ) : null}
-        </div> : null}
+            ) : null}
+          </div>
+        ) : null}
       </section>
     </Surface>
   );

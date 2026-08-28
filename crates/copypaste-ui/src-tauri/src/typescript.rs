@@ -30,6 +30,9 @@ use crate::events::TauriEventName;
 use crate::model::{
     UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon, UiSyncResult,
 };
+use crate::pairing_presentation::semantics::{
+    PairingIcon, PairingLive, PairingMessageId, PairingSemantics, PairingTone,
+};
 use crate::pairing_presentation::PairingPresentationState;
 use crate::service::diagnostics::{Diagnostics, HistoryRead};
 use crate::service::push::{ChangePayload, PushStatePayload};
@@ -105,6 +108,11 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<Liveness>(&config, &mut output);
     declaration::<PairingRole>(&config, &mut output);
     declaration::<PairingState>(&config, &mut output);
+    declaration::<PairingMessageId>(&config, &mut output);
+    declaration::<PairingIcon>(&config, &mut output);
+    declaration::<PairingTone>(&config, &mut output);
+    declaration::<PairingLive>(&config, &mut output);
+    declaration::<PairingSemantics>(&config, &mut output);
     declaration::<PairingPresentationState>(&config, &mut output);
     declaration::<PairedDevice>(&config, &mut output);
     declaration::<PairingCeremony>(&config, &mut output);

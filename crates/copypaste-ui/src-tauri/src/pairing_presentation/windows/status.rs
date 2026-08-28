@@ -2,10 +2,11 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use copypaste_ipc::{PairingProgressData, PairingState};
+use copypaste_ipc::PairingProgressData;
 use winsafe::{co, prelude::*};
 
 use super::common::{self, CloseHandle};
+use crate::pairing_presentation::semantics::{native_copy, resolve_pairing_semantics};
 use crate::pairing_presentation::NativeAbort;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,92 +71,55 @@ fn run(
 }
 
 pub(super) fn copy(progress: &PairingProgressData) -> StatusCopy {
-    match progress.state {
-        PairingState::Idle => StatusCopy {
-            heading: "Pairing ended",
-            message: "No device pairing is in progress.",
-        },
-        PairingState::WaitingForPeer => StatusCopy {
-            heading: "Waiting for a device",
-            message: "Waiting for the other device to join.",
-        },
-        PairingState::Handshaking => StatusCopy {
-            heading: "Securing the connection",
-            message: "Keep both devices nearby while CopyPaste establishes a secure connection.",
-        },
-        PairingState::AwaitingConfirmation => StatusCopy {
-            heading: "Compare security codes",
-            message: "Confirm the code in the native security prompt.",
-        },
-        PairingState::Confirmed => StatusCopy {
-            heading: "Paired",
-            message: "The device was paired successfully.",
-        },
-        PairingState::Rejected => StatusCopy {
-            heading: "Pairing rejected",
-            message: "The security codes did not match, so no pairing was saved.",
-        },
-        PairingState::Cancelled => StatusCopy {
-            heading: "Pairing cancelled",
-            message: "No pairing was saved.",
-        },
-        PairingState::TimedOut => StatusCopy {
-            heading: "Pairing timed out",
-            message: "Check that both devices are on the same network and try again.",
-        },
-        PairingState::Failed => StatusCopy {
-            heading: "Pairing failed",
-            message: "CopyPaste could not finish pairing. Try again.",
-        },
+    let copy =
+        native_copy(resolve_pairing_semantics(progress.state, progress.error_code).message_id);
+    StatusCopy {
+        heading: copy.title,
+        message: copy.detail,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use copypaste_ipc::{ErrorCode, PairingRole};
+    use copypaste_ipc::{ErrorCode, PairingRole, PairingState};
 
-    #[test]
-    fn progress_copy_is_closed_over_known_text_not_backend_or_peer_fields() {
-        let secret = "SAS-123456";
-        let path = r"C:\\Users\\alice\\AppData\\copypaste.sock";
-        let progress = PairingProgressData {
+    fn progress(state: PairingState, error_code: Option<ErrorCode>) -> PairingProgressData {
+        PairingProgressData {
             pairing_id: Some("pair-id".into()),
             role: Some(PairingRole::Initiator),
-            state: PairingState::Failed,
+            state,
             expires_in_ms: None,
-            sas: Some(secret.into()),
+            sas: Some("SAS-123456".into()),
             peer_device_id: Some("key-material".into()),
-            peer_name: Some(path.into()),
+            peer_name: Some(r"C:\\Users\\alice\\AppData\\copypaste.sock".into()),
             peer_addr: Some("192.0.2.1:47654".into()),
             known_device: None,
-            error_code: Some(ErrorCode::PeerFailed),
-        };
-        let copy = copy(&progress);
+            error_code,
+        }
+    }
+
+    #[test]
+    fn windows_uses_the_canonical_copy_table_without_backend_or_peer_fields() {
+        let copy = copy(&progress(PairingState::Failed, Some(ErrorCode::PeerFailed)));
         let visible = format!("{} {}", copy.heading, copy.message);
-        for forbidden in [secret, path, "key-material", "192.0.2.1"] {
+        for forbidden in ["SAS-123456", "C:\\\\Users", "key-material", "192.0.2.1"] {
             assert!(!visible.contains(forbidden), "progress leaked {forbidden}");
         }
     }
 
     #[test]
     fn mismatch_timeout_and_cancel_have_distinct_copy() {
-        let mut progress = PairingProgressData {
-            pairing_id: None,
-            role: None,
-            state: PairingState::Rejected,
-            expires_in_ms: None,
-            sas: None,
-            peer_device_id: None,
-            peer_name: None,
-            peer_addr: None,
-            known_device: None,
-            error_code: None,
-        };
-        assert!(copy(&progress).message.contains("did not match"));
-        progress.state = PairingState::TimedOut;
-        assert!(copy(&progress).heading.contains("timed out"));
-        progress.state = PairingState::Cancelled;
-        assert!(copy(&progress).heading.contains("cancelled"));
+        assert!(
+            copy(&progress(PairingState::Failed, Some(ErrorCode::AuthFailed)))
+                .message
+                .contains("did not match")
+        );
+        assert!(copy(&progress(PairingState::TimedOut, None))
+            .heading
+            .contains("timed out"));
+        assert!(copy(&progress(PairingState::Cancelled, None))
+            .heading
+            .contains("cancelled"));
     }
 }

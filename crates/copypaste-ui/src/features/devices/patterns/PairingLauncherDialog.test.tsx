@@ -12,6 +12,17 @@ const waiting: PairingCeremony = {
     ceremony_id: "preview-ceremony",
     role: "initiator",
     state: "waiting_for_peer",
+    semantics: {
+        message_id: "waiting_for_peer",
+        icon: "spinner",
+        tone: "info",
+        live: "status",
+        active: true,
+        terminal: false,
+        needs_devices: false,
+        review_secure: false,
+        retry: false,
+    },
     presentation: "presented",
     known_device: null,
     error: null,
@@ -19,10 +30,23 @@ const waiting: PairingCeremony = {
 const connecting: PairingCeremony = {
     ...waiting,
     state: "handshaking",
+    semantics: {
+        ...waiting.semantics,
+        message_id: "securing_connection",
+        needs_devices: true,
+    },
 };
 const confirmed: PairingCeremony = {
     ...waiting,
     state: "confirmed",
+    semantics: {
+        ...waiting.semantics,
+        message_id: "paired",
+        icon: "checkCircle",
+        tone: "success",
+        active: false,
+        terminal: true,
+    },
     known_device: {
         name: "Studio Mac",
         last_seen_ms: Date.now(),
