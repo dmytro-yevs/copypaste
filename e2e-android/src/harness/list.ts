@@ -90,9 +90,14 @@ export function maxScrollTop(snapshot: ListSnapshot): number {
   return Math.max(0, snapshot.scrollHeight - snapshot.clientHeight);
 }
 
-/** The mounted window must cover the complete viewport without a blank gap. */
+/** Rows cover the viewport's virtual content; trailing scroll padding has no row. */
 export function renderedRowsCoverViewport(snapshot: ListSnapshot): boolean {
-  const end = snapshot.scrollTop + snapshot.clientHeight;
+  const end = Math.min(
+    snapshot.scrollTop + snapshot.clientHeight,
+    snapshot.totalSize,
+  );
+  if (end <= snapshot.scrollTop || snapshot.totalSize > snapshot.scrollHeight)
+    return false;
   let coveredUntil = snapshot.scrollTop;
 
   for (const row of [...snapshot.rows].sort((a, b) => a.start - b.start)) {
