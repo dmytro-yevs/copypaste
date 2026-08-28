@@ -158,4 +158,33 @@ describe("device presentation components", () => {
     expect(container.querySelectorAll('[data-slot="device-status"]')).toHaveLength(1);
     expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
   });
+
+  it("gives syncing precedence over a peer failure and unknown presence", () => {
+    const { container } = render(
+      <PeerRow
+        peer={{ ...PEER, details: undefined }}
+        health={{
+          failure: {
+            at: Date.now(),
+            kind: "auth_failed",
+            retryable: false,
+            durationMs: null,
+          },
+        }}
+        syncing
+        unpairing={false}
+        revoking={false}
+        onSync={vi.fn()}
+        onUnpair={vi.fn()}
+        onRevoke={vi.fn()}
+      />,
+    );
+
+    const status = container.querySelector('[data-slot="device-status"]');
+    expect(status?.getAttribute("data-tone")).toBe("busy");
+    expect(status?.getAttribute("aria-busy")).toBe("true");
+    expect(status?.textContent).toContain("Syncing");
+    expect(status?.textContent).not.toContain("Sync failed");
+    expect(status?.textContent).not.toContain("Presence unknown");
+  });
 });

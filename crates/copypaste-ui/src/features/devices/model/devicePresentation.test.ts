@@ -267,7 +267,7 @@ describe("device status descriptors", () => {
 
     it("resolves peer presentation precedence consistently for cards and rows", () => {
         const now = Date.now();
-        const failure = (kind: "auth_failed" | "peer_failed") => ({
+        const failure = (kind: "auth_failed" | "peer_failed" | "pairing_code") => ({
             failure: {
                 at: now,
                 kind,
@@ -285,6 +285,12 @@ describe("device status descriptors", () => {
             {
                 peer: peerWithPresence(undefined, now - 1),
                 health: failure("peer_failed"),
+                state: "failing",
+                label: "Sync failed",
+            },
+            {
+                peer: peerWithPresence(undefined, now - 1),
+                health: failure("pairing_code"),
                 state: "failing",
                 label: "Sync failed",
             },
@@ -315,7 +321,11 @@ describe("device status descriptors", () => {
         ] as const;
 
         for (const expected of cases) {
-            const state = peerPresentationState(expected.peer, expected.health);
+            const state = peerPresentationState(
+                expected.peer,
+                expected.health,
+                false,
+            );
             expect(state).toBe(expected.state);
             expect(peerStatus(expected.peer, expected.health, false).label).toBe(
                 expected.label,

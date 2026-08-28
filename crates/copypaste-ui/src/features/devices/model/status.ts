@@ -39,7 +39,7 @@ export interface DeviceStatusPresentation {
     };
 }
 
-export type PeerPresentationState = PeerState | "presence-unknown";
+export type PeerPresentationState = PeerState | "presence-unknown" | "syncing";
 
 function status(
     icon: DeviceStatusIcon,
@@ -62,7 +62,9 @@ export function deviceStatus(
 export function peerPresentationState(
     peer: PeerInfo,
     health: PeerHealth | undefined,
+    syncing: boolean,
 ): PeerPresentationState {
+    if (syncing) return "syncing";
     const state = peerState(peer, health);
     if (state === "failing" || state === "waiting") return state;
     return peerPresence(peer) === "unknown" ? "presence-unknown" : state;
@@ -72,6 +74,8 @@ export function peerStatusForState(
     state: PeerPresentationState,
 ): DeviceStatusPresentation {
     switch (state) {
+        case "syncing":
+            return status("refresh", t("devices.presentation.status.syncing"), "busy");
         case "presence-unknown":
             return status(
                 "circle",
@@ -107,6 +111,8 @@ export function peerRowStatus(
         detailA11y: { role: "status", live: "polite" },
     });
     switch (state) {
+        case "syncing":
+            return status("refresh", t("devices.presentation.status.syncing"), "busy");
         case "presence-unknown":
             return hint(
                 "circle",
