@@ -21,6 +21,7 @@ const WINDOWS_STATES = new Map([
     type: "protected-accessibility",
     state: "desktop-pairing-entry",
     name: "Pairing code",
+    requiredRootName: "Add a CopyPaste device",
     requiredNames: ["Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel"],
     requiredEnabledNames: ["Pairing code", "Pairing address", "Pair", "Cancel"],
     requiredPasswordNames: ["Pairing code", "Pairing address"],
@@ -120,9 +121,11 @@ async function fixture(root, platform, overrides = {}) {
           display_affinity: 17,
         },
         node_read: { complete: true, read: nodeNames.length, retried: [] },
-        nodes: nodeNames.map((name) => ({
+        nodes: nodeNames.map((name, index) => ({
           name,
-          ...(type === "protected-accessibility" ? { control_type: "ControlType.Edit" } : {}),
+          ...(type === "protected-accessibility" ? {
+            control_type: index === 0 ? "ControlType.Window" : "ControlType.Edit",
+          } : {}),
           enabled: expected.requiredEnabledNames?.includes(name) ?? true,
           offscreen: false,
           bounds: { x: 0, y: 0, width: 1, height: 1 },
@@ -436,6 +439,59 @@ async function restampAccessibility(receiptPath, mutate, feature) {
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
+test("accepts a visible disabled Windows pairing UIA root", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifest = JSON.parse(await readFile(path.join(path.dirname(receiptPath), "feature-states.json"), "utf8"));
+  const pairing = manifest.states.find((state) => state.feature === "devices");
+  const accessibility = JSON.parse(await readFile(path.join(path.dirname(receiptPath), pairing.accessibility.path), "utf8"));
+  assert.equal(accessibility.nodes[0].name, "Add a CopyPaste device");
+  assert.equal(accessibility.nodes[0].enabled, false);
+  const receipts = await validateEvidence({
+    commit: COMMIT,
+    evidence: [receiptPath],
+    required: new Set(["windows"]),
+    runId: RUN_ID,
+  });
+  assert.equal(receipts.length, 1);
+}));
+
+for (const wrongRootName of [null, "Pairing code"]) {
+  test(`rejects a ${wrongRootName === null ? "null" : "wrong"} Windows pairing root even with a title descendant`, () => withRoot(async (root) => {
+    const receiptPath = await fixture(root, "windows");
+    await restampAccessibility(receiptPath, (accessibility) => {
+      const rootNode = accessibility.nodes[0];
+      rootNode.name = wrongRootName;
+      accessibility.nodes.splice(1, 0, {
+        ...rootNode,
+        name: "Add a CopyPaste device",
+        control_type: "ControlType.Text",
+      });
+      accessibility.node_read.read = accessibility.nodes.length;
+    }, "devices");
+    await assert.rejects(
+      validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+      /does not prove its protected UIA root/,
+    );
+  }));
+}
+
+for (const [description, mutate] of [
+  ["an offscreen", (rootNode) => { rootNode.offscreen = true; }],
+  ["zero-width", (rootNode) => { rootNode.bounds.width = 0; }],
+  ["non-window", (rootNode) => { rootNode.control_type = "ControlType.Text"; }],
+]) {
+  test(`rejects ${description.startsWith("an ") ? description : `a ${description}`} Windows pairing UIA root`, () => withRoot(async (root) => {
+    const receiptPath = await fixture(root, "windows");
+    await restampAccessibility(receiptPath, (accessibility) => {
+      mutate(accessibility.nodes[0]);
+    }, "devices");
+    await assert.rejects(
+      validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+      /does not prove its protected UIA root/,
+    );
+  }));
+}
+
 test("rejects Windows desktop pairing evidence without native entry controls", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "windows");
   await restampAccessibility(receiptPath, (accessibility) => {
@@ -456,7 +512,7 @@ test("rejects Windows desktop pairing evidence without its dialog title", () => 
   }, "devices");
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
-    /lacks Add a CopyPaste device/,
+    /does not prove its protected UIA root/,
   );
 }));
 
