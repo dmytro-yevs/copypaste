@@ -12,8 +12,8 @@ on:
         type: boolean
 
 # Scheduled evidence must remain visible when someone starts a manual spot
-# check, and a second run of either kind must wait instead of cancelling the
-# run that owns its evidence.
+# check. The default single pending slot may replace an older queued run, but
+# schedule and dispatch are separate and never cancel their active evidence.
 concurrency:
   group: native-nightly-${{ github.event_name }}
   cancel-in-progress: false
