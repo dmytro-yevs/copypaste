@@ -1,46 +1,65 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { routeChunkErrors } from "./check-route-chunks.mjs";
+import { ROUTE_CHUNK_PREFIXES, routeChunkErrors } from "./check-route-chunks.mjs";
 
-const js = [
-  "App-a.js",
-  "App-legacy-b.js",
-  "capture-a.js",
-  "capture-legacy-a.js",
-  "devices-a.js",
-  "devices-legacy-a.js",
-  "history-a.js",
-  "history-legacy-a.js",
-  "settings-a.js",
-  "settings-legacy-a.js",
-];
-const references = "./capture-a.js ./devices-a.js ./history-a.js ./settings-a.js";
-
-function errors(assets, android, source = references) {
-  return routeChunkErrors({
+function fixture({ android, staticRoutes = false }) {
+  const manifest = {};
+  const assets = [];
+  for (const route of ROUTE_CHUNK_PREFIXES) {
+    for (const legacy of [false, true]) {
+      const key = `${route}${legacy ? "-legacy" : ""}`;
+      const file = `assets/${key}-a.js`;
+      manifest[key] = {
+        file,
+        name: route,
+        ...(!android && !legacy ? { css: [`assets/${route}-a.css`] } : {}),
+      };
+      assets.push(file.replace("assets/", ""));
+    }
+    if (!android) assets.push(`${route}-a.css`);
+  }
+  const routeKeys = Object.keys(manifest);
+  manifest.app = {
+    file: "assets/App-a.js",
+    name: "App",
+    imports: staticRoutes ? routeKeys.filter((key) => !key.includes("legacy")) : [],
+    dynamicImports: staticRoutes ? [] : routeKeys.filter((key) => !key.includes("legacy")),
+  };
+  manifest["app-legacy"] = {
+    file: "assets/App-legacy-a.js",
+    name: "App",
+    imports: staticRoutes ? routeKeys.filter((key) => key.includes("legacy")) : [],
+    dynamicImports: staticRoutes ? [] : routeKeys.filter((key) => key.includes("legacy")),
+  };
+  assets.push("App-a.js", "App-legacy-a.js");
+  if (android) assets.push("style-a.css");
+  else assets.push("shared-a.css");
+  return {
     android,
     assets,
-    indexHtml: '<link rel="stylesheet" href="./assets/index-a.css">',
-    readAsset: (name) => (name.startsWith("App-") ? source : ""),
-  });
+    indexHtml: '<link rel="stylesheet" href="./assets/style-a.css">',
+    manifest,
+  };
 }
 
-test("accepts lazy JavaScript with one statically loaded Android stylesheet", () => {
-  assert.deepEqual(errors([...js, "index-a.css"], true), []);
+test("accepts dynamic routes with one statically loaded Android stylesheet", () => {
+  assert.deepEqual(routeChunkErrors(fixture({ android: true })), []);
 });
 
-test("rejects an Android route stylesheet that can strand the import promise", () => {
-  assert.ok(errors([...js, "index-a.css", "devices-a.css"], true).some((error) => error.includes("route CSS")));
+test("rejects Android route CSS that can leave Vite awaiting a link event", () => {
+  const input = fixture({ android: true });
+  input.manifest.devices.css = ["assets/devices-a.css"];
+  input.assets.push("devices-a.css");
+  assert.ok(routeChunkErrors(input).some((error) => error.includes("still owns split CSS")));
 });
 
-test("accepts route-specific stylesheets in the standard browser build", () => {
-  assert.deepEqual(
-    errors([...js, ...["capture", "devices", "history", "settings"].map((name) => `${name}-a.css`)], false),
-    [],
-  );
+test("accepts dynamic route stylesheets in the standard browser build", () => {
+  assert.deepEqual(routeChunkErrors(fixture({ android: false })), []);
 });
 
-test("rejects an eagerly folded route chunk", () => {
-  assert.ok(errors(js.filter((name) => name !== "devices-a.js"), true).some((error) => error.startsWith("devices:")));
+test("rejects an App graph that statically imports every route", () => {
+  const errors = routeChunkErrors(fixture({ android: true, staticRoutes: true }));
+  assert.ok(errors.some((error) => error.includes("is not a dynamic import")));
+  assert.ok(errors.some((error) => error.includes("is also statically imported")));
 });

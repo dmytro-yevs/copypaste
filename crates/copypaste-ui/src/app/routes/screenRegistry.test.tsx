@@ -1,8 +1,8 @@
 import { Suspense, type ComponentType } from "react";
-import { render, screen } from "@testing-library/react";
-import { ErrorBoundary } from "react-error-boundary";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { Boundary } from "@/app/shell/Boundary";
 import { createScreenRegistry } from "./screenRegistry";
 
 function moduleWith(label: string): Promise<{ default: ComponentType }> {
@@ -20,11 +20,11 @@ function loaders(history = moduleWith("Library"), devices = moduleWith("Devices"
 
 function Route({ registry, view }: { registry: ReturnType<typeof createScreenRegistry>; view: "history" | "devices" }) {
   return (
-    <ErrorBoundary fallback={<div>Screen unavailable</div>}>
+    <Boundary label={view === "devices" ? "Devices" : "Library"} onReset={registry[view].reset}>
       <Suspense fallback={<div>Loading screen</div>}>
         {registry[view].render(false)}
       </Suspense>
-    </ErrorBoundary>
+    </Boundary>
   );
 }
 
@@ -44,14 +44,22 @@ describe("lazy screen registry", () => {
     expect(await screen.findByText("Devices")).toBeTruthy();
   });
 
-  test("turns a rejected route import into the safe route boundary", async () => {
+  test("retries a rejected route with a fresh lazy import", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const rejected = Promise.reject(new Error("/private/path/devices.js failed"));
-    const registry = createScreenRegistry(loaders(undefined, rejected));
+    const devices = vi.fn(async () => {
+      if (devices.mock.calls.length === 1) throw new Error("/private/path/devices.js failed");
+      return { default: () => <div>Devices</div> };
+    });
+    const history = vi.fn(async () => ({ default: () => <div>Library</div> }));
+    const registry = createScreenRegistry({ ...loaders(), history, devices });
     render(<Route registry={registry} view="devices" />);
 
-    expect(await screen.findByText("Screen unavailable")).toBeTruthy();
+    expect(await screen.findByText("Devices didn’t open")).toBeTruthy();
     expect(document.body.textContent).not.toContain("/private/path/devices.js");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Devices")).toBeTruthy();
+    expect(devices).toHaveBeenCalledTimes(2);
+    expect(history).not.toHaveBeenCalled();
   });
 
   test("switches between independently lazy Devices and Library screens", async () => {
