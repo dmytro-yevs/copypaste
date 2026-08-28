@@ -12,6 +12,7 @@ export interface Selection {
   rangeTo: (id: string) => void;
   selectAll: () => void;
   replace: (ids: readonly string[]) => void;
+  reconcile: (scope: readonly string[], retained: readonly string[]) => void;
 }
 
 export function useSelection(visible: readonly Item[]): Selection {
@@ -67,6 +68,34 @@ export function useSelection(visible: readonly Item[]): Selection {
     anchor.current = ids[0] ?? null;
     setSelected(new Set(ids));
   }, []);
+  const reconcile = useCallback(
+    (scope: readonly string[], retained: readonly string[]) => {
+      const scoped = new Set(scope);
+      const kept = new Set(retained);
+      if (
+        anchor.current !== null &&
+        scoped.has(anchor.current) &&
+        !kept.has(anchor.current)
+      ) {
+        anchor.current = retained[0] ?? null;
+      }
+      setSelected((current) => {
+        const next = new Set(current);
+        for (const id of scope) {
+          if (kept.has(id)) next.add(id);
+          else next.delete(id);
+        }
+        if (
+          next.size === current.size &&
+          [...next].every((id) => current.has(id))
+        ) {
+          return current;
+        }
+        return next;
+      });
+    },
+    [],
+  );
 
   return {
     active: selected.size > 0,
@@ -78,5 +107,6 @@ export function useSelection(visible: readonly Item[]): Selection {
     rangeTo,
     selectAll,
     replace,
+    reconcile,
   };
 }

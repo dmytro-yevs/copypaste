@@ -25,12 +25,14 @@ export interface HistorySelection {
 interface PinRun {
   readonly token: number;
   readonly ids: readonly string[];
+  readonly retainedIds: readonly string[];
   readonly pinned: boolean;
   readonly active: boolean;
 }
 
-function sameIds(left: ReadonlySet<string>, right: readonly string[]): boolean {
-  return left.size === right.length && right.every((id) => left.has(id));
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  const expected = new Set(right);
+  return left.length === expected.size && left.every((id) => expected.has(id));
 }
 
 function unreconciledPinIds(
@@ -73,39 +75,55 @@ export function useHistorySelection(
         current.pinned,
       );
 
-      selection.replace(remaining);
+      selection.reconcile(current.ids, remaining);
       pinRun.current =
         remaining.length === 0
           ? null
-          : { ...current, ids: remaining, active: false };
+          : {
+              ...current,
+              ids: candidates,
+              retainedIds: remaining,
+              active: false,
+            };
       running.current = false;
       setBusy(false);
     },
-    [selection.replace],
+    [selection.reconcile],
   );
 
   useEffect(() => {
     const current = pinRun.current;
     if (current === null) return;
-    if (!current.active && !sameIds(selection.selected, current.ids)) {
+    const selectedInScope = current.ids.filter((id) =>
+      selection.selected.has(id),
+    );
+    if (
+      !current.active &&
+      !sameIds(selectedInScope, current.retainedIds)
+    ) {
       pinRun.current = null;
       return;
     }
 
     const remaining = unreconciledPinIds(items, current.ids, current.pinned);
-    if (remaining.length === current.ids.length) return;
+    if (sameIds(remaining, current.retainedIds)) return;
 
-    pinRun.current = { ...current, ids: remaining };
-    selection.replace(remaining);
-  }, [busy, items, selection.replace, selection.selected]);
+    pinRun.current =
+      !current.active && remaining.length === 0
+        ? null
+        : { ...current, retainedIds: remaining };
+    selection.reconcile(current.ids, remaining);
+  }, [busy, items, selection.reconcile, selection.selected]);
 
   const togglePin = useCallback(() => {
     if (running.current) return;
     const selected = selection.items;
     const pinned = !selection.allPinned;
+    const ids = selected.map((item) => item.id);
     const started: PinRun = {
       token: ++nextPinToken.current,
-      ids: selected.map((item) => item.id),
+      ids,
+      retainedIds: ids,
       pinned,
       active: true,
     };
