@@ -91,12 +91,26 @@ const RULES: ReadonlyArray<readonly [Kind, RegExp]> = [
  */
 export function kindOf(item: Item): Kind {
   if (item.is_sensitive) return "secret";
-  if (item.content_class === "image") return "image";
-  if (item.content_class === "file") return "file";
-  if (item.content_class === "other" || item.content === null)
-    return "unknown";
+  switch (item.content_class) {
+    case "image":
+      return "image";
+    case "file":
+      return "file";
+    case "other":
+      return "unknown";
+    case "text":
+      return item.content === null ? "unknown" : textKind(item.content);
+    default:
+      return unknownContentClass(item.content_class);
+  }
+}
 
-  const trimmed = item.content.trim();
+function unknownContentClass(_contentClass: never): "unknown" {
+  return "unknown";
+}
+
+function textKind(content: string): Kind {
+  const trimmed = content.trim();
   if (!trimmed) return "text";
 
   for (const [kind, pattern] of RULES) {
