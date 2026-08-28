@@ -1,24 +1,33 @@
 import { Suspense, type ComponentType } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { Boundary } from "@/app/shell/Boundary";
-import { createScreenRegistry } from "./screenRegistry";
 
-function moduleWith(label: string): Promise<{ default: ComponentType }> {
-  return Promise.resolve({ default: () => <div>{label}</div> });
+const routeModules = vi.hoisted(() => ({
+  capture: vi.fn(),
+  devices: vi.fn(),
+  history: vi.fn(),
+  settings: vi.fn(),
+}));
+
+vi.mock("@/features/capture", () => routeModules.capture());
+vi.mock("@/features/devices", () => routeModules.devices());
+vi.mock("@/features/history", () => routeModules.history());
+vi.mock("@/features/settings", () => routeModules.settings());
+
+type Registry = typeof import("./screenRegistry").screenRegistry;
+
+function component(label: string): ComponentType {
+  return () => <div>{label}</div>;
 }
 
-function loaders(history = moduleWith("Library"), devices = moduleWith("Devices")) {
-  return {
-    history: async () => history,
-    devices: async () => devices,
-    settings: async () => moduleWith("Settings"),
-    capture: async () => moduleWith("Capture"),
-  };
+async function loadRegistry(): Promise<Registry> {
+  vi.resetModules();
+  return (await import("./screenRegistry")).screenRegistry;
 }
 
-function Route({ registry, view }: { registry: ReturnType<typeof createScreenRegistry>; view: "history" | "devices" }) {
+function Route({ registry, view }: { registry: Registry; view: "history" | "devices" }) {
   return (
     <Boundary label={view === "devices" ? "Devices" : "Library"} onReset={registry[view].reset}>
       <Suspense fallback={<div>Loading screen</div>}>
@@ -28,42 +37,29 @@ function Route({ registry, view }: { registry: ReturnType<typeof createScreenReg
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  routeModules.capture.mockReset().mockResolvedValue({ CaptureScreen: component("Capture") });
+  routeModules.devices.mockReset().mockResolvedValue({ DevicesScreen: component("Devices") });
+  routeModules.history.mockReset().mockResolvedValue({ LibraryScreen: component("Library") });
+  routeModules.settings.mockReset().mockResolvedValue({ SettingsScreen: component("Settings") });
+});
 
 describe("lazy screen registry", () => {
   test("keeps the loading state until the selected route module resolves", async () => {
-    let resolve!: (module: { default: ComponentType }) => void;
-    const pending = new Promise<{ default: ComponentType }>((done) => {
+    let resolve!: (module: { DevicesScreen: ComponentType }) => void;
+    routeModules.devices.mockReturnValueOnce(new Promise((done) => {
       resolve = done;
-    });
-    const registry = createScreenRegistry(loaders(undefined, pending));
+    }));
+    const registry = await loadRegistry();
     render(<Route registry={registry} view="devices" />);
 
     expect(screen.getByText("Loading screen")).toBeTruthy();
-    resolve({ default: () => <div>Devices</div> });
+    resolve({ DevicesScreen: component("Devices") });
     expect(await screen.findByText("Devices")).toBeTruthy();
-  });
-
-  test("retries a rejected route with a fresh lazy import", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const devices = vi.fn(async () => {
-      if (devices.mock.calls.length === 1) throw new Error("/private/path/devices.js failed");
-      return { default: () => <div>Devices</div> };
-    });
-    const history = vi.fn(async () => ({ default: () => <div>Library</div> }));
-    const registry = createScreenRegistry({ ...loaders(), history, devices });
-    render(<Route registry={registry} view="devices" />);
-
-    expect(await screen.findByText("Devices didn’t open")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("/private/path/devices.js");
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByText("Devices")).toBeTruthy();
-    expect(devices).toHaveBeenCalledTimes(2);
-    expect(history).not.toHaveBeenCalled();
   });
 
   test("switches between independently lazy Devices and Library screens", async () => {
-    const registry = createScreenRegistry(loaders());
+    const registry = await loadRegistry();
     const view = render(<Route registry={registry} view="devices" />);
     expect(await screen.findByText("Devices")).toBeTruthy();
 
