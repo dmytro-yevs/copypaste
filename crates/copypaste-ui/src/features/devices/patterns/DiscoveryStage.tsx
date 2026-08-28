@@ -4,13 +4,15 @@ import { BrandMark } from "@/components/shared";
 import { Button, Icon } from "@/components/ui";
 import { DeviceKindIcon } from "@/features/devices/components/DeviceKindIcon";
 import {
-    DEVICE_PLATFORM_LABELS,
+    discoveryResultsPresentation,
+    discoveryStagePresentation,
+    radarDevicePresentation,
+    type DiscoveryStageState,
     type DevicePresentationIdentity,
-} from "@/features/devices/model/devicePresentation";
+} from "@/features/devices/model";
 import styles from "./DiscoveryStage.module.css";
 
-export type DiscoveryStageState =
-    "checking" | "idle" | "scanning" | "error" | "results";
+export type { DiscoveryStageState } from "@/features/devices/model";
 
 export interface RadarDevice {
     readonly id: string;
@@ -41,15 +43,7 @@ function positionedDevices(devices: readonly RadarDevice[]) {
     const occupied = new Set<number>();
 
     return visible.map((device) => {
-        const latency = device.latencyMs;
-        const distance =
-            typeof latency !== "number"
-                ? "unknown"
-                : latency <= 35
-                  ? "near"
-                  : latency <= 90
-                    ? "middle"
-                    : "far";
+        const presentation = radarDevicePresentation(device);
         const hash = [...device.id].reduce(
             (value, character) =>
                 (value * 31 + (character.codePointAt(0) ?? 0)) >>> 0,
@@ -66,7 +60,7 @@ function positionedDevices(devices: readonly RadarDevice[]) {
             ((hash & 2) === 0 ? 1 : -1) * (3 + ((hash >>> 2) % 3));
         return {
             device,
-            distance,
+            presentation,
             sector: sector + 1,
             motion: {
                 "--radar-drift-x": `${driftX}px`,
@@ -80,29 +74,6 @@ function positionedDevices(devices: readonly RadarDevice[]) {
     });
 }
 
-const copy = {
-    checking: {
-        title: "Checking nearby devices…",
-        body: "Reading the latest network discovery state.",
-    },
-    idle: {
-        title: "No devices in range",
-        body: "Open CopyPaste on another device, then scan again.",
-    },
-    scanning: {
-        title: "Scanning your network…",
-        body: "Available CopyPaste devices will appear on the radar.",
-    },
-    error: {
-        title: "Network discovery is unavailable",
-        body: "Devices on this network couldn’t be checked.",
-    },
-    results: {
-        title: "Nearby devices",
-        body: "Select a device on the radar or from the list to pair securely.",
-    },
-} as const;
-
 export function DiscoveryStage({
     state,
     devices,
@@ -112,33 +83,21 @@ export function DiscoveryStage({
     devices: readonly RadarDevice[];
     children: ReactNode;
 }) {
-    const presentation = copy[state];
-    const busy = state === "checking" || state === "scanning";
-    const radarActive = state !== "error";
-    const role = state === "error" ? "alert" : busy ? "status" : undefined;
+    const presentation = discoveryStagePresentation(state);
     const positioned = positionedDevices(devices);
+    const results = discoveryResultsPresentation(devices.length);
 
     return (
         <div className={styles.stage}>
             <div
                 className={styles.state}
                 data-state={state}
-                role={role}
-                aria-live={
-                    state === "error"
-                        ? "assertive"
-                        : busy
-                          ? "polite"
-                          : undefined
-                }
-                aria-atomic={role ? true : undefined}
-                aria-label={
-                    state === "error"
-                        ? undefined
-                        : `${presentation.title} ${presentation.body}`
-                }
+                role={presentation.a11y.role}
+                aria-live={presentation.a11y.live}
+                aria-atomic={presentation.a11y.atomic}
+                aria-label={presentation.a11y.label}
             >
-                <div className={styles.radar} aria-label="Nearby device radar">
+                <div className={styles.radar} aria-label={presentation.radarLabel}>
                     <svg
                         className={styles.radarPlot}
                         viewBox="0 0 100 100"
@@ -203,7 +162,7 @@ export function DiscoveryStage({
                                 />
                             ))}
                         </g>
-                        {radarActive ? (
+                        {presentation.radarActive ? (
                             <g className={styles.sweep} data-radar-sweep>
                                 <path
                                     className={styles.sweepSector}
@@ -214,7 +173,7 @@ export function DiscoveryStage({
                             </g>
                         ) : null}
                     </svg>
-                    {state === "error" ? (
+                    {presentation.unavailable ? (
                         <span
                             className={styles.unavailable}
                             data-discovery-unavailable
@@ -223,7 +182,7 @@ export function DiscoveryStage({
                                 className={styles.unavailableIcon}
                                 aria-hidden="true"
                             >
-                                <Icon name="wifiOff" size="lg" />
+                                <Icon name={presentation.unavailableIcon!} size="lg" />
                             </span>
                             <span className={styles.unavailableCopy}>
                                 <strong>{presentation.title}</strong>
@@ -241,7 +200,7 @@ export function DiscoveryStage({
                             </span>
                             <span className={styles.deviceLayer}>
                                 {positioned.map(
-                                    ({ device, distance, sector, motion }) => (
+                                    ({ device, presentation: devicePresentation, sector, motion }) => (
                                         <Button
                                             key={device.id}
                                             type="button"
@@ -249,11 +208,11 @@ export function DiscoveryStage({
                                             size="sm"
                                             className={styles.radarDevice}
                                             data-sector={sector}
-                                            data-distance={distance}
+                                            data-distance={devicePresentation.distance}
                                             data-selected={device.selected || undefined}
                                             style={motion}
                                             aria-pressed={device.selected}
-                                            aria-label={`${device.name}. ${DEVICE_PLATFORM_LABELS[device.identity.platform]}. ${device.address}. ${typeof device.latencyMs !== "number" ? "Latency unavailable, shown in the unknown-distance band" : `${device.latencyMs} milliseconds`}. ${device.status}.`}
+                                            aria-label={`${device.name}. ${devicePresentation.a11yLabel}`}
                                             onClick={device.onSelect}
                                         >
                                             <span
@@ -286,14 +245,8 @@ export function DiscoveryStage({
                         role="status"
                         aria-live="polite"
                     >
-                        <strong>
-                            {devices.length}{" "}
-                            {devices.length === 1 ? "device" : "devices"} found
-                        </strong>
-                        <span>
-                            Protected pairing starts only after you choose
-                            Connect.
-                        </span>
+                        <strong>{results.label}</strong>
+                        <span>{results.detail}</span>
                     </span>
                     {children}
                 </div>

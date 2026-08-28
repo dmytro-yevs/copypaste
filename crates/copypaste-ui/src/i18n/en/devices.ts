@@ -108,6 +108,36 @@ export const devices = {
       minutesAgo: "{{count}}m ago",
       hoursAgo: "{{count}}h ago",
       daysAgo: "{{count}}d ago",
+      stage: {
+        checking: {
+          title: "Checking nearby devices…",
+          body: "Reading the latest network discovery state.",
+        },
+        idle: {
+          title: "No devices in range",
+          body: "Open CopyPaste on another device, then scan again.",
+        },
+        scanning: {
+          title: "Scanning your network…",
+          body: "Available CopyPaste devices will appear on the radar.",
+        },
+        error: {
+          title: "Network discovery is unavailable",
+          body: "Devices on this network couldn’t be checked.",
+        },
+        results: {
+          title: "Nearby devices",
+          body: "Select a device on the radar or from the list to pair securely.",
+        },
+      },
+      radar: {
+        label: "Nearby device radar",
+        latencyUnknown: "Latency unavailable, shown in the unknown-distance band",
+        latencyMilliseconds: "{{count}} milliseconds",
+        found_one: "{{count}} device found",
+        found_other: "{{count}} devices found",
+        foundDetail: "Protected pairing starts only after you choose Connect.",
+      },
     },
     discoveryCard: {
       subtitle: "Nearby · name unverified",

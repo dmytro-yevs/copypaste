@@ -7,6 +7,7 @@ import {
     deviceIconKind,
     discoveredDeviceIdentity,
     localDeviceIdentity,
+    peerIdentity,
     type DevicePresentationIdentity,
 } from "./identity";
 import { peerPresence, peerState, type PeerHealth } from "./peerState";
@@ -24,6 +25,7 @@ export {
     deviceIconKind,
     discoveredDeviceIdentity,
     localDeviceIdentity,
+    peerIdentity,
 };
 export type {
     DevicePresentationIdentity,

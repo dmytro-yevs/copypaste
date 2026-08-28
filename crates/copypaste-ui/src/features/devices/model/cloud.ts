@@ -15,6 +15,7 @@ export interface CloudConnectionPresentation {
     readonly title: string;
     readonly detail?: string;
     readonly busy: boolean;
+    readonly role: "status";
     readonly live: "polite";
     readonly action: { readonly label: string; readonly icon: "settings" };
 }
@@ -31,6 +32,7 @@ export function cloudConnectionPresentation(
             icon: "cloud",
             title: t("devices.presentation.cloud.title"),
             busy: true,
+            role: "status",
             live: "polite",
             action,
         };
@@ -54,6 +56,7 @@ function cloud(
         title: t("devices.presentation.cloud.title"),
         detail: t(`devices.presentation.cloud.${detail}`),
         busy: false,
+        role: "status",
         live: "polite",
         action,
     };

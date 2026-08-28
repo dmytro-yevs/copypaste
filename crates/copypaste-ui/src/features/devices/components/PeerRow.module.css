@@ -12,18 +12,6 @@
   gap: var(--s-3);
 }
 
-.stateIcon {
-  display: flex;
-  inline-size: var(--sz-tile);
-  block-size: var(--sz-tile);
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--r-ctl);
-  color: var(--dim);
-  background: var(--elevated);
-}
-
 .identity,
 .detail,
 .addressDetail {

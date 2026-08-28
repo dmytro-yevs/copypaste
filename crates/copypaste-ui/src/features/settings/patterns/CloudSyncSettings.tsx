@@ -3,6 +3,7 @@ import { useId } from "react";
 import { Badge, Button, Icon } from "@/components/ui";
 import { FieldFeedback, SkeletonText } from "@/components/shared";
 import { Section } from "@/features/settings/components/Section";
+import { cloudConnectionPresentation } from "@/features/devices";
 import { useCloudAccountController } from "@/features/settings/hooks/useCloudAccountController";
 import { CloudAccountForm } from "@/features/settings/patterns/cloud/CloudAccountForm";
 import { CloudConnectedControls } from "@/features/settings/patterns/cloud/CloudConnectedControls";
@@ -19,6 +20,11 @@ export function CloudSyncSettings() {
   const { cloud, status } = controller;
   const configured = Boolean(status?.configured);
   const connected = Boolean(status?.signed_in && status.key_ready);
+  const deviceCloud = cloudConnectionPresentation(
+    status,
+    cloud.isError,
+    cloud.isLoading,
+  );
 
   const badge = t(cloud.isLoading
     ? "settings.sync.cloud.loading"
@@ -65,15 +71,13 @@ export function CloudSyncSettings() {
       {badge}
     </Badge>
   );
-  const statusIcon = cloud.isLoading
-    ? "cloud"
-    : cloud.isError
-      ? "alert"
-      : connected
-        ? "shieldCheck"
-        : configured
-          ? "cloudOff"
-          : "cloud";
+  const statusIcon =
+    deviceCloud.state === "checking" ||
+    deviceCloud.state === "unavailable" ||
+    deviceCloud.state === "signed-out" ||
+    deviceCloud.state === "healthy"
+      ? deviceCloud.icon
+      : "cloud";
 
   return (
     <Section

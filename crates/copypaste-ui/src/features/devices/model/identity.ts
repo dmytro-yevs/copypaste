@@ -3,6 +3,7 @@ import type {
     DeviceClass,
     DevicePlatform,
     DiscoveredDevice,
+    PeerInfo,
 } from "@/lib/ipc";
 
 export type DevicePresentationIcon =
@@ -68,6 +69,17 @@ export function discoveredDeviceIdentity(
     device: DiscoveredDevice,
 ): DevicePresentationIdentity {
     const profile = device.details?.profile;
+    return profile
+        ? {
+              platform: profile.platform,
+              formFactor: profile.device_class,
+              source: "peer-asserted",
+          }
+        : UNKNOWN_DEVICE_IDENTITY;
+}
+
+export function peerIdentity(peer: PeerInfo): DevicePresentationIdentity {
+    const profile = peer.details?.profile;
     return profile
         ? {
               platform: profile.platform,

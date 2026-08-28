@@ -96,6 +96,9 @@ describe("DiscoveryStage radar", () => {
         );
 
         expect(screen.getByLabelText("Nearby device radar")).toBeTruthy();
+        expect(screen.getAllByRole("status")[0].getAttribute("aria-live")).toBe(
+            "polite",
+        );
         fireEvent.click(
             screen.getByRole("button", {
                 name: /Studio Mac.*macOS.*192\.0\.2\.10.*12 milliseconds.*Available to pair/,

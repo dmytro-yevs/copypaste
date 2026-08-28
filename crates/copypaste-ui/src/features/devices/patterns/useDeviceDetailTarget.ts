@@ -5,6 +5,7 @@ import {
     discoveredDeviceIdentity,
     localDeviceIdentity,
     ownDeviceStatus,
+    peerIdentity,
     peerStatus,
 } from "@/features/devices/model/devicePresentation";
 import {
@@ -101,11 +102,7 @@ export function useDeviceDetailTarget({
                 ? {
                       kind: "peer",
                       name: peer.name,
-                      identity: {
-                          platform: "unknown",
-                          formFactor: "unknown",
-                          source: "unknown",
-                      },
+                      identity: peerIdentity(peer),
                       status: peerStatus(
                           peer,
                           health[peer.pairing_id],
