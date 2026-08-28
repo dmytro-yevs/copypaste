@@ -15,6 +15,10 @@
   flex: 1;
 }
 
+@media (pointer: coarse) {
+  .input { min-block-size: var(--tap-min); }
+}
+
 .input::-webkit-search-cancel-button {
   -webkit-appearance: none;
   appearance: none;

@@ -10,6 +10,28 @@ const styles = readFileSync(
   resolve(process.cwd(), "src/components/shared/SearchField.module.css"),
   "utf8",
 );
+const controlSurfaceStyles = readFileSync(
+  resolve(process.cwd(), "src/components/ui/control-surface.module.css"),
+  "utf8",
+);
+const inputStyles = readFileSync(
+  resolve(process.cwd(), "src/components/ui/input.module.css"),
+  "utf8",
+);
+const resetStyles = readFileSync(
+  resolve(process.cwd(), "src/styles/reset.css"),
+  "utf8",
+);
+const tokenStyles = readFileSync(
+  resolve(process.cwd(), "../../design/dist/css/tokens.base.css"),
+  "utf8",
+);
+
+function pixelToken(source: string, name: string): number {
+  const match = source.match(new RegExp(`--${name}:\\s*(\\d+)px;`));
+  if (!match) throw new Error(`Missing ${name} token`);
+  return Number(match[1]);
+}
 
 describe("SearchField", () => {
   it("keeps its searchbox vocabulary and renders one clear control", () => {
@@ -31,6 +53,21 @@ describe("SearchField", () => {
   it("suppresses the native search cancellation control", () => {
     expect(styles).toMatch(
       /::-webkit-search-cancel-button\s*\{\s*-webkit-appearance:\s*none;\s*appearance:\s*none;\s*display:\s*none;/,
+    );
+  });
+
+  it("keeps the coarse search input's border box at the tap target", () => {
+    const coarseTokens = tokenStyles.match(/@media \(pointer: coarse\)\s*\{\s*:root \{(?<tokens>[\s\S]*?)\}\s*\}/);
+    const tapTarget = pixelToken(coarseTokens?.groups?.tokens ?? "", "tap-min");
+    const surfaceBorder = pixelToken(tokenStyles, "stroke-1");
+
+    expect(controlSurfaceStyles).toMatch(/border:\s*var\(--stroke-1\) solid/);
+    expect(inputStyles).toMatch(/\.embedded\s*\{[\s\S]*?min-block-size:\s*100%/);
+    expect(resetStyles).toMatch(/\*,[\s\S]*?box-sizing:\s*border-box/);
+    expect(tapTarget).toBe(44);
+    expect(tapTarget - surfaceBorder * 2).toBe(42);
+    expect(styles).toMatch(
+      /@media \(pointer: coarse\)\s*\{\s*\.input\s*\{\s*min-block-size:\s*var\(--tap-min\);/,
     );
   });
 });
