@@ -431,9 +431,7 @@ try {
         $featureStates += Save-WindowsProtectedFeatureState `
             $app $evidencePath "devices" "desktop-pairing-entry" "Pairing code" `
             $pairingNames $pairingNames @("Pairing code", "Pairing address") "" $captureTrace
-        [Windows.Forms.SendKeys]::SendWait("{ESC}")
-        Wait-UiaName $app "Connect a device" | Out-Null
-        $restoredShell = Wait-ForegroundWindow $app
+        $restoredShell = Close-WindowsProtectedPairingEntry $app $pairingNames
         Write-WindowCaptureObservation $app $captureTrace "devices/after-close" $restoredShell
         Invoke-UiaNamedControl $app "Preferences" "Mode"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Mode" "" $captureTrace

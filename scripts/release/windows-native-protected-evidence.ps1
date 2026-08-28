@@ -105,6 +105,83 @@ function Wait-ProtectedUiaName(
     } { Get-ProtectedUiaSummary $App $AllowedNames } 15000
 }
 
+function New-ProtectedPairingTransitionSummary(
+    [IntPtr]$PairingHandle,
+    $Window,
+    $Snapshot,
+    [string[]]$AllowedNames
+) {
+    $tree = Get-ProtectedUiaSnapshotSummary $Snapshot $AllowedNames
+    return "$tree current_is_pairing=$([int64]$Window.handle -eq $PairingHandle.ToInt64()) foreground=$([bool]$Window.foreground) visible=$([bool]$Window.visible) minimized=$([bool]$Window.minimized) capture_allowed=$([bool]$Window.capture_allowed) display_affinity=$([int64]$Window.display_affinity)"
+}
+
+function Get-ProtectedPairingTransitionSummary(
+    [Diagnostics.Process]$App,
+    [IntPtr]$PairingHandle,
+    [string[]]$AllowedNames
+) {
+    try {
+        $App.Refresh()
+        $window = Get-WindowCaptureState $App.MainWindowHandle
+        $root = Get-AppAutomationRoot $App
+        if ($null -eq $root) {
+            return "protected pairing transition: native window handle is not ready"
+        }
+        $snapshot = Get-ProtectedUiaSnapshot $root $AllowedNames
+        return New-ProtectedPairingTransitionSummary $PairingHandle $window $snapshot $AllowedNames
+    } catch {
+        return "protected pairing transition: diagnostics unavailable"
+    }
+}
+
+function Close-WindowsProtectedPairingEntry(
+    [Diagnostics.Process]$App,
+    [string[]]$AllowedNames
+) {
+    try {
+        $App.Refresh()
+        $pairingHandle = $App.MainWindowHandle
+        if ($pairingHandle -eq [IntPtr]::Zero) { throw "missing protected handle" }
+        [Windows.Forms.SendKeys]::SendWait("{ESC}")
+    } catch {
+        throw "protected pairing entry could not be dismissed"
+    }
+    $diagnosticNames = @($AllowedNames) + @("Connect a device")
+    return Wait-Readiness "protected pairing entry closed to restored shell" {
+        try {
+            $App.Refresh()
+            if ($App.HasExited) { return New-ProbeInvariant "the installed app exited" }
+            $handle = $App.MainWindowHandle
+            if ($handle -eq [IntPtr]::Zero) {
+                return New-ProbeNotReady "the restored shell handle is not ready"
+            }
+            if ($handle -eq $pairingHandle) {
+                return New-ProbeNotReady "the protected pairing window remains active"
+            }
+            if ($null -eq (Get-UiaNamedElement $App "Connect a device")) {
+                return New-ProbeNotReady "the allowlisted shell control is not ready"
+            }
+            $window = Get-WindowCaptureState $handle
+            $plan = Get-WindowActivationPlan $window
+            if ($plan.restore) {
+                [CopyPasteNativeWindowEvidence]::ShowWindowAsync($handle, 9) | Out-Null
+            }
+            if ($plan.activate) {
+                [CopyPasteNativeWindowEvidence]::SetForegroundWindow($handle) | Out-Null
+            }
+            if ($plan.restore -or $plan.activate) {
+                $window = Get-WindowCaptureState $handle
+            }
+            if (Test-WindowCaptureReady $window -and $window.display_affinity -eq 0) {
+                return New-ProbeReady $window
+            }
+            return New-ProbeNotReady "the restored shell window state is not ready"
+        } catch {
+            return New-ProbeTransient "the protected pairing transition is temporarily unavailable"
+        }
+    } { Get-ProtectedPairingTransitionSummary $App $pairingHandle $diagnosticNames } 15000
+}
+
 function New-WindowsProtectedStateRecord(
     [string]$Feature,
     [string]$State,
