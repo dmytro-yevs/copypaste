@@ -14,6 +14,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
+import { withSelectionActionProbe } from "../src/harness/selection-diagnostics.js";
 import {
   ROW,
   clickButton,
@@ -213,15 +214,28 @@ describe("selection mode", () => {
     expect(firstRowId).toBeDefined();
     expect(await checkedRowIds()).toEqual([firstRowId]);
 
-    await clickButton(app.browser, "Done", {
-      within: SELECTION_TOOLBAR,
-      timeout: 5_000,
-    });
-    await app.browser.waitUntil(
-      async () =>
-        !(await app.browser.$(SELECTION_TOOLBAR)).isExisting() &&
-        (await checkedRowIds()).length === 0,
-      { timeout: 5_000, timeoutMsg: "selection mode stayed active after Done" },
+    await withSelectionActionProbe(app.browser, "Done", (probe) =>
+      probe.perform(
+        "history-controls-done",
+        {
+          budgetMs: 5_000,
+        },
+        () =>
+          clickButton(app.browser, "Done", {
+            within: SELECTION_TOOLBAR,
+            timeout: 5_000,
+          }),
+        () =>
+          app.browser.waitUntil(
+            async () =>
+              !(await app.browser.$(SELECTION_TOOLBAR)).isExisting() &&
+              (await checkedRowIds()).length === 0,
+            {
+              timeout: 5_000,
+              timeoutMsg: "selection mode stayed active after Done",
+            },
+          ),
+      ),
     );
     expect(await checkedRowIds()).toEqual([]);
     expect(await count(app.browser, ROW_SELECTION)).toBe(4);
