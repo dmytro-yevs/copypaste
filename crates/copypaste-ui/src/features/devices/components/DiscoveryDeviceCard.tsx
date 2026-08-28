@@ -4,6 +4,7 @@ import {
     discoveredDeviceIdentity,
     discoveredStatus,
 } from "@/features/devices/model/devicePresentation";
+import { t } from "@/i18n";
 import type { DiscoveredDevice } from "@/lib/ipc";
 import styles from "./DiscoveryDeviceCard.module.css";
 
@@ -27,7 +28,10 @@ export function DiscoveryDeviceCard({
             className={styles.root}
             data-selected={selected || undefined}
             aria-expanded={selected}
-            aria-label={`${device.name}. Network-advertised name, unverified. ${status.label}. Show details.`}
+            aria-label={t("devices.presentation.discoveryCard.ariaLabel", {
+                name: device.name,
+                status: status.label,
+            })}
             data-device-selection-key={`discovered:${device.discovery_id}`}
             onClick={onSelect}
         >
@@ -37,7 +41,7 @@ export function DiscoveryDeviceCard({
             <span className={styles.copy}>
                 <strong>{device.name}</strong>
                 <span className={styles.metaLine}>
-                    <span>Nearby · name unverified</span>
+                    <span>{t("devices.presentation.discoveryCard.subtitle")}</span>
                 </span>
             </span>
             <Icon name="caretRight" size="sm" className={styles.chevron} />
