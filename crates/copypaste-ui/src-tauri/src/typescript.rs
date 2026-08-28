@@ -31,7 +31,8 @@ use crate::model::{
     UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon, UiSyncResult,
 };
 use crate::pairing_presentation::semantics::{
-    PairingIcon, PairingLive, PairingMessageId, PairingSemantics, PairingTone,
+    resolve_pairing_semantics, PairingIcon, PairingLive, PairingMessageId, PairingSemantics,
+    PairingTone,
 };
 use crate::pairing_presentation::PairingPresentationState;
 use crate::service::diagnostics::{Diagnostics, HistoryRead};
@@ -113,6 +114,7 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<PairingTone>(&config, &mut output);
     declaration::<PairingLive>(&config, &mut output);
     declaration::<PairingSemantics>(&config, &mut output);
+    pairing_semantics_metadata(&mut output);
     declaration::<PairingPresentationState>(&config, &mut output);
     declaration::<PairedDevice>(&config, &mut output);
     declaration::<PairingCeremony>(&config, &mut output);
@@ -148,6 +150,27 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
         command_inventory(),
     )?;
     Ok(())
+}
+
+fn pairing_semantics_metadata(output: &mut String) {
+    output.push_str("export const PAIRING_SEMANTICS_BY_STATE = {\n");
+    for pairing_state in [
+        PairingState::Idle,
+        PairingState::WaitingForPeer,
+        PairingState::Handshaking,
+        PairingState::AwaitingConfirmation,
+        PairingState::Confirmed,
+        PairingState::Rejected,
+        PairingState::Cancelled,
+        PairingState::TimedOut,
+        PairingState::Failed,
+    ] {
+        let state = serde_json::to_string(&pairing_state).expect("pairing state serializes");
+        let semantics = serde_json::to_string(&resolve_pairing_semantics(pairing_state, None))
+            .expect("pairing semantics serializes");
+        output.push_str(&format!("  {state}: {semantics},\n"));
+    }
+    output.push_str("} as const satisfies Record<PairingState, PairingSemantics>;\n\n");
 }
 
 fn command_contracts(output: &mut String) {

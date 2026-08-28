@@ -112,7 +112,7 @@ export type PairingRole = "initiator" | "responder";
 
 export type PairingState = "idle" | "waiting_for_peer" | "handshaking" | "awaiting_confirmation" | "confirmed" | "rejected" | "cancelled" | "timed_out" | "failed";
 
-export type PairingMessageId = "ready" | "waiting_for_peer" | "securing_connection" | "compare_codes" | "paired" | "rejected" | "cancelled" | "timed_out" | "code_mismatch" | "incompatible_version" | "unreachable" | "busy" | "failed";
+export type PairingMessageId = "ready" | "waiting_for_peer" | "securing_connection" | "compare_codes" | "paired" | "rejected" | "cancelled" | "timed_out" | "code_mismatch" | "incompatible_version" | "unreachable" | "busy" | "limit" | "failed";
 
 export type PairingIcon = "shieldCheck" | "spinner" | "checkCircle" | "close" | "alert" | "wifiOff";
 
@@ -121,6 +121,18 @@ export type PairingTone = "neutral" | "info" | "success" | "warning" | "danger";
 export type PairingLive = "status" | "alert";
 
 export type PairingSemantics = { message_id: PairingMessageId, icon: PairingIcon, tone: PairingTone, live: PairingLive, active: boolean, terminal: boolean, needs_devices: boolean, review_secure: boolean, retry: boolean, };
+
+export const PAIRING_SEMANTICS_BY_STATE = {
+  "idle": {"message_id":"ready","icon":"shieldCheck","tone":"neutral","live":"status","active":false,"terminal":false,"needs_devices":false,"review_secure":false,"retry":false},
+  "waiting_for_peer": {"message_id":"waiting_for_peer","icon":"spinner","tone":"info","live":"status","active":true,"terminal":false,"needs_devices":false,"review_secure":false,"retry":false},
+  "handshaking": {"message_id":"securing_connection","icon":"spinner","tone":"info","live":"status","active":true,"terminal":false,"needs_devices":true,"review_secure":false,"retry":false},
+  "awaiting_confirmation": {"message_id":"compare_codes","icon":"shieldCheck","tone":"warning","live":"status","active":true,"terminal":false,"needs_devices":true,"review_secure":true,"retry":false},
+  "confirmed": {"message_id":"paired","icon":"checkCircle","tone":"success","live":"status","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":false},
+  "rejected": {"message_id":"rejected","icon":"close","tone":"warning","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
+  "cancelled": {"message_id":"cancelled","icon":"close","tone":"neutral","live":"status","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
+  "timed_out": {"message_id":"timed_out","icon":"alert","tone":"warning","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
+  "failed": {"message_id":"failed","icon":"alert","tone":"danger","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
+} as const satisfies Record<PairingState, PairingSemantics>;
 
 export type PairingPresentationState = "available" | "presented" | "unavailable";
 
