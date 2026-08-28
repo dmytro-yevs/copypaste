@@ -5,6 +5,8 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
 # shellcheck source=scripts/release/android-ui-evidence-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/android-ui-evidence-lib.sh"
+# shellcheck source=scripts/release/android-navigation-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-navigation-lib.sh"
 # shellcheck source=scripts/release/native-cloud-evidence-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/native-cloud-evidence-lib.sh"
 
@@ -24,6 +26,7 @@ CLOUD_FORM="Cloud account sign in"
 FIELD_EMAIL="field:$CLOUD_FORM:0"
 FIELD_PASSWORD="field:$CLOUD_FORM:1"
 FIELD_PASSPHRASE="field:$CLOUD_FORM:2"
+CLOUD_SECTION_ACTION="Cloud sync Account, encryption and cloud status"
 
 now_ms() { python3 -c 'import time; print(time.time_ns() // 1000000)'; }
 
@@ -58,10 +61,20 @@ install_and_open() { # <apk>
     }
 }
 
+cloud_settings_pane_holds() { # <artifact>
+    enabled_node_exists_exact "$1" "Preference sections"
+}
+
+cloud_detail_holds() { # <artifact>
+    node_exists_exact "$1" "Cloud sync" \
+        && enabled_action_exists_exact "$1" "Back to Preferences"
+}
+
 open_cloud() {
-    tap_selector "Settings" "$OUT/settings-nav.xml" || return 1
-    tap_selector "Sync" "$OUT/settings-sync.xml" || return 1
-    find_scrolling "Cloud sync" "$OUT/cloud-visible.xml" up
+    tap_until_state "Settings" "$OUT/settings-nav.xml" \
+        cloud_settings_pane_holds none || return 1
+    tap_until_state "$CLOUD_SECTION_ACTION" "$OUT/settings-sync.xml" \
+        cloud_detail_holds up
 }
 
 capture_state() { # <state>
@@ -447,6 +460,42 @@ PY
         || bad "a form missing a field fails without hint to read"
 }
 
+cloud_navigation_fixture_holds() { # <temp>
+    (
+        local OUT="$1" primary settings prefs_hidden prefs_visible detail
+        primary='<node text="Primary" bounds="[49,572][271,628]"><node text="Settings" bounds="[196,577][266,623]" enabled="true" clickable="true"/></node>'
+        settings='<node text="Preference sections" bounds="[12,184][308,640]" enabled="true"/>'
+        prefs_hidden="${settings}<node text=\"$CLOUD_SECTION_ACTION\" enabled=\"true\" clickable=\"true\"/>"
+        prefs_visible="${settings}<node text=\"$CLOUD_SECTION_ACTION\" bounds=\"[13,444][307,510]\" enabled=\"true\" clickable=\"true\"/>"
+        detail='<node text="Cloud sync" bounds="[12,12][308,640]" enabled="true"><node text="Back to Preferences" bounds="[12,29][56,74]" enabled="true" clickable="true"/></node>'
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary</hierarchy>" > "$OUT/cloud-library.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$settings</hierarchy>" > "$OUT/cloud-preferences.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$prefs_hidden</hierarchy>" > "$OUT/cloud-row-hidden.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$prefs_visible</hierarchy>" > "$OUT/cloud-row-visible.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$detail</hierarchy>" > "$OUT/cloud-detail.xml"
+        ui_fixtures "$OUT/cloud-library.xml" "$OUT/cloud-library.xml" \
+            "$OUT/cloud-preferences.xml" "$OUT/cloud-row-hidden.xml" \
+            "$OUT/cloud-row-visible.xml" "$OUT/cloud-detail.xml"
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        NAVIGATION_FIXTURE_DIRECTION=""
+        open_cloud \
+            && [[ $UI_FIXTURE_INDEX -eq 6 && $UI_FIXTURE_TAPS -eq 3 \
+                  && $UI_FIXTURE_SCROLLS -eq 1 \
+                  && "$NAVIGATION_FIXTURE_DIRECTION" == up ]] \
+            && cloud_settings_pane_holds "$OUT/settings-nav.xml" \
+            && cloud_detail_holds "$OUT/settings-sync.xml"
+    )
+}
+
+cloud_navigation_self_test() { # <temp>
+    cloud_navigation_fixture_holds "$1" \
+        && ok "Cloud settings retries a swallowed tab tap and verifies its detail pane" \
+        || bad "Cloud settings retries a swallowed tab tap and verifies its detail pane"
+}
+
 # Cards taken from run 31671766432's published dumps: the release leg signed in,
 # lost the session to the offline probe, and then asserted a sign-out against
 # the sign-in form that came back.
@@ -538,6 +587,8 @@ if [[ "$MODE" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
     android_ui_self_test
+    android_navigation_self_test "$SELF_TEST_TMP"
+    cloud_navigation_self_test "$SELF_TEST_TMP"
     cloud_form_self_test "$SELF_TEST_TMP"
     sign_out_self_test "$SELF_TEST_TMP"
     cloud_evidence_self_test "$SELF_TEST_TMP"
