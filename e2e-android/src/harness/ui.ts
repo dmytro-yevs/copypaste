@@ -109,15 +109,17 @@ export async function dismissFirstRun(app: AndroidApp): Promise<void> {
   await waitFor(
     async () => {
       if (await navigationIsReady(app)) return true;
-      return app.withPage((page) => page.evaluate(() => {
-        const explore = Array.from(
-          document.querySelectorAll<HTMLButtonElement>(
-            '[data-onboarding-step="welcome"] button',
-          ),
-        ).find((button) => button.textContent?.trim() === "Explore first");
-        explore?.click();
-        return false;
-      }));
+      return app.withPage((page) =>
+        page.evaluate(() => {
+          const explore = Array.from(
+            document.querySelectorAll<HTMLButtonElement>(
+              '[data-onboarding-step="welcome"] button',
+            ),
+          ).find((button) => button.textContent?.trim() === "Explore first");
+          explore?.click();
+          return false;
+        }),
+      );
     },
     "the welcome flow never yielded to settled navigation",
     60_000,
@@ -293,6 +295,35 @@ export async function interactableElementBox(
           right: element.right,
         }
       : null;
+  });
+}
+
+export async function interactableControlSurfaceBox(
+  app: AndroidApp,
+  selector: string,
+): Promise<(ElementBox & { right: number }) | null> {
+  return app.withPage(async (page) => {
+    const element = await firstInteractableElement(page, selector);
+    if (!element) return null;
+    return page.evaluate(
+      (query, index) => {
+        const target = document.querySelectorAll(query)[index] as
+          | HTMLElement
+          | undefined;
+        const surface = target?.closest<HTMLElement>(
+          '[data-slot="control-surface"]',
+        );
+        if (!surface) return null;
+        const rect = surface.getBoundingClientRect();
+        return {
+          width: rect.width,
+          height: rect.height,
+          right: rect.right,
+        };
+      },
+      selector,
+      element.index,
+    );
   });
 }
 
@@ -485,6 +516,17 @@ export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
   if ((await byLabel(app, "Close search")).length > 0) {
     await tapButton(app, "Close search");
   }
+}
+
+export async function closeHistorySearch(app: AndroidApp): Promise<void> {
+  const expanded = '[data-slot="history-toolbar"][data-search-expanded]';
+  if ((await count(app, expanded)) === 0) return;
+  await clearField(app, SEARCH);
+  await tapButton(app, "Close search");
+  await waitFor(
+    async () => (await count(app, expanded)) === 0,
+    "the expanded history search never closed",
+  );
 }
 
 export async function openHistorySearch(app: AndroidApp): Promise<void> {
