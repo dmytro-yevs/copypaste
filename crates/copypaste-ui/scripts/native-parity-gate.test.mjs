@@ -18,11 +18,12 @@ const WINDOWS_STATES = new Map([
   ["capture", { state: "service-capture-status", name: "Background capture", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGMUW+zFwMDAAKEAEOcCCBlQdmcAAAAASUVORK5CYII=" }],
   ["capture/copy-feedback-setting", { feature: "capture", state: "copy-feedback-setting", name: "Copy feedback sound", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGMIqDgRUnOGIaLhQkzLFQArGgaJKbubPAAAAABJRU5ErkJggg==" }],
   ["devices", {
+    type: "protected-accessibility",
     state: "desktop-pairing-entry",
     name: "Pairing code",
     requiredNames: ["Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel"],
     requiredEnabledNames: ["Pairing code", "Pairing address", "Pair", "Cancel"],
-    png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGNUTX7NwMDAxMDAcGuOCAAUogMBx1ZqEgAAAABJRU5ErkJggg==",
+    requiredPasswordNames: ["Pairing code", "Pairing address"],
   }],
   ["settings-and-service", { state: "appearance", name: "Mode", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGOcbPyKgYGBiYGBIX2mNgAWpQLf2/uWLgAAAABJRU5ErkJggg==" }],
   ["settings-and-service/updater-configured", { feature: "settings-and-service", state: "updater-configured", name: "Check for updates", png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8DAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==" }],
@@ -94,14 +95,15 @@ async function fixture(root, platform, overrides = {}) {
       await mkdir(featureDirectory, { recursive: true });
       const screenshotPath = `${evidenceDirectory}/screenshot.png`;
       const accessibilityPath = `${evidenceDirectory}/accessibility.json`;
-      const screenshot = Buffer.from(expected.png, "base64");
+      const type = expected.type ?? "visual";
+      const screenshot = type === "visual" ? Buffer.from(expected.png, "base64") : null;
       const nodeNames = expected.requiredNames ?? [expected.name];
       const accessibility = `${JSON.stringify({
         schema_version: 2,
         feature,
         state: expected.state,
         expected_name: expected.name,
-        window: {
+        window: type === "visual" ? {
           handle: 1,
           foreground: true,
           visible: true,
@@ -109,40 +111,53 @@ async function fixture(root, platform, overrides = {}) {
           capture_allowed: true,
           display_affinity: 0,
           capture_bounds: { kind: "client", x: 0, y: 0, width: 1, height: 1 },
+        } : {
+          handle: 1,
+          foreground: true,
+          visible: true,
+          minimized: false,
+          capture_allowed: false,
+          display_affinity: 17,
         },
         node_read: { complete: true, read: nodeNames.length, retried: [] },
         nodes: nodeNames.map((name) => ({
           name,
+          ...(type === "protected-accessibility" ? { control_type: "ControlType.Edit" } : {}),
           enabled: expected.requiredEnabledNames?.includes(name) ?? true,
           offscreen: false,
           bounds: { x: 0, y: 0, width: 1, height: 1 },
+          ...(type === "protected-accessibility" ? {
+            is_password: expected.requiredPasswordNames?.includes(name) ?? false,
+          } : {}),
         })),
       }, null, 2)}\n`;
-      await writeFile(path.join(directory, screenshotPath), screenshot);
+      if (screenshot) await writeFile(path.join(directory, screenshotPath), screenshot);
       await writeFile(path.join(directory, accessibilityPath), accessibility);
-      states.push({
+      const state = {
+        type,
         feature,
         state: expected.state,
         expected_name: expected.name,
-        screenshot: {
-          path: screenshotPath,
-          sha256: createHash("sha256").update(screenshot).digest("hex"),
-          bytes: screenshot.length,
-        },
         accessibility: {
           path: accessibilityPath,
           sha256: createHash("sha256").update(accessibility).digest("hex"),
           bytes: Buffer.byteLength(accessibility),
         },
-      });
+      };
+      if (screenshot) {
+        state.screenshot = {
+          path: screenshotPath,
+          sha256: createHash("sha256").update(screenshot).digest("hex"),
+          bytes: screenshot.length,
+        };
+      }
+      states.push(state);
       if (!expected.state.startsWith("updater-")) {
-        artifacts.push(
-          { kind: "screenshot", ...states.at(-1).screenshot },
-          { kind: "accessibility", ...states.at(-1).accessibility },
-        );
+        if (screenshot) artifacts.push({ kind: "screenshot", ...states.at(-1).screenshot });
+        artifacts.push({ kind: "accessibility", ...states.at(-1).accessibility });
       }
     }
-    const manifest = `${JSON.stringify({ schema_version: 1, states }, null, 2)}\n`;
+    const manifest = `${JSON.stringify({ schema_version: 2, states }, null, 2)}\n`;
     await writeFile(path.join(directory, "feature-states.json"), manifest);
     artifacts.push({
       kind: "feature-evidence",
@@ -393,7 +408,7 @@ test("rejects a Windows capture without foreground HWND proof", () => withRoot(a
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
-    /accessibility describes the wrong state/,
+    /accessibility describes the wrong (visual )?state/,
   );
 }));
 
@@ -456,6 +471,110 @@ test("rejects Windows desktop pairing evidence with a disabled native entry cont
   );
 }));
 
+test("rejects legacy all-visual Windows pairing evidence", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const directory = path.dirname(receiptPath);
+  const manifestPath = path.join(directory, "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const pairing = manifest.states.find((state) => state.feature === "devices");
+  const screenshot = Buffer.from(WINDOWS_STATES.get("history").png, "base64");
+  await writeFile(path.join(directory, "devices/screenshot.png"), screenshot);
+  pairing.type = "visual";
+  pairing.screenshot = {
+    path: "devices/screenshot.png",
+    sha256: createHash("sha256").update(screenshot).digest("hex"),
+    bytes: screenshot.length,
+  };
+  const manifestContents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, manifestContents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  receipt.artifacts.push({ kind: "screenshot", ...pairing.screenshot });
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(manifestContents).digest("hex");
+  index.bytes = Buffer.byteLength(manifestContents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /invalid or duplicate Windows feature state/,
+  );
+}));
+
+test("rejects a screenshot artifact bound beside protected Windows pairing evidence", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const screenshot = Buffer.from(WINDOWS_STATES.get("history").png, "base64");
+  await writeFile(path.join(path.dirname(receiptPath), "devices/screenshot.png"), screenshot);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  receipt.artifacts.push({
+    kind: "screenshot",
+    path: "devices/screenshot.png",
+    sha256: createHash("sha256").update(screenshot).digest("hex"),
+    bytes: screenshot.length,
+  });
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /protected devices evidence binds a screenshot/,
+  );
+}));
+
+test("rejects capture bounds or WDA_NONE on protected Windows pairing evidence", () => withRoot(async (root) => {
+  const boundsPath = await fixture(root, "windows");
+  await restampAccessibility(boundsPath, (accessibility) => {
+    accessibility.window.capture_bounds = { kind: "client", x: 0, y: 0, width: 1, height: 1 };
+  }, "devices");
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [boundsPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility describes the wrong state/,
+  );
+
+  const affinityPath = await fixture(root, "windows");
+  await restampAccessibility(affinityPath, (accessibility) => {
+    accessibility.window.capture_allowed = true;
+    accessibility.window.display_affinity = 0;
+  }, "devices");
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [affinityPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility is not capture-protected/,
+  );
+}));
+
+test("rejects incomplete, nonpassword, and raw Windows pairing accessibility", () => withRoot(async (root) => {
+  const incompletePath = await fixture(root, "windows");
+  await restampAccessibility(incompletePath, (accessibility) => {
+    accessibility.node_read.complete = false;
+  }, "devices");
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [incompletePath], required: new Set(["windows"]), runId: RUN_ID }),
+    /accessibility is a partial snapshot/,
+  );
+
+  const passwordPath = await fixture(root, "windows");
+  await restampAccessibility(passwordPath, (accessibility) => {
+    accessibility.nodes.find((node) => node.name === "Pairing address").is_password = false;
+  }, "devices");
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [passwordPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /lacks protected Pairing address/,
+  );
+
+  const rawPath = await fixture(root, "windows");
+  await restampAccessibility(rawPath, (accessibility) => {
+    accessibility.nodes.push({
+      name: "192.0.2.1:48654",
+      control_type: "ControlType.Text",
+      enabled: true,
+      offscreen: false,
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      is_password: false,
+    });
+    accessibility.node_read.read = accessibility.nodes.length;
+  }, "devices");
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [rawPath], required: new Set(["windows"]), runId: RUN_ID }),
+    /contains raw or secret-like nodes/,
+  );
+}));
+
 // A node the capture could not read used to be dropped silently, so the file
 // claimed to be the app's accessibility tree while being a subset of it.
 test("rejects a Windows accessibility snapshot that admits it is incomplete", () => withRoot(async (root) => {
@@ -513,7 +632,7 @@ test("rejects Windows capture bounds not derived from the client", () => withRoo
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
-    /accessibility describes the wrong state/,
+    /accessibility describes the wrong visual state/,
   );
 }));
 
