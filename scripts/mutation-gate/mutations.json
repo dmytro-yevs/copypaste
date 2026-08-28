@@ -401,7 +401,7 @@
     },
     {
       "id": "check-wiring",
-      "verifies": "the CI runner-image detector: an unknown label or a mixed image family must be rejected",
+      "verifies": "runner images, job budgets, Android artifacts, and Dockerless cargo-deny wiring",
       "command": ["python3", "scripts/release/check-wiring.py", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["python3"],
@@ -468,6 +468,55 @@
           "find": "            if \"src-tauri/gen/android\" in path and \"jniLibs/\" not in path:\n",
           "replace": "            if False:\n",
           "expect": "FAIL|self-test: an opaque generated Android tree artifact is rejected|"
+        },
+        {
+          "name": "unverified-cargo-deny-release-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"checksum\": str(settings.get(\"checksum\", \"\")).lower() == \"true\",\n",
+          "replace": "        \"checksum\": True,\n",
+          "expect": "FAIL|self-test: cargo-deny without checksum verification is rejected|"
+        },
+        {
+          "name": "cargo-deny-build-fallback-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"fallback\": settings.get(\"fallback\") == \"none\",\n",
+          "replace": "        \"fallback\": True,\n",
+          "expect": "FAIL|self-test: cargo-deny with a source-build fallback is rejected|"
+        },
+        {
+          "name": "unpinned-cargo-deny-version-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"version\": settings.get(\"tool\") == \"cargo-deny@0.20.2\",\n",
+          "replace": "        \"version\": True,\n",
+          "expect": "FAIL|self-test: an unreviewed cargo-deny version is rejected|"
+        },
+        {
+          "name": "docker-cargo-deny-action-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"dockerless\": not docker_actions,\n",
+          "replace": "        \"dockerless\": True,\n",
+          "expect": "FAIL|self-test: the Docker-based cargo-deny action is rejected|"
+        },
+        {
+          "name": "incomplete-cargo-deny-flags-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "    flags_hold = command.startswith(required_prefix) and command.endswith(required_suffix)\n",
+          "replace": "    flags_hold = True\n",
+          "expect": "FAIL|self-test: a cargo-deny command without the lockfile flag is rejected|"
+        },
+        {
+          "name": "incomplete-cargo-deny-matrix-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"matrix\": matrix == [\"advisories\", \"bans\", \"licenses\", \"sources\"],\n",
+          "replace": "        \"matrix\": True,\n",
+          "expect": "FAIL|self-test: a cargo-deny matrix missing a policy check is rejected|"
+        },
+        {
+          "name": "hardcoded-cargo-deny-subset-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"selector\": selector == \"${{ matrix.check }}\",\n",
+          "replace": "        \"selector\": True,\n",
+          "expect": "FAIL|self-test: a hardcoded cargo-deny policy subset is rejected|"
         }
       ]
     },
