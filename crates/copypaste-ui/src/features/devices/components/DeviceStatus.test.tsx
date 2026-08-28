@@ -8,7 +8,13 @@ import type { DiscoveredDevice } from "@/lib/ipc";
 
 describe("device status presentation", () => {
   it("keeps status consistent and labels observed device telemetry", () => {
-    const status = { label: "Found nearby · Not paired", tone: "neutral" } as const;
+    const status = {
+      icon: "circle",
+      label: "Found nearby · Not paired",
+      tone: "neutral",
+      busy: false,
+      live: "off",
+    } as const;
     const device: DiscoveredDevice = {
       discovery_id: "nearby-1",
       name: "Nearby phone",
@@ -119,6 +125,7 @@ describe("device status presentation", () => {
     expect(presentations).toHaveLength(3);
     for (const presentation of presentations) {
       expect(presentation.getAttribute("data-tone")).toBe("neutral");
+      expect(presentation.getAttribute("data-live")).toBe("off");
       expect(presentation.textContent).toBe(status.label);
       expect(presentation.querySelector('[aria-hidden="true"]')).not.toBeNull();
     }

@@ -41,7 +41,13 @@ describe("DiscoveredDeviceDetails", () => {
         const { container } = render(
             <DiscoveredDeviceDetails
                 device={device(state)}
-                status={{ label: "Not paired", tone: "neutral" }}
+                status={{
+                    icon: "circle",
+                    label: "Not paired",
+                    tone: "neutral",
+                    busy: false,
+                    live: "off",
+                }}
             />,
         );
 
