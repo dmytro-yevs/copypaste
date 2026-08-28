@@ -12,7 +12,7 @@
     "dev:web:daemon": "sh scripts/dev-web-daemon.sh",
     "dev:native": "sh scripts/dev-native.sh",
     "dev:android": "tauri android dev",
-    "build": "npm run check:responsive && node scripts/check-flex-gap.mjs --source && tsc --noEmit && vite build && node scripts/check-flex-gap.mjs --dist && node scripts/check-webview-baseline.mjs",
+    "build": "npm run check:responsive && node scripts/check-flex-gap.mjs --source && tsc --noEmit && vite build && node scripts/check-route-chunks.mjs && node scripts/check-flex-gap.mjs --dist && node scripts/check-webview-baseline.mjs",
     "build:android": "VITE_ANDROID_BUILD=1 npm run build",
     "generate:icons": "sh scripts/generate-icons.sh",
     "generate:ipc": "sh scripts/generate-ipc-bindings.sh",
@@ -25,7 +25,7 @@
     "check:native-parity": "node scripts/native-parity-gate.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run && node --test scripts/native-parity-gate.test.mjs scripts/check-webview-baseline.test.mjs scripts/check-flex-gap.test.mjs scripts/orphan-chunks.test.mjs",
+    "test": "vitest run && node --test scripts/native-parity-gate.test.mjs scripts/check-route-chunks.test.mjs scripts/check-webview-baseline.test.mjs scripts/check-flex-gap.test.mjs scripts/orphan-chunks.test.mjs",
     "test:cloud": "vitest run src/features/settings/patterns/CloudSyncSettings.test.tsx",
     "test:native-parity": "node --test scripts/native-parity-gate.test.mjs"
   },
