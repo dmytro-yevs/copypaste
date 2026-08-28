@@ -427,10 +427,12 @@ try {
         $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history" "" $captureTrace
         Invoke-UiaNamedControl $app "Connections" "Connect a device"
         $pairingNames = @("Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel")
+        $pairingVisibleNames = @("Add a CopyPaste device")
+        $pairingEnabledNames = @("Pairing code", "Pairing address", "Pair", "Cancel")
         Open-WindowsPairingEntry $app $pairingNames
         $featureStates += Save-WindowsProtectedFeatureState `
             $app $evidencePath "devices" "desktop-pairing-entry" "Pairing code" `
-            $pairingNames $pairingNames @("Pairing code", "Pairing address") "" $captureTrace
+            $pairingNames $pairingVisibleNames $pairingEnabledNames @("Pairing code", "Pairing address") "" $captureTrace
         $restoredShell = Close-WindowsProtectedPairingEntry $app $pairingNames
         Write-WindowCaptureObservation $app $captureTrace "devices/after-close" $restoredShell
         Invoke-UiaNamedControl $app "Preferences" "Mode"

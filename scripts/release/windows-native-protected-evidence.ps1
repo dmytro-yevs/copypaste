@@ -83,17 +83,61 @@ function Assert-ProtectedUiaSnapshotComplete($Snapshot, [string]$Context) {
     }
 }
 
+function Get-ProtectedUiaNamedElement(
+    [Diagnostics.Process]$App,
+    [string]$Name,
+    [bool]$RequireEnabled
+) {
+    try {
+        $App.Refresh()
+        if ($App.HasExited) { return $null }
+        $root = Get-AppAutomationRoot $App
+        if ($null -eq $root) { return $null }
+        $condition = [Windows.Automation.PropertyCondition]::new(
+            [Windows.Automation.AutomationElement]::NameProperty,
+            $Name
+        )
+        $candidates = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+        foreach ($match in $candidates) {
+            $bounds = $match.Current.BoundingRectangle
+            if ((-not $RequireEnabled -or $match.Current.IsEnabled) -and
+                -not $match.Current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
+                return $match
+            }
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+function Get-ProtectedUiaNamedRoot([Diagnostics.Process]$App, [string]$Name) {
+    try {
+        $App.Refresh()
+        if ($App.HasExited) { return $null }
+        $root = Get-AppAutomationRoot $App
+        if ($null -eq $root -or $root.Current.Name -ne $Name) { return $null }
+        $bounds = $root.Current.BoundingRectangle
+        if (-not $root.Current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
+            return $root
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
 function Wait-ProtectedUiaName(
     [Diagnostics.Process]$App,
     [string]$Name,
     [string[]]$AllowedNames,
-    [bool]$Actionable = $false
+    [bool]$RequireEnabled
 ) {
     return Wait-Readiness "protected UI state '$Name'" {
         try {
             $App.Refresh()
             if ($App.HasExited) { return New-ProbeInvariant "the installed app exited" }
-            $match = Get-UiaNamedElement $App $Name $Actionable
+            $match = Get-ProtectedUiaNamedElement $App $Name $RequireEnabled
             if ($null -ne $match) { return New-ProbeReady $match }
             if ($null -eq (Get-AppAutomationRoot $App)) {
                 return New-ProbeNotReady "the protected window handle is not ready"
@@ -103,6 +147,61 @@ function Wait-ProtectedUiaName(
             return New-ProbeTransient "protected accessibility is temporarily unavailable"
         }
     } { Get-ProtectedUiaSummary $App $AllowedNames } 15000
+}
+
+function Wait-ProtectedUiaRootName(
+    [Diagnostics.Process]$App,
+    [string]$Name,
+    [string[]]$AllowedNames
+) {
+    return Wait-Readiness "protected root UI state '$Name'" {
+        try {
+            $App.Refresh()
+            if ($App.HasExited) { return New-ProbeInvariant "the installed app exited" }
+            $match = Get-ProtectedUiaNamedRoot $App $Name
+            if ($null -ne $match) { return New-ProbeReady $match }
+            if ($null -eq (Get-AppAutomationRoot $App)) {
+                return New-ProbeNotReady "the protected window handle is not ready"
+            }
+            return New-ProbeNotReady "the allowlisted protected root is not ready"
+        } catch {
+            return New-ProbeTransient "protected accessibility is temporarily unavailable"
+        }
+    } { Get-ProtectedUiaSummary $App $AllowedNames } 15000
+}
+
+function Test-ProtectedUiaNodeVisible($Node, [string]$Name, [bool]$RequireEnabled) {
+    $bounds = $Node["bounds"]
+    return $Node["name"] -eq $Name -and
+        (-not $RequireEnabled -or $Node["enabled"]) -and
+        -not $Node["offscreen"] -and
+        $bounds -is [Collections.IDictionary] -and
+        $bounds["width"] -gt 0 -and $bounds["height"] -gt 0
+}
+
+function Assert-WindowsProtectedNodes(
+    [object[]]$Nodes,
+    [string[]]$RequiredNames,
+    [string[]]$RequiredEnabledNames,
+    [string[]]$RequiredPasswordNames,
+    [string]$Context
+) {
+    $root = @($Nodes)[0]
+    foreach ($name in $RequiredNames) {
+        Assert-True ($null -ne $root -and (Test-ProtectedUiaNodeVisible $root $name $false)) `
+            "$Context lacks visible root '$name'"
+    }
+    $descendants = @($Nodes | Select-Object -Skip 1)
+    foreach ($name in $RequiredEnabledNames) {
+        $matches = @($descendants | Where-Object { Test-ProtectedUiaNodeVisible $_ $name $true })
+        Assert-True ($matches.Count -gt 0) "$Context lacks visible, enabled '$name'"
+    }
+    foreach ($name in $RequiredPasswordNames) {
+        $matches = @($descendants | Where-Object {
+            (Test-ProtectedUiaNodeVisible $_ $name $true) -and $_["is_password"]
+        })
+        Assert-True ($matches.Count -gt 0) "$Context lacks IsPassword=true for '$name'"
+    }
 }
 
 function New-ProtectedPairingTransitionSummary(
@@ -236,12 +335,16 @@ function Save-WindowsProtectedFeatureState(
     [string]$ExpectedName,
     [string[]]$AllowedNames,
     [string[]]$RequiredNames,
+    [string[]]$RequiredEnabledNames,
     [string[]]$RequiredPasswordNames,
     [string]$ArtifactDirectory = "",
     [string]$CaptureTracePath = ""
 ) {
     foreach ($name in $RequiredNames) {
-        Wait-ProtectedUiaName $App $name $AllowedNames | Out-Null
+        Wait-ProtectedUiaRootName $App $name $AllowedNames | Out-Null
+    }
+    foreach ($name in $RequiredEnabledNames) {
+        Wait-ProtectedUiaName $App $name $AllowedNames $true | Out-Null
     }
     $window = Wait-ProtectedForegroundWindow $App
     try {
@@ -258,20 +361,8 @@ function Save-WindowsProtectedFeatureState(
     $document = New-WindowsProtectedAccessibilityDocument `
         $Feature $State $ExpectedName $window $snapshot $AllowedNames
     $nodes = @($document.nodes)
-    foreach ($name in $RequiredNames) {
-        $matches = @($nodes | Where-Object {
-            $bounds = $_["bounds"]
-            $_["name"] -eq $name -and $_["enabled"] -and -not $_["offscreen"] -and
-                $bounds -is [Collections.IDictionary] -and $bounds["width"] -gt 0 -and $bounds["height"] -gt 0
-        })
-        Assert-True ($matches.Count -gt 0) "$Feature protected evidence lacks visible, enabled '$name'"
-    }
-    foreach ($name in $RequiredPasswordNames) {
-        $matches = @($nodes | Where-Object {
-            $_["name"] -eq $name -and $_["is_password"]
-        })
-        Assert-True ($matches.Count -gt 0) "$Feature protected evidence lacks IsPassword=true for '$name'"
-    }
+    Assert-WindowsProtectedNodes `
+        $nodes $RequiredNames $RequiredEnabledNames $RequiredPasswordNames "$Feature protected evidence"
     $relativeDirectory = if ($ArtifactDirectory) { Join-Path $Feature $ArtifactDirectory } else { $Feature }
     $directory = Join-Path $EvidenceRoot $relativeDirectory
     $accessibility = Join-Path $relativeDirectory "accessibility.json"
