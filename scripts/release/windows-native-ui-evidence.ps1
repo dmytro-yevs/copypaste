@@ -379,6 +379,19 @@ function Test-WindowsUiEvidenceHelpers {
     } catch { $_.Exception.Message }
     Assert-True ($failureText -match "protected UIA" -and -not ($failureText -match $unsafePattern)) `
         "protected wait failure exposed a secret or local path"
+    $modalWindow = [ordered]@{
+        handle = 41; foreground = $true; visible = $true; minimized = $false
+        capture_allowed = $false; display_affinity = 17
+    }
+    $transitionFailure = try {
+        Wait-Readiness "protected close fixture" {
+            New-ProbeNotReady "the protected pairing window remains active"
+        } {
+            New-ProtectedPairingTransitionSummary ([IntPtr]41) $modalWindow $unsafeSnapshot @("Pairing code")
+        } 0 | Out-Null
+    } catch { $_.Exception.Message }
+    Assert-True ($transitionFailure -match "current_is_pairing=True" -and -not ($transitionFailure -match $unsafePattern)) `
+        "failed protected pairing dismissal exposed a secret or local path"
     $pairingSourceParts = ${function:Open-WindowsPairingEntry}.ToString() -split `
         [regex]::Escape('Invoke-UiaElement $launcher "Connect a device"'), 2
     Assert-True ($pairingSourceParts.Count -eq 2) "native pairing entry launch boundary is missing"
@@ -388,6 +401,14 @@ function Test-WindowsUiEvidenceHelpers {
     $protectedSaver = ${function:Save-WindowsProtectedFeatureState}.ToString()
     Assert-True (-not ($protectedSaver -match "Get-UiaSummary|Wait-UiaName|Assert-UiaSnapshotComplete")) `
         "protected evidence retained raw UIA wait or snapshot diagnostics"
+    $caller = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "windows-native-evidence.ps1"))
+    $callerParts = $caller -split "Open-WindowsPairingEntry", 2
+    Assert-True ($callerParts.Count -eq 2) "Windows evidence lacks the pairing entry caller"
+    $closeParts = $callerParts[1] -split 'Write-WindowCaptureObservation \$app \$captureTrace "devices/after-close"', 2
+    Assert-True ($closeParts.Count -eq 2) "Windows evidence lacks the protected pairing close boundary"
+    Assert-True ($closeParts[0] -match "Close-WindowsProtectedPairingEntry" -and
+        -not ($closeParts[0] -match "SendKeys|Wait-UiaName|Get-UiaSummary|Wait-ForegroundWindow")) `
+        "Windows pairing caller bypassed the protected close transition"
     Assert-True (-not (${function:Read-ProtectedUiaNode}.ToString() -match "ValuePattern")) `
         "protected accessibility queried ValuePattern"
 }
