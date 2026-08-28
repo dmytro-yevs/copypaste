@@ -14,8 +14,9 @@ export function DeviceStatus({
     <span
       data-slot="device-status"
       data-tone={status.tone}
-      data-live={status.live}
       aria-busy={status.busy || undefined}
+      role={status.a11y.role}
+      aria-live={status.a11y.live}
       className={cn(styles.root, className)}
     >
       <Icon

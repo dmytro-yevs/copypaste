@@ -6,6 +6,7 @@ import type { PeerInfo } from "@/lib/ipc";
 import {
     connectionSummary,
     deviceIconKind,
+    peerIdentity,
     peerStatus,
 } from "./devicePresentation";
 import { cloudConnectionPresentation } from "./cloud";
@@ -173,6 +174,44 @@ describe("device icon presentation", () => {
             expect(deviceIconKind({ platform, formFactor: "unknown", source: "peer-asserted" })).toBe("devices");
         }
     });
+
+    it("uses only a peer's generated profile for its identity", () => {
+        expect(peerIdentity({ ...PEER, name: "Windows phone" })).toEqual({
+            platform: "unknown",
+            formFactor: "unknown",
+            source: "unknown",
+        });
+        expect(
+            peerIdentity({
+                ...PEER,
+                details: {
+                    profile: {
+                        display_name: "Whatever the peer called itself",
+                        app_version: null,
+                        protocol_version: null,
+                        platform: "windows",
+                        device_class: "laptop",
+                        os_name: null,
+                        os_version: null,
+                        model: null,
+                        provenance: "self_reported",
+                        trust: "unverified",
+                        observed_at_ms: 1,
+                        fresh_until_ms: null,
+                    },
+                    endpoint: null,
+                    latency: null,
+                    presence: null,
+                    public_ip: { availability: "unavailable" },
+                    geo: { availability: "unavailable" },
+                },
+            }),
+        ).toEqual({
+            platform: "windows",
+            formFactor: "laptop",
+            source: "peer-asserted",
+        });
+    });
 });
 
 describe("device status descriptors", () => {
@@ -190,7 +229,7 @@ describe("device status descriptors", () => {
             label: "Syncing",
             tone: "busy",
             busy: true,
-            live: "off",
+            a11y: {},
         });
     });
 
@@ -201,6 +240,7 @@ describe("device status descriptors", () => {
             title: "Encrypted cloud",
             detail: "Cloud status is unavailable.",
             busy: false,
+            role: "status",
             live: "polite",
             action: { label: "Manage", icon: "settings" },
         });
@@ -208,9 +248,15 @@ describe("device status descriptors", () => {
 
     it("keeps status and cloud vocabulary out of component-local maps", () => {
         const sourceRoot = resolve(import.meta.dirname, "..");
-        for (const file of ["components/DeviceStatus.tsx", "components/PeerRow.tsx", "components/CloudConnectionCard.tsx"]) {
+        for (const file of [
+            "components/DeviceStatus.tsx",
+            "components/PeerRow.tsx",
+            "components/CloudConnectionCard.tsx",
+            "patterns/DiscoveryStage.tsx",
+            "../settings/patterns/CloudSyncSettings.tsx",
+        ]) {
             const source = readFileSync(resolve(sourceRoot, file), "utf8");
-            expect(source).not.toMatch(/STATUS_ICON|const BADGE|cloudPresentation/);
+            expect(source).not.toMatch(/STATUS_ICON|const BADGE|cloudPresentation|const copy/);
         }
     });
 });

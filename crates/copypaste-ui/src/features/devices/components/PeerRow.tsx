@@ -66,13 +66,6 @@ export function PeerRow({
         aria-busy={syncing || unpairing || revoking || undefined}
       >
       <div className={styles.summary}>
-        <span
-          aria-hidden="true"
-          className={styles.stateIcon}
-        >
-          <Icon name={status.icon} size="md" />
-        </span>
-
         <div className={styles.identity}>
           <span
             className={styles.name}
@@ -177,8 +170,12 @@ export function PeerRow({
         </div>
       ) : (
         <>
-          {status.detail && (
-            <p role="status" aria-live="polite" className={styles.hint}>
+          {status.detail && status.detailA11y && (
+            <p
+              role={status.detailA11y.role}
+              aria-live={status.detailA11y.live}
+              className={styles.hint}
+            >
               <Icon name="link" aria-hidden="true" className={styles.hintIcon} />
               {status.detail}
             </p>
