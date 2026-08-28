@@ -19,6 +19,17 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  html[data-platform="android"] {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  html[data-platform="android"] #root {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+  }
+
   ::selection {
     background: var(--selected);
   }

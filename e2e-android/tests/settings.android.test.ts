@@ -238,6 +238,92 @@ describe("the section index", () => {
     }
     await ensureSettingsNavigation(app);
   }, 120_000);
+
+  test("keeps the Android document fixed while compact Preferences scrolls", async () => {
+    await ensureSettingsNavigation(app);
+    const before = await app.withPage((page) =>
+      page.evaluate(() => {
+        const root = document.querySelector<HTMLElement>("#root");
+        const dock = document.querySelector<HTMLElement>(
+          'nav[aria-label="Primary"]',
+        );
+        if (!root || !dock) throw new Error("the app frame is incomplete");
+        const rootBox = root.getBoundingClientRect();
+        const dockBox = dock.getBoundingClientRect();
+        return {
+          windowScrollY: window.scrollY,
+          rootTop: rootBox.top,
+          rootBottom: rootBox.bottom,
+          dockTop: dockBox.top,
+          dockBottom: dockBox.bottom,
+        };
+      }),
+    );
+
+    await settingsSectionGeometry(app, "About");
+    await settingsSectionGeometry(app, "Appearance");
+    await settingsSectionGeometry(app, "Cloud sync");
+
+    const after = await app.withPage((page) =>
+      page.evaluate(() => {
+        const navigation = document.querySelector(
+          '[aria-label="Preference sections"]',
+        );
+        let viewport = navigation?.parentElement ?? null;
+        while (
+          viewport &&
+          !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY)
+        ) {
+          viewport = viewport.parentElement;
+        }
+        const root = document.querySelector<HTMLElement>("#root");
+        const dock = document.querySelector<HTMLElement>(
+          'nav[aria-label="Primary"]',
+        );
+        if (!root || !dock || !viewport) {
+          throw new Error("the app frame is incomplete");
+        }
+        const rootBox = root.getBoundingClientRect();
+        const dockBox = dock.getBoundingClientRect();
+        return {
+          windowScrollY: window.scrollY,
+          rootTop: rootBox.top,
+          rootBottom: rootBox.bottom,
+          dockTop: dockBox.top,
+          dockBottom: dockBox.bottom,
+          viewportScrollTop: viewport.scrollTop,
+        };
+      }),
+    );
+
+    expect(after.viewportScrollTop).toBeGreaterThan(0);
+    expect(after.windowScrollY).toBe(0);
+    expect(after.rootTop).toBeCloseTo(before.rootTop, 1);
+    expect(after.rootBottom).toBeCloseTo(before.rootBottom, 1);
+    expect(after.dockTop).toBeCloseTo(before.dockTop, 1);
+    expect(after.dockBottom).toBeCloseTo(before.dockBottom, 1);
+
+    await openSettingsSection(app, "Cloud sync");
+    const fields = await app.withPage((page) =>
+      page.evaluate(() => {
+        const panel = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
+          ),
+        ).find((candidate) => candidate.getClientRects().length > 0);
+        return Array.from(panel?.querySelectorAll<HTMLElement>("input") ?? [])
+          .map((field) => field.getBoundingClientRect())
+          .filter((box) => box.bottom > 0 && box.top < innerHeight)
+          .map((box) => ({ width: box.width, height: box.height }));
+      }),
+    );
+    expect(fields.length).toBeGreaterThan(0);
+    for (const field of fields) {
+      expect(field.width).toBeGreaterThan(0);
+      expect(field.height).toBeGreaterThanOrEqual(44);
+    }
+    await ensureSettingsNavigation(app);
+  });
 });
 
 describe("a preference that limits only the visible list", () => {
