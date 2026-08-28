@@ -115,6 +115,7 @@ function selectedDevice(scenario: PreviewScenario): PreviewDevice | undefined {
 
 function pairingCeremony(scenario: PreviewScenario): PairingCeremony {
     const device = selectedDevice(scenario);
+    const details = device === undefined ? null : previewDeviceDetails(device);
     return {
         ceremony_id: scenario.pairing === "idle" ? null : "preview-ceremony",
         role: scenario.pairing === "idle" ? null : "initiator",
@@ -127,7 +128,7 @@ function pairingCeremony(scenario: PreviewScenario): PairingCeremony {
                 : {
                       name: device.name,
                       last_seen_ms: Date.now() - device.lastSeenAgeMs,
-                      online: device.online,
+                      online: details?.presence?.state === "online",
                   },
         error:
             scenario.pairing === "failure"

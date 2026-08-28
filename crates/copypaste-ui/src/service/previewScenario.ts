@@ -1,7 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { z } from "zod";
 
-import type { DeviceClass, DevicePlatform } from "@/lib/ipc";
+import type { DeviceClass, DevicePlatform, DevicePresence } from "@/lib/ipc";
 
 export type PreviewDaemonState = "live" | "up" | "starting" | "down";
 export type PreviewNetworkState = "live" | "online" | "offline" | "slow";
@@ -38,7 +38,7 @@ export interface PreviewDevice {
     readonly publicIp: string | null;
     readonly location: string | null;
     readonly lastSeenAgeMs: number;
-    readonly online: boolean;
+    readonly presence: DevicePresence;
     readonly paired: boolean;
 }
 
@@ -78,9 +78,13 @@ export interface PreviewScenarioState {
 type PreviewStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const STORAGE_KEY = "copypaste.dev.preview-scenario";
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
+const LEGACY_STORAGE_VERSION = 1;
 
-const deviceSchema = z.object({
+/** Preview observations expire just like the generated device DTOs. */
+export const PREVIEW_PRESENCE_FRESHNESS_MS = 15_000;
+
+const deviceFieldsSchema = z.object({
     id: z.string().min(1),
     name: z.string().min(1),
     type: z.enum(["desktop", "laptop", "phone", "tablet", "unknown"]),
@@ -102,8 +106,15 @@ const deviceSchema = z.object({
     publicIp: z.string().nullable().default(null),
     location: z.string().nullable().default(null),
     lastSeenAgeMs: z.number().nonnegative(),
-    online: z.boolean(),
     paired: z.boolean(),
+});
+
+const deviceSchema = deviceFieldsSchema.extend({
+    presence: z.enum(["online", "offline", "unknown"]),
+});
+
+const legacyDeviceSchema = deviceFieldsSchema.extend({
+    online: z.boolean(),
 });
 
 const resourceStateSchema = z.enum([
@@ -140,10 +151,17 @@ const scenarioSchema = z.object({
     devices: z.array(deviceSchema),
 });
 
-const persistedSchema = z.object({
-    version: z.literal(STORAGE_VERSION),
-    scenario: scenarioSchema,
+const legacyScenarioSchema = scenarioSchema.extend({
+    devices: z.array(legacyDeviceSchema),
 });
+
+const persistedSchema = z.discriminatedUnion("version", [
+    z.object({
+        version: z.literal(LEGACY_STORAGE_VERSION),
+        scenario: legacyScenarioSchema,
+    }),
+    z.object({ version: z.literal(STORAGE_VERSION), scenario: scenarioSchema }),
+]);
 
 function liveScenario(): PreviewScenario {
     return {
@@ -172,12 +190,33 @@ function browserStorage(): PreviewStorage | null {
     return window.sessionStorage;
 }
 
+function migrateLegacyScenario(
+    scenario: z.infer<typeof legacyScenarioSchema>,
+): PreviewScenario {
+    return {
+        ...scenario,
+        devices: scenario.devices.map(({ online, ...device }) => ({
+            ...device,
+            // Legacy false did not distinguish offline from an unavailable poll.
+            // A true value can only remain online while its observation is current.
+            presence:
+                online && device.lastSeenAgeMs <= PREVIEW_PRESENCE_FRESHNESS_MS
+                    ? "online"
+                    : "unknown",
+        })),
+    };
+}
+
 function restore(storage: PreviewStorage | null): PreviewScenario {
     if (!import.meta.env.DEV || storage === null) return liveScenario();
     try {
         const value = storage.getItem(STORAGE_KEY);
         if (value === null) return liveScenario();
-        return persistedSchema.parse(JSON.parse(value)).scenario;
+        const persisted = persistedSchema.safeParse(JSON.parse(value));
+        if (!persisted.success) return liveScenario();
+        return persisted.data.version === LEGACY_STORAGE_VERSION
+            ? migrateLegacyScenario(persisted.data.scenario)
+            : persisted.data.scenario;
     } catch {
         return liveScenario();
     }
