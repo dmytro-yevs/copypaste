@@ -135,6 +135,51 @@ describe("useHistorySelection", () => {
     expect(result.current.busy).toBe(false);
   });
 
+  it("restores a reversed failure without dropping a new selection", async () => {
+    const shown = items(3);
+    const run = deferred<{ done: number; failedIds: readonly string[] }>();
+    bulkPin.mutateAsync.mockReturnValue(run.promise);
+    const { result, rerender } = renderHook(
+      ({ visible }) => useHistorySelection(visible),
+      { initialProps: { visible: shown } },
+    );
+
+    act(() => {
+      result.current.selection.toggle(shown[0]!.id);
+      result.current.selection.toggle(shown[1]!.id);
+    });
+    act(() => result.current.togglePin());
+    rerender({
+      visible: shown.map((entry, index) => ({
+        ...entry,
+        pinned: index < 2,
+      })),
+    });
+    await waitFor(() => expect(result.current.selection.active).toBe(false));
+
+    act(() => result.current.selection.toggle(shown[2]!.id));
+    rerender({
+      visible: shown.map((entry, index) => ({
+        ...entry,
+        pinned: index === 0,
+      })),
+    });
+    await waitFor(() =>
+      expect([...result.current.selection.selected]).toEqual([
+        shown[2]!.id,
+        shown[1]!.id,
+      ]),
+    );
+
+    await act(async () =>
+      run.resolve({ done: 1, failedIds: [shown[1]!.id] }),
+    );
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(new Set(result.current.selection.selected)).toEqual(
+      new Set([shown[1]!.id, shown[2]!.id]),
+    );
+  });
+
   it("keeps only failed rows selected after a partial delete", async () => {
     const visible = items(2);
     bulkDelete.mutateAsync.mockResolvedValue({
