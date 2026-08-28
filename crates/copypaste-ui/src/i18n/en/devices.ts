@@ -79,7 +79,7 @@ export const devices = {
       publicIp: "Public IP",
       location: "Location",
       latency: "Connection latency",
-      latencyValue: "{{value}} ms",
+      latencyValue: "{{latency}} ms",
       networkPresence: "Network presence",
       presence: {
         online: "Seen on this network",
