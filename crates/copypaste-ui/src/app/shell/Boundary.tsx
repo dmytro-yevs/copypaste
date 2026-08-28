@@ -12,10 +12,11 @@ interface BoundaryProps {
   /** Named so a crash report says which region failed. */
   label: string;
   layout?: "inline" | "screen";
+  onReset?: () => void;
   children: ReactNode;
 }
 
-export function Boundary({ label, layout = "inline", children }: BoundaryProps) {
+export function Boundary({ label, layout = "inline", onReset, children }: BoundaryProps) {
   const { t } = useTranslation();
   const setView = useUi((state) => state.setView);
   const setSettingsTab = useUi((state) => state.setSettingsTab);
@@ -24,6 +25,7 @@ export function Boundary({ label, layout = "inline", children }: BoundaryProps) 
     <ErrorBoundary
       // Logged, never rendered: a stack contains a bundle path (INV-12).
       onError={(error) => console.error(`[copypaste] ${label} crashed`, error)}
+      onReset={onReset}
       fallbackRender={({ resetErrorBoundary }) => {
         const message = (
           <IllustratedErrorState
