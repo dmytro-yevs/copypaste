@@ -1,6 +1,7 @@
 use copypaste_ipc::PairingProgressData;
 
-use super::semantics::{native_copy, resolve_pairing_semantics};
+use super::native_copy::copy;
+use super::semantics::resolve_pairing_semantics;
 
 pub(super) struct ProgressCopy {
     pub title: &'static str,
@@ -8,8 +9,7 @@ pub(super) struct ProgressCopy {
 }
 
 pub(super) fn progress_copy(progress: &PairingProgressData) -> ProgressCopy {
-    let copy =
-        native_copy(resolve_pairing_semantics(progress.state, progress.error_code).message_id);
+    let copy = copy(resolve_pairing_semantics(progress.state, progress.error_code).message_id);
     ProgressCopy {
         title: copy.title,
         message: copy.detail,
