@@ -128,6 +128,10 @@ export const pairing = {
       title: "Pairing is busy",
       body: "Another pairing is already in progress.",
     },
+    limit: {
+      title: "Pairing limit reached",
+      body: "Remove or revoke a paired device before trying again.",
+    },
     failed: {
       title: "Pairing failed",
       body: "CopyPaste couldn't finish pairing.",
