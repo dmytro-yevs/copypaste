@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  settingsNavigationAction,
   settingsNavigationReady,
   settingsPanelReady,
   settingsScrollDelta,
+  settingsSliderIndex,
   settingsTriggerDecision,
   settingsViewLevel,
   type SettingsTriggerSnapshot,
@@ -81,16 +83,27 @@ describe("adaptive Preferences navigation", () => {
   });
 
   test("requires compact Back to restore the actual viewport to the top", () => {
-    const restored: SettingsViewSnapshot = {
+    const detail: SettingsViewSnapshot = {
+      navigation: false,
+      back: true,
+      visiblePanels: ["Storage & history"],
+      busyPanels: [],
+      scrollTop: 640,
+    };
+    expect(settingsNavigationAction(detail, false)).toBe("restore");
+    expect(settingsNavigationAction({ ...detail, scrollTop: 0 }, false)).toBe("back");
+
+    const restoredNavigation: SettingsViewSnapshot = {
       navigation: true,
       back: false,
       visiblePanels: [],
       busyPanels: [],
       scrollTop: 0,
     };
-    expect(settingsNavigationReady(restored, true)).toBe(true);
-    expect(settingsNavigationReady({ ...restored, scrollTop: 480 }, true)).toBe(false);
-    expect(settingsNavigationReady({ ...restored, scrollTop: null }, true)).toBe(false);
+    expect(settingsNavigationAction({ ...restoredNavigation, scrollTop: 640 }, true)).toBe("wait");
+    expect(settingsNavigationAction(restoredNavigation, true)).toBe("ready");
+    expect(settingsNavigationReady({ ...restoredNavigation, scrollTop: 480 }, true)).toBe(false);
+    expect(settingsNavigationReady({ ...restoredNavigation, scrollTop: null }, true)).toBe(false);
   });
 
   test("waits for an opened panel to finish its asynchronous content", () => {
@@ -148,5 +161,31 @@ describe("a Preferences category trigger", () => {
     expect(settingsTriggerDecision({ ...actionable, exists: false })).toBe("missing");
     expect(settingsTriggerDecision({ ...actionable, disabled: true })).toBe("blocked");
     expect(settingsTriggerDecision({ ...actionable, ariaDisabled: "true" })).toBe("blocked");
+  });
+});
+
+describe("the History display slider", () => {
+  const valid = {
+    exists: true,
+    index: "2",
+    min: "0",
+    max: "4",
+    output: "500",
+  };
+
+  test("accepts an integer index inside its declared range", () => {
+    expect(settingsSliderIndex(valid)).toBe(2);
+  });
+
+  test.each([
+    ["missing slider", { ...valid, exists: false }],
+    ["missing index", { ...valid, index: null }],
+    ["empty index", { ...valid, index: "" }],
+    ["missing minimum", { ...valid, min: null }],
+    ["missing maximum", { ...valid, max: null }],
+  ])("rejects a %s with its rendered output in diagnostics", (_name, snapshot) => {
+    expect(() => settingsSliderIndex(snapshot)).toThrow(
+      '"output":"500"',
+    );
   });
 });
