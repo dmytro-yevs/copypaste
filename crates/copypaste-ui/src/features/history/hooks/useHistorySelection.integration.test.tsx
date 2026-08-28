@@ -101,15 +101,16 @@ describe("the real bulk-pin selection composition", () => {
     expect(outcome).toEqual({ done: 2, failedIds: [] });
   });
 
-  it("ends selection when canonical rows confirm commits before responses", async () => {
-    const selected = items(2);
+  it("preserves a new selection when canonical rows beat the old response", async () => {
+    const shown = items(3);
+    const selected = shown.slice(0, 2);
     const first = deferred<Item>();
     const second = deferred<Item>();
     setPinned
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
     const user = userEvent.setup();
-    const view = render(<SelectionProbe shown={selected} />, {
+    const view = render(<SelectionProbe shown={shown} />, {
       wrapper: wrapper(),
     });
 
@@ -128,10 +129,11 @@ describe("the real bulk-pin selection composition", () => {
 
     view.rerender(
       <SelectionProbe
-        shown={selected.map((entry, index) => ({
-          ...entry,
-          pinned: index === 0,
-        }))}
+        shown={[
+          { ...selected[0]!, pinned: true },
+          selected[1]!,
+          shown[2]!,
+        ]}
       />,
     );
     await waitFor(() => expect(checkedIds()).toEqual(["row-1"]));
@@ -142,7 +144,9 @@ describe("the real bulk-pin selection composition", () => {
     await waitFor(() => expect(setPinned).toHaveBeenCalledTimes(2));
     view.rerender(
       <SelectionProbe
-        shown={selected.map((entry) => ({ ...entry, pinned: true }))}
+        shown={selected
+          .map((entry) => ({ ...entry, pinned: true }))
+          .concat(shown[2]!)}
       />,
     );
 
@@ -152,11 +156,13 @@ describe("the real bulk-pin selection composition", () => {
       ).toBeNull(),
     );
     expect(checkedIds()).toEqual([]);
+    await user.click(screen.getByRole("checkbox", { name: "Select row-2" }));
+    expect(checkedIds()).toEqual(["row-2"]);
 
     await act(async () =>
       second.resolve({ ...selected[1]!, pinned: true }),
     );
-    await waitFor(() => expect(checkedIds()).toEqual([]));
+    await waitFor(() => expect(checkedIds()).toEqual(["row-2"]));
     await waitFor(() =>
       expect(
         screen.getByRole("status", { name: "Bulk busy state" }).textContent,
