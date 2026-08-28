@@ -24,7 +24,14 @@ export interface DeviceStatusPresentation {
     readonly tone: DeviceStatusTone;
     readonly detail?: string;
     readonly busy: boolean;
-    readonly live: "off" | "polite";
+    readonly a11y: {
+        readonly role?: "status";
+        readonly live?: "polite";
+    };
+    readonly detailA11y?: {
+        readonly role: "status";
+        readonly live: "polite";
+    };
 }
 
 function status(
@@ -33,7 +40,7 @@ function status(
     tone: DeviceStatusTone,
     detail?: string,
 ): DeviceStatusPresentation {
-    return { icon, label, tone, detail, busy: tone === "busy", live: "off" };
+    return { icon, label, tone, detail, busy: tone === "busy", a11y: {} };
 }
 
 export function deviceStatus(
@@ -46,19 +53,28 @@ export function deviceStatus(
 }
 
 export function peerRowStatus(state: PeerState): DeviceStatusPresentation {
+    const hint = (
+        icon: DeviceStatusIcon,
+        label: string,
+        tone: DeviceStatusTone,
+        detail: string,
+    ): DeviceStatusPresentation => ({
+        ...status(icon, label, tone, detail),
+        detailA11y: { role: "status", live: "polite" },
+    });
     switch (state) {
         case "synced":
             return status("checkCircle", t("devices.state.synced.label"), "ready");
         case "away":
-            return status("more", t("devices.state.away.label"), "neutral", t("devices.state.away.hint"));
+            return hint("more", t("devices.state.away.label"), "neutral", t("devices.state.away.hint"));
         case "stalled":
-            return status("alert", t("devices.state.stalled.label"), "attention", t("devices.state.stalled.hint"));
+            return hint("alert", t("devices.state.stalled.label"), "attention", t("devices.state.stalled.hint"));
         case "inbound":
-            return status("download", t("devices.state.inbound.label"), "neutral", t("devices.state.inbound.hint"));
+            return hint("download", t("devices.state.inbound.label"), "neutral", t("devices.state.inbound.hint"));
         case "waiting":
-            return status("more", t("devices.state.waiting.label"), "neutral", t("devices.state.waiting.hint"));
+            return hint("more", t("devices.state.waiting.label"), "neutral", t("devices.state.waiting.hint"));
         case "failing":
-            return status("alert", t("devices.state.failing.label"), "danger", t("devices.state.failing.hint"));
+            return hint("alert", t("devices.state.failing.label"), "danger", t("devices.state.failing.hint"));
     }
 }
 

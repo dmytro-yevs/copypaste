@@ -27,12 +27,13 @@ export function CloudConnectionCard({
                 tone="neutral"
                 className={styles.card}
                 data-state="checking"
-                role="status"
+                role={presentation.role}
+                aria-live={presentation.live}
                 aria-label={presentation.title}
                 aria-busy={presentation.busy}
             >
                 <span className={styles.iconWell} aria-hidden="true">
-                    <Icon name="cloud" size="md" />
+                    <Icon name={presentation.icon} size="md" />
                 </span>
                 <span className={styles.copy}>
                     <strong>{presentation.title}</strong>
@@ -66,6 +67,9 @@ export function CloudConnectionCard({
             tone="neutral"
             className={styles.card}
             data-state={presentation.state}
+            role={presentation.role}
+            aria-live={presentation.live}
+            aria-busy={presentation.busy || undefined}
         >
             <span className={styles.iconWell} aria-hidden="true">
                 <Icon name={presentation.icon} size="md" />
