@@ -490,6 +490,72 @@ def job_timeout_checks(workflows, maximum=20):
 for check in job_timeout_checks(docs):
     rec(*check)
 
+
+def cargo_deny_contract(workflow):
+    job = (workflow.get("jobs") or {}).get("deny") or {}
+    strategy = job.get("strategy") or {}
+    matrix = (strategy.get("matrix") or {}).get("check")
+    job_steps = steps(job)
+    docker_actions = [
+        step for step in job_steps
+        if str(step.get("uses") or "").split("@", 1)[0].lower()
+        == "embarkstudios/cargo-deny-action"
+    ]
+    installers = [
+        step for step in job_steps
+        if str(step.get("uses") or "").split("@", 1)[0]
+        == "taiki-e/install-action"
+        and str(step.get("with", {}).get("tool") or "").startswith("cargo-deny")
+    ]
+    settings = (installers[0].get("with") or {}) if len(installers) == 1 else {}
+    install_ref = str(installers[0].get("uses") or "") if len(installers) == 1 else ""
+    commands = [
+        str(step.get("run") or "") for step in job_steps
+        if "cargo deny" in str(step.get("run") or "")
+    ]
+    command = " ".join(commands[0].split()) if len(commands) == 1 else ""
+    required_prefix = (
+        "cargo deny --manifest-path Cargo.toml --config deny.toml "
+        "--all-features --locked check "
+    )
+    required_suffix = " --show-stats"
+    flags_hold = command.startswith(required_prefix) and command.endswith(required_suffix)
+    selector_match = re.search(r"\bcheck\s+(.+?)\s+--show-stats$", command)
+    selector = selector_match.group(1) if selector_match else ""
+    return {
+        "matrix": matrix == ["advisories", "bans", "licenses", "sources"],
+        "fail-fast": strategy.get("fail-fast") is False,
+        "dockerless": not docker_actions,
+        "installer-count": len(installers) == 1,
+        "installer-ref": install_ref == (
+            "taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf"
+        ),
+        "version": settings.get("tool") == "cargo-deny@0.20.2",
+        "checksum": str(settings.get("checksum", "")).lower() == "true",
+        "fallback": settings.get("fallback") == "none",
+        "command-count": len(commands) == 1,
+        "flags": flags_hold,
+        "selector": selector == "${{ matrix.check }}",
+    }
+
+
+deny_checks = cargo_deny_contract(docs.get("supply-chain.yml") or {})
+for key, description in (
+    ("matrix", "runs the four policy checks as separate matrix legs"),
+    ("fail-fast", "keeps every policy leg visible after a failure"),
+    ("dockerless", "does not use the Docker-based cargo-deny action"),
+    ("installer-count", "installs cargo-deny exactly once"),
+    ("installer-ref", "pins the cargo-deny installer to the reviewed full SHA"),
+    ("version", "pins cargo-deny 0.20.2"),
+    ("checksum", "verifies the cargo-deny release checksum"),
+    ("fallback", "fails instead of compiling an unverified fallback"),
+    ("command-count", "runs cargo deny exactly once per matrix leg"),
+    ("flags", "uses the manifest, policy, feature, lockfile, and stats flags"),
+    ("selector", "runs the selected matrix check instead of a hardcoded subset"),
+):
+    rec(deny_checks[key], "supply-chain.yml: cargo-deny {}".format(description),
+        "the Dockerless cargo-deny contract is incomplete")
+
 # --- one ref per action, across every workflow ------------------------------
 refs = {}
 for wf, doc in docs.items():
@@ -1155,6 +1221,65 @@ rec("check-feature-ledger.py" in release_ledger_body,
 
 # --- self-test: prove the runner-image detector fails when it should --------
 if SELF_TEST:
+    current_supply = docs.get("supply-chain.yml") or {}
+
+    def broken_deny(mutator):
+        fixture = copy.deepcopy(current_supply)
+        mutator(fixture["jobs"]["deny"])
+        return not all(cargo_deny_contract(fixture).values())
+
+    def deny_installer(job):
+        return next(
+            step for step in steps(job)
+            if str(step.get("uses") or "").startswith("taiki-e/install-action@")
+            and str((step.get("with") or {}).get("tool") or "").startswith("cargo-deny")
+        )
+
+    def deny_command(job):
+        return next(step for step in steps(job) if "cargo deny" in str(step.get("run") or ""))
+
+    deny_fixtures = (
+        (
+            "cargo-deny without checksum verification is rejected",
+            lambda job: deny_installer(job)["with"].update(checksum=False),
+        ),
+        (
+            "cargo-deny with a source-build fallback is rejected",
+            lambda job: deny_installer(job)["with"].update(fallback="cargo"),
+        ),
+        (
+            "an unreviewed cargo-deny version is rejected",
+            lambda job: deny_installer(job)["with"].update(tool="cargo-deny@0.20.3"),
+        ),
+        (
+            "the Docker-based cargo-deny action is rejected",
+            lambda job: job["steps"].append({
+                "uses": "EmbarkStudios/cargo-deny-action@fixture"
+            }),
+        ),
+        (
+            "a cargo-deny command without the lockfile flag is rejected",
+            lambda job: deny_command(job).update(
+                run=deny_command(job)["run"].replace(" --locked", "")
+            ),
+        ),
+        (
+            "a cargo-deny matrix missing a policy check is rejected",
+            lambda job: job["strategy"]["matrix"].update(
+                check=["advisories", "bans", "licenses"]
+            ),
+        ),
+        (
+            "a hardcoded cargo-deny policy subset is rejected",
+            lambda job: deny_command(job).update(
+                run=deny_command(job)["run"].replace("${{ matrix.check }}", "advisories")
+            ),
+        ),
+    )
+    for desc, mutate in deny_fixtures:
+        emit(broken_deny(mutate), "self-test: {}".format(desc),
+             "the cargo-deny wiring detector accepted a broken fixture")
+
     webview_build_task, webview_extension, pairing_frontend, pairing_wrapper = \
         ANDROID_WEBVIEW_SOURCES
     webview_contract_fixtures = (
