@@ -349,6 +349,53 @@ function Test-WindowsUiEvidenceHelpers {
     $redacted = New-ProtectedUiaNode "secret-value" "ControlType.Edit" $true $false `
         ([ordered]@{ x = 0; y = 0; width = 1; height = 1 }) $true @("Pairing code")
     Assert-True ($null -eq $redacted.name) "protected accessibility retained an unapproved name"
+    $pairingNames = @("Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel")
+    $pairingVisibleNames = @("Add a CopyPaste device")
+    $pairingEnabledNames = @("Pairing code", "Pairing address", "Pair", "Cancel")
+    $makePairingNodes = {
+        param([string]$Missing = "", [string]$Offscreen = "", [string]$Disabled = "")
+        foreach ($name in $pairingNames) {
+            if ($name -eq $Missing) { continue }
+            $enabled = $name -in $pairingEnabledNames -and $name -ne $Disabled
+            New-ProtectedUiaNode $name "ControlType.Edit" $enabled ($name -eq $Offscreen) `
+                ([ordered]@{ x = 0; y = 0; width = 1; height = 1 }) `
+                ($name -in @("Pairing code", "Pairing address")) $pairingNames
+        }
+    }
+    $validPairingNodes = @(& $makePairingNodes)
+    Assert-WindowsProtectedNodes $validPairingNodes $pairingVisibleNames $pairingEnabledNames `
+        @("Pairing code", "Pairing address") "fixture"
+    foreach ($brokenTitle in @("missing", "offscreen")) {
+        $rejected = $false
+        try {
+            $nodes = if ($brokenTitle -eq "missing") {
+                @(& $makePairingNodes "Add a CopyPaste device")
+            } else {
+                @(& $makePairingNodes "" "Add a CopyPaste device")
+            }
+            Assert-WindowsProtectedNodes $nodes $pairingVisibleNames $pairingEnabledNames `
+                @("Pairing code", "Pairing address") "fixture"
+        } catch { $rejected = $_.Exception.Message -match "lacks visible root 'Add a CopyPaste device'" }
+        Assert-True $rejected "a $brokenTitle protected pairing title was accepted"
+    }
+    $wrongRoot = New-ProtectedUiaNode $null "ControlType.Window" $true $false `
+        ([ordered]@{ x = 0; y = 0; width = 1; height = 1 }) $false $pairingNames
+    $titleOnlyInDescendants = @($wrongRoot) + @(& $makePairingNodes)
+    $rejected = $false
+    try {
+        Assert-WindowsProtectedNodes $titleOnlyInDescendants $pairingVisibleNames $pairingEnabledNames `
+            @("Pairing code", "Pairing address") "fixture"
+    } catch { $rejected = $_.Exception.Message -match "lacks visible root 'Add a CopyPaste device'" }
+    Assert-True $rejected "a descendant title was accepted instead of the protected UIA root"
+    foreach ($disabledName in $pairingEnabledNames) {
+        $rejected = $false
+        try {
+            $nodes = @(& $makePairingNodes "" "" $disabledName)
+            Assert-WindowsProtectedNodes $nodes $pairingVisibleNames $pairingEnabledNames `
+                @("Pairing code", "Pairing address") "fixture"
+        } catch { $rejected = $_.Exception.Message -match "lacks visible, enabled '$([regex]::Escape($disabledName))'" }
+        Assert-True $rejected "disabled protected pairing control '$disabledName' was accepted"
+    }
     $record = New-WindowsProtectedStateRecord "devices" "entry" "Pairing code" ([ordered]@{ path = "accessibility.json" })
     Assert-True (-not $record.Contains("screenshot")) "protected state record bound a screenshot"
     $secret = "pairing-secret-0123456789"
