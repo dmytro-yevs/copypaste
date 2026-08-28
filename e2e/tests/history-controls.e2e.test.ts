@@ -14,7 +14,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
-import { ROW, count, rowBoxes, waitForRows } from "../src/harness/ui.js";
+import {
+  ROW,
+  clickButton,
+  count,
+  rowBoxes,
+  waitForRows,
+} from "../src/harness/ui.js";
 
 const SELECTION_TOOLBAR =
   '[role="toolbar"][aria-label="Selection actions"]';
@@ -95,6 +101,16 @@ async function waitForKindMenu(expanded: boolean) {
       timeoutMsg: `kind filter did not reach its ${state} state`,
     },
   );
+}
+
+async function checkedRowIds() {
+  return (await app.browser.execute(function (rowSelector: string) {
+    return Array.from(document.querySelectorAll<HTMLElement>(rowSelector))
+      .filter((row) =>
+        row.querySelector('[role="checkbox"][aria-checked="true"]'),
+      )
+      .map((row) => row.id.replace(/^history-row-/, ""));
+  }, ROW)) as string[];
 }
 
 describe("the toolbar", () => {
@@ -193,11 +209,21 @@ describe("selection mode", () => {
   });
 
   test("leaves selection mode with row selection entries available", async () => {
-    await app.browser.$(`${SELECTION_TOOLBAR} [aria-label="Done"]`).click();
+    const firstRowId = (await rowBoxes(app.browser))[0]?.id;
+    expect(firstRowId).toBeDefined();
+    expect(await checkedRowIds()).toEqual([firstRowId]);
+
+    await clickButton(app.browser, "Done", {
+      within: SELECTION_TOOLBAR,
+      timeout: 5_000,
+    });
     await app.browser.waitUntil(
-      async () => !(await app.browser.$(SELECTION_TOOLBAR)).isExisting(),
+      async () =>
+        !(await app.browser.$(SELECTION_TOOLBAR)).isExisting() &&
+        (await checkedRowIds()).length === 0,
       { timeout: 5_000, timeoutMsg: "selection mode stayed active after Done" },
     );
+    expect(await checkedRowIds()).toEqual([]);
     expect(await count(app.browser, ROW_SELECTION)).toBe(4);
   });
 });
