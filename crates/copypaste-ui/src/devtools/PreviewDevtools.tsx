@@ -33,6 +33,8 @@ const PAIRING_OPTIONS: readonly PreviewPairingPhase[] = [
     "confirm",
     "connecting",
     "success",
+    "rejected",
+    "timed_out",
     "failure",
     "cancelled",
 ];

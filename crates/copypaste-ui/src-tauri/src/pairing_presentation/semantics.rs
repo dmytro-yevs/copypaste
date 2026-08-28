@@ -93,9 +93,7 @@ pub fn resolve_pairing_semantics(
     };
     let mut semantics = semantics_for(message_id);
     if state == PairingState::Failed {
-        if error == Some(ErrorCode::ContentTooLarge) {
-            semantics.terminal = true;
-        }
+        semantics.terminal = true;
         semantics.retry = error.is_some_and(ErrorCode::retryable);
     }
     semantics
@@ -517,7 +515,10 @@ mod tests {
                 code.retryable(),
                 "{code:?}"
             );
+            assert!(resolve_pairing_semantics(PairingState::Failed, Some(code)).terminal);
         }
-        assert!(!resolve_pairing_semantics(PairingState::Failed, None).retry);
+        let none = resolve_pairing_semantics(PairingState::Failed, None);
+        assert!(none.terminal);
+        assert!(!none.retry);
     }
 }

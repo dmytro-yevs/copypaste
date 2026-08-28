@@ -16,6 +16,8 @@ export type PreviewPairingPhase =
     | "confirm"
     | "connecting"
     | "success"
+    | "rejected"
+    | "timed_out"
     | "failure"
     | "cancelled";
 export type PreviewResource = "history" | "discovery" | "logs" | "cloud";
@@ -129,6 +131,8 @@ const scenarioSchema = z.object({
         "confirm",
         "connecting",
         "success",
+        "rejected",
+        "timed_out",
         "failure",
         "cancelled",
     ]),

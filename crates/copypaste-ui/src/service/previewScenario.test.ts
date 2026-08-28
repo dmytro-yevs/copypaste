@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PairingCeremony } from "@/lib/ipc";
+import { PAIRING_SEMANTICS_BY_STATE, type PairingCeremony } from "@/lib/ipc";
 import { createPreviewInterceptor } from "@/service/previewIpc";
 import {
   createPreviewScenarioStore,
@@ -379,7 +379,7 @@ describe("preview scenario service", () => {
     store.getState().startPairing(PHONE.id);
     await expect(intercept("pair_reject")).resolves.toMatchObject({
       handled: true,
-      value: { state: "failed" },
+      value: { state: "rejected", semantics: PAIRING_SEMANTICS_BY_STATE.rejected },
     });
     expect(store.getState().scenario.devices[0]?.paired).toBe(false);
     await expect(intercept("discovered")).resolves.toMatchObject({
@@ -405,6 +405,8 @@ describe("preview scenario service", () => {
       confirm: "awaiting_confirmation",
       connecting: "handshaking",
       success: "confirmed",
+      rejected: "rejected",
+      timed_out: "timed_out",
       failure: "failed",
       cancelled: "cancelled",
     };
@@ -418,6 +420,8 @@ describe("preview scenario service", () => {
       confirm: "compare_codes",
       connecting: "securing_connection",
       success: "paired",
+      rejected: "rejected",
+      timed_out: "timed_out",
       failure: "failed",
       cancelled: "cancelled",
     };
