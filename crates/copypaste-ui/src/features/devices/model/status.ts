@@ -1,6 +1,11 @@
 import { t } from "@/i18n";
-import type { DevicePresence } from "@/lib/ipc";
-import type { PeerState } from "./peerState";
+import type { DevicePresence, PeerInfo } from "@/lib/ipc";
+import {
+    peerPresence,
+    peerState,
+    type PeerHealth,
+    type PeerState,
+} from "./peerState";
 
 export type DeviceStatusTone =
     | "ready"
@@ -34,6 +39,8 @@ export interface DeviceStatusPresentation {
     };
 }
 
+export type PeerPresentationState = PeerState | "presence-unknown";
+
 function status(
     icon: DeviceStatusIcon,
     label: string,
@@ -52,7 +59,44 @@ export function deviceStatus(
     return status(icon, label, tone, detail);
 }
 
-export function peerRowStatus(state: PeerState): DeviceStatusPresentation {
+export function peerPresentationState(
+    peer: PeerInfo,
+    health: PeerHealth | undefined,
+): PeerPresentationState {
+    const state = peerState(peer, health);
+    if (state === "failing" || state === "waiting") return state;
+    return peerPresence(peer) === "unknown" ? "presence-unknown" : state;
+}
+
+export function peerStatusForState(
+    state: PeerPresentationState,
+): DeviceStatusPresentation {
+    switch (state) {
+        case "presence-unknown":
+            return status(
+                "circle",
+                t("devices.presentation.status.presenceUnknown"),
+                "neutral",
+                t("devices.presentation.status.presenceUnknownDetail"),
+            );
+        case "synced":
+            return status("checkCircle", t("devices.presentation.status.synced"), "ready");
+        case "away":
+            return status("circle", t("devices.presentation.status.away"), "neutral", t("devices.presentation.status.awayDetail"));
+        case "waiting":
+            return status("circle", t("devices.presentation.status.waiting"), "neutral", t("devices.presentation.status.waitingDetail"));
+        case "inbound":
+            return status("circle", t("devices.presentation.status.waiting"), "neutral", t("devices.presentation.status.inboundDetail"));
+        case "stalled":
+            return status("alert", t("devices.presentation.status.needsAttention"), "attention", t("devices.presentation.status.needsAttentionDetail"));
+        case "failing":
+            return status("xCircle", t("devices.presentation.status.syncFailed"), "danger", t("devices.presentation.status.syncFailedDetail"));
+    }
+}
+
+export function peerRowStatus(
+    state: PeerPresentationState,
+): DeviceStatusPresentation {
     const hint = (
         icon: DeviceStatusIcon,
         label: string,
@@ -63,6 +107,13 @@ export function peerRowStatus(state: PeerState): DeviceStatusPresentation {
         detailA11y: { role: "status", live: "polite" },
     });
     switch (state) {
+        case "presence-unknown":
+            return hint(
+                "circle",
+                t("devices.presentation.status.presenceUnknown"),
+                "neutral",
+                t("devices.presentation.status.presenceUnknownDetail"),
+            );
         case "synced":
             return status("checkCircle", t("devices.state.synced.label"), "ready");
         case "away":
