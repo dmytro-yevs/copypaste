@@ -45,6 +45,7 @@ const CONTROLS = [
   "Filter by kind, default: All kinds",
   "Sort order, default: Newest first",
 ];
+const KIND_FILTER = 'button[aria-label^="Filter by kind,"]';
 
 let app: AndroidApp;
 let seeded: string[] = [];
@@ -66,6 +67,7 @@ beforeAllWithEvidence("history-controls", async () => {
 }, 300_000);
 
 afterAll(async () => {
+  await closeKindMenu().catch(() => undefined);
   await closeHistorySearch(app).catch(() => undefined);
   await clearField(app, SEARCH).catch(() => undefined);
   await cleanUpItems(app, seeded);
@@ -73,6 +75,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  await closeKindMenu();
   await closeHistorySearch(app);
 });
 
@@ -91,14 +94,38 @@ async function controlBoxes() {
   );
 }
 
-/** Use the authored listbox rather than reaching through the control. */
-async function chooseKind(value: string): Promise<void> {
-  await tapElement(app, 'button[aria-label^="Filter by kind,"]');
-  await tapElement(
-    app,
-    '[role="menuitemcheckbox"]',
-    value === "url" ? "Links" : "All kinds",
+async function waitForKindMenu(expanded: boolean): Promise<void> {
+  const state = expanded ? "open" : "closed";
+  await waitFor(
+    async () =>
+      app.withPage((page) =>
+        page.evaluate(
+          (selector, expected, expectedState) => {
+            const trigger = document.querySelector(selector);
+            const menuId = trigger?.getAttribute("aria-controls");
+            const menu = menuId ? document.getElementById(menuId) : null;
+            return (
+              trigger?.getAttribute("aria-expanded") === String(expected) &&
+              trigger?.getAttribute("data-state") === expectedState &&
+              (expected
+                ? menu?.getAttribute("role") === "menu" &&
+                  menu.getAttribute("data-state") === "open"
+                : menu === null)
+            );
+          },
+          KIND_FILTER,
+          expanded,
+          state,
+        ),
+      ),
+    `kind filter did not reach its exact ${state} state`,
   );
+}
+
+async function closeKindMenu(): Promise<void> {
+  if ((await count(app, `${KIND_FILTER}[aria-expanded="true"]`)) === 0) return;
+  await app.withPage((page) => page.keyboard.press("Escape"));
+  await waitForKindMenu(false);
 }
 
 describe("the toolbar", () => {
@@ -173,20 +200,35 @@ describe("the toolbar", () => {
     const before = itemRows(await rowBoxes(app));
     expect(before.length).toBeGreaterThanOrEqual(4);
 
-    await chooseKind("url");
-    await waitFor(async () => {
-      const rows = itemRows(await rowBoxes(app));
-      return (
-        rows.length > 0 &&
-        rows.every((row) => row.text.includes("https://example.com"))
-      );
-    }, "the kind filter left rows that are not links on screen");
+    await tapElement(app, KIND_FILTER);
+    await waitForKindMenu(true);
+    try {
+      await tapElement(app, '[role="menuitemcheckbox"]', "Links");
+      await waitFor(async () => {
+        const rows = itemRows(await rowBoxes(app));
+        return (
+          rows.length > 0 &&
+          rows.every((row) => row.text.includes("https://example.com"))
+        );
+      }, "the kind filter left rows that are not links on screen");
 
-    await chooseKind("all");
-    await waitFor(
-      async () => itemRows(await rowBoxes(app)).length >= before.length,
-      "clearing the kind filter never restored the list",
-    );
+      // MultiSelect prevents item selection from closing its Radix portal.
+      // Restore All from that live menu; the trigger is occluded until Escape.
+      await waitForKindMenu(true);
+      await tapElement(app, '[role="menuitemcheckbox"]', "All kinds");
+      await waitFor(
+        async () =>
+          itemRows(await rowBoxes(app)).length >= before.length &&
+          (await count(
+            app,
+            'button[aria-label="Filter by kind, default: All kinds"]',
+          )) === 1,
+        "clearing the kind filter never restored the list",
+      );
+      await waitForKindMenu(true);
+    } finally {
+      await closeKindMenu();
+    }
   });
 });
 
