@@ -80,9 +80,11 @@ export function useBulkPin() {
       runBulk(items, (item) => setPinned(item.id, pinned)),
     onSuccess: (outcome, { pinned }) => {
       report(pinned ? "pinned" : "unpinned", outcome);
-      void invalidateHistoryQueries(qc);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
+    onSettled: () => {
+      void invalidateHistoryQueries(qc);
+    },
   });
 }
 
