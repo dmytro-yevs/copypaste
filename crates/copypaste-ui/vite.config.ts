@@ -114,5 +114,12 @@ export default defineConfig({
   // The plugin owns the lowering for both builds, and
   // `scripts/check-webview-baseline.mjs` holds each emitted chunk to the engine
   // that will load it.
-  build: { cssTarget: LEGACY_CSS_TARGET, emptyOutDir: true },
+  build: {
+    // Run 33131597896 rendered route CSS but never fired the custom-protocol
+    // link event Vite awaits before importing its chunk. Android loads one
+    // static sheet; JavaScript routes stay split and independently lazy.
+    cssCodeSplit: !androidBuild,
+    cssTarget: LEGACY_CSS_TARGET,
+    emptyOutDir: true,
+  },
 });
