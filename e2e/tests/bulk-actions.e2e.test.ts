@@ -12,6 +12,15 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
 import {
+  captureRowSelectionClick,
+  type RowSelectionClickReceipt,
+} from "../src/harness/row-selection-diagnostics.js";
+import {
+  selectionDiagnosticFailure,
+  type SelectionProbeRead,
+  withSelectionActionProbe,
+} from "../src/harness/selection-diagnostics.js";
+import {
   clickButton,
   count,
   HISTORY_LIST,
@@ -42,7 +51,11 @@ async function rowCheckboxes() {
   return [...(await app.browser.$$(ROW_CHECKBOXES))];
 }
 
-async function enterSelectionMode(firstId?: string): Promise<void> {
+async function enterSelectionMode(
+  firstId?: string,
+  receipts?: RowSelectionClickReceipt[],
+  intendedIds: readonly string[] = [],
+): Promise<void> {
   const bar = await app.browser.$(BULK_BAR);
   if (await bar.isExisting()) return;
 
@@ -50,21 +63,38 @@ async function enterSelectionMode(firstId?: string): Promise<void> {
   if (firstId) {
     const row = await app.browser.$(`#history-row-${firstId}`);
     const box = await row.$('[role="checkbox"]');
-    await box.moveTo();
-    await box.click();
+    const receipt = await captureRowSelectionClick(
+      app.browser,
+      firstId,
+      async () => {
+        await box.moveTo();
+        await box.click();
+      },
+      { intendedIds, priorReceipts: receipts ?? [] },
+    );
+    receipts?.push(receipt);
   } else {
     const boxes = await rowCheckboxes();
     expect(boxes).toHaveLength(SEED.length);
     await boxes[0]!.moveTo();
     await boxes[0]!.click();
   }
-  await app.browser.waitUntil(
-    async () => (await app.browser.$(BULK_BAR)).isDisplayed(),
-    {
-      timeout: 10_000,
-      timeoutMsg: "selecting a row never opened the bulk bar",
-    },
-  );
+  try {
+    await app.browser.waitUntil(
+      async () => (await app.browser.$(BULK_BAR)).isDisplayed(),
+      {
+        timeout: 10_000,
+        timeoutMsg: "selecting a row never opened the bulk bar",
+      },
+    );
+  } catch (cause) {
+    throw selectionDiagnosticFailure(cause, "row-selection-toolbar-open", {
+      budgetMs: 10_000,
+      intendedIds,
+      rowClickReceipts: receipts ?? [],
+      checkedIds: await bestEffortSelectedRowIds(),
+    });
+  }
 }
 
 async function selectedRowIds(): Promise<string[]> {
@@ -77,21 +107,50 @@ async function selectedRowIds(): Promise<string[]> {
   )) as string[];
 }
 
-async function selectIds(ids: readonly string[]): Promise<void> {
+async function bestEffortSelectedRowIds(): Promise<string[] | "unavailable"> {
+  try {
+    return await selectedRowIds();
+  } catch {
+    return "unavailable";
+  }
+}
+
+async function selectIds(
+  ids: readonly string[],
+  receipts: RowSelectionClickReceipt[],
+): Promise<void> {
   for (const id of ids) {
     const row = await app.browser.$(`#history-row-${id}`);
     const checkbox = await row.$('[role="checkbox"]');
     if ((await checkbox.getAttribute("aria-checked")) === "true") continue;
-    await checkbox.moveTo();
-    await checkbox.click();
+    const receipt = await captureRowSelectionClick(
+      app.browser,
+      id,
+      async () => {
+        await checkbox.moveTo();
+        await checkbox.click();
+      },
+      { intendedIds: ids, priorReceipts: receipts },
+    );
+    receipts.push(receipt);
   }
 
   const expected = [...ids].sort();
-  await app.browser.waitUntil(
-    async () =>
-      (await selectedRowIds()).sort().join("\u0000") === expected.join("\u0000"),
-    { timeout: 10_000, timeoutMsg: "the expected rows were not selected" },
-  );
+  try {
+    await app.browser.waitUntil(
+      async () =>
+        (await selectedRowIds()).sort().join("\u0000") ===
+        expected.join("\u0000"),
+      { timeout: 10_000, timeoutMsg: "the expected rows were not selected" },
+    );
+  } catch (cause) {
+    throw selectionDiagnosticFailure(cause, "row-selection-settle", {
+      budgetMs: 10_000,
+      intendedIds: ids,
+      rowClickReceipts: receipts,
+      checkedIds: await bestEffortSelectedRowIds(),
+    });
+  }
 }
 
 async function select(count: number): Promise<void> {
@@ -128,14 +187,30 @@ async function select(count: number): Promise<void> {
 async function leaveSelectionMode(): Promise<void> {
   const bar = await app.browser.$(BULK_BAR);
   if (!(await bar.isExisting())) return;
-  await clickButton(app.browser, "Done", { within: BULK_BAR });
-  await app.browser.waitUntil(
-    async () => !(await app.browser.$(BULK_BAR)).isExisting(),
-    {
-      timeout: 10_000,
-      timeoutMsg: "the bulk bar stayed after leaving selection mode",
-    },
+  await withSelectionActionProbe(app.browser, "Done", (probe) =>
+    probe.perform(
+      "bulk-done",
+      {
+        budgetMs: 10_000,
+      },
+      () => clickButton(app.browser, "Done", { within: BULK_BAR }),
+      () =>
+        app.browser.waitUntil(
+          async () => !(await app.browser.$(BULK_BAR)).isExisting(),
+          {
+            timeout: 10_000,
+            timeoutMsg: "the bulk bar stayed after leaving selection mode",
+          },
+        ),
+    ),
   );
+}
+
+function boundaryChanged(
+  first: SelectionProbeRead,
+  last: SelectionProbeRead,
+): boolean {
+  return JSON.stringify(first) !== JSON.stringify(last);
 }
 
 describe("entering selection mode", () => {
@@ -201,63 +276,115 @@ describe("the bulk bar", () => {
     const pinnedIds = await selectedRowIds();
     expect(pinnedIds).toHaveLength(2);
 
-    await clickButton(app.browser, "Pin", {
-      within: BULK_BAR,
+    await withSelectionActionProbe(app.browser, "Pin", async (probe) => {
+      await probe.perform(
+        "bulk-pin-daemon-confirmation",
+        { budgetMs: 20_000, selectedIds: pinnedIds },
+        () => clickButton(app.browser, "Pin", { within: BULK_BAR }),
+        () =>
+          app.browser.waitUntil(
+            async () =>
+              (await app.daemon.items()).filter((item) => item.pinned).length ===
+              2,
+            {
+              timeout: 20_000,
+              timeoutMsg: "the daemon never recorded two pinned items",
+            },
+          ),
+      );
+
+      const afterDaemon = await probe.read();
+      let lastSelectionState = afterDaemon;
+      let selectionPolls = 0;
+
+      // Bulk actions release selection when every write succeeds. The refresh
+      // that moves rows into the pinned section must not hold that UI state
+      // hostage, so the next selection targets stable ids after both claims
+      // have independently become true.
+      try {
+        await app.browser.waitUntil(
+          async () => {
+            selectionPolls += 1;
+            lastSelectionState = await probe.read();
+            return !(await app.browser.$(BULK_BAR)).isExisting();
+          },
+          {
+            timeout: 10_000,
+            timeoutMsg: "pinning did not clear the bulk selection",
+          },
+        );
+      } catch (cause) {
+        throw await probe.failure(cause, "bulk-pin-selection-release", {
+          budgetMs: 10_000,
+          selectedIds: pinnedIds,
+          polls: selectionPolls,
+          stateChanged: boundaryChanged(afterDaemon, lastSelectionState),
+          afterDaemon,
+          lastSelectionState,
+        });
+      }
+
+      const afterSelection = await probe.read();
+      let lastRenderedState = afterSelection;
+      let renderedPolls = 0;
+      try {
+        await app.browser.waitUntil(
+          async () => {
+            renderedPolls += 1;
+            lastRenderedState = await probe.read();
+            for (const id of pinnedIds) {
+              const row = await app.browser.$(`#history-row-${id}`);
+              if (
+                !(await row.isExisting()) ||
+                !(await row.getText()).includes("Pinned")
+              ) {
+                return false;
+              }
+            }
+            return true;
+          },
+          {
+            timeout: 10_000,
+            timeoutMsg: "the pinned rows never reached the rendered history",
+          },
+        );
+      } catch (cause) {
+        throw await probe.failure(cause, "bulk-pin-rendered-badges", {
+          budgetMs: 10_000,
+          selectedIds: pinnedIds,
+          polls: renderedPolls,
+          stateChanged: boundaryChanged(afterSelection, lastRenderedState),
+          afterDaemon,
+          afterSelection,
+          lastRenderedState,
+        });
+      }
+
+      // The toggle's label is a claim about every selected row, so selecting
+      // the same two rows after their reorder must flip it.
+      const rowClickReceipts: RowSelectionClickReceipt[] = [];
+      await enterSelectionMode(pinnedIds[0], rowClickReceipts, pinnedIds);
+      await selectIds(pinnedIds, rowClickReceipts);
+      try {
+        await app.browser.waitUntil(
+          async () => {
+            const bar = await app.browser.$(BULK_BAR);
+            return (await bar.getText()).includes("Unpin");
+          },
+          {
+            timeout: 10_000,
+            timeoutMsg:
+              "the toggle still offered to pin two already-pinned items",
+          },
+        );
+      } catch (cause) {
+        throw await probe.failure(cause, "bulk-pin-unpin-presentation", {
+          budgetMs: 10_000,
+          selectedIds: pinnedIds,
+          rowClickReceipts,
+        });
+      }
     });
-
-    await app.browser.waitUntil(
-      async () =>
-        (await app.daemon.items()).filter((item) => item.pinned).length === 2,
-      {
-        timeout: 20_000,
-        timeoutMsg: "the daemon never recorded two pinned items",
-      },
-    );
-
-    // Bulk actions release selection when every write succeeds. The refresh
-    // that moves rows into the pinned section must not hold that UI state
-    // hostage, so the next selection targets stable ids after both claims
-    // have independently become true.
-    await app.browser.waitUntil(
-      async () => !(await app.browser.$(BULK_BAR)).isExisting(),
-      {
-        timeout: 10_000,
-        timeoutMsg: "pinning did not clear the bulk selection",
-      },
-    );
-    await app.browser.waitUntil(
-      async () => {
-        for (const id of pinnedIds) {
-          const row = await app.browser.$(`#history-row-${id}`);
-          if (
-            !(await row.isExisting()) ||
-            !(await row.getText()).includes("Pinned")
-          ) {
-            return false;
-          }
-        }
-        return true;
-      },
-      {
-        timeout: 10_000,
-        timeoutMsg: "the pinned rows never reached the rendered history",
-      },
-    );
-
-    // The toggle's label is a claim about every selected row, so selecting the
-    // same two rows after their reorder must flip it.
-    await enterSelectionMode(pinnedIds[0]);
-    await selectIds(pinnedIds);
-    await app.browser.waitUntil(
-      async () => {
-        const bar = await app.browser.$(BULK_BAR);
-        return (await bar.getText()).includes("Unpin");
-      },
-      {
-        timeout: 10_000,
-        timeoutMsg: "the toggle still offered to pin two already-pinned items",
-      },
-    );
   });
 
   test("bulk delete confirms first, then really deletes", async () => {
