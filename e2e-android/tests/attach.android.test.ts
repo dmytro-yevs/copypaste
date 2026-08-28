@@ -1,12 +1,13 @@
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, expect, test } from "vitest";
 
 import { PACKAGE } from "../src/harness/adb.js";
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import { NAV } from "../src/harness/ui.js";
 
 let app: AndroidApp;
 
-beforeAll(async () => {
+beforeAllWithEvidence("attach", async () => {
   app = await attachToApp();
 }, 180_000);
 
