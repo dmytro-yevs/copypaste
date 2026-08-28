@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 
+import type { Item } from "../../crates/copypaste-ui/src/generated/ipc.js";
+import { missingFixtureIds } from "../src/harness/bridge.js";
 import {
   settingsNavigationAction,
   settingsNavigationReady,
@@ -11,6 +13,39 @@ import {
   type SettingsTriggerSnapshot,
   type SettingsViewSnapshot,
 } from "../src/harness/settings.js";
+
+function item(id: string, content: string | null, contentType = "text"): Item {
+  return {
+    id,
+    content,
+    content_type: contentType,
+    created_at: 0,
+    pinned: false,
+    is_sensitive: content === null,
+    sensitive_finding: null,
+    origin_device_id: "device",
+    origin_device_name: null,
+    source_app_bundle_id: null,
+    source_app_name: null,
+    too_large_to_sync: false,
+    truncated: false,
+  };
+}
+
+describe("the Settings history fixture query", () => {
+  test("retains all 101 seeded ids alongside null, binary, and unknown items", () => {
+    const fixtureIds = Array.from({ length: 101 }, (_, index) => `fixture-${index}`);
+    const stored: Item[] = [
+      item("sensitive", null),
+      item("image", null, "image/png"),
+      item("other", "opaque", "application/octet-stream"),
+      ...fixtureIds.map((id) => item(id, `${id} text`)),
+    ];
+
+    expect(missingFixtureIds(stored, fixtureIds)).toEqual([]);
+    expect(stored).toHaveLength(104);
+  });
+});
 
 describe("adaptive Preferences navigation", () => {
   const fixtures: ReadonlyArray<{
