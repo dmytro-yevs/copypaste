@@ -1,15 +1,7 @@
-import { Icon, type IconName } from "@/components/ui";
+import { Icon } from "@/components/ui";
 import type { DeviceStatusPresentation } from "@/features/devices/model/devicePresentation";
 import { cn } from "@/lib/cn";
 import styles from "./DeviceStatus.module.css";
-
-const STATUS_ICON: Record<DeviceStatusPresentation["tone"], IconName> = {
-  ready: "checkCircle",
-  busy: "refresh",
-  attention: "alert",
-  danger: "xCircle",
-  neutral: "circle",
-};
 
 export function DeviceStatus({
   status,
@@ -22,10 +14,12 @@ export function DeviceStatus({
     <span
       data-slot="device-status"
       data-tone={status.tone}
+      data-live={status.live}
+      aria-busy={status.busy || undefined}
       className={cn(styles.root, className)}
     >
       <Icon
-        name={STATUS_ICON[status.tone]}
+        name={status.icon}
         size="xs"
         className={styles.icon}
         aria-hidden="true"

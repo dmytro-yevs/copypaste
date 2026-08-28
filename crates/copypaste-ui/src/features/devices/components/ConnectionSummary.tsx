@@ -1,6 +1,7 @@
-import { StatusCard, type StatusCardStatus } from "@/components/shared";
-import { Button, Icon, type IconName } from "@/components/ui";
+import { StatusCard } from "@/components/shared";
+import { Button, Icon } from "@/components/ui";
 import type { ConnectionSummaryPresentation } from "@/features/devices/model/devicePresentation";
+import { t } from "@/i18n";
 
 export function ConnectionSummary({
   summary,
@@ -15,16 +16,6 @@ export function ConnectionSummary({
   actionBusy: boolean;
   onAction: () => void;
 }) {
-  const status: StatusCardStatus = summary.state === "connected"
-    ? "positive"
-    : summary.state === "syncing"
-      ? "info"
-      : "attention";
-  const icon: IconName = summary.state === "connected"
-    ? "checkCircle"
-    : summary.state === "syncing"
-      ? "refresh"
-      : "alert";
   const action = summary.action ? (
     <Button
       type="button"
@@ -34,22 +25,23 @@ export function ConnectionSummary({
       onClick={onAction}
     >
       <Icon
-        name={summary.action.kind === "retry-peer" ? "refresh" : "devices"}
+        name={summary.action.icon}
         aria-hidden="true"
       />
-      {actionBusy ? "Syncing…" : actionLabel ?? summary.action.label}
+      {actionBusy ? t("devices.actions.syncing") : actionLabel ?? summary.action.label}
     </Button>
   ) : undefined;
 
   return (
     <StatusCard
-      status={status}
+      status={summary.status}
       title={summary.title}
       detail={summary.supportingLine}
-      icon={icon}
+      icon={summary.icon}
       action={action}
       density="compact"
       busy={summary.busy}
+      live={summary.live}
     />
   );
 }
