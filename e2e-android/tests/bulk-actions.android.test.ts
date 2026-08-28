@@ -30,7 +30,7 @@ import {
 
 const BULK_BAR = '[role="toolbar"][aria-label="Selection actions"]';
 const CHECKBOX = ROW_SELECTION;
-const DETAIL_ACTIONS = ["Copy to clipboard", "Pin item", "Delete item"];
+const DETAIL_ACTIONS = ["Copy", "Pin item", "Delete item"];
 
 let app: AndroidApp;
 let seeded: string[] = [];

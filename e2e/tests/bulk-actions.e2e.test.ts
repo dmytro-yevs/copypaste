@@ -25,7 +25,7 @@ const SEED = ["bulk alpha", "bulk beta", "bulk gamma", "bulk delta"];
 const BULK_BAR = '[role="toolbar"][aria-label="Selection actions"]';
 const HISTORY_ROWS = `${HISTORY_LIST} ${ROW}`;
 const ROW_CHECKBOXES = `${HISTORY_ROWS} [role="checkbox"]`;
-const ROW_ACTIONS = ["Copy to clipboard", "Pin item", "Delete item"];
+const ROW_ACTIONS = ["Copy", "Pin item", "Delete item"];
 
 let app: App;
 
@@ -173,7 +173,7 @@ describe("entering selection mode", () => {
         return rows.every(
           (row) =>
             row.querySelectorAll(
-              '[aria-label="Copy to clipboard"], [aria-label="Pin item"], [aria-label="Delete item"]',
+              '[aria-label="Copy"], [aria-label="Pin item"], [aria-label="Delete item"]',
             ).length === 0,
         );
       }, HISTORY_ROWS),
