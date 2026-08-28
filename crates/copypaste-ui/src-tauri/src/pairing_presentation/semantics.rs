@@ -92,8 +92,11 @@ pub fn resolve_pairing_semantics(
         PairingState::Failed => failed_message(error),
     };
     let mut semantics = semantics_for(message_id);
-    if state == PairingState::Failed && error == Some(ErrorCode::ContentTooLarge) {
-        semantics.retry = false;
+    if state == PairingState::Failed {
+        if error == Some(ErrorCode::ContentTooLarge) {
+            semantics.terminal = true;
+        }
+        semantics.retry = error.is_some_and(ErrorCode::retryable);
     }
     semantics
 }
@@ -221,7 +224,7 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             PairingTone::Danger,
             PairingLive::Alert,
             false,
-            true,
+            false,
             false,
             false,
             true,
@@ -232,7 +235,7 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             PairingTone::Danger,
             PairingLive::Alert,
             false,
-            true,
+            false,
             false,
             false,
             true,
@@ -243,7 +246,7 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             PairingTone::Warning,
             PairingLive::Alert,
             false,
-            true,
+            false,
             false,
             false,
             true,
@@ -254,7 +257,7 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             PairingTone::Warning,
             PairingLive::Alert,
             false,
-            true,
+            false,
             false,
             false,
             true,
@@ -276,7 +279,7 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             PairingTone::Danger,
             PairingLive::Alert,
             false,
-            true,
+            false,
             false,
             false,
             true,
@@ -478,12 +481,43 @@ mod tests {
         let busy = resolve_pairing_semantics(PairingState::Failed, Some(ErrorCode::RateLimited));
         let limit = resolve_pairing_semantics(PairingState::Failed, Some(ErrorCode::PairingLimit));
         assert_eq!(busy.message_id, PairingMessageId::Busy);
-        assert!(busy.retry);
+        assert!(!busy.retry);
         assert_eq!(limit.message_id, PairingMessageId::Limit);
         assert!(!limit.retry);
         assert_ne!(
             native_copy(busy.message_id).detail,
             native_copy(limit.message_id).detail
         );
+    }
+
+    #[test]
+    fn failed_retry_is_exactly_the_typed_error_policy() {
+        for code in [
+            ErrorCode::NotFound,
+            ErrorCode::InvalidRequest,
+            ErrorCode::ProtocolMismatch,
+            ErrorCode::NotReady,
+            ErrorCode::AuthFailed,
+            ErrorCode::KeyLocked,
+            ErrorCode::KeyUnusable,
+            ErrorCode::UnsupportedContent,
+            ErrorCode::ContentTooLarge,
+            ErrorCode::PairingCode,
+            ErrorCode::PairingAddress,
+            ErrorCode::RateLimited,
+            ErrorCode::PeerUnreachable,
+            ErrorCode::PairingLimit,
+            ErrorCode::PeerFailed,
+            ErrorCode::PeerVersion,
+            ErrorCode::PeerNotFound,
+            ErrorCode::Internal,
+        ] {
+            assert_eq!(
+                resolve_pairing_semantics(PairingState::Failed, Some(code)).retry,
+                code.retryable(),
+                "{code:?}"
+            );
+        }
+        assert!(!resolve_pairing_semantics(PairingState::Failed, None).retry);
     }
 }
