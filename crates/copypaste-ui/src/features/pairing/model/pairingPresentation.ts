@@ -4,8 +4,9 @@ import type {
   PairingMessageId,
   PairingSemantics,
 } from "@/lib/ipc";
-import { classifyError, friendlyError } from "@/lib/errors";
+import { classifyError, friendlyError, isRetryable } from "@/lib/errors";
 import { t } from "@/i18n";
+import { PAIRING_SEMANTICS_BY_STATE } from "@/lib/ipc";
 
 export interface PairingPresentation {
   readonly semantics: PairingSemantics;
@@ -17,22 +18,10 @@ export interface PairingPresentation {
   readonly icon: IconName;
 }
 
-const IDLE_SEMANTICS: PairingSemantics = {
-  message_id: "ready",
-  icon: "shieldCheck",
-  tone: "neutral",
-  live: "status",
-  active: false,
-  terminal: false,
-  needs_devices: false,
-  review_secure: false,
-  retry: false,
-};
-
 export function pairingPresentation(
   ceremony: PairingCeremony | undefined,
 ): PairingPresentation {
-  const semantics = ceremony?.semantics ?? IDLE_SEMANTICS;
+  const semantics = ceremony?.semantics ?? PAIRING_SEMANTICS_BY_STATE.idle;
   const prefix = `devices.pairing.semantic.${semantics.message_id}` as const;
   const deviceName = ceremony?.known_device?.name;
   return {
@@ -57,7 +46,7 @@ export interface PairingClientErrorPresentation {
   readonly icon: "alert";
   readonly tone: "danger";
   readonly live: "alert";
-  readonly retry: true;
+  readonly retry: boolean;
 }
 
 export function pairingClientErrorPresentation(
@@ -70,6 +59,6 @@ export function pairingClientErrorPresentation(
     icon: "alert",
     tone: "danger",
     live: "alert",
-    retry: true,
+    retry: isRetryable(error),
   };
 }
