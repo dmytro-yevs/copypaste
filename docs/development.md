@@ -47,7 +47,12 @@ macOS ledger entries name separate screenshot and accessibility paths on every
 credited state. Receipts bind those states to records containing `path`,
 `sha256`, and `bytes` under `feature_states`. The records must name declared
 receipt artifacts, match the ledger paths, and have distinct screenshot
-identities. Windows keeps its stricter feature-evidence manifest. The receipt's
+identities. Windows keeps its stricter feature-evidence manifest. Its version 2
+envelope tags ordinary states as `visual`; those states require a screenshot,
+complete accessibility tree, and `WDA_NONE`. Desktop pairing is tagged
+`protected-accessibility`: it requires `WDA_EXCLUDEFROMCAPTURE`, a complete
+allowlisted accessibility tree, password semantics for the code and address,
+and forbids screenshot or capture-bounds evidence. The receipt's
 outer `source.commit` and `source.run_id` bind every state and artifact to the
 publication run. Missing, additional, duplicate, or label-only states fail
 publication.

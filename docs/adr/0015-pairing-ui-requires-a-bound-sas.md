@@ -29,3 +29,15 @@ native presentation layer.
 Product controls call only the native-safe command family. Native presentation
 owns QR generation/scanning and SAS comparison; the WebView owns progress,
 cancellation, retry, and the confirmed-device refresh.
+
+On Windows, every pairing window keeps `WDA_EXCLUDEFROMCAPTURE` (`0x11`)
+regardless of the shell's Allow screenshots preference. Windows documents this
+affinity as excluding a top-level window from capture; `WDA_NONE` imposes no
+restriction. Release evidence therefore never screenshots pairing. It records
+only a complete, allowlisted UI Automation tree, requires the code and address
+edits to report `IsPassword=true`, and never reads `ValuePattern`.
+
+Primary sources:
+
+- [SetWindowDisplayAffinity](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity)
+- [AutomationElement.IsPassword](https://learn.microsoft.com/dotnet/api/system.windows.automation.automationelement.automationelementinformation.ispassword)

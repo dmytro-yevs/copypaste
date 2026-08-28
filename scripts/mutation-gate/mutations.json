@@ -916,6 +916,27 @@
           "expect": "a registered control type was not read from the element"
         },
         {
+          "name": "protected-pairing-accepts-wda-none",
+          "file": "scripts/release/windows-native-window-evidence.ps1",
+          "find": "        -not $State.capture_allowed -and $State.display_affinity -eq 17",
+          "replace": "        -not $State.capture_allowed -and $State.display_affinity -in @(0, 17)",
+          "expect": "WDA_NONE was accepted as protected"
+        },
+        {
+          "name": "protected-pairing-binds-a-screenshot",
+          "file": "scripts/release/windows-native-ui-evidence.ps1",
+          "find": "        accessibility = $Accessibility\n",
+          "replace": "        screenshot = $Accessibility\n        accessibility = $Accessibility\n",
+          "expect": "protected state record bound a screenshot"
+        },
+        {
+          "name": "protected-pairing-retains-a-raw-secret",
+          "file": "scripts/release/windows-native-ui-evidence.ps1",
+          "find": "        name = if ($Name -in $AllowedNames) { $Name } else { $null }",
+          "replace": "        name = $Name",
+          "expect": "protected accessibility retained an unapproved name"
+        },
+        {
           "name": "installed-sidecar-not-required",
           "file": "scripts/release/windows-native-evidence.ps1",
           "find": "\"copypaste-daemon.exe\", ",
