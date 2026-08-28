@@ -44,7 +44,7 @@
 }
 
 .compact > .content {
-  --scroll-dock-clearance: calc(var(--s-9, 0px) + var(--s-7, 0px) + var(--s-1, 0px) + var(--inset-bottom, 0px));
+  --scroll-dock-clearance: calc(var(--s-9) + var(--s-7) + var(--s-1) + var(--inset-bottom));
 }
 
 .desktopContent { background: transparent; }
