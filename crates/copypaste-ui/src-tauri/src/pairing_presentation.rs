@@ -379,4 +379,14 @@ mod native_pairing_source_contracts {
         assert!(android.contains("deliver(\"refresh\")"));
         assert!(!android.contains("presentProgress(\"timed_out\")"));
     }
+
+    #[test]
+    fn windows_status_keeps_native_copy_import_unambiguous() {
+        let status = production(include_str!("pairing_presentation/windows/status.rs"));
+        assert!(status.contains(
+            "use crate::pairing_presentation::native_copy::copy as native_pairing_copy;"
+        ));
+        assert!(status.contains("pub(super) fn copy(progress: &PairingProgressData)"));
+        assert!(status.contains("let copy = native_pairing_copy("));
+    }
 }
