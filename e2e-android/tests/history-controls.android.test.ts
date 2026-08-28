@@ -6,12 +6,18 @@
  * control pushed off a 412px-wide screen, a filter that narrows nothing. jsdom
  * has no layout and would pass on all three while the screen was unusable.
  */
-import { afterAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
-import { rowBoxes } from "../src/harness/list.js";
+import { itemRows, rowBoxes } from "../src/harness/list.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   ROW_SELECTION,
@@ -19,8 +25,10 @@ import {
   SEARCH_DEFAULT_LABEL,
   HISTORY_SEARCH_EXPANDED_ATTRIBUTE,
   clearField,
+  closeHistorySearch,
   count,
   gotoView,
+  interactableControlSurfaceBox,
   interactableElementBox,
   openHistorySearch,
   reloadHistoryWith,
@@ -58,9 +66,14 @@ beforeAllWithEvidence("history-controls", async () => {
 }, 300_000);
 
 afterAll(async () => {
+  await closeHistorySearch(app).catch(() => undefined);
   await clearField(app, SEARCH).catch(() => undefined);
   await cleanUpItems(app, seeded);
   await app?.detach();
+});
+
+beforeEach(async () => {
+  await closeHistorySearch(app);
 });
 
 async function controlBoxes() {
@@ -106,41 +119,46 @@ describe("the toolbar", () => {
 
   test("search replaces the control row at full width", async () => {
     await openHistorySearch(app);
-    const search = await interactableElementBox(app, SEARCH);
-    const filter = await interactableElementBox(
-      app,
-      '[aria-label^="Filter by kind,"]',
-    );
-    const state = await app.withPage((page) =>
-      page.evaluate((expandedAttribute) => {
-        const toolbar = document.querySelector(
-          '[data-slot="history-toolbar"]',
-        ) as HTMLElement;
-        const siblings = toolbar.querySelector(
-          ':scope > [aria-hidden="true"]',
-        ) as HTMLElement | null;
-        const toolbarRect = toolbar.getBoundingClientRect();
-        return {
-          expanded: toolbar.hasAttribute(expandedAttribute),
-          toolbarWidth: toolbarRect.width,
-          filterMounted: Boolean(
-            toolbar.querySelector('[aria-label^="Filter by kind,"]'),
-          ),
-          siblingsHidden: siblings?.getAttribute("aria-hidden"),
-          siblingsVisibility: siblings
-            ? getComputedStyle(siblings).visibility
-            : null,
-        };
-      }, HISTORY_SEARCH_EXPANDED_ATTRIBUTE),
-    );
+    try {
+      const searchSurface = await interactableControlSurfaceBox(app, SEARCH);
+      const filter = await interactableElementBox(
+        app,
+        '[aria-label^="Filter by kind,"]',
+      );
+      const state = await app.withPage((page) =>
+        page.evaluate((expandedAttribute) => {
+          const toolbar = document.querySelector(
+            '[data-slot="history-toolbar"]',
+          ) as HTMLElement;
+          const siblings = toolbar.querySelector(
+            ':scope > [aria-hidden="true"]',
+          ) as HTMLElement | null;
+          const toolbarRect = toolbar.getBoundingClientRect();
+          return {
+            expanded: toolbar.hasAttribute(expandedAttribute),
+            toolbarWidth: toolbarRect.width,
+            filterMounted: Boolean(
+              toolbar.querySelector('[aria-label^="Filter by kind,"]'),
+            ),
+            siblingsHidden: siblings?.getAttribute("aria-hidden"),
+            siblingsVisibility: siblings
+              ? getComputedStyle(siblings).visibility
+              : null,
+          };
+        }, HISTORY_SEARCH_EXPANDED_ATTRIBUTE),
+      );
 
-    expect(state.expanded).toBe(true);
-    expect(state.filterMounted).toBe(true);
-    expect(state.siblingsHidden).toBe("true");
-    expect(state.siblingsVisibility).toBe("hidden");
-    expect(filter).toBeNull();
-    expect(search?.width ?? 0).toBeGreaterThan(state.toolbarWidth - 80);
-    await tapButton(app, "Close search");
+      expect(state.expanded).toBe(true);
+      expect(state.filterMounted).toBe(true);
+      expect(state.siblingsHidden).toBe("true");
+      expect(state.siblingsVisibility).toBe("hidden");
+      expect(filter).toBeNull();
+      expect(searchSurface?.width ?? 0).toBeGreaterThanOrEqual(
+        state.toolbarWidth - 1,
+      );
+    } finally {
+      await closeHistorySearch(app);
+    }
   });
 
   test("every control meets the touch target the tokens promise", async () => {
@@ -152,12 +170,12 @@ describe("the toolbar", () => {
   });
 
   test("filtering by kind removes the rows that do not match", async () => {
-    const before = await rowBoxes(app);
+    const before = itemRows(await rowBoxes(app));
     expect(before.length).toBeGreaterThanOrEqual(4);
 
     await chooseKind("url");
     await waitFor(async () => {
-      const rows = await rowBoxes(app);
+      const rows = itemRows(await rowBoxes(app));
       return (
         rows.length > 0 &&
         rows.every((row) => row.text.includes("https://example.com"))
@@ -166,7 +184,7 @@ describe("the toolbar", () => {
 
     await chooseKind("all");
     await waitFor(
-      async () => (await rowBoxes(app)).length >= before.length,
+      async () => itemRows(await rowBoxes(app)).length >= before.length,
       "clearing the kind filter never restored the list",
     );
   });

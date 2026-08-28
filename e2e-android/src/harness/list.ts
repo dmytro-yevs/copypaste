@@ -57,10 +57,13 @@ export async function listSnapshot(app: AndroidApp): Promise<ListSnapshot> {
               : NaN,
           rows: Array.from(document.querySelectorAll(rowSelector), (node) => {
             const row = node as HTMLElement;
-            const match = /translateY\(([-0-9.]+)px\)/.exec(row.style.transform);
+            const match = /translateY\(([-0-9.]+)px\)/.exec(
+              row.style.transform,
+            );
             return {
               id: row.id.replace(/^history-row-/, ""),
-              start: match && match[1] !== undefined ? parseFloat(match[1]) : NaN,
+              start:
+                match && match[1] !== undefined ? parseFloat(match[1]) : NaN,
               height: row.getBoundingClientRect().height,
               active: row.getAttribute("aria-current") === "true",
               text: row.innerText,
@@ -78,11 +81,52 @@ export async function rowBoxes(app: AndroidApp): Promise<RowBox[]> {
   return (await listSnapshot(app)).rows;
 }
 
+/** Group headings share listitem semantics with clips but carry no item id. */
+export function itemRows(rows: readonly RowBox[]): RowBox[] {
+  return rows.filter((row) => row.id !== "");
+}
+
+export function maxScrollTop(snapshot: ListSnapshot): number {
+  return Math.max(0, snapshot.scrollHeight - snapshot.clientHeight);
+}
+
+/** The mounted window must cover the complete viewport without a blank gap. */
+export function renderedRowsCoverViewport(snapshot: ListSnapshot): boolean {
+  const end = snapshot.scrollTop + snapshot.clientHeight;
+  let coveredUntil = snapshot.scrollTop;
+
+  for (const row of [...snapshot.rows].sort((a, b) => a.start - b.start)) {
+    const rowEnd = row.start + row.height;
+    if (rowEnd <= coveredUntil) continue;
+    if (row.start > coveredUntil + 0.5) return false;
+    coveredUntil = rowEnd;
+    if (coveredUntil >= end - 0.5) return true;
+  }
+
+  return coveredUntil >= end - 0.5;
+}
+
+export function reservesConservativeTextList(
+  snapshot: ListSnapshot,
+  itemCount: number,
+  geometry: { group: number; short: number; long: number },
+): boolean {
+  const minimum = geometry.group + itemCount * geometry.short;
+  const maximum = geometry.group + itemCount * geometry.long;
+  return (
+    snapshot.totalSize > minimum &&
+    snapshot.totalSize <= maximum &&
+    snapshot.scrollHeight > snapshot.clientHeight
+  );
+}
+
 /** Geometry only. Row text carries a relative age that ticks on its own, so a
  *  signature including it would never repeat and nothing would ever settle. */
 function signature(snapshot: ListSnapshot): string {
   const rows = snapshot.rows
-    .map((row) => `${row.id}:${Math.round(row.start)}+${Math.round(row.height)}`)
+    .map(
+      (row) => `${row.id}:${Math.round(row.start)}+${Math.round(row.height)}`,
+    )
     .join(",");
   return (
     `${Math.round(snapshot.totalSize)}@${Math.round(snapshot.scrollTop)}` +

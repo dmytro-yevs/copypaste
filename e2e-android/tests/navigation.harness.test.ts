@@ -12,6 +12,7 @@ import {
   fieldValue,
   firstInteractableElementIndex,
   HISTORY_SEARCH_EXPANDED_ATTRIBUTE,
+  interactableControlSurfaceBox,
   NAV,
   NAVIGATION_READY,
   SEARCH,
@@ -22,6 +23,13 @@ afterEach(() => {
 });
 
 function appBackedBySearchInputs(): AndroidApp {
+  const surface = {
+    getBoundingClientRect: () => ({
+      width: 288,
+      height: 44,
+      right: 308,
+    }),
+  };
   const hidden = {
     value: "hidden value",
     getBoundingClientRect: () => ({
@@ -34,6 +42,7 @@ function appBackedBySearchInputs(): AndroidApp {
     matches: () => false,
     getAttribute: () => null,
     contains: () => false,
+    closest: () => null,
   };
   const rendered = {
     value: "rendered value",
@@ -47,6 +56,8 @@ function appBackedBySearchInputs(): AndroidApp {
     matches: () => false,
     getAttribute: () => null,
     contains: (node: unknown) => node === rendered,
+    closest: (selector: string) =>
+      selector === '[data-slot="control-surface"]' ? surface : null,
   };
   (globalThis as { document?: unknown }).document = {
     querySelectorAll: () => [hidden, rendered],
@@ -122,6 +133,16 @@ describe("compact history search readiness", () => {
     await expect(fieldValue(appBackedBySearchInputs(), SEARCH)).resolves.toBe(
       "rendered value",
     );
+  });
+
+  test("measures the complete control surface rather than its inner input", async () => {
+    await expect(
+      interactableControlSurfaceBox(appBackedBySearchInputs(), SEARCH),
+    ).resolves.toEqual({
+      width: 288,
+      height: 44,
+      right: 308,
+    });
   });
 
   test("rejects a mounted control that CSS keeps out of hit testing", () => {
