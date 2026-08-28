@@ -49,7 +49,7 @@ export function PeerRow({
 }: PeerRowProps) {
   const { t } = useTranslation();
   const presenceState = peerPresence(peer);
-  const status = peerRowStatus(peerPresentationState(peer, health));
+  const status = peerRowStatus(peerPresentationState(peer, health, syncing));
   const failure = unsettledFailure(peer, health);
 
   const synced =

@@ -42,10 +42,7 @@ export function peerStatus(
     health: PeerHealth | undefined,
     syncing: boolean,
 ): DeviceStatusPresentation {
-    if (syncing) {
-        return deviceStatus("refresh", t("devices.presentation.status.syncing"), "busy");
-    }
-    return peerStatusForState(peerPresentationState(peer, health));
+    return peerStatusForState(peerPresentationState(peer, health, syncing));
 }
 
 export function ownDeviceStatus(
