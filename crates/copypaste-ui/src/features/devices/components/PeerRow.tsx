@@ -1,38 +1,21 @@
 import { Icon } from "@/components/ui/icon";
-import { Badge, Button, Surface } from "@/components/ui";
+import { Button, Surface } from "@/components/ui";
+import { DeviceStatus } from "@/features/devices/components/DeviceStatus";
 import {
-  type PeerHealth,
-  type PeerState,
-  peerPresence,
-  peerState,
-  unsettledFailure,
+    type PeerHealth,
+    peerPresence,
+    peerState,
+    unsettledFailure,
 } from "@/features/devices/model/peerState";
+import {
+    peerPresenceLabel,
+    peerRowStatus,
+} from "@/features/devices/model/status";
 import { t as translate, useTranslation } from "@/i18n";
 import { type ErrorKind, friendlyError } from "@/lib/errors";
 import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";
 import styles from "./PeerRow.module.css";
-
-type BadgeVariant = "ok" | "warn" | "error" | "info" | "secondary";
-
-/** The state is carried by a word and a glyph as well as a tint: a device state
- *  told by colour alone fails manifest 06's accessibility half. */
-const BADGE: Record<PeerState, { variant: BadgeVariant; icon: import("@/components/ui/icon").IconName }> = {
-  synced: { variant: "ok", icon: "checkCircle" },
-  away: { variant: "secondary", icon: "more" },
-  stalled: { variant: "warn", icon: "alert" },
-  inbound: { variant: "info", icon: "download" },
-  waiting: { variant: "info", icon: "more" },
-  failing: { variant: "error", icon: "alert" },
-};
-
-/** Every state but the healthy one names what to do about it, and the type
- *  says so — `devices.state.synced.hint` does not exist to be asked for. */
-type HintedState = Exclude<PeerState, "synced">;
-
-function hasHint(state: PeerState): state is HintedState {
-  return state !== "synced";
-}
 
 /** `errors.unknown` and `errors.internal` both render "The background service
  *  returned an error", which names nothing the user can do; this screen has a
@@ -67,19 +50,14 @@ export function PeerRow({
   const { t } = useTranslation();
   const state = peerState(peer, health);
   const presenceState = peerPresence(peer);
-  const { variant, icon: StateIcon } = BADGE[state];
+  const status = peerRowStatus(state);
   const failure = unsettledFailure(peer, health);
 
   const synced =
     peer.last_seen_ms > 0
       ? t("devices.peer.lastSynced", { age: longAge(peer.last_seen_ms) })
       : t("devices.peer.neverSynced");
-  const presence =
-    presenceState === "online"
-      ? t("devices.peer.online")
-      : presenceState === "offline"
-        ? t("devices.peer.offline")
-        : t("devices.peer.unknown");
+  const presence = peerPresenceLabel(presenceState);
 
   return (
     <Surface asChild elevation="raised" border="subtle" radius="md">
@@ -92,7 +70,7 @@ export function PeerRow({
           aria-hidden="true"
           className={styles.stateIcon}
         >
-          <Icon name={StateIcon} size="md" />
+          <Icon name={status.icon} size="md" />
         </span>
 
         <div className={styles.identity}>
@@ -108,7 +86,7 @@ export function PeerRow({
           </span>
         </div>
 
-        <Badge variant={variant}>{t(`devices.state.${state}.label`)}</Badge>
+        <DeviceStatus status={status} />
       </div>
 
       <dl className={styles.details}>
@@ -199,10 +177,10 @@ export function PeerRow({
         </div>
       ) : (
         <>
-          {hasHint(state) && (
+          {status.detail && (
             <p role="status" aria-live="polite" className={styles.hint}>
               <Icon name="link" aria-hidden="true" className={styles.hintIcon} />
-              {t(`devices.state.${state}.hint`)}
+              {status.detail}
             </p>
           )}
           {health?.success && (

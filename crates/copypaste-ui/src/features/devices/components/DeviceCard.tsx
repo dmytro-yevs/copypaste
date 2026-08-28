@@ -35,7 +35,7 @@ export function DeviceCard({
         variant="ghost"
         size="md"
         aria-expanded={selected}
-        aria-busy={status.tone === "busy" || undefined}
+        aria-busy={status.busy || undefined}
         aria-label={`${name}. ${trustLabel}. ${status.label}.`}
         className={cn(styles.card, className)}
         data-status={status.tone}

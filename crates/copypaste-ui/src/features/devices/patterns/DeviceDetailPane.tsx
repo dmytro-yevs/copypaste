@@ -102,7 +102,11 @@ export function DeviceDetailPane({
         [t("devices.own.version"), target.version ?? ownFallback],
         [
           t("devices.detail.protocol"),
-          target.protocolVersion === undefined ? ownFallback : `v${target.protocolVersion}`,
+          target.protocolVersion === undefined
+            ? ownFallback
+            : t("devices.presentation.detail.protocolVersion", {
+                version: target.protocolVersion,
+              }),
         ],
         [
           t("devices.detail.captureBackend"),
@@ -175,7 +179,7 @@ export function DeviceDetailPane({
 
   return (
     <section
-      aria-label={`${target.name} details`}
+      aria-label={t("devices.presentation.detail.section", { name: target.name })}
       aria-busy={syncing || unpairing || revoking || undefined}
       className={styles.root}
       data-compact={compact || undefined}
@@ -228,7 +232,7 @@ export function DeviceDetailPane({
       )}
 
       {target.kind === "peer" ? (
-        <div className={styles.actions} aria-label="Device actions">
+        <div className={styles.actions} aria-label={t("devices.presentation.detail.actions")}>
           <Button
             type="button"
             variant="secondary"
@@ -238,7 +242,9 @@ export function DeviceDetailPane({
             onClick={() => onSync(target.peer)}
           >
             {!syncing ? <Icon name="refresh" aria-hidden="true" /> : null}
-            {syncing ? "Syncing…" : "Sync now"}
+            {syncing
+              ? t("devices.presentation.detail.syncing")
+              : t("devices.presentation.detail.syncNow")}
           </Button>
           <Button
             type="button"
@@ -250,7 +256,9 @@ export function DeviceDetailPane({
             onClick={() => onUnpair(target.peer)}
           >
             {!unpairing ? <Icon name="close" aria-hidden="true" /> : null}
-            {unpairing ? "Unpairing…" : "Unpair"}
+            {unpairing
+              ? t("devices.presentation.detail.unpairing")
+              : t("devices.presentation.detail.unpair")}
           </Button>
           <Button
             type="button"
@@ -262,7 +270,9 @@ export function DeviceDetailPane({
             className={styles.revoke}
           >
             {!revoking ? <Icon name="shieldX" aria-hidden="true" /> : null}
-            {revoking ? "Revoking…" : "Revoke pairing…"}
+            {revoking
+              ? t("devices.presentation.detail.revoking")
+              : t("devices.presentation.detail.revoke")}
           </Button>
         </div>
       ) : null}

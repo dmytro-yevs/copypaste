@@ -14,6 +14,7 @@ import {
 } from "@/features/devices/model/peerState";
 import type { DeviceDetailTarget } from "@/features/devices/patterns/DeviceDetailPane";
 import type { DeviceSelectionKey } from "@/features/devices/patterns/DeviceRoster";
+import { t } from "@/i18n";
 import type { DiscoveredDevice, PeerInfo, StatusData } from "@/lib/ipc";
 import { currentPlatform } from "@/lib/platform";
 
@@ -60,7 +61,7 @@ export function useDeviceDetailTarget({
         if (selected === "own") {
             return {
                 kind: "own",
-                name: own.data?.device_name || "This device",
+                name: own.data?.device_name || t("devices.own.name"),
                 identity: localDeviceIdentity(currentPlatform()),
                 status: ownDeviceStatus(
                     own.isPending,
@@ -80,10 +81,15 @@ export function useDeviceDetailTarget({
                 captureRunning: own.data?.capture_running,
                 privateMode: own.data?.private_mode,
                 itemCountLabel: own.data
-                    ? `${own.data.item_count.toLocaleString()} ${own.data.item_count === 1 ? "item" : "items"}`
+                    ? t(
+                          own.data.item_count === 1
+                              ? "devices.own.items_one"
+                              : "devices.own.items_other",
+                          { count: own.data.item_count },
+                      )
                     : own.isError
-                      ? "Unavailable"
-                      : "Checking…",
+                      ? t("devices.presentation.status.unavailable")
+                      : t("devices.detail.checking"),
             };
         }
         if (selected?.startsWith("peer:")) {

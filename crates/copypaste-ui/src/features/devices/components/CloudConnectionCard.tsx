@@ -1,40 +1,10 @@
-import { Icon, type IconName } from "@/components/ui/icon";
+import { Icon } from "@/components/ui/icon";
 import { SkeletonText } from "@/components/shared";
 
 import { Button, Surface } from "@/components/ui";
+import { cloudConnectionPresentation } from "@/features/devices/model";
 import type { CloudStatusData } from "@/lib/ipc";
 import styles from "./CloudConnectionCard.module.css";
-
-type CloudState =
-    "unavailable" | "not-configured" | "signed-out" | "attention" | "healthy";
-
-function cloudPresentation(
-    status: CloudStatusData | undefined,
-    failed: boolean,
-): { state: CloudState; detail: string } {
-    if (failed || status === undefined) {
-        return { state: "unavailable", detail: "Cloud status is unavailable." };
-    }
-    if (!status.configured) {
-        return {
-            state: "not-configured",
-            detail: "Not configured · direct device sync still works",
-        };
-    }
-    if (!status.signed_in || !status.key_ready) {
-        return {
-            state: "signed-out",
-            detail: "Sign in from Settings to use encrypted cloud",
-        };
-    }
-    if (status.last_error || status.unreadable_uploads > 0) {
-        return {
-            state: "attention",
-            detail: "Encrypted cloud needs attention",
-        };
-    }
-    return { state: "healthy", detail: "End-to-end encrypted · healthy" };
-}
 
 export function CloudConnectionCard({
     status,
@@ -47,7 +17,8 @@ export function CloudConnectionCard({
     failed: boolean;
     onManage: () => void;
 }) {
-    if (loading) {
+    const presentation = cloudConnectionPresentation(status, failed, loading);
+    if (presentation.state === "checking") {
         return (
             <Surface
                 elevation="raised"
@@ -57,14 +28,14 @@ export function CloudConnectionCard({
                 className={styles.card}
                 data-state="checking"
                 role="status"
-                aria-label="Checking encrypted cloud"
-                aria-busy="true"
+                aria-label={presentation.title}
+                aria-busy={presentation.busy}
             >
                 <span className={styles.iconWell} aria-hidden="true">
                     <Icon name="cloud" size="md" />
                 </span>
                 <span className={styles.copy}>
-                    <strong>Encrypted cloud</strong>
+                    <strong>{presentation.title}</strong>
                     <SkeletonText width="md" className={styles.skeletonDetail} />
                 </span>
                 <Button
@@ -74,8 +45,8 @@ export function CloudConnectionCard({
                     className={styles.manage}
                     onClick={onManage}
                 >
-                    <Icon name="settings" size="sm" aria-hidden="true" />
-                    <span>Manage</span>
+                    <Icon name={presentation.action.icon} size="sm" aria-hidden="true" />
+                    <span>{presentation.action.label}</span>
                     <Icon
                         name="caretRight"
                         size="sm"
@@ -87,14 +58,6 @@ export function CloudConnectionCard({
         );
     }
 
-    const presentation = cloudPresentation(status, failed);
-    const icon: IconName =
-        presentation.state === "healthy"
-            ? "shieldCheck"
-            : presentation.state === "attention"
-              ? "alert"
-              : "cloudOff";
-
     return (
         <Surface
             elevation="raised"
@@ -105,10 +68,10 @@ export function CloudConnectionCard({
             data-state={presentation.state}
         >
             <span className={styles.iconWell} aria-hidden="true">
-                <Icon name={icon} size="md" />
+                <Icon name={presentation.icon} size="md" />
             </span>
             <span className={styles.copy}>
-                <strong>Encrypted cloud</strong>
+                <strong>{presentation.title}</strong>
                 <small>{presentation.detail}</small>
             </span>
             <Button
@@ -118,8 +81,8 @@ export function CloudConnectionCard({
                 className={styles.manage}
                 onClick={onManage}
             >
-                <Icon name="settings" size="sm" aria-hidden="true" />
-                <span>Manage</span>
+                <Icon name={presentation.action.icon} size="sm" aria-hidden="true" />
+                <span>{presentation.action.label}</span>
                 <Icon
                     name="caretRight"
                     size="sm"
