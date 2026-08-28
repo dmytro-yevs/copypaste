@@ -16,6 +16,9 @@ describe("the native app frame", () => {
     expect(globals).toMatch(
       /html\[data-platform="android"\]\s*#root\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*overflow:\s*hidden;/s,
     );
+    expect(globals).not.toMatch(
+      /html:(?:not|is)\([^)]*android[^)]*\)[^{]*\{[^}]*overflow:\s*hidden;/s,
+    );
     expect(globals).not.toMatch(/(?:^|\n)\s*#root\s*\{[^}]*position:\s*fixed;/s);
   });
 });
