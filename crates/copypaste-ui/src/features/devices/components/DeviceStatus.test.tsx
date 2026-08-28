@@ -13,7 +13,7 @@ describe("device status presentation", () => {
       label: "Found nearby · Not paired",
       tone: "neutral",
       busy: false,
-      live: "off",
+      a11y: {},
     } as const;
     const device: DiscoveredDevice = {
       discovery_id: "nearby-1",
@@ -125,7 +125,7 @@ describe("device status presentation", () => {
     expect(presentations).toHaveLength(3);
     for (const presentation of presentations) {
       expect(presentation.getAttribute("data-tone")).toBe("neutral");
-      expect(presentation.getAttribute("data-live")).toBe("off");
+      expect(presentation.getAttribute("role")).toBeNull();
       expect(presentation.textContent).toBe(status.label);
       expect(presentation.querySelector('[aria-hidden="true"]')).not.toBeNull();
     }
