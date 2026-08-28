@@ -4,11 +4,11 @@ import { DeviceStatus } from "@/features/devices/components/DeviceStatus";
 import {
     type PeerHealth,
     peerPresence,
-    peerState,
     unsettledFailure,
 } from "@/features/devices/model/peerState";
 import {
     peerPresenceLabel,
+    peerPresentationState,
     peerRowStatus,
 } from "@/features/devices/model/status";
 import { t as translate, useTranslation } from "@/i18n";
@@ -48,9 +48,8 @@ export function PeerRow({
   onRevoke,
 }: PeerRowProps) {
   const { t } = useTranslation();
-  const state = peerState(peer, health);
   const presenceState = peerPresence(peer);
-  const status = peerRowStatus(state);
+  const status = peerRowStatus(peerPresentationState(peer, health));
   const failure = unsettledFailure(peer, health);
 
   const synced =

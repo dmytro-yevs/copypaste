@@ -10,7 +10,11 @@ import {
     peerStatus,
 } from "./devicePresentation";
 import { cloudConnectionPresentation } from "./cloud";
-import { peerPresenceLabel } from "./status";
+import {
+    peerPresentationState,
+    peerPresenceLabel,
+    peerRowStatus,
+} from "./status";
 import { STALE_AFTER_MS } from "./peerState";
 
 const PEER = {
@@ -34,6 +38,34 @@ function summary(overrides: Partial<Parameters<typeof connectionSummary>[0]> = {
         health: {},
         ...overrides,
     });
+}
+
+function peerWithPresence(
+    state: "online" | "offline" | "unknown" | undefined,
+    lastSeenMs: number,
+): PeerInfo {
+    const now = Date.now();
+    return {
+        ...PEER,
+        last_seen_ms: lastSeenMs,
+        details: state === undefined
+            ? undefined
+            : {
+                  profile: null,
+                  endpoint: null,
+                  latency: null,
+                  presence: {
+                      state,
+                      last_seen_ms: lastSeenMs,
+                      provenance: "observed",
+                      trust: "local",
+                      observed_at_ms: now,
+                      fresh_until_ms: now + 60_000,
+                  },
+                  public_ip: { availability: "unavailable" },
+                  geo: { availability: "unavailable" },
+              },
+    };
 }
 
 describe("connectionSummary", () => {
@@ -231,6 +263,65 @@ describe("device status descriptors", () => {
             busy: true,
             a11y: {},
         });
+    });
+
+    it("resolves peer presentation precedence consistently for cards and rows", () => {
+        const now = Date.now();
+        const failure = (kind: "auth_failed" | "peer_failed") => ({
+            failure: {
+                at: now,
+                kind,
+                retryable: false,
+                durationMs: null,
+            },
+        });
+        const cases = [
+            {
+                peer: peerWithPresence(undefined, now - 1),
+                health: failure("auth_failed"),
+                state: "failing",
+                label: "Sync failed",
+            },
+            {
+                peer: peerWithPresence(undefined, now - 1),
+                health: failure("peer_failed"),
+                state: "failing",
+                label: "Sync failed",
+            },
+            {
+                peer: peerWithPresence(undefined, 0),
+                health: undefined,
+                state: "waiting",
+                label: "Waiting",
+            },
+            {
+                peer: peerWithPresence(undefined, now - STALE_AFTER_MS - 1),
+                health: undefined,
+                state: "presence-unknown",
+                label: "Presence unknown",
+            },
+            {
+                peer: peerWithPresence("online", now - STALE_AFTER_MS - 1),
+                health: undefined,
+                state: "stalled",
+                label: "Needs attention",
+            },
+            {
+                peer: peerWithPresence("offline", now - 1),
+                health: undefined,
+                state: "away",
+                label: "Away",
+            },
+        ] as const;
+
+        for (const expected of cases) {
+            const state = peerPresentationState(expected.peer, expected.health);
+            expect(state).toBe(expected.state);
+            expect(peerStatus(expected.peer, expected.health, false).label).toBe(
+                expected.label,
+            );
+            expect(peerRowStatus(state).label).toBeTruthy();
+        }
     });
 
     it("owns cloud icon, detail, action, and a11y facts in the descriptor", () => {
