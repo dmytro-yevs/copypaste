@@ -6,6 +6,9 @@ use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 use tauri::{AppHandle, Manager as _};
 use zeroize::Zeroizing;
 
+pub(crate) mod semantics;
+pub use semantics::{resolve_pairing_semantics, PairingSemantics};
+
 #[cfg(any(target_os = "android", target_os = "macos", target_os = "windows"))]
 pub type NativeAbort = Arc<dyn Fn() + Send + Sync>;
 
