@@ -21,6 +21,10 @@ b6c311e8ada603578543d5b4d99b09cd27d053af:e2e/src/harness/selection-diagnostics.t
 92d6904446f9c9f0d6cddb945d8b93e8bdb9b99f:crates/copypaste-core/src/sensitive.rs:github-app-token:992
 92d6904446f9c9f0d6cddb945d8b93e8bdb9b99f:crates/copypaste-core/src/sensitive.rs:slack-bot-token:1005
 
+# Public v0.4.1 archive detector tests, reviewed as synthetic true positives.
+75ba2a72d5a70cd7097328598ceeafa2a7fbe10d:crates/copypaste-core/src/sensitive/detector.rs:slack-bot-token:86
+75ba2a72d5a70cd7097328598ceeafa2a7fbe10d:crates/copypaste-core/src/sensitive/detector.rs:github-app-token:102
+
 
 # aws-access-token (1)
 d4946c5ded0075269f9abcff09f3819ab9539819:crates/copypaste-daemon/src/cloud/source.rs:aws-access-token:434
