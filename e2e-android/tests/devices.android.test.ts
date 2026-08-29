@@ -14,6 +14,12 @@ import {
   expectNoRawError,
   outerHtml,
 } from "../src/harness/leaks.js";
+import {
+  allDeviceSectionsSatisfyContracts,
+  DEVICE_SECTION_CONTRACTS,
+  deviceSectionSatisfiesContract,
+  type DeviceSectionSnapshot,
+} from "../src/harness/devices.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   count,
@@ -28,30 +34,6 @@ const HEADER = "header.chrome";
 const PAIRING_CODE = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}\b/;
 const SECURITY_CODE = /\b[0-9A-F]{6}\b/;
 const PAIRING_ACTIONS = ["Show pairing code", "Scan pairing code"];
-const DEVICE_SECTION_CONTRACTS = [
-  { id: "your-devices-heading", heading: "Your devices" },
-  { id: "cloud-connection-heading", heading: "Cloud connection" },
-  { id: "network-devices-heading", heading: "Discovered on your network" },
-] as const;
-
-interface DeviceSectionSnapshot {
-  sectionCount: number;
-  headingCount: number;
-  headingText: string | null;
-  rendered: boolean;
-}
-
-function sectionSatisfiesContract(
-  snapshot: DeviceSectionSnapshot,
-  heading: string,
-): boolean {
-  return (
-    snapshot.sectionCount === 1 &&
-    snapshot.headingCount === 1 &&
-    snapshot.headingText === heading &&
-    snapshot.rendered
-  );
-}
 
 let app: AndroidApp;
 
@@ -99,12 +81,7 @@ beforeAllWithEvidence("devices", async () => {
   await waitFor(
     async () => {
       const snapshots = await readDeviceSections();
-      return (
-        snapshots.length === DEVICE_SECTION_CONTRACTS.length &&
-        snapshots.every((snapshot, index) =>
-          sectionSatisfiesContract(snapshot, DEVICE_SECTION_CONTRACTS[index]!.heading),
-        )
-      );
+      return allDeviceSectionsSatisfyContracts(snapshots);
     },
     "the Devices screen never settled",
   );
@@ -148,43 +125,6 @@ async function openPairingChoices(): Promise<void> {
   );
 }
 
-describe("device section readiness", () => {
-  test("accepts canonical textContent when CSS uppercases the rendered heading", () => {
-    expect(
-      sectionSatisfiesContract(
-        {
-          sectionCount: 1,
-          headingCount: 1,
-          headingText: "Your devices",
-          rendered: true,
-        },
-        "Your devices",
-      ),
-    ).toBe(true);
-  });
-
-  test.each([
-    [
-      "wrong heading",
-      { sectionCount: 1, headingCount: 1, headingText: "YOUR DEVICES", rendered: true },
-    ],
-    [
-      "missing heading",
-      { sectionCount: 1, headingCount: 0, headingText: null, rendered: true },
-    ],
-    [
-      "duplicate sections",
-      { sectionCount: 2, headingCount: 1, headingText: "Your devices", rendered: true },
-    ],
-    [
-      "hidden placeholder",
-      { sectionCount: 1, headingCount: 1, headingText: "Your devices", rendered: false },
-    ],
-  ])("rejects %s", (_name, snapshot) => {
-    expect(sectionSatisfiesContract(snapshot, "Your devices")).toBe(false);
-  });
-});
-
 describe("the screen", () => {
   test("describes each device section through its labelled heading", async () => {
     const snapshots = await readDeviceSections();
@@ -194,7 +134,7 @@ describe("the screen", () => {
       expect(snapshot.sectionCount, contract.id).toBe(1);
       expect(snapshot.headingCount, contract.id).toBe(1);
       expect(snapshot.headingText, contract.id).toBe(contract.heading);
-      expect(sectionSatisfiesContract(snapshot, contract.heading), contract.id).toBe(true);
+      expect(deviceSectionSatisfiesContract(snapshot, contract), contract.id).toBe(true);
     }
     expectNoRawError(await outerHtml(app));
     expectNoFilesystemPath(await accessibleSurface(app));
