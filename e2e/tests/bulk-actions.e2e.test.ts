@@ -335,12 +335,12 @@ describe("the bulk bar", () => {
             lastRenderedState = await probe.read();
             for (const id of pinnedIds) {
               const row = await app.browser.$(`#history-row-${id}`);
-              if (
-                !(await row.isExisting()) ||
-                !(await row.getText()).includes("Pinned")
-              ) {
-                return false;
-              }
+              if (!(await row.isExisting())) return false;
+              const badges = await row.$$('[title="Pinned"]');
+              if ((await badges.length) !== 1) return false;
+              if (!(await badges[0]!.isDisplayed())) return false;
+              const size = await badges[0]!.getSize();
+              if (size.width <= 0 || size.height <= 0) return false;
             }
             return true;
           },
