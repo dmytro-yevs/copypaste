@@ -127,6 +127,20 @@ describe("LibraryScreen selection integration", () => {
         });
     }
 
+    function expectLibraryToolbarReplaced(selectionToolbar: HTMLElement) {
+        const libraryToolbar = screen.getByRole("toolbar", {
+            name: "Library controls",
+        });
+
+        expect(libraryToolbar).not.toBe(selectionToolbar);
+        expect(selectionToolbar.isConnected).toBe(false);
+        expect(libraryToolbar.getAttribute("aria-label")).toBe(
+            "Library controls",
+        );
+        expect(screen.getAllByRole("toolbar")).toEqual([libraryToolbar]);
+        expect(checkedIds()).toEqual([]);
+    }
+
     it("ends selection through the rendered Done icon button", async () => {
         const { user } = renderScreen();
         const toolbar = await selectBoth(user);
@@ -136,7 +150,7 @@ describe("LibraryScreen selection integration", () => {
         expect(
             screen.queryByRole("toolbar", { name: "Selection actions" }),
         ).toBeNull();
-        expect(checkedIds()).toEqual([]);
+        expectLibraryToolbarReplaced(toolbar);
     });
 
     it("reconciles a successful bulk pin into the rendered rows", async () => {
@@ -168,7 +182,7 @@ describe("LibraryScreen selection integration", () => {
                 screen.queryByRole("toolbar", { name: "Selection actions" }),
             ).toBeNull(),
         );
-        expect(checkedIds()).toEqual([]);
+        expectLibraryToolbarReplaced(toolbar);
         expect(ipc.setPinned).toHaveBeenCalledTimes(2);
         expect(toast.success).toHaveBeenCalledWith("Pinned 2 items");
         await waitFor(() => {
