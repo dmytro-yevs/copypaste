@@ -30,7 +30,7 @@ import {
   waitFor,
 } from "../src/harness/ui.js";
 
-const HEADER = "header.chrome";
+const HEADER = "header";
 const PAIRING_CODE = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}\b/;
 const SECURITY_CODE = /\b[0-9A-F]{6}\b/;
 const PAIRING_ACTIONS = ["Show pairing code", "Scan pairing code"];
