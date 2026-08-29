@@ -96,6 +96,75 @@ pub(super) fn button(
     )
 }
 
+fn with_accessible_property_services<T>(
+    callback: impl FnOnce(&::windows::Win32::UI::Accessibility::IAccPropServices) -> T,
+) -> Option<T> {
+    use ::windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use ::windows::Win32::UI::Accessibility::{CLSID_AccPropServices, IAccPropServices};
+
+    let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok();
+    let service = match unsafe {
+        CoCreateInstance::<_, IAccPropServices>(&CLSID_AccPropServices, None, CLSCTX_INPROC_SERVER)
+    } {
+        Ok(service) => service,
+        Err(_) => {
+            if initialized {
+                unsafe { CoUninitialize() };
+            }
+            return None;
+        }
+    };
+    let result = callback(&service);
+    if initialized {
+        unsafe { CoUninitialize() };
+    }
+    Some(result)
+}
+
+pub(super) fn set_accessible_name(hwnd: &winsafe::HWND, name: &str) -> bool {
+    use ::windows::core::PCWSTR;
+    use ::windows::Win32::Foundation::HWND as WindowsHwnd;
+    use ::windows::Win32::UI::Accessibility::Name_Property_GUID;
+    use ::windows::Win32::UI::WindowsAndMessaging::{CHILDID_SELF, OBJID_CLIENT};
+
+    let mut name16: Vec<u16> = name.encode_utf16().collect();
+    name16.push(0);
+    with_accessible_property_services(|service| unsafe {
+        service
+            .SetHwndPropStr(
+                WindowsHwnd(hwnd.ptr()),
+                OBJID_CLIENT.0 as u32,
+                CHILDID_SELF,
+                Name_Property_GUID,
+                PCWSTR::from_raw(name16.as_ptr()),
+            )
+            .is_ok()
+    })
+    .unwrap_or(false)
+}
+
+pub(super) fn clear_accessible_name(hwnd: &winsafe::HWND) -> bool {
+    use ::windows::Win32::Foundation::HWND as WindowsHwnd;
+    use ::windows::Win32::UI::Accessibility::Name_Property_GUID;
+    use ::windows::Win32::UI::WindowsAndMessaging::{CHILDID_SELF, OBJID_CLIENT};
+
+    let properties = [Name_Property_GUID];
+    with_accessible_property_services(|service| unsafe {
+        service
+            .ClearHwndProps(
+                WindowsHwnd(hwnd.ptr()),
+                OBJID_CLIENT.0 as u32,
+                CHILDID_SELF,
+                &properties,
+            )
+            .is_ok()
+    })
+    .unwrap_or(false)
+}
+
 pub(super) fn hide(hwnd: &winsafe::HWND) {
     hwnd.ShowWindow(co::SW::HIDE);
 }
@@ -148,6 +217,18 @@ mod tests {
     #[test]
     fn acceptance_returns_true() {
         assert!(protect_from_capture(&winsafe::HWND::NULL, |_| true));
+    }
+
+    #[test]
+    fn accessible_names_are_annotated_without_value_access() {
+        let source = include_str!("common.rs")
+            .split_once("#[cfg(test)]")
+            .unwrap()
+            .0;
+        assert!(source.contains("SetHwndPropStr"));
+        assert!(source.contains("ClearHwndProps"));
+        assert!(source.contains("Name_Property_GUID"));
+        assert!(!source.contains("ValuePattern"));
     }
 
     /// The window whose affinity is being set is the one that was asked about;
