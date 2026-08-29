@@ -24,29 +24,86 @@ import {
   waitFor,
 } from "../src/harness/ui.js";
 
-/** DMY-48: this leg asserted the string "Nearby devices", which the screen has
- *  never rendered — its heading reads "Discovered on your network". The region
- *  is anchored on the heading that labels it and asserted against the copy the
- *  screen actually shows — see DevicesView.test.tsx, which pins both. */
-const DISCOVERED = 'section[aria-labelledby="network-devices-heading"]';
-const DISCOVERED_HEADING = "Discovered on your network";
 const HEADER = "header.chrome";
 const PAIRING_CODE = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}\b/;
 const SECURITY_CODE = /\b[0-9A-F]{6}\b/;
 const PAIRING_ACTIONS = ["Show pairing code", "Scan pairing code"];
+const DEVICE_SECTION_CONTRACTS = [
+  { id: "your-devices-heading", heading: "Your devices" },
+  { id: "cloud-connection-heading", heading: "Cloud connection" },
+  { id: "network-devices-heading", heading: "Discovered on your network" },
+] as const;
+
+interface DeviceSectionSnapshot {
+  sectionCount: number;
+  headingCount: number;
+  headingText: string | null;
+  rendered: boolean;
+}
+
+function sectionSatisfiesContract(
+  snapshot: DeviceSectionSnapshot,
+  heading: string,
+): boolean {
+  return (
+    snapshot.sectionCount === 1 &&
+    snapshot.headingCount === 1 &&
+    snapshot.headingText === heading &&
+    snapshot.rendered
+  );
+}
 
 let app: AndroidApp;
+
+async function readDeviceSections(): Promise<DeviceSectionSnapshot[]> {
+  return app.withPage((page) =>
+    page.evaluate((contracts) => {
+      const headingTags = "h1,h2,h3,h4,h5,h6";
+      const isRendered = (element: Element): boolean => {
+        const style = window.getComputedStyle(element);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          element.getClientRects().length > 0
+        );
+      };
+      return contracts.map(({ id }) => {
+        const sections = Array.from(document.querySelectorAll("section")).filter(
+          (section) => section.getAttribute("aria-labelledby") === id,
+        );
+        const section = sections.length === 1 ? sections[0] : undefined;
+        const headings = section
+          ? Array.from(section.querySelectorAll(headingTags)).filter(
+              (heading) => heading.id === id,
+            )
+          : [];
+        return {
+          sectionCount: sections.length,
+          headingCount: headings.length,
+          headingText: headings.length === 1 ? headings[0]?.textContent ?? null : null,
+          rendered:
+            section !== undefined &&
+            headings.length === 1 &&
+            isRendered(section) &&
+            isRendered(headings[0]!),
+        } satisfies DeviceSectionSnapshot;
+      });
+    }, DEVICE_SECTION_CONTRACTS),
+  );
+}
 
 beforeAllWithEvidence("devices", async () => {
   app = await attachToApp();
   await gotoView(app, "Devices");
   await waitFor(
     async () => {
-      const text = await visibleText(app);
+      const snapshots = await readDeviceSections();
       return (
-        text.includes("Your devices") &&
-        text.includes(DISCOVERED_HEADING) &&
-        (await count(app, DISCOVERED)) === 1
+        snapshots.length === DEVICE_SECTION_CONTRACTS.length &&
+        snapshots.every((snapshot, index) =>
+          sectionSatisfiesContract(snapshot, DEVICE_SECTION_CONTRACTS[index]!.heading),
+        )
       );
     },
     "the Devices screen never settled",
@@ -91,13 +148,54 @@ async function openPairingChoices(): Promise<void> {
   );
 }
 
+describe("device section readiness", () => {
+  test("accepts canonical textContent when CSS uppercases the rendered heading", () => {
+    expect(
+      sectionSatisfiesContract(
+        {
+          sectionCount: 1,
+          headingCount: 1,
+          headingText: "Your devices",
+          rendered: true,
+        },
+        "Your devices",
+      ),
+    ).toBe(true);
+  });
+
+  test.each([
+    [
+      "wrong heading",
+      { sectionCount: 1, headingCount: 1, headingText: "YOUR DEVICES", rendered: true },
+    ],
+    [
+      "missing heading",
+      { sectionCount: 1, headingCount: 0, headingText: null, rendered: true },
+    ],
+    [
+      "duplicate sections",
+      { sectionCount: 2, headingCount: 1, headingText: "Your devices", rendered: true },
+    ],
+    [
+      "hidden placeholder",
+      { sectionCount: 1, headingCount: 1, headingText: "Your devices", rendered: false },
+    ],
+  ])("rejects %s", (_name, snapshot) => {
+    expect(sectionSatisfiesContract(snapshot, "Your devices")).toBe(false);
+  });
+});
+
 describe("the screen", () => {
-  test("describes this device and its paired-device region", async () => {
-    const text = await visibleText(app);
-    expect(text).toContain("Your devices");
-    expect(text).toContain("Cloud connection");
-    expect(text).toContain(DISCOVERED_HEADING);
-    expect(await count(app, DISCOVERED)).toBe(1);
+  test("describes each device section through its labelled heading", async () => {
+    const snapshots = await readDeviceSections();
+    expect(snapshots).toHaveLength(DEVICE_SECTION_CONTRACTS.length);
+    for (const [index, contract] of DEVICE_SECTION_CONTRACTS.entries()) {
+      const snapshot = snapshots[index]!;
+      expect(snapshot.sectionCount, contract.id).toBe(1);
+      expect(snapshot.headingCount, contract.id).toBe(1);
+      expect(snapshot.headingText, contract.id).toBe(contract.heading);
+      expect(sectionSatisfiesContract(snapshot, contract.heading), contract.id).toBe(true);
+    }
     expectNoRawError(await outerHtml(app));
     expectNoFilesystemPath(await accessibleSurface(app));
   });
