@@ -73,9 +73,10 @@ Implemented controls:
 Status: Supply chain run 33136251962 is an overall FAILURE because its secret
 scan/gitleaks gate failed; dependency review, cargo-deny, and cargo-audit were
 successful. `f6494b413` reviewed and integrated the eight exact HEAD-history
-fingerprints. A default all-refs gitleaks scan then found two additional
-published archive/tag synthetic-detector fixtures, including `75ba2a72d`;
-their correction remains pending and is not silently accepted.
+fingerprints. The all-public-refs correction was reviewed and integrated as
+`bd29cd710` (from `f50a16b54`), and the default clone's 2,859-commit all-refs
+scan is clean. That later source scan does not retroactively change the
+captured workflow result or claim that a scheduled workflow is green.
 
 ### 3. Readiness and contract observation
 
@@ -97,9 +98,11 @@ Implemented controls:
   failed import, validate the Vite graph/CSS ownership, and clean temporary
   manifests on every outcome.
 
-Status: code and structural checks are implemented. Native assertions below
-still contain unresolved observation failures; green lower-layer tests do not
-promote them to native evidence.
+Status: code and structural checks are implemented. The earlier lazy-route
+hypothesis is not the final Devices failure: the route was mounted, and the
+remaining predicate is a rendered-text case mismatch described below. Native
+assertions still contain unresolved observation failures; green lower-layer
+tests do not promote them to native evidence.
 
 ### 4. Protected Windows evidence and sensitive output
 
@@ -130,7 +133,7 @@ claim can be checked against the complete log and artifact set.
 | [CI 33136251867](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251867) | 21/22 jobs green. [Windows job 98737516489](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251867/job/98737516489) still cannot observe the named `IsPassword=true` pairing-code element after `affinity17` passed. |
 | [Windows E2E 33136251881](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251881) | Pin/Done receipts prove `checkedIDs` cleared and old actions disconnected; Windows also observes the Pin success toast. Remaining failures concern toolbar existence/identity observation. A diagnostic captured old-node connectivity, not its `aria-label`, so it is not direct label proof. |
 | [Browser 33136251778](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251778) | Pin/Done receipts prove `checkedIDs` cleared and old actions disconnected. Remaining failures concern toolbar existence/identity observation; the diagnostic does not prove an `aria-label`. Linux WebKitGTK remains a shared-UI layer, not Windows/macOS/Android native evidence. |
-| [Android 33136251808](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251808) | API 33 leg is green; storage reports 18/0. Cloud sign-in/sync works, but stale immediate-error/sign-out assertions remain. [Debug job 98737897489](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251808/job/98737897489) still shows a Devices skeleton, compact search was not opened, icon-only Unpin was incorrectly expected as text, and the IME CDP proof fails. |
+| [Android 33136251808](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251808) | API 33 leg is green; storage reports 18/0. Cloud sign-in/sync works, but stale immediate-error/sign-out assertions remain. [Debug artifact 9672382866](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251808) shows three mounted DeviceRoster sections: `DeviceRoster.module.css` uppercases `body.innerText` to `YOUR DEVICES`, while the case-sensitive setup predicate expects `Your devices`, leaving `beforeAll` and the first-screen test false despite the mounted route. This is not a slow-route or timeout finding. Compact search was not opened, icon-only Unpin was incorrectly expected as text, and the IME CDP proof fails. |
 | [Mutation 33136251938](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251938) | Green: Linux 91/0 and Windows 18/0 mutation verdicts. |
 | [Supply chain 33136251962](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251962) | Overall FAILURE from the secret scan/gitleaks gate; dependency review, cargo-deny, and cargo-audit succeeded. Fixture findings remain tracked above. |
 
@@ -145,10 +148,14 @@ claim can be checked against the complete log and artifact set.
    checked-ID clearing, old-action disconnection, and Windows Pin-toast
    receipts remain passing evidence. Keep WebKitGTK findings separate from
    shipping-native claims.
-3. **Android harness — queued.** Resolve the Devices readiness state, open the
-   compact search surface before asserting it, assert icon-only Unpin by its
-   accessible semantics, and obtain a valid IME proof. Re-run API 33 and the
-   full scheduled matrix on the same commit.
+3. **Android harness — queued.** Correct the test-only structural
+   `aria-labelledby`/`textContent` predicate for the rendered Devices heading
+   (worker `fix_android_devices_heading_contract`); do not add a route delay or
+   larger timeout. Open the compact search surface before asserting it, assert
+   icon-only Unpin by its accessible semantics, and obtain a valid IME proof.
+   The IME correction was code-reviewed and integrated as `7102adb98` and
+   `4e72e315d`; native rerun remains pending. Re-run API 33 and the full
+   scheduled matrix on the same commit.
 4. **Cloud evidence — under review.** `f76274600` aligns Android cloud
    evidence with rendered states, but its full self-test currently fails and is
    under investigation. It is not counted as done in this report.
@@ -156,12 +163,14 @@ claim can be checked against the complete log and artifact set.
    pending.** The `f1ce450fc` change was reviewed and integrated as
    `4c731cd18`; it does not make the unresolved native evidence green. Any
    follow-up must retain fail-closed semantics.
-6. **Windows naming — candidate under review.** `7de55c07c` adds the pairing
-   password naming path; it is not counted as native evidence until reviewed
-   and rerun.
-7. **Supply-chain fixtures — queued.** Correct the two additional published
-   archive/tag synthetic fixtures, including `75ba2a72d`, with a narrow,
-   reviewed ignore. Do not broaden an ignore pattern.
+6. **Windows naming — reviewed/integrated code, native rerun pending.**
+   `7de55c07c` was code-reviewed and integrated as `8a0dbc264`; the associated
+   COM-teardown correction is `074087a16`. These changes are not counted as
+   native evidence until rerun.
+7. **Supply-chain verification — required.** The all-public-refs correction
+   is reviewed/integrated as `bd29cd710`, and the default 2,859-commit clone
+   scan is clean. Rerun the failed secret-scan workflow on the corrected tree;
+   do not call a HEAD-only or local scan a scheduled green result.
 8. **Release qualification — required.** Fresh code/local and GitHub checks do
    not replace same-commit macOS, physical Android, and installed Windows
    release receipts. No rulesets were found in a fresh GitHub API check (`[]`);
