@@ -245,7 +245,6 @@ describe("the section index", () => {
     await openSettingsSection(app, "Cloud sync");
     let primaryFailure: unknown;
     try {
-      const selector = "[data-android-root-scroll-probe]";
       const imeBefore = await app.withPage((page) =>
         page.evaluate(() => {
           const panel = Array.from(

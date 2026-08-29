@@ -39,6 +39,12 @@ export interface NativeTapReceipt {
   display: DisplaySize;
 }
 
+export type FocusDiagnostic = {
+  status: "present" | "missing" | "null" | "malformed";
+  packageName: string | null;
+  component: string | null;
+};
+
 export interface NativeInputCommands {
   devices: () => Promise<string>;
   getSerialno: (serial: string) => Promise<string>;
@@ -82,15 +88,35 @@ function parseFrame(value: string): WindowFrame | undefined {
   return { left, top, width: right - left, height: bottom - top };
 }
 
+export function foregroundFocusDiagnostic(dump: string): FocusDiagnostic {
+  const line = dump.split("\n").find((candidate) => /\bmCurrentFocus\s*=/.test(candidate));
+  if (!line) return { status: "missing", packageName: null, component: null };
+  if (/\bmCurrentFocus\s*=\s*(?:null|Window\{[^}]*\snull\s*\}?)/.test(line)) {
+    return { status: "null", packageName: null, component: null };
+  }
+  const match = line.match(/\bmCurrentFocus\s*=\s*Window\{[^\n]*\s([^\s/]+)\/([^\s}]+)/);
+  if (!match) return { status: "malformed", packageName: null, component: null };
+  return { status: "present", packageName: match[1]!, component: match[2]! };
+}
+
 export function parseAppWindowFrame(
   dump: string,
   packageName = PACKAGE,
 ): WindowFrame {
-  const focus = dump.match(/mCurrentFocus=Window\{[^\n]*\s([^\s/]+)\/[^\s}]+/);
-  if (focus?.[1] !== packageName) {
-    throw new Error(`Android foreground window is not ${packageName}`);
+  const focus = foregroundFocusDiagnostic(dump);
+  if (focus.status !== "present") {
+    throw new Error(
+      `Android foreground focus ${JSON.stringify(focus)}; expected ${packageName}`,
+    );
+  }
+  if (focus.packageName !== packageName) {
+    throw new Error(
+      `Android foreground focus ${JSON.stringify(focus)} does not match expected ${packageName}`,
+    );
   }
 
+  // AOSP WindowManagerService's `windows` subcommand dumps only the window
+  // list; the full dump carries mCurrentFocus and the same window frames.
   const lines = dump.split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     if (!/Window #\d+ Window\{/.test(lines[index]!) || !lines[index]!.includes(packageName)) {
@@ -201,7 +227,7 @@ export async function tapNativeInput(
   const serial = await selectedSerial(nativeCommands);
   const [displayOutput, windowOutput] = await Promise.all([
     nativeCommands.shell(serial, "wm", "size"),
-    nativeCommands.shell(serial, "dumpsys", "window", "windows"),
+    nativeCommands.shell(serial, "dumpsys", "window"),
   ]);
   const display = parseDisplaySize(displayOutput);
   const frame = parseAppWindowFrame(windowOutput, packageName);
