@@ -106,18 +106,24 @@ fn with_accessible_property_services<T>(
     use ::windows::Win32::UI::Accessibility::{CLSID_AccPropServices, IAccPropServices};
 
     let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok();
-    let service = match unsafe {
-        CoCreateInstance::<_, IAccPropServices>(&CLSID_AccPropServices, None, CLSCTX_INPROC_SERVER)
-    } {
-        Ok(service) => service,
-        Err(_) => {
-            if initialized {
-                unsafe { CoUninitialize() };
+    let result = {
+        let service = match unsafe {
+            CoCreateInstance::<_, IAccPropServices>(
+                &CLSID_AccPropServices,
+                None,
+                CLSCTX_INPROC_SERVER,
+            )
+        } {
+            Ok(service) => service,
+            Err(_) => {
+                if initialized {
+                    unsafe { CoUninitialize() };
+                }
+                return None;
             }
-            return None;
-        }
+        };
+        callback(&service)
     };
-    let result = callback(&service);
     if initialized {
         unsafe { CoUninitialize() };
     }
@@ -229,6 +235,24 @@ mod tests {
         assert!(source.contains("ClearHwndProps"));
         assert!(source.contains("Name_Property_GUID"));
         assert!(!source.contains("ValuePattern"));
+    }
+
+    #[test]
+    fn accessible_service_is_dropped_before_com_uninitializes() {
+        let source = include_str!("common.rs")
+            .split_once("#[cfg(test)]")
+            .unwrap()
+            .0;
+        let service_scope = source
+            .split_once("let result = {")
+            .unwrap()
+            .1
+            .split_once("\n    if initialized {")
+            .unwrap()
+            .0;
+        assert!(service_scope.contains("let service = match"));
+        assert!(service_scope.contains("callback(&service)"));
+        assert!(service_scope.trim_end().ends_with("};"));
     }
 
     /// The window whose affinity is being set is the one that was asked about;
