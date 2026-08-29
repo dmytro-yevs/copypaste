@@ -8,6 +8,9 @@ use super::common;
 use crate::pairing_presentation::invite::{MAX_CODE_BYTES, MAX_LISTEN_ADDR_BYTES};
 use crate::pairing_presentation::ScannedPairing;
 
+const CODE_ACCESSIBLE_NAME: &str = "Pairing code";
+const ADDRESS_ACCESSIBLE_NAME: &str = "Pairing address";
+
 pub(super) type FieldValidator = fn(Zeroizing<String>, Zeroizing<String>) -> Option<ScannedPairing>;
 
 pub(super) fn prompt(
@@ -113,6 +116,8 @@ fn run(
         let address = address.clone();
         let wnd = wnd.clone();
         move || {
+            let _ = common::clear_accessible_name(code.hwnd());
+            let _ = common::clear_accessible_name(address.hwnd());
             code.set_text("")?;
             address.set_text("")?;
             wnd.hwnd().DestroyWindow()?;
@@ -127,6 +132,14 @@ fn run(
             if !common::protect_from_capture(wnd.hwnd(), affinity) {
                 // Nothing is typed yet, so closing is all that is needed: the
                 // invite must not be entered into a window that can be filmed.
+                wnd.close();
+                return Ok(0);
+            }
+            if !common::set_accessible_name(code.hwnd(), CODE_ACCESSIBLE_NAME)
+                || !common::set_accessible_name(address.hwnd(), ADDRESS_ACCESSIBLE_NAME)
+            {
+                // The protected entry must remain discoverable as the named
+                // password edits, not merely as its static labels.
                 wnd.close();
                 return Ok(0);
             }
@@ -166,5 +179,50 @@ mod tests {
         assert!(source.matches("code.set_text(\"\")").count() >= 2);
         assert!(source.matches("address.set_text(\"\")").count() >= 2);
         assert_eq!(source.matches("co::ES::PASSWORD").count(), 2);
+    }
+
+    #[test]
+    fn native_entry_names_each_password_edit_control() {
+        let source = include_str!("entry.rs")
+            .split_once("#[cfg(test)]")
+            .unwrap()
+            .0;
+        assert!(source.contains("set_accessible_name(code.hwnd(), CODE_ACCESSIBLE_NAME)"));
+        assert!(source.contains("set_accessible_name(address.hwnd(), ADDRESS_ACCESSIBLE_NAME)"));
+        assert!(source.contains("clear_accessible_name(code.hwnd())"));
+        assert!(source.contains("clear_accessible_name(address.hwnd())"));
+        assert_eq!(source.matches("const CODE_ACCESSIBLE_NAME").count(), 1);
+        assert_eq!(source.matches("const ADDRESS_ACCESSIBLE_NAME").count(), 1);
+        let code_edit = source
+            .split_once("let code = gui::Edit::new(")
+            .unwrap()
+            .1
+            .split_once("let _address_label")
+            .unwrap()
+            .0;
+        let address_edit = source
+            .split_once("let address = gui::Edit::new(")
+            .unwrap()
+            .1
+            .split_once("let error")
+            .unwrap()
+            .0;
+        assert!(code_edit.contains("co::ES::PASSWORD"));
+        assert!(address_edit.contains("co::ES::PASSWORD"));
+    }
+
+    #[test]
+    fn native_entry_closes_if_a_named_password_edit_cannot_be_annotated() {
+        let source = include_str!("entry.rs")
+            .split_once("#[cfg(test)]")
+            .unwrap()
+            .0;
+        let setup = source
+            .split_once("if !common::set_accessible_name(code.hwnd(), CODE_ACCESSIBLE_NAME)")
+            .unwrap()
+            .1;
+        assert!(setup.contains("set_accessible_name(address.hwnd(), ADDRESS_ACCESSIBLE_NAME)"));
+        assert!(setup.contains("wnd.close();"));
+        assert!(setup.contains("return Ok(0);"));
     }
 }
