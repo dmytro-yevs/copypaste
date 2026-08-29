@@ -128,6 +128,8 @@ fn with_accessible_property_services<T>(
             Ok(service) => service,
             Err(_) => {
                 if initialized {
+                    // SAFETY: no interface was created on this path; this
+                    // balances the successful apartment initialization.
                     unsafe { CoUninitialize() };
                 }
                 return None;
