@@ -196,7 +196,7 @@ async function leaveSelectionMode(): Promise<void> {
       () => clickButton(app.browser, "Done", { within: BULK_BAR }),
       () =>
         app.browser.waitUntil(
-          async () => !(await app.browser.$(BULK_BAR)).isExisting(),
+          async () => (await count(app.browser, BULK_BAR)) === 0,
           {
             timeout: 10_000,
             timeoutMsg: "the bulk bar stayed after leaving selection mode",
@@ -229,6 +229,7 @@ describe("entering selection mode", () => {
 
   test("per-row actions are absent from the document, not merely hidden", async () => {
     await enterSelectionMode();
+    expect(await count(app.browser, BULK_BAR)).toBe(1);
 
     for (const label of ROW_ACTIONS) {
       // Scope the document query to history rows: the desktop inspector keeps
@@ -306,7 +307,7 @@ describe("the bulk bar", () => {
           async () => {
             selectionPolls += 1;
             lastSelectionState = await probe.read();
-            return !(await app.browser.$(BULK_BAR)).isExisting();
+            return (await count(app.browser, BULK_BAR)) === 0;
           },
           {
             timeout: 10_000,

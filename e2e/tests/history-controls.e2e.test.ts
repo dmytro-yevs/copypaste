@@ -179,6 +179,7 @@ describe("selection mode", () => {
       async () => (await app.browser.$(SELECTION_TOOLBAR)).isDisplayed(),
       { timeout: 5_000, timeoutMsg: "selection actions never appeared" },
     );
+    expect(await count(app.browser, SELECTION_TOOLBAR)).toBe(1);
 
     const layout = (await app.browser.execute(function (rowSelector: string) {
       const bar = document.querySelector(
@@ -228,7 +229,7 @@ describe("selection mode", () => {
         () =>
           app.browser.waitUntil(
             async () =>
-              !(await app.browser.$(SELECTION_TOOLBAR)).isExisting() &&
+              (await count(app.browser, SELECTION_TOOLBAR)) === 0 &&
               (await checkedRowIds()).length === 0,
             {
               timeout: 5_000,
