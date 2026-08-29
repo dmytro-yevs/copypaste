@@ -1,4 +1,11 @@
-import { adb, PACKAGE, shell, tryShell } from "./adb.js";
+import {
+  adb,
+  adbForSerial,
+  PACKAGE,
+  shellForSerial,
+  tryShellForSerial,
+  type Attempt,
+} from "./adb.js";
 import { adbFailureText } from "./adb-failure.js";
 
 export interface DisplaySize {
@@ -31,6 +38,20 @@ export interface NativeTapReceipt {
   frame: WindowFrame;
   display: DisplaySize;
 }
+
+export interface NativeInputCommands {
+  devices: () => Promise<string>;
+  getSerialno: (serial: string) => Promise<string>;
+  shell: (serial: string, ...args: string[]) => Promise<string>;
+  tryShell: (serial: string, ...args: string[]) => Promise<Attempt<string>>;
+}
+
+const commands: NativeInputCommands = {
+  devices: () => adb("devices"),
+  getSerialno: (serial) => adbForSerial(serial, "get-serialno"),
+  shell: (serial, ...args) => shellForSerial(serial, ...args),
+  tryShell: (serial, ...args) => tryShellForSerial(serial, ...args),
+};
 
 function positiveInteger(value: string): number | undefined {
   const parsed = Number(value);
@@ -145,16 +166,16 @@ export function mapWebViewPointToScreen(
   return screen;
 }
 
-async function selectedSerial(): Promise<string> {
+async function selectedSerial(nativeCommands: NativeInputCommands): Promise<string> {
   const selected = process.env.ANDROID_SERIAL?.trim();
   if (selected) {
-    const actual = (await adb("get-serialno")).trim();
+    const actual = (await nativeCommands.getSerialno(selected)).trim();
     if (actual !== selected) {
       throw new Error(`adb selected serial ${actual || "unknown"}, expected ${selected}`);
     }
     return selected;
   }
-  const attached = (await adb("devices"))
+  const attached = (await nativeCommands.devices())
     .split("\n")
     .slice(1)
     .filter((line) => /\tdevice$/.test(line))
@@ -163,23 +184,35 @@ async function selectedSerial(): Promise<string> {
   if (attached.length !== 1) {
     throw new Error(`native tap needs one attached Android device, found ${attached.length}`);
   }
-  return attached[0]!;
+  const serial = attached[0]!;
+  const actual = (await nativeCommands.getSerialno(serial)).trim();
+  if (actual !== serial) {
+    throw new Error(`adb selected serial ${actual || "unknown"}, expected ${serial}`);
+  }
+  return serial;
 }
 
 export async function tapNativeInput(
   point: WebViewPoint,
   metrics: WebViewMetrics,
   packageName = PACKAGE,
+  nativeCommands: NativeInputCommands = commands,
 ): Promise<NativeTapReceipt> {
-  const serial = await selectedSerial();
+  const serial = await selectedSerial(nativeCommands);
   const [displayOutput, windowOutput] = await Promise.all([
-    shell("wm", "size"),
-    shell("dumpsys", "window", "windows"),
+    nativeCommands.shell(serial, "wm", "size"),
+    nativeCommands.shell(serial, "dumpsys", "window", "windows"),
   ]);
   const display = parseDisplaySize(displayOutput);
   const frame = parseAppWindowFrame(windowOutput, packageName);
   const screenPoint = mapWebViewPointToScreen(point, metrics, frame, display);
-  const tap = await tryShell("input", "tap", String(screenPoint.x), String(screenPoint.y));
+  const tap = await nativeCommands.tryShell(
+    serial,
+    "input",
+    "tap",
+    String(screenPoint.x),
+    String(screenPoint.y),
+  );
   if (!tap.ok) {
     throw new Error(
       `native Android tap failed: ${adbFailureText(tap.failure)}`,
