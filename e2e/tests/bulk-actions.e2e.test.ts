@@ -366,11 +366,22 @@ describe("the bulk bar", () => {
       const rowClickReceipts: RowSelectionClickReceipt[] = [];
       await enterSelectionMode(pinnedIds[0], rowClickReceipts, pinnedIds);
       await selectIds(pinnedIds, rowClickReceipts);
+      const unpinSelector = `${BULK_BAR} button[aria-label="Unpin"]`;
       try {
         await app.browser.waitUntil(
           async () => {
-            const bar = await app.browser.$(BULK_BAR);
-            return (await bar.getText()).includes("Unpin");
+            if ((await count(app.browser, unpinSelector)) !== 1) return false;
+            const selectedIds = (await selectedRowIds()).sort();
+            const expectedIds = [...pinnedIds].sort();
+            if (selectedIds.join("\u0000") !== expectedIds.join("\u0000")) {
+              return false;
+            }
+            const unpin = await app.browser.$(unpinSelector);
+            return (
+              (await unpin.isDisplayed()) &&
+              (await unpin.isEnabled()) &&
+              (await unpin.isClickable())
+            );
           },
           {
             timeout: 10_000,
