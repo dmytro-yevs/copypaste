@@ -70,8 +70,9 @@ Implemented controls:
   shard coverage. The intended policy is one executable gate definition shared
   by local and CI entry points.
 
-Status: Supply chain run 33136251962 is green for dependency review, deny, and
-audit. `f6494b413` reviewed and integrated the eight exact HEAD-history
+Status: Supply chain run 33136251962 is an overall FAILURE because its secret
+scan/gitleaks gate failed; dependency review, cargo-deny, and cargo-audit were
+successful. `f6494b413` reviewed and integrated the eight exact HEAD-history
 fingerprints. A default all-refs gitleaks scan then found two additional
 published archive/tag synthetic-detector fixtures, including `75ba2a72d`;
 their correction remains pending and is not silently accepted.
@@ -90,8 +91,8 @@ Implemented controls:
   across permission hydration and fence the race.
 - `2606282ad` repairs the Android pairing provider seam; `3d1efef78` checks
   that the tracked provider extension is actually wired into Wry.
-- `6235aeb35` locks Android document scrolling and adds focused geometry
-  evidence.
+- `6235aeb35` locks Android document scrolling; fresh
+  `10c3a8f49` provides the focused geometry proof.
 - `76cf2735`, `f531e01d`, and `1fa9a5bc6` make lazy route retries recreate the
   failed import, validate the Vite graph/CSS ownership, and clean temporary
   manifests on every outcome.
@@ -131,7 +132,7 @@ claim can be checked against the complete log and artifact set.
 | [Browser 33136251778](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251778) | Pin/Done receipts prove `checkedIDs` cleared and old actions disconnected. Remaining failures concern toolbar existence/identity observation; the diagnostic does not prove an `aria-label`. Linux WebKitGTK remains a shared-UI layer, not Windows/macOS/Android native evidence. |
 | [Android 33136251808](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251808) | API 33 leg is green; storage reports 18/0. Cloud sign-in/sync works, but stale immediate-error/sign-out assertions remain. [Debug job 98737897489](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251808/job/98737897489) still shows a Devices skeleton, compact search was not opened, icon-only Unpin was incorrectly expected as text, and the IME CDP proof fails. |
 | [Mutation 33136251938](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251938) | Green: Linux 91/0 and Windows 18/0 mutation verdicts. |
-| [Supply chain 33136251962](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251962) | Dependency review, cargo-deny, and cargo-audit are green; fixture findings remain tracked above. |
+| [Supply chain 33136251962](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251962) | Overall FAILURE from the secret scan/gitleaks gate; dependency review, cargo-deny, and cargo-audit succeeded. Fixture findings remain tracked above. |
 
 ## Remaining work and ownership
 
