@@ -4,6 +4,7 @@ import {
   mapWebViewPointToScreen,
   parseAppWindowFrame,
   parseDisplaySize,
+  foregroundFocusDiagnostic,
   tapNativeInput,
   type NativeInputCommands,
 } from "../src/harness/native-input.js";
@@ -14,6 +15,7 @@ const WINDOW_DUMP = [
   "    mFrame=[0,48][1080,1920]",
   "  Window #5 Window{def u0 com.android.systemui/.StatusBar}",
 ].join("\n");
+const WINDOW_SUBSECTION = WINDOW_DUMP.split("\n").slice(1).join("\n");
 
 const DISPLAY_OUTPUT = "Physical size: 1080x1920\n";
 const POINT = { x: 180, y: 320 };
@@ -24,6 +26,7 @@ function fixtureCommands(
   serial = "device-a",
   serialAnswer = serial,
   failShell = false,
+  windowDump = WINDOW_DUMP,
 ): NativeInputCommands {
   return {
     devices: async () => {
@@ -37,7 +40,7 @@ function fixtureCommands(
     shell: async (selected, ...args) => {
       calls.push(["-s", selected, ...args]);
       if (failShell) throw new Error("device command failed");
-      return args[0] === "wm" ? DISPLAY_OUTPUT : WINDOW_DUMP;
+      return args[0] === "wm" ? DISPLAY_OUTPUT : windowDump;
     },
     tryShell: async (selected, ...args) => {
       calls.push(["-s", selected, ...args]);
@@ -111,7 +114,17 @@ describe("Android native input geometry", () => {
         WINDOW_DUMP.replace("com.copypaste.app/", "com.android.settings/"),
         "com.copypaste.app",
       ),
-    ).toThrow(/foreground window/);
+    ).toThrow(/foreground focus/);
+  });
+
+  test.each([
+    ["current16full", WINDOW_DUMP, "present", "com.copypaste.app", "com.copypaste.app.MainActivity"],
+    ["current16subsection", WINDOW_SUBSECTION, "missing", null, null],
+    ["missing", "Window #4 Window{abc u0 com.copypaste.app/com.copypaste.app.MainActivity}", "missing", null, null],
+    ["null", "mCurrentFocus=null", "null", null, null],
+    ["other package", WINDOW_DUMP.replace("com.copypaste.app/", "com.android.settings/"), "present", "com.android.settings", "com.copypaste.app.MainActivity"],
+  ] as const)("reports sanitized %s focus diagnostics", (_name, dump, status, packageName, component) => {
+    expect(foregroundFocusDiagnostic(dump)).toEqual({ status, packageName, component });
   });
 
   test("passes the selected serial to every native command after discovery", async () => {
@@ -122,7 +135,7 @@ describe("Android native input geometry", () => {
       ["devices"],
       ["-s", "device-a", "get-serialno"],
       ["-s", "device-a", "wm", "size"],
-      ["-s", "device-a", "dumpsys", "window", "windows"],
+      ["-s", "device-a", "dumpsys", "window"],
       ["-s", "device-a", "input", "tap", "540", "1008"],
     ]);
   });
@@ -171,6 +184,20 @@ describe("Android native input geometry", () => {
         fixtureCommands(calls, "device-a", "device-a", true),
       ),
     ).rejects.toThrow("device command failed");
+    expect(calls.some((call) => call.includes("input"))).toBe(false);
+  });
+
+  test("does not tap when Android 16's window subsection omits focus", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await expect(
+      tapNativeInput(
+        POINT,
+        METRICS,
+        "com.copypaste.app",
+        fixtureCommands(calls, "device-a", "device-a", false, WINDOW_SUBSECTION),
+      ),
+    ).rejects.toThrow(/"status":"missing"/);
     expect(calls.some((call) => call.includes("input"))).toBe(false);
   });
 });
