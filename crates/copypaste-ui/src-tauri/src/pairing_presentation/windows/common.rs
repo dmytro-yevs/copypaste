@@ -96,17 +96,28 @@ pub(super) fn button(
     )
 }
 
+#[allow(unsafe_code)]
 fn with_accessible_property_services<T>(
     callback: impl FnOnce(&::windows::Win32::UI::Accessibility::IAccPropServices) -> T,
 ) -> Option<T> {
+    use ::windows::Win32::Foundation::RPC_E_CHANGED_MODE;
     use ::windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
     };
     use ::windows::Win32::UI::Accessibility::{CLSID_AccPropServices, IAccPropServices};
 
-    let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok();
+    // SAFETY: this function runs on the owned pairing UI thread; S_OK/S_FALSE
+    // initialization is balanced below, while RPC_E_CHANGED_MODE explicitly
+    // permits use of the already-initialized apartment without balancing it.
+    let initialization = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let initialized = initialization.is_ok();
+    if !initialized && initialization != RPC_E_CHANGED_MODE {
+        return None;
+    }
     let result = {
+        // SAFETY: CoCreateInstance returns an owned interface whose lexical
+        // scope ends before CoUninitialize below.
         let service = match unsafe {
             CoCreateInstance::<_, IAccPropServices>(
                 &CLSID_AccPropServices,
@@ -125,11 +136,13 @@ fn with_accessible_property_services<T>(
         callback(&service)
     };
     if initialized {
+        // SAFETY: the service interface was dropped at the end of `result`.
         unsafe { CoUninitialize() };
     }
     Some(result)
 }
 
+#[allow(unsafe_code)]
 pub(super) fn set_accessible_name(hwnd: &winsafe::HWND, name: &str) -> bool {
     use ::windows::core::PCWSTR;
     use ::windows::Win32::Foundation::HWND as WindowsHwnd;
@@ -139,6 +152,9 @@ pub(super) fn set_accessible_name(hwnd: &winsafe::HWND, name: &str) -> bool {
     let mut name16: Vec<u16> = name.encode_utf16().collect();
     name16.push(0);
     with_accessible_property_services(|service| unsafe {
+        // SAFETY: the caller passes a live, owned Edit HWND during WM_CREATE;
+        // the NUL-terminated UTF-16 buffer and static property GUID live for
+        // the duration of this synchronous call.
         service
             .SetHwndPropStr(
                 WindowsHwnd(hwnd.ptr()),
@@ -152,6 +168,7 @@ pub(super) fn set_accessible_name(hwnd: &winsafe::HWND, name: &str) -> bool {
     .unwrap_or(false)
 }
 
+#[allow(unsafe_code)]
 pub(super) fn clear_accessible_name(hwnd: &winsafe::HWND) -> bool {
     use ::windows::Win32::Foundation::HWND as WindowsHwnd;
     use ::windows::Win32::UI::Accessibility::Name_Property_GUID;
@@ -159,6 +176,8 @@ pub(super) fn clear_accessible_name(hwnd: &winsafe::HWND) -> bool {
 
     let properties = [Name_Property_GUID];
     with_accessible_property_services(|service| unsafe {
+        // SAFETY: the caller passes the still-live Edit HWND before destroy;
+        // the property slice is stack-owned and borrowed only for this call.
         service
             .ClearHwndProps(
                 WindowsHwnd(hwnd.ptr()),
@@ -235,6 +254,8 @@ mod tests {
         assert!(source.contains("ClearHwndProps"));
         assert!(source.contains("Name_Property_GUID"));
         assert!(!source.contains("ValuePattern"));
+        assert_eq!(source.matches("#[allow(unsafe_code)]").count(), 3);
+        assert!(source.contains("RPC_E_CHANGED_MODE"));
     }
 
     #[test]
