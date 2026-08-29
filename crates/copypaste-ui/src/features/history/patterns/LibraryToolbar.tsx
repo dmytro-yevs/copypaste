@@ -138,6 +138,7 @@ export function LibraryToolbar({
                 className={styles.toolbarShell}
             >
                 <div
+                    key={selection ? "selection" : "library"}
                     ref={setToolbarRef}
                     role="toolbar"
                     aria-label={t(
