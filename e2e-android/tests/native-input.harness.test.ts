@@ -12,10 +12,14 @@ import {
 const WINDOW_DUMP = [
   "mCurrentFocus=Window{abc u0 com.copypaste.app/com.copypaste.app.MainActivity}",
   "  Window #4 Window{abc u0 com.copypaste.app/com.copypaste.app.MainActivity}",
-  "    mFrame=[0,48][1080,1920]",
+  "    Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,48][1080,1920] last=[1,49][1081,1921]",
   "  Window #5 Window{def u0 com.android.systemui/.StatusBar}",
 ].join("\n");
 const WINDOW_SUBSECTION = WINDOW_DUMP.split("\n").slice(1).join("\n");
+const LEGACY_WINDOW_DUMP = WINDOW_DUMP.replace(
+  "Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,48][1080,1920] last=[1,49][1081,1921]",
+  "mFrame=[0,48][1080,1920]",
+);
 
 const DISPLAY_OUTPUT = "Physical size: 1080x1920\n";
 const POINT = { x: 180, y: 320 };
@@ -117,6 +121,37 @@ describe("Android native input geometry", () => {
     ).toThrow(/foreground focus/);
   });
 
+  test("reads the modern frame field, not parent, display, or last", () => {
+    expect(parseAppWindowFrame(WINDOW_DUMP, "com.copypaste.app")).toEqual({
+      left: 0,
+      top: 48,
+      width: 1080,
+      height: 1872,
+    });
+  });
+
+  test("retains the legacy mFrame field for older Android dumps", () => {
+    expect(parseAppWindowFrame(LEGACY_WINDOW_DUMP, "com.copypaste.app")).toEqual({
+      left: 0,
+      top: 48,
+      width: 1080,
+      height: 1872,
+    });
+  });
+
+  test("selects the exact focused window among same-package windows", () => {
+    const dump = WINDOW_DUMP.replace(
+      "  Window #4 Window{abc u0 com.copypaste.app/com.copypaste.app.MainActivity}\n    Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,48][1080,1920] last=[1,49][1081,1921]",
+      "  Window #4 Window{def u0 com.copypaste.app/com.copypaste.app.MainActivity}\n    Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,0][1080,100] last=[0,0][1080,100]\n  Window #5 Window{abc u0 com.copypaste.app/com.copypaste.app.MainActivity}\n    Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,48][1080,1920] last=[1,49][1081,1921]",
+    );
+    expect(parseAppWindowFrame(dump, "com.copypaste.app")).toEqual({
+      left: 0,
+      top: 48,
+      width: 1080,
+      height: 1872,
+    });
+  });
+
   test.each([
     ["current16full", WINDOW_DUMP, "present", "com.copypaste.app", "com.copypaste.app.MainActivity"],
     ["current16subsection", WINDOW_SUBSECTION, "missing", null, null],
@@ -198,6 +233,21 @@ describe("Android native input geometry", () => {
         fixtureCommands(calls, "device-a", "device-a", false, WINDOW_SUBSECTION),
       ),
     ).rejects.toThrow(/"status":"missing"/);
+    expect(calls.some((call) => call.includes("input"))).toBe(false);
+  });
+
+  test("does not tap when the focused window has no usable frame", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    const malformed = WINDOW_DUMP.replace(/frame=\[[^\n]+/, "frame=broken");
+    await expect(
+      tapNativeInput(
+        POINT,
+        METRICS,
+        "com.copypaste.app",
+        fixtureCommands(calls, "device-a", "device-a", false, malformed),
+      ),
+    ).rejects.toThrow(/window frame/);
     expect(calls.some((call) => call.includes("input"))).toBe(false);
   });
 });
