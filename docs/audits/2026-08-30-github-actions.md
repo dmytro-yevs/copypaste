@@ -11,15 +11,49 @@ are bound to the named commit, ref, and run IDs captured on 2026-08-30.
 
 ## Executive finding
 
-The inherited month-window inventory recorded 1,700 workflow runs: 906
-successful, 341 failed, 452 cancelled, and 1 queued. It also recorded 426
-automatic, 19 manual, and 7 Android-timeout cases. Cancelled jobs consumed
-82.862 elapsed runner-hours; that is elapsed capacity, not billable usage.
+The verified closed-day inventory contains 1,764 runs: 929 successful, 376
+failed, 458 cancelled, and 1 queued. It covers 32 daily segments and 39 API
+pages; the largest segment contained 269 runs. There were zero duplicate rows,
+out-of-cutoff rows, or segment-count mismatches. Coverage is complete for the
+enumerated run rows, not an individual causal review of all 376 failures.
 
-These counts are inherited audit findings. The raw inventory is not retained in
-this checkout, so this report does not freshly recount the window and does not
-claim that all 341 failures have been individually classified. The root
-families below combine the retained findings with source/workflow inspection.
+The raw run inventory is preserved verbatim as
+[2026-08-30-github-actions-runs.tsv](2026-08-30-github-actions-runs.tsv)
+(602,063 bytes; SHA256
+`34c290a55af777cb62073a2954d116c99f417bf00c9d49b22cadcff5a039937b`). The
+artifact is a mechanical, no-reformat copy from the verified source; byte
+comparison and SHA256 equality both passed. The companion `workflows.tsv` and
+`segments.tsv` files supplied the aggregates and coverage checks. An earlier,
+partial inherited snapshot recorded 1,700 runs
+(906 successful, 341 failed, 452 cancelled, 1 queued), 426 automatic, 19
+manual, and 7 Android-timeout cases; those figures are not directly comparable
+to this complete closed-day inventory.
+
+The earlier snapshot's 82.862 elapsed cancelled-job hours are retained as an
+initial-snapshot-only measurement. No duration is assigned here to the fresh
+458 cancellations, and elapsed hours are not billable usage.
+
+All 12 workflows with nonzero failure conclusions are listed below. The counts
+sum to 376; they are inventory counts, not a claim that every failure has been
+causally classified.
+
+| Workflow | Failures |
+| --- | ---: |
+| CI | 102 |
+| Android emulator | 74 |
+| Browser (WebKitGTK, Linux) | 49 |
+| Windows native desktop E2E | 40 |
+| E2E (real WebView) | 34 |
+| Release | 22 |
+| Nightly native matrix | 19 |
+| Supply chain | 13 |
+| GitHub Advanced Security | 9 |
+| Mutation gate | 8 |
+| Dependabot Updates | 3 |
+| Nightly | 3 |
+
+The root families below combine this verified inventory with retained findings
+and source/workflow inspection.
 
 The systemic pattern is evidence loss: reusable-workflow expansion duplicated
 Android work; platform assertions observed stale or non-authoritative surfaces;
@@ -50,10 +84,10 @@ Implemented controls:
 - The wiring checker and mutation fixtures reject a missing event discriminator,
   an unsafe cancellation policy, and the duplicated scheduled shape.
 
-Status: implemented in the tested baseline. The fresh sample does not recreate
-the historical 82.862-hour cancellation total; it validates the changed wiring
-through the workflow and mutation gates. The historical cancellation total is
-not attributed to the latent collision without per-run evidence.
+Status: implemented in the tested baseline. The fresh inventory records 458
+cancellations but computes no duration for them. The changed wiring is
+validated through the workflow and mutation gates; the historical cancellation
+total is not attributed to the latent collision without per-run evidence.
 
 ### 2. Tooling and gate drift
 
@@ -74,9 +108,10 @@ Status: Supply chain run 33136251962 is an overall FAILURE because its secret
 scan/gitleaks gate failed; dependency review, cargo-deny, and cargo-audit were
 successful. `f6494b413` reviewed and integrated the eight exact HEAD-history
 fingerprints. The all-public-refs correction was reviewed and integrated as
-`bd29cd710` (from `f50a16b54`), and the default clone's 2,859-commit all-refs
-scan is clean. That later source scan does not retroactively change the
-captured workflow result or claim that a scheduled workflow is green.
+`bd29cd710` (from `f50a16b54`), covering archive/tag fixtures including
+`75ba2a72d`; the default clone's 2,859-commit all-refs scan is clean. That
+later source scan does not retroactively change the captured workflow result
+or claim that a scheduled workflow is green.
 
 ### 3. Readiness and contract observation
 
@@ -117,11 +152,21 @@ Implemented controls:
 - `810a1f31c` validates the protected root separately; `555d37ace` binds the
   receipt to that UIA root. The pairing code requires `IsPassword=true`.
 - `c6b217ec4` corrects the toolbar mode-key/identity contract; the code is
-  reviewed and integrated, but its native rerun remains pending.
+  reviewed and integrated, but its native rerun remains pending. It is not the
+  root fix for the Pin/Done wait bug described below.
 
 Status: implemented, but the CI observation below still reports a missing
 named password element after an earlier affinity check passed. That is an
 evidence failure, not permission to weaken the requirement.
+
+### 5. Windows build safety boundary
+
+New F5 Windows builds reject `unsafe_code` at six sites under the library-level
+deny. A worker is correcting the narrowly documented FFI boundary; no global
+`unsafe` allowance is authorized.
+
+Status: queued; the correction is not counted as a green Windows build until
+the exact F5 job passes.
 
 ## Fresh validation sample
 
@@ -137,17 +182,23 @@ claim can be checked against the complete log and artifact set.
 | [Mutation 33136251938](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251938) | Green: Linux 91/0 and Windows 18/0 mutation verdicts. |
 | [Supply chain 33136251962](https://github.com/dmytro-yevs/copypaste/actions/runs/33136251962) | Overall FAILURE from the secret scan/gitleaks gate; dependency review, cargo-deny, and cargo-audit succeeded. Fixture findings remain tracked above. |
 
+Subsequent evidence note (the table above remains the captured `10c3a8f49`
+sample): Node verification found three E2E expressions of the form
+`!(await browser.$(...)).isExisting()`. They negate an unawaited Promise and are
+therefore always false. This is the definitive remaining Pin/Done wait bug,
+not proof of a stale accessibility label. `edc450ede` is under review; its
+native rerun remains pending.
+
 ## Remaining work and ownership
 
 1. **Native observation contract — queued.** Repair the Windows pairing
    selector/evidence path so the named password element is observed directly;
    preserve `IsPassword=true`, protected-root binding, capture exclusion, and
    redaction. A missing native observation remains a blocker.
-2. **Desktop observation contract — queued.** Replace stored toolbar
-   existence/identity assumptions with direct semantic attributes; the
-   checked-ID clearing, old-action disconnection, and Windows Pin-toast
-   receipts remain passing evidence. Keep WebKitGTK findings separate from
-   shipping-native claims.
+2. **Desktop observation contract — queued.** Correct the three unawaited
+   toolbar-absence checks under review in `edc450ede`; the checked-ID clearing,
+   old-action disconnection, and Windows Pin-toast receipts remain passing
+   evidence. Keep WebKitGTK findings separate from shipping-native claims.
 3. **Android harness — queued.** Correct the test-only structural
    `aria-labelledby`/`textContent` predicate for the rendered Devices heading
    (worker `fix_android_devices_heading_contract`); do not add a route delay or
