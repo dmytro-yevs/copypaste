@@ -19,6 +19,7 @@ import {
   count,
   filterHistoryTo,
   gotoView,
+  interactableElementBox,
   rowCount,
   tapButton,
   tapElement,
@@ -258,8 +259,11 @@ describe("the bulk bar", () => {
     // two rows that are now pinned must flip it.
     await enterSelectionMode();
     await selectIds(pinnedIds);
+    expect((await selectedRowIds()).sort()).toEqual([...pinnedIds].sort());
     await waitFor(
-      async () => (await visibleText(app)).includes("Unpin"),
+      async () =>
+        (await interactableElementBox(app, 'button[aria-label="Unpin"]')) !==
+        null,
       "the toggle still offered to pin two already-pinned items",
     );
   }, 120_000);

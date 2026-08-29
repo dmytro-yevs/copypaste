@@ -18,6 +18,7 @@ import {
   clearField,
   count,
   gotoView,
+  openHistorySearch,
   reloadHistoryWith,
   waitForRows,
   waitForText,
@@ -34,6 +35,7 @@ let seeded: string[] = [];
 beforeAllWithEvidence("leaks", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
+  await openHistorySearch(app);
   await clearField(app, SEARCH);
   seeded = await addItems(app, [secret, ordinary]);
   await reloadHistoryWith(app, ordinary);
