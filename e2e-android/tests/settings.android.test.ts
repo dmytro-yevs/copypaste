@@ -15,6 +15,7 @@
 import { afterAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
+import { PACKAGE } from "../src/harness/adb.js";
 import { accessibleSurface, expectNoFilesystemPath } from "../src/harness/leaks.js";
 import {
   addItems,
@@ -23,6 +24,7 @@ import {
   storedItems,
 } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
+import { tapNativeInput } from "../src/harness/native-input.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   ensureSettingsNavigation,
@@ -241,151 +243,209 @@ describe("the section index", () => {
 
   test("keeps the Android document fixed while compact Preferences scrolls", async () => {
     await openSettingsSection(app, "Cloud sync");
-    const selector = "[data-android-root-scroll-probe]";
-    const imeBefore = await app.withPage((page) =>
-      page.evaluate(() => {
-        const panel = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
-          ),
-        ).find((candidate) => candidate.getClientRects().length > 0);
-        const field = Array.from(
-          panel?.querySelectorAll<HTMLInputElement>("input") ?? [],
-        ).find((candidate) => {
-          const box = candidate.getBoundingClientRect();
-          return box.bottom > 0 && box.top < innerHeight;
-        });
-        if (!field) throw new Error("Cloud sync has no visible input");
-        field.dataset.androidRootScrollProbe = "";
-        return {
-          innerHeight: window.innerHeight,
-          visualHeight: window.visualViewport?.height ?? null,
-        };
-      }),
-    );
-    await app.withPage((page) => page.click(selector));
-    let imeAfter: typeof imeBefore | null = null;
-    await waitFor(
-      async () => {
-        imeAfter = await app.withPage((page) =>
-          page.evaluate(() => ({
+    let primaryFailure: unknown;
+    try {
+      const selector = "[data-android-root-scroll-probe]";
+      const imeBefore = await app.withPage((page) =>
+        page.evaluate(() => {
+          const panel = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
+            ),
+          ).find((candidate) => candidate.getClientRects().length > 0);
+          const field = Array.from(
+            panel?.querySelectorAll<HTMLInputElement>("input") ?? [],
+          ).find((candidate) => {
+            const box = candidate.getBoundingClientRect();
+            return box.bottom > 0 && box.top < innerHeight;
+          });
+          if (!field) throw new Error("Cloud sync has no visible input");
+          field.dataset.androidRootScrollProbe = "";
+          const box = field.getBoundingClientRect();
+          return {
             innerHeight: window.innerHeight,
             visualHeight: window.visualViewport?.height ?? null,
-          })),
-        );
-        return imeBefore.visualHeight !== null &&
-          imeAfter.visualHeight !== null &&
-          imeBefore.visualHeight - imeAfter.visualHeight >= 80;
-      },
-      () =>
-        "focusing the Cloud input never opened the Android IME: " +
-        JSON.stringify({ before: imeBefore, after: imeAfter }),
-      15_000,
-    );
-    expect(
-      imeBefore.visualHeight! - imeAfter!.visualHeight!,
-      JSON.stringify({ before: imeBefore, after: imeAfter }),
-    ).toBeGreaterThanOrEqual(80);
+            focused: document.activeElement === field,
+            activeElement: document.activeElement?.tagName ?? null,
+            activeLabel: document.activeElement?.getAttribute("aria-label") ?? null,
+            point: { x: box.left + box.width / 2, y: box.top + box.height / 2 },
+            metrics: {
+              width: window.innerWidth,
+              height: window.innerHeight,
+              devicePixelRatio: window.devicePixelRatio,
+            },
+          };
+        }),
+      );
+      const nativeTap = await tapNativeInput(
+        imeBefore.point,
+        imeBefore.metrics,
+        PACKAGE,
+      );
+      let imeAfter: Pick<
+        typeof imeBefore,
+        "innerHeight" | "visualHeight" | "focused" | "activeElement" | "activeLabel"
+      > | null = null;
+      await waitFor(
+        async () => {
+          imeAfter = await app.withPage((page) =>
+            page.evaluate(() => ({
+              innerHeight: window.innerHeight,
+              visualHeight: window.visualViewport?.height ?? null,
+              focused:
+                document.activeElement?.matches(
+                  "[data-android-root-scroll-probe]",
+                ) ?? false,
+              activeElement: document.activeElement?.tagName ?? null,
+              activeLabel: document.activeElement?.getAttribute("aria-label") ?? null,
+            })),
+          );
+          return imeBefore.visualHeight !== null &&
+            imeAfter.visualHeight !== null &&
+            imeAfter.focused &&
+            imeBefore.visualHeight - imeAfter.visualHeight >= 80;
+        },
+        () =>
+          "focusing the Cloud input never opened the Android IME: " +
+          JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap }),
+        15_000,
+      );
+      expect(
+        imeBefore.visualHeight! - imeAfter!.visualHeight!,
+        JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap }),
+      ).toBeGreaterThanOrEqual(80);
+      expect(
+        imeBefore.focused,
+        JSON.stringify({ before: imeBefore, nativeTap }),
+      ).toBe(false);
+      expect(
+        imeAfter!.focused,
+        JSON.stringify({ after: imeAfter, nativeTap }),
+      ).toBe(true);
 
-    const evidence = await app.withPage((page) =>
-      page.evaluate(async () => {
-        const field = document.querySelector<HTMLInputElement>(
-          "[data-android-root-scroll-probe]",
-        );
-        const panel = field?.closest<HTMLElement>(
-          'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
-        );
-        let viewport = panel?.parentElement ?? null;
-        while (
-          viewport &&
-          !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY)
-        ) {
-          viewport = viewport.parentElement;
-        }
-        const root = document.querySelector<HTMLElement>("#root");
-        const dock = document.querySelector<HTMLElement>(
-          'nav[aria-label="Primary"]',
-        );
-        if (!field || !panel || !viewport || !root || !dock) {
-          throw new Error("the focused Cloud app frame is incomplete");
-        }
+      const evidence = await app.withPage((page) =>
+        page.evaluate(async () => {
+          const field = document.querySelector<HTMLInputElement>(
+            "[data-android-root-scroll-probe]",
+          );
+          const panel = field?.closest<HTMLElement>(
+            'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
+          );
+          let viewport = panel?.parentElement ?? null;
+          while (
+            viewport &&
+            !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY)
+          ) {
+            viewport = viewport.parentElement;
+          }
+          const root = document.querySelector<HTMLElement>("#root");
+          const dock = document.querySelector<HTMLElement>(
+            'nav[aria-label="Primary"]',
+          );
+          if (!field || !panel || !viewport || !root || !dock) {
+            throw new Error("the focused Cloud app frame is incomplete");
+          }
 
-        const beforeRoot = root.getBoundingClientRect();
-        const beforeDock = dock.getBoundingClientRect();
-        const beforeField = field.getBoundingClientRect();
-        const before = {
-          windowScrollY: window.scrollY,
-          documentScrollY: document.documentElement.scrollTop,
-          bodyScrollY: document.body.scrollTop,
-          rootTop: beforeRoot.top,
-          rootBottom: beforeRoot.bottom,
-          dockTop: beforeDock.top,
-          dockBottom: beforeDock.bottom,
-          fieldWidth: beforeField.width,
-          fieldHeight: beforeField.height,
-          focused: document.activeElement === field,
-        };
+          const beforeRoot = root.getBoundingClientRect();
+          const beforeDock = dock.getBoundingClientRect();
+          const beforeField = field.getBoundingClientRect();
+          const before = {
+            windowScrollY: window.scrollY,
+            documentScrollY: document.documentElement.scrollTop,
+            bodyScrollY: document.body.scrollTop,
+            rootTop: beforeRoot.top,
+            rootBottom: beforeRoot.bottom,
+            dockTop: beforeDock.top,
+            dockBottom: beforeDock.bottom,
+            fieldWidth: beforeField.width,
+            fieldHeight: beforeField.height,
+            focused: document.activeElement === field,
+          };
 
-        const spacer = document.createElement("div");
-        spacer.dataset.androidRootScrollSpacer = "";
-        spacer.setAttribute("aria-hidden", "true");
-        spacer.style.blockSize = `${innerHeight}px`;
-        spacer.style.flex = "none";
-        panel.append(spacer);
-        const previousScrollTop = viewport.scrollTop;
-        const maximumScrollTop = viewport.scrollHeight - viewport.clientHeight;
-        viewport.scrollTop = Math.min(maximumScrollTop, previousScrollTop + 48);
-        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          const spacer = document.createElement("div");
+          spacer.dataset.androidRootScrollSpacer = "";
+          spacer.setAttribute("aria-hidden", "true");
+          spacer.style.blockSize = `${innerHeight}px`;
+          spacer.style.flex = "none";
+          panel.append(spacer);
+          const previousScrollTop = viewport.scrollTop;
+          const maximumScrollTop = viewport.scrollHeight - viewport.clientHeight;
+          viewport.scrollTop = Math.min(maximumScrollTop, previousScrollTop + 48);
+          viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+
+          const afterRoot = root.getBoundingClientRect();
+          const afterDock = dock.getBoundingClientRect();
+          const afterField = field.getBoundingClientRect();
+          const x = afterField.left + afterField.width / 2;
+          const y = afterField.top + afterField.height / 2;
+          const after = {
+            windowScrollY: window.scrollY,
+            documentScrollY: document.documentElement.scrollTop,
+            bodyScrollY: document.body.scrollTop,
+            rootTop: afterRoot.top,
+            rootBottom: afterRoot.bottom,
+            dockTop: afterDock.top,
+            dockBottom: afterDock.bottom,
+            fieldWidth: afterField.width,
+            fieldHeight: afterField.height,
+            fieldVisible:
+              afterField.bottom > 0 && afterField.top < window.innerHeight,
+            fieldHit: field.contains(document.elementFromPoint(x, y)),
+            focused: document.activeElement === field,
+            viewportScrollDelta: viewport.scrollTop - previousScrollTop,
+          };
+          spacer.remove();
+          field.removeAttribute("data-android-root-scroll-probe");
+          return { before, after };
+        }),
+      );
+
+      expect(evidence.before.focused).toBe(true);
+      expect(evidence.after.focused).toBe(true);
+      expect(evidence.after.viewportScrollDelta).toBeGreaterThan(0);
+      expect(evidence.before.windowScrollY).toBe(0);
+      expect(evidence.before.documentScrollY).toBe(0);
+      expect(evidence.before.bodyScrollY).toBe(0);
+      expect(evidence.after.windowScrollY).toBe(0);
+      expect(evidence.after.documentScrollY).toBe(0);
+      expect(evidence.after.bodyScrollY).toBe(0);
+      expect(evidence.after.rootTop).toBeCloseTo(evidence.before.rootTop, 1);
+      expect(evidence.after.rootBottom).toBeCloseTo(evidence.before.rootBottom, 1);
+      expect(evidence.after.dockTop).toBeCloseTo(evidence.before.dockTop, 1);
+      expect(evidence.after.dockBottom).toBeCloseTo(evidence.before.dockBottom, 1);
+      expect(evidence.after.fieldWidth).toBeCloseTo(evidence.before.fieldWidth, 1);
+      expect(evidence.after.fieldHeight).toBeCloseTo(evidence.before.fieldHeight, 1);
+      expect(evidence.after.fieldHeight).toBeGreaterThanOrEqual(44);
+      expect(evidence.after.fieldVisible).toBe(true);
+      expect(evidence.after.fieldHit).toBe(true);
+      await ensureSettingsNavigation(app);
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      try {
+        await app.withPage((page) =>
+          page.evaluate(() => {
+            document
+              .querySelectorAll("[data-android-root-scroll-spacer]")
+              .forEach((node) => node.remove());
+            document
+              .querySelectorAll("[data-android-root-scroll-probe]")
+              .forEach((node) =>
+                node.removeAttribute("data-android-root-scroll-probe"),
+              );
+          }),
         );
-
-        const afterRoot = root.getBoundingClientRect();
-        const afterDock = dock.getBoundingClientRect();
-        const afterField = field.getBoundingClientRect();
-        const x = afterField.left + afterField.width / 2;
-        const y = afterField.top + afterField.height / 2;
-        const after = {
-          windowScrollY: window.scrollY,
-          documentScrollY: document.documentElement.scrollTop,
-          bodyScrollY: document.body.scrollTop,
-          rootTop: afterRoot.top,
-          rootBottom: afterRoot.bottom,
-          dockTop: afterDock.top,
-          dockBottom: afterDock.bottom,
-          fieldWidth: afterField.width,
-          fieldHeight: afterField.height,
-          fieldVisible:
-            afterField.bottom > 0 && afterField.top < window.innerHeight,
-          fieldHit: field.contains(document.elementFromPoint(x, y)),
-          focused: document.activeElement === field,
-          viewportScrollDelta: viewport.scrollTop - previousScrollTop,
-        };
-        spacer.remove();
-        field.removeAttribute("data-android-root-scroll-probe");
-        return { before, after };
-      }),
-    );
-
-    expect(evidence.before.focused).toBe(true);
-    expect(evidence.after.focused).toBe(true);
-    expect(evidence.after.viewportScrollDelta).toBeGreaterThan(0);
-    expect(evidence.before.windowScrollY).toBe(0);
-    expect(evidence.before.documentScrollY).toBe(0);
-    expect(evidence.before.bodyScrollY).toBe(0);
-    expect(evidence.after.windowScrollY).toBe(0);
-    expect(evidence.after.documentScrollY).toBe(0);
-    expect(evidence.after.bodyScrollY).toBe(0);
-    expect(evidence.after.rootTop).toBeCloseTo(evidence.before.rootTop, 1);
-    expect(evidence.after.rootBottom).toBeCloseTo(evidence.before.rootBottom, 1);
-    expect(evidence.after.dockTop).toBeCloseTo(evidence.before.dockTop, 1);
-    expect(evidence.after.dockBottom).toBeCloseTo(evidence.before.dockBottom, 1);
-    expect(evidence.after.fieldWidth).toBeCloseTo(evidence.before.fieldWidth, 1);
-    expect(evidence.after.fieldHeight).toBeCloseTo(evidence.before.fieldHeight, 1);
-    expect(evidence.after.fieldHeight).toBeGreaterThanOrEqual(44);
-    expect(evidence.after.fieldVisible).toBe(true);
-    expect(evidence.after.fieldHit).toBe(true);
-    await ensureSettingsNavigation(app);
+      } catch (error) {
+        if (primaryFailure === undefined) throw error;
+        console.warn(
+          `settings cleanup could not clear the Android scroll probe: ${String(error)}`,
+        );
+      }
+    }
   });
 });
 
