@@ -100,7 +100,7 @@ pub(super) fn button(
 fn with_accessible_property_services<T>(
     callback: impl FnOnce(&::windows::Win32::UI::Accessibility::IAccPropServices) -> T,
 ) -> Option<T> {
-    use ::windows::Win32::Foundation::RPC_E_CHANGED_MODE;
+    use ::windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK};
     use ::windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
@@ -111,7 +111,7 @@ fn with_accessible_property_services<T>(
     // initialization is balanced below, while RPC_E_CHANGED_MODE explicitly
     // permits use of the already-initialized apartment without balancing it.
     let initialization = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-    let initialized = initialization.is_ok();
+    let initialized = initialization == S_OK || initialization == S_FALSE;
     if !initialized && initialization != RPC_E_CHANGED_MODE {
         return None;
     }
@@ -258,6 +258,7 @@ mod tests {
         assert!(!source.contains("ValuePattern"));
         assert_eq!(source.matches("#[allow(unsafe_code)]").count(), 3);
         assert!(source.contains("RPC_E_CHANGED_MODE"));
+        assert!(source.contains("S_OK") && source.contains("S_FALSE"));
     }
 
     #[test]
