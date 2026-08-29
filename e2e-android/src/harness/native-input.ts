@@ -45,6 +45,8 @@ export type FocusDiagnostic = {
   component: string | null;
 };
 
+type FocusIdentity = FocusDiagnostic & { token: string | null };
+
 export interface NativeInputCommands {
   devices: () => Promise<string>;
   getSerialno: (serial: string) => Promise<string>;
@@ -76,7 +78,7 @@ export function parseDisplaySize(output: string): DisplaySize {
 
 function parseFrame(value: string): WindowFrame | undefined {
   const match = value.match(
-    /mFrame=(?:Rect\()?\[?(-?\d+),\s*(-?\d+)\]?\s*\[?(-?\d+),\s*(-?\d+)\]?\)?/,
+    /(?:mFrame=|\bframe=)(?:Rect\()?\[?(-?\d+),\s*(-?\d+)\]?\s*\[?(-?\d+),\s*(-?\d+)\]?\)?/,
   );
   if (!match) return undefined;
   const left = Number(match[1]);
@@ -89,29 +91,51 @@ function parseFrame(value: string): WindowFrame | undefined {
 }
 
 export function foregroundFocusDiagnostic(dump: string): FocusDiagnostic {
+  const { status, packageName, component } = focusIdentity(dump);
+  return { status, packageName, component };
+}
+
+function focusIdentity(dump: string): FocusIdentity {
   const line = dump.split("\n").find((candidate) => /\bmCurrentFocus\s*=/.test(candidate));
-  if (!line) return { status: "missing", packageName: null, component: null };
+  if (!line) return { status: "missing", packageName: null, component: null, token: null };
   if (/\bmCurrentFocus\s*=\s*(?:null|Window\{[^}]*\snull\s*\}?)/.test(line)) {
-    return { status: "null", packageName: null, component: null };
+    return { status: "null", packageName: null, component: null, token: null };
   }
-  const match = line.match(/\bmCurrentFocus\s*=\s*Window\{[^\n]*\s([^\s/]+)\/([^\s}]+)/);
-  if (!match) return { status: "malformed", packageName: null, component: null };
-  return { status: "present", packageName: match[1]!, component: match[2]! };
+  const match = line.match(
+    /\bmCurrentFocus\s*=\s*Window\{([^\s]+)\s+u\d+\s+([^\s/]+)\/([^\s}]+)/,
+  );
+  if (!match) {
+    return { status: "malformed", packageName: null, component: null, token: null };
+  }
+  return {
+    status: "present",
+    packageName: match[2]!,
+    component: match[3]!,
+    token: match[1]!,
+  };
 }
 
 export function parseAppWindowFrame(
   dump: string,
   packageName = PACKAGE,
 ): WindowFrame {
-  const focus = foregroundFocusDiagnostic(dump);
+  const focus = focusIdentity(dump);
   if (focus.status !== "present") {
     throw new Error(
-      `Android foreground focus ${JSON.stringify(focus)}; expected ${packageName}`,
+      `Android foreground focus ${JSON.stringify({
+        status: focus.status,
+        packageName: focus.packageName,
+        component: focus.component,
+      })}; expected ${packageName}`,
     );
   }
   if (focus.packageName !== packageName) {
     throw new Error(
-      `Android foreground focus ${JSON.stringify(focus)} does not match expected ${packageName}`,
+      `Android foreground focus ${JSON.stringify({
+        status: focus.status,
+        packageName: focus.packageName,
+        component: focus.component,
+      })} does not match expected ${packageName}`,
     );
   }
 
@@ -119,7 +143,16 @@ export function parseAppWindowFrame(
   // list; the full dump carries mCurrentFocus and the same window frames.
   const lines = dump.split("\n");
   for (let index = 0; index < lines.length; index += 1) {
-    if (!/Window #\d+ Window\{/.test(lines[index]!) || !lines[index]!.includes(packageName)) {
+    const header = lines[index]!.match(
+      /^\s*Window #\d+ Window\{([^\s]+)\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}/,
+    );
+    if (
+      !header ||
+      header[1] !== focus.token ||
+      header[2] !== packageName ||
+      header[2] !== focus.packageName ||
+      header[3] !== focus.component
+    ) {
       continue;
     }
     for (let cursor = index; cursor < lines.length; cursor += 1) {
