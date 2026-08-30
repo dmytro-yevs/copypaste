@@ -277,7 +277,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
         throw new Error(`${label} ${state.feature} accessibility lacks enabled ${requiredName}`);
       }
     }
-    for (const requiredName of expectedState.requiredPasswordNames ?? []) {
+    for (const [requiredPasswordIndex, requiredName] of (expectedState.requiredPasswordNames ?? []).entries()) {
       if (!searchableNodes.some((node) => (
         node?.name === requiredName
         && node.is_password === true
@@ -288,7 +288,7 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
         && node.bounds.width > 0
         && node.bounds.height > 0
       ))) {
-        throw new Error(`${label} ${state.feature} accessibility lacks protected ${requiredName}`);
+        throw new Error(`${label} ${state.feature} accessibility lacks protected field ${requiredPasswordIndex + 1}`);
       }
     }
   }
