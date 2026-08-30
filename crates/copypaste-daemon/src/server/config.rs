@@ -9,7 +9,7 @@ use copypaste_ipc::{
     ConfigApplied, ConfigData, ConfigPatch, ErrorCode, PrivateModeData, Response, ResponseData,
 };
 
-use crate::settings::SettingsError;
+use crate::settings::{SettingsError, SettingsTransition};
 use crate::AppState;
 
 pub(super) fn get(state: &AppState, id: u64) -> Response {
@@ -23,31 +23,29 @@ pub(super) fn get(state: &AppState, id: u64) -> Response {
 }
 
 pub(super) fn set(state: &AppState, id: u64, patch: &ConfigPatch) -> Response {
-    let before = state.settings.get().clone();
-    match state.settings.apply(&state.meta, patch) {
-        Ok(config) => {
-            if config.storage_quota_bytes < before.storage_quota_bytes
-                || config.history_limit < before.history_limit
-                || (config.retention_days > 0
-                    && (before.retention_days == 0
-                        || config.retention_days < before.retention_days))
-            {
-                copypaste_core::ingest::enforce_retention(&state.store, &config);
-            }
-            if config.lan_visibility != before.lan_visibility {
-                state.p2p.node().set_lan_visibility(config.lan_visibility);
-            }
-            Response::ok(
-                id,
-                ResponseData::Config(ConfigApplied {
-                    config,
-                    restart_required: ConfigData::restart_required_by(patch)
-                        .into_iter()
-                        .map(str::to_string)
-                        .collect(),
-                }),
-            )
-        }
+    set_with_effects(state, id, patch, |transition| {
+        apply_runtime_effects(state, transition);
+    })
+}
+
+fn set_with_effects<F>(state: &AppState, id: u64, patch: &ConfigPatch, effects: F) -> Response
+where
+    F: FnOnce(&SettingsTransition),
+{
+    match state
+        .settings
+        .apply_with_effects(&state.meta, patch, effects)
+    {
+        Ok(config) => Response::ok(
+            id,
+            ResponseData::Config(ConfigApplied {
+                config: config.config,
+                restart_required: ConfigData::restart_required_by(patch)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }),
+        ),
         // `ConfigError`'s text names a field and a bound and can contain no
         // path — the type is built that way, and `copypaste_ipc::config` has a
         // test pinning it — so it is safe to pass through verbatim. That is
@@ -57,6 +55,18 @@ pub(super) fn set(state: &AppState, id: u64, patch: &ConfigPatch) -> Response {
             Response::err(id, ErrorCode::InvalidRequest, e.to_string())
         }
         Err(e @ SettingsError::Store) => Response::err(id, ErrorCode::Internal, e.to_string()),
+    }
+}
+
+fn apply_runtime_effects(state: &AppState, transition: &SettingsTransition) {
+    if transition.should_enforce_retention() {
+        copypaste_core::ingest::enforce_retention(&state.store, transition.config());
+    }
+    if transition.lan_visibility_changed() {
+        state
+            .p2p
+            .node()
+            .set_lan_visibility(transition.config().lan_visibility);
     }
 }
 
@@ -97,6 +107,8 @@ pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Resp
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
     use super::*;
     use crate::testutil::test_state;
     use copypaste_ipc::Method;
@@ -184,6 +196,79 @@ mod tests {
         ));
         assert_eq!(result.config.history_limit, 50);
         assert_eq!(state.store.count().unwrap(), 50);
+    }
+
+    /// F-01. The first request cannot leave a destructive sweep behind after a
+    /// later request has acknowledged a relaxed history limit.
+    #[test]
+    fn a_later_history_limit_acknowledgement_cannot_overtake_retention() {
+        let (state, _dir) = test_state("ordered-settings-retention");
+        for n in 0..101 {
+            crate::testutil::add(&state, &format!("history item {n}"));
+        }
+
+        let (effect_ready_tx, effect_ready_rx) = mpsc::channel();
+        let (release_effect_tx, release_effect_rx) = mpsc::channel();
+        let first = {
+            let state = std::sync::Arc::clone(&state);
+            std::thread::spawn(move || {
+                set_with_effects(
+                    &state,
+                    1,
+                    &ConfigPatch {
+                        history_limit: Some(50),
+                        ..Default::default()
+                    },
+                    |transition| {
+                        effect_ready_tx.send(()).unwrap();
+                        release_effect_rx.recv().unwrap();
+                        apply_runtime_effects(&state, transition);
+                    },
+                )
+            })
+        };
+
+        effect_ready_rx.recv().unwrap();
+        let second = if state.settings.transition_is_in_progress() {
+            let (second_started_tx, second_started_rx) = mpsc::channel();
+            let state = std::sync::Arc::clone(&state);
+            let second = std::thread::spawn(move || {
+                second_started_tx.send(()).unwrap();
+                let response = set(
+                    &state,
+                    2,
+                    &ConfigPatch {
+                        history_limit: Some(100),
+                        ..Default::default()
+                    },
+                );
+                for n in 0..20 {
+                    crate::testutil::add(&state, &format!("relaxed item {n}"));
+                }
+                response
+            });
+            second_started_rx.recv().unwrap();
+            release_effect_tx.send(()).unwrap();
+            second
+        } else {
+            let response = set(
+                &state,
+                2,
+                &ConfigPatch {
+                    history_limit: Some(100),
+                    ..Default::default()
+                },
+            );
+            for n in 0..20 {
+                crate::testutil::add(&state, &format!("relaxed item {n}"));
+            }
+            release_effect_tx.send(()).unwrap();
+            std::thread::spawn(move || response)
+        };
+
+        assert_eq!(applied(first.join().unwrap()).config.history_limit, 50);
+        assert_eq!(applied(second.join().unwrap()).config.history_limit, 100);
+        assert_eq!(state.store.count().unwrap(), 70);
     }
 
     #[test]
