@@ -94,17 +94,20 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 /// data, so a failure must leave the data alone and retry, not stop capture
 /// (AGENTS.md rule 4). `0` disables it. The shipped default is 30 seconds.
 fn sweep_sensitive_items(state: &AppState) {
-    let ttl = Duration::from_secs(state.settings.get().sensitive_ttl_secs);
-    // Capture before wipe stamps so the upload floor cannot land above the
-    // tombstone `created_at` (decrypt/judge can cross a millisecond).
-    let mutation_started = copypaste_core::now_ms();
-    let removed = copypaste_core::sensitive::sweep_sensitive(
-        &state.store,
-        &state.detector,
-        &state.keyring.item_key(),
-        ttl,
-        mutation_started,
-    );
+    let (mutation_started, removed) = state.store.with_retention(|| {
+        let ttl = Duration::from_secs(state.settings.get().sensitive_ttl_secs);
+        // Capture before wipe stamps so the upload floor cannot land above the
+        // tombstone `created_at` (decrypt/judge can cross a millisecond).
+        let mutation_started = copypaste_core::now_ms();
+        let removed = copypaste_core::sensitive::sweep_sensitive(
+            &state.store,
+            &state.detector,
+            &state.keyring.item_key(),
+            ttl,
+            mutation_started,
+        );
+        (mutation_started, removed)
+    });
     match removed {
         Ok(0) => {}
         // `note_sensitive_swept` rather than `note_local_change`: this is the
@@ -195,7 +198,7 @@ pub(crate) fn ingest_capture(
         .app_bundle_id
         .as_deref()
         .is_some_and(crate::clipboard::is_password_manager_app);
-    copypaste_core::ingest_into_with_capture_source(
+    copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
         &state.store,
         &state.detector,
         &state.keyring,
@@ -206,6 +209,7 @@ pub(crate) fn ingest_capture(
         capture.app_bundle_id.as_deref(),
         capture.app_name.as_deref(),
         settings,
+        || state.settings.get().clone(),
     )
 }
 
@@ -234,14 +238,18 @@ pub fn ingest_at(
     // reader substitutes this device's id (`copypaste_core::origin_or`). The
     // alternative — stamping the id on every row — costs a column of repeated
     // UUIDs and an extra argument on a path that has no opinion about sync.
-    copypaste_core::ingest_into(
+    copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
         &state.store,
         &state.detector,
         &state.keyring,
         content,
         content_type,
         created_at,
+        false,
+        None,
+        None,
         &settings,
+        || state.settings.get().clone(),
     )
 }
 
@@ -484,6 +492,31 @@ mod tests {
         assert_eq!(state.store.count().unwrap(), 0);
     }
 
+    #[test]
+    fn capture_keeps_its_admission_snapshot_when_retention_reads_live_settings() {
+        let (state, _dir) = test_state("capture-ingress-snapshot");
+        let snapshot = state.settings.get().clone();
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &copypaste_ipc::ConfigPatch {
+                    max_text_size_bytes: Some(copypaste_ipc::MIN_TEXT_SIZE_BYTES),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let content = "x".repeat(copypaste_ipc::MIN_TEXT_SIZE_BYTES as usize + 1);
+
+        assert!(ingest_capture(
+            &state,
+            &snapshot,
+            captured(&content, None),
+            copypaste_core::now_ms(),
+        )
+        .is_ok());
+    }
+
     /// `sensitive_ttl_secs` ships at 30 seconds; this test turns it on
     /// explicitly so the fixture does not depend on the default.
     #[test]
@@ -551,6 +584,32 @@ mod tests {
         let mut events = state.subscribe();
         sweep_sensitive_items(&state);
         assert!(events.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_disabled_sensitive_ttl_keeps_an_expired_secret() {
+        let (state, _dir) = test_state("ttl-off");
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &copypaste_ipc::ConfigPatch {
+                    sensitive_ttl_secs: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let item = ingest_at(
+            &state,
+            "AKIAIOSFODNN7EXAMPLE",
+            copypaste_ipc::content_type::TEXT,
+            copypaste_core::now_ms().saturating_sub(120_000),
+        )
+        .unwrap()
+        .into_item();
+
+        sweep_sensitive_items(&state);
+        assert!(state.store.get(&item.id).unwrap().is_some());
     }
 
     #[test]

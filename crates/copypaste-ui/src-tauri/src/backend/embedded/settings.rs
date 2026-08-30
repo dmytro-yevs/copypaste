@@ -250,14 +250,13 @@ pub(super) async fn set(backend: &EmbeddedBackend, patch: ConfigPatch) -> Result
 }
 
 fn apply_runtime_effects(inner: &Inner, transition: &SettingsTransition) {
-    if transition.should_enforce_retention() {
-        let removed = copypaste_core::retention::enforce_retention_report(
-            &inner.state.store,
-            transition.config(),
-        );
-        if removed > 0 {
-            inner.publish_items(false, 0);
-        }
+    let removed = copypaste_core::retention::reconcile_policy(
+        &inner.state.store,
+        || inner.settings(),
+        transition.should_enforce_retention(),
+    );
+    if removed > 0 {
+        inner.publish_items(false, 0);
     }
     if transition.lan_visibility_changed() {
         if let Some(node) = inner.node.get() {

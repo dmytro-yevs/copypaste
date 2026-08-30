@@ -2,7 +2,7 @@
 //! connection, and nothing about what is then done with it.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
@@ -20,6 +20,9 @@ use super::schema::create;
 pub struct Store {
     pool: Pool<SqliteConnectionManager>,
     pub(super) path: Option<Arc<PathBuf>>,
+    retention: Arc<Mutex<()>>,
+    #[cfg(test)]
+    before_retention: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
 }
 
 impl std::fmt::Debug for Store {
@@ -57,6 +60,9 @@ impl Store {
         Ok(Self {
             pool,
             path: Some(Arc::new(path.to_owned())),
+            retention: Arc::new(Mutex::new(())),
+            #[cfg(test)]
+            before_retention: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -80,13 +86,54 @@ impl Store {
         let mut conn = pool.get()?;
         create(&mut conn)?;
         drop(conn);
-        Ok(Self { pool, path: None })
+        Ok(Self {
+            pool,
+            path: None,
+            retention: Arc::new(Mutex::new(())),
+            #[cfg(test)]
+            before_retention: Arc::new(Mutex::new(None)),
+        })
     }
 
     /// Checks a connection out of the pool. `pub(super)` so the query modules
     /// share one pool without exposing it to callers.
     pub(super) fn conn(&self) -> Result<PooledConnection<SqliteConnectionManager>, StoreError> {
         Ok(self.pool.get()?)
+    }
+
+    /// Serialises destructive retention with settings publication. The closure
+    /// cannot escape this boundary, so it cannot be held across an await.
+    pub fn with_retention<T>(&self, work: impl FnOnce() -> T) -> T {
+        let _retention = self
+            .retention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        work()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn before_next_retention(&self, hook: impl FnOnce() + Send + 'static) {
+        *self
+            .before_retention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn run_before_retention_hook(&self) {
+        let hook = self
+            .before_retention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retention_is_locked(&self) -> bool {
+        self.retention.try_lock().is_err()
     }
 }
 

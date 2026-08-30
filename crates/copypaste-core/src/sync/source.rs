@@ -154,7 +154,7 @@ impl StoreSource {
             incoming,
         )?;
         if applied {
-            self.enforce_retention(None);
+            self.enforce_retention();
             if let Some(hook) = &self.on_applied {
                 hook(incoming.created_at);
             }
@@ -190,7 +190,7 @@ impl StoreSource {
             .map(|(item, _)| item.created_at)
             .min();
         if let Some(floor) = floor {
-            self.enforce_retention(None);
+            self.enforce_retention();
             if let Some(hook) = &self.on_applied {
                 hook(floor);
             }
@@ -199,16 +199,11 @@ impl StoreSource {
     }
 
     /// Hold the retention bound after a stored version, at most once per
-    /// [`RETENTION_DEBOUNCE`]. `settings` is the clone this apply already made,
-    /// where it has one.
-    fn enforce_retention(&self, settings: Option<&copypaste_ipc::ConfigData>) {
+    /// [`RETENTION_DEBOUNCE`]. Its policy is read only after the store's
+    /// destructive-work barrier has been acquired.
+    fn enforce_retention(&self) {
         if self.retention.claim() {
-            match settings {
-                Some(settings) => crate::ingest::enforce_retention(&self.store, settings),
-                None => {
-                    crate::ingest::enforce_retention(&self.store, &(self.retention_settings)());
-                }
-            }
+            crate::retention::enforce_retention_with(&self.store, || (self.retention_settings)());
             return;
         }
         self.schedule_trailing_retention();
@@ -227,7 +222,7 @@ impl StoreSource {
                 .trailing_scheduled
                 .store(false, Ordering::SeqCst);
             self.retention.stamp();
-            crate::ingest::enforce_retention(&self.store, &(self.retention_settings)());
+            crate::retention::enforce_retention_with(&self.store, || (self.retention_settings)());
             return;
         };
         let retention = Arc::clone(&self.retention);
@@ -239,7 +234,7 @@ impl StoreSource {
             // schedules the next one rather than being absorbed by this one.
             retention.trailing_scheduled.store(false, Ordering::SeqCst);
             retention.stamp();
-            super::blocking(|| crate::ingest::enforce_retention(&store, &settings()));
+            super::blocking(|| crate::retention::enforce_retention_with(&store, || settings()));
         });
     }
 
@@ -349,7 +344,7 @@ impl SyncSource for StoreSource {
         if items.is_empty() {
             return Ok(Vec::new());
         }
-        let settings = self.settings_if_sync_enabled()?;
+        self.settings_if_sync_enabled()?;
         super::blocking(|| {
             let versions: Vec<RemoteVersion<'_>> = items
                 .iter()
@@ -392,7 +387,7 @@ impl SyncSource for StoreSource {
                 .map(|(item, _)| item.created_at)
                 .min();
             if let Some(floor) = floor {
-                self.enforce_retention(Some(&settings));
+                self.enforce_retention();
                 if let Some(hook) = &self.on_applied {
                     hook(floor);
                 }
@@ -747,20 +742,30 @@ mod tests {
     /// trailing run can bring it there.
     #[tokio::test]
     async fn a_burst_of_applies_still_lands_under_the_history_cap() {
+        use std::sync::RwLock;
+
         let f = fixture_named("beta");
-        let source = StoreSource::new(
+        let settings = Arc::new(RwLock::new(copypaste_ipc::ConfigData {
+            history_limit: 10,
+            ..Default::default()
+        }));
+        let source = StoreSource::with_retention_settings(
             f.store.clone(),
             Arc::clone(&f.keyring),
             Arc::clone(&f.detector),
             f.here.clone(),
             "test-device".to_string(),
-            copypaste_ipc::ConfigData {
-                history_limit: 2,
-                ..Default::default()
+            {
+                let settings = Arc::clone(&settings);
+                move || settings.read().unwrap().clone()
             },
         );
 
-        for n in 0..8 {
+        assert!(source
+            .apply(peer_item("item-0", "remote value 0", 1_000))
+            .unwrap());
+        settings.write().unwrap().history_limit = 2;
+        for n in 1..8 {
             assert!(source
                 .apply(peer_item(
                     &format!("item-{n}"),

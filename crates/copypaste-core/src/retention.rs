@@ -28,6 +28,41 @@ pub fn policy_tightened(
 }
 
 pub fn enforce_retention_report(store: &Store, settings: &copypaste_ipc::ConfigData) -> u64 {
+    enforce_retention_with(store, || settings.clone())
+}
+
+/// Read the retention policy only after this store's destructive-work barrier
+/// has been acquired.
+pub fn enforce_retention_with(
+    store: &Store,
+    settings: impl FnOnce() -> copypaste_ipc::ConfigData,
+) -> u64 {
+    #[cfg(test)]
+    store.run_before_retention_hook();
+    store.with_retention(|| {
+        let settings = settings();
+        enforce_retention_report_unlocked(store, &settings)
+    })
+}
+
+/// Join settings publication to the destructive-work barrier. Every settings
+/// acknowledgement takes this path, even when the new policy is less strict.
+pub fn reconcile_policy(
+    store: &Store,
+    settings: impl FnOnce() -> copypaste_ipc::ConfigData,
+    enforce: bool,
+) -> u64 {
+    #[cfg(test)]
+    store.run_before_retention_hook();
+    store.with_retention(|| {
+        let settings = settings();
+        enforce
+            .then(|| enforce_retention_report_unlocked(store, &settings))
+            .unwrap_or(0)
+    })
+}
+
+fn enforce_retention_report_unlocked(store: &Store, settings: &copypaste_ipc::ConfigData) -> u64 {
     #[cfg(test)]
     sweeps::record();
 
@@ -87,7 +122,22 @@ impl RetentionGate {
 /// store it did not write to (ADR-0023).
 pub struct BatchScope<'a> {
     store: &'a Store,
-    settings: &'a copypaste_ipc::ConfigData,
+    settings: copypaste_ipc::ConfigData,
+    current_settings: BatchPolicy<'a>,
+}
+
+enum BatchPolicy<'a> {
+    Static(copypaste_ipc::ConfigData),
+    Dynamic(&'a dyn Fn() -> copypaste_ipc::ConfigData),
+}
+
+impl BatchPolicy<'_> {
+    fn read(&self) -> copypaste_ipc::ConfigData {
+        match self {
+            Self::Static(settings) => settings.clone(),
+            Self::Dynamic(settings) => settings(),
+        }
+    }
 }
 
 impl<'a> BatchScope<'a> {
@@ -95,8 +145,8 @@ impl<'a> BatchScope<'a> {
         self.store
     }
 
-    pub fn settings(&self) -> &'a copypaste_ipc::ConfigData {
-        self.settings
+    pub fn settings(&self) -> &copypaste_ipc::ConfigData {
+        &self.settings
     }
 }
 
@@ -111,11 +161,37 @@ pub type RetentionBatch<'a> = ScopeGuard<BatchScope<'a>, fn(BatchScope<'a>), OnS
 /// [`disarm`] resolves it first.
 #[must_use]
 pub fn batch<'a>(store: &'a Store, settings: &'a copypaste_ipc::ConfigData) -> RetentionBatch<'a> {
-    guard_on_success(BatchScope { store, settings }, sweep as fn(BatchScope<'a>))
+    guard_on_success(
+        BatchScope {
+            store,
+            settings: settings.clone(),
+            current_settings: BatchPolicy::Static(settings.clone()),
+        },
+        sweep as fn(BatchScope<'a>),
+    )
+}
+
+/// Opens a batch whose terminal sweep reads the retention policy after it has
+/// acquired the store barrier. `settings` remains the ingress snapshot used by
+/// every item in this batch for limits and classification.
+#[must_use]
+pub fn batch_with_current_policy<'a>(
+    store: &'a Store,
+    settings: copypaste_ipc::ConfigData,
+    current_settings: &'a dyn Fn() -> copypaste_ipc::ConfigData,
+) -> RetentionBatch<'a> {
+    guard_on_success(
+        BatchScope {
+            store,
+            settings,
+            current_settings: BatchPolicy::Dynamic(current_settings),
+        },
+        sweep as fn(BatchScope<'a>),
+    )
 }
 
 fn sweep(scope: BatchScope<'_>) {
-    enforce_retention(scope.store, scope.settings);
+    enforce_retention_with(scope.store, || scope.current_settings.read());
 }
 
 /// Sweep now rather than on drop, for a caller that wants the limits enforced
@@ -157,6 +233,8 @@ pub(crate) mod sweeps {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{mpsc, Arc, Mutex};
+
     use super::*;
     use crate::storage::test_support::{item, store};
 
@@ -320,5 +398,74 @@ mod tests {
         let gate = RetentionGate::default();
         assert!(gate.claim(), "the first caller owns the window");
         assert!(!gate.claim(), "a second caller in the same window does not");
+    }
+
+    #[test]
+    fn a_relaxed_policy_acknowledgement_waits_for_an_old_sweep() {
+        let s = store();
+        s.insert(item("old", T0)).unwrap();
+        s.insert(item("new", T0 + 1)).unwrap();
+        let old = copypaste_ipc::ConfigData {
+            history_limit: 1,
+            ..settings()
+        };
+        let current = Arc::new(Mutex::new(old.clone()));
+        let (sweep_ready_tx, sweep_ready_rx) = mpsc::channel();
+        let (release_sweep_tx, release_sweep_rx) = mpsc::channel();
+        let sweep = {
+            let s = s.clone();
+            let old = old.clone();
+            std::thread::spawn(move || {
+                s.with_retention(|| {
+                    sweep_ready_tx.send(()).unwrap();
+                    release_sweep_rx.recv().unwrap();
+                    assert_eq!(enforce_retention_report_unlocked(&s, &old), 1);
+                });
+            })
+        };
+        sweep_ready_rx.recv().unwrap();
+        let (attempt_tx, attempt_rx) = mpsc::channel();
+        s.before_next_retention(move || attempt_tx.send(()).unwrap());
+        let (ack_tx, ack_rx) = mpsc::channel();
+        let worker = {
+            let s = s.clone();
+            let current = Arc::clone(&current);
+            std::thread::spawn(move || {
+                current.lock().unwrap().history_limit = 2;
+                reconcile_policy(&s, || current.lock().unwrap().clone(), false);
+                ack_tx.send(()).unwrap();
+            })
+        };
+        attempt_rx.recv().unwrap();
+        assert!(
+            ack_rx.try_recv().is_err(),
+            "acknowledgement passed the sweep"
+        );
+
+        release_sweep_tx.send(()).unwrap();
+        sweep.join().unwrap();
+        ack_rx.recv().unwrap();
+        worker.join().unwrap();
+        assert_eq!(s.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn reconciliation_reads_even_a_relaxed_policy_under_the_store_barrier() {
+        let s = store();
+        let reader_store = s.clone();
+        assert_eq!(
+            reconcile_policy(
+                &s,
+                move || {
+                    assert!(
+                        reader_store.retention_is_locked(),
+                        "the policy reader escaped the retention barrier"
+                    );
+                    settings()
+                },
+                false,
+            ),
+            0
+        );
     }
 }

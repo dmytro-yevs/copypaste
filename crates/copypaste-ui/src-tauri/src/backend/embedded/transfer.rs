@@ -37,11 +37,13 @@ pub(super) fn export(inner: &Inner, limit: u32, include_sensitive: bool) -> Resu
 /// credential clean comes back flagged and stays out of the search index
 /// (manifest 04, PG-26).
 pub(super) fn import(inner: &Inner, items: Vec<ExportItem>) -> Result<ImportData> {
-    copypaste_core::import(
+    let settings = inner.settings();
+    copypaste_core::transfer::import_with_current_retention(
         &inner.state.store,
         &inner.state.detector,
         &inner.state.keyring,
-        &inner.settings(),
+        &settings,
+        || inner.settings(),
         items,
     )
     .map_err(|e| match e {
