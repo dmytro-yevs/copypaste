@@ -236,6 +236,12 @@ mod tests {
 
     use super::*;
 
+    fn production_source(source: &'static str) -> &'static str {
+        source
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .map_or("", |(production, _)| production)
+    }
+
     #[test]
     fn refusal_returns_false() {
         assert!(!protect_from_capture(&winsafe::HWND::NULL, |_| false));
@@ -248,10 +254,7 @@ mod tests {
 
     #[test]
     fn accessible_names_are_annotated_without_value_access() {
-        let source = include_str!("common.rs")
-            .split_once("#[cfg(test)]")
-            .unwrap()
-            .0;
+        let source = production_source(include_str!("common.rs"));
         assert!(source.contains("SetHwndPropStr"));
         assert!(source.contains("ClearHwndProps"));
         assert!(source.contains("Name_Property_GUID"));
@@ -263,10 +266,7 @@ mod tests {
 
     #[test]
     fn accessible_service_is_dropped_before_com_uninitializes() {
-        let source = include_str!("common.rs")
-            .split_once("#[cfg(test)]")
-            .unwrap()
-            .0;
+        let source = production_source(include_str!("common.rs"));
         let service_scope = source
             .split_once("let result = {")
             .unwrap()
@@ -277,6 +277,31 @@ mod tests {
         assert!(service_scope.contains("let service = match"));
         assert!(service_scope.contains("callback(&service)"));
         assert!(service_scope.trim_end().ends_with("};"));
+    }
+
+    #[test]
+    fn production_source_ignores_method_cfg_and_fails_closed_without_module_gate() {
+        let fixture = concat!(
+            "impl Type {\n",
+            "    #[cfg(test)]\n",
+            "    fn test_helper() {}\n",
+            "}\n",
+            "\n",
+            "pub fn production() {}\n",
+            "\n",
+            "#[cfg(test)]\n",
+            "mod tests {\n",
+            "    #[test]\n",
+            "    fn regression() {}\n",
+            "}\n",
+        );
+        let production = production_source(fixture);
+        assert!(production.contains("fn test_helper()"));
+        assert!(production.contains("pub fn production()"));
+        assert!(!production.contains("fn regression()"));
+        assert!(
+            production_source("pub fn production() {}\n#[cfg(test)]\nfn helper() {}").is_empty()
+        );
     }
 
     /// The window whose affinity is being set is the one that was asked about;
