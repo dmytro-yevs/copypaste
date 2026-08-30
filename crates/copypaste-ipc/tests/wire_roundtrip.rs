@@ -335,6 +335,7 @@ fn sync_error_code_is_additive_and_omitted_when_absent() {
 fn export_request_fields_default_to_safe_values() {
     let request: Request = serde_json::from_value(json!({
         "id": 1,
+        "protocol_version": 2,
         "method": "export",
         "params": {}
     }))
