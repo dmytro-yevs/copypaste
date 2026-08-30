@@ -274,7 +274,21 @@ fi
 # new process's socket alongside its XML and screenshot.
 if [[ -n "$pid2" ]]; then
     wake_screen
+    restart_focus_before="$(sh_ dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | head -n 4)"
+    if [[ "$(app_pid)" == "$pid2" && "$restart_focus_before" == *"$PKG"* ]]; then
+        ok "the restarted process owns the foreground package before paint"
+    else
+        bad "the restarted process owns the foreground package before paint" \
+            "expected pid $pid2 and package $PKG; native ownership was not established"
+    fi
     assert_painted "$PAINT_TIMEOUT" "$second_launched_at" "$OUT/ui-launch2.xml" "$OUT/launch2.png"
+    restart_focus_after="$(sh_ dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | head -n 4)"
+    if [[ "$(app_pid)" == "$pid2" && "$restart_focus_after" == *"$PKG"* ]]; then
+        ok "the restarted process owns the foreground package after paint"
+    else
+        bad "the restarted process owns the foreground package after paint" \
+            "expected pid $pid2 and package $PKG; native ownership changed during paint"
+    fi
     unix_sockets2="$(sh_ cat /proc/net/unix)"
     webview_socket2="$(devtools_sockets "$unix_sockets2" "$pid2")"
     if [[ -n "$webview_socket2" ]]; then
