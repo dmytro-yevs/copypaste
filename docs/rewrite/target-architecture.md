@@ -4,9 +4,8 @@ Which maintained crate does each job, and the short list of custom code that
 stays. The governing rule is [AGENTS.md](../../AGENTS.md) rule 1 and is not
 restated here.
 
-Where a row disagrees with the tree, the tree is right — this is the target, not
-an inventory. `Cargo.toml`'s dependency table carries the same choices with the
-version pins and the RustSec reasoning attached.
+This document records the current architectural choices. `Cargo.toml` is the
+canonical owner of dependency versions and RustSec reasoning.
 
 ## Core and daemon
 
@@ -36,9 +35,10 @@ attack, and there is no dictionary against a random 256-bit token.
 
 ## IPC
 
-**Keep the newline-JSON protocol over the Unix socket. Do not adopt `tarpc` or
-`jsonrpsee`.** This is the one place the library-first default is overruled, on
-three pieces of evidence:
+**Keep the newline-JSON protocol over the platform local-IPC endpoint. Do not
+adopt `tarpc` or `jsonrpsee`.** Unix uses a socket and Windows uses a named
+pipe; the wire contract is the same. This is the one place the library-first
+default is overruled, on three pieces of evidence:
 
 - `tarpc`'s bincode wire has no TypeScript story, and the CLI, the demo scripts
   and anything piped into `jq` all read the same JSON. A wire a human can read
@@ -192,9 +192,9 @@ the better outcome.
   filename. No `LegacyDatabase`, encounter detection, or alternate decoder.
 - **No migration path may be retrofitted casually.** Adding one is a feature to
   decide with its own acceptance tests.
-- **Keychain service and account names are fixed strings.** Renaming them
-  orphans keys already written by a v2 build (manifest 02, I-10). A
-  frozen-identifier test asserts it.
+- **Device-secret identifiers are fixed strings.** Renaming a platform
+  identifier or sealed-blob name orphans keys already written by a v2 build
+  (manifest 02, I-10). A frozen-identifier test asserts them.
 - **The security properties bind the only format.** Fail closed on a wrong
   key or a wrong AAD, never fall back to a plaintext read; the AAD binds item
   identity; key material is zeroized; comparisons are constant-time.

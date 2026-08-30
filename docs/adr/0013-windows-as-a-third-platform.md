@@ -1,8 +1,8 @@
 # ADR-0013 — Windows as a third platform
 
 **Status:** accepted · 2026-08-07 · **codified in AGENTS.md rule 7**
-**Scope:** that Windows is a shipped target, and what the tree already says it
-will cost. No Windows code exists yet.
+**Scope:** that Windows is a shipped target, and the platform boundaries that
+must be maintained and qualified.
 
 ## Decision
 
@@ -17,20 +17,15 @@ its acceptance of the `glib 0.18.5` advisory on that distinction: the GTK
 stack is unshipped, so the alert is not a shipped exposure. Windows becoming
 shippable does not promote Linux.
 
-This lands before any Windows code because rule 2 forbids building something
-that contradicts the specification.
-
 ## Consequences
 
-Each is in the tree today, named so the work is not rediscovered.
+The implementation is organized behind platform seams. These source references
+describe current code, not native qualification of a release artifact.
 
-**IPC transport.** `crates/copypaste-daemon/src/server/listener.rs`,
-`crates/copypaste-cli/src/client.rs` and
-`crates/copypaste-ui/src-tauri/src/backend/daemon.rs` are
-`UnixListener`/`UnixStream`, and there is no `cfg(windows)` anywhere in the
-tree. Windows needs a named-pipe transport behind a seam — one declaration both
-sides answer to, for the reason ADR-0003 gives: two `cfg` modules with matching
-names compile while disagreeing.
+**IPC transport.** `copypaste-ipc::transport` owns the shared stream/listener
+surface: Unix uses a `0600` socket and Windows uses a named pipe. The daemon's
+Windows binder supplies the pipe access list and singleton policy; clients use
+the same transport surface rather than a parallel Windows protocol.
 
 **The socket's security properties do not port.** `bind_owner_only` reaches
 `0600` by binding inside a `0700` staging directory and renaming into place
@@ -42,36 +37,20 @@ something other than `flock`. The socket is the only authentication boundary
 4 carries too — a pipe name discloses the username exactly as the socket path
 does, so it must not appear in a user-facing error.
 
-**Secret storage.** `crypto::keystore` selects on the target: Keychain via
-`security-framework` on macOS, the Android Keystore on Android, and a `0600`
-file on everything else. That last arm is not a fallback Windows can take —
-`file.rs` is written on `std::os::unix::fs` so it will not compile there, and it
-is a development posture that ADR-0003 already refused to ship. Windows needs
-its own backend on DPAPI or the Credential Manager. Fail-closed (rule 4) applies
-unchanged, and so does I-20: no entry authorises a mint, an unusable entry does
-not.
+**Secret storage.** `crypto::keystore` selects a Windows DPAPI backend, keeping
+the sealed blob in the data directory. The file-backed store is limited to
+non-shipped targets. Fail-closed behaviour remains unchanged: no entry may mint
+a secret, while an unusable entry must not.
 
-**Clipboard capture.** The `clipboard::ClipboardSource` trait is the seam and it
-holds. `clipboard/macos.rs` exists because no crate exposes `changeCount`
-together with the three `org.nspasteboard.*` opt-out markers. Windows needs its
-own implementation behind that trait, with its own change detection and its own
-self-write suppression. What stands in for the `org.nspasteboard.*` contract on
-Windows is an open question, not a port.
+**Clipboard capture.** `clipboard::ClipboardSource` is the seam. The Windows
+implementation uses the Windows change cursor and Windows opt-out formats;
+native capture evidence remains separately required.
 
-**Build.** `bundled-sqlcipher` resolves to `-lcrypto` against the build
-machine's OpenSSL on any non-Apple target, which on Windows means `OPENSSL_DIR`
-(ADR-0007). Android answered the same problem by vendoring, through
-`bundled-sqlcipher-vendored-openssl` in a target-specific dependency; that
-mechanism is the precedent to weigh, against the costs ADR-0007 already
-enumerates.
-
-**Shell and packaging.** Tray, popover, global hotkey, launch-at-login and
-notifications are written against Tauri plugins for macOS, and
-`shell::hotkey::is_permission_free` encodes a macOS TCC constraint that means
-nothing on Windows. Windows needs its own shell wiring, an installer, a signing
-story, and a CI job — every runner in every workflow today is `ubuntu-*` or
-`macos-14`. Until that job exists, Windows code is unverified in the sense the
-README's middle column uses.
+**Shell, packaging and updates.** Windows-specific service, hotkey, updater,
+and packaging code is maintained under the Tauri and release owners. The
+installer, Authenticode, updater-signature, and publication decisions are
+canonicalized by [ADR-0020](0020-windows-distribution-and-update-signing.md),
+not duplicated here.
 
 **The source-application icon resolves via App Paths registry on Windows.**
 `get_source_app_icon` looks up the executable path transiently from the image
@@ -80,14 +59,8 @@ name using `App Paths` or `System32`, extracts the shell icon with
 logs (I-9). Applications not in the registry return no icon; rows keep their
 semantic content-type icon in that case.
 
-## Not decided
+## Qualification
 
-- Installer format — MSI, NSIS or MSIX.
-- Signing: whether an Authenticode certificate is bought, and what ADR-0001's
-  ad-hoc posture becomes against SmartScreen.
-- Whether Windows ships in the same version stream as macOS or on its own until
-  a runner has exercised it.
-- The daemon's lifecycle — a Windows service, a run-key process, or spawned by
-  the app, which ADR-0003 left open on macOS as well.
-
-None of these blocks starting. Each belongs to the ADR that takes it.
+Windows remains a shipped target only when same-commit installed-product and
+native evidence is available. CI and source tests are useful checks but do not
+replace that evidence.
