@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -5,6 +7,11 @@ import type { CloudCredentials, CloudStatusData } from "@/lib/ipc";
 import { withUser } from "@/test/harness";
 import { CloudSyncSettings } from "./CloudSyncSettings";
 import styles from "./CloudSyncSettings.module.css";
+
+const cloudStyles = readFileSync(
+  resolve(process.cwd(), "src/features/settings/patterns/CloudSyncSettings.module.css"),
+  "utf8",
+);
 
 const ipc = vi.hoisted(() => ({
   cloudSetEndpoint: vi.fn(),
@@ -105,12 +112,24 @@ describe("connection error announcements", () => {
     expect(alert.getAttribute("aria-atomic")).toBe("true");
     expect(alert.querySelector('[role="alert"]')).toBeNull();
     if (message === null) {
+      expect(alert.childNodes).toHaveLength(0);
       expect(alert.textContent).toBe("");
     } else {
       expect(alert.textContent).toContain(message);
     }
     return alert;
   }
+
+  it("keeps the empty owner in flow without an inline line box", () => {
+    const emptyRule = cloudStyles.match(
+      /\.setupCopy > \.connectionNote:empty\s*\{([^}]*)\}/,
+    );
+    const populatedRule = cloudStyles.match(/\.connectionNote\s*\{([^}]*)\}/);
+    expect(emptyRule?.[1]).toMatch(/display:\s*block/);
+    expect(emptyRule?.[1]).toMatch(/block-size:\s*0/);
+    expect(emptyRule?.[1]).toMatch(/margin-block-start:\s*0/);
+    expect(populatedRule?.[1]).toMatch(/display:\s*inline-flex/);
+  });
 
   it("keeps one stable atomic owner through failures, success, and a second failure", async () => {
     ipc.getCloudStatus.mockResolvedValue(status({
