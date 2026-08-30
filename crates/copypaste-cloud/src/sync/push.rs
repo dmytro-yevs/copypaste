@@ -181,6 +181,7 @@ mod tests {
     use super::super::fakes::{
         config, driver, item, key, session, tombstone, FakeAuth, FakeRest, FakeSource,
     };
+    use super::super::source::CloudSource;
     use super::*;
     use crate::crypto::decrypt_row;
     use crate::sync::SensitiveGuard;
@@ -406,31 +407,67 @@ mod tests {
     /// lost or uploaded, and a later eligible item still proceeds.
     #[tokio::test]
     async fn an_item_over_the_shared_cap_is_withheld_and_the_rest_still_upload() {
-        let over_cap = copypaste_ipc::MAX_CONTENT_BYTES + 1;
-        let big_text = || {
-            let mut item = item("huge-text", 1_000, "");
-            item.content = zeroize::Zeroizing::new(vec![b'x'; over_cap]);
-            item
-        };
-        let big_image = || {
-            let mut item = item("huge-image", 2_000, "");
-            item.content = zeroize::Zeroizing::new(vec![0u8; over_cap]);
-            item.content_type = "image/png".into();
-            item
-        };
+        // Test inputs, not a second classifier: IPC owns these six shapes.
+        for (name, content_type, binary, metadata) in [
+            ("text", "text", false, None),
+            ("rtf", "text/rtf", false, None),
+            ("html", "text/html", false, None),
+            ("image", "image/png", true, None),
+            (
+                "file",
+                "file",
+                true,
+                Some(r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#),
+            ),
+            ("future", "application/x-future", true, None),
+        ] {
+            let mut at_limit = item("at-limit", 1_000, "");
+            let mut bytes = if binary {
+                vec![0; MAX_BINARY_BYTES]
+            } else {
+                "\0".repeat(MAX_TEXT_BYTES).into_bytes()
+            };
+            if binary {
+                bytes[..3].copy_from_slice(&[0, 0xff, 0x80]);
+            }
+            at_limit.content = zeroize::Zeroizing::new(bytes);
+            at_limit.content_type = content_type.into();
+            at_limit.payload_metadata = metadata.map(str::to_owned);
+            let mut over_limit = at_limit.clone();
+            over_limit.item_id = "over-limit".into();
+            over_limit.created_at = 2_000;
+            over_limit.content.push(0);
+            let expected_over_limit = over_limit.clone();
+            let valid = item("valid", 3_000, "small");
+            let source = FakeSource::with_outgoing(vec![at_limit, over_limit, valid]);
+            let sync = driver(FakeRest::default(), FakeAuth::default());
 
-        let source =
-            FakeSource::with_outgoing(vec![big_text(), big_image(), item("ok", 3_000, "small")]);
-        let sync = driver(FakeRest::default(), FakeAuth::default());
+            let stats = sync.push(&source).await.unwrap();
 
-        let stats = sync.push(&source).await.unwrap();
-
-        assert_eq!(stats.skipped_too_large, 2);
-        assert_eq!(stats.uploaded, 1);
-        let rows = sync.rest.rows.lock().unwrap();
-        assert!(rows.contains_key("ok"));
-        assert!(!rows.contains_key("huge-text"));
-        assert!(!rows.contains_key("huge-image"));
+            assert_eq!((stats.uploaded, stats.skipped_too_large), (2, 1), "{name}");
+            let rows = sync.rest.rows.lock().unwrap();
+            let row = rows.get("at-limit").expect("exact cap uploaded");
+            row.verify(&key())
+                .expect("exact-cap row has a valid signature");
+            assert!(
+                rows.contains_key("valid"),
+                "{name} blocked the following item"
+            );
+            assert!(
+                !rows.contains_key("over-limit"),
+                "{name} over-cap row reached backend"
+            );
+            drop(rows);
+            assert_eq!(
+                source
+                    .local_changes_since(0)
+                    .unwrap()
+                    .into_iter()
+                    .find(|item| item.item_id == "over-limit"),
+                Some(expected_over_limit),
+                "{name} withheld local item was lost"
+            );
+        }
     }
 
     #[test]

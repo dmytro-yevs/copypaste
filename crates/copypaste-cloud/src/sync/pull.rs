@@ -381,6 +381,29 @@ mod tests {
     use super::*;
     use crate::crypto::encrypt_row;
 
+    fn signed_boundary_row(
+        id: &str,
+        created_at: i64,
+        content_type: &str,
+        content: &[u8],
+        payload_metadata: Option<&str>,
+    ) -> CloudItem {
+        let (nonce, ciphertext) = encrypt_row(content, &super::super::fakes::key(), id).unwrap();
+        signed(CloudItem {
+            item_id: id.into(),
+            ciphertext,
+            nonce,
+            content_type: content_type.into(),
+            payload_metadata: payload_metadata.map(str::to_owned),
+            source_app_bundle_id: None,
+            source_app_name: None,
+            created_at,
+            deleted: false,
+            origin_device_id: "device-b".into(),
+            signature: String::new(),
+        })
+    }
+
     #[tokio::test]
     async fn pull_opens_rows_and_applies_them() {
         let rest = FakeRest::seeded(vec![
@@ -607,33 +630,87 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_signed_oversized_row_is_skipped_and_the_cursor_reaches_the_next_row() {
-        let mut old_local = item("oversized", 500, "");
-        old_local.content = Zeroizing::new(vec![b'l'; copypaste_ipc::MAX_CONTENT_BYTES + 1]);
-        let source = FakeSource::with_local(old_local);
-        let oversized = "r".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1);
-        let sync = driver(
-            FakeRest::seeded(vec![
-                cloud_row("oversized", 1_000, &oversized),
-                cloud_row("valid", 2_000, "still reachable"),
-            ]),
-            FakeAuth::default(),
-        );
+    async fn signed_size_boundaries_apply_or_skip_without_blocking_progress() {
+        // Test inputs, not a second classifier: IPC owns these six shapes.
+        for (name, content_type, binary, metadata) in [
+            ("text", "text", false, None),
+            ("rtf", "text/rtf", false, None),
+            ("html", "text/html", false, None),
+            ("image", "image/png", true, None),
+            (
+                "file",
+                "file",
+                true,
+                Some(r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#),
+            ),
+            ("future", "application/x-future", true, None),
+        ] {
+            let mut exact = if binary {
+                vec![0; copypaste_ipc::MAX_CONTENT_BYTES]
+            } else {
+                "\0".repeat(copypaste_ipc::MAX_CONTENT_BYTES).into_bytes()
+            };
+            if binary {
+                exact[..3].copy_from_slice(&[0, 0xff, 0x80]);
+            }
+            let exact_row = signed_boundary_row("exact", 1_000, content_type, &exact, metadata);
+            exact_row
+                .verify(&super::super::fakes::key())
+                .expect("boundary fixture is signed");
+            let source = FakeSource::default();
+            let sync = driver(FakeRest::seeded(vec![exact_row]), FakeAuth::default());
+            let stats = sync.pull(&source).await.unwrap();
+            assert_eq!(
+                (
+                    stats.applied,
+                    stats.skipped_too_large,
+                    stats.skipped_undecryptable
+                ),
+                (1, 0, 0),
+                "{name}"
+            );
+            assert_eq!(
+                source.get("exact").unwrap().content.as_slice(),
+                exact.as_slice(),
+                "{name} bytes"
+            );
 
-        let stats = sync.pull(&source).await.unwrap();
-
-        assert_eq!(stats.skipped_too_large, 1);
-        assert_eq!(stats.applied, 1);
-        assert_eq!(
-            source.get("oversized").unwrap().content.len(),
-            copypaste_ipc::MAX_CONTENT_BYTES + 1,
-            "a remote refusal modified the pre-existing local row"
-        );
-        assert_eq!(
-            source.get("valid").unwrap().content.as_slice(),
-            b"still reachable"
-        );
-        assert_eq!(source.watermark().unwrap(), 2_000);
+            let old_local = item("oversized", 500, "local history");
+            let source = FakeSource::with_local(old_local.clone());
+            let mut oversized = exact;
+            oversized.push(0);
+            let sync = driver(
+                FakeRest::seeded(vec![
+                    signed_boundary_row("oversized", 1_000, content_type, &oversized, metadata),
+                    signed_boundary_row("valid", 2_000, "text", b"still reachable", None),
+                ]),
+                FakeAuth::default(),
+            );
+            let stats = sync.pull(&source).await.unwrap();
+            assert_eq!(
+                (
+                    stats.skipped_too_large,
+                    stats.applied,
+                    stats.skipped_undecryptable
+                ),
+                (1, 1, 0),
+                "{name}"
+            );
+            assert_eq!(
+                source.get("oversized"),
+                Some(old_local),
+                "{name} refusal changed local row"
+            );
+            assert_eq!(
+                source.get("valid").unwrap().content.as_slice(),
+                b"still reachable"
+            );
+            assert_eq!(
+                source.watermark().unwrap(),
+                2_000,
+                "{name} did not advance past refusal"
+            );
+        }
     }
 
     // --- signed metadata (manifest 05 §5.3) --------------------------------

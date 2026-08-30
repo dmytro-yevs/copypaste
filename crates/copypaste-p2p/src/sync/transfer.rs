@@ -186,6 +186,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn every_content_shape_over_the_cap_is_withheld_without_losing_it() {
+        // These are boundary test inputs; content-type ownership remains in IPC.
+        for (name, content_type, binary, metadata) in [
+            ("text", "text", false, None),
+            ("rtf", "text/rtf", false, None),
+            ("html", "text/html", false, None),
+            ("image", "image/png", true, None),
+            (
+                "file",
+                "file",
+                true,
+                Some(r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#),
+            ),
+            ("future", "application/x-future", true, None),
+        ] {
+            let mut oversized = item("oversized", 100, "", "dev-a");
+            oversized.content_type = content_type.into();
+            oversized.payload_metadata = metadata.map(str::to_owned);
+            if binary {
+                oversized.binary_content = vec![0, 0xff, 0x80];
+                oversized.binary_content.resize(MAX_CONTENT_BYTES + 1, 0);
+            } else {
+                oversized.content = "x".repeat(MAX_CONTENT_BYTES + 1);
+            }
+            let expected = oversized.clone();
+            let valid = item("valid", 200, "fits", "dev-a");
+            let advertised = HashMap::from([
+                (oversized.item_id.clone(), oversized.summary()),
+                (valid.item_id.clone(), valid.summary()),
+            ]);
+            let source = TestSource::new("dev-a", vec![oversized, valid]);
+            let mut channel = ScriptChannel::new(vec![]);
+            let mut stats = SyncStats::default();
+
+            serve_items(
+                &mut channel,
+                &source,
+                &advertised,
+                vec!["oversized".into(), "valid".into()],
+                &mut stats,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                (stats.sent, stats.skipped, stats.skipped_too_large),
+                (1, 1, 1),
+                "{name}"
+            );
+            assert_eq!(
+                source.get("oversized"),
+                Some(expected),
+                "{name} source payload changed"
+            );
+            assert!(
+                matches!(
+                    &channel.sent[..],
+                    [SyncMessage::Items { items }, SyncMessage::Done]
+                        if items.len() == 1 && items[0].item_id == "valid"
+                ),
+                "{name} blocked the following valid item"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn a_tombstone_drops_stale_binary_payload_before_the_size_gate() {
         let mut tombstone = item("gone", 100, "stale text", "dev-a");
         tombstone.deleted = true;
