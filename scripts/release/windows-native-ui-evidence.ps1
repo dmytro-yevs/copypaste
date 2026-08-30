@@ -10,6 +10,11 @@ Add-Type -AssemblyName UIAutomationTypes
 . (Join-Path $PSScriptRoot "windows-native-protected-evidence.ps1")
 . (Join-Path $PSScriptRoot "windows-protected-failure-diagnostics.ps1")
 . (Join-Path $PSScriptRoot "windows-protected-failure-diagnostics.test.ps1")
+. (Join-Path $PSScriptRoot "windows-uia-client-bootstrap.ps1")
+
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+    Initialize-WindowsUiaClientProviders | Out-Null
+}
 
 function Get-AppAutomationRoot([Diagnostics.Process]$App) {
     $App.Refresh()
@@ -300,6 +305,7 @@ function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) 
 }
 
 function Test-WindowsUiEvidenceHelpers {
+    Test-WindowsUiaClientBootstrapHelpers
     Test-UiaSnapshotHelpers
     $names = @(Get-UiaSnapshotNames ([ordered]@{
         nodes = @([ordered]@{ name = "Explore first" }, [ordered]@{ control_type = "ControlType.Button" })
