@@ -480,43 +480,102 @@ mod tests {
 
     #[test]
     fn a_direct_oversized_remote_version_fails_closed_without_replacing_local_history() {
-        let f = fixture();
-        let old_content = "l".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1);
-        let old_hash = crate::storage::compute_content_hash(old_content.as_bytes());
-        f.store
-            .insert(crate::NewItem {
-                id: "shared".into(),
-                content_ciphertext: vec![1],
-                nonce: vec![2],
-                content_type: "text".into(),
-                content_hash: old_hash.clone(),
-                is_sensitive: false,
-                search_text: None,
-                created_at: 1_000,
+        // Boundary test inputs; the content-type policy itself is owned by IPC.
+        for (name, content_type, binary, metadata) in [
+            ("text", "text", false, None),
+            ("rtf", "text/rtf", false, None),
+            ("html", "text/html", false, None),
+            ("image", "image/png", true, None),
+            (
+                "file",
+                copypaste_ipc::content_type::FILE,
+                true,
+                Some(r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#),
+            ),
+            ("future", "application/x-future", true, None),
+        ] {
+            let f = fixture();
+            let old_hash = crate::storage::compute_content_hash(b"local history");
+            f.store
+                .insert(crate::NewItem {
+                    id: "shared".into(),
+                    content_ciphertext: vec![1],
+                    nonce: vec![2],
+                    content_type: "text".into(),
+                    content_hash: old_hash,
+                    is_sensitive: false,
+                    search_text: None,
+                    created_at: 1_000,
+                    app_bundle_id: None,
+                    app_name: None,
+                    payload_metadata: None,
+                })
+                .expect("store the local row");
+            let before = f.store.get("shared").unwrap().expect("local row");
+
+            let mut exact = vec![0; copypaste_ipc::MAX_CONTENT_BYTES];
+            if binary {
+                exact[..3].copy_from_slice(&[0, 0xff, 0x80]);
+            }
+            let exact_text = (!binary).then(|| String::from_utf8(exact.clone()).unwrap());
+            let exact_incoming = RemoteVersion {
+                item_id: "shared",
+                content: exact_text.as_deref().unwrap_or(""),
+                binary_content: binary.then_some(exact.as_slice()),
+                payload_metadata: metadata,
+                content_type,
+                created_at: 2_000,
+                deleted: false,
+                content_hash: None,
+                origin_device_id: "device-a",
                 app_bundle_id: None,
                 app_name: None,
-                payload_metadata: None,
-            })
-            .expect("store the legacy row");
-        let oversized = "r".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1);
-        let incoming = RemoteVersion {
-            content: &oversized,
-            created_at: 2_000,
-            ..version("shared", "", 2_000)
-        };
+            };
+            assert!(
+                apply_remote_version(&f.store, &f.keyring, &f.detector, &f.here, &exact_incoming)
+                    .expect("exact cap applies"),
+                "{name} at the cap was rejected"
+            );
+            let exact_stored = f.store.get("shared").unwrap().expect("stored cap row");
+            assert_ne!(exact_stored, before, "{name} exact-cap row did not apply");
 
-        assert_eq!(
-            apply_remote_version(&f.store, &f.keyring, &f.detector, &f.here, &incoming,),
-            Err(MergeError::TooLarge)
-        );
-        let stored = f
-            .store
-            .version("shared")
-            .unwrap()
-            .expect("legacy row remains");
-        assert_eq!(stored.content_hash, old_hash);
-        assert_eq!(stored.created_at, 1_000);
-        assert!(!stored.deleted);
+            let mut oversized = exact.clone();
+            oversized.push(0);
+            let oversized_text = (!binary).then(|| String::from_utf8(oversized.clone()).unwrap());
+            let oversized_incoming = RemoteVersion {
+                item_id: "shared",
+                content: oversized_text.as_deref().unwrap_or(""),
+                binary_content: binary.then_some(oversized.as_slice()),
+                payload_metadata: metadata,
+                content_type,
+                created_at: 3_000,
+                deleted: false,
+                content_hash: None,
+                origin_device_id: "device-a",
+                app_bundle_id: None,
+                app_name: None,
+            };
+            assert_eq!(
+                apply_remote_version(
+                    &f.store,
+                    &f.keyring,
+                    &f.detector,
+                    &f.here,
+                    &oversized_incoming,
+                ),
+                Err(MergeError::TooLarge),
+                "{name} must fail before a SQL write"
+            );
+            let after_oversized = f
+                .store
+                .get("shared")
+                .unwrap()
+                .expect("row survives refusal");
+            assert_eq!(
+                after_oversized, exact_stored,
+                "{name} oversized row mutated local history"
+            );
+        }
     }
 
     /// The same pair of versions must be decided identically whether the hash
