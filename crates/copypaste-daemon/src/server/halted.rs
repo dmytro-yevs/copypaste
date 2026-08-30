@@ -149,7 +149,8 @@ mod tests {
 
     #[tokio::test]
     async fn an_ordinary_request_is_refused_with_the_startup_code() {
-        let response = ask(r#"{"id":7,"method":"list","params":{"limit":50}}"#).await;
+        let response =
+            ask(r#"{"id":7,"protocol_version":2,"method":"list","params":{"limit":50}}"#).await;
         assert_eq!(response.id, 7);
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::KeyLocked));
@@ -161,7 +162,7 @@ mod tests {
     /// wrong screen.
     #[tokio::test]
     async fn status_is_refused_too_rather_than_reporting_health() {
-        let response = ask(r#"{"id":1,"method":"status"}"#).await;
+        let response = ask(r#"{"id":1,"protocol_version":2,"method":"status"}"#).await;
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::KeyLocked));
     }
@@ -191,7 +192,7 @@ mod tests {
         let stream = tokio::net::UnixStream::connect(&path).await.unwrap();
         let (reader, mut writer) = stream.into_split();
         writer
-            .write_all(b"{\"id\":3,\"method\":\"shutdown\"}\n")
+            .write_all(b"{\"id\":3,\"protocol_version\":2,\"method\":\"shutdown\"}\n")
             .await
             .unwrap();
         let mut line = String::new();
