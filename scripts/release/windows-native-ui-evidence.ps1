@@ -8,6 +8,7 @@ Add-Type -AssemblyName UIAutomationTypes
 . (Join-Path $PSScriptRoot "windows-uia-snapshot-lib.ps1")
 . (Join-Path $PSScriptRoot "windows-native-window-evidence.ps1")
 . (Join-Path $PSScriptRoot "windows-native-protected-evidence.ps1")
+. (Join-Path $PSScriptRoot "windows-protected-failure-diagnostics.ps1")
 
 function Get-AppAutomationRoot([Diagnostics.Process]$App) {
     $App.Refresh()
