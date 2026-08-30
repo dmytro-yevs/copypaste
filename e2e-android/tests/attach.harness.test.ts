@@ -12,6 +12,7 @@ import {
 } from "../src/harness/attach.js";
 import {
   enablePageAutoAttach,
+  resolvePageAutoAttach,
   type PublicBrowser,
   type PublicBrowserSession,
   type PublicRootConnection,
@@ -180,6 +181,7 @@ describe("bounded final attach diagnostics", () => {
           webSocketPresent: true,
         },
         "page-autoattach-enabled",
+        "confirmed",
       ),
     ).toEqual({
       pages: { status: "ok", count: 0, appOriginMatchCount: 0 },
@@ -191,6 +193,7 @@ describe("bounded final attach diagnostics", () => {
         webSocketPresent: true,
       },
       pageAutoAttachOutcome: "page-autoattach-enabled",
+      pageAutoAttachCleanup: "confirmed",
     });
   });
 
@@ -198,8 +201,8 @@ describe("bounded final attach diagnostics", () => {
     const pages = { status: "error" as const, count: 0, appOriginMatchCount: 0 };
     const rawError = { status: "fetch-error" as const, count: 0, targetTypeHistogram: { page: 0, webview: 0, other: 0 }, appOriginMatchCount: 0, webSocketPresent: false };
     const rawEmpty = { ...rawError, status: "ok" as const };
-    const error = finalAttachDiagnostic(pages, rawError, "page-autoattach-rejected");
-    const empty = finalAttachDiagnostic(pages, rawEmpty, "not-attempted");
+    const error = finalAttachDiagnostic(pages, rawError, "page-autoattach-rejected", "confirmed");
+    const empty = finalAttachDiagnostic(pages, rawEmpty, "not-attempted", "not-needed");
     expect(error.raw.status).toBe("fetch-error");
     expect(empty.raw.status).toBe("ok");
     expect(JSON.stringify(error)).not.toMatch(/https?:|title|provider|secret/i);
@@ -216,6 +219,7 @@ describe("bounded final attach diagnostics", () => {
         appOriginMatchCount: 0, webSocketPresent: true,
       },
       "not-attempted",
+      "not-needed",
     );
     expect(diagnostic).toEqual({
       pages: { status: "ok", count: 1, appOriginMatchCount: 0 },
@@ -225,6 +229,7 @@ describe("bounded final attach diagnostics", () => {
         appOriginMatchCount: 0, webSocketPresent: true,
       },
       pageAutoAttachOutcome: "not-attempted",
+      pageAutoAttachCleanup: "not-needed",
     });
   });
 });
@@ -240,6 +245,7 @@ function publicBrowser(
         return session;
       },
     }),
+    disconnect: async () => { events.push("disconnect-browser"); },
   };
 }
 
@@ -265,7 +271,7 @@ describe("public root CDP auto-attach", () => {
     };
 
     await expect(enablePageAutoAttach(publicBrowser(session, events), () => 137))
-      .resolves.toBe("page-autoattach-enabled");
+      .resolves.toEqual({ outcome: "page-autoattach-enabled", cleanup: "confirmed" });
     expect(events).toEqual(["create-session", "set-auto-attach", "detach-session"]);
   });
 
@@ -277,7 +283,7 @@ describe("public root CDP auto-attach", () => {
     };
 
     await expect(enablePageAutoAttach(publicBrowser(session, []), () => 100))
-      .resolves.toBe("browser-session-detach-failed");
+      .resolves.toEqual({ outcome: "page-autoattach-enabled", cleanup: "unconfirmed" });
   });
 
   test("does not begin a public CDP operation after the attachment budget expires", async () => {
@@ -288,7 +294,7 @@ describe("public root CDP auto-attach", () => {
     };
 
     await expect(enablePageAutoAttach(publicBrowser(session, events), () => 0))
-      .resolves.toBe("deadline-exceeded");
+      .resolves.toEqual({ outcome: "deadline-exceeded", cleanup: "not-needed" });
     expect(events).toEqual([]);
 
     const expiringEvents: string[] = [];
@@ -303,25 +309,26 @@ describe("public root CDP auto-attach", () => {
     const remaining = () => (++remainingCalls === 5 ? 0 : 100);
 
     await expect(enablePageAutoAttach(publicBrowser(expiringSession, expiringEvents), remaining))
-      .resolves.toBe("browser-session-detach-failed");
+      .resolves.toEqual({ outcome: "page-autoattach-enabled", cleanup: "unconfirmed" });
     await Promise.resolve();
     expect(expiringEvents).toEqual(["create-session", "set-auto-attach", "detach-session"]);
   });
 
   test("reports an unavailable browser target without creating a session", async () => {
-    const browser: PublicBrowser = { target: () => undefined };
+    const browser: PublicBrowser = { target: () => undefined, disconnect: async () => undefined };
 
     await expect(enablePageAutoAttach(browser, () => 100))
-      .resolves.toBe("browser-target-unavailable");
+      .resolves.toEqual({ outcome: "browser-target-unavailable", cleanup: "not-needed" });
   });
 
   test("reports a rejected browser session without a provider error", async () => {
     const browser: PublicBrowser = {
       target: () => ({ createCDPSession: async () => { throw new Error("provider error"); } }),
+      disconnect: async () => undefined,
     };
 
     await expect(enablePageAutoAttach(browser, () => 100))
-      .resolves.toBe("browser-session-unavailable");
+      .resolves.toEqual({ outcome: "browser-session-unavailable", cleanup: "not-needed" });
   });
 
   test("detaches a temporary session whose root connection is unavailable", async () => {
@@ -332,7 +339,7 @@ describe("public root CDP auto-attach", () => {
     };
 
     await expect(enablePageAutoAttach(publicBrowser(session, events), () => 100))
-      .resolves.toBe("root-connection-unavailable");
+      .resolves.toEqual({ outcome: "root-connection-unavailable", cleanup: "confirmed" });
     expect(events).toEqual(["create-session", "detach-session"]);
   });
 
@@ -347,8 +354,77 @@ describe("public root CDP auto-attach", () => {
     };
 
     await expect(enablePageAutoAttach(publicBrowser(session, events), () => 100))
-      .resolves.toBe("page-autoattach-rejected");
+      .resolves.toEqual({ outcome: "page-autoattach-rejected", cleanup: "confirmed" });
     expect(events).toEqual(["create-session", "detach-session"]);
+  });
+
+  test("gates the resolver on the owned page and attempts once per browser", async () => {
+    const candidate = {
+      pagesStatus: "ok" as const,
+      defaultPageCount: 0,
+      rawTarget: { type: "page", url: "http://tauri.localhost/" },
+      currentPid: 3761,
+      endpointPid: 3761,
+    };
+    const session: PublicBrowserSession = {
+      connection: () => ({ send: async () => undefined }),
+      detach: async () => undefined,
+    };
+    const state = { attempted: false, outcome: "not-attempted" as const, cleanup: "not-needed" as const };
+    const events: string[] = [];
+    const browser = publicBrowser(session, events);
+
+    const first = await resolvePageAutoAttach(browser, state, candidate, () => 100);
+    const second = await resolvePageAutoAttach(browser, first.state, candidate, () => 100);
+    expect(first.blocked).toBe(false);
+    expect(second.state).toBe(first.state);
+    expect(events).toEqual(["create-session"]);
+
+    const newBrowserEvents: string[] = [];
+    await resolvePageAutoAttach(publicBrowser(session, newBrowserEvents), state, candidate, () => 100);
+    expect(newBrowserEvents).toEqual(["create-session"]);
+
+    for (const rejected of [
+      { ...candidate, rawTarget: { type: "webview", url: "http://tauri.localhost/" } },
+      { ...candidate, rawTarget: { type: "page", url: "https://tauri.localhost/" } },
+      { ...candidate, defaultPageCount: 1 },
+      { ...candidate, currentPid: 4102 },
+    ]) {
+      const rejectedEvents: string[] = [];
+      const result = await resolvePageAutoAttach(publicBrowser(session, rejectedEvents), state, rejected, () => 100);
+      expect(result).toEqual({ state, blocked: false });
+      expect(rejectedEvents).toEqual([]);
+    }
+  });
+
+  test("blocks the resolver and disconnects when temporary-session cleanup is unconfirmed", async () => {
+    const events: string[] = [];
+    const session: PublicBrowserSession = {
+      connection: () => ({ send: async () => undefined }),
+      detach: async () => {
+        events.push("detach-session");
+        throw new Error("cleanup failed");
+      },
+    };
+    const result = await resolvePageAutoAttach(
+      publicBrowser(session, events),
+      { attempted: false, outcome: "not-attempted", cleanup: "not-needed" },
+      {
+        pagesStatus: "ok",
+        defaultPageCount: 0,
+        rawTarget: { type: "page", url: "http://tauri.localhost/" },
+        currentPid: 3761,
+        endpointPid: 3761,
+      },
+      () => 100,
+    );
+
+    expect(result).toMatchObject({
+      blocked: true,
+      state: { outcome: "page-autoattach-enabled", cleanup: "unconfirmed" },
+    });
+    expect(result).not.toHaveProperty("page");
+    expect(events).toEqual(["create-session", "detach-session", "disconnect-browser"]);
   });
 
   test("has no private Puppeteer or direct-page connection dependency", () => {
@@ -356,7 +432,7 @@ describe("public root CDP auto-attach", () => {
     const app = readFileSync(resolve(here, "../../src/harness/app.ts"), "utf8");
     expect(app).toMatch(/browser\.target\(\).*createCDPSession/s);
     expect(app).toMatch(/session\.connection\(\)/);
-    expect(app).toMatch(/defaultPageCount === 0 && raw && !autoAttachAttempted/);
+    expect(app).toMatch(/target\.type === "page" && isAppTarget\(target\.url\)/);
     expect(app).not.toMatch(/browserWSEndpoint|directAppTarget|_targetManager|_connection/);
   });
 });
