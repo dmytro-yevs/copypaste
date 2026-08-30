@@ -21,6 +21,7 @@ import {
 import {
   SRC, SCANNED, NOT_SCANNED, CLASS_RULES, REQUIRED_UTILITIES, ALPHA_UTILITIES,
   COARSE_TOKENS, EXEMPTIONS, exemptions, isExempt,
+  TOUCH_CAPABILITY_FALLBACK_SELECTOR,
 } from './lib/component-usage.mjs';
 
 const problems = [];
@@ -214,24 +215,39 @@ notes.push(`recipe-fallback-contexts      ${generatedRecipeContexts} concrete pa
 /* ---------------------------------------------- coarse pointer, not width */
 
 const base = read('tokens.base.css');
-const coarse = /@media \(pointer: coarse\)\s*\{([^}]*)\}/.exec(base);
-if (!coarse) {
-  fail('dist/css/tokens.base.css', 'no @media (pointer: coarse) block',
-    're-emit --tap-min, --hit-slop and --sz-iconbtn there',
-    'Touch targets key off the pointer, not the viewport: a narrow window on a Mac is still a mouse.');
-} else {
-  const declared = [...coarse[1].matchAll(/--([\w-]+):/g)].map((m) => m[1]).sort();
+const declaredCoarseTokens = (source) =>
+  [...source.matchAll(/--([\w-]+):/g)].map((m) => m[1]).sort();
+const checkCoarseTokens = (context, source, fix, why) => {
+  if (!source) {
+    fail('dist/css/tokens.base.css', context, fix, why);
+    return;
+  }
+  const declared = declaredCoarseTokens(source);
   const want = [...COARSE_TOKENS].sort();
   if (declared.join(',') !== want.join(',')) {
     const extra = declared.filter((d) => !want.includes(d));
     const missing = want.filter((w) => !declared.includes(w));
-    fail('dist/css/tokens.base.css', `@media (pointer: coarse) declares [${declared}]`,
+    fail('dist/css/tokens.base.css', `${context} declares [${declared}]`,
       `declare exactly [${want}]`,
       (extra.length ? `${extra.map((e) => `--${e}`).join(', ')} must not vary by pointer. ` : '')
       + (missing.length ? `${missing.map((m) => `--${m}`).join(', ')} is the coarse floor and is missing. ` : '')
       + exemptions('coarse-pointer-set').map((e) => `${e.token}: ${e.why}`).join(' '));
   }
-}
+};
+const coarse = /@media \(pointer: coarse\)\s*\{([^}]*)\}/.exec(base);
+checkCoarseTokens(
+  '@media (pointer: coarse)',
+  coarse?.[1],
+  're-emit --tap-min, --hit-slop and --sz-iconbtn there',
+  'Touch targets key off the pointer, not the viewport: a narrow window on a Mac is still a mouse.',
+);
+const fallback = new RegExp(`${TOUCH_CAPABILITY_FALLBACK_SELECTOR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(base);
+checkCoarseTokens(
+  TOUCH_CAPABILITY_FALLBACK_SELECTOR,
+  fallback?.[1],
+  `emit the same token set for ${TOUCH_CAPABILITY_FALLBACK_SELECTOR}`,
+  'Legacy Android WebViews can report a fine primary pointer for a combined touch and stylus device.',
+);
 
 for (const file of ['tokens.base.css', 'tokens.dark.css', 'tokens.light.css']) {
   for (const m of read(file).matchAll(/@media \(([^)]*width[^)]*)\)\s*\{([^}]*)\}/g)) {
@@ -243,7 +259,7 @@ for (const file of ['tokens.base.css', 'tokens.dark.css', 'tokens.light.css']) {
     }
   }
 }
-notes.push(`coarse-pointer-set            exactly [${COARSE_TOKENS}], --pad-row-y deliberately absent`);
+notes.push(`coarse-pointer-set            exactly [${COARSE_TOKENS}] in media and capability fallback, --pad-row-y deliberately absent`);
 
 /* A modern dynamic enhancement is allowed only after the same property has a
  * concrete declaration. Current generated output intentionally needs none. */
