@@ -2,7 +2,8 @@ import type { ListSnapshot } from "./list.js";
 
 const MAX_DIAGNOSTIC_ID_LENGTH = 64;
 const MAX_DIAGNOSTIC_IDS = 64;
-const MAX_DIAGNOSTIC_JSON_LENGTH = 8_192;
+const MAX_DIAGNOSTIC_JSON_LENGTH = 16_384;
+const MAX_DIAGNOSTIC_FRAME = 1_000_000_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
@@ -37,7 +38,7 @@ export interface HistoryFilterMenuObservation {
 export interface HistoryFilterDiagnostic {
   beforeIds: SafeDiagnosticIds;
   restoredIds: SafeDiagnosticIds;
-  symmetricDifference: string[];
+  symmetricDifference: SafeDiagnosticIds;
   matched: boolean;
   defaultTriggerCount: number | null;
   menu: HistoryFilterMenuDiagnostic;
@@ -65,7 +66,19 @@ function boundedCount(value: unknown): number | null {
   ) {
     return null;
   }
-  return Math.min(value, MAX_DIAGNOSTIC_IDS);
+  return value <= MAX_DIAGNOSTIC_IDS ? value : null;
+}
+
+function boundedFrame(value: unknown): number | null {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > MAX_DIAGNOSTIC_FRAME
+  ) {
+    return null;
+  }
+  return value;
 }
 
 function diagnosticId(value: unknown): string | null {
@@ -118,10 +131,10 @@ export function normalizeAriaChecked(value: unknown): AriaCheckedDiagnostic {
 function symmetricDifference(
   expected: readonly string[],
   actual: readonly string[],
-): string[] {
+): SafeDiagnosticIds {
   const expectedSet = new Set(expected);
   const actualSet = new Set(actual);
-  return sortedItemIds([
+  return safeDiagnosticIds([
     ...expected.filter((id) => !actualSet.has(id)),
     ...actual.filter((id) => !expectedSet.has(id)),
   ]);
@@ -156,7 +169,7 @@ export function historyFilterDiagnostic(
       scrollTop: boundedFiniteNumber(list.scrollTop),
       scrollHeight: boundedFiniteNumber(list.scrollHeight),
       clientHeight: boundedFiniteNumber(list.clientHeight),
-      frame: boundedCount(list.frame),
+      frame: boundedFrame(list.frame),
       visibleItemCount: boundedCount(
         list.rows.filter((row) => row.id !== "").length,
       ),
