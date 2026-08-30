@@ -139,8 +139,8 @@ export function parseAppWindowFrame(
     );
   }
 
-  // AOSP WindowManagerService's `windows` subcommand dumps only the window
-  // list; the full dump carries mCurrentFocus and the same window frames.
+  // AOSP WindowManagerService emits WindowFrames only when dumpAll (`-a`) is
+  // set; the native probe requests that flag for focus and frame atomically.
   const lines = dump.split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     const header = lines[index]!.match(
@@ -260,7 +260,7 @@ export async function tapNativeInput(
   const serial = await selectedSerial(nativeCommands);
   const [displayOutput, windowOutput] = await Promise.all([
     nativeCommands.shell(serial, "wm", "size"),
-    nativeCommands.shell(serial, "dumpsys", "window"),
+    nativeCommands.shell(serial, "dumpsys", "window", "-a"),
   ]);
   const display = parseDisplaySize(displayOutput);
   const frame = parseAppWindowFrame(windowOutput, packageName);

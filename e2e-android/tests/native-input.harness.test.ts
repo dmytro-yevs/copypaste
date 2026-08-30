@@ -16,6 +16,10 @@ const WINDOW_DUMP = [
   "  Window #5 Window{def u0 com.android.systemui/.StatusBar}",
 ].join("\n");
 const WINDOW_SUBSECTION = WINDOW_DUMP.split("\n").slice(1).join("\n");
+const WINDOW_BRIEF = WINDOW_DUMP.replace(
+  "    Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,48][1080,1920] last=[1,49][1081,1921]",
+  "",
+);
 const LEGACY_WINDOW_DUMP = WINDOW_DUMP.replace(
   "Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,48][1080,1920] last=[1,49][1081,1921]",
   "mFrame=[0,48][1080,1920]",
@@ -139,6 +143,12 @@ describe("Android native input geometry", () => {
     });
   });
 
+  test("rejects a brief full dump that has focus but no WindowFrames", () => {
+    expect(() => parseAppWindowFrame(WINDOW_BRIEF, "com.copypaste.app")).toThrow(
+      /window frame/,
+    );
+  });
+
   test("selects the exact focused window among same-package windows", () => {
     const dump = WINDOW_DUMP.replace(
       "  Window #4 Window{abc u0 com.copypaste.app/com.copypaste.app.MainActivity}\n    Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,48][1080,1920] last=[1,49][1081,1921]",
@@ -170,7 +180,7 @@ describe("Android native input geometry", () => {
       ["devices"],
       ["-s", "device-a", "get-serialno"],
       ["-s", "device-a", "wm", "size"],
-      ["-s", "device-a", "dumpsys", "window"],
+      ["-s", "device-a", "dumpsys", "window", "-a"],
       ["-s", "device-a", "input", "tap", "540", "1008"],
     ]);
   });
@@ -246,6 +256,20 @@ describe("Android native input geometry", () => {
         METRICS,
         "com.copypaste.app",
         fixtureCommands(calls, "device-a", "device-a", false, malformed),
+      ),
+    ).rejects.toThrow(/window frame/);
+    expect(calls.some((call) => call.includes("input"))).toBe(false);
+  });
+
+  test("does not tap when the brief dump omits WindowFrames", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await expect(
+      tapNativeInput(
+        POINT,
+        METRICS,
+        "com.copypaste.app",
+        fixtureCommands(calls, "device-a", "device-a", false, WINDOW_BRIEF),
       ),
     ).rejects.toThrow(/window frame/);
     expect(calls.some((call) => call.includes("input"))).toBe(false);
