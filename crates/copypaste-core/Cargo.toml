@@ -67,6 +67,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security_Cryptography",
 ] }
+winsafe = { version = "0.0.28", features = ["kernel"] }
 
 # sha2's `asm` backend, aarch64 only — the one target where it buys anything:
 # it selects the ARMv8 crypto extensions, 56 SHA-2 instructions the soft
