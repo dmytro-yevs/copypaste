@@ -103,10 +103,11 @@ protected root, поза capture та з redaction у помилках. У
 
 Поточні [Browser E2E run 33280200330](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200330)
 і [Windows E2E run 33280200306](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200306)
-підтверджують Pin/Done assertions; локальна корекція вже закрила старий
-unawaited-Promise дефект. Тепер потрібні лише rerun exact candidate і читання
-нової diagnostics для Pin badge/Unpin icon та toolbar identity. WebKitGTK —
-спільний UI-шар, не native evidence для macOS, Android чи Windows.
+мають Done passed, але Pin залишається failed через старі badge/Unpin
+спостереження; локальна корекція вже закрила unawaited-Promise дефект. Тепер
+потрібні лише rerun exact candidate і читання нової diagnostics для Pin badge,
+Unpin icon та toolbar identity. WebKitGTK — спільний UI-шар, не native evidence
+для macOS, Android чи Windows.
 
 Широкі старі класифікації «driver crash = infrastructure» відхилено: passing
 harness guard навмисно падає, щоб довести guard. Свіжі mixed-cause рядки не
@@ -122,10 +123,11 @@ green.
 | --- | --- | --- |
 | Event-aware concurrency і один Android fan-out | **Реалізовано** у workflow/wiring baseline | Матриця викликає scheduled sweep один раз; cancellation не приписується цій причині без run-level доказу. |
 | Portable gate config, wiring/mutation contract checks | **Реалізовано**; Supply/Mutation current runs green | Одна конфігурація gate для local/CI; mutation не може пройти через відсутній producer/consumer. |
-| Target-OS compile/unit boundary для Windows | **Частково реалізовано; blocker** | F5 exact build має пройти; глобальний `unsafe` allowance не додається. |
+| Target-OS compile/unit boundary для Windows | **F5 compile пройшов; source-boundary/UIA blocker** | Зберегти exact build evidence і прочитати source-boundary та protected-UIA failures; глобальний `unsafe` allowance не додається. |
 | Semantic E2E observations і negative fixtures | **Реалізовано локально; native rerun pending** | Receipts доводять authoritative state, identity і negative guard; WebKit/local proof не замінює native evidence. |
 | Failure-artifact preservation і privacy-safe diagnostics | **Контроль потрібний; coverage неповна** | Logs/jobs/artifacts мають зберігатися та не розкривати секрети; evidence loss не класифікується як product/infrastructure. |
-| Exact candidate/bytes qualification before release tag | **Пропозиція, потребує авторизації** | Один commit/artifact identity, macOS, physical Android і installed Windows receipts; tag/release блокується без них. |
+| Exact candidate/bytes qualification before release tag | **Обов'язкова release-вимога; evidence неповна** | Один commit/artifact identity, macOS, physical Android і installed Windows receipts; tag/release блокується без них. |
+| Branch protection/required checks | **Пропозиція, потребує окремої дії** | Перевірити й налаштувати required checks після user-authorized policy change; у свіжій перевірці rulesets — `[]`. |
 
 ## Поточний acceptance snapshot
 
@@ -134,7 +136,7 @@ green.
 API 36 shipped smoke (22), storage (18), Cloud (17) та API 33 green у [Android
 PR run 33280200527](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200527).
 Debug 51/52 залишає frame-parser спостереження. Browser і Windows E2E мають
-Pin/Done assertions у [33280200330](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200330)
+Done passed, але Pin failed на старих badge/Unpin assertions у [33280200330](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200330)
 та [33280200306](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200306).
 CI [33280200310](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200310)
 залишається 20/22 через source-boundary та protected-UIA спостереження.
@@ -148,9 +150,10 @@ Cloud native experiment не доведений. Локальні виправл
 release залишаються «не кваліфіковано», доки receipt не зв'яже commit, run,
 платформу, сценарій, accessibility evidence і бюджети.
 
-На цьому кандидатові локальні gates дали UI 425, Node 86, E2E 15, Android 130,
-smoke 85×2, wiring 572 і mutation 91/0; Browser/Cloud — 320/390, із фактичним
-gap 8 і одним alert без console error. Це корисна перевірка коду та harness,
+На локальному correction candidate
+`093e90b9d646fdae3621e2dd453e63c9c68054ae` gates дали UI 425, Node 86, E2E 15,
+Android 130, smoke 85, wiring 572 і mutation 91/0; Browser/Cloud — 320/390,
+із фактичним gap 8 і одним alert без console error. Це корисна перевірка коду та harness,
 але не native proof і не підстава оголошувати release готовим.
 
 ## Наступні кроки
@@ -158,7 +161,7 @@ gap 8 і одним alert без console error. Це корисна переві
 | Пріоритет / власник | Прийняття |
 | --- | --- |
 | P0 — Windows native evidence owner | На тому самому commit повторити [CI 33280200310](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200310) і прочитати нові source-boundary/protected-UIA diagnostics: named `IsPassword=true` element, protected root, capture exclusion і redacted failure; відсутність елемента залишається blocker. |
-| P0 — Browser/Windows E2E owner | Повторити exact candidate для [Browser 33280200330](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200330) і [Windows 33280200306](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200306); прочитати Pin badge/Unpin icon та toolbar identity diagnostics. Вже зелені Android heading/compact-search/Done/Promise перевірки не відкривати як нові fixes; не вилучати assertion і не додавати retry. |
+| P0 — Browser/Windows E2E owner | Повторити exact candidate для [Browser 33280200330](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200330) і [Windows 33280200306](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200306); прочитати Pin badge/Unpin icon та toolbar identity diagnostics. Done вже passed, Pin — failed; зелені Android heading/compact-search/Promise перевірки не відкривати як нові fixes; не вилучати assertion і не додавати retry. |
 | P0 — Android native evidence owner | Повторити exact candidate з [Android 33280200527](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200527) і прочитати modern-IME frame та local-restart diagnostics; не відтворювати вже зелені Devices 4/4, compact-search, Done або Promise checks як нові fixes. |
 | P1 — cloud/release owner | Провести plain-wrapper Cloud native experiment, розібрати visible error/AX та [API34 manual 33280198553](https://github.com/dmytro-yevs/copypaste/actions/runs/33280198553); додати physical Android/macOS/installed Windows receipts і bind exact commit/run/artifact. |
 | P1 — supply-chain owner | Зберегти green [Supply 33280200416](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200416) та [Mutation 33280200297](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200297); синтетичні fixture findings не оголошувати live vulnerability. |
@@ -168,10 +171,10 @@ gap 8 і одним alert без console error. Це корисна переві
 
 ## Обмеження та походження даних
 
-`31533839104` — відомий failure статус, але evidence loss: logs HTTP 404, jobs і
+[`31533839104`](https://github.com/dmytro-yevs/copypaste/actions/runs/31533839104) — відомий failure статус, але evidence loss: logs HTTP 404, jobs і
 artifacts HTTP 200 з порожнім вмістом, локальний log 0 bytes; причинний висновок
 неможливий.
-`32367887300` — job log підтверджує `testUniversalDebugUnitTest`: 35 тестів,
+[`32367887300`](https://github.com/dmytro-yevs/copypaste/actions/runs/32367887300) — job log підтверджує `testUniversalDebugUnitTest`: 35 тестів,
 7 failed, але JUnit не прикріплено; імена та assertions відсутні, тому рядок
 залишається unknown. У багатьох 35 delta-рядках причина навмисно
 залишається unknown через mixed failures або неповний log. Це не можна
