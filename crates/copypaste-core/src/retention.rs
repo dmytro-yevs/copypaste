@@ -17,26 +17,43 @@ use crate::storage::Store;
 /// How long applied versions may coalesce onto one retention sweep.
 pub(crate) const RETENTION_DEBOUNCE: Duration = Duration::from_millis(250);
 
-/// Apply every local retention limit after a write. Best-effort: a cleanup
-/// failure must not turn a stored capture into data loss.
-pub fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
+pub fn policy_tightened(
+    before: &copypaste_ipc::ConfigData,
+    after: &copypaste_ipc::ConfigData,
+) -> bool {
+    after.storage_quota_bytes < before.storage_quota_bytes
+        || after.history_limit < before.history_limit
+        || (after.retention_days > 0
+            && (before.retention_days == 0 || after.retention_days < before.retention_days))
+}
+
+pub fn enforce_retention_report(store: &Store, settings: &copypaste_ipc::ConfigData) -> u64 {
     #[cfg(test)]
     sweeps::record();
 
-    if let Err(e) = store.evict_over_cap(u64::from(settings.history_limit)) {
-        warn!(error = ?e, "history cap eviction failed");
+    let mut removed = 0;
+    match store.evict_over_cap(u64::from(settings.history_limit)) {
+        Ok(count) => removed += count,
+        Err(e) => warn!(error = ?e, "history cap eviction failed"),
     }
-    if let Err(e) = store.evict_over_byte_cap(settings.storage_quota_bytes) {
-        warn!(error = ?e, "storage quota eviction failed");
+    match store.evict_over_byte_cap(settings.storage_quota_bytes) {
+        Ok(count) => removed += count,
+        Err(e) => warn!(error = ?e, "storage quota eviction failed"),
     }
     // Measured from the wall clock: `created_at` is caller-supplied, and one
     // row stamped a year ahead wiped the whole history.
     if settings.retention_days > 0 {
         let cutoff = crate::now_ms() - i64::from(settings.retention_days) * 86_400_000;
-        if let Err(e) = store.evict_older_than(cutoff) {
-            warn!(error = ?e, "age-based retention failed");
+        match store.evict_older_than(cutoff) {
+            Ok(count) => removed += count,
+            Err(e) => warn!(error = ?e, "age-based retention failed"),
         }
     }
+    removed
+}
+
+pub fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
+    let _ = enforce_retention_report(store, settings);
 }
 
 /// Coalesces the sweeps of a burst of independent writes onto one run.
@@ -147,6 +164,60 @@ mod tests {
 
     fn settings() -> copypaste_ipc::ConfigData {
         copypaste_ipc::ConfigData::default()
+    }
+
+    #[test]
+    fn a_tighter_policy_is_the_only_settings_change_that_needs_a_sweep() {
+        let before = copypaste_ipc::ConfigData {
+            retention_days: 3,
+            ..settings()
+        };
+
+        let mut after = before.clone();
+        after.poll_interval_ms = 250;
+        assert!(!policy_tightened(&before, &after));
+
+        after = before.clone();
+        after.history_limit -= 1;
+        assert!(policy_tightened(&before, &after));
+
+        after = before.clone();
+        after.storage_quota_bytes -= 1;
+        assert!(policy_tightened(&before, &after));
+
+        after = before.clone();
+        after.retention_days = before.retention_days - 1;
+        assert!(policy_tightened(&before, &after));
+
+        after = before.clone();
+        after.retention_days = 0;
+        assert!(!policy_tightened(&before, &after));
+
+        let disabled = copypaste_ipc::ConfigData {
+            retention_days: 0,
+            ..before.clone()
+        };
+        assert!(policy_tightened(&disabled, &before));
+    }
+
+    #[test]
+    fn a_report_counts_only_real_removals_and_keeps_pins_and_the_newest() {
+        let store = store();
+        let pinned = store.insert(item("pinned", T0)).unwrap();
+        let removed = store.insert(item("removable", T0 + 1)).unwrap();
+        let newest = store.insert(item("newest", T0 + 2)).unwrap();
+        store.set_pinned(&pinned.id, true).unwrap();
+        let settings = copypaste_ipc::ConfigData {
+            history_limit: 1,
+            ..settings()
+        };
+
+        assert_eq!(enforce_retention_report(&store, &settings), 1);
+        assert_eq!(store.count().unwrap(), 2);
+        assert!(store.get(&pinned.id).unwrap().is_some());
+        assert!(store.get(&newest.id).unwrap().is_some());
+        assert!(store.get(&removed.id).unwrap().is_none());
+        assert_eq!(enforce_retention_report(&store, &settings), 0);
     }
 
     #[test]
