@@ -1,3 +1,27 @@
+$MAX_PROTECTED_FAILURE_NODES = 256
+
+function Convert-ProtectedUiaBounds($Bounds) {
+    if ($Bounds -isnot [Collections.IDictionary]) { return $null }
+    $values = @()
+    foreach ($name in @("x", "y", "width", "height")) {
+        if (-not $Bounds.Contains($name) -or $null -eq $Bounds[$name]) { return $null }
+        try { $value = [double]$Bounds[$name] } catch { return $null }
+        if ([double]::IsNaN($value) -or [double]::IsInfinity($value)) { return $null }
+        $values += $value
+    }
+    return [ordered]@{
+        x = $values[0]
+        y = $values[1]
+        width = $values[2]
+        height = $values[3]
+    }
+}
+
+function Convert-ProtectedUiaControlType([AllowNull()][string]$ControlType) {
+    if ($ControlType -match '^ControlType\.[A-Za-z0-9]{1,48}$') { return $ControlType }
+    return $null
+}
+
 function New-ProtectedUiaNode(
     [AllowNull()][string]$Name,
     [AllowNull()][string]$ControlType,
@@ -9,10 +33,10 @@ function New-ProtectedUiaNode(
 ) {
     return [ordered]@{
         name = if ($Name -in $AllowedNames) { $Name } else { $null }
-        control_type = $ControlType
+        control_type = Convert-ProtectedUiaControlType $ControlType
         enabled = $Enabled
         offscreen = $Offscreen
-        bounds = $Bounds
+        bounds = Convert-ProtectedUiaBounds $Bounds
         is_password = $IsPassword
     }
 }
@@ -327,6 +351,93 @@ function New-WindowsProtectedAccessibilityDocument(
     }
 }
 
+function New-WindowsProtectedFailureDiagnostic(
+    [string]$Feature,
+    [string]$State,
+    [string]$ExpectedName,
+    $Snapshot,
+    [string[]]$AllowedNames
+) {
+    $allNodes = @($Snapshot.nodes)
+    $count = [Math]::Min($allNodes.Count, $MAX_PROTECTED_FAILURE_NODES)
+    $nodes = @(
+        for ($index = 0; $index -lt $count; $index++) {
+            $projected = New-ProtectedUiaNode `
+                $allNodes[$index]["name"] $allNodes[$index]["control_type"] `
+                $allNodes[$index]["enabled"] $allNodes[$index]["offscreen"] `
+                $allNodes[$index]["bounds"] $allNodes[$index]["is_password"] $AllowedNames
+            [ordered]@{
+                index = $index
+                name = $projected["name"]
+                control_type = $projected["control_type"]
+                enabled = $projected["enabled"]
+                offscreen = $projected["offscreen"]
+                is_password = $projected["is_password"]
+                bounds = $projected["bounds"]
+            }
+        }
+    )
+    return [ordered]@{
+        schema_version = 1
+        type = "protected-accessibility-failure"
+        feature = $Feature
+        state = $State
+        expected_name = if ($ExpectedName -in $AllowedNames) { $ExpectedName } else { $null }
+        node_read = [ordered]@{
+            complete = $true
+            read = $allNodes.Count
+            included = $nodes.Count
+            truncated = $nodes.Count -lt $allNodes.Count
+        }
+        nodes = $nodes
+    }
+}
+
+function Save-WindowsProtectedFailureDiagnostic(
+    [string]$EvidenceRoot,
+    [string]$Feature,
+    [string]$State,
+    [string]$ExpectedName,
+    $Snapshot,
+    [string[]]$AllowedNames
+) {
+    $directory = Join-Path $EvidenceRoot "failure-diagnostics"
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $relativePath = "failure-diagnostics/protected-accessibility-failure.json"
+    $diagnostic = New-WindowsProtectedFailureDiagnostic `
+        $Feature $State $ExpectedName $Snapshot $AllowedNames
+    $diagnostic | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath (Join-Path $EvidenceRoot $relativePath) -Encoding utf8
+}
+
+function Assert-WindowsProtectedNodesWithFailureDiagnostic(
+    [object[]]$Nodes,
+    [string[]]$RequiredNames,
+    [string[]]$RequiredEnabledNames,
+    [string[]]$RequiredPasswordNames,
+    [string]$Context,
+    [string]$EvidenceRoot,
+    [string]$Feature,
+    [string]$State,
+    [string]$ExpectedName,
+    $Snapshot,
+    [string[]]$AllowedNames
+) {
+    try {
+        Assert-WindowsProtectedNodes `
+            $Nodes $RequiredNames $RequiredEnabledNames $RequiredPasswordNames $Context
+    } catch {
+        $assertionFailure = $_
+        try {
+            Save-WindowsProtectedFailureDiagnostic `
+                $EvidenceRoot $Feature $State $ExpectedName $Snapshot $AllowedNames
+        } catch {
+            Write-Warning "protected accessibility failure diagnostic could not be persisted"
+        }
+        throw $assertionFailure
+    }
+}
+
 function Save-WindowsProtectedFeatureState(
     [Diagnostics.Process]$App,
     [string]$EvidenceRoot,
@@ -361,8 +472,9 @@ function Save-WindowsProtectedFeatureState(
     $document = New-WindowsProtectedAccessibilityDocument `
         $Feature $State $ExpectedName $window $snapshot $AllowedNames
     $nodes = @($document.nodes)
-    Assert-WindowsProtectedNodes `
-        $nodes $RequiredNames $RequiredEnabledNames $RequiredPasswordNames "$Feature protected evidence"
+    Assert-WindowsProtectedNodesWithFailureDiagnostic `
+        $nodes $RequiredNames $RequiredEnabledNames $RequiredPasswordNames "$Feature protected evidence" `
+        $EvidenceRoot $Feature $State $ExpectedName $snapshot $AllowedNames
     $relativeDirectory = if ($ArtifactDirectory) { Join-Path $Feature $ArtifactDirectory } else { $Feature }
     $directory = Join-Path $EvidenceRoot $relativeDirectory
     $accessibility = Join-Path $relativeDirectory "accessibility.json"
