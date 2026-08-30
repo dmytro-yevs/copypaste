@@ -149,6 +149,12 @@ as a known code and do not acquire a guessed retry policy.
 - A settings patch is all-or-nothing: one invalid value rejects the patch and
   leaves the effective configuration unchanged.
 - Export excludes sensitive content unless the explicit include flag is true.
+- After authentication, a legacy text body over the supported full-body limit
+  `MAX_CONTENT_BYTES` is refused by get, native copy, plain-text copy and an
+  included export as non-retryable `content_too_large`. Default sensitive and
+  non-text export exclusions retain their filtering-before-authentication
+  precedence. List, search and pin/unpin instead return a bounded preview
+  marked `truncated`; the stored ciphertext is never altered.
 - Restore requires affirmative confirmation before any replacement work.
 
 ### 5.2.1 Sync size-refusal count
@@ -216,6 +222,7 @@ The shared enum distinguishes at least:
 | `auth_failed` | content authentication failed | no fallback |
 | `key_locked` | keystore state is temporarily unavailable | bounded retry |
 | `key_unusable` | stored secret cannot open this history | no |
+| `content_too_large` | authenticated legacy text cannot fit a full bounded reply | no |
 | pairing validation/limit/version errors | ceremony cannot proceed as requested | only the explicitly transient peer failures retry |
 | `internal` | bounded unexpected failure | retry only where shared policy says so |
 
@@ -240,6 +247,9 @@ Stable rule IDs used by source comments:
   client holds the list.
 - Item reveal is read-only and sensitive plaintext appears only after the
   client-owned explicit reveal gesture.
+- Get, native copy, plain-text copy and included export refuse authenticated
+  legacy text over the supported full-body limit before any clipboard write;
+  list, search and pin/unpin retain bounded previews and protection controls.
 - Export defaults to excluding sensitive items. Import reruns detector, size and
   dedup policy rather than inserting rows directly.
 - Backup refuses overwrite. Restore validates current key, schema, integrity

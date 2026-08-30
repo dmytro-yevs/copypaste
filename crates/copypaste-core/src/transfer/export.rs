@@ -4,6 +4,14 @@ use tracing::{info, warn};
 use crate::storage::{Store, StoreError};
 use crate::Keyring;
 
+#[derive(Debug, thiserror::Error)]
+pub enum ExportError {
+    #[error("the history database could not be accessed")]
+    Store(#[from] StoreError),
+    #[error("an authenticated text item is too large to export")]
+    ContentTooLarge,
+}
+
 /// How many rows one export reads out of the store at a time.
 const EXPORT_CHUNK: u32 = 500;
 
@@ -17,7 +25,7 @@ pub fn export(
     keyring: &Keyring,
     limit: u32,
     include_sensitive: bool,
-) -> Result<ExportData, StoreError> {
+) -> Result<ExportData, ExportError> {
     let key = keyring.item_key();
     let mut data = ExportData {
         items: Vec::new(),
@@ -56,6 +64,9 @@ pub fn export(
                     continue;
                 }
             };
+            if plaintext.len() > copypaste_ipc::MAX_CONTENT_BYTES {
+                return Err(ExportError::ContentTooLarge);
+            }
             data.items.push(ExportItem {
                 content: String::from_utf8_lossy(&plaintext).into_owned(),
                 content_type: row.content_type,
@@ -88,6 +99,27 @@ fn finish(data: ExportData) -> ExportData {
 mod tests {
     use super::*;
     use crate::transfer::testkit::{fixture, Fixture};
+
+    fn seed_legacy_text(f: &Fixture, content: &[u8], content_type: &str, sensitive: bool) {
+        let id = format!("legacy-{}", content.len());
+        let key = f.keyring.item_key();
+        let (nonce, content_ciphertext) = crate::encrypt(content, &key, &id).unwrap();
+        f.store
+            .insert(crate::NewItem {
+                id,
+                content_ciphertext,
+                nonce,
+                content_type: content_type.to_string(),
+                content_hash: crate::compute_content_hash(content),
+                is_sensitive: sensitive,
+                search_text: (!sensitive).then(|| String::from_utf8_lossy(content).into_owned()),
+                created_at: crate::now_ms(),
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+    }
 
     fn export_of(f: &Fixture, include_sensitive: bool) -> ExportData {
         export(&f.store, &f.keyring, 0, include_sensitive).expect("the store must read")
@@ -193,6 +225,80 @@ mod tests {
             export(&f.store, &f.keyring, 0, false).unwrap().items.len(),
             5
         );
+    }
+
+    #[test]
+    fn an_authenticated_legacy_text_body_over_the_limit_refuses_the_whole_export() {
+        let f = fixture();
+        let ordinary = f.add("ordinary");
+        f.store.set_pinned(&ordinary, true).unwrap();
+        seed_legacy_text(
+            &f,
+            "\u{1}"
+                .repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1)
+                .as_bytes(),
+            copypaste_ipc::content_type::TEXT,
+            false,
+        );
+        let before = f
+            .store
+            .list(10, 0)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id != ordinary)
+            .unwrap()
+            .content_ciphertext;
+
+        assert!(matches!(
+            export(&f.store, &f.keyring, 0, false),
+            Err(ExportError::ContentTooLarge)
+        ));
+        assert_eq!(
+            f.store
+                .list(10, 0)
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id != ordinary)
+                .unwrap()
+                .content_ciphertext,
+            before
+        );
+    }
+
+    #[test]
+    fn a_sensitive_legacy_body_is_skipped_before_it_is_opened() {
+        let f = fixture();
+        seed_legacy_text(
+            &f,
+            "\u{1}"
+                .repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1)
+                .as_bytes(),
+            copypaste_ipc::content_type::TEXT,
+            true,
+        );
+        let data = export_of(&f, false);
+        assert_eq!(data.skipped_sensitive, 1);
+        assert!(matches!(
+            export(&f.store, &f.keyring, 0, true),
+            Err(ExportError::ContentTooLarge)
+        ));
+    }
+
+    #[test]
+    fn an_unreadable_oversized_legacy_row_is_still_counted_not_refused_for_size() {
+        let f = fixture();
+        seed_legacy_text(
+            &f,
+            "\u{1}"
+                .repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1)
+                .as_bytes(),
+            copypaste_ipc::content_type::TEXT,
+            false,
+        );
+        let stranger = crate::Keyring::from_secret(&[9u8; 32]);
+        let data = export(&f.store, &stranger, 0, false).expect("unreadable rows are skipped");
+        assert!(data.items.is_empty());
+        assert_eq!(data.skipped_undecryptable, 1);
     }
 
     /// More rows than one page, so the paging loop is exercised rather than

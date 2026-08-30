@@ -17,6 +17,8 @@ pub enum ErrorCode {
     KeyUnusable,
     /// The item exists, but the requested clipboard representation does not.
     UnsupportedContent,
+    /// An authenticated legacy text body cannot fit the bounded full-body reply.
+    ContentTooLarge,
 
     PairingCode,
     PairingAddress,
@@ -44,6 +46,7 @@ impl ErrorCode {
             Self::KeyLocked => "key_locked",
             Self::KeyUnusable => "key_unusable",
             Self::UnsupportedContent => "unsupported_content",
+            Self::ContentTooLarge => "content_too_large",
             Self::PairingCode => "pairing_code",
             Self::PairingAddress => "pairing_address",
             Self::RateLimited => "rate_limited",
@@ -66,6 +69,7 @@ impl ErrorCode {
             "key_locked" => Some(Self::KeyLocked),
             "key_unusable" => Some(Self::KeyUnusable),
             "unsupported_content" => Some(Self::UnsupportedContent),
+            "content_too_large" => Some(Self::ContentTooLarge),
             "pairing_code" => Some(Self::PairingCode),
             "pairing_address" => Some(Self::PairingAddress),
             "rate_limited" => Some(Self::RateLimited),
@@ -94,6 +98,7 @@ impl ErrorCode {
             | Self::AuthFailed
             | Self::KeyUnusable
             | Self::UnsupportedContent
+            | Self::ContentTooLarge
             | Self::PairingCode
             | Self::PairingAddress
             | Self::RateLimited
@@ -119,6 +124,7 @@ mod tests {
             (ErrorCode::KeyLocked, "\"key_locked\""),
             (ErrorCode::KeyUnusable, "\"key_unusable\""),
             (ErrorCode::UnsupportedContent, "\"unsupported_content\""),
+            (ErrorCode::ContentTooLarge, "\"content_too_large\""),
             (ErrorCode::PairingCode, "\"pairing_code\""),
             (ErrorCode::PairingAddress, "\"pairing_address\""),
             (ErrorCode::RateLimited, "\"rate_limited\""),
@@ -146,6 +152,7 @@ mod tests {
         assert!(ErrorCode::KeyLocked.retryable());
         assert!(!ErrorCode::KeyUnusable.retryable());
         assert!(!ErrorCode::UnsupportedContent.retryable());
+        assert!(!ErrorCode::ContentTooLarge.retryable());
     }
 
     #[test]

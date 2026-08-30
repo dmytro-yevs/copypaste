@@ -8,7 +8,6 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::{p2p_contract, ItemCursor, StoredItem};
-use copypaste_ipc::limits::bound_preview;
 use copypaste_ipc::{
     clamp_page, ErrorCode, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
     DEFAULT_SEARCH_PAGE, MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
@@ -19,10 +18,12 @@ mod copy;
 mod wire;
 
 pub(super) use self::copy::{copy, copy_plain_text};
-use self::wire::{decrypt_rows, to_wire};
+use self::wire::{
+    bound_item_preview, decrypt_rows, is_oversized_text, to_wire, to_wire_and_payload,
+};
 use super::messages::{
-    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_EMPTY_CONTENT, MSG_ENCRYPT,
-    MSG_IMAGE_PREVIEW, MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
+    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_CONTENT_TOO_LARGE, MSG_EMPTY_CONTENT,
+    MSG_ENCRYPT, MSG_IMAGE_PREVIEW, MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
 };
 use crate::capture::{self, IngestError};
 use crate::AppState;
@@ -116,7 +117,7 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
     let next = page.next.map(|cursor| cursor.token());
     let mut wire = decrypt_rows(state, page.items);
     for item in &mut wire.items {
-        item.truncated = bound_preview(&mut item.content);
+        bound_item_preview(item);
     }
     wire.next_cursor = next;
     Response::ok(id, ResponseData::Page(wire))
@@ -135,7 +136,11 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
             // Search carries no cursor, so matches past the budget are dropped
             // rather than deferred. An undeliverable frame would drop all of them.
             rows.truncate(within_budget(&rows));
-            Response::ok(id, ResponseData::Page(decrypt_rows(state, rows)))
+            let mut page = decrypt_rows(state, rows);
+            for item in &mut page.items {
+                bound_item_preview(item);
+            }
+            Response::ok(id, ResponseData::Page(page))
         }
         Err(e) => storage_error(id, "search", &e),
     }
@@ -209,8 +214,11 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
 /// exactly that.
 pub(super) fn get(state: &AppState, id: u64, item_id: &str) -> Response {
     match state.store.get(item_id) {
-        Ok(Some(row)) => match to_wire(state, row) {
-            Ok(item) => Response::ok(id, ResponseData::Item(item)),
+        Ok(Some(row)) => match to_wire_and_payload(state, row) {
+            Ok((_, payload)) if is_oversized_text(&payload) => {
+                Response::err(id, ErrorCode::ContentTooLarge, MSG_CONTENT_TOO_LARGE)
+            }
+            Ok((item, _)) => Response::ok(id, ResponseData::Item(item)),
             Err(e) => decrypt_error(id, &e),
         },
         Ok(None) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
@@ -282,8 +290,13 @@ pub(super) fn pin(state: &AppState, id: u64, item_id: &str, pinned: bool) -> Res
     // Reply with the updated row so a client does not have to re-list to learn
     // the new state.
     match state.store.get(item_id) {
-        Ok(Some(row)) => match to_wire(state, row) {
-            Ok(item) => Response::ok(id, ResponseData::Item(item)),
+        Ok(Some(row)) => match to_wire_and_payload(state, row) {
+            Ok((mut item, payload)) => {
+                if is_oversized_text(&payload) {
+                    bound_item_preview(&mut item);
+                }
+                Response::ok(id, ResponseData::Item(item))
+            }
             Err(e) => decrypt_error(id, &e),
         },
         Ok(None) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
@@ -365,6 +378,28 @@ mod tests {
     use base64::engine::general_purpose::STANDARD;
     use copypaste_ipc::limits::LIST_PREVIEW_BYTES;
     use copypaste_ipc::{content_type::TEXT, Method};
+
+    fn seed_legacy_text(state: &AppState, id: &str, content: &str, content_type: &str) {
+        let key = state.keyring.item_key();
+        let (nonce, content_ciphertext) = copypaste_core::encrypt(content.as_bytes(), &key, id)
+            .expect("the current item key seals the direct legacy row");
+        state
+            .store
+            .insert(copypaste_core::NewItem {
+                id: id.to_string(),
+                content_ciphertext,
+                nonce,
+                content_type: content_type.to_string(),
+                content_hash: copypaste_core::compute_content_hash(content.as_bytes()),
+                is_sensitive: false,
+                search_text: Some(content.to_string()),
+                created_at: copypaste_core::now_ms(),
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .expect("a pre-limit row is still a valid stored row");
+    }
 
     fn row_of(bytes: usize) -> StoredItem {
         StoredItem {
@@ -650,6 +685,146 @@ mod tests {
             vec![crate::testutil::WrittenPayload::Text(long)],
             "copy wrote the list preview instead of the authenticated full body"
         );
+    }
+
+    #[test]
+    fn authenticated_legacy_text_refuses_full_paths_but_keeps_a_safe_preview() {
+        let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("legacy-text");
+        let body = format!(
+            "needle {}",
+            "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1 - "needle ".len())
+        );
+        seed_legacy_text(&state, "legacy-plus-one", &body, TEXT);
+        let before = state
+            .store
+            .get("legacy-plus-one")
+            .unwrap()
+            .unwrap()
+            .content_ciphertext;
+        let source = state.store.get("legacy-plus-one").unwrap().unwrap();
+        state
+            .store
+            .insert(copypaste_core::NewItem {
+                id: "legacy-wrong-aad".into(),
+                content_ciphertext: source.content_ciphertext.clone(),
+                nonce: source.nonce.clone(),
+                content_type: TEXT.into(),
+                content_hash: "wrong-aad-content-hash".into(),
+                is_sensitive: false,
+                search_text: None,
+                created_at: source.created_at.saturating_sub(1),
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+        for response in [
+            get(&state, 0, "legacy-wrong-aad"),
+            copy(&state, 0, "legacy-wrong-aad"),
+        ] {
+            assert!(!response.ok);
+            assert_eq!(response.error_code, Some(ErrorCode::Internal));
+            assert!(response.data.is_none());
+        }
+        assert_eq!(writes.count(), 0);
+
+        for response in [
+            get(&state, 1, "legacy-plus-one"),
+            copy(&state, 2, "legacy-plus-one"),
+            copy_plain_text(&state, 3, "legacy-plus-one"),
+        ] {
+            assert!(!response.ok);
+            assert_eq!(response.error_code, Some(ErrorCode::ContentTooLarge));
+            assert!(response.data.is_none());
+        }
+        assert_eq!(writes.count(), 0);
+
+        let listed = match list(&state, 4, 20, None).data {
+            Some(ResponseData::Page(page)) => page,
+            _ => panic!("list must return a page"),
+        };
+        assert!(listed.items[0].truncated);
+        assert!(listed.items[0].content.len() <= LIST_PREVIEW_BYTES);
+        assert!(serde_json::to_string(&listed).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
+
+        let searched = match search(&state, 5, "needle", 20).data {
+            Some(ResponseData::Page(page)) => page,
+            _ => panic!("search must return a page"),
+        };
+        assert!(searched.items[0].truncated);
+        assert!(searched.items[0].content.len() <= LIST_PREVIEW_BYTES);
+
+        for pinned in [true, false] {
+            let response = pin(&state, 6, "legacy-plus-one", pinned);
+            assert!(response.ok);
+            let item = match response.data {
+                Some(ResponseData::Item(item)) => item,
+                _ => panic!("pin must return its preview"),
+            };
+            assert!(item.truncated);
+            assert!(item.content.len() <= LIST_PREVIEW_BYTES);
+            assert!(serde_json::to_string(&item).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
+        }
+        for (index, content_type) in [
+            TEXT,
+            "text/plain",
+            copypaste_ipc::content_type::RICH_TEXT,
+            copypaste_ipc::content_type::HTML,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let id = format!("legacy-text-type-{index}");
+            let typed_body = format!(
+                "{index}{}",
+                "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES)
+            );
+            seed_legacy_text(&state, &id, &typed_body, content_type);
+            let response = get(&state, 7, &id);
+            assert_eq!(response.error_code, Some(ErrorCode::ContentTooLarge));
+            assert!(response.data.is_none());
+        }
+        assert_eq!(
+            state
+                .store
+                .get("legacy-plus-one")
+                .unwrap()
+                .unwrap()
+                .content_ciphertext,
+            before
+        );
+    }
+
+    #[test]
+    fn an_exact_limit_legacy_text_still_has_a_full_frame_safe_response() {
+        let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("legacy-exact");
+        let body = "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES);
+        seed_legacy_text(&state, "legacy-exact", &body, "text/plain");
+
+        let response = get(&state, 1, "legacy-exact");
+        assert!(response.ok);
+        assert!(serde_json::to_string(&response).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
+        assert_eq!(writes.count(), 0);
+    }
+
+    #[test]
+    fn pinning_an_ordinary_body_keeps_its_full_response() {
+        let (state, _dir) = test_state("ordinary-pin-response");
+        let body = "x".repeat(LIST_PREVIEW_BYTES * 2);
+        let item = match add(&state, 1, &body).data {
+            Some(ResponseData::Item(item)) => item,
+            _ => panic!("add must return an item"),
+        };
+
+        for pinned in [true, false] {
+            let response = pin(&state, 2, &item.id, pinned);
+            let updated = match response.data {
+                Some(ResponseData::Item(item)) => item,
+                _ => panic!("pin must return its item"),
+            };
+            assert_eq!(updated.content.len(), body.len());
+            assert!(!updated.truncated);
+        }
     }
 
     #[test]

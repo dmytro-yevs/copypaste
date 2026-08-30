@@ -14,9 +14,14 @@ use super::messages::{storage_error, MSG_ENCRYPT, MSG_IMPORT_EMPTY, MSG_IMPORT_T
 use crate::AppState;
 
 pub(super) fn export(state: &AppState, id: u64, limit: u32, include_sensitive: bool) -> Response {
-    match copypaste_core::export(&state.store, &state.keyring, limit, include_sensitive) {
+    match copypaste_core::transfer::export(&state.store, &state.keyring, limit, include_sensitive) {
         Ok(data) => Response::ok(id, ResponseData::Export(data)),
-        Err(e) => storage_error(id, "export", &e),
+        Err(copypaste_core::transfer::ExportError::ContentTooLarge) => Response::err(
+            id,
+            ErrorCode::ContentTooLarge,
+            super::messages::MSG_CONTENT_TOO_LARGE,
+        ),
+        Err(copypaste_core::transfer::ExportError::Store(e)) => storage_error(id, "export", &e),
     }
 }
 
@@ -68,6 +73,28 @@ mod tests {
     use crate::testutil::test_state;
     use copypaste_core::MAX_IMPORT_ITEMS;
     use copypaste_ipc::{ExportData, Method};
+
+    fn seed_legacy_text(state: &AppState, id: &str, content: &str, sensitive: bool) {
+        let key = state.keyring.item_key();
+        let (nonce, content_ciphertext) = copypaste_core::encrypt(content.as_bytes(), &key, id)
+            .expect("the current item key seals the direct legacy row");
+        state
+            .store
+            .insert(copypaste_core::NewItem {
+                id: id.to_string(),
+                content_ciphertext,
+                nonce,
+                content_type: copypaste_ipc::content_type::TEXT.to_string(),
+                content_hash: copypaste_core::compute_content_hash(content.as_bytes()),
+                is_sensitive: sensitive,
+                search_text: (!sensitive).then(|| content.to_string()),
+                created_at: copypaste_core::now_ms(),
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .expect("a pre-limit row is still a valid stored row");
+    }
 
     fn export_of(state: &AppState, include_sensitive: bool) -> ExportData {
         match export(state, 1, 0, include_sensitive).data {
@@ -232,5 +259,22 @@ mod tests {
         let response = import_of(&state, vec![item; MAX_IMPORT_ITEMS + 1]);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         assert_eq!(state.store.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn legacy_text_export_is_a_typed_non_retryable_refusal() {
+        let (state, _dir) = test_state("legacy-export");
+        seed_legacy_text(
+            &state,
+            "daemon-export-legacy",
+            &"\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1),
+            false,
+        );
+
+        let response = export(&state, 1, 0, false);
+        assert!(!response.ok);
+        assert_eq!(response.error_code, Some(ErrorCode::ContentTooLarge));
+        assert!(response.data.is_none());
+        assert!(!ErrorCode::ContentTooLarge.retryable());
     }
 }

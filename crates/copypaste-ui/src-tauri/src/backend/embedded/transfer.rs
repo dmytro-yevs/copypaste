@@ -7,6 +7,7 @@
 use copypaste_ipc::{ExportData, ExportItem, ImportData};
 
 use super::open::Inner;
+use super::rows::MSG_CONTENT_TOO_LARGE;
 use super::{BackendError, Result};
 
 const MSG_EXPORT_FAILED: &str = "Your history couldn't be read.";
@@ -20,15 +21,20 @@ const MSG_IMPORT_FAILED: &str = "That file couldn't be imported.";
 /// accounting is how the two platforms would come to disagree about what a short
 /// export means (AGENTS.md rule 1).
 pub(super) fn export(inner: &Inner, limit: u32, include_sensitive: bool) -> Result<ExportData> {
-    copypaste_core::export(
+    copypaste_core::transfer::export(
         &inner.state.store,
         &inner.state.keyring,
         limit,
         include_sensitive,
     )
-    .map_err(|e| {
-        tracing::warn!(error = ?e, "an export could not read the history");
-        BackendError::internal(MSG_EXPORT_FAILED)
+    .map_err(|e| match e {
+        copypaste_core::transfer::ExportError::ContentTooLarge => {
+            BackendError::ContentTooLarge(MSG_CONTENT_TOO_LARGE)
+        }
+        copypaste_core::transfer::ExportError::Store(e) => {
+            tracing::warn!(error = ?e, "an export could not read the history");
+            BackendError::internal(MSG_EXPORT_FAILED)
+        }
     })
 }
 
@@ -63,6 +69,30 @@ mod tests {
     use super::super::tests::backend;
     use super::*;
     use crate::backend::Backend;
+
+    fn seed_legacy_text(backend: &super::super::EmbeddedBackend, id: &str, content: &str) {
+        let key = backend.inner.state.keyring.item_key();
+        let (nonce, content_ciphertext) = copypaste_core::encrypt(content.as_bytes(), &key, id)
+            .expect("the current item key seals the direct legacy row");
+        backend
+            .inner
+            .state
+            .store
+            .insert(copypaste_core::NewItem {
+                id: id.to_string(),
+                content_ciphertext,
+                nonce,
+                content_type: copypaste_ipc::content_type::TEXT.to_string(),
+                content_hash: copypaste_core::compute_content_hash(content.as_bytes()),
+                is_sensitive: false,
+                search_text: Some(content.to_string()),
+                created_at: copypaste_core::now_ms(),
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .expect("a pre-limit row is still a valid stored row");
+    }
 
     /// The point of the move: on this platform these are operations, not
     /// refusals.
@@ -130,5 +160,19 @@ mod tests {
             backend.import(Vec::new()).await.unwrap_err(),
             BackendError::Invalid(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn an_authenticated_legacy_text_body_refuses_export_with_the_ipc_code() {
+        let (backend, _clip, _dir) = backend();
+        seed_legacy_text(
+            &backend,
+            "embedded-export-legacy",
+            &"\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1),
+        );
+        let error = backend.export(0, false).await.unwrap_err();
+        assert!(matches!(error, BackendError::ContentTooLarge(_)));
+        assert_eq!(error.ui_error().code, "content_too_large");
+        assert!(!error.ui_error().retryable);
     }
 }

@@ -22,7 +22,9 @@
         "reorder_pinned"
       ],
       "backend_tests": [
-        "cargo test -p copypaste-ipc -p copypaste-core"
+        "cargo test -p copypaste-ipc -p copypaste-core",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::items::tests::authenticated_legacy_text_refuses_full_paths_but_keeps_a_safe_preview'",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::legacy_text_refuses_full_operations_but_pin_returns_a_preview'"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -55,21 +57,26 @@
           "scenario": "./scripts/release/android-smoke.sh",
           "evidence_status": "pending",
           "unverified_states": [
-            "history-ui"
+            "history-ui",
+            "legacy-content-size-refusal"
           ]
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
           "evidence_status": "pending",
           "unverified_states": [
-            "history-ui"
+            "history-ui",
+            "legacy-content-size-refusal"
           ]
         },
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
-          "evidence_status": "verified",
+          "evidence_status": "partial",
           "evidence_states": [
             "populated"
+          ],
+          "unverified_states": [
+            "legacy-content-size-refusal"
           ],
           "release_artifact": "release-windows-native-evidence"
         }
@@ -314,7 +321,9 @@
         "cargo test -p copypaste-ui installed_source_apps",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key settings::tests'",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::config::tests'",
-        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::settings::tests'"
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::settings::tests'",
+        "cargo test -p copypaste-core transfer::export::tests::an_authenticated_legacy_text_body_over_the_limit_refuses_the_whole_export",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::transfer::tests::an_authenticated_legacy_text_body_refuses_export_with_the_ipc_code'"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -365,7 +374,8 @@
           "unverified_states": [
             "storage-transfer-persisted",
             "source-exclusion-catalog",
-            "live-settings-runtime-effects"
+            "live-settings-runtime-effects",
+            "legacy-content-size-refusal"
           ]
         },
         "macos": {
@@ -374,7 +384,8 @@
           "unverified_states": [
             "settings-ui",
             "source-exclusion-catalog",
-            "live-settings-runtime-effects"
+            "live-settings-runtime-effects",
+            "legacy-content-size-refusal"
           ]
         },
         "windows": {
@@ -386,7 +397,8 @@
           ],
           "unverified_states": [
             "source-exclusion-catalog",
-            "live-settings-runtime-effects"
+            "live-settings-runtime-effects",
+            "legacy-content-size-refusal"
           ],
           "release_artifact": "release-windows-native-evidence"
         }

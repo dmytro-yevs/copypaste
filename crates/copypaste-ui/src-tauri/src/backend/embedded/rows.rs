@@ -16,6 +16,12 @@ use crate::backend::{BackendError, Page, Result};
 pub(super) use copypaste_ipc::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 
 const MSG_NO_ITEM: &str = "That item is no longer there.";
+pub(super) const MSG_CONTENT_TOO_LARGE: &str =
+    "That older text item is too large to return or copy safely.";
+
+pub(super) fn bound_item_preview(item: &mut Item) {
+    item.truncated = copypaste_ipc::limits::bound_preview(&mut item.content);
+}
 
 impl Inner {
     /// Decrypt one stored row into its wire form.
@@ -109,7 +115,24 @@ impl Inner {
     }
 
     pub(super) fn fetch(&self, id: &str) -> Result<Item> {
-        self.fetch_with_payload(id).map(|(item, _)| item)
+        let (item, payload) = self.fetch_with_payload(id)?;
+        self.refuse_oversized_text(&payload)?;
+        Ok(item)
+    }
+
+    pub(super) fn fetch_preview(&self, id: &str) -> Result<Item> {
+        let (mut item, payload) = self.fetch_with_payload(id)?;
+        if is_oversized_text(&payload) {
+            bound_item_preview(&mut item);
+        }
+        Ok(item)
+    }
+
+    pub(super) fn refuse_oversized_text(&self, payload: &ClipboardPayload) -> Result<()> {
+        if is_oversized_text(payload) {
+            return Err(BackendError::ContentTooLarge(MSG_CONTENT_TOO_LARGE));
+        }
+        Ok(())
     }
 
     pub(super) fn fetch_with_payload(&self, id: &str) -> Result<(Item, ClipboardPayload)> {
@@ -151,6 +174,11 @@ impl Inner {
             height: thumbnail.height,
         })
     }
+}
+
+fn is_oversized_text(payload: &ClipboardPayload) -> bool {
+    matches!(payload, ClipboardPayload::Text(_))
+        && payload.byte_len() > copypaste_ipc::MAX_CONTENT_BYTES
 }
 
 /// The status this build can honestly report.

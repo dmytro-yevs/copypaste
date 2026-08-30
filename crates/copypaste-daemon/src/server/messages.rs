@@ -33,6 +33,8 @@ pub(super) const MSG_ENCRYPT: &str = "the item could not be encrypted";
 pub(super) const MSG_CLIPBOARD: &str = "the system clipboard could not be written";
 pub(super) const MSG_UNSUPPORTED_CONTENT: &str =
     "this item has no supported representation for that clipboard action";
+pub(super) const MSG_CONTENT_TOO_LARGE: &str =
+    "this legacy text item is too large to return or copy safely";
 pub(super) const MSG_INTERNAL: &str = "the daemon failed to process the request";
 pub(super) const MSG_WATCHERS_FULL: &str = "too many clients are already watching for changes";
 pub(super) const MSG_TOO_BIG: &str = "the item is larger than the configured size limit";
@@ -170,6 +172,7 @@ mod tests {
         MSG_ENCRYPT,
         MSG_CLIPBOARD,
         MSG_UNSUPPORTED_CONTENT,
+        MSG_CONTENT_TOO_LARGE,
         MSG_INTERNAL,
         MSG_WATCHERS_FULL,
         MSG_TOO_BIG,

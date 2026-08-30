@@ -27,6 +27,7 @@ const FRIENDLY = {
   key_locked: "errors.key_locked",
   key_unusable: "errors.key_unusable",
   unsupported_content: "errors.unsupported_content",
+  content_too_large: "errors.content_too_large",
   pairing_code: "errors.pairing_code",
   pairing_address: "errors.pairing_address",
   rate_limited: "errors.rate_limited",
