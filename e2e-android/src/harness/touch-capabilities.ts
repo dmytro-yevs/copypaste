@@ -17,6 +17,7 @@ export interface TouchCapabilityDiagnostic {
     anyHover: boolean | null;
   };
   dataPointer: "coarse" | "fine" | null;
+  maxTouchPoints: number | null;
   viewport: { width: number | null; height: number | null };
   tapMin: { value: number; unit: CssUnit } | null;
   controls: ReadonlyArray<{
@@ -108,6 +109,7 @@ export function normalizeTouchCapabilityDiagnostic(
       input.dataPointer === "coarse" || input.dataPointer === "fine"
         ? input.dataPointer
         : null,
+    maxTouchPoints: finiteNumber(input.maxTouchPoints),
     viewport: {
       width: finiteNumber(viewport.width),
       height: finiteNumber(viewport.height),
@@ -183,6 +185,7 @@ export function touchCapabilityPageProbe(knownSelectors: readonly string[]) {
     },
     dataPointer:
       dataPointer === "coarse" || dataPointer === "fine" ? dataPointer : null,
+    maxTouchPoints: number(globalThis.navigator?.maxTouchPoints),
     viewport: {
       width: number(document.documentElement.clientWidth),
       height: number(document.documentElement.clientHeight),
