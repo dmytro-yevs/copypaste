@@ -69,6 +69,12 @@ function Get-WindowsUiaCanaryExpectations {
     )
 }
 
+function Test-WindowsUiaCanaryClassName([string]$ObservedClassName, [string]$ExpectedClassName) {
+    if ($ObservedClassName -ceq $ExpectedClassName) { return $true }
+    $pattern = "^WindowsForms10\.$([regex]::Escape($ExpectedClassName))\.app\.0\.[0-9A-Fa-f]+_r[0-9]+_ad[0-9]+$"
+    return $ObservedClassName -cmatch $pattern
+}
+
 function Test-WindowsUiaCanaryMappings([object[]]$Facts) {
     $expected = @(Get-WindowsUiaCanaryExpectations)
     if (@($Facts).Count -ne $expected.Count) { return $false }
@@ -76,7 +82,7 @@ function Test-WindowsUiaCanaryMappings([object[]]$Facts) {
         $matches = @($Facts | Where-Object {
             $_ -is [Collections.IDictionary] -and
             $_["role"] -eq $requirement["role"] -and
-            $_["class_name"] -eq $requirement["class_name"] -and
+            (Test-WindowsUiaCanaryClassName $_["class_name"] $requirement["class_name"]) -and
             $_["control_type"] -eq $requirement["control_type"] -and
             $_["is_password"] -eq $requirement["is_password"] -and
             $_["configured_style_flags"] -eq $requirement["configured_style_flags"]
