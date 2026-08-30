@@ -184,7 +184,11 @@
         "pair_cancel"
       ],
       "backend_tests": [
-        "cargo test -p copypaste-p2p"
+        "cargo test -p copypaste-p2p",
+        "cargo test -p copypaste-p2p oversized_item",
+        "cargo test -p copypaste-core p2p_contract",
+        "cargo test -p copypaste-ipc --test wire_roundtrip",
+        "bash -c 'cd crates/copypaste-ui && npm exec -- vitest run src/hooks/useDevices.test.ts'"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -216,7 +220,7 @@
       "native": {
         "android": {
           "scenario": "./scripts/release/android-smoke-release.sh",
-          "evidence_status": "verified",
+          "evidence_status": "partial",
           "evidence_states": [
             {
               "state": "scan-pairing-code",
@@ -224,7 +228,10 @@
               "accessibility": "artifacts/release-android-physical/pairing-entry.xml"
             }
           ],
-          "release_artifact": "release-android-physical-evidence"
+          "release_artifact": "release-android-physical-evidence",
+          "unverified_states": [
+            "p2p-size-refusal-count"
+          ]
         },
         "macos": {
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
@@ -238,15 +245,19 @@
           ],
           "unverified_states": [
             "desktop-pairing-entry",
-            "desktop-pairing-invite"
+            "desktop-pairing-invite",
+            "p2p-size-refusal-count"
           ],
           "release_artifact": "release-macos-native-evidence"
         },
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
-          "evidence_status": "verified",
+          "evidence_status": "partial",
           "evidence_states": [
             "desktop-pairing-entry"
+          ],
+          "unverified_states": [
+            "p2p-size-refusal-count"
           ],
           "release_artifact": "release-windows-native-evidence"
         }

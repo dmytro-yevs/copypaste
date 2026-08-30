@@ -52,6 +52,7 @@ fn sync_result() -> SyncResult {
         name: "Phone".into(),
         sent: 1,
         received: 2,
+        skipped_too_large: Some(0),
         duration_ms: Some(42),
         error: None,
         error_code: None,
@@ -319,6 +320,7 @@ fn sync_error_code_is_additive_and_omitted_when_absent() {
     });
     let old: SyncResult = serde_json::from_value(old_wire.clone()).unwrap();
     assert_eq!(old.error_code, None);
+    assert_eq!(old.skipped_too_large, None);
     assert_eq!(serde_json::to_value(old).unwrap(), old_wire);
 
     let current = SyncResult {
@@ -329,6 +331,36 @@ fn sync_error_code_is_additive_and_omitted_when_absent() {
         serde_json::to_value(current).unwrap()["error_code"],
         "peer_unreachable"
     );
+}
+
+#[test]
+fn sync_size_refusal_count_is_additive_and_strict_when_present() {
+    let current = SyncResult {
+        skipped_too_large: Some(3),
+        ..sync_result()
+    };
+    assert_eq!(
+        serde_json::to_value(current).unwrap()["skipped_too_large"],
+        3
+    );
+
+    for value in [
+        json!(null),
+        json!(-1),
+        json!(1.5),
+        json!("3"),
+        json!(4_294_967_296u64),
+    ] {
+        let invalid = json!({
+            "pairing_id": "peer-1",
+            "name": "Phone",
+            "sent": 0,
+            "received": 0,
+            "error": null,
+            "skipped_too_large": value,
+        });
+        assert!(serde_json::from_value::<SyncResult>(invalid).is_err());
+    }
 }
 
 #[test]

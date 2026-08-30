@@ -246,6 +246,9 @@ pub fn sync_result(
             name: outcome.peer_device_name,
             sent: u32::try_from(outcome.stats.sent).unwrap_or(u32::MAX),
             received: u32::try_from(outcome.stats.received).unwrap_or(u32::MAX),
+            skipped_too_large: Some(
+                u32::try_from(outcome.stats.skipped_too_large).unwrap_or(u32::MAX),
+            ),
             duration_ms: Some(duration_ms),
             error: None,
             error_code: None,
@@ -255,6 +258,7 @@ pub fn sync_result(
             name: peer.name.clone(),
             sent: 0,
             received: 0,
+            skipped_too_large: None,
             duration_ms: Some(duration_ms),
             error: Some(error.to_string()),
             error_code: Some(node_error_code(&error)),
@@ -281,5 +285,55 @@ pub fn node_error_code(error: &NodeError) -> ErrorCode {
         NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
         NodeError::PeerVersion => ErrorCode::PeerVersion,
         NodeError::NoPeer => ErrorCode::PeerNotFound,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use copypaste_p2p::sync::{SyncCursor, SyncStats};
+    use copypaste_p2p::transport::TOKEN_LEN;
+
+    fn peer() -> Peer {
+        Peer {
+            pairing_id: "peer-1".into(),
+            name: "Phone".into(),
+            psk: [1; TOKEN_LEN],
+            last_addr: None,
+            last_seen_ms: 0,
+        }
+    }
+
+    fn outcome(skipped_too_large: usize) -> SyncOutcome {
+        SyncOutcome {
+            stats: SyncStats {
+                sent: 1,
+                received: 2,
+                skipped: 3,
+                skipped_too_large,
+            },
+            peer_device_id: "device-1".into(),
+            peer_device_name: "Phone".into(),
+            peer_profile: None,
+            peer_listen_addr: None,
+            cursor: SyncCursor::default(),
+            applied_floor: None,
+        }
+    }
+
+    #[test]
+    fn successful_sync_projects_a_saturated_size_refusal_count() {
+        let result = sync_result(
+            &peer(),
+            Ok(outcome((u32::MAX as usize).saturating_add(1))),
+            std::time::Duration::ZERO,
+        );
+        assert_eq!(result.skipped_too_large, Some(u32::MAX));
+    }
+
+    #[test]
+    fn failed_sync_keeps_size_refusal_count_unknown() {
+        let result = sync_result(&peer(), Err(NodeError::Timeout), std::time::Duration::ZERO);
+        assert_eq!(result.skipped_too_large, None);
     }
 }

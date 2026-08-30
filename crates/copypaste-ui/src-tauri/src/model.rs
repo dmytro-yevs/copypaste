@@ -325,6 +325,9 @@ pub struct UiSyncResult {
     name: String,
     sent: u32,
     received: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    skipped_too_large: Option<u32>,
     duration_ms: Option<u64>,
     error: Option<UiError>,
 }
@@ -340,6 +343,7 @@ impl From<SyncResult> for UiSyncResult {
             name: result.name,
             sent: result.sent,
             received: result.received,
+            skipped_too_large: result.skipped_too_large,
             duration_ms: result.duration_ms,
             error,
         }
@@ -472,6 +476,7 @@ mod tests {
             name: "Phone".into(),
             sent: 0,
             received: 0,
+            skipped_too_large: None,
             duration_ms: Some(750),
             error: Some("timed out at /Users/alice/.copypaste.sock".into()),
             error_code: Some(copypaste_ipc::ErrorCode::PeerUnreachable),
@@ -482,6 +487,7 @@ mod tests {
             "{json}"
         );
         assert!(json.contains(r#""duration_ms":750"#), "{json}");
+        assert!(!json.contains("skipped_too_large"), "{json}");
         assert!(!json.contains("alice"), "{json}");
         assert!(!json.contains("sock"), "{json}");
         assert!(!json.contains("timed out"), "{json}");
@@ -494,6 +500,7 @@ mod tests {
             name: "Phone".into(),
             sent: 0,
             received: 0,
+            skipped_too_large: None,
             duration_ms: None,
             error: Some("some future failure".into()),
             error_code: None,
@@ -504,5 +511,21 @@ mod tests {
             "{json}"
         );
         assert!(!json.contains("future failure"), "{json}");
+    }
+
+    #[test]
+    fn sync_size_refusal_count_reaches_the_webview_only_when_known() {
+        let result = UiSyncResult::from(SyncResult {
+            pairing_id: "peer-1".into(),
+            name: "Phone".into(),
+            sent: 1,
+            received: 2,
+            skipped_too_large: Some(3),
+            duration_ms: Some(750),
+            error: None,
+            error_code: None,
+        });
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains(r#""skipped_too_large":3"#), "{json}");
     }
 }

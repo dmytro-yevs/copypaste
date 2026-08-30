@@ -118,6 +118,17 @@ describe("preview scenario service", () => {
     });
   });
 
+  it("reports an explicit zero size-refusal count for preview sync success", async () => {
+    const store = createPreviewScenarioStore(null);
+    const intercept = createPreviewInterceptor(store);
+    store.getState().addDevice({ ...PHONE, paired: true });
+
+    await expect(intercept("sync_now")).resolves.toMatchObject({
+      handled: true,
+      value: [{ skipped_too_large: 0 }],
+    });
+  });
+
   it("keeps explicit discovery authoritative across environment changes", async () => {
     const store = createPreviewScenarioStore(window.sessionStorage);
     store.getState().addDevice(WINDOWS_PC);

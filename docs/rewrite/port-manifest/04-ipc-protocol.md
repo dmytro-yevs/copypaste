@@ -151,6 +151,18 @@ as a known code and do not acquire a guessed retry policy.
 - Export excludes sensitive content unless the explicit include flag is true.
 - Restore requires affirmative confirmation before any replacement work.
 
+### 5.2.1 Sync size-refusal count
+
+Each successful P2P `SyncResult` carries `skipped_too_large` when the daemon
+has final session statistics. It is the saturated count of locally withheld
+outgoing live items that exceeded the P2P payload limit; it does not classify
+replay, merge, crypto, protocol, or remote-ingress skips. A current successful
+daemon sends zero explicitly only when it withheld no oversized items. Omission
+means the daemon did not report a final count, including failed sessions, and
+clients must present it as unknown rather than zero. On the wire, a present
+value must be an unsigned 32-bit integer;
+`null`, negative, fractional, string, and overflowing values are invalid.
+
 ### 5.3 Read-only versus side-effecting operations
 
 Showing item detail uses a read-only operation. It must not write the plaintext

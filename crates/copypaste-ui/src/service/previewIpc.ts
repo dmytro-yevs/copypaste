@@ -388,6 +388,7 @@ export function createPreviewInterceptor(
                         name: device.name,
                         sent: 1,
                         received: 1,
+                        skipped_too_large: 0,
                         duration_ms: device.latencyMs,
                         error: null,
                     })),

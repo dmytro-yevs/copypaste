@@ -67,6 +67,7 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
                     "item is too large to send; skipping it"
                 );
                 stats.skipped += 1;
+                stats.skipped_too_large += 1;
                 continue;
             }
 
@@ -172,6 +173,7 @@ mod tests {
 
         assert_eq!(stats.sent, 1);
         assert_eq!(stats.skipped, 1);
+        assert_eq!(stats.skipped_too_large, 1);
         assert!(
             source.get("oversized").is_some(),
             "the source row was deleted"

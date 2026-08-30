@@ -489,6 +489,7 @@ mod tests {
             // the whole idempotency mechanism: an already-applied version
             // compares equal and loses.
             assert_eq!(o.stats.skipped, 2);
+            assert_eq!(o.stats.skipped_too_large, 0);
         }
     }
 
@@ -654,6 +655,7 @@ mod tests {
             .unwrap();
         assert!(a.get("x").is_none());
         assert_eq!(outcome.stats.skipped, 1);
+        assert_eq!(outcome.stats.skipped_too_large, 0);
     }
 
     /// The peer's `content_hash` is comparator key 2, so a peer that is believed
@@ -693,6 +695,7 @@ mod tests {
         assert!(a.get("x").is_none(), "a forged content_hash was applied");
         assert_eq!(outcome.stats.received, 0);
         assert_eq!(outcome.stats.skipped, 1);
+        assert_eq!(outcome.stats.skipped_too_large, 0);
     }
 
     /// The exemption that must survive the check: a tombstone carries the hash of
@@ -924,6 +927,8 @@ mod tests {
         let (oa, ob) = session(&a, &b).await;
         assert_eq!(oa.stats.sent, 1);
         assert_eq!(ob.stats.received, 1);
+        assert_eq!(oa.stats.skipped_too_large, 1);
+        assert_eq!(ob.stats.skipped_too_large, 0);
         assert!(b.get("fine").is_some());
         assert!(b.get("huge").is_none());
     }

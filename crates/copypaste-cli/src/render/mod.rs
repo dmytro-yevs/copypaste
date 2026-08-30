@@ -257,13 +257,16 @@ pub fn sync_table(results: &[SyncResult], empty: &str) -> String {
     let mut table = Table::new();
     table.load_preset(presets::UTF8_HORIZONTAL_ONLY);
     table.set_content_arrangement(ContentArrangement::Disabled);
-    table.set_header(vec!["PEER", "SENT", "RECEIVED", "RESULT"]);
+    table.set_header(vec!["PEER", "SENT", "RECEIVED", "TOO LARGE", "RESULT"]);
 
     for result in results {
         table.add_row(vec![
             one_line(&result.name, 24),
             result.sent.to_string(),
             result.received.to_string(),
+            result
+                .skipped_too_large
+                .map_or_else(|| "unknown".to_string(), |count| count.to_string()),
             match &result.error {
                 // Already a fixed sentence from the daemon; scrubbed anyway,
                 // because this CLI is what the user actually reads.
@@ -572,6 +575,7 @@ mod tests {
             name: "phone".into(),
             sent: 3,
             received: 2,
+            skipped_too_large: Some(0),
             duration_ms: Some(25),
             error: error.map(str::to_string),
             error_code: None,
@@ -596,6 +600,18 @@ mod tests {
             "none",
         );
         assert!(!table.contains("dmitriy"), "{table}");
+    }
+
+    #[test]
+    fn sync_table_reports_known_and_unknown_size_refusal_counts() {
+        let mut known = sync_result(None);
+        known.skipped_too_large = Some(2);
+        let mut unknown = sync_result(None);
+        unknown.skipped_too_large = None;
+        let table = sync_table(&[known, unknown], "none");
+        assert!(table.contains("TOO LARGE"), "{table}");
+        assert!(table.contains('2'), "{table}");
+        assert!(table.contains("unknown"), "{table}");
     }
 
     #[test]

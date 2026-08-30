@@ -118,11 +118,7 @@ export function useSyncNow() {
 
       if (results.length === 0) {
         toast(t("devices.toast.nothingToSync"));
-      } else if (failed.length === 0) {
-        toast.success(
-          t("devices.toast.synced", { count: results.length, sent, received }),
-        );
-      } else {
+      } else if (failed.length > 0) {
         // Per-peer errors are structured; the toast reports aggregate work and
         // each row localizes its own code (INV-12).
         toast.warning(
@@ -132,6 +128,46 @@ export function useSyncNow() {
             failed: failed.length,
           }),
         );
+      } else {
+        const missingSizeCounts = results.some(
+          (result) => result.skipped_too_large === undefined,
+        );
+        const skippedTooLarge = results.reduce(
+          (count, result) => count + (result.skipped_too_large ?? 0),
+          0,
+        );
+
+        if (missingSizeCounts && skippedTooLarge > 0) {
+          toast.warning(
+            t("devices.toast.syncedWithKnownSizeRefusals", {
+              count: results.length,
+              sent,
+              received,
+              skipped: skippedTooLarge,
+            }),
+          );
+        } else if (missingSizeCounts) {
+          toast.warning(
+            t("devices.toast.syncedWithUnknownSizeRefusals", {
+              count: results.length,
+              sent,
+              received,
+            }),
+          );
+        } else if (skippedTooLarge > 0) {
+          toast.warning(
+            t("devices.toast.syncedWithSizeRefusals", {
+              count: results.length,
+              sent,
+              received,
+              skipped: skippedTooLarge,
+            }),
+          );
+        } else {
+          toast.success(
+            t("devices.toast.synced", { count: results.length, sent, received }),
+          );
+        }
       }
       void invalidateHistoryQueries(qc);
       void qc.invalidateQueries({ queryKey: PEERS_KEY });
