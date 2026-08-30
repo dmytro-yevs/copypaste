@@ -269,6 +269,46 @@ mod tests {
     use super::*;
     use crate::backend::testing::FakeBackend;
     use copypaste_ipc::DiagnosticCounters;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Corpus {
+        display_leak_cases: Vec<DisplayCase>,
+        safe_display_cases: Vec<SafeCase>,
+        #[serde(default)]
+        redaction_cases: Vec<RedactionCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DisplayCase {
+        id: String,
+        surface: String,
+        expected_surface: String,
+        forbidden_fragments: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct SafeCase {
+        id: String,
+        surface: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RedactionCase {
+        id: String,
+        surface: String,
+        forbidden_fragments: Vec<String>,
+    }
+
+    fn corpus() -> Corpus {
+        serde_json::from_str(include_str!(
+            "../../../../../test-support/security/path-security-vectors.json"
+        ))
+        .expect("path security corpus is valid")
+    }
 
     /// Every free-text field a hostile or broken daemon could fill, filled with
     /// the thing rule 4 exists to keep out. The socket path is the real one:
@@ -314,6 +354,21 @@ mod tests {
     /// sanitising step is part of what is under test.
     fn report_of(service: ServiceState, status: Option<StatusData>) -> String {
         Diagnostics::new(service, status, HistoryRead::Readable).report
+    }
+
+    fn diagnostics_for_surface(surface: &str) -> Diagnostics {
+        let mut status = status();
+        status.version = surface.into();
+        status.clipboard_backend = surface.into();
+        Diagnostics::new(
+            ServiceState::Running {
+                version: surface.into(),
+                matches_app: true,
+                ours: true,
+            },
+            Some(status),
+            HistoryRead::Readable,
+        )
     }
 
     #[tokio::test]
@@ -489,5 +544,67 @@ mod tests {
         )
         .report;
         assert!(text.contains("history-read: failed (internal)"), "{text}");
+    }
+
+    #[test]
+    fn diagnostics_snapshot_and_report_path_security_corpus() {
+        let corpus = corpus();
+        for case in corpus.display_leak_cases {
+            let diagnostics = diagnostics_for_surface(&case.surface);
+            let rendered = serde_json::to_string(&diagnostics).unwrap();
+            assert!(
+                rendered.contains(REDACTED),
+                "{} did not fail closed",
+                case.id
+            );
+            assert!(
+                !rendered.contains(&case.surface),
+                "{} was not redacted",
+                case.id
+            );
+            assert!(
+                !diagnostics.report.contains(&case.surface),
+                "{} reached report",
+                case.id
+            );
+            assert!(
+                case.expected_surface.contains("<path>"),
+                "{} lacks a redaction expectation",
+                case.id
+            );
+            for fragment in case.forbidden_fragments {
+                assert!(
+                    !rendered.contains(&fragment),
+                    "{} kept a forbidden fragment",
+                    case.id
+                );
+                assert!(
+                    !diagnostics.report.contains(&fragment),
+                    "{} reached report",
+                    case.id
+                );
+            }
+        }
+        for case in corpus.safe_display_cases {
+            let diagnostics = diagnostics_for_surface(&case.surface);
+            let rendered = serde_json::to_string(&diagnostics).unwrap();
+            assert!(!rendered.contains(REDACTED), "{} was changed", case.id);
+        }
+        for case in corpus.redaction_cases {
+            let diagnostics = diagnostics_for_surface(&case.surface);
+            let rendered = serde_json::to_string(&diagnostics).unwrap();
+            for fragment in case.forbidden_fragments {
+                assert!(
+                    !rendered.contains(&fragment),
+                    "{} kept a forbidden fragment",
+                    case.id
+                );
+                assert!(
+                    !diagnostics.report.contains(&fragment),
+                    "{} reached report",
+                    case.id
+                );
+            }
+        }
     }
 }

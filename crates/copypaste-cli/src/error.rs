@@ -152,6 +152,47 @@ pub use copypaste_ipc::redact::scrub_paths;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Corpus {
+        display_leak_cases: Vec<DisplayCase>,
+        safe_display_cases: Vec<SafeCase>,
+        #[serde(default)]
+        redaction_cases: Vec<RedactionCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DisplayCase {
+        id: String,
+        surface: String,
+        expected_surface: String,
+        forbidden_fragments: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct SafeCase {
+        id: String,
+        surface: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RedactionCase {
+        id: String,
+        surface: String,
+        expected_surface: String,
+        forbidden_fragments: Vec<String>,
+    }
+
+    fn corpus() -> Corpus {
+        serde_json::from_str(include_str!(
+            "../../../test-support/security/path-security-vectors.json"
+        ))
+        .expect("path security corpus is valid")
+    }
 
     #[test]
     fn unreachable_daemon_exits_one() {
@@ -308,5 +349,48 @@ mod tests {
     #[test]
     fn scrub_preserves_whitespace_layout() {
         assert_eq!(scrub_paths("a  b\nc"), "a  b\nc");
+    }
+
+    #[test]
+    fn cli_error_path_security_corpus() {
+        let corpus = corpus();
+        for case in corpus.display_leak_cases {
+            let rendered = CliError::local(&case.surface).user_message();
+            assert_eq!(
+                rendered, case.expected_surface,
+                "{} rendered unexpectedly",
+                case.id
+            );
+            for fragment in case.forbidden_fragments {
+                assert!(
+                    !rendered.contains(&fragment),
+                    "{} kept a forbidden fragment",
+                    case.id
+                );
+            }
+        }
+        for case in corpus.safe_display_cases {
+            assert_eq!(
+                CliError::local(&case.surface).user_message(),
+                case.surface,
+                "{} was changed",
+                case.id
+            );
+        }
+        for case in corpus.redaction_cases {
+            let rendered = CliError::local(&case.surface).user_message();
+            assert_eq!(
+                rendered, case.expected_surface,
+                "{} rendered unexpectedly",
+                case.id
+            );
+            for fragment in case.forbidden_fragments {
+                assert!(
+                    !rendered.contains(&fragment),
+                    "{} kept a forbidden fragment",
+                    case.id
+                );
+            }
+        }
     }
 }
