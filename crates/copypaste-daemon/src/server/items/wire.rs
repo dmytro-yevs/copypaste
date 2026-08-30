@@ -6,6 +6,15 @@ use tracing::warn;
 
 use crate::AppState;
 
+pub(super) fn is_oversized_text(payload: &ClipboardPayload) -> bool {
+    matches!(payload, ClipboardPayload::Text(_))
+        && payload.byte_len() > copypaste_ipc::MAX_CONTENT_BYTES
+}
+
+pub(super) fn bound_item_preview(item: &mut Item) {
+    item.truncated = copypaste_ipc::limits::bound_preview(&mut item.content);
+}
+
 /// Decrypt a stored row into its wire form, resolving its origin as it goes.
 ///
 /// [`decrypt_rows`] batches origin lookup for a whole page.

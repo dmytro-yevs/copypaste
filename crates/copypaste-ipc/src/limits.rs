@@ -64,6 +64,15 @@ pub fn clamp_page(limit: u32, default: u32) -> u32 {
 pub const LIST_PREVIEW_BYTES: usize = 1024;
 
 pub fn bound_preview(content: &mut String) -> bool {
+    if content.len() > MAX_CONTENT_BYTES {
+        let first = unicode_segmentation::UnicodeSegmentation::graphemes(content.as_str(), true)
+            .next()
+            .map_or(0, str::len);
+        if first > MAX_CONTENT_BYTES {
+            content.clear();
+            return true;
+        }
+    }
     if content.len() <= LIST_PREVIEW_BYTES {
         return false;
     }
@@ -126,6 +135,28 @@ mod tests {
         let mut content = cluster.clone();
         assert!(bound_preview(&mut content));
         assert_eq!(content, cluster);
+    }
+
+    #[test]
+    fn a_maximal_grapheme_survives_but_an_oversized_one_is_not_split() {
+        let maximal = format!("\u{e9}{}", "\u{301}".repeat((MAX_CONTENT_BYTES - 2) / 2));
+        assert_eq!(maximal.len(), MAX_CONTENT_BYTES);
+        let mut content = maximal.clone();
+        assert!(bound_preview(&mut content));
+        assert_eq!(content, maximal);
+
+        let mut oversized = format!("a{}", "\u{301}".repeat(MAX_CONTENT_BYTES / 2));
+        assert_eq!(oversized.len(), MAX_CONTENT_BYTES + 1);
+        assert!(bound_preview(&mut oversized));
+        assert!(oversized.is_empty());
+    }
+
+    #[test]
+    fn ordinary_oversized_text_keeps_its_soft_preview() {
+        let mut content = "\u{1}".repeat(MAX_CONTENT_BYTES + 1);
+        content.replace_range(..1, "a");
+        assert!(bound_preview(&mut content));
+        assert_eq!(content.len(), LIST_PREVIEW_BYTES);
     }
 
     #[test]
