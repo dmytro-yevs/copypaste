@@ -296,15 +296,12 @@ tap_selector() { # <selector> <artifact> [timeout]
 }
 
 reach_settings_tab() { # <artifact> [timeout]
-    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}" started="$SECONDS"
-    while (( SECONDS - started < timeout )); do
-        if dump_hierarchy "$artifact"; then
-            [[ -n "$(action_center "$artifact" "Settings")" ]] && return 0
-            tap_selector_scrolling "Explore first" "$artifact" up 8 || true
-        fi
-        sleep 1
-    done
-    return 1
+    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}"
+    tap_until_state "Explore first" "$artifact" settings_tab_holds up "$timeout"
+}
+
+settings_tab_holds() { # <artifact>
+    enabled_action_exists_exact "$1" "Settings"
 }
 
 screen_size() {
