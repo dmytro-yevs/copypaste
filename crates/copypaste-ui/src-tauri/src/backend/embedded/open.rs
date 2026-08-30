@@ -120,7 +120,25 @@ impl EmbeddedBackend {
         self.inner
             .node
             .get_or_try_init(|| PeerNode::start(&self.inner))
-            .await
+            .await?;
+        self.blocking(|inner| {
+            let node = inner
+                .node
+                .get()
+                .ok_or_else(|| BackendError::internal("the peer node did not start"))?;
+            inner
+                .state
+                .settings
+                .reconcile_lan_visibility_after_node_publish(|visible| {
+                    node.set_lan_visibility(visible);
+                });
+            Ok(())
+        })
+        .await?;
+        self.inner
+            .node
+            .get()
+            .ok_or_else(|| BackendError::internal("the peer node did not start"))
     }
 
     /// Run blocking work off the reactor.

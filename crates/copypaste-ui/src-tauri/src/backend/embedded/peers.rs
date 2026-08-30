@@ -286,6 +286,10 @@ impl PeerNode {
         self.node.set_device_name(device_name);
     }
 
+    pub(super) fn set_lan_visibility(&self, visible: bool) {
+        self.node.set_lan_visibility(visible);
+    }
+
     pub(super) fn note_cloud_version_applied(&self, created_at: i64) {
         // No peer to hold back: a row from the cloud is new to all of them.
         self.node.cursors().note_local(created_at);

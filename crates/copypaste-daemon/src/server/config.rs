@@ -60,7 +60,14 @@ where
 
 fn apply_runtime_effects(state: &AppState, transition: &SettingsTransition) {
     if transition.should_enforce_retention() {
-        copypaste_core::ingest::enforce_retention(&state.store, transition.config());
+        let removed =
+            copypaste_core::retention::enforce_retention_report(&state.store, transition.config());
+        if removed > 0 {
+            // Retention is local housekeeping, not a sync deletion. This only
+            // wakes watchers; `note_local_change` would advance transport
+            // cursors for rows that must remain local to this device.
+            state.note_remote_change();
+        }
     }
     if transition.lan_visibility_changed() {
         state
@@ -184,6 +191,7 @@ mod tests {
         for n in 0..51 {
             crate::testutil::add(&state, &format!("history item {n}"));
         }
+        let mut events = state.subscribe();
 
         let result = applied(call(
             &state,
@@ -196,6 +204,26 @@ mod tests {
         ));
         assert_eq!(result.config.history_limit, 50);
         assert_eq!(state.store.count().unwrap(), 50);
+        let event = events
+            .try_recv()
+            .expect("the real sweep must wake watchers");
+        assert_eq!(event.event, copypaste_ipc::EventKind::Items);
+        assert!(!event.captured);
+        assert_eq!(event.swept, 0, "ordinary retention is not an auto-wipe");
+
+        let _ = call(
+            &state,
+            Method::SetConfig {
+                patch: ConfigPatch {
+                    poll_interval_ms: Some(250),
+                    ..Default::default()
+                },
+            },
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "an unrelated settings save emitted an Items event"
+        );
     }
 
     /// F-01. The first request cannot leave a destructive sweep behind after a

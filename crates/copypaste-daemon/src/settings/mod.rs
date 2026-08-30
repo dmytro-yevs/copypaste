@@ -93,11 +93,7 @@ impl SettingsTransition {
     }
 
     pub(crate) fn should_enforce_retention(&self) -> bool {
-        self.applied.config.storage_quota_bytes < self.before.storage_quota_bytes
-            || self.applied.config.history_limit < self.before.history_limit
-            || (self.applied.config.retention_days > 0
-                && (self.before.retention_days == 0
-                    || self.applied.config.retention_days < self.before.retention_days))
+        copypaste_core::retention::policy_tightened(&self.before, &self.applied.config)
     }
 
     pub(crate) fn lan_visibility_changed(&self) -> bool {

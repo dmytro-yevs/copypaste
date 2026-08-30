@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 use copypaste_ipc::{ConfigApplied, ConfigData, ConfigPatch, PrivateModeData, SettingsHealth};
 
@@ -23,6 +23,7 @@ pub(super) struct SettingsSnapshot {
 pub(super) struct EmbeddedSettings {
     path: PathBuf,
     current: RwLock<SettingsSnapshot>,
+    applying: Mutex<()>,
 }
 
 impl EmbeddedSettings {
@@ -52,6 +53,7 @@ impl EmbeddedSettings {
                 private_mode_epoch: 0,
                 health,
             }),
+            applying: Mutex::new(()),
         }
     }
 
@@ -62,33 +64,61 @@ impl EmbeddedSettings {
             .clone()
     }
 
-    fn apply(&self, inner: &Inner, patch: &ConfigPatch) -> Result<AppliedSettings> {
-        let mut current = self
-            .current
-            .write()
+    fn apply(&self, patch: &ConfigPatch) -> Result<AppliedSettings> {
+        self.apply_with_effects(patch, |_| {})
+    }
+
+    fn apply_with_effects<F>(&self, patch: &ConfigPatch, effects: F) -> Result<AppliedSettings>
+    where
+        F: FnOnce(&SettingsTransition),
+    {
+        let _serialised = self
+            .applying
+            .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = self.snapshot();
         let next = patch
-            .apply(&current.config)
+            .apply(&before.config)
             .map_err(|_| BackendError::Invalid(MSG_INVALID_SETTING))?;
         let next_epoch = if patch.private_mode.is_some() {
-            current
+            before
                 .private_mode_epoch
                 .checked_add(1)
                 .ok_or_else(|| BackendError::internal(MSG_SAVE_FAILED))?
         } else {
-            current.private_mode_epoch
+            before.private_mode_epoch
         };
         write_settings(&self.path, &next)?;
+        let mut current = self
+            .current
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         current.config = next.clone();
         current.private_mode_epoch = next_epoch;
         // The record on disk is this one now, so the degraded state is over.
         // Leaving it set would keep warning a user who had already repaired it.
         current.health = None;
-        inner.publish_items(false, 0);
-        Ok(AppliedSettings {
-            config: next,
-            private_mode_epoch: next_epoch,
-        })
+        drop(current);
+        let transition = SettingsTransition {
+            before: before.config,
+            applied: AppliedSettings {
+                config: next,
+                private_mode_epoch: next_epoch,
+            },
+        };
+        effects(&transition);
+        Ok(transition.applied)
+    }
+
+    pub(super) fn reconcile_lan_visibility_after_node_publish<F>(&self, apply: F)
+    where
+        F: FnOnce(bool),
+    {
+        let _serialised = self
+            .applying
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        apply(self.snapshot().config.lan_visibility);
     }
 
     #[cfg(test)]
@@ -100,6 +130,30 @@ impl EmbeddedSettings {
 struct AppliedSettings {
     config: ConfigData,
     private_mode_epoch: u64,
+}
+
+struct SettingsTransition {
+    before: ConfigData,
+    applied: AppliedSettings,
+}
+
+impl SettingsTransition {
+    fn config(&self) -> &ConfigData {
+        &self.applied.config
+    }
+
+    fn should_enforce_retention(&self) -> bool {
+        copypaste_core::retention::policy_tightened(&self.before, &self.applied.config)
+    }
+
+    fn lan_visibility_changed(&self) -> bool {
+        self.applied.config.lan_visibility != self.before.lan_visibility
+    }
+
+    fn sync_enabled_changed(&self) -> Option<bool> {
+        (self.applied.config.sync_enabled != self.before.sync_enabled)
+            .then_some(self.applied.config.sync_enabled)
+    }
 }
 
 /// Why there are no stored settings to start from.
@@ -163,24 +217,44 @@ pub(super) async fn get(backend: &EmbeddedBackend) -> Result<ConfigApplied> {
 }
 
 pub(super) async fn set(backend: &EmbeddedBackend, patch: ConfigPatch) -> Result<ConfigApplied> {
-    let sync_enabled = patch.sync_enabled;
-    let applied = backend
+    backend
         .blocking(move |inner| {
             let restart_required = copypaste_ipc::ConfigData::restart_required_by(&patch)
                 .into_iter()
                 .map(str::to_string)
                 .collect();
-            let applied = inner.state.settings.apply(inner, &patch)?;
+            let applied = inner
+                .state
+                .settings
+                .apply_with_effects(&patch, |transition| {
+                    apply_runtime_effects(inner, transition);
+                })?;
             Ok(ConfigApplied {
                 config: applied.config,
                 restart_required,
             })
         })
-        .await?;
-    if let Some(enabled) = sync_enabled {
-        backend.inner.cloud.sync_enabled_changed(enabled);
+        .await
+}
+
+fn apply_runtime_effects(inner: &Inner, transition: &SettingsTransition) {
+    if transition.should_enforce_retention() {
+        let removed = copypaste_core::retention::enforce_retention_report(
+            &inner.state.store,
+            transition.config(),
+        );
+        if removed > 0 {
+            inner.publish_items(false, 0);
+        }
     }
-    Ok(applied)
+    if transition.lan_visibility_changed() {
+        if let Some(node) = inner.node.get() {
+            node.set_lan_visibility(transition.config().lan_visibility);
+        }
+    }
+    if let Some(enabled) = transition.sync_enabled_changed() {
+        inner.cloud.sync_enabled_changed(enabled);
+    }
 }
 
 pub(super) async fn get_private_mode(backend: &EmbeddedBackend) -> Result<PrivateModeData> {
@@ -201,13 +275,10 @@ pub(super) async fn set_private_mode(
 ) -> Result<PrivateModeData> {
     backend
         .blocking(move |inner| {
-            let applied = inner.state.settings.apply(
-                inner,
-                &ConfigPatch {
-                    private_mode: Some(enabled),
-                    ..ConfigPatch::default()
-                },
-            )?;
+            let applied = inner.state.settings.apply(&ConfigPatch {
+                private_mode: Some(enabled),
+                ..ConfigPatch::default()
+            })?;
             Ok(PrivateModeData {
                 private_mode: applied.config.private_mode,
                 private_mode_epoch: applied.private_mode_epoch,
@@ -379,6 +450,158 @@ mod tests {
         assert!(
             repaired.settings_health.is_none(),
             "the notice outlived the record it was warning about"
+        );
+    }
+
+    #[test]
+    fn persisting_does_not_hold_the_settings_reader_lock() {
+        let (_dir, path) = stored(None);
+        let settings = std::sync::Arc::new(EmbeddedSettings::open(path.clone()));
+        let held = settings
+            .current
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let writer = {
+            let settings = std::sync::Arc::clone(&settings);
+            std::thread::spawn(move || {
+                settings.apply(&ConfigPatch {
+                    poll_interval_ms: Some(250),
+                    ..ConfigPatch::default()
+                })
+            })
+        };
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut persisted = false;
+        while std::time::Instant::now() < deadline {
+            if fs::read(&path)
+                .ok()
+                .and_then(|raw| serde_json::from_slice::<ConfigData>(&raw).ok())
+                .is_some_and(|config| config.poll_interval_ms == 250)
+            {
+                persisted = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        drop(held);
+        writer
+            .join()
+            .expect("the writer thread")
+            .expect("a valid patch");
+
+        assert!(persisted, "the file write ran inside the reader lock");
+    }
+
+    #[test]
+    fn a_failed_persist_leaves_snapshot_epoch_and_effects_unchanged() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let parent = dir.path().join("not-a-directory");
+        fs::write(&parent, b"block settings parent").unwrap();
+        let settings = EmbeddedSettings::open(parent.join("settings-v2.json"));
+        let before = settings.snapshot();
+        let effects_ran = std::sync::atomic::AtomicBool::new(false);
+
+        let error = settings.apply_with_effects(
+            &ConfigPatch {
+                private_mode: Some(true),
+                ..ConfigPatch::default()
+            },
+            |_| {
+                effects_ran.store(true, std::sync::atomic::Ordering::Release);
+            },
+        );
+
+        assert!(error.is_err());
+        assert!(!effects_ran.load(std::sync::atomic::Ordering::Acquire));
+        let snapshot = settings.snapshot();
+        assert_eq!(snapshot.config, before.config);
+        assert_eq!(snapshot.private_mode_epoch, before.private_mode_epoch);
+    }
+
+    #[test]
+    fn a_visibility_change_during_lazy_node_start_is_reconciled_on_publication() {
+        let (_dir, path) = stored(None);
+        let settings = EmbeddedSettings::open(path);
+        settings
+            .apply(&ConfigPatch {
+                lan_visibility: Some(false),
+                ..ConfigPatch::default()
+            })
+            .unwrap();
+        let applied = std::sync::atomic::AtomicBool::new(true);
+
+        settings.reconcile_lan_visibility_after_node_publish(|visible| {
+            applied.store(visible, std::sync::atomic::Ordering::Release);
+        });
+
+        assert!(!applied.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_later_visibility_transition_overrides_a_stale_publication_reconciliation() {
+        let (_dir, path) = stored(None);
+        let settings = EmbeddedSettings::open(path);
+        let applied = std::sync::atomic::AtomicBool::new(false);
+
+        settings.reconcile_lan_visibility_after_node_publish(|visible| {
+            applied.store(visible, std::sync::atomic::Ordering::Release);
+        });
+        assert!(applied.load(std::sync::atomic::Ordering::Acquire));
+        settings
+            .apply_with_effects(
+                &ConfigPatch {
+                    lan_visibility: Some(false),
+                    ..ConfigPatch::default()
+                },
+                |transition| {
+                    if transition.lan_visibility_changed() {
+                        applied.store(
+                            transition.config().lan_visibility,
+                            std::sync::atomic::Ordering::Release,
+                        );
+                    }
+                },
+            )
+            .unwrap();
+
+        assert!(!applied.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn a_lowered_limit_reports_only_real_embedded_retention() {
+        use crate::backend::Backend as _;
+        use copypaste_ipc::EventKind;
+
+        let (backend, _clipboard, _dir) = super::super::tests::backend();
+        for n in 0..51 {
+            backend.add(&format!("history item {n}")).await.unwrap();
+        }
+        let mut events = backend.watch().await.unwrap();
+
+        backend
+            .set_config(ConfigPatch {
+                history_limit: Some(50),
+                ..ConfigPatch::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(backend.inner.state.store.count().unwrap(), 50);
+        let event = events.recv().await.unwrap();
+        assert_eq!(event.event, EventKind::Items);
+        assert!(!event.captured);
+        assert_eq!(event.swept, 0, "ordinary retention is not an auto-wipe");
+
+        backend
+            .set_config(ConfigPatch {
+                poll_interval_ms: Some(250),
+                ..ConfigPatch::default()
+            })
+            .await
+            .unwrap();
+        assert!(
+            events.try_recv().is_err(),
+            "an unrelated settings save emitted an Items event"
         );
     }
 }
