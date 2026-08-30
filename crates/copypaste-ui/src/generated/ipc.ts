@@ -72,7 +72,7 @@ export type DeviceDetails = { profile: DeviceProfileObservation | null, endpoint
 
 export type DiscoveredDevice = { discovery_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, details?: DeviceDetails, };
 
-export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "unsupported_content" | "pairing_code" | "pairing_address" | "rate_limited" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_version" | "peer_not_found" | "internal";
+export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "unsupported_content" | "content_too_large" | "pairing_code" | "pairing_address" | "rate_limited" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_version" | "peer_not_found" | "internal";
 
 export type EventKind = "items" | "peers";
 

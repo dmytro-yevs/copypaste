@@ -10,7 +10,7 @@ use copypaste_ipc::{ImagePreview, Item};
 use super::messages::{
     MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_TOO_LARGE, MSG_UNSUPPORTED_CONTENT,
 };
-use super::rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
+use super::rows::{bound_item_preview, clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 use super::EmbeddedBackend;
 use crate::backend::{BackendError, CaptureWrite, Page, Result};
 use crate::capture::model::CaptureSource;
@@ -37,7 +37,7 @@ pub(super) async fn list(
             let next = page.next.map(|cursor| cursor.token());
             let mut wire = inner.to_wire_page(page.items);
             for item in &mut wire.items {
-                item.truncated = copypaste_ipc::limits::bound_preview(&mut item.content);
+                bound_item_preview(item);
             }
             // The cursor belongs to the store page, not the rows that survived
             // decryption; unreadable rows still occupy their original window.
@@ -60,7 +60,11 @@ pub(super) async fn search(backend: &EmbeddedBackend, query: &str, limit: u32) -
             // This read-time layer protects databases written before sensitive
             // rows were excluded from FTS at write time (storage invariant I7).
             let rows: Vec<StoredItem> = rows.into_iter().filter(|row| !row.is_sensitive).collect();
-            Ok(inner.to_wire_page(rows))
+            let mut page = inner.to_wire_page(rows);
+            for item in &mut page.items {
+                bound_item_preview(item);
+            }
+            Ok(page)
         })
         .await
 }
@@ -182,6 +186,7 @@ pub(super) async fn copy(backend: &EmbeddedBackend, id: &str) -> Result<Item> {
     backend
         .blocking(move |inner| {
             let (item, payload) = inner.fetch_with_payload(&id)?;
+            inner.refuse_oversized_text(&payload)?;
             inner.clipboard.write(&payload).map_err(clipboard_error)?;
             Ok(item)
         })
@@ -193,6 +198,7 @@ pub(super) async fn copy_plain_text(backend: &EmbeddedBackend, id: &str) -> Resu
     backend
         .blocking(move |inner| {
             let (item, payload) = inner.fetch_with_payload(&id)?;
+            inner.refuse_oversized_text(&payload)?;
             if payload.plain_text().is_none() {
                 return Err(BackendError::UnsupportedContent(MSG_UNSUPPORTED_CONTENT));
             }
@@ -245,7 +251,7 @@ pub(super) async fn set_pinned(backend: &EmbeddedBackend, id: &str, pinned: bool
             }
             inner.note_local_version(copypaste_core::now_ms());
             inner.publish_items(false, 0);
-            inner.fetch(&id)
+            inner.fetch_preview(&id)
         })
         .await
 }
@@ -296,6 +302,30 @@ mod tests {
         .into_item()
     }
 
+    fn seed_legacy_text(backend: &EmbeddedBackend, id: &str, content: &str) {
+        let key = backend.inner.state.keyring.item_key();
+        let (nonce, content_ciphertext) = copypaste_core::encrypt(content.as_bytes(), &key, id)
+            .expect("the current item key seals the direct legacy row");
+        backend
+            .inner
+            .state
+            .store
+            .insert(copypaste_core::NewItem {
+                id: id.to_string(),
+                content_ciphertext,
+                nonce,
+                content_type: copypaste_ipc::content_type::TEXT.to_string(),
+                content_hash: copypaste_core::compute_content_hash(content.as_bytes()),
+                is_sensitive: false,
+                search_text: Some(content.to_string()),
+                created_at: copypaste_core::now_ms(),
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .expect("a pre-limit row is still a valid stored row");
+    }
+
     #[tokio::test]
     async fn text_copy_uses_the_full_authenticated_body_not_the_list_preview() {
         let (backend, clipboard, _dir) = backend();
@@ -308,6 +338,73 @@ mod tests {
         backend.copy(&item.id).await.unwrap();
         backend.copy_as_plain_text(&item.id).await.unwrap();
         assert_eq!(clipboard.entries(), vec![body.clone(), body]);
+    }
+
+    #[tokio::test]
+    async fn pinning_an_ordinary_body_keeps_its_full_response() {
+        let (backend, _clipboard, _dir) = backend();
+        let body = "x".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES * 2);
+        let item = backend.add(&body).await.unwrap();
+
+        for pinned in [true, false] {
+            let updated = backend.set_pinned(&item.id, pinned).await.unwrap();
+            assert_eq!(updated.content, body);
+            assert!(!updated.truncated);
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_text_refuses_full_operations_but_pin_returns_a_preview() {
+        let (backend, clipboard, _dir) = backend();
+        let body = format!(
+            "needle {}",
+            "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1 - "needle ".len())
+        );
+        seed_legacy_text(&backend, "embedded-legacy", &body);
+        let before = backend
+            .inner
+            .state
+            .store
+            .get("embedded-legacy")
+            .unwrap()
+            .unwrap()
+            .content_ciphertext;
+
+        for result in [
+            backend.get("embedded-legacy").await,
+            backend.copy("embedded-legacy").await,
+            backend.copy_as_plain_text("embedded-legacy").await,
+        ] {
+            let error = result.unwrap_err();
+            assert!(matches!(error, BackendError::ContentTooLarge(_)));
+            assert_eq!(error.ui_error().code, "content_too_large");
+            assert!(!error.ui_error().retryable);
+        }
+        assert!(clipboard.entries().is_empty());
+
+        let listed = backend.list(20, None).await.unwrap();
+        assert!(listed.items[0].truncated);
+        assert!(listed.items[0].content.len() <= copypaste_ipc::limits::LIST_PREVIEW_BYTES);
+        let searched = backend.search("needle", 20).await.unwrap();
+        assert!(searched.items[0].truncated);
+        assert!(searched.items[0].content.len() <= copypaste_ipc::limits::LIST_PREVIEW_BYTES);
+
+        for pinned in [true, false] {
+            let item = backend.set_pinned("embedded-legacy", pinned).await.unwrap();
+            assert!(item.truncated);
+            assert!(item.content.len() <= copypaste_ipc::limits::LIST_PREVIEW_BYTES);
+        }
+        assert_eq!(
+            backend
+                .inner
+                .state
+                .store
+                .get("embedded-legacy")
+                .unwrap()
+                .unwrap()
+                .content_ciphertext,
+            before
+        );
     }
 
     #[tokio::test]
