@@ -21,9 +21,11 @@
     "deepmerge-ts": "^8.0.1"
   },
   "devDependencies": {
+    "@types/jsdom": "^27.0.0",
     "@types/node": "^26.1.2",
     "@types/wait-on": "^5.3.4",
     "execa": "^10.0.0",
+    "jsdom": "^30.0.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",
     "wait-on": "^9.1.0",
