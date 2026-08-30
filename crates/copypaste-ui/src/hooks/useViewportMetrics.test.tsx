@@ -3,6 +3,9 @@ import { StrictMode, useLayoutEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type ObserverCallback = (entries: ResizeObserverEntry[]) => void;
+type TestMediaQuery = MediaQueryList & { setMatches: (matches: boolean) => void };
+
+const maxTouchPointsDescriptor = Object.getOwnPropertyDescriptor(navigator, "maxTouchPoints");
 
 const { TestResizeObserver } = vi.hoisted(() => {
   class TestResizeObserver {
@@ -53,6 +56,54 @@ function metricsEntry(target: Element, width: number, height: number): ResizeObs
   } as ResizeObserverEntry;
 }
 
+function setMaxTouchPoints(value: number): void {
+  Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, value });
+}
+
+function mediaQuery(query: string, matches: boolean): TestMediaQuery {
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const list = {
+    media: query,
+    matches,
+    onchange: null,
+    addListener(listener: (event: MediaQueryListEvent) => void) {
+      listeners.add(listener);
+    },
+    removeListener(listener: (event: MediaQueryListEvent) => void) {
+      listeners.delete(listener);
+    },
+    addEventListener(_type: string, listener: (event: MediaQueryListEvent) => void) {
+      listeners.add(listener);
+    },
+    removeEventListener(_type: string, listener: (event: MediaQueryListEvent) => void) {
+      listeners.delete(listener);
+    },
+    dispatchEvent: () => false,
+    setMatches(next: boolean) {
+      if (next === list.matches) return;
+      list.matches = next;
+      for (const listener of listeners) {
+        listener({ matches: next, media: query } as MediaQueryListEvent);
+      }
+    },
+  };
+  return list as unknown as TestMediaQuery;
+}
+
+function configurePointerMedia(coarse: boolean, noHover: boolean): {
+  pointer: TestMediaQuery;
+  hover: TestMediaQuery;
+} {
+  const pointer = mediaQuery("(pointer: coarse)", coarse);
+  const hover = mediaQuery("(hover: none)", noHover);
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+    if (query === pointer.media) return pointer;
+    if (query === hover.media) return hover;
+    return mediaQuery(query, false);
+  });
+  return { pointer, hover };
+}
+
 function Probe({ onRender }: { onRender: () => void }) {
   onRender();
   const viewport = useViewportMetrics();
@@ -63,6 +114,11 @@ function Probe({ onRender }: { onRender: () => void }) {
       <div data-testid="observed" ref={observed.ref}>{`${observed.width}x${observed.height}`}</div>
     </>
   );
+}
+
+function PointerProbe() {
+  const { pointer } = useViewportMetrics();
+  return <output data-testid="pointer">{pointer}</output>;
 }
 
 function ElementSubscriber({ element }: { element: HTMLDivElement }) {
@@ -89,11 +145,72 @@ function SharedElementProbe({ first, second }: { first: boolean; second: boolean
 
 afterEach(() => {
   vi.restoreAllMocks();
+  if (maxTouchPointsDescriptor) {
+    Object.defineProperty(navigator, "maxTouchPoints", maxTouchPointsDescriptor);
+  } else {
+    delete (navigator as { maxTouchPoints?: number }).maxTouchPoints;
+  }
+  delete document.documentElement.dataset.pointer;
   TestResizeObserver.instances = [];
   TestResizeObserver.latest = null;
 });
 
 describe("ViewportMetricsProvider", () => {
+  it("uses touch capability when a legacy WebView reports fine with no hover", () => {
+    setMaxTouchPoints(5);
+    const { hover } = configurePointerMedia(false, true);
+
+    render(
+      <ViewportMetricsProvider>
+        <PointerProbe />
+      </ViewportMetricsProvider>,
+    );
+
+    expect(screen.getByTestId("pointer").textContent).toBe("coarse");
+    expect(document.documentElement.dataset.pointer).toBe("coarse");
+
+    act(() => hover.setMatches(false));
+
+    expect(screen.getByTestId("pointer").textContent).toBe("fine");
+    expect(document.documentElement.dataset.pointer).toBe("fine");
+  });
+
+  it("keeps a fine pointer without a known touch capability", () => {
+    setMaxTouchPoints(0);
+    configurePointerMedia(false, true);
+    const { unmount } = render(
+      <ViewportMetricsProvider>
+        <PointerProbe />
+      </ViewportMetricsProvider>,
+    );
+
+    expect(screen.getByTestId("pointer").textContent).toBe("fine");
+    unmount();
+
+    setMaxTouchPoints(Number.NaN);
+    configurePointerMedia(false, true);
+    render(
+      <ViewportMetricsProvider>
+        <PointerProbe />
+      </ViewportMetricsProvider>,
+    );
+
+    expect(screen.getByTestId("pointer").textContent).toBe("fine");
+  });
+
+  it("keeps modern coarse pointer detection authoritative", () => {
+    setMaxTouchPoints(0);
+    configurePointerMedia(true, false);
+
+    render(
+      <ViewportMetricsProvider>
+        <PointerProbe />
+      </ViewportMetricsProvider>,
+    );
+
+    expect(screen.getByTestId("pointer").textContent).toBe("coarse");
+  });
+
   it("coalesces matching observer entries and skips unchanged publications", () => {
     let scheduled: FrameRequestCallback | undefined;
     const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {

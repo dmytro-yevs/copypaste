@@ -124,13 +124,21 @@
 
 /* Touch targets. `pointer: coarse` is the primary pointer being a finger,
  * which is the Android build and a Mac in tablet-mirroring — not a screen
- * width, because a narrow window on a Mac is still driven by a mouse. */
+ * width, because a narrow window on a Mac is still driven by a mouse. The
+ * same values also cover a touch-capable legacy WebView that reports a fine
+ * primary pointer and no hover capability. */
 @media (pointer: coarse) {
   :root {
     --tap-min: 44px;
     --hit-slop: 6px;
     --sz-iconbtn: 48px;
   }
+}
+
+:root[data-pointer="coarse"] {
+  --tap-min: 44px;
+  --hit-slop: 6px;
+  --sz-iconbtn: 48px;
 }
 
 /* §8.6: solid is the baseline. Frosting is additive inside @supports, so an
