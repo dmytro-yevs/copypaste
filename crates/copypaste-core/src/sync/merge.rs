@@ -136,6 +136,7 @@ pub struct RemoteVersion<'a> {
 pub enum MergeError {
     Store,
     Encrypt,
+    TooLarge,
 }
 
 /// The independent outcomes of a P2P merge. Pin state is intentionally
@@ -159,6 +160,7 @@ impl MergeError {
         match self {
             MergeError::Store => MSG_STORE,
             MergeError::Encrypt => MSG_ENCRYPT,
+            MergeError::TooLarge => "incoming content exceeds the product limit",
         }
     }
 }
@@ -476,6 +478,47 @@ mod tests {
         assert!(f.store.version("image").unwrap().is_none());
     }
 
+    #[test]
+    fn a_direct_oversized_remote_version_fails_closed_without_replacing_local_history() {
+        let f = fixture();
+        let old_content = "l".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1);
+        let old_hash = crate::storage::compute_content_hash(old_content.as_bytes());
+        f.store
+            .insert(crate::NewItem {
+                id: "shared".into(),
+                content_ciphertext: vec![1],
+                nonce: vec![2],
+                content_type: "text".into(),
+                content_hash: old_hash.clone(),
+                is_sensitive: false,
+                search_text: None,
+                created_at: 1_000,
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .expect("store the legacy row");
+        let oversized = "r".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1);
+        let incoming = RemoteVersion {
+            content: &oversized,
+            created_at: 2_000,
+            ..version("shared", "", 2_000)
+        };
+
+        assert_eq!(
+            apply_remote_version(&f.store, &f.keyring, &f.detector, &f.here, &incoming,),
+            Err(MergeError::TooLarge)
+        );
+        let stored = f
+            .store
+            .version("shared")
+            .unwrap()
+            .expect("legacy row remains");
+        assert_eq!(stored.content_hash, old_hash);
+        assert_eq!(stored.created_at, 1_000);
+        assert!(!stored.deleted);
+    }
+
     /// The same pair of versions must be decided identically whether the hash
     /// came off the wire (peer) or was recomputed (cloud). This is INV-C2.
     #[test]
@@ -782,7 +825,7 @@ mod tests {
 
     #[test]
     fn error_messages_contain_no_paths() {
-        for message in [MSG_STORE, MSG_ENCRYPT] {
+        for message in [MSG_STORE, MSG_ENCRYPT, MergeError::TooLarge.message()] {
             assert!(!message.contains('/'), "{message}");
         }
     }
