@@ -11,6 +11,7 @@ Add-Type -AssemblyName UIAutomationTypes
 . (Join-Path $PSScriptRoot "windows-protected-failure-diagnostics.ps1")
 . (Join-Path $PSScriptRoot "windows-protected-failure-diagnostics.test.ps1")
 . (Join-Path $PSScriptRoot "windows-uia-client-bootstrap.ps1")
+. (Join-Path $PSScriptRoot "windows-uia-client-bootstrap.test.ps1")
 
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
     Initialize-WindowsUiaClientProviders | Out-Null
@@ -306,6 +307,13 @@ function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) 
 
 function Test-WindowsUiEvidenceHelpers {
     Test-WindowsUiaClientBootstrapHelpers
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        Assert-True $script:WindowsUiaClientProviderReady "Windows UIA provider bootstrap did not run before self-test"
+        Assert-True ($script:WindowsUiaClientProviderBootstrap["outcome"] -eq "ready") `
+            "Windows UIA provider bootstrap did not retain a ready canary receipt"
+        Assert-True (Test-WindowsUiaCanaryMappings $script:WindowsUiaClientProviderBootstrap["canary"]["controls"]) `
+            "Windows UIA provider bootstrap did not retain the verified canary mapping"
+    }
     Test-UiaSnapshotHelpers
     $names = @(Get-UiaSnapshotNames ([ordered]@{
         nodes = @([ordered]@{ name = "Explore first" }, [ordered]@{ control_type = "ControlType.Button" })
