@@ -477,6 +477,96 @@ mod tests {
     }
 
     #[test]
+    fn every_content_shape_has_an_inclusive_payload_boundary() {
+        // Test inputs, not a second content-type policy: the IPC owner
+        // classifies these shapes for all transports.
+        for (name, content_type, binary, metadata) in [
+            ("text", "text", false, None),
+            ("rtf", "text/rtf", false, None),
+            ("html", "text/html", false, None),
+            ("image", "image/png", true, None),
+            (
+                "file",
+                "file",
+                true,
+                Some(r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#),
+            ),
+            ("future", "application/x-future", true, None),
+        ] {
+            let mut payload = vec![0; MAX_CONTENT_BYTES];
+            if binary {
+                payload[..3].copy_from_slice(&[0, 0xff, 0x80]);
+            }
+            let mut at_limit = item(name, "");
+            at_limit.content_type = content_type.into();
+            at_limit.payload_metadata = metadata.map(str::to_owned);
+            if binary {
+                at_limit.binary_content = payload.clone();
+                at_limit.content_hash = plaintext_content_hash(&payload);
+            } else {
+                at_limit.content = String::from_utf8(payload.clone()).unwrap();
+                at_limit.content_hash = plaintext_content_hash(&payload);
+            }
+            assert!(
+                SyncMessage::Items {
+                    items: vec![at_limit.clone()]
+                }
+                .validate()
+                .is_ok(),
+                "{name} at the cap"
+            );
+
+            if binary {
+                at_limit.binary_content.push(1);
+            } else {
+                at_limit.content.push('x');
+            }
+            assert!(
+                matches!(
+                    SyncMessage::Items {
+                        items: vec![at_limit]
+                    }
+                    .validate(),
+                    Err(ProtocolError::ContentTooLarge { .. })
+                ),
+                "{name} one byte over must be a content error"
+            );
+        }
+    }
+
+    #[test]
+    fn nul_text_at_the_content_cap_round_trips_within_the_frame_cap() {
+        let content = "\0".repeat(MAX_CONTENT_BYTES);
+        let message = SyncMessage::Items {
+            items: vec![SyncItem {
+                item_id: "nul-text".into(),
+                content_hash: plaintext_content_hash(content.as_bytes()),
+                content,
+                binary_content: Vec::new(),
+                payload_metadata: None,
+                source_app_bundle_id: None,
+                source_app_name: None,
+                content_type: "text".into(),
+                created_at: 1,
+                deleted: false,
+                origin_device_id: "device-a".into(),
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
+            }],
+        };
+        let bytes = message.encode().expect("NUL text encodes");
+        assert!(
+            bytes.len() <= MAX_MESSAGE_BYTES,
+            "JSON expansion exceeded frame cap"
+        );
+        assert_eq!(
+            SyncMessage::decode(&bytes).expect("NUL text decodes"),
+            message
+        );
+    }
+
+    #[test]
     fn a_batch_over_the_byte_budget_is_rejected() {
         // Each item is legal on its own; together they are not.
         let half = "x".repeat(MAX_ITEM_BYTES_PER_MESSAGE / 2 + 1);
