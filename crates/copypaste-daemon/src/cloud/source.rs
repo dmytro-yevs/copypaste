@@ -25,6 +25,7 @@ use copypaste_cloud::sync::{
     floor_after_round, Applied, CloudSource, LocalItem, StoreView, SyncError, UnreadableUploads,
 };
 use copypaste_core::sync::blocking;
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::cloud::{
@@ -36,6 +37,7 @@ use crate::AppState;
 pub struct StoreSource {
     state: Arc<AppState>,
     expected: Option<Arc<Driver>>,
+    cancel: Option<CancellationToken>,
     /// The shared sync view. Held rather than rebuilt per call so one round
     /// opens and merges through one source, and so this file cannot grow a
     /// second answer to "what does this device hold".
@@ -49,6 +51,7 @@ impl StoreSource {
             view: StoreView::new(crate::sync::store_source(&state), device_id),
             state,
             expected: None,
+            cancel: None,
         }
     }
 
@@ -58,13 +61,38 @@ impl StoreSource {
         source
     }
 
+    pub(crate) fn for_sync_round(
+        state: Arc<AppState>,
+        expected: Arc<Driver>,
+        cancel: CancellationToken,
+    ) -> Self {
+        let mut source = Self::for_round(state, expected);
+        source.cancel = Some(cancel);
+        source
+    }
+
+    #[cfg(test)]
+    fn for_sync_cycle(state: Arc<AppState>, cancel: CancellationToken) -> Self {
+        let mut source = Self::new(state);
+        source.cancel = Some(cancel);
+        source
+    }
+
     fn with_account<T>(
         &self,
         action: impl FnOnce() -> Result<T, SyncError>,
     ) -> Result<T, SyncError> {
-        match self.expected.as_ref() {
+        let guarded = || match self.expected.as_ref() {
             Some(expected) => self.state.cloud.with_current_driver(expected, action),
             None => action(),
+        };
+        match self.cancel.as_ref() {
+            Some(cancel) => self
+                .state
+                .cloud
+                .while_sync_cycle_active(cancel, guarded)
+                .unwrap_or(Err(SyncError::Source(copypaste_core::sync::MSG_STORE))),
+            None => guarded(),
         }
     }
 
@@ -163,7 +191,10 @@ impl CloudSource for StoreSource {
             if outcomes.iter().any(|o| matches!(o, Applied::Merged)) {
                 // No peer to hold back: a row from the cloud is new to all of
                 // them.
-                self.state.p2p.node().cursors().note_local(floor);
+                self.with_account(|| {
+                    self.state.p2p.node().cursors().note_local(floor);
+                    Ok(())
+                })?;
             }
         }
         Ok(outcomes)
@@ -271,8 +302,19 @@ fn source_error(e: impl std::fmt::Debug) -> SyncError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
     use super::*;
     use crate::testutil::{add, test_state};
+    use copypaste_cloud::auth::Session;
+    use copypaste_cloud::crypto::{encrypt_row, SyncKey};
+    use copypaste_cloud::rest::CloudItem;
+    use copypaste_cloud::sync::{
+        AuthApi, AuthFault, CloudSync, RestApi, SensitiveGuard, TransportFault,
+    };
+    use copypaste_cloud::CloudConfig;
+    use tokio::sync::Notify;
 
     fn source(name: &str) -> (StoreSource, Arc<AppState>, tempfile::TempDir) {
         let (state, dir) = test_state(name);
@@ -281,6 +323,124 @@ mod tests {
 
     fn ids(items: &[LocalItem]) -> Vec<&str> {
         items.iter().map(|i| i.item_id.as_str()).collect()
+    }
+
+    struct ControlledRest {
+        rows: Vec<CloudItem>,
+        second_page: Arc<Notify>,
+        release_second_page: Arc<Notify>,
+        block_once: AtomicBool,
+    }
+
+    impl RestApi for ControlledRest {
+        async fn fetch_since(
+            &self,
+            _token: &str,
+            since_ms: i64,
+            after_item_id: Option<&str>,
+            limit: u32,
+        ) -> Result<Vec<CloudItem>, TransportFault> {
+            let rows: Vec<_> = self
+                .rows
+                .iter()
+                .filter(|row| match after_item_id {
+                    Some(item_id) => (row.created_at, row.item_id.as_str()) > (since_ms, item_id),
+                    None => row.created_at >= since_ms,
+                })
+                .take(limit as usize)
+                .cloned()
+                .collect();
+            if after_item_id.is_some()
+                && !rows.is_empty()
+                && !self.block_once.swap(true, Ordering::AcqRel)
+            {
+                self.second_page.notify_one();
+                self.release_second_page.notified().await;
+            }
+            Ok(rows)
+        }
+
+        async fn upsert(&self, _token: &str, _items: &[CloudItem]) -> Result<(), TransportFault> {
+            Ok(())
+        }
+    }
+
+    struct NoRefresh;
+
+    impl AuthApi for NoRefresh {
+        async fn refresh(&self, _refresh_token: &str) -> Result<Session, AuthFault> {
+            panic!("the test session is unexpired")
+        }
+    }
+
+    fn signed_row(key: &SyncKey, n: usize) -> CloudItem {
+        let item_id = format!("page-{n:03}");
+        let (nonce, ciphertext) = encrypt_row(item_id.as_bytes(), key, &item_id).unwrap();
+        let mut row = CloudItem {
+            item_id,
+            ciphertext,
+            nonce,
+            content_type: "text".into(),
+            payload_metadata: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
+            created_at: 1_000,
+            deleted: false,
+            origin_device_id: "remote".into(),
+            signature: String::new(),
+        };
+        row.sign(key);
+        row
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_cycle_keeps_the_completed_page_and_replays_only_the_remainder() {
+        let (state, _dir) = test_state("controlled-pages");
+        let key = SyncKey::from_bytes([7; 32]);
+        let second_page = Arc::new(Notify::new());
+        let release_second_page = Arc::new(Notify::new());
+        let driver = Arc::new(CloudSync::new(
+            ControlledRest {
+                rows: (0..101).map(|n| signed_row(&key, n)).collect(),
+                second_page: Arc::clone(&second_page),
+                release_second_page: Arc::clone(&release_second_page),
+                block_once: AtomicBool::new(false),
+            },
+            NoRefresh,
+            key,
+            CloudConfig::new_loopback("http://127.0.0.1:1", "anon").unwrap(),
+            Session {
+                access_token: "access".into(),
+                refresh_token: "refresh".into(),
+                user_id: "user-1".into(),
+                expires_at_ms: i64::MAX,
+            },
+            SensitiveGuard::new(|_| false),
+        ));
+        let source = StoreSource::for_sync_cycle(Arc::clone(&state), state.cloud.sync_cancel());
+        let pull = tokio::spawn({
+            let source = source;
+            let driver = Arc::clone(&driver);
+            async move { driver.pull(&source).await }
+        });
+        second_page.notified().await;
+        state.cloud.sync_enabled_changed(false);
+        release_second_page.notify_one();
+        assert!(pull.await.unwrap().is_err());
+
+        let observed = StoreSource::new(Arc::clone(&state));
+        assert_eq!(observed.watermark().unwrap(), 1_000);
+        assert_eq!(
+            observed.watermark_item_id().unwrap().as_deref(),
+            Some("page-099")
+        );
+        assert_eq!(state.store.count().unwrap(), 100);
+
+        state.cloud.sync_enabled_changed(true);
+        let replay = StoreSource::for_sync_cycle(Arc::clone(&state), state.cloud.sync_cancel());
+        let stats = driver.pull(&replay).await.unwrap();
+        assert_eq!(stats.applied, 1);
+        assert_eq!(state.store.count().unwrap(), 101);
     }
 
     #[test]
@@ -429,6 +589,28 @@ mod tests {
         let second = source.local_changes_after(stamp, Some(&last)).unwrap();
         assert_eq!(second.len(), 1, "the first 500 rows were replayed");
         assert_ne!(second[0].item_id, last);
+    }
+
+    #[test]
+    fn a_cancelled_cycle_keeps_completed_watermark_progress_and_fences_later_writes() {
+        let (state, _dir) = test_state("sync-cycle-watermark");
+        let cancel = state.cloud.sync_cancel();
+        let source = StoreSource::for_sync_cycle(Arc::clone(&state), cancel);
+
+        source.set_watermark_keyset(1_000, "first").unwrap();
+        state.cloud.sync_enabled_changed(false);
+        assert!(source.set_watermark_keyset(2_000, "second").is_err());
+        let observed = StoreSource::new(Arc::clone(&state));
+        assert_eq!(observed.watermark().unwrap(), 1_000);
+        assert_eq!(
+            observed.watermark_item_id().unwrap().as_deref(),
+            Some("first")
+        );
+
+        state.cloud.sync_enabled_changed(true);
+        let replay = StoreSource::for_sync_cycle(Arc::clone(&state), state.cloud.sync_cancel());
+        replay.set_watermark_keyset(2_000, "second").unwrap();
+        assert_eq!(replay.watermark().unwrap(), 2_000);
     }
 
     #[test]

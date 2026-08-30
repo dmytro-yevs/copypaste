@@ -121,6 +121,18 @@ impl EmbeddedSettings {
         apply(self.snapshot().config.lan_visibility);
     }
 
+    pub(super) fn reconcile_node_after_publish<F>(&self, apply: F)
+    where
+        F: FnOnce(bool, bool),
+    {
+        let _serialised = self
+            .applying
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let config = self.snapshot().config;
+        apply(config.lan_visibility, config.sync_enabled);
+    }
+
     #[cfg(test)]
     pub(super) fn path(&self) -> &Path {
         &self.path
@@ -254,6 +266,9 @@ fn apply_runtime_effects(inner: &Inner, transition: &SettingsTransition) {
     }
     if let Some(enabled) = transition.sync_enabled_changed() {
         inner.cloud.sync_enabled_changed(enabled);
+        if let Some(node) = inner.node.get() {
+            node.sync_enabled_changed(enabled);
+        }
     }
 }
 
@@ -566,6 +581,25 @@ mod tests {
             .unwrap();
 
         assert!(!applied.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[test]
+    fn node_publication_reconciles_the_current_sync_cycle() {
+        let (_dir, path) = stored(None);
+        let settings = EmbeddedSettings::open(path);
+        settings
+            .apply(&ConfigPatch {
+                sync_enabled: Some(false),
+                ..ConfigPatch::default()
+            })
+            .unwrap();
+        let sync_enabled = std::sync::atomic::AtomicBool::new(true);
+
+        settings.reconcile_node_after_publish(|_lan_visible, enabled| {
+            sync_enabled.store(enabled, std::sync::atomic::Ordering::Release);
+        });
+
+        assert!(!sync_enabled.load(std::sync::atomic::Ordering::Acquire));
     }
 
     #[tokio::test]

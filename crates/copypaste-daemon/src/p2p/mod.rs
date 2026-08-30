@@ -22,6 +22,7 @@ pub mod poll;
 use std::sync::Arc;
 
 use copypaste_p2p::discovery::{DiscoveredPeer, Discovery};
+use copypaste_p2p::node::SyncCycle;
 use copypaste_p2p::peers::PeerStore;
 use copypaste_p2p::sync::SyncOutcome;
 use copypaste_p2p::Node;
@@ -55,6 +56,8 @@ pub struct P2p {
     /// peers at once, and the second one is refused by the far side's session
     /// limit rather than doing anything useful.
     rounds: RoundGate,
+    /// Cancels outbound sessions for the current enabled cycle.
+    sync_cycle: SyncCycle,
 }
 
 impl std::fmt::Debug for P2p {
@@ -78,6 +81,7 @@ impl P2p {
                 crate::cadence::MAX_POLL_INTERVAL_WITHOUT_PUSH,
             ),
             rounds: RoundGate::new(),
+            sync_cycle: SyncCycle::new(),
         }
     }
 
@@ -145,6 +149,17 @@ impl P2p {
     /// so a wake during a round is not lost.
     pub async fn wake_signal(&self) {
         self.wake.notified().await;
+    }
+
+    pub(crate) fn sync_enabled_changed(&self, enabled: bool) {
+        self.sync_cycle.set_enabled(enabled);
+        if enabled {
+            self.wake();
+        }
+    }
+
+    pub(crate) fn sync_cycle(&self) -> SyncCycle {
+        self.sync_cycle.clone()
     }
 }
 
@@ -293,6 +308,55 @@ mod tests {
             .collect();
         assert_eq!(ids_a, ids_b);
 
+        let _ = shutdown_tx.send(true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reenabled_cycle_applies_a_real_peer_item_once() {
+        let (a, _da) = test_state("cycle-source");
+        let (b, _db) = test_state("cycle-target");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (pairing_id, _addr) = pair(&a, &b, shutdown_rx).await;
+        add(&a, "off then on");
+
+        crate::server::dispatch::dispatch_store(
+            &b,
+            1,
+            copypaste_ipc::Method::SetConfig {
+                patch: copypaste_ipc::ConfigPatch {
+                    sync_enabled: Some(false),
+                    ..Default::default()
+                },
+            },
+        );
+        let stopped = crate::p2p::handlers::sync_now(&b, 1, Some(&pairing_id)).await;
+        assert!(!stopped.ok);
+        assert!(contents(&b).is_empty());
+        assert_eq!(b.p2p.node().cursors().get(&pairing_id).since_ms, 0);
+
+        crate::server::dispatch::dispatch_store(
+            &b,
+            2,
+            copypaste_ipc::Method::SetConfig {
+                patch: copypaste_ipc::ConfigPatch {
+                    sync_enabled: Some(true),
+                    ..Default::default()
+                },
+            },
+        );
+        let resumed = crate::p2p::handlers::sync_now(&b, 2, Some(&pairing_id)).await;
+        assert!(resumed.ok);
+        assert_eq!(contents(&b), ["off then on"]);
+        let cursor = b.p2p.node().cursors().get(&pairing_id).since_ms;
+        assert!(
+            cursor > 0,
+            "the completed session did not commit its cursor"
+        );
+
+        let replay = crate::p2p::handlers::sync_now(&b, 3, Some(&pairing_id)).await;
+        assert!(replay.ok);
+        assert_eq!(contents(&b), ["off then on"]);
+        assert_eq!(b.p2p.node().cursors().get(&pairing_id).since_ms, cursor);
         let _ = shutdown_tx.send(true);
     }
 

@@ -129,8 +129,9 @@ impl EmbeddedBackend {
             inner
                 .state
                 .settings
-                .reconcile_lan_visibility_after_node_publish(|visible| {
+                .reconcile_node_after_publish(|visible, sync_enabled| {
                     node.set_lan_visibility(visible);
+                    node.sync_enabled_changed(sync_enabled);
                 });
             Ok(())
         })

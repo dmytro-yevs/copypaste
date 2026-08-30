@@ -31,6 +31,13 @@ pub const SIGNED_OUT_INTERVAL: Duration = Duration::from_secs(60);
 /// `MSG_ACCOUNT_CHANGED`: the account is fine, the process is leaving.
 pub(crate) const MSG_SHUTTING_DOWN: &str = "the daemon is shutting down";
 
+#[derive(Debug)]
+pub(crate) enum RoundOutcome {
+    NoAccount,
+    SyncDisabled,
+    Completed(Result<CloudSyncData, SyncError>),
+}
+
 /// Run cloud rounds until shutdown.
 pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
     if !state.cloud.is_configured() {
@@ -70,10 +77,10 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 
 /// One push-then-pull round, with the outcome recorded for `cloud status`.
 ///
-/// Returns `None` when nobody is signed in. Every failure is reported and
-/// swallowed: a backend that is down must not stop the daemon, and the next
-/// tick will try again.
-pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, SyncError>> {
+/// An unsigned, disabled or completed outcome. Every completed failure is
+/// reported and swallowed: a backend that is down must not stop the daemon,
+/// and the next tick will try again.
+pub async fn sync_round(state: &Arc<AppState>) -> RoundOutcome {
     // The explicit request waits for a running round rather than duplicating
     // it: the user asked after that round began its scan, so its result would
     // answer for a history older than the request.
@@ -85,16 +92,20 @@ async fn round_with_permit(
     state: &Arc<AppState>,
     permit: copypaste_core::sync::RoundGuard,
     shutdown: Option<watch::Receiver<bool>>,
-) -> Option<Result<CloudSyncData, SyncError>> {
+) -> RoundOutcome {
     // Held for the whole round, released when it returns, whichever arm of the
     // select below finishes first.
     let _permit = permit;
     if !state.settings.get().sync_enabled {
-        return None;
+        return RoundOutcome::SyncDisabled;
     }
-    let account = state.cloud.round()?;
+    let sync_cancel = state.cloud.sync_cancel();
+    let Some(account) = state.cloud.round() else {
+        return RoundOutcome::NoAccount;
+    };
     let driver = account.driver;
-    let source = StoreSource::for_round(Arc::clone(state), Arc::clone(&driver));
+    let source =
+        StoreSource::for_sync_round(Arc::clone(state), Arc::clone(&driver), sync_cancel.clone());
 
     // Captured *before* the round, so that everything created while it runs is
     // still offered on the next one. Advancing the floor to "now" afterwards
@@ -102,6 +113,7 @@ async fn round_with_permit(
     let started_ms = copypaste_core::now_ms();
     let outcome = tokio::select! {
         biased;
+        _ = sync_cancel.cancelled() => return RoundOutcome::SyncDisabled,
         _ = account.cancel.cancelled() => Err(SyncError::Source(MSG_ACCOUNT_CHANGED)),
         // Teardown does not wait out a round's network time. Abandoning one
         // costs nothing: the floor is only committed on success below, so the
@@ -116,22 +128,27 @@ async fn round_with_permit(
 
     match &outcome {
         Ok(stats) => {
-            let at_ms = copypaste_core::now_ms();
-            state.cloud.note_driver_success(&state.meta, &driver, at_ms);
-            if let Err(e) = source.commit_upload_floor(started_ms) {
-                warn!(error = ?e, "could not advance the upload floor");
-            }
-            if stats.applied > 0 {
-                state.note_remote_change();
-            }
-            if stats.changed() || stats.skipped_sensitive > 0 {
-                info!(
-                    uploaded = stats.uploaded,
-                    tombstoned = stats.tombstoned,
-                    applied = stats.applied,
-                    withheld = stats.skipped_sensitive,
-                    "cloud sync round"
-                );
+            let committed = state.cloud.while_sync_cycle_active(&sync_cancel, || {
+                let at_ms = copypaste_core::now_ms();
+                state.cloud.note_driver_success(&state.meta, &driver, at_ms);
+                if let Err(e) = source.commit_upload_floor(started_ms) {
+                    warn!(error = ?e, "could not advance the upload floor");
+                }
+                if stats.applied > 0 {
+                    state.note_remote_change();
+                }
+                if stats.changed() || stats.skipped_sensitive > 0 {
+                    info!(
+                        uploaded = stats.uploaded,
+                        tombstoned = stats.tombstoned,
+                        applied = stats.applied,
+                        withheld = stats.skipped_sensitive,
+                        "cloud sync round"
+                    );
+                }
+            });
+            if committed.is_none() {
+                return RoundOutcome::SyncDisabled;
             }
         }
         // Abandoned rather than failed: recording it would leave "sync is
@@ -148,7 +165,7 @@ async fn round_with_permit(
         }
     }
 
-    Some(outcome.map(to_wire))
+    RoundOutcome::Completed(outcome.map(to_wire))
 }
 
 fn record_failure(state: &AppState, driver: &Arc<Driver>, error: &SyncError) {
@@ -234,13 +251,83 @@ mod tests {
             let state = Arc::clone(&state);
             async move {
                 // Signed out, so this is the gate and nothing else.
-                sync_round(&state).await.is_none()
+                matches!(sync_round(&state).await, RoundOutcome::NoAccount)
             }
         });
         tokio::task::yield_now().await;
         assert!(!queued.is_finished(), "the request did not wait its turn");
         drop(held);
         assert!(queued.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_queued_cloud_round_disabled_before_its_turn_never_reaches_transport() {
+        use copypaste_cloud::crypto::derive_sync_key;
+        use copypaste_cloud::CloudConfig;
+        use tokio::sync::oneshot;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let config = CloudConfig::new_loopback(
+            &format!("http://{}", listener.local_addr().expect("address")),
+            "anon",
+        )
+        .expect("loopback config");
+        let (state, _dir) = crate::testutil::test_state_with_cloud(
+            "queued-cancel-cloud-sync",
+            crate::cloud::Cloud::new(Some(config.clone())),
+        );
+        state.cloud.install(
+            &state,
+            config,
+            "a@example.com".into(),
+            "user-1".into(),
+            derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+            copypaste_cloud::auth::Session {
+                access_token: "access-1".into(),
+                refresh_token: "refresh-1".into(),
+                user_id: "user-1".into(),
+                expires_at_ms: i64::MAX,
+            },
+        );
+        let (entered_tx, mut entered_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let _ = listener.accept().await;
+            let _ = entered_tx.send(());
+        });
+        let held = state.cloud.begin_round().await;
+        let queued = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { sync_round(&state).await }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !queued.is_finished(),
+            "the request skipped the running round"
+        );
+
+        let off = crate::server::dispatch::dispatch_store(
+            &state,
+            1,
+            copypaste_ipc::Method::SetConfig {
+                patch: copypaste_ipc::ConfigPatch {
+                    sync_enabled: Some(false),
+                    ..Default::default()
+                },
+            },
+        );
+        assert!(off.ok, "the off transition failed");
+        drop(held);
+        assert!(matches!(
+            queued.await.expect("queued cloud task"),
+            RoundOutcome::SyncDisabled
+        ));
+        assert!(
+            entered_rx.try_recv().is_err(),
+            "a request queued before the off acknowledgement reached transport"
+        );
+        server.abort();
     }
 
     /// A round in flight when the daemon is asked to stop must not hold
@@ -282,7 +369,10 @@ mod tests {
         let outcome = sync_round(&state).await;
 
         assert!(
-            matches!(outcome, Some(Err(SyncError::Source(MSG_SHUTTING_DOWN)))),
+            matches!(
+                outcome,
+                RoundOutcome::Completed(Err(SyncError::Source(MSG_SHUTTING_DOWN)))
+            ),
             "{outcome:?}"
         );
         assert_eq!(
@@ -300,7 +390,7 @@ mod tests {
     #[tokio::test]
     async fn a_round_with_nobody_signed_in_does_nothing() {
         let (state, _dir) = test_state("alpha");
-        assert!(sync_round(&state).await.is_none());
+        assert!(matches!(sync_round(&state).await, RoundOutcome::NoAccount));
         assert_eq!(state.cloud.status().last_sync_ms, None);
     }
 
@@ -337,7 +427,10 @@ mod tests {
         crate::testutil::add(&state, "captured while the backend was down");
         let floor = state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap();
 
-        assert!(matches!(sync_round(&state).await, Some(Err(_))));
+        assert!(matches!(
+            sync_round(&state).await,
+            RoundOutcome::Completed(Err(_))
+        ));
 
         assert_eq!(state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap(), floor);
         assert_eq!(
@@ -356,6 +449,83 @@ mod tests {
             Some("the sync backend could not be reached")
         );
         assert_eq!(status.last_sync_ms, None);
+    }
+
+    #[tokio::test]
+    async fn disabling_sync_abandons_a_started_cloud_round_without_advancing_its_floor() {
+        use copypaste_cloud::crypto::derive_sync_key;
+        use copypaste_cloud::sync::CloudSource;
+        use copypaste_cloud::CloudConfig;
+        use tokio::sync::oneshot;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let config = CloudConfig::new_loopback(
+            &format!("http://{}", listener.local_addr().expect("address")),
+            "anon",
+        )
+        .expect("loopback config");
+        let (state, _dir) = crate::testutil::test_state_with_cloud(
+            "cancel-cloud-sync",
+            crate::cloud::Cloud::new(Some(config.clone())),
+        );
+        state.cloud.install(
+            &state,
+            config,
+            "a@example.com".into(),
+            "user-1".into(),
+            derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+            copypaste_cloud::auth::Session {
+                access_token: "access-1".into(),
+                refresh_token: "refresh-1".into(),
+                user_id: "user-1".into(),
+                expires_at_ms: i64::MAX,
+            },
+        );
+        crate::testutil::add(&state, "must be offered after cancellation");
+        let floor = state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap();
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let _connection = listener.accept().await.expect("owned connection");
+            entered_tx.send(()).expect("record outbound request");
+            std::future::pending::<()>().await;
+        });
+
+        let round = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { sync_round(&state).await }
+        });
+        entered_rx
+            .await
+            .expect("the cloud round entered the owned transport");
+
+        let off = crate::server::dispatch::dispatch_store(
+            &state,
+            1,
+            copypaste_ipc::Method::SetConfig {
+                patch: copypaste_ipc::ConfigPatch {
+                    sync_enabled: Some(false),
+                    ..Default::default()
+                },
+            },
+        );
+        assert!(off.ok, "the off transition failed");
+        assert!(matches!(
+            round.await.expect("cloud round task"),
+            RoundOutcome::SyncDisabled
+        ));
+        assert_eq!(state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap(), floor);
+        assert_eq!(
+            StoreSource::new(Arc::clone(&state))
+                .local_changes_since(floor)
+                .unwrap()
+                .len(),
+            1,
+            "a cancelled round stopped offering its local item"
+        );
+        assert_eq!(state.cloud.status().last_error, None);
+        server.abort();
     }
 
     #[tokio::test]

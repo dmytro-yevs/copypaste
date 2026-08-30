@@ -34,6 +34,7 @@ use copypaste_core::sync::{RoundGate, RoundGuard};
 use copypaste_core::StoreError;
 use copypaste_ipc::CloudStatusData;
 use tokio::sync::{watch, Notify};
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::meta::Meta;
@@ -122,6 +123,8 @@ pub struct Cloud {
     /// One round at a time. Without it `cloud sync` ran a second round beside
     /// the poll loop's, against the same history and the same floor.
     rounds: RoundGate,
+    /// Cancels the current sync-enabled cycle without changing the account.
+    sync_cancel: Mutex<CancellationToken>,
     /// How many local rows the last upload scan could not open. Read by
     /// `status`, which must not take a lock a round may be holding.
     unreadable_uploads: AtomicU32,
@@ -151,6 +154,7 @@ impl Cloud {
             upload_floor_epoch: AtomicU64::new(0),
             wake: Notify::new(),
             rounds: RoundGate::new(),
+            sync_cancel: Mutex::new(CancellationToken::new()),
             unreadable_uploads: AtomicU32::new(0),
             session_revision,
         }
@@ -199,6 +203,40 @@ impl Cloud {
     /// Ask the poll loop to run a round now.
     pub fn wake(&self) {
         self.wake.notify_one();
+    }
+
+    pub(crate) fn sync_enabled_changed(&self, enabled: bool) {
+        let mut cancel = self
+            .sync_cancel
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if enabled {
+            if cancel.is_cancelled() {
+                *cancel = CancellationToken::new();
+            }
+            self.wake();
+        } else {
+            cancel.cancel();
+        }
+    }
+
+    pub(crate) fn sync_cancel(&self) -> CancellationToken {
+        self.sync_cancel
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    pub(crate) fn while_sync_cycle_active<T>(
+        &self,
+        cancel: &CancellationToken,
+        action: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _cycle = self
+            .sync_cancel
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        (!cancel.is_cancelled()).then(action)
     }
 
     pub(crate) fn session_updates(&self) -> watch::Receiver<u64> {
