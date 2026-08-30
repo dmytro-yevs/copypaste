@@ -1,6 +1,7 @@
 $script:WindowsUiaClientProviderReady = $false
 $script:WindowsUiaClientProviderBootstrap = $null
 $script:WindowsUiaClientProviderCanaryDiagnostic = $null
+$WINDOWS_UIA_EXCEPTION_CHAIN_MAX_DEPTH = 4
 
 function Get-WindowsUiaProviderAssemblyName([Reflection.AssemblyName]$ClientAssembly) {
     $provider = [Reflection.AssemblyName]::new()
@@ -23,6 +24,22 @@ function Get-LoadedWindowsUiaProviderIdentities {
             ForEach-Object { Format-WindowsUiaAssemblyIdentity $_.GetName() } |
             Sort-Object -Unique
     )
+}
+
+function Get-WindowsUiaSafeExceptionChain([Exception]$Exception) {
+    $facts = @()
+    $current = $Exception
+    for ($depth = 0; $depth -lt $WINDOWS_UIA_EXCEPTION_CHAIN_MAX_DEPTH -and $null -ne $current; $depth++) {
+        $typeName = $current.GetType().FullName
+        if ($typeName -match '^(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*(?:`[0-9]+)?$') {
+            $facts += [ordered]@{
+                type = $typeName
+                hresult = [int64]$current.HResult
+            }
+        }
+        $current = $current.InnerException
+    }
+    return @($facts)
 }
 
 function New-WindowsUiaCanaryExpectation(
@@ -198,7 +215,8 @@ function New-WindowsUiaProviderBootstrapDiagnostic(
     [Reflection.AssemblyName]$Provider,
     [string[]]$Before,
     [string[]]$After,
-    [Collections.IDictionary]$Canary
+    [Collections.IDictionary]$Canary,
+    [object[]]$RegistrationExceptionChain
 ) {
     return [ordered]@{
         schema_version = 1
@@ -209,6 +227,7 @@ function New-WindowsUiaProviderBootstrapDiagnostic(
         provider_assemblies_before = @($Before)
         provider_assemblies_after = @($After)
         canary = $Canary
+        registration_exception_chain = @($RegistrationExceptionChain)
     }
 }
 
@@ -223,9 +242,15 @@ function Initialize-WindowsUiaClientProviders {
     $provider = Get-WindowsUiaProviderAssemblyName $client
     $before = @(Get-LoadedWindowsUiaProviderIdentities)
     $after = @()
+    $registrationExceptionChain = @()
     $phase = "provider-registration"
     try {
-        [Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly($provider)
+        try {
+            [Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly($provider)
+        } catch {
+            $registrationExceptionChain = @(Get-WindowsUiaSafeExceptionChain $_.Exception)
+            throw
+        }
         $after = @(Get-LoadedWindowsUiaProviderIdentities)
         if ($after.Count -eq 0) { throw "client-side provider assembly is not loaded" }
         $phase = "native-control-canary"
@@ -234,13 +259,13 @@ function Initialize-WindowsUiaClientProviders {
         $phase = "complete"
     } catch {
         $script:WindowsUiaClientProviderBootstrap = New-WindowsUiaProviderBootstrapDiagnostic `
-            $phase "failed" $client $provider $before $after $script:WindowsUiaClientProviderCanaryDiagnostic
+            $phase "failed" $client $provider $before $after $script:WindowsUiaClientProviderCanaryDiagnostic $registrationExceptionChain
         Write-WindowsUiaProviderBootstrapDiagnostic $script:WindowsUiaClientProviderBootstrap
         throw "Windows UI Automation environment bootstrap failed: explicit client-side provider registration and the native-control canary must succeed before product evidence runs."
     }
     $script:WindowsUiaClientProviderReady = $true
     $script:WindowsUiaClientProviderBootstrap = New-WindowsUiaProviderBootstrapDiagnostic `
-        $phase "ready" $client $provider $before $after $script:WindowsUiaClientProviderCanaryDiagnostic
+        $phase "ready" $client $provider $before $after $script:WindowsUiaClientProviderCanaryDiagnostic $registrationExceptionChain
     Write-WindowsUiaProviderBootstrapDiagnostic $script:WindowsUiaClientProviderBootstrap
     return $script:WindowsUiaClientProviderBootstrap
 }
