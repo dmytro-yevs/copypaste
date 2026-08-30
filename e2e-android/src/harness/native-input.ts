@@ -7,6 +7,10 @@ import {
   type Attempt,
 } from "./adb.js";
 import { adbFailureText } from "./adb-failure.js";
+import {
+  parseImeRuntimeDiagnostics,
+  type ImeRuntimeDiagnostics,
+} from "./native-ime-diagnostics.js";
 
 export interface DisplaySize {
   width: number;
@@ -41,9 +45,8 @@ export interface NativeTapReceipt {
 
 type ShowImeWithHardKeyboard = "0" | "1" | null;
 
-export interface SoftKeyboardDiagnostics {
+export interface SoftKeyboardDiagnostics extends ImeRuntimeDiagnostics {
   preference: ShowImeWithHardKeyboard | "unknown";
-  imeWindow: "present" | "unknown";
 }
 
 export interface SoftKeyboardScenario {
@@ -318,19 +321,11 @@ async function restoreShowImeWithHardKeyboard(
   }
 }
 
-function imeWindowDiagnostic(output: string): "present" | "unknown" {
-  // Android 14 and 16 emit this full-dump line only for a current IME window.
-  // Nothing infers absence because dump variants may omit it.
-  return /^\s*mInputMethodWindow=Window\{[^\n]*\}$/m.test(output)
-    ? "present"
-    : "unknown";
-}
-
 async function softKeyboardDiagnostics(
   serial: string,
   nativeCommands: NativeInputCommands,
 ): Promise<SoftKeyboardDiagnostics> {
-  const [preference, window] = await Promise.all([
+  const [preference, inputMethod, window] = await Promise.all([
     nativeCommands.tryShell(
       serial,
       "settings",
@@ -338,6 +333,7 @@ async function softKeyboardDiagnostics(
       "secure",
       "show_ime_with_hard_keyboard",
     ),
+    nativeCommands.tryShell(serial, "dumpsys", "input_method"),
     nativeCommands.tryShell(serial, "dumpsys", "window", "-a"),
   ]);
   return {
@@ -348,7 +344,10 @@ async function softKeyboardDiagnostics(
         return "unknown" as const;
       }
     })() : "unknown",
-    imeWindow: window.ok ? imeWindowDiagnostic(window.value) : "unknown",
+    ...parseImeRuntimeDiagnostics(
+      inputMethod.ok ? inputMethod.value : undefined,
+      window.ok ? window.value : undefined,
+    ),
   };
 }
 
