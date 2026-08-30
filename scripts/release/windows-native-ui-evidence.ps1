@@ -403,7 +403,10 @@ function Test-WindowsUiEvidenceHelpers {
     $unsafeSnapshot = [ordered]@{
         nodes = @([ordered]@{
             name = $secret; control_type = "ControlType.Edit"; enabled = $true
-            offscreen = $false; bounds = [ordered]@{ x = 0; y = 0; width = 1; height = 1 }
+            offscreen = $false; bounds = [ordered]@{
+                x = 0; y = 0; width = 1; height = 1
+                raw_bounds = [ordered]@{ path = $privatePath }
+            }
             is_password = $true; value = "192.0.2.1:48654"; peer_text = "Unverified peer"
         })
         unreadable = @([ordered]@{ index = 1; attempts = 3; reason = $privatePath })
@@ -420,6 +423,75 @@ function Test-WindowsUiEvidenceHelpers {
         "protected accessibility artifact exposed a secret or local path"
     Assert-True ($null -eq $document.nodes[0].name -and -not $document.node_read.retried[0].Contains("last_failure")) `
         "protected accessibility artifact did not project onto its safe schema"
+    Assert-True (-not $document.nodes[0].bounds.Contains("raw_bounds")) `
+        "protected accessibility artifact retained an unknown nested bounds field"
+    $failureRoot = Join-Path ([IO.Path]::GetTempPath()) "copypaste-protected-failure-$([guid]::NewGuid())"
+    [IO.Directory]::CreateDirectory($failureRoot) | Out-Null
+    try {
+        $missingPasswordNode = [ordered]@{
+            name = "Pairing code"; control_type = "ControlType.Edit"; enabled = $true
+            offscreen = $false; bounds = [ordered]@{ x = 0; y = 0; width = 1; height = 1 }
+            is_password = $false; value = $secret
+        }
+        $missingPasswordRoot = [ordered]@{
+            name = "Add a CopyPaste device"; control_type = "ControlType.Window"; enabled = $true
+            offscreen = $false; bounds = [ordered]@{ x = 0; y = 0; width = 2; height = 2 }
+            is_password = $false
+        }
+        $missingPasswordSnapshot = [ordered]@{ nodes = @($missingPasswordRoot, $missingPasswordNode) }
+        $missingPasswordNodes = @(
+            New-ProtectedUiaNode `
+                $missingPasswordRoot["name"] $missingPasswordRoot["control_type"] `
+                $missingPasswordRoot["enabled"] $missingPasswordRoot["offscreen"] `
+                $missingPasswordRoot["bounds"] $missingPasswordRoot["is_password"] $pairingNames
+            New-ProtectedUiaNode `
+                $missingPasswordNode["name"] $missingPasswordNode["control_type"] `
+                $missingPasswordNode["enabled"] $missingPasswordNode["offscreen"] `
+                $missingPasswordNode["bounds"] $missingPasswordNode["is_password"] $pairingNames
+        )
+        $assertionFailed = $false
+        try {
+            Assert-WindowsProtectedNodesWithFailureDiagnostic `
+                $missingPasswordNodes @("Add a CopyPaste device") @("Pairing code") @("Pairing code") `
+                "fixture protected evidence" $failureRoot "devices" "desktop-pairing-entry" `
+                "Pairing code" $missingPasswordSnapshot $pairingNames
+        } catch {
+            $assertionFailed = $_.Exception.Message -match "lacks IsPassword=true for 'Pairing code'"
+        }
+        Assert-True $assertionFailed "the missing IsPassword assertion did not remain the original failure"
+        $failurePath = Join-Path $failureRoot "failure-diagnostics/protected-accessibility-failure.json"
+        Assert-True (Test-Path -LiteralPath $failurePath -PathType Leaf) `
+            "the protected UIA failure diagnostic was not retained"
+        $failureDocument = Get-Content -Raw -LiteralPath $failurePath | ConvertFrom-Json
+        $failureJson = $failureDocument | ConvertTo-Json -Depth 8
+        Assert-True ($failureDocument.type -eq "protected-accessibility-failure") `
+            "the protected UIA failure diagnostic used the success artifact type"
+        Assert-True ($failureDocument.nodes[0].index -eq 0 -and
+            $failureDocument.nodes[0].name -eq "Pairing code" -and
+            -not $failureDocument.nodes[0].is_password -and
+            $failureDocument.nodes[0].bounds.width -eq 1) `
+            "the protected UIA failure diagnostic lost its bounded node facts"
+        Assert-True (-not ($failureJson -match $unsafePattern) -and
+            -not ($failureJson -match "raw_bounds|peer_text|value|last_failure|reason")) `
+            "the protected UIA failure diagnostic retained raw node fields"
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $failureRoot "devices/desktop-pairing-entry/accessibility.json"))) `
+            "a protected UIA failure emitted a successful accessibility receipt"
+        $largeSnapshot = [ordered]@{
+            nodes = @(0..$MAX_PROTECTED_FAILURE_NODES | ForEach-Object {
+                [ordered]@{
+                    name = "Pairing code"; control_type = "ControlType.Edit"; enabled = $true
+                    offscreen = $false; bounds = [ordered]@{ x = 0; y = 0; width = 1; height = 1 }
+                    is_password = $true
+                }
+            })
+        }
+        $bounded = New-WindowsProtectedFailureDiagnostic `
+            "devices" "desktop-pairing-entry" "Pairing code" $largeSnapshot $pairingNames
+        Assert-True ($bounded.nodes.Count -eq $MAX_PROTECTED_FAILURE_NODES -and $bounded.node_read.truncated) `
+            "the protected UIA failure diagnostic was not bounded"
+    } finally {
+        Remove-Item -LiteralPath $failureRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
     $failureText = try {
         Wait-Readiness "protected fixture" { New-ProbeNotReady "allowlisted controls not ready" } `
             { Get-ProtectedUiaSnapshotSummary $unsafeSnapshot @("Pairing code") } 0 | Out-Null
