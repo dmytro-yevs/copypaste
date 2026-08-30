@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   mapWebViewPointToScreen,
@@ -394,17 +394,31 @@ describe("Android native input geometry", () => {
     ).rejects.toThrow("restore failed");
   });
 
-  test("preserves callback failure when restoration also fails", async () => {
+  test.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["false", false],
+    ["zero", 0],
+    ["empty string", ""],
+  ] as const)("preserves a %s callback failure when restoration also fails", async (_name, reason) => {
     delete process.env.ANDROID_SERIAL;
     const calls: string[][] = [];
-    await expect(
-      withSoftKeyboardScenario(
-        async () => {
-          throw new Error("scenario failed");
-        },
-        softKeyboardCommands(calls, "0", { failRestore: true }),
-      ),
-    ).rejects.toThrow("scenario failed");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await expect(
+        withSoftKeyboardScenario(
+          async () => {
+            throw reason;
+          },
+          softKeyboardCommands(calls, "0", { failRestore: true }),
+        ),
+      ).rejects.toBe(reason);
+      expect(warning).toHaveBeenCalledWith(
+        "Android show_ime_with_hard_keyboard cleanup also failed",
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   test("returns only redacted serial-bound IME diagnostics", async () => {
