@@ -19,6 +19,8 @@ describe("Android native touch diagnostics", () => {
     ["no source line", "Input Reader State"],
     ["unknown source", "Sources: PRIVATE_POINTER"],
     ["malformed source", "Sources: TOUCHSCREEN|STYLUS"],
+    ["prototype key", "Sources: __proto__"],
+    ["constructor key", "Sources: constructor"],
   ])("keeps %s input source data unknown", (_name, dump) => {
     expect(parseInputSourceMasks(dump)).toBe("unknown");
   });
