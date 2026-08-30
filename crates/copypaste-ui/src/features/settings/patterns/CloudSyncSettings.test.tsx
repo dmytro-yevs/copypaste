@@ -96,70 +96,92 @@ describe("cloud account lifecycle", () => {
 });
 
 describe("connection error announcements", () => {
-  function expectSingleAlert(message: string) {
+  function expectSingleConnectionAlert(message: string | null) {
     const alerts = screen.getAllByRole("alert");
     expect(alerts).toHaveLength(1);
     const [alert] = alerts;
+    expect(alert.classList.contains(styles.connectionNote)).toBe(true);
     expect(alert.getAttribute("aria-live")).toBe("assertive");
-    expect(alert.parentElement?.classList.contains(styles.connectionNote)).toBe(true);
-    expect(alert.parentElement?.tagName).toBe("SPAN");
-    expect(alert.textContent).toContain(message);
+    expect(alert.getAttribute("aria-atomic")).toBe("true");
+    expect(alert.querySelector('[role="alert"]')).toBeNull();
+    if (message === null) {
+      expect(alert.textContent).toBe("");
+    } else {
+      expect(alert.textContent).toContain(message);
+    }
+    return alert;
   }
 
-  it("keeps a sync failure as one assertive connection alert", async () => {
+  it("keeps one stable atomic owner through failures, success, and a second failure", async () => {
     ipc.getCloudStatus.mockResolvedValue(status({
       configured: true,
       signed_in: true,
       key_ready: true,
       email: "person@example.com",
     }));
-    ipc.syncCloudNow.mockRejectedValue(new Error("sync failed"));
+    ipc.syncCloudNow
+      .mockRejectedValueOnce(new Error("sync failed"))
+      .mockResolvedValueOnce({
+        uploaded: 0,
+        tombstoned: 0,
+        downloaded: 0,
+        applied: 0,
+        skipped_sensitive: 0,
+        skipped_undecryptable: 0,
+        skipped_forged: 0,
+        skipped_future: 0,
+        skipped_too_large: 0,
+      });
+    ipc.cloudSignOut.mockRejectedValueOnce(new Error("sign-out failed"));
     const { user } = withUser(<CloudSyncSettings />);
 
-    await user.click(await screen.findByRole("button", { name: "Sync cloud now" }));
-    await screen.findByRole("alert");
+    const initialOwner = await screen.findByRole("alert");
+    expectSingleConnectionAlert(null);
 
-    expectSingleAlert("Cloud sync failed. Check the connection and try again.");
+    await screen.findByRole("button", { name: "Sync cloud now" });
+    await user.click(screen.getByRole("button", { name: "Sync cloud now" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(
+      "Cloud sync failed. Check the connection and try again.",
+    ));
+    expect(screen.getByRole("alert")).toBe(initialOwner);
+    expectSingleConnectionAlert("Cloud sync failed. Check the connection and try again.");
+
+    await user.click(screen.getByRole("button", { name: "Sync cloud now" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(""));
+    expect(screen.getByRole("alert")).toBe(initialOwner);
+    expectSingleConnectionAlert(null);
+
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(
+      "Cloud sign-out failed. Try again.",
+    ));
+    expect(screen.getByRole("alert")).toBe(initialOwner);
+    expectSingleConnectionAlert("Cloud sign-out failed. Try again.");
   });
 
-  it("keeps a sign-out failure as one assertive connection alert", async () => {
-    ipc.getCloudStatus.mockResolvedValue(status({
-      configured: true,
-      signed_in: true,
-      key_ready: true,
-      email: "person@example.com",
-    }));
-    ipc.cloudSignOut.mockRejectedValue(new Error("sign-out failed"));
-    const { user } = withUser(<CloudSyncSettings />);
-
-    await user.click(await screen.findByRole("button", { name: "Sign out" }));
-    await screen.findByRole("alert");
-
-    expectSingleAlert("Cloud sign-out failed. Try again.");
-  });
-
-  it("keeps the persisted sync failure as one assertive connection alert", async () => {
+  it("preserves persisted sync error priority and copy", async () => {
     ipc.getCloudStatus.mockResolvedValue(status({
       configured: true,
       last_error: "safe persisted error",
+      unreadable_uploads: 2,
     }));
     withUser(<CloudSyncSettings />);
 
-    await screen.findByRole("alert");
-
-    expectSingleAlert("The last cloud sync failed. Try again or sign in again.");
+    await screen.findByText("The last cloud sync failed. Try again or sign in again.");
+    expectSingleConnectionAlert("The last cloud sync failed. Try again or sign in again.");
   });
 
-  it("keeps unreadable upload feedback as one assertive connection alert", async () => {
+  it("announces unreadable uploads when no persisted sync error exists", async () => {
     ipc.getCloudStatus.mockResolvedValue(status({
       configured: true,
       unreadable_uploads: 2,
     }));
     withUser(<CloudSyncSettings />);
 
-    await screen.findByRole("alert");
-
-    expectSingleAlert(
+    await screen.findByText(
+      "2 items on this device could not be prepared for cloud sync and are being retried.",
+    );
+    expectSingleConnectionAlert(
       "2 items on this device could not be prepared for cloud sync and are being retried.",
     );
   });
