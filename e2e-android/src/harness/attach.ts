@@ -59,21 +59,24 @@ export type PageAutoAttachOutcome =
   | "browser-session-unavailable"
   | "root-connection-unavailable"
   | "page-autoattach-rejected"
-  | "browser-session-detach-failed"
   | "deadline-exceeded";
+
+export type PageAutoAttachCleanup = "not-needed" | "confirmed" | "unconfirmed";
 
 export interface AttachFinalDiagnostic {
   pages: AttachPagesDiagnostic;
   raw: AttachRawDiagnostic;
   pageAutoAttachOutcome: PageAutoAttachOutcome;
+  pageAutoAttachCleanup: PageAutoAttachCleanup;
 }
 
 export function finalAttachDiagnostic(
   pages: AttachPagesDiagnostic,
   raw: AttachRawDiagnostic,
   pageAutoAttachOutcome: PageAutoAttachOutcome,
+  pageAutoAttachCleanup: PageAutoAttachCleanup,
 ): AttachFinalDiagnostic {
-  return { pages, raw, pageAutoAttachOutcome };
+  return { pages, raw, pageAutoAttachOutcome, pageAutoAttachCleanup };
 }
 
 export type AttachStep =
