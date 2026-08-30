@@ -454,8 +454,8 @@ pub struct Item {
     #[serde(default)]
     pub source_app_name: Option<String>,
 
-    /// This item is larger than cloud sync will carry, so it will never reach
-    /// another device through an account.
+    /// This item exceeds the sync size limit, so sync refuses it before sending
+    /// it to another device.
     ///
     /// A property of the item and the cap, not of any particular round: it is
     /// true before the first sync attempt and stays true, which is the point —
@@ -463,9 +463,8 @@ pub struct Item {
     /// item that will silently never arrive does not look like one that is
     /// still on its way.
     ///
-    /// Local history is unaffected. The item is stored in full, it is
-    /// searchable, it copies, and the peer transport is not governed by this
-    /// cap. [`CloudSyncData::skipped_too_large`] is the per-round half.
+    /// Local history remains preserved while sync refuses over-limit items.
+    /// [`CloudSyncData::skipped_too_large`] is the per-round half.
     #[serde(default)]
     pub too_large_to_sync: bool,
 

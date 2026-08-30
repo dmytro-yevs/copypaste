@@ -25,7 +25,7 @@ export const history = {
     historyItem: "History item",
     cloudEligibility: "Cloud sync",
     eligible: "Eligible",
-    tooLarge: "Too large · peer sync only",
+    tooLarge: "Too large to sync — this item stays on this device",
   },
 
   list: {
