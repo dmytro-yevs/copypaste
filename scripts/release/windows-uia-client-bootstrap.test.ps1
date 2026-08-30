@@ -35,8 +35,31 @@ function Test-WindowsUiaClientBootstrapHelpers {
     }
     $facts = @(Get-WindowsUiaCanaryExpectations)
     if (-not (Test-WindowsUiaCanaryMappings $facts)) { throw "the native UIA canary expectations were rejected" }
+    $coreFacts = @(Get-WindowsUiaCanaryExpectations)
+    $coreFacts[0]["class_name"] = "WindowsForms10.Edit.app.0.1400c58_r9_ad1"
+    $coreFacts[1]["class_name"] = "WindowsForms10.Button.app.0.1400c58_r3_ad1"
+    $coreFacts[2]["class_name"] = "WindowsForms10.Static.app.0.1400c58_r12_ad42"
+    if (-not (Test-WindowsUiaCanaryMappings $coreFacts)) { throw "the native UIA canary rejected documented WinForms classes" }
+    $wrongRole = @(Get-WindowsUiaCanaryExpectations)
+    $wrongRole[0]["class_name"] = "WindowsForms10.Button.app.0.1400c58_r9_ad1"
+    if (Test-WindowsUiaCanaryMappings $wrongRole) { throw "the native UIA canary accepted a wrong WinForms role class" }
+    $wrongPrefix = @(Get-WindowsUiaCanaryExpectations)
+    $wrongPrefix[0]["class_name"] = "WindowsForms11.Edit.app.0.1400c58_r9_ad1"
+    if (Test-WindowsUiaCanaryMappings $wrongPrefix) { throw "the native UIA canary accepted a wrong WinForms prefix" }
+    $malformedHash = @(Get-WindowsUiaCanaryExpectations)
+    $malformedHash[0]["class_name"] = "WindowsForms10.Edit.app.0.not-hex_r9_ad1"
+    if (Test-WindowsUiaCanaryMappings $malformedHash) { throw "the native UIA canary accepted a malformed WinForms hash" }
+    $malformedSuffix = @(Get-WindowsUiaCanaryExpectations)
+    $malformedSuffix[0]["class_name"] = "WindowsForms10.Edit.app.0.1400c58_r9_adx"
+    if (Test-WindowsUiaCanaryMappings $malformedSuffix) { throw "the native UIA canary accepted a malformed WinForms suffix" }
+    $arbitraryClass = @(Get-WindowsUiaCanaryExpectations)
+    $arbitraryClass[0]["class_name"] = "Custom.Edit"
+    if (Test-WindowsUiaCanaryMappings $arbitraryClass) { throw "the native UIA canary accepted an arbitrary class" }
     if (Test-WindowsUiaCanaryMappings @($facts | Select-Object -Skip 1)) { throw "the native UIA canary accepted a missing control" }
     if (Test-WindowsUiaCanaryMappings @($facts + $facts[0])) { throw "the native UIA canary accepted a duplicate control" }
+    $wrongPassword = @(Get-WindowsUiaCanaryExpectations)
+    $wrongPassword[0]["is_password"] = $false
+    if (Test-WindowsUiaCanaryMappings $wrongPassword) { throw "the native UIA canary accepted an unprotected Edit" }
     $wrongType = @(Get-WindowsUiaCanaryExpectations)
     $wrongType[1]["control_type"] = "ControlType.Pane"
     if (Test-WindowsUiaCanaryMappings $wrongType) { throw "the native UIA canary accepted a wrong control type" }
