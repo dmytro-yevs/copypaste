@@ -23,6 +23,8 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
 # shellcheck source=scripts/release/android-ui-evidence-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/android-ui-evidence-lib.sh"
+# shellcheck source=scripts/release/android-navigation-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-navigation-lib.sh"
 
 APK="${APK:-}"
 MAIN="$PKG/$APP_NAMESPACE.MainActivity"
@@ -31,7 +33,9 @@ SETTLE_SECS="${SETTLE_SECS:-25}"
 PAINT_TIMEOUT="${PAINT_TIMEOUT:-90}"
 
 if [[ "${1:-}" == "--self-test" ]]; then
-    self_test
+    self_test || exit $?
+    android_navigation_self_test "$SELF_TEST_TMP"
+    [[ $FAIL -eq 0 ]]
     exit $?
 fi
 
