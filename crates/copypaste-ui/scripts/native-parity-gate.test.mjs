@@ -611,8 +611,8 @@ test("rejects incomplete, nonpassword, and raw Windows pairing accessibility", (
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [passwordPath], required: new Set(["windows"]), runId: RUN_ID }),
     (error) => {
-      assert.match(error.message, /lacks protected field 2/);
-      assert.doesNotMatch(error.message, /Pairing address/);
+      assert.match(error.message, /accessibility lacks a protected field/);
+      assert.doesNotMatch(error.message, /Pairing address|field 2/);
       return true;
     },
   );
