@@ -52,30 +52,28 @@ export interface AttachRawDiagnostic {
   webSocketPresent: boolean;
 }
 
-export type DirectOutcome =
+export type PageAutoAttachOutcome =
   | "not-attempted"
-  | "connected"
-  | "connect-failed"
-  | "pages-failed"
-  | "no-page"
-  | "wrong-origin"
-  | "ownership-failed"
-  | "no-websocket"
-  | "raw-empty"
-  | "raw-error";
+  | "page-autoattach-enabled"
+  | "browser-target-unavailable"
+  | "browser-session-unavailable"
+  | "root-connection-unavailable"
+  | "page-autoattach-rejected"
+  | "browser-session-detach-failed"
+  | "deadline-exceeded";
 
 export interface AttachFinalDiagnostic {
   pages: AttachPagesDiagnostic;
   raw: AttachRawDiagnostic;
-  directOutcome: DirectOutcome;
+  pageAutoAttachOutcome: PageAutoAttachOutcome;
 }
 
 export function finalAttachDiagnostic(
   pages: AttachPagesDiagnostic,
   raw: AttachRawDiagnostic,
-  directOutcome: DirectOutcome,
+  pageAutoAttachOutcome: PageAutoAttachOutcome,
 ): AttachFinalDiagnostic {
-  return { pages, raw, directOutcome };
+  return { pages, raw, pageAutoAttachOutcome };
 }
 
 export type AttachStep =
