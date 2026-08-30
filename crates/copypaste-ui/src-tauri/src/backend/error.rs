@@ -85,7 +85,6 @@ impl UiBoundaryErrorCode {
                 | Self::UpdateNetworkFailed
                 | Self::UpdateCheckFailed
                 | Self::UpdatePermissionRequired
-                | Self::Unknown
         )
     }
 }
@@ -125,7 +124,7 @@ impl UiError {
                 .bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
         if safe {
-            Self::new(code, true)
+            Self::new(code, false)
         } else {
             Self::from_boundary(UiBoundaryErrorCode::Unknown)
         }
@@ -509,7 +508,7 @@ mod tests {
             Some("failed under /home/bob/private"),
         );
         let json = serde_json::to_string(&error).unwrap();
-        assert_eq!(json, r#"{"code":"future_state_2","retryable":true}"#);
+        assert_eq!(json, r#"{"code":"future_state_2","retryable":false}"#);
         assert!(!json.contains("bob"), "{json}");
     }
 
@@ -522,7 +521,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&error).unwrap(),
-            r#"{"code":"unknown","retryable":true}"#
+            r#"{"code":"unknown","retryable":false}"#
         );
     }
 }

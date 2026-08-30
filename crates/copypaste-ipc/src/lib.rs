@@ -47,14 +47,9 @@ pub const PROTOCOL_VERSION: u32 = 2;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
     pub id: u64,
-    #[serde(default = "default_protocol_version")]
     pub protocol_version: u32,
     #[serde(flatten)]
     pub method: Method,
-}
-
-fn default_protocol_version() -> u32 {
-    PROTOCOL_VERSION
 }
 
 /// Every operation the daemon supports.
@@ -482,6 +477,24 @@ mod tests {
     #[test]
     fn private_mode_epoch_is_required_for_convergence() {
         assert!(serde_json::from_str::<PrivateModeData>(r#"{"private_mode":true}"#).is_err());
+    }
+
+    #[test]
+    fn request_protocol_version_is_required_but_any_numeric_version_decodes() {
+        assert!(serde_json::from_str::<Request>(r#"{"id":1,"method":"status"}"#).is_err());
+
+        for version in [
+            0,
+            PROTOCOL_VERSION - 1,
+            PROTOCOL_VERSION,
+            PROTOCOL_VERSION + 1,
+        ] {
+            let request: Request = serde_json::from_str(&format!(
+                r#"{{"id":1,"protocol_version":{version},"method":"status"}}"#
+            ))
+            .unwrap();
+            assert_eq!(request.protocol_version, version);
+        }
     }
 
     #[test]

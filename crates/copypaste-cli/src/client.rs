@@ -646,6 +646,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn destructive_calls_reject_wrong_id_and_payloadless_success_replies() {
+        for reply in [
+            r#"{"id":999,"ok":true,"data":{"empty":{}}}"#,
+            r#"{"id":{id},"ok":true}"#,
+        ] {
+            let (result, ids) = paired_request(
+                Method::DeleteAll { through: None },
+                [PairAction::Reply(reply.into())],
+                REQUEST_TIMEOUT,
+                |_| ready(()),
+            )
+            .await;
+
+            assert!(result.is_err(), "{reply}");
+            assert_eq!(ids.len(), 1);
+        }
+    }
+
+    #[tokio::test]
     async fn a_missing_socket_is_reported_as_an_unreachable_daemon() {
         let missing = std::env::temp_dir().join("copypaste-cli-test-absent.sock");
         let _ = std::fs::remove_file(&missing);
@@ -1136,11 +1155,9 @@ mod tests {
     }
 
     #[test]
-    fn an_untagged_failure_still_becomes_an_error() {
+    fn a_failure_without_an_error_code_is_rejected() {
         let line = r#"{"id":1,"ok":false,"error":"unknown method"}"#;
-        let response: Response = serde_json::from_str(line).unwrap();
-        let err = into_data(response).unwrap_err();
-        assert_eq!(err.exit_code(), crate::error::EXIT_OTHER);
+        assert!(serde_json::from_str::<Response>(line).is_err());
     }
 
     #[test]
