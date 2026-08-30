@@ -30,6 +30,13 @@ impl CloseHandle {
             self.window.close();
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn close_from_user_for_test(&self) {
+        if self.window.hwnd().IsWindow() {
+            self.window.close();
+        }
+    }
 }
 
 pub(super) fn abort_if_user_dismissed(programmatic: &AtomicBool, abort: &NativeAbort) {
@@ -89,6 +96,102 @@ pub(super) fn button(
     )
 }
 
+#[allow(unsafe_code)]
+fn with_accessible_property_services<T>(
+    callback: impl FnOnce(&::windows::Win32::UI::Accessibility::IAccPropServices) -> T,
+) -> Option<T> {
+    use ::windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK};
+    use ::windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use ::windows::Win32::UI::Accessibility::{CLSID_AccPropServices, IAccPropServices};
+
+    // SAFETY: this function runs on the owned pairing UI thread; S_OK/S_FALSE
+    // initialization is balanced below, while RPC_E_CHANGED_MODE explicitly
+    // permits use of the already-initialized apartment without balancing it.
+    let initialization = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let initialized = initialization == S_OK || initialization == S_FALSE;
+    if !initialized && initialization != RPC_E_CHANGED_MODE {
+        return None;
+    }
+    let result = {
+        // SAFETY: CoCreateInstance returns an owned interface whose lexical
+        // scope ends before CoUninitialize below.
+        let service = match unsafe {
+            CoCreateInstance::<_, IAccPropServices>(
+                &CLSID_AccPropServices,
+                None,
+                CLSCTX_INPROC_SERVER,
+            )
+        } {
+            Ok(service) => service,
+            Err(_) => {
+                if initialized {
+                    // SAFETY: no interface was created on this path; this
+                    // balances the successful apartment initialization.
+                    unsafe { CoUninitialize() };
+                }
+                return None;
+            }
+        };
+        callback(&service)
+    };
+    if initialized {
+        // SAFETY: the service interface was dropped at the end of `result`.
+        unsafe { CoUninitialize() };
+    }
+    Some(result)
+}
+
+#[allow(unsafe_code)]
+pub(super) fn set_accessible_name(hwnd: &winsafe::HWND, name: &str) -> bool {
+    use ::windows::core::PCWSTR;
+    use ::windows::Win32::Foundation::HWND as WindowsHwnd;
+    use ::windows::Win32::UI::Accessibility::Name_Property_GUID;
+    use ::windows::Win32::UI::WindowsAndMessaging::{CHILDID_SELF, OBJID_CLIENT};
+
+    let mut name16: Vec<u16> = name.encode_utf16().collect();
+    name16.push(0);
+    with_accessible_property_services(|service| unsafe {
+        // SAFETY: the caller passes a live, owned Edit HWND during WM_CREATE;
+        // the NUL-terminated UTF-16 buffer and static property GUID live for
+        // the duration of this synchronous call.
+        service
+            .SetHwndPropStr(
+                WindowsHwnd(hwnd.ptr()),
+                OBJID_CLIENT.0 as u32,
+                CHILDID_SELF,
+                Name_Property_GUID,
+                PCWSTR::from_raw(name16.as_ptr()),
+            )
+            .is_ok()
+    })
+    .unwrap_or(false)
+}
+
+#[allow(unsafe_code)]
+pub(super) fn clear_accessible_name(hwnd: &winsafe::HWND) -> bool {
+    use ::windows::Win32::Foundation::HWND as WindowsHwnd;
+    use ::windows::Win32::UI::Accessibility::Name_Property_GUID;
+    use ::windows::Win32::UI::WindowsAndMessaging::{CHILDID_SELF, OBJID_CLIENT};
+
+    let properties = [Name_Property_GUID];
+    with_accessible_property_services(|service| unsafe {
+        // SAFETY: the caller passes the still-live Edit HWND before destroy;
+        // the property slice is stack-owned and borrowed only for this call.
+        service
+            .ClearHwndProps(
+                WindowsHwnd(hwnd.ptr()),
+                OBJID_CLIENT.0 as u32,
+                CHILDID_SELF,
+                &properties,
+            )
+            .is_ok()
+    })
+    .unwrap_or(false)
+}
+
 pub(super) fn hide(hwnd: &winsafe::HWND) {
     hwnd.ShowWindow(co::SW::HIDE);
 }
@@ -133,6 +236,13 @@ mod tests {
 
     use super::*;
 
+    fn production_source(source: &'static str) -> &'static str {
+        source
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .or_else(|| source.split_once("\r\n#[cfg(test)]\r\nmod tests {"))
+            .map_or("", |(production, _)| production)
+    }
+
     #[test]
     fn refusal_returns_false() {
         assert!(!protect_from_capture(&winsafe::HWND::NULL, |_| false));
@@ -141,6 +251,80 @@ mod tests {
     #[test]
     fn acceptance_returns_true() {
         assert!(protect_from_capture(&winsafe::HWND::NULL, |_| true));
+    }
+
+    #[test]
+    fn accessible_names_are_annotated_without_value_access() {
+        let source = production_source(include_str!("common.rs"));
+        assert!(source.contains("SetHwndPropStr"));
+        assert!(source.contains("ClearHwndProps"));
+        assert!(source.contains("Name_Property_GUID"));
+        assert!(!source.contains("ValuePattern"));
+        assert_eq!(source.matches("#[allow(unsafe_code)]").count(), 3);
+        assert!(source.contains("RPC_E_CHANGED_MODE"));
+        assert!(source.contains("S_OK") && source.contains("S_FALSE"));
+    }
+
+    #[test]
+    fn accessible_service_is_dropped_before_com_uninitializes() {
+        let source = production_source(include_str!("common.rs"));
+        let service_scope = source
+            .split_once("let result = {")
+            .unwrap()
+            .1
+            .split_once("\n    if initialized {")
+            .unwrap()
+            .0;
+        assert!(service_scope.contains("let service = match"));
+        assert!(service_scope.contains("callback(&service)"));
+        assert!(service_scope.trim_end().ends_with("};"));
+    }
+
+    #[test]
+    fn production_source_ignores_method_cfg_and_fails_closed_without_module_gate() {
+        let fixture = concat!(
+            "impl Type {\n",
+            "    #[cfg(test)]\n",
+            "    fn test_helper() {}\n",
+            "}\n",
+            "\n",
+            "pub fn production() {}\n",
+            "\n",
+            "#[cfg(test)]\n",
+            "mod tests {\n",
+            "    #[test]\n",
+            "    fn regression() {}\n",
+            "}\n",
+        );
+        let production = production_source(fixture);
+        assert!(production.contains("fn test_helper()"));
+        assert!(production.contains("pub fn production()"));
+        assert!(!production.contains("fn regression()"));
+        assert!(
+            production_source("pub fn production() {}\n#[cfg(test)]\nfn helper() {}").is_empty()
+        );
+    }
+
+    #[test]
+    fn production_source_handles_crlf_module_boundaries() {
+        let fixture = concat!(
+            "impl Type {\r\n",
+            "    #[cfg(test)]\r\n",
+            "    fn test_helper() {}\r\n",
+            "}\r\n",
+            "\r\n",
+            "pub fn production() {}\r\n",
+            "\r\n",
+            "#[cfg(test)]\r\n",
+            "mod tests {\r\n",
+            "    #[test]\r\n",
+            "    fn regression() {}\r\n",
+            "}\r\n",
+        );
+        let production = production_source(fixture);
+        assert!(production.contains("fn test_helper()"));
+        assert!(production.contains("pub fn production()"));
+        assert!(!production.contains("fn regression()"));
     }
 
     /// The window whose affinity is being set is the one that was asked about;

@@ -185,9 +185,9 @@
         {
           "name": "webview-surface-not-required",
           "file": "scripts/release/android-native-accessibility.sh",
-          "find": "if not any(\"WebView\" in name for name in classes):",
+          "find": "if not webviews:",
           "replace": "if False:",
-          "expect": "self-test failed: invalid fixture passed"
+          "expect": "self-test failed: invalid fixture reached the wrong rejection"
         },
         {
           "name": "named-node-floor-removed",
@@ -283,7 +283,7 @@
     },
     {
       "id": "android-smoke",
-      "verifies": "the on-device smoke detectors: our native code, the devtools socket, and the wry JNI scan",
+      "verifies": "the on-device smoke detectors: React hydration, native code, the devtools socket, and the wry JNI scan",
       "command": ["bash", "scripts/release/android-smoke.sh", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["bash", "python3", "node", "awk"],
@@ -315,6 +315,20 @@
           "find": "    for name in setWebContentsDebuggingEnabled setWebViewClient setWebChromeClient; do",
           "replace": "    for name in setWebContentsDebuggingEnabled; do",
           "expect": "FAIL  a release library reports no devtools call and both neighbours"
+        },
+        {
+          "name": "webview-shell-counted-as-react-hydration",
+          "file": "scripts/release/android-smoke-lib.sh",
+          "find": "    (( $1 >= 3 && $2 >= 3 && $3 >= 1 ))",
+          "replace": "    return 0",
+          "expect": "FAIL  run 33124469586's titled WebView and React root are not hydration"
+        },
+        {
+          "name": "pairing-provider-marker-counted-as-authored-content",
+          "file": "scripts/release/android-smoke-lib.sh",
+          "find": "        or node.get(\"resource-id\") in {\"root\", \"copypaste-pairing-dialog-open\"}",
+          "replace": "        or node.get(\"resource-id\") == \"root\"",
+          "expect": "FAIL  the pairing provider marker alone is not React hydration"
         }
       ]
     },
@@ -387,11 +401,95 @@
     },
     {
       "id": "check-wiring",
-      "verifies": "the CI runner-image detector: an unknown label or a mixed image family must be rejected",
+      "verifies": "runner images, job budgets, Android artifacts, and Dockerless cargo-deny wiring",
       "command": ["python3", "scripts/release/check-wiring.py", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["python3"],
       "mutations": [
+        {
+          "name": "bare-ref-concurrency-accepted",
+          "file": ".github/workflows/ci.yml",
+          "find": "  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}\n",
+          "replace": "  group: ci-${{ github.ref }}\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "missing-event-concurrency-discriminator-accepted",
+          "file": ".github/workflows/ci.yml",
+          "find": "  group: ci-${{ github.event_name }}-",
+          "replace": "  group: ci-",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "missing-merge-group-trigger-accepted",
+          "file": ".github/workflows/browser-webkitgtk.yml",
+          "find": "  merge_group:\n    types: [checks_requested]\n",
+          "replace": "",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "merge-group-cancellation-accepted",
+          "file": ".github/workflows/windows-native-e2e.yml",
+          "find": "  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}\n",
+          "replace": "  cancel-in-progress: true\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "nightly-events-may-collide",
+          "file": ".github/workflows/native-nightly.yml",
+          "find": "  group: native-nightly-${{ github.event_name }}\n",
+          "replace": "  group: native-nightly-${{ github.ref }}\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "android-manual-runs-share-ref",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "|| github.run_id }}",
+          "replace": "|| github.ref_name }}",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "android-api-concurrency-not-distinct",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "-${{ github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36' }}",
+          "replace": "",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "android-target-concurrency-not-distinct",
+          "file": ".github/workflows/android-emulator.yml",
+          "find": "-${{ inputs.target || 'google_apis' }}\n",
+          "replace": "\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "prefixed-release-input-double-prefixed",
+          "file": ".github/workflows/release.yml",
+          "find": "  group: release-${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}\n",
+          "replace": "  group: release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "release-ref-used-as-version",
+          "file": ".github/workflows/release.yml",
+          "find": "  group: release-${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}\n",
+          "replace": "  group: release-${{ github.ref }}\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "release-cancellation-accepted",
+          "file": ".github/workflows/release.yml",
+          "find": "  cancel-in-progress: false\n",
+          "replace": "  cancel-in-progress: true\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
+        {
+          "name": "secret-scan-shares-cancelling-caller-group",
+          "file": ".github/workflows/secret-scan.yml",
+          "find": "permissions:\n  contents: read\n",
+          "replace": "concurrency:\n  group: secret-scan-${{ github.ref_name }}\n  cancel-in-progress: true\n\npermissions:\n  contents: read\n",
+          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
+        },
         {
           "name": "unknown-runner-label-accepted",
           "file": "scripts/release/check-wiring.py",
@@ -454,6 +552,55 @@
           "find": "            if \"src-tauri/gen/android\" in path and \"jniLibs/\" not in path:\n",
           "replace": "            if False:\n",
           "expect": "FAIL|self-test: an opaque generated Android tree artifact is rejected|"
+        },
+        {
+          "name": "unverified-cargo-deny-release-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"checksum\": str(settings.get(\"checksum\", \"\")).lower() == \"true\",\n",
+          "replace": "        \"checksum\": True,\n",
+          "expect": "FAIL|self-test: cargo-deny without checksum verification is rejected|"
+        },
+        {
+          "name": "cargo-deny-build-fallback-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"fallback\": settings.get(\"fallback\") == \"none\",\n",
+          "replace": "        \"fallback\": True,\n",
+          "expect": "FAIL|self-test: cargo-deny with a source-build fallback is rejected|"
+        },
+        {
+          "name": "unpinned-cargo-deny-version-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"version\": settings.get(\"tool\") == \"cargo-deny@0.20.2\",\n",
+          "replace": "        \"version\": True,\n",
+          "expect": "FAIL|self-test: an unreviewed cargo-deny version is rejected|"
+        },
+        {
+          "name": "docker-cargo-deny-action-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"dockerless\": not docker_actions,\n",
+          "replace": "        \"dockerless\": True,\n",
+          "expect": "FAIL|self-test: the Docker-based cargo-deny action is rejected|"
+        },
+        {
+          "name": "incomplete-cargo-deny-flags-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "    flags_hold = command.startswith(required_prefix) and command.endswith(required_suffix)\n",
+          "replace": "    flags_hold = True\n",
+          "expect": "FAIL|self-test: a cargo-deny command without the lockfile flag is rejected|"
+        },
+        {
+          "name": "incomplete-cargo-deny-matrix-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"matrix\": matrix == [\"advisories\", \"bans\", \"licenses\", \"sources\"],\n",
+          "replace": "        \"matrix\": True,\n",
+          "expect": "FAIL|self-test: a cargo-deny matrix missing a policy check is rejected|"
+        },
+        {
+          "name": "hardcoded-cargo-deny-subset-accepted",
+          "file": "scripts/release/check-wiring.py",
+          "find": "        \"selector\": selector == \"${{ matrix.check }}\",\n",
+          "replace": "        \"selector\": True,\n",
+          "expect": "FAIL|self-test: a hardcoded cargo-deny policy subset is rejected|"
         }
       ]
     },
@@ -767,6 +914,27 @@
           "find": "    return $ControlType.ProgrammaticName",
           "replace": "    return $null",
           "expect": "a registered control type was not read from the element"
+        },
+        {
+          "name": "protected-pairing-accepts-wda-none",
+          "file": "scripts/release/windows-native-window-evidence.ps1",
+          "find": "        -not $State.capture_allowed -and $State.display_affinity -eq 17",
+          "replace": "        ((-not $State.capture_allowed -and $State.display_affinity -eq 17) -or ($State.capture_allowed -and $State.display_affinity -eq 0))",
+          "expect": "WDA_NONE was accepted as protected"
+        },
+        {
+          "name": "protected-pairing-binds-a-screenshot",
+          "file": "scripts/release/windows-native-protected-evidence.ps1",
+          "find": "        accessibility = $Accessibility",
+          "replace": "        screenshot = $Accessibility; accessibility = $Accessibility",
+          "expect": "protected state record bound a screenshot"
+        },
+        {
+          "name": "protected-pairing-retains-a-raw-secret",
+          "file": "scripts/release/windows-native-protected-evidence.ps1",
+          "find": "        name = if ($Name -in $AllowedNames) { $Name } else { $null }",
+          "replace": "        name = $Name",
+          "expect": "protected accessibility retained an unapproved name"
         },
         {
           "name": "installed-sidecar-not-required",

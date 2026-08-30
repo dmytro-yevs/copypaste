@@ -37,23 +37,17 @@ export function CloudSyncSettings() {
         ? "settings.sync.cloud.description"
         : "settings.sync.cloud.notConfigured");
 
-  const connectionNote = controller.syncError ? (
-    <FieldFeedback state="error">
-      {t("settings.sync.cloud.syncError")}
-    </FieldFeedback>
-  ) : controller.signOutError ? (
-    <FieldFeedback state="error">
-      {t("settings.sync.cloud.signOutError")}
-    </FieldFeedback>
-  ) : status?.last_error ? (
-    <FieldFeedback state="error">
-      {t("settings.sync.cloud.lastError")}
-    </FieldFeedback>
-  ) : status?.unreadable_uploads ? (
-    <FieldFeedback state="error">
-      {t("settings.sync.cloud.unreadableUploads", { count: status.unreadable_uploads })}
-    </FieldFeedback>
-  ) : undefined;
+  const connectionMessage = controller.syncError
+    ? t("settings.sync.cloud.syncError")
+    : controller.signOutError
+      ? t("settings.sync.cloud.signOutError")
+      : status?.last_error
+        ? t("settings.sync.cloud.lastError")
+        : status?.unreadable_uploads
+          ? t("settings.sync.cloud.unreadableUploads", {
+              count: status.unreadable_uploads,
+            })
+          : null;
 
   const statusControl = cloud.isLoading ? (
     <SkeletonText width="xs" />
@@ -101,7 +95,18 @@ export function CloudSyncSettings() {
             ) : (
               <p id={connectionDescriptionId}>{connectionDescription}</p>
             )}
-            {connectionNote}
+            <span
+              className={styles.connectionNote}
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+            >
+              {connectionMessage ? (
+                <FieldFeedback state="error" announce={false}>
+                  {connectionMessage}
+                </FieldFeedback>
+              ) : null}
+            </span>
           </div>
           <div className={styles.setupStatus}>{statusControl}</div>
         </header>

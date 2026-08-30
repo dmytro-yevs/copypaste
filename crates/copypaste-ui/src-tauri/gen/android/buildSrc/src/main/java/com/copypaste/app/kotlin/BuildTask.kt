@@ -61,11 +61,16 @@ open class BuildTask @Inject constructor(private val execOperations: ExecOperati
         val target = target ?: throw GradleException("target cannot be null")
         val release = release ?: throw GradleException("release cannot be null")
         val args = listOf("run", "--", "tauri", "android", "android-studio-script");
+        val rustWebViewExtension = File(
+            project.projectDir,
+            "src/main/rust-webview-accessibility.kt.inc",
+        ).readText()
 
         execOperations.exec {
             workingDir(File(project.projectDir, rootDirRel))
             executable(executable)
             args(args)
+            environment("WRY_RUSTWEBVIEW_CLASS_EXTENSION", rustWebViewExtension)
             if (project.logger.isEnabled(LogLevel.DEBUG)) {
                 args("-vv")
             } else if (project.logger.isEnabled(LogLevel.INFO)) {

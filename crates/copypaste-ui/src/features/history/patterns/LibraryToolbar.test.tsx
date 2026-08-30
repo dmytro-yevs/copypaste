@@ -1,5 +1,6 @@
 import { createRef } from "react";
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui";
@@ -84,6 +85,44 @@ afterEach(() => {
 });
 
 describe("Library toolbar active-control badges", () => {
+    it("keeps the kind menu state on its trigger", async () => {
+        const user = userEvent.setup();
+        render(toolbar());
+        const trigger = screen.getByRole("button", {
+            name: "Filter by kind, default: All kinds",
+        });
+
+        await user.click(trigger);
+        expect(trigger.getAttribute("aria-expanded")).toBe("true");
+        expect(trigger.getAttribute("data-state")).toBe("open");
+        expect(
+            screen.getByRole("menuitemcheckbox", { name: "Links" }),
+        ).toBeTruthy();
+
+        await user.keyboard("{Escape}");
+        expect(trigger.getAttribute("aria-expanded")).toBe("false");
+        expect(trigger.getAttribute("data-state")).toBe("closed");
+    });
+
+    it("keeps the sort menu state on its trigger", async () => {
+        const user = userEvent.setup();
+        render(toolbar());
+        const trigger = screen.getByRole("combobox", {
+            name: "Sort order, default: Newest first",
+        });
+
+        await user.click(trigger);
+        expect(trigger.getAttribute("aria-expanded")).toBe("true");
+        expect(trigger.getAttribute("data-state")).toBe("open");
+        expect(
+            screen.getByRole("option", { name: "Oldest first" }),
+        ).toBeTruthy();
+
+        await user.keyboard("{Escape}");
+        expect(trigger.getAttribute("aria-expanded")).toBe("false");
+        expect(trigger.getAttribute("data-state")).toBe("closed");
+    });
+
     it("has no badges at defaults and says each control is default", () => {
         const { container } = render(toolbar());
 

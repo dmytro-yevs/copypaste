@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, inject, test } from "vitest";
+import { afterAll, expect, inject, test } from "vitest";
 
 import { PACKAGE } from "../src/harness/adb.js";
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
@@ -11,12 +11,14 @@ import {
   expectSecretAbsent,
   outerHtml,
 } from "../src/harness/leaks.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   MASKED_ROW,
   SEARCH,
   clearField,
   count,
   gotoView,
+  openHistorySearch,
   reloadHistoryWith,
   waitForRows,
   waitForText,
@@ -30,9 +32,10 @@ const ordinary = ordinaryFor(leakNonce);
 let app: AndroidApp;
 let seeded: string[] = [];
 
-beforeAll(async () => {
+beforeAllWithEvidence("leaks", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
+  await openHistorySearch(app);
   await clearField(app, SEARCH);
   seeded = await addItems(app, [secret, ordinary]);
   await reloadHistoryWith(app, ordinary);

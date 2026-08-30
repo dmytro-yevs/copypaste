@@ -8,18 +8,31 @@
  * moving, and the pair that comes back fails an invariant the app never
  * violated.
  */
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
-import { addItems, cleanUpItems, deleteItems, storedItems } from "../src/harness/bridge.js";
+import {
+  addItems,
+  cleanUpItems,
+  deleteItems,
+  storedItems,
+} from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
-import { scrollTo, settledList, type ListSnapshot } from "../src/harness/list.js";
+import {
+  maxScrollTop,
+  renderedRowsCoverViewport,
+  scrollTo,
+  settledList,
+  type ListSnapshot,
+} from "../src/harness/list.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   gotoView,
   filterHistoryTo,
   reloadHistoryWith,
   resetHistoryFilters,
   scrollListToTop,
+  waitForText,
   waitForRows,
 } from "../src/harness/ui.js";
 
@@ -29,21 +42,6 @@ const COUNT = 150;
  *  `crates/copypaste-ui/src/lib/layout.ts`. Used only as a floor for "the list
  *  is taller than the viewport", never as the expected height. */
 const MIN_ROW = 67;
-
-/**
- * How far past the end the clamp may leave the offset: one row.
- *
- * The browser layer allows a pixel. Here the rows are measured rather than
- * fixed — `HistoryList` sets `minHeight` on Android — so the spacer, the
- * measured content and the scroll box round against each other and the
- * residue is a few pixels that varies with the shrink (1.5 to 5.5 observed).
- * The failure INV-6 exists for is a viewport left over blank space, which
- * under a row's worth of overshoot cannot produce; the assertion that no
- * blank viewport happened is the `covered` one below, and it is exact.
- */
-function overshootSlack(rowHeight: number): number {
-  return Math.max(1, rowHeight);
-}
 
 let app: AndroidApp;
 let seeded: string[] = [];
@@ -66,12 +64,18 @@ function label(index: number): string {
 /** The row occupying the top of the viewport, by list-space offset. */
 function topRow(snapshot: ListSnapshot) {
   const rows = [...snapshot.rows].sort((a, b) => a.start - b.start);
-  const row = rows.find((candidate) => candidate.start + candidate.height > snapshot.scrollTop);
+  const row = rows.find(
+    (candidate) => candidate.start + candidate.height > snapshot.scrollTop,
+  );
   if (!row) throw new Error("no row covers the current scroll offset");
-  return { row, scrollTop: snapshot.scrollTop, intra: snapshot.scrollTop - row.start };
+  return {
+    row,
+    scrollTop: snapshot.scrollTop,
+    intra: snapshot.scrollTop - row.start,
+  };
 }
 
-beforeAll(async () => {
+beforeAllWithEvidence("scroll-anchor", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
   marker = fixtureMarker("anchor");
@@ -103,7 +107,10 @@ test("a prepend keeps the row under the viewport top where it was (INV-1)", asyn
   const resting = await settledList(
     app,
     (list) => list.scrollTop > 2_000 && list.rows.length > 0,
-    { timeout: 15_000, describe: "the list did not come to rest scrolled past 2000px" },
+    {
+      timeout: 15_000,
+      describe: "the list did not come to rest scrolled past 2000px",
+    },
   );
   const before = topRow(resting);
   expect(before.row.text).toContain(marker);
@@ -117,10 +124,12 @@ test("a prepend keeps the row under the viewport top where it was (INV-1)", asyn
   const after = topRow(
     await settledList(
       app,
-      (list) => list.totalSize >= resting.totalSize + grown - 1 && list.rows.length > 0,
+      (list) =>
+        list.totalSize >= resting.totalSize + grown - 1 && list.rows.length > 0,
       {
         timeout: 30_000,
-        describe: "the poll never picked up the new item, or the list height never grew",
+        describe:
+          "the poll never picked up the new item, or the list height never grew",
       },
     ),
   );
@@ -141,7 +150,10 @@ test("scroll offset is never left past the end when the list shrinks (INV-6)", a
   const resting = await settledList(
     app,
     (list) => list.scrollTop > bottom.scrollHeight / 2 && list.rows.length > 0,
-    { timeout: 15_000, describe: "the list did not scroll to the bottom" },
+    {
+      timeout: 15_000,
+      describe: "the list did not scroll to the bottom",
+    },
   );
 
   // Only rows this file seeded. The run's own fixtures live in the same store,
@@ -152,31 +164,38 @@ test("scroll offset is never left past the end when the list shrinks (INV-6)", a
   await deleteItems(app, doomed);
   const remaining = new Set((await storedItems(app)).map((item) => item.id));
   expect(doomed.every((id) => !remaining.has(id))).toBe(true);
-  expect(seeded.filter((id) => !doomed.includes(id)).every((id) => remaining.has(id))).toBe(true);
-
-  const row = resting.rows[0]?.height ?? MIN_ROW;
-  const shrunkTo = resting.totalSize - doomed.length * row;
+  expect(
+    seeded
+      .filter((id) => !doomed.includes(id))
+      .every((id) => remaining.has(id)),
+  ).toBe(true);
+  const survivingSeeded = seeded.filter((id) => !doomed.includes(id));
+  await waitForText(app, `${survivingSeeded.length} items`, 60_000);
 
   // Waits for the shrink to land and the virtualiser to stop moving — never for
   // the invariant below, which is asserted once against that resting state.
-  const after = await settledList(app, (list) => list.totalSize <= shrunkTo + row, {
-    timeout: 60_000,
-    describe:
-      `list height never came to rest at or below ${Math.round(shrunkTo)}px after ` +
-      `deleting ${doomed.length} of ${seeded.length} suite items`,
-  });
-  seeded = seeded.filter((id) => !doomed.includes(id));
-
-  expect(after.scrollTop).toBeLessThanOrEqual(
-    Math.max(0, after.scrollHeight - after.clientHeight) +
-      overshootSlack(after.rows[0]?.height ?? 0),
+  const after = await settledList(
+    app,
+    (list) => list.totalSize < resting.totalSize,
+    {
+      timeout: 60_000,
+      describe:
+        `list height never shrank after deleting ${doomed.length} of ` +
+        `${seeded.length} suite items and rendering ${survivingSeeded.length} results`,
+    },
   );
+  seeded = survivingSeeded;
+
+  expect(after.scrollTop).toBeCloseTo(maxScrollTop(after), 5);
 
   // A clamp that only fixed the DOM would leave the virtualiser rendering the
   // rows it thinks are on screen, so the window must still cover the viewport.
   expect(after.rows.length).toBeGreaterThan(0);
-  const covered = after.rows.some(
-    (row) => row.start <= after.scrollTop && row.start + row.height > after.scrollTop,
-  );
-  expect(covered, `no rendered row covers scrollTop ${after.scrollTop}`).toBe(true);
+  expect(
+    renderedRowsCoverViewport(after),
+    `rendered rows do not cover virtual content ${after.scrollTop}..${Math.min(
+      after.scrollTop + after.clientHeight,
+      after.totalSize,
+    )}`,
+  ).toBe(true);
 }, 180_000);

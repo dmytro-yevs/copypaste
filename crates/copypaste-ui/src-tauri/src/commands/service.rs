@@ -38,9 +38,9 @@ pub async fn start_service(
     supervisor.start(backend.inner()).await
 }
 
-/// Stop what this app started and start it again.
+/// Shut down a live service through IPC, then start the bundled version.
 ///
-/// Refuses when the running service is not ours — see ADR-0004.
+/// An adopted service is never signalled or killed by process id (ADR-0004).
 #[tauri::command]
 pub async fn restart_service(
     backend: State<'_, SelectedBackend>,

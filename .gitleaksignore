@@ -1,14 +1,29 @@
 # Reviewed findings from the full-history scan, pinned by commit fingerprint.
 #
-# Every entry was read at the commit named in its fingerprint and is a v0.4.x-era
-# synthetic fixture, a hex digest, an identifier name, or a vendor documentation
-# placeholder. None is a live credential. A fingerprint pins one rule at one line
-# of one blob, so an entry here can never suppress a secret added later.
+# Every entry was read at the commit named in its fingerprint and is a reviewed
+# synthetic test or manifest fixture, a v0.4.x-era fixture, a hex digest, an
+# identifier name, or a vendor documentation placeholder. None is live. A
+# fingerprint pins one rule at one line of one blob, so an entry here can never
+# suppress a secret added later.
 #
 # `.gitleaks.toml` covers content that is still in the tree; this file covers only
 # history. Regenerate after rewriting history, never to silence a new finding.
 #
 # The matched values are deliberately not quoted here: this file is itself scanned.
+
+# Reviewed synthetic test and manifest fixtures from the v2 rewrite history.
+b6c311e8ada603578543d5b4d99b09cd27d053af:e2e/src/harness/selection-diagnostics.test.ts:generic-api-key:50
+1131d1e2a67678e35bf9baed25d64785567ca0ed:crates/copypaste-core/src/sensitive/engine.rs:slack-bot-token:1200
+9263042a9f334218357f3585dfbb4458ecdc7f09:crates/copypaste-core/src/sensitive/engine.rs:github-app-token:264
+9263042a9f334218357f3585dfbb4458ecdc7f09:crates/copypaste-core/src/sensitive/engine.rs:slack-bot-token:277
+432d8ec25d697508f0b06e2fc6ab67e0a5a3942f:docs/rewrite/port-manifest/07-secret-detection.md:github-app-token:817
+432d8ec25d697508f0b06e2fc6ab67e0a5a3942f:docs/rewrite/port-manifest/07-secret-detection.md:slack-bot-token:824
+92d6904446f9c9f0d6cddb945d8b93e8bdb9b99f:crates/copypaste-core/src/sensitive.rs:github-app-token:992
+92d6904446f9c9f0d6cddb945d8b93e8bdb9b99f:crates/copypaste-core/src/sensitive.rs:slack-bot-token:1005
+
+# Public v0.4.1 archive detector tests, reviewed as synthetic true positives.
+75ba2a72d5a70cd7097328598ceeafa2a7fbe10d:crates/copypaste-core/src/sensitive/detector.rs:slack-bot-token:86
+75ba2a72d5a70cd7097328598ceeafa2a7fbe10d:crates/copypaste-core/src/sensitive/detector.rs:github-app-token:102
 
 
 # aws-access-token (1)

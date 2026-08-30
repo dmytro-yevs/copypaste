@@ -23,6 +23,7 @@ import { rowCount, waitForRows, waitForText } from "../src/harness/ui.js";
  *  names this string. Duplicated here on purpose: a test that imported it
  *  could not catch it changing. */
 const EVENT_CHANGED = "copypaste://changed";
+const EVENT_PUSH_STATE = "copypaste://push-state";
 
 /** `POLL_ACTIVE_MS` from `lib/layout.ts` — what a poll-only build would cost. */
 const POLL_ACTIVE_MS = 3000;
@@ -32,12 +33,18 @@ interface ChangeEvent {
   payload: { topic: string; item_count: number };
 }
 
+interface PushStateEvent {
+  event: string;
+  payload: { live: boolean };
+}
+
 let app: App;
 
 beforeAll(async () => {
   app = await startApp({ seed: ["push baseline"] });
   await waitForRows(app.browser, 1);
   await subscribe();
+  await subscribePushState();
 }, 300_000);
 
 afterAll(async () => {
@@ -85,10 +92,51 @@ async function subscribe(): Promise<void> {
   }
 }
 
+async function subscribePushState(): Promise<void> {
+  const result = (await app.browser.executeAsync(
+    (event: string, done: (value: unknown) => void) => {
+      const w = window as unknown as {
+        __TAURI_INTERNALS__: {
+          invoke: (command: string, args: unknown) => Promise<unknown>;
+          transformCallback: (fn: (payload: unknown) => void) => number;
+        };
+        __e2ePushState?: unknown[];
+      };
+      w.__e2ePushState = [];
+      const handler = w.__TAURI_INTERNALS__.transformCallback((payload) => {
+        w.__e2ePushState!.push(payload);
+      });
+      w.__TAURI_INTERNALS__
+        .invoke("plugin:event|listen", {
+          event,
+          target: { kind: "Any" },
+          handler,
+        })
+        .then(
+          () => done({ ok: true }),
+          (error: unknown) => done({ ok: false, error: String(error) }),
+        );
+    },
+    EVENT_PUSH_STATE,
+  )) as { ok: boolean; error?: string };
+
+  if (!result.ok) {
+    throw new Error(`could not subscribe to ${EVENT_PUSH_STATE}: ${result.error}`);
+  }
+}
+
 async function received(): Promise<ChangeEvent[]> {
   return (await app.browser.execute(
     () => (window as unknown as { __e2ePush?: ChangeEvent[] }).__e2ePush ?? [],
   )) as ChangeEvent[];
+}
+
+async function receivedPushStates(): Promise<PushStateEvent[]> {
+  return (await app.browser.execute(
+    () =>
+      (window as unknown as { __e2ePushState?: PushStateEvent[] }).__e2ePushState ??
+      [],
+  )) as PushStateEvent[];
 }
 
 test("a change event actually arrives in the WebView", async () => {
@@ -159,8 +207,14 @@ test("a daemon that dies degrades to polling, not to a broken screen", async () 
   // The rows that were already fetched stay: a failed background poll must not
   // throw away what the user is reading.
   await browser.waitUntil(
-    async () => (await accessibleSurface(browser)).includes("Background service unreachable"),
-    { timeout: 30_000, timeoutMsg: "the status control never reported the outage" },
+    async () =>
+      (await receivedPushStates()).some(
+        (event) => event.event === EVENT_PUSH_STATE && !event.payload.live,
+      ),
+    {
+      timeout: 30_000,
+      timeoutMsg: "the push state never reported that the subscription was lost",
+    },
   );
   expect(await rowCount(browser)).toBeGreaterThan(0);
   expectNoFilesystemPath(await accessibleSurface(browser), app.daemon.dataHome);
@@ -173,14 +227,17 @@ test("a daemon that dies degrades to polling, not to a broken screen", async () 
   // recover the window (INV-2's cadence, `pollInterval`'s reason for existing).
   await waitForText(browser, afterRestart, 45_000);
 
-  // The banner clears on the status query's own cadence, which is slower than
-  // the history query's — so this is a wait, not an immediate assertion.
+  // The subscription reports its recovered state independently of the history
+  // query. The row assertion above remains the no-reload recovery check.
   await browser.waitUntil(
-    async () => !(await accessibleSurface(browser)).includes("Background service unreachable"),
+    async () =>
+      (await receivedPushStates()).some(
+        (event) => event.event === EVENT_PUSH_STATE && event.payload.live,
+      ),
     {
       timeout: 30_000,
       interval: 500,
-      timeoutMsg: "the offline banner stayed up after the service came back",
+      timeoutMsg: "the push state stayed degraded after the service came back",
     },
   );
 }, 120_000);

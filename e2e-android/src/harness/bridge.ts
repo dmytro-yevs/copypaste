@@ -6,13 +6,10 @@
  * an adb-forwarded socket; 150 separate evaluations take about a minute.
  */
 import type { AndroidApp } from "./app.js";
-
-export interface StoredItem {
-  id: string;
-  content: string;
-  pinned: boolean;
-  is_sensitive: boolean;
-}
+import type {
+  Item,
+  ItemPage,
+} from "../../../crates/copypaste-ui/src/generated/ipc.js";
 
 interface Internals {
   __TAURI_INTERNALS__: { invoke: (command: string, args: unknown) => Promise<unknown> };
@@ -124,9 +121,17 @@ export async function cleanUpItems(app: AndroidApp, ids: string[]): Promise<void
   }
 }
 
+export function missingFixtureIds(
+  items: readonly Item[],
+  fixtureIds: readonly string[],
+): string[] {
+  const stored = new Set(items.map(({ id }) => id));
+  return fixtureIds.filter((id) => !stored.has(id));
+}
+
 /** What the store holds, read past the screen. `limit` is above `PAGE_SIZE`,
  *  so a caller counting rows is not counting a page boundary. */
-export async function storedItems(app: AndroidApp, limit = 500): Promise<StoredItem[]> {
-  const page = await invoke<{ items: StoredItem[] }>(app, "list", { limit, cursor: null });
+export async function storedItems(app: AndroidApp, limit = 500): Promise<Item[]> {
+  const page = await invoke<ItemPage>(app, "list", { limit, cursor: null });
   return page.items;
 }

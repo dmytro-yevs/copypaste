@@ -62,3 +62,16 @@ export function writeRedacted(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, redactFixtures(JSON.stringify(value, null, 2)));
 }
+
+/** The screenshot caller removes every text and media surface before capture. */
+export function writeSafeScreenshot(file: string, base64Png: string): void {
+  const png = Buffer.from(base64Png, "base64");
+  if (
+    png.length < 8 ||
+    !png.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
+  ) {
+    throw new Error("setup evidence screenshot was not a PNG");
+  }
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, png);
+}

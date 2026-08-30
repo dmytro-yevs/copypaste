@@ -91,6 +91,52 @@ if candidates:
 PY
 }
 
+# Run 33124469586 kept an enabled below-fold control in the tree with no bounds.
+# Existence proves hydration; pointer actions still require selector_center.
+selector_exists() { # <xml> <selector alternatives separated by |> <exact|enabled-node|enabled-action>
+    python3 - "$1" "$2" "$3" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    raise SystemExit(1)
+selectors = [part.casefold() for part in sys.argv[2].split("|")]
+mode = sys.argv[3]
+if mode not in ("exact", "enabled-node", "enabled-action"):
+    raise SystemExit(2)
+for node in root.iter("node"):
+    values = [(node.get(name) or "").casefold()
+              for name in ("text", "content-desc", "resource-id", "hint")]
+    exact = any(selector == value or value.endswith("/" + selector)
+                for selector in selectors for value in values if value)
+    if not exact:
+        continue
+    if mode != "exact" and node.get("enabled") != "true":
+        continue
+    if mode == "enabled-action":
+        actionable = (node.get("clickable") == "true"
+                      or "documentsui" in (node.get("package") or "").casefold())
+        if not actionable:
+            continue
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+node_exists_exact() { # <xml> <selector alternatives separated by |>
+    selector_exists "$1" "$2" exact
+}
+
+enabled_node_exists_exact() { # <xml> <selector alternatives separated by |>
+    selector_exists "$1" "$2" enabled-node
+}
+
+enabled_action_exists_exact() { # <xml> <selector alternatives separated by |>
+    selector_exists "$1" "$2" enabled-action
+}
+
 # Whether this device's `uiautomator dump` carries the `hint` attribute at all.
 #
 # AOSP's AccessibilityNodeInfoDumper gained `serializer.attribute("", "hint",
@@ -250,15 +296,12 @@ tap_selector() { # <selector> <artifact> [timeout]
 }
 
 reach_settings_tab() { # <artifact> [timeout]
-    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}" started="$SECONDS"
-    while (( SECONDS - started < timeout )); do
-        if dump_hierarchy "$artifact"; then
-            [[ -n "$(action_center "$artifact" "Settings")" ]] && return 0
-            tap_selector_scrolling "Explore first" "$artifact" up 8 || true
-        fi
-        sleep 1
-    done
-    return 1
+    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}"
+    tap_until_state "Explore first" "$artifact" settings_tab_holds up "$timeout"
+}
+
+settings_tab_holds() { # <artifact>
+    [[ -n "$(action_center "$1" "Settings")" ]]
 }
 
 screen_size() {
@@ -608,6 +651,7 @@ android_ui_self_test() {
     local temp point
     temp="$(mktemp -d)"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text=""><node text="Primary" bounds="[0,240][320,300]"><node text="Devices" bounds="[110,245][210,295]" enabled="false" clickable="true"/><node text="Settings" bounds="[220,245][310,295]" enabled="true" clickable="true"/></node><node text="Clear history" bounds="[0,0][150,30]" enabled="true"/><node text="Clear history" bounds="[10,40][110,100]" enabled="true" clickable="true"/><node text="Export…" bounds="[10,110][110,170]" enabled="true" clickable="true"/><node content-desc="Save" resource-id="com.google.android.documentsui:id/action_menu_done" bounds="[200,40][300,100]" enabled="true" clickable="true"/><node text="copypaste-export.json" package="com.google.android.documentsui" bounds="[160,110][300,170]" enabled="true"/><node hint="Email" bounds="[10,180][190,230]" enabled="true" clickable="true"/><node text="Cloud sync" bounds="[10,238][190,240]" enabled="true"/><node text="Sign out" bounds="[10,220][190,270]" enabled="true" clickable="true"/><node text="Zero action" bounds="[0,0][0,0]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/ui.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Semantic only" bounds="[10,10][100,40]"/></hierarchy>' > "$temp/semantic-only.xml"
     point="$(action_center "$temp/ui.xml" "Export…")"
     [[ "$point" == "60 140" ]] && ok "an app label resolves to its tappable centre" || bad "an app label resolves to its tappable centre" "$point"
     [[ -z "$(node_center_exact "$temp/ui.xml" "Export")" ]] && ok "an exact selector rejects a partial label" || bad "an exact selector rejects a partial label"
@@ -620,6 +664,24 @@ android_ui_self_test() {
     [[ -z "$(node_center "$temp/ui.xml" "Cloud sync")" ]] && ok "a clipped semantic node is not visible" || bad "a clipped semantic node is not visible"
     [[ -z "$(action_center "$temp/ui.xml" "Sign out")" ]] && ok "an action obscured by app navigation is not actionable" || bad "an action obscured by app navigation is not actionable"
     [[ -z "$(action_center "$temp/ui.xml" "Zero action")" ]] && ok "a zero-sized action is not actionable" || bad "a zero-sized action is not actionable"
+    enabled_action_exists_exact "$temp/ui.xml" "Zero action" \
+        && ok "an enabled offscreen action remains present in the accessibility tree" \
+        || bad "an enabled offscreen action remains present in the accessibility tree"
+    enabled_action_exists_exact "$temp/ui.xml" "Devices" \
+        && bad "a disabled action is not an enabled semantic control" \
+        || ok "a disabled action is not an enabled semantic control"
+    node_exists_exact "$temp/ui.xml" "Cloud sync" \
+        && ok "an exact semantic node can be present outside tappable geometry" \
+        || bad "an exact semantic node can be present outside tappable geometry"
+    enabled_node_exists_exact "$temp/semantic-only.xml" "Semantic only" \
+        && bad "a semantic node without enabled proof is not enabled" \
+        || ok "a semantic node without enabled proof is not enabled"
+    enabled_node_exists_exact "$temp/ui.xml" "Settings" \
+        && ok "an explicitly enabled semantic node is enabled" \
+        || bad "an explicitly enabled semantic node is enabled"
+    node_exists_exact "$temp/ui.xml" "Cloud" \
+        && bad "semantic existence still rejects partial labels" \
+        || ok "semantic existence still rejects partial labels"
     point="$(action_center "$temp/ui.xml" "Settings")"
     [[ "$point" == "265 270" ]] && ok "an action inside app navigation remains actionable" || bad "an action inside app navigation remains actionable" "$point"
     [[ -z "$(action_center "$temp/ui.xml" "Devices")" ]] && ok "pending app navigation is not actionable" || bad "pending app navigation is not actionable"

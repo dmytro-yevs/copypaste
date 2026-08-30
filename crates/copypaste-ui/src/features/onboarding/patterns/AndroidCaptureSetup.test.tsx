@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   capture: vi.fn(),
   captureNow: vi.fn(),
+  permissionFetching: false,
+  permissionReadFailed: false,
 }));
 
 vi.mock("@/hooks/useOnboardingPermissions", () => ({
@@ -27,6 +29,8 @@ vi.mock("@/hooks/useOnboardingPermissions", () => ({
       clipboardStatus: "not_required",
     },
     isPending: false,
+    isFetching: mocks.permissionFetching,
+    error: mocks.permissionReadFailed ? new Error("permission host unavailable") : null,
   }),
   usePermissionRequest: () => ({ mutate: mocks.request, isPending: false }),
   usePermissionOpenSettings: () => ({
@@ -55,6 +59,8 @@ afterEach(() => {
   mocks.save.mockReset();
   mocks.capture.mockReset();
   mocks.captureNow.mockReset();
+  mocks.permissionFetching = false;
+  mocks.permissionReadFailed = false;
 });
 
 describe("AndroidCaptureSetup", () => {
@@ -88,6 +94,31 @@ describe("AndroidCaptureSetup", () => {
     ).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Not needed" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("fails closed when the permission snapshot cannot be refreshed", () => {
+    mocks.permissionReadFailed = true;
+    render(<AndroidCaptureSetup />);
+
+    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(2);
+    expect(
+      screen.getAllByText("This helper is not available on this device."),
+    ).toHaveLength(2);
+    for (const button of screen.getAllByRole("button", { name: "Unavailable" })) {
+      expect(button.hasAttribute("disabled")).toBe(true);
+    }
+  });
+
+  it("keeps permission actions busy while cached data refreshes", () => {
+    mocks.permissionFetching = true;
+    render(<AndroidCaptureSetup />);
+
+    expect(
+      screen.getByRole("button", { name: "Open settings" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Save now" }).hasAttribute("disabled"),
     ).toBe(true);
   });
 });

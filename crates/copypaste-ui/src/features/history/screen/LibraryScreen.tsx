@@ -144,10 +144,9 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
     );
 
     useEffect(() => {
-        if (items.length === 0) return;
-        if (activeId === null || !items.some((item) => item.id === activeId)) {
-            setActiveId(items[0]!.id);
-        }
+        if (activeId === null) return;
+        if (!items.some((item) => item.id === activeId))
+            setActiveId(items[0]?.id ?? null);
     }, [activeId, items, setActiveId]);
 
     const originsMarked = useMemo(() => markedOrigins(items), [items]);
@@ -236,7 +235,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                               onSelectAll: selection.selectAll,
                               onTogglePin: bulk.togglePin,
                               onDelete: bulk.requestDelete,
-                              onClose: selection.clear,
+                              onClose: bulk.end,
                           }
                         : undefined
                 }

@@ -12,7 +12,14 @@
 
 .input {
   min-inline-size: 0;
+  min-block-size: max(var(--control-block-size), var(--tap-min));
   flex: 1;
+}
+
+.input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
 }
 
 .overlay { min-inline-size: 0; }

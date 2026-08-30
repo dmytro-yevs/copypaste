@@ -1,5 +1,6 @@
 import {
     useEffect,
+    useId,
     useMemo,
     useState,
     type FormEvent,
@@ -27,6 +28,8 @@ import { isAndroidPlatform } from "@/lib/platform";
 import styles from "./PairingLauncherDialog.module.css";
 
 type PairingFlow = "choices" | "host" | "join";
+
+const ANDROID_PAIRING_BODY_ID = "copypaste-pairing-dialog-open";
 
 const codeSchema = z
     .string()
@@ -67,6 +70,8 @@ export function PairingLauncherDialog({
 }: PairingLauncherDialogProps) {
     const { t } = useTranslation();
     const android = isAndroidPlatform();
+    const showDescriptionId = useId();
+    const joinDescriptionId = useId();
     const [flow, setFlow] = useState<PairingFlow>("choices");
     const [code, setCode] = useState("");
     const [address, setAddress] = useState("");
@@ -100,6 +105,19 @@ export function PairingLauncherDialog({
         setStarted(false);
         setCopyState("idle");
     }, [open]);
+
+    useEffect(() => {
+        if (!android || !open) return;
+        const previousId = document.body.getAttribute("id");
+        document.body.id = ANDROID_PAIRING_BODY_ID;
+        return () => {
+            if (previousId === null) {
+                document.body.removeAttribute("id");
+            } else {
+                document.body.id = previousId;
+            }
+        };
+    }, [android, open]);
 
     const close = (nextOpen: boolean) => {
         if (!nextOpen && active) pairing.run("cancel");
@@ -191,6 +209,8 @@ export function PairingLauncherDialog({
                             type="button"
                             variant="ghost"
                             disabled={disabled}
+                            aria-label="Show pairing code"
+                            aria-describedby={showDescriptionId}
                             onClick={chooseHost}
                             className={styles.choice}
                         >
@@ -199,7 +219,7 @@ export function PairingLauncherDialog({
                             </span>
                             <span className={styles.copy}>
                                 <strong>Show pairing code</strong>
-                                <small>
+                                <small id={showDescriptionId}>
                                     {preview
                                         ? "Show a QR code, short code and address."
                                         : "Open a protected code on this device."}
@@ -211,6 +231,12 @@ export function PairingLauncherDialog({
                             type="button"
                             variant="ghost"
                             disabled={disabled}
+                            aria-label={
+                                android
+                                    ? t("devices.pairing.join")
+                                    : t("devices.pairing.joinTitle")
+                            }
+                            aria-describedby={joinDescriptionId}
                             onClick={chooseJoin}
                             className={styles.choice}
                         >
@@ -226,7 +252,7 @@ export function PairingLauncherDialog({
                                         ? t("devices.pairing.join")
                                         : t("devices.pairing.joinTitle")}
                                 </strong>
-                                <small>
+                                <small id={joinDescriptionId}>
                                     {android
                                         ? t("devices.pairing.joinHint")
                                         : t("devices.pairing.joinBody")}

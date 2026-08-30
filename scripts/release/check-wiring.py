@@ -137,6 +137,46 @@ def matching_event_path_filters(workflow):
     )
 
 
+def android_webview_accessibility_contract(build_task, extension, frontend, wrapper):
+    compact = re.sub(r"\s+", " ", build_task)
+    source = re.search(
+        r'val\s+(\w+)\s*=\s*File\(\s*project\.projectDir,\s*'
+        r'"src/main/rust-webview-accessibility\.kt\.inc",\s*\)\.readText\(\)',
+        compact,
+    )
+    if not source:
+        return False, "BuildTask.kt does not read the tracked RustWebView extension"
+    if not re.search(
+        r'environment\(\s*"WRY_RUSTWEBVIEW_CLASS_EXTENSION",\s*{}\s*\)'.format(
+            re.escape(source.group(1))
+        ),
+        compact,
+    ):
+        return False, "BuildTask.kt does not export the file it read to Wry"
+    if not re.search(r"override\s+fun\s+getAccessibilityNodeProvider\s*\(\s*\)", extension):
+        return False, "the Wry extension does not override getAccessibilityNodeProvider"
+    if not re.search(
+        r"\.wrap\(\s*super\.getAccessibilityNodeProvider\(\s*\)\s*\)", extension
+    ):
+        return False, "the Wry extension does not wrap the direct WebView provider"
+    frontend_marker = re.search(
+        r'const\s+ANDROID_PAIRING_BODY_ID\s*=\s*"([^"]+)"', frontend
+    )
+    native_marker = re.search(
+        r'const\s+val\s+PAIRING_BODY_ACCESSIBILITY_MARKER\s*=\s*"([^"]+)"',
+        wrapper,
+    )
+    if not frontend_marker or not native_marker:
+        return False, "the pairing marker is missing from the frontend or native matcher"
+    if "info.viewIdResourceName != PAIRING_BODY_ACCESSIBILITY_MARKER" not in wrapper:
+        return False, "the native matcher does not require the marker constant"
+    if frontend_marker.group(1) != native_marker.group(1):
+        return False, "frontend marker {!r} differs from native marker {!r}".format(
+            frontend_marker.group(1), native_marker.group(1)
+        )
+    return True, ""
+
+
 def retired_push_branch_violations(workflows, retired):
     violations = []
     for name, workflow in workflows.items():
@@ -209,6 +249,180 @@ def dispatch_spot_check_holds(jobs):
     )
 
 
+def nightly_concurrency_holds(workflow):
+    concurrency = workflow.get("concurrency")
+    if not isinstance(concurrency, dict):
+        return False
+    group = concurrency.get("group")
+    if not isinstance(group, str) or "github.event_name" not in group:
+        return False
+    groups = {
+        event: re.sub(
+            r"\$\{\{\s*github\.event_name\s*\}\}", event, group
+        )
+        for event in ("schedule", "workflow_dispatch")
+    }
+    return (
+        groups["schedule"] != groups["workflow_dispatch"]
+        and concurrency.get("cancel-in-progress") is False
+    )
+
+
+ACTIVE_CHANGE_CANCEL = (
+    "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+)
+GATE_CONCURRENCY = {
+    "ci.yml": "ci",
+    "browser-webkitgtk.yml": "browser",
+    "windows-native-e2e.yml": "windows-native-e2e",
+    "mutation-gate.yml": "mutation-gate",
+    "supply-chain.yml": "supply-chain",
+}
+
+
+def event_triggers(workflow):
+    return workflow.get(True) or workflow.get("on") or {}
+
+
+def checks_merge_queue(workflow):
+    merge_group = event_triggers(workflow).get("merge_group")
+    return isinstance(merge_group, dict) and merge_group.get("types") == ["checks_requested"]
+
+
+def isolated_change_group(group, slug, extra=()):
+    if not isinstance(group, str):
+        return False
+    namespace = group.startswith("{}-".format(slug)) or group.startswith(
+        "${{ github.workflow }}-"
+    )
+    required = (
+        "${{ github.event_name }}",
+        "github.event.pull_request.number",
+        "github.event_name == 'push'",
+        "github.ref_name",
+        "github.run_id",
+    ) + tuple(extra)
+    return namespace and all(token in group for token in required)
+
+
+def secret_scan_concurrency_is_safe(workflow):
+    concurrency = workflow.get("concurrency")
+    if concurrency is None:
+        return True
+    if not isinstance(concurrency, dict):
+        return False
+    group = concurrency.get("group")
+    return isinstance(group, str) and "github.run_id" in group
+
+
+def concurrency_policy_failures(workflows):
+    failures = []
+    for name, slug in GATE_CONCURRENCY.items():
+        workflow = workflows.get(name) or {}
+        concurrency = workflow.get("concurrency") or {}
+        if not isolated_change_group(concurrency.get("group"), slug):
+            failures.append("{} must isolate workflow, event, and logical change".format(name))
+        if concurrency.get("cancel-in-progress") != ACTIVE_CHANGE_CANCEL:
+            failures.append("{} may cancel only pull_request and push".format(name))
+        if not checks_merge_queue(workflow):
+            failures.append("{} must run for merge_group checks_requested".format(name))
+
+    android = workflows.get("android-emulator.yml") or {}
+    android_concurrency = android.get("concurrency") or {}
+    if not isolated_change_group(
+            android_concurrency.get("group"), "android-emulator",
+            ("inputs.api-level", "inputs.target")):
+        failures.append("android-emulator.yml must isolate event, change, API, and target")
+    if android_concurrency.get("cancel-in-progress") != ACTIVE_CHANGE_CANCEL:
+        failures.append("android-emulator.yml may cancel only pull_request and push")
+    if not checks_merge_queue(android):
+        failures.append("android-emulator.yml must run for merge_group checks_requested")
+
+    release = (workflows.get("release.yml") or {}).get("concurrency") or {}
+    release_group = (
+        "release-${{ github.event_name == 'workflow_dispatch' && "
+        "(startsWith(inputs.version, 'v') && inputs.version || "
+        "format('v{0}', inputs.version)) || github.ref_name }}"
+    )
+    if release.get("group") != release_group:
+        failures.append("release.yml must serialize the normalized tag or dispatch version")
+    if release.get("cancel-in-progress") is not False:
+        failures.append("release.yml must not cancel an in-progress release run")
+
+    nightly = workflows.get("native-nightly.yml") or {}
+    if not nightly_concurrency_holds(nightly):
+        failures.append(
+            "native-nightly.yml must isolate events without cancelling an in-progress run")
+    if not secret_scan_concurrency_is_safe(workflows.get("secret-scan.yml") or {}):
+        failures.append("secret-scan.yml must not share a non-unique caller concurrency group")
+    return failures
+
+
+def synthetic_bucket(slug, event, run_id, pull_request=None, ref_name=None,
+                     api_level=None, target=None):
+    change = pull_request if event == "pull_request" else (
+        ref_name if event == "push" else run_id
+    )
+    fields = [slug, event, str(change)]
+    if slug == "android-emulator":
+        fields += ["sweep" if event == "schedule" else (api_level or "36"),
+                   target or "google_apis"]
+    return "-".join(fields)
+
+
+def synthetic_cancels(event):
+    return event in {"pull_request", "push"}
+
+
+def synthetic_release_bucket(event, ref_name=None, version=None):
+    normalized = (
+        version if str(version).startswith("v") else "v{}".format(version)
+    ) if event == "workflow_dispatch" else ref_name
+    return "release-{}".format(normalized)
+
+
+def synthetic_concurrency_table_holds():
+    pr_one = synthetic_bucket("ci", "pull_request", 10, pull_request=41)
+    pr_update = synthetic_bucket("ci", "pull_request", 11, pull_request=41)
+    pr_other = synthetic_bucket("ci", "pull_request", 12, pull_request=42)
+    push_one = synthetic_bucket("ci", "push", 20, ref_name="main")
+    push_update = synthetic_bucket("ci", "push", 21, ref_name="main")
+    merge_one = synthetic_bucket("ci", "merge_group", 30, ref_name="gh-readonly-queue/main/a")
+    merge_two = synthetic_bucket("ci", "merge_group", 31, ref_name="gh-readonly-queue/main/b")
+    dispatch = synthetic_bucket("supply-chain", "workflow_dispatch", 40, ref_name="main")
+    schedule = synthetic_bucket("supply-chain", "schedule", 41, ref_name="main")
+    android_api = synthetic_bucket(
+        "android-emulator", "workflow_dispatch", 50, api_level="34", target="google_apis")
+    android_other_api = synthetic_bucket(
+        "android-emulator", "workflow_dispatch", 50, api_level="36", target="google_apis")
+    android_other_target = synthetic_bucket(
+        "android-emulator", "workflow_dispatch", 50, api_level="34", target="aosp_atd")
+    android_sweep = synthetic_bucket(
+        "android-emulator", "schedule", 60, api_level="34", target="google_apis")
+    return all((
+        pr_one == pr_update,
+        pr_one != pr_other,
+        pr_one != synthetic_bucket("browser", "pull_request", 10, pull_request=41),
+        push_one == push_update,
+        merge_one != merge_two,
+        dispatch != schedule,
+        android_api != android_other_api,
+        android_api != android_other_target,
+        android_sweep.endswith("-sweep-google_apis"),
+        synthetic_release_bucket("push", ref_name="v2.0.0")
+        == synthetic_release_bucket("workflow_dispatch", version="2.0.0"),
+        synthetic_release_bucket("push", ref_name="v2.0.0")
+        == synthetic_release_bucket("workflow_dispatch", version="v2.0.0"),
+        synthetic_release_bucket("workflow_dispatch", version="v2.0.0")
+        != "release-vv2.0.0",
+        synthetic_cancels("pull_request"),
+        synthetic_cancels("push"),
+        not synthetic_cancels("merge_group"),
+        not synthetic_cancels("workflow_dispatch"),
+        not synthetic_cancels("schedule"),
+    ))
+
+
 def closure(jobs, name):
     seen, stack = set(), list(as_list(jobs.get(name, {}).get("needs")))
     while stack:
@@ -231,6 +445,17 @@ def min_major(rng):
 
 docs = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WF.glob("*.yml"))}
 text = {p.name: p.read_text() for p in sorted(WF.glob("*.yml"))}
+
+nightly_workflow = docs.get("native-nightly.yml") or {}
+rec(nightly_concurrency_holds(nightly_workflow),
+    "native-nightly.yml isolates scheduled and manual evidence",
+    "group must include github.event_name and cancel-in-progress must be false")
+concurrency_failures = concurrency_policy_failures(docs)
+rec(not concurrency_failures,
+    "workflow concurrency isolates events and preserves merge-queue evidence",
+    "; ".join(concurrency_failures))
+rec(synthetic_concurrency_table_holds(),
+    "workflow concurrency synthetic event table preserves only intended supersession")
 
 try:
     WORKSPACE_PACKAGES, RUST_VERSION = workspace_contract(pathlib.Path.cwd())
@@ -407,6 +632,13 @@ for check in runner_image_checks(docs):
 def job_timeout_checks(workflows, maximum=20):
     for wf, doc in workflows.items():
         for jn, job in (doc.get("jobs") or {}).items():
+            if "uses" in job:
+                # A reusable caller has no runner of its own. Its callee owns
+                # the timeout, so classify it separately from an unbounded job.
+                yield (True,
+                       "{}: {} delegates its timeout to a reusable workflow".format(wf, jn),
+                       "the called workflow owns the runner budget")
+                continue
             if "runs-on" not in job:
                 continue
             timeout = job.get("timeout-minutes")
@@ -418,6 +650,72 @@ def job_timeout_checks(workflows, maximum=20):
 
 for check in job_timeout_checks(docs):
     rec(*check)
+
+
+def cargo_deny_contract(workflow):
+    job = (workflow.get("jobs") or {}).get("deny") or {}
+    strategy = job.get("strategy") or {}
+    matrix = (strategy.get("matrix") or {}).get("check")
+    job_steps = steps(job)
+    docker_actions = [
+        step for step in job_steps
+        if str(step.get("uses") or "").split("@", 1)[0].lower()
+        == "embarkstudios/cargo-deny-action"
+    ]
+    installers = [
+        step for step in job_steps
+        if str(step.get("uses") or "").split("@", 1)[0]
+        == "taiki-e/install-action"
+        and str(step.get("with", {}).get("tool") or "").startswith("cargo-deny")
+    ]
+    settings = (installers[0].get("with") or {}) if len(installers) == 1 else {}
+    install_ref = str(installers[0].get("uses") or "") if len(installers) == 1 else ""
+    commands = [
+        str(step.get("run") or "") for step in job_steps
+        if "cargo deny" in str(step.get("run") or "")
+    ]
+    command = " ".join(commands[0].split()) if len(commands) == 1 else ""
+    required_prefix = (
+        "cargo deny --manifest-path Cargo.toml --config deny.toml "
+        "--all-features --locked check "
+    )
+    required_suffix = " --show-stats"
+    flags_hold = command.startswith(required_prefix) and command.endswith(required_suffix)
+    selector_match = re.search(r"\bcheck\s+(.+?)\s+--show-stats$", command)
+    selector = selector_match.group(1) if selector_match else ""
+    return {
+        "matrix": matrix == ["advisories", "bans", "licenses", "sources"],
+        "fail-fast": strategy.get("fail-fast") is False,
+        "dockerless": not docker_actions,
+        "installer-count": len(installers) == 1,
+        "installer-ref": install_ref == (
+            "taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf"
+        ),
+        "version": settings.get("tool") == "cargo-deny@0.20.2",
+        "checksum": str(settings.get("checksum", "")).lower() == "true",
+        "fallback": settings.get("fallback") == "none",
+        "command-count": len(commands) == 1,
+        "flags": flags_hold,
+        "selector": selector == "${{ matrix.check }}",
+    }
+
+
+deny_checks = cargo_deny_contract(docs.get("supply-chain.yml") or {})
+for key, description in (
+    ("matrix", "runs the four policy checks as separate matrix legs"),
+    ("fail-fast", "keeps every policy leg visible after a failure"),
+    ("dockerless", "does not use the Docker-based cargo-deny action"),
+    ("installer-count", "installs cargo-deny exactly once"),
+    ("installer-ref", "pins the cargo-deny installer to the reviewed full SHA"),
+    ("version", "pins cargo-deny 0.20.2"),
+    ("checksum", "verifies the cargo-deny release checksum"),
+    ("fallback", "fails instead of compiling an unverified fallback"),
+    ("command-count", "runs cargo deny exactly once per matrix leg"),
+    ("flags", "uses the manifest, policy, feature, lockfile, and stats flags"),
+    ("selector", "runs the selected matrix check instead of a hardcoded subset"),
+):
+    rec(deny_checks[key], "supply-chain.yml: cargo-deny {}".format(description),
+        "the Dockerless cargo-deny contract is incomplete")
 
 # --- one ref per action, across every workflow ------------------------------
 refs = {}
@@ -556,6 +854,43 @@ def toolchain_component_checks(workflows, required):
 for check in toolchain_component_checks(docs, TEST_SPAWNED_COMPONENTS):
     rec(*check)
 
+# --- the generated Android WebView provider seam ---------------------------
+ANDROID_WEBVIEW_BUILD_TASK = pathlib.Path(
+    "crates/copypaste-ui/src-tauri/gen/android/buildSrc/src/main/java/"
+    "com/copypaste/app/kotlin/BuildTask.kt"
+)
+ANDROID_WEBVIEW_EXTENSION = pathlib.Path(
+    "crates/copypaste-ui/src-tauri/gen/android/app/src/main/"
+    "rust-webview-accessibility.kt.inc"
+)
+ANDROID_PAIRING_FRONTEND = pathlib.Path(
+    "crates/copypaste-ui/src/features/devices/patterns/PairingLauncherDialog.tsx"
+)
+ANDROID_PAIRING_WRAPPER = pathlib.Path(
+    "crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/"
+    "com/copypaste/app/PairingBackdropAccessibility.kt"
+)
+
+
+def read_contract_source(source):
+    return source.read_text() if source.is_file() else ""
+
+
+ANDROID_WEBVIEW_SOURCES = tuple(
+    read_contract_source(source)
+    for source in (
+        ANDROID_WEBVIEW_BUILD_TASK,
+        ANDROID_WEBVIEW_EXTENSION,
+        ANDROID_PAIRING_FRONTEND,
+        ANDROID_PAIRING_WRAPPER,
+    )
+)
+android_webview_held, android_webview_detail = \
+    android_webview_accessibility_contract(*ANDROID_WEBVIEW_SOURCES)
+rec(android_webview_held,
+    "Android pairing accessibility wraps Wry's direct provider seam",
+    android_webview_detail)
+
 # --- the Android NDK binutils wiring ---------------------------------------
 # openssl-src asks cc-rs for AR and RANLIB, and cc-rs falls back to
 # `<triple>-ranlib` — a wrapper no NDK has shipped since r23 — unless something
@@ -669,7 +1004,7 @@ if emu:
             and any(p.startswith("crates/copypaste-ipc") for p in paths),
             f"android-emulator.yml {event} filter covers the shared frontend and the wire contract",
             "a path filter that omits them hides cross-platform breakage")
-    nightly_jobs = (docs.get("native-nightly.yml") or {}).get("jobs") or {}
+    nightly_jobs = nightly_workflow.get("jobs") or {}
     rec("workflow_call" in triggers and "workflow_dispatch" in triggers,
         "android-emulator.yml is reusable and dispatchable",
         "expected workflow_call and workflow_dispatch triggers: {}".format(sorted(triggers)))
@@ -1047,6 +1382,222 @@ rec("check-feature-ledger.py" in release_ledger_body,
 
 # --- self-test: prove the runner-image detector fails when it should --------
 if SELF_TEST:
+    current_supply = docs.get("supply-chain.yml") or {}
+
+    def concurrency_fixture(mutator):
+        fixture = copy.deepcopy(docs)
+        mutator(fixture)
+        return bool(concurrency_policy_failures(fixture))
+
+    def change_group(fixture, name, old, new):
+        group = fixture[name]["concurrency"]["group"]
+        fixture[name]["concurrency"]["group"] = group.replace(old, new)
+
+    workflow_namespace_fixture = copy.deepcopy(docs)
+    change_group(
+        workflow_namespace_fixture, "ci.yml", "ci-", "${{ github.workflow }}-")
+    android_without_sweep_fixture = copy.deepcopy(docs)
+    change_group(
+        android_without_sweep_fixture, "android-emulator.yml",
+        "github.event_name == 'schedule' && 'sweep' || ", "")
+    unique_secret_fixture = copy.deepcopy(docs)
+    unique_secret_fixture["secret-scan.yml"]["concurrency"] = {
+        "group": "secret-scan-${{ github.run_id }}",
+        "cancel-in-progress": True,
+    }
+    semantic_positive_fixtures = (
+        ("GitHub's workflow namespace isolates an otherwise valid key",
+         workflow_namespace_fixture),
+        ("Android's unique run key does not require a literal sweep marker",
+         android_without_sweep_fixture),
+        ("a run-unique reusable secret-scan group is harmless",
+         unique_secret_fixture),
+    )
+    for desc, fixture in semantic_positive_fixtures:
+        emit(not concurrency_policy_failures(fixture),
+             "self-test: {}".format(desc),
+             "; ".join(concurrency_policy_failures(fixture)))
+
+    concurrency_fixtures = (
+        (
+            "a bare ref concurrency key is rejected",
+            lambda fixture: fixture["ci.yml"]["concurrency"].update(
+                group="ci-${{ github.ref }}"),
+        ),
+        (
+            "a concurrency key without the event discriminator is rejected",
+            lambda fixture: change_group(
+                fixture, "ci.yml", "-${{ github.event_name }}-", "-"),
+        ),
+        (
+            "a missing merge-queue trigger is rejected",
+            lambda fixture: event_triggers(fixture["browser-webkitgtk.yml"]).pop(
+                "merge_group", None),
+        ),
+        (
+            "merge-queue evidence may not be cancelled",
+            lambda fixture: fixture["windows-native-e2e.yml"]["concurrency"].update(
+                **{"cancel-in-progress": True}),
+        ),
+        (
+            "nightly schedule and dispatch may not share a group",
+            lambda fixture: fixture["native-nightly.yml"]["concurrency"].update(
+                group="native-nightly-${{ github.ref }}"),
+        ),
+        (
+            "Android manual and scheduled runs retain a unique run discriminator",
+            lambda fixture: change_group(
+                fixture, "android-emulator.yml",
+                "|| github.run_id", "|| github.ref_name"),
+        ),
+        (
+            "Android concurrency retains the API discriminator",
+            lambda fixture: change_group(
+                fixture, "android-emulator.yml",
+                "${{ github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36' }}-",
+                ""),
+        ),
+        (
+            "Android concurrency retains the target discriminator",
+            lambda fixture: change_group(
+                fixture, "android-emulator.yml", "-${{ inputs.target || 'google_apis' }}", ""),
+        ),
+        (
+            "release concurrency uses the normalized version",
+            lambda fixture: fixture["release.yml"]["concurrency"].update(
+                group="release-${{ github.ref }}"),
+        ),
+        (
+            "an in-progress release run may not be cancelled",
+            lambda fixture: fixture["release.yml"]["concurrency"].update(
+                **{"cancel-in-progress": True}),
+        ),
+        (
+            "the reusable secret scan rejects a shared cancelling group",
+            lambda fixture: fixture["secret-scan.yml"].update(concurrency={
+                "group": "secret-scan-${{ github.ref_name }}",
+                "cancel-in-progress": True,
+            }),
+        ),
+    )
+    emit(not concurrency_policy_failures(docs),
+         "self-test: current workflow concurrency policy holds",
+         "; ".join(concurrency_policy_failures(docs)))
+    emit(synthetic_concurrency_table_holds(),
+         "self-test: synthetic concurrency event table holds")
+    for desc, mutate in concurrency_fixtures:
+        emit(concurrency_fixture(mutate), "self-test: {}".format(desc),
+             "the workflow concurrency detector accepted a broken fixture")
+
+    def broken_deny(mutator):
+        fixture = copy.deepcopy(current_supply)
+        mutator(fixture["jobs"]["deny"])
+        return not all(cargo_deny_contract(fixture).values())
+
+    def deny_installer(job):
+        return next(
+            step for step in steps(job)
+            if str(step.get("uses") or "").startswith("taiki-e/install-action@")
+            and str((step.get("with") or {}).get("tool") or "").startswith("cargo-deny")
+        )
+
+    def deny_command(job):
+        return next(step for step in steps(job) if "cargo deny" in str(step.get("run") or ""))
+
+    deny_fixtures = (
+        (
+            "cargo-deny without checksum verification is rejected",
+            lambda job: deny_installer(job)["with"].update(checksum=False),
+        ),
+        (
+            "cargo-deny with a source-build fallback is rejected",
+            lambda job: deny_installer(job)["with"].update(fallback="cargo"),
+        ),
+        (
+            "an unreviewed cargo-deny version is rejected",
+            lambda job: deny_installer(job)["with"].update(tool="cargo-deny@0.20.3"),
+        ),
+        (
+            "the Docker-based cargo-deny action is rejected",
+            lambda job: job["steps"].append({
+                "uses": "EmbarkStudios/cargo-deny-action@fixture"
+            }),
+        ),
+        (
+            "a cargo-deny command without the lockfile flag is rejected",
+            lambda job: deny_command(job).update(
+                run=deny_command(job)["run"].replace(" --locked", "")
+            ),
+        ),
+        (
+            "a cargo-deny matrix missing a policy check is rejected",
+            lambda job: job["strategy"]["matrix"].update(
+                check=["advisories", "bans", "licenses"]
+            ),
+        ),
+        (
+            "a hardcoded cargo-deny policy subset is rejected",
+            lambda job: deny_command(job).update(
+                run=deny_command(job)["run"].replace("${{ matrix.check }}", "advisories")
+            ),
+        ),
+    )
+    for desc, mutate in deny_fixtures:
+        emit(broken_deny(mutate), "self-test: {}".format(desc),
+             "the cargo-deny wiring detector accepted a broken fixture")
+
+    webview_build_task, webview_extension, pairing_frontend, pairing_wrapper = \
+        ANDROID_WEBVIEW_SOURCES
+    webview_contract_fixtures = (
+        (
+            "a renamed RustWebView extension file is rejected",
+            webview_build_task.replace(
+                "src/main/rust-webview-accessibility.kt.inc",
+                "src/main/missing-accessibility.kt.inc",
+            ),
+            webview_extension,
+            pairing_frontend,
+            pairing_wrapper,
+        ),
+        (
+            "an unexported RustWebView extension is rejected",
+            webview_build_task.replace(
+                "WRY_RUSTWEBVIEW_CLASS_EXTENSION",
+                "WRY_UNUSED_CLASS_EXTENSION",
+            ),
+            webview_extension,
+            pairing_frontend,
+            pairing_wrapper,
+        ),
+        (
+            "a deleted RustWebView extension is rejected",
+            webview_build_task,
+            "",
+            pairing_frontend,
+            pairing_wrapper,
+        ),
+        (
+            "a RustWebView extension without the direct provider is rejected",
+            webview_build_task,
+            webview_extension.replace("super.getAccessibilityNodeProvider()", "null"),
+            pairing_frontend,
+            pairing_wrapper,
+        ),
+        (
+            "a frontend and native pairing marker mismatch is rejected",
+            webview_build_task,
+            webview_extension,
+            pairing_frontend.replace(
+                "copypaste-pairing-dialog-open", "different-pairing-dialog"
+            ),
+            pairing_wrapper,
+        ),
+    )
+    for desc, *fixture in webview_contract_fixtures:
+        held, _ = android_webview_accessibility_contract(*fixture)
+        emit(not held, "self-test: {}".format(desc),
+             "the Android WebView provider detector accepted broken wiring")
+
     def windows_shard_fixture():
         def job(command, timeout=20, key="fixture"):
             return {
@@ -1193,6 +1744,26 @@ if SELF_TEST:
     ):
         emit(held, "self-test: {}".format(desc),
              "the job timeout detector did not behave as stated")
+
+    current_nightly = docs.get("native-nightly.yml") or {}
+    shared_group_nightly = copy.deepcopy(current_nightly)
+    shared_group_nightly["concurrency"]["group"] = "native-nightly"
+    cancelling_nightly = copy.deepcopy(current_nightly)
+    cancelling_nightly["concurrency"]["cancel-in-progress"] = True
+    missing_nightly_concurrency = copy.deepcopy(current_nightly)
+    missing_nightly_concurrency.pop("concurrency", None)
+    for desc, held in (
+        ("the nightly workflow isolates scheduled and manual groups",
+         nightly_concurrency_holds(current_nightly)),
+        ("a shared nightly group is rejected",
+         not nightly_concurrency_holds(shared_group_nightly)),
+        ("cancelling nightly concurrency is rejected",
+         not nightly_concurrency_holds(cancelling_nightly)),
+        ("missing nightly concurrency is rejected",
+         not nightly_concurrency_holds(missing_nightly_concurrency)),
+    ):
+        emit(held, "self-test: {}".format(desc),
+             "the nightly concurrency detector did not behave as stated")
 
     def components_probe(components, run="cargo +1.96 test --workspace --locked"):
         setup = {"uses": "dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c"}

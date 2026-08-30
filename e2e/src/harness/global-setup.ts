@@ -17,6 +17,21 @@ let server: Child | undefined;
 
 export async function setup(): Promise<void> {
   await recordRunEnvironment();
+  const manifest = runLogPath("run.log");
+  if (process.platform === "win32") {
+    const { probeTauriSession, probeWindowsEnvironment } = await import(
+      "./windows-environment.js"
+    );
+    await probeWindowsEnvironment({ manifest });
+    await startDevServer();
+    const { startApp } = await import("./app.js");
+    await probeTauriSession(() => startApp(), manifest);
+    return;
+  }
+  await startDevServer();
+}
+
+async function startDevServer(): Promise<void> {
   requireDisplay();
   await assertPortFree();
 

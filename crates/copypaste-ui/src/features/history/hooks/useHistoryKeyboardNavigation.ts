@@ -88,9 +88,9 @@ export function useHistoryKeyboardNavigation({
         (index: number, extend: boolean) => {
             const item = items[index];
             if (!item) return;
+            scrollToItemIndex(index);
             onActiveIdChange(item.id);
             if (extend) selection.rangeTo(item.id);
-            scrollToItemIndex(index);
         },
         [items, onActiveIdChange, scrollToItemIndex, selection],
     );

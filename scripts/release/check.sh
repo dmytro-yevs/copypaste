@@ -151,21 +151,48 @@ group "Generators round-trip"
 SHA_A="1111111111111111111111111111111111111111111111111111111111111111"
 SHA_B="2222222222222222222222222222222222222222222222222222222222222222"
 VERSION_A="2.0.0-alpha.1"
-TAPDIR="$(mktemp -d)"
-BACKUP="$(mktemp -d)"
-cp Casks/copypaste.rb "$BACKUP/cask.rb"
-cp packaging/homebrew/copypaste-cli.rb "$BACKUP/formula.rb"
-restore() {
-    cp "$BACKUP/cask.rb"    Casks/copypaste.rb
-    cp "$BACKUP/formula.rb" packaging/homebrew/copypaste-cli.rb
-    rm -rf "$TAPDIR" "$BACKUP"
+FIXTURE="$(mktemp -d 2>/dev/null)" || FIXTURE=""
+CASK_TRACKED="Casks/copypaste.rb"
+FORMULA_TRACKED="packaging/homebrew/copypaste-cli.rb"
+CASK_FIXTURE="$FIXTURE/Casks/copypaste.rb"
+FORMULA_FIXTURE="$FIXTURE/packaging/homebrew/copypaste-cli.rb"
+GEN_CASK="$FIXTURE/scripts/release/gen-cask.sh"
+GEN_FORMULA="$FIXTURE/scripts/release/gen-formula.sh"
+TAPDIR="$FIXTURE/tap"
+
+cleanup_fixture() {
+    if [[ -n "$FIXTURE" ]]; then
+        rm -rf "$FIXTURE" 2>/dev/null || true
+    fi
 }
-trap restore EXIT
+trap cleanup_fixture EXIT
 
-check "gen-cask.sh accepts a pre-release version"    ./scripts/release/gen-cask.sh    "$VERSION_A" "$SHA_A" --out "$TAPDIR"
-check "gen-formula.sh accepts a pre-release version" ./scripts/release/gen-formula.sh "$VERSION_A" "$SHA_B" --out "$TAPDIR"
+prepare_generator_fixture() {
+    [[ -n "$FIXTURE" ]] || return 1
+    mkdir -p "$FIXTURE/Casks" "$FIXTURE/Formula" \
+        "$FIXTURE/packaging/homebrew" "$FIXTURE/scripts/release" "$TAPDIR" \
+        "$FIXTURE/original" || return 1
+    cp "$CASK_TRACKED" "$CASK_FIXTURE" || return 1
+    cp "$FORMULA_TRACKED" "$FORMULA_FIXTURE" || return 1
+    cp "$CASK_TRACKED" "$FIXTURE/original/cask.rb" || return 1
+    cp "$FORMULA_TRACKED" "$FIXTURE/original/formula.rb" || return 1
+    cp scripts/release/gen-cask.sh "$GEN_CASK" || return 1
+    cp scripts/release/gen-formula.sh "$GEN_FORMULA" || return 1
+    git -C "$FIXTURE" init -q || return 1
+    cmp -s "$CASK_TRACKED" "$FIXTURE/original/cask.rb" || return 1
+    cmp -s "$FORMULA_TRACKED" "$FIXTURE/original/formula.rb" || return 1
+}
 
-for pair in "Casks/copypaste.rb:$SHA_A" "packaging/homebrew/copypaste-cli.rb:$SHA_B"; do
+tracked_generators_unchanged() {
+    cmp -s "$CASK_TRACKED" "$FIXTURE/original/cask.rb" \
+        && cmp -s "$FORMULA_TRACKED" "$FIXTURE/original/formula.rb"
+}
+
+if prepare_generator_fixture; then
+check "gen-cask.sh accepts a pre-release version"    bash "$GEN_CASK"    "$VERSION_A" "$SHA_A" --out "$TAPDIR"
+check "gen-formula.sh accepts a pre-release version" bash "$GEN_FORMULA" "$VERSION_A" "$SHA_B" --out "$TAPDIR"
+
+for pair in "$CASK_FIXTURE:$SHA_A" "$FORMULA_FIXTURE:$SHA_B"; do
     f="${pair%%:*}"; sha="${pair##*:}"
     if grep -qE "^[[:space:]]*version \"${VERSION_A}\"$" "$f"; then
         ok "$f version rewritten"
@@ -186,15 +213,15 @@ for pair in "Casks/copypaste.rb:$SHA_A" "packaging/homebrew/copypaste-cli.rb:$SH
 done
 
 if [[ "$HAVE_RUBY" == 1 ]]; then
-    check "stamped cask is still valid Ruby"    ruby -c Casks/copypaste.rb
-    check "stamped formula is still valid Ruby" ruby -c packaging/homebrew/copypaste-cli.rb
+    check "stamped cask is still valid Ruby"    ruby -c "$CASK_FIXTURE"
+    check "stamped formula is still valid Ruby" ruby -c "$FORMULA_FIXTURE"
 fi
 
 # Idempotence. The release workflow can be re-run on the same tag, and a
 # generator that only works on a pristine file would corrupt the second run.
-check "gen-cask.sh is idempotent"    ./scripts/release/gen-cask.sh    "$VERSION_A" "$SHA_A" --out "$TAPDIR"
-check "gen-formula.sh is idempotent" ./scripts/release/gen-formula.sh "$VERSION_A" "$SHA_B" --out "$TAPDIR"
-if [[ "$(grep -cE "^[[:space:]]*version \"${VERSION_A}\"$" Casks/copypaste.rb)" == "1" ]]; then
+check "gen-cask.sh is idempotent"    bash "$GEN_CASK"    "$VERSION_A" "$SHA_A" --out "$TAPDIR"
+check "gen-formula.sh is idempotent" bash "$GEN_FORMULA" "$VERSION_A" "$SHA_B" --out "$TAPDIR"
+if [[ "$(grep -cE "^[[:space:]]*version \"${VERSION_A}\"$" "$CASK_FIXTURE")" == "1" ]]; then
     ok "cask still has exactly one version line after a second run"
 else
     bad "cask still has exactly one version line after a second run"
@@ -203,13 +230,13 @@ fi
 # The URL the cask builds must be the filename make-dmg.sh writes. This is the
 # join between two scripts that never see each other.
 EXPECTED_DMG="CopyPaste-v${VERSION_A}-macos-arm64.dmg"
-if grep -q 'CopyPaste-v#{version}-macos-arm64\.dmg' Casks/copypaste.rb; then
+if grep -q 'CopyPaste-v#{version}-macos-arm64\.dmg' "$CASK_FIXTURE"; then
     ok "cask URL interpolates to $EXPECTED_DMG"
 else
     bad "cask URL interpolates to $EXPECTED_DMG" "the url stanza does not match the DMG naming in make-dmg.sh"
 fi
 EXPECTED_TGZ="copypaste-cli-v${VERSION_A}-macos-arm64.tar.gz"
-if grep -q 'copypaste-cli-v#{version}-macos-arm64\.tar\.gz' packaging/homebrew/copypaste-cli.rb; then
+if grep -q 'copypaste-cli-v#{version}-macos-arm64\.tar\.gz' "$FORMULA_FIXTURE"; then
     ok "formula URL interpolates to $EXPECTED_TGZ"
 else
     bad "formula URL interpolates to $EXPECTED_TGZ"
@@ -224,12 +251,12 @@ reject() {
         ok "$desc"
     fi
 }
-reject "gen-cask.sh rejects a leading v"        ./scripts/release/gen-cask.sh    "v2.0.0" "$SHA_A"
-reject "gen-formula.sh rejects a leading v"     ./scripts/release/gen-formula.sh "v2.0.0" "$SHA_A"
-reject "gen-cask.sh rejects a short sha256"     ./scripts/release/gen-cask.sh    "2.0.0"  "deadbeef"
-reject "gen-cask.sh rejects uppercase sha256"   ./scripts/release/gen-cask.sh    "2.0.0"  "$(printf '%s' "$SHA_A" | tr '12' 'AB')"
-reject "gen-cask.sh rejects a missing argument" ./scripts/release/gen-cask.sh    "2.0.0"
-reject "gen-cask.sh rejects an unknown flag"    ./scripts/release/gen-cask.sh    "2.0.0" "$SHA_A" --nope
+reject "gen-cask.sh rejects a leading v"        bash "$GEN_CASK"    "v2.0.0" "$SHA_A"
+reject "gen-formula.sh rejects a leading v"     bash "$GEN_FORMULA" "v2.0.0" "$SHA_A"
+reject "gen-cask.sh rejects a short sha256"     bash "$GEN_CASK"    "2.0.0"  "deadbeef"
+reject "gen-cask.sh rejects uppercase sha256"   bash "$GEN_CASK"    "2.0.0"  "$(printf '%s' "$SHA_A" | tr '12' 'AB')"
+reject "gen-cask.sh rejects a missing argument" bash "$GEN_CASK"    "2.0.0"
+reject "gen-cask.sh rejects an unknown flag"    bash "$GEN_CASK"    "2.0.0" "$SHA_A" --nope
 
 group "Tap layout"
 # `brew tap` looks for Casks/ and Formula/ at the repository root.
@@ -247,6 +274,12 @@ check "setup-tap.sh --dry-run is idempotent beside an existing tap" \
     ./scripts/release/setup-tap.sh --github-user dmytro-yevs --dry-run
 reject "setup-tap.sh needs a user"   ./scripts/release/setup-tap.sh --dry-run
 reject "setup-tap.sh rejects a bad tap name" ./scripts/release/setup-tap.sh --github-user dmytro-yevs --tap-name "Bad Name" --dry-run
+
+check "tracked generator fixtures remain byte-identical" tracked_generators_unchanged
+else
+    bad "isolated generator fixture is available" \
+        "generators were not run because their temporary fixture could not be prepared"
+fi
 
 group "One version, three files"
 # Cargo metadata is authoritative. Tauri still resolves package.json for its

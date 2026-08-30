@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, expect, inject, test } from "vitest";
+import { afterAll, expect, inject, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
 import { ordinaryFor } from "../src/harness/fixtures.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   HISTORY_LIST,
   ROW,
@@ -10,6 +11,8 @@ import {
   count,
   gotoView,
   rowCount,
+  openHistorySearch,
+  resetHistoryFilters,
   typeInto,
   visibleText,
   waitFor,
@@ -21,10 +24,10 @@ const ordinary = ordinaryFor(nonce);
 
 let app: AndroidApp;
 
-beforeAll(async () => {
+beforeAllWithEvidence("interaction", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
-  await clearField(app, SEARCH);
+  await resetHistoryFilters(app);
   await waitForRows(app, 1);
 }, 180_000);
 
@@ -48,6 +51,7 @@ test("typing into search filters the list the engine laid out", async () => {
   const before = await rowCount(app);
   expect(before).toBeGreaterThan(1);
 
+  await openHistorySearch(app);
   await typeInto(app, SEARCH, `HARNESS${nonce}`);
   await waitFor(
     async () =>

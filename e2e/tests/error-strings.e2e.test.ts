@@ -27,10 +27,13 @@ beforeAll(async () => {
   // The failure under test is the transport one: the socket path is what
   // discloses the local username, and it is only in play once the daemon dies
   // under a running window.
-  await app.daemon.stop();
+  await app.daemon.kill();
 
   await app.browser.waitUntil(
-    async () => (await accessibleSurface(app.browser)).includes("Background service unreachable"),
+    async () =>
+      (await accessibleSurface(app.browser)).includes(
+        "The clipboard service isn't running",
+      ),
     {
       timeout: 40_000,
       interval: 500,
@@ -45,7 +48,7 @@ afterAll(async () => {
 
 test("the offline state is reported to the user", async () => {
   const surface = await accessibleSurface(app.browser);
-  expect(surface).toContain("Background service unreachable");
+  expect(surface).toContain("The clipboard service isn't running");
 });
 
 test("no user-facing string contains a filesystem path (INV-12)", async () => {

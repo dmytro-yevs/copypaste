@@ -32,7 +32,7 @@ afterAll(async () => {
 });
 
 async function openTab(label: string): Promise<void> {
-  await gotoView(app.browser, "Settings");
+  await gotoView(app.browser, "Preferences");
   const tab = await app.browser.$(`[role="tab"]=${label}`);
   await tab.waitForClickable({ timeout: 15_000 });
   await tab.click();
@@ -60,7 +60,7 @@ async function setClipboard(value: string): Promise<void> {
 
 describe("private mode and the native clipboard", () => {
   test("blocks capture until the setting is turned off", async () => {
-    await openTab("Service");
+    await openTab("Privacy & retention");
     const toggle = await app.browser.$("#private-mode");
     await toggle.waitForClickable({ timeout: 15_000 });
     expect(await toggle.getAttribute("aria-checked")).toBe("false");
@@ -96,7 +96,7 @@ describe("private mode and the native clipboard", () => {
 
 describe("desktop settings", () => {
   test("persists a native shortcut registration and restores the default", async () => {
-    await openTab("Shortcut");
+    await openTab("Shortcuts");
     const binding = await app.browser.$('[aria-label^="Current shortcut:"]');
     await binding.waitForClickable({ timeout: 15_000 });
     await binding.click();
@@ -121,7 +121,7 @@ describe("desktop settings", () => {
   });
 
   test("changes and restores the Windows launch-at-login registration", async () => {
-    await openTab("Shortcut");
+    await openTab("Shortcuts");
     const toggle = await app.browser.$("#open-at-login");
     await toggle.waitForClickable({ timeout: 15_000 });
     const initial = await toggle.getAttribute("aria-checked");
@@ -144,12 +144,34 @@ describe("desktop settings", () => {
 describe("fail-closed product surfaces", () => {
   test("names the updater as unconfigured in unsigned builds", async () => {
     await openTab("About");
-    await waitForText(app.browser, "Updates aren't configured in this build.");
-    expect(await app.browser.$$("button=Check for updates")).toHaveLength(0);
+    await app.browser.waitUntil(
+      async () =>
+        (await app.browser.$$('[data-settings-search-target="row:App updates"]').length) ===
+        1,
+      {
+        timeout: 15_000,
+        timeoutMsg: "the unconfigured updater row did not render exactly once",
+      },
+    );
+    const updater = await app.browser.$(
+      '[data-settings-search-target="row:App updates"]',
+    );
+    await updater.waitForDisplayed({ timeout: 15_000 });
+    expect(await updater.getAttribute("data-state")).toBe("unconfigured");
+    expect(await updater.getText()).toContain(
+      "Updates aren't configured in this build.",
+    );
+    const description = await updater.$("p");
+    expect(await description.getProperty("textContent")).toBe(
+      "Checks the signed CopyPaste release feed for Windows.",
+    );
+    expect(await updater.getText()).toContain("Not configured");
+    expect(await updater.$$("button")).toHaveLength(0);
+    expect(await updater.$$("progress")).toHaveLength(0);
   });
 
   test("keeps cloud controls absent when no deployment is configured", async () => {
-    await openTab("Sync");
+    await openTab("Cloud sync");
     await waitForText(app.browser, "Not configured");
     expect(await app.browser.$$('form[aria-label="Cloud account sign in"]')).toHaveLength(
       0,
@@ -157,7 +179,7 @@ describe("fail-closed product surfaces", () => {
   });
 
   test("warns before readable export and destructive restore", async () => {
-    await openTab("Storage");
+    await openTab("Storage & history");
     await clickButton(app.browser, "Export…");
     await waitForText(app.browser, "Export your clipboard history?");
     const includeSensitive = await app.browser.$("#export-include-sensitive");
@@ -177,14 +199,31 @@ describe("fail-closed product surfaces", () => {
 
   test("collects redacted Windows diagnostics and runtime events", async () => {
     await openTab("Diagnostics");
-    await waitForText(app.browser, "windows-system-clipboard", 30_000);
     expectNoFilesystemPath(
       await accessibleSurface(app.browser),
       app.daemon.dataHome,
     );
 
-    const events = await app.browser.$('[role="tab"]=Runtime events');
-    await events.click();
+    await clickButton(app.browser, "Open", {
+      within: '[data-settings-search-target="section:Support"]',
+    });
+    const report = await app.browser.$('[data-slot="dialog-content"]');
+    await report.waitForDisplayed({ timeout: 15_000 });
+    await waitForText(app.browser, "windows-system-clipboard", 30_000);
+    expect(await report.getText()).toContain("CopyPaste diagnostics");
+    expectNoFilesystemPath(
+      await accessibleSurface(app.browser),
+      app.daemon.dataHome,
+    );
+    await clickButton(app.browser, "Close", {
+      within: '[data-slot="dialog-content"]',
+    });
+    await app.browser.waitUntil(
+      async () => (await app.browser.$$('[data-slot="dialog-content"]').length) === 0,
+      { timeout: 15_000, timeoutMsg: "the diagnostics report did not close" },
+    );
+
+    await openTab("Runtime events");
     const log = await app.browser.$(
       '[role="log"][aria-label="Runtime event list"]',
     );

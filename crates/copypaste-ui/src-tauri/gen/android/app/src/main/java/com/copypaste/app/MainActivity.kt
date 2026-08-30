@@ -5,12 +5,16 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
   private val notificationWaiters = ArrayList<(NotificationPermissionFacts) -> Unit>()
+  private var imeInsetsHost: WebView? = null
   private val permissionPreferences by lazy {
     getSharedPreferences(PERMISSION_PREFERENCES, Context.MODE_PRIVATE)
   }
@@ -35,6 +39,28 @@ class MainActivity : TauriActivity() {
     window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+  }
+
+  override fun onContentChanged() {
+    super.onContentChanged()
+    // Tauri/Wry installs its RustWebView with setContentView, so this callback
+    // reaches the actual host view synchronously before an accessibility dump.
+    findHostWebView(window.decorView)?.let { webView ->
+      webView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+      if (imeInsetsHost !== webView) {
+        imeInsetsHost = webView
+        WebViewImeInsets.install(webView)
+      }
+    }
+  }
+
+  private fun findHostWebView(view: View): WebView? {
+    if (view is WebView) return view
+    if (view !is ViewGroup) return null
+    for (index in 0 until view.childCount) {
+      findHostWebView(view.getChildAt(index))?.let { return it }
+    }
+    return null
   }
 
   /**

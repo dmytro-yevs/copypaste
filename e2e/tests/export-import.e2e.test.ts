@@ -25,7 +25,11 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
 import { expectSecretAbsent, outerHtml } from "../src/harness/leaks.js";
-import { waitForRows, waitForText } from "../src/harness/ui.js";
+import {
+  openHistorySearch,
+  waitForRows,
+  waitForText,
+} from "../src/harness/ui.js";
 
 const ORDINARY = "an ordinary clipping to export";
 const SECRET = "AKIAIOSFODNN7EXAMPLE";
@@ -111,7 +115,8 @@ describe("import", () => {
     await waitForRows(app.browser, 3, 45_000);
     await app.browser.waitUntil(
       async () =>
-        (await app.browser.$$('[aria-label^="Sensitive item, hidden"]').length) >= 2,
+        (await app.browser.$$('button[aria-label^="Sensitive item, hidden"]').length) >=
+          2,
       {
         timeout: 45_000,
         interval: 500,
@@ -126,7 +131,7 @@ describe("import", () => {
   });
 
   test("and it never reaches the search index", async () => {
-    const search = await app.browser.$('[aria-label="Search clipboard history"]');
+    const search = await openHistorySearch(app.browser);
     await search.setValue(SMUGGLED.slice(0, 12));
     await waitForText(app.browser, "No results for", 20_000);
     await expectSecretAbsent(app.browser, SMUGGLED);

@@ -13,6 +13,11 @@ import {
   assertTauriBridge,
   assertTauriBrowserName,
 } from "../src/harness/webview-guard.js";
+import {
+  assertMajorCompatibility,
+  probeTauriSession,
+  probeWindowsEnvironment,
+} from "../src/harness/windows-environment.js";
 
 describe("Tauri WebDriver capabilities", () => {
   it("accepts WebView2 only on Windows", () => {
@@ -41,6 +46,112 @@ describe("Tauri WebDriver capabilities", () => {
       );
     },
   );
+});
+
+describe("Windows environment probe", () => {
+  it("accepts a different standalone Edge with matching WebView2 and EdgeDriver builds", () => {
+    expect(() =>
+      assertMajorCompatibility({
+        edge: "151.0.4129.40",
+        webview2: "131.0.2903.86",
+        edgeDriver: "131.0.2903.86",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a WebView2 Runtime and EdgeDriver build mismatch", () => {
+    expect(() =>
+      assertMajorCompatibility({
+        edge: "151.0.4129.40",
+        webview2: "131.0.2903.86",
+        edgeDriver: "131.0.2904.1",
+      }),
+    ).toThrow(/first-three-part versions are incompatible/);
+  });
+
+  it("records compatible versions before the session probe", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-windows-probe-test-"));
+    const manifest = path.join(directory, "run.log");
+    try {
+      await probeWindowsEnvironment({
+        manifest,
+        powershell: async () => "Microsoft Edge 151.0.4129.40",
+        driverVersion: async () => "Microsoft Edge WebDriver 131.0.2903.86",
+        webview2Version: "131.0.2903.86",
+      });
+      expect(readFileSync(manifest, "utf8")).toContain(
+        "windowsEnvironmentProbe=ready",
+      );
+      expect(readFileSync(manifest, "utf8")).toContain("edgeVersion=151.0.4129.40");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies a failed compatibility probe as an environment failure", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-windows-probe-test-"));
+    const manifest = path.join(directory, "run.log");
+    try {
+      const failure = await probeWindowsEnvironment({
+        manifest,
+        powershell: async () => "Edge 151.0.4129.40",
+        driverVersion: async () => "Microsoft Edge WebDriver 131.0.2904.1",
+        webview2Version: "131.0.2903.86",
+      }).then(() => undefined, (error: Error) => error);
+      expect(failure?.name).toBe("WindowsEnvironmentProbeFailure");
+      expect(failure?.message).toContain("before the native E2E suite");
+      expect(readFileSync(manifest, "utf8")).toContain(
+        "windowsEnvironmentProbe=failed",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("closes the app after a ready-session probe", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-windows-probe-test-"));
+    let stopped = false;
+    try {
+      await probeTauriSession(
+        async () => ({
+          async stop() {
+            stopped = true;
+          },
+        }),
+        path.join(directory, "run.log"),
+      );
+      expect(stopped).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when session cleanup rejects after readiness", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "cp-windows-probe-test-"));
+    const manifest = path.join(directory, "run.log");
+    try {
+      const failure = await probeTauriSession(
+        async () => ({
+          async stop() {
+            throw new Error("driver cleanup failed");
+          },
+        }),
+        manifest,
+      ).then(() => undefined, (error: Error) => error);
+      const written = readFileSync(manifest, "utf8");
+      expect(failure?.name).toBe("WindowsEnvironmentProbeFailure");
+      expect(failure?.message).toContain("during Tauri session cleanup");
+      expect(written).toContain("tauriSessionProbe=ready");
+      expect(written).toContain("tauriSessionProbe=failed");
+      expect(written).toContain("tauriSessionProbeFailure=cleanup");
+      expect(written).toContain("tauriSessionProbeCleanupError=driver cleanup failed");
+      expect(written.lastIndexOf("tauriSessionProbe=failed")).toBeGreaterThan(
+        written.lastIndexOf("tauriSessionProbe=ready"),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Tauri bridge startup", () => {

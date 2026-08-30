@@ -19,9 +19,24 @@ try:
 except (OSError, ET.ParseError) as error:
     raise SystemExit(f"native accessibility observation unavailable: {error}")
 
-owned = [node for node in root.iter("node") if node.get("package") == package]
-if not owned:
-    raise SystemExit(f"native accessibility tree contains no nodes owned by {package}")
+webviews = [
+    node for node in root.iter("node")
+    if node.get("class") == "android.webkit.WebView" and node.get("package") == package
+]
+if not webviews:
+    raise SystemExit(f"native accessibility tree contains no Android WebView surface for {package}")
+
+# WebView virtual descendants are owned by the host view even when the
+# provider omits or rewrites their package attribute. Filtering every node by
+# package made an API 33 tree look like one named WebView node and hid the
+# product's actual controls from this gate.
+owned = []
+seen = set()
+for webview in webviews:
+    for node in webview.iter():
+        if id(node) not in seen:
+            owned.append(node)
+            seen.add(id(node))
 
 def has_name(node):
     return any((node.get(attribute) or "").strip() for attribute in ("text", "content-desc", "hint"))
@@ -62,16 +77,19 @@ self_test() {
     good="$dir/good.xml"
     unnamed="$dir/unnamed.xml"
     unnamed_input="$dir/unnamed-input.xml"
+    virtual_children="$dir/virtual-children.xml"
     no_webview="$dir/no-webview.xml"
     no_action="$dir/no-action.xml"
     too_few="$dir/too-few.xml"
-    printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node package="com.copypaste.app" class="android.view.View" focusable="true" scrollable="true"/><node package="com.copypaste.app" class="android.widget.Button" text="Library" clickable="true" focusable="true"/><node package="com.copypaste.app" class="android.widget.Button" content-desc="Settings" clickable="true"/><node package="com.copypaste.app" class="android.widget.EditText" hint="Search" focusable="true"/></node></hierarchy>' > "$good"
-    printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node package="com.copypaste.app" class="android.widget.Button" text="Library" clickable="true"/><node package="com.copypaste.app" class="android.widget.Button" content-desc="Settings" clickable="true"/><node package="com.copypaste.app" class="android.widget.EditText" text="Search" focusable="true"/><node package="com.copypaste.app" class="android.widget.Button" clickable="true"/></node></hierarchy>' > "$unnamed"
+    printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node package="com.copypaste.app" class="android.view.View" focusable="true" scrollable="true"/><node package="com.copypaste.app" class="android.view.View" content-desc="Dismiss pairing dialog" clickable="true" bounds="[0,0][320,640]"/><node package="com.copypaste.app" class="android.widget.Button" text="Library" clickable="true" focusable="true"/><node package="com.copypaste.app" class="android.widget.Button" content-desc="Settings" clickable="true"/><node package="com.copypaste.app" class="android.widget.EditText" hint="Search" focusable="true"/></node></hierarchy>' > "$good"
+    printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node package="com.copypaste.app" class="android.widget.Button" text="Library" clickable="true"/><node package="com.copypaste.app" class="android.widget.Button" content-desc="Settings" clickable="true"/><node package="com.copypaste.app" class="android.widget.EditText" text="Search" focusable="true"/><node package="com.copypaste.app" class="android.view.View" clickable="true" bounds="[0,0][320,640]"/></node></hierarchy>' > "$unnamed"
+    printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node class="android.widget.Button" text="Library" clickable="true"/><node package="android.webkit" class="android.widget.Button" content-desc="Settings" clickable="true"/><node class="android.widget.EditText" hint="Search" focusable="true"/></node></hierarchy>' > "$virtual_children"
     printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node package="com.copypaste.app" class="android.widget.Button" text="Library" clickable="true"/><node package="com.copypaste.app" class="android.widget.Button" content-desc="Settings" clickable="true"/><node package="com.copypaste.app" class="android.widget.EditText" text="Search" focusable="true"/><node NAF="true" package="com.copypaste.app" resource-id="android-exclusion-search" class="android.widget.EditText" text="" content-desc="" hint="" clickable="true" focusable="true" bounds="[0,0][0,0]"/></node></hierarchy>' > "$unnamed_input"
     printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.widget.FrameLayout" text="CopyPaste"><node package="com.copypaste.app" class="android.widget.Button" text="Library" clickable="true"/><node package="com.copypaste.app" class="android.widget.Button" text="Settings" clickable="true"/></node></hierarchy>' > "$no_webview"
     printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node package="com.copypaste.app" class="android.widget.TextView" text="Library"/><node package="com.copypaste.app" class="android.widget.TextView" text="Settings"/></node></hierarchy>' > "$no_action"
     printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node package="com.copypaste.app" class="android.widget.Button" text="Library" clickable="true"/></node></hierarchy>' > "$too_few"
     check_tree "$good" >/dev/null || return 1
+    check_tree "$virtual_children" >/dev/null || return 1
     reject_fixture "$unnamed" "interactive CopyPaste nodes have no accessible name" || return 1
     reject_fixture "$unnamed_input" "android.widget.EditText#android-exclusion-search at [0,0][0,0]" || return 1
     reject_fixture "$no_webview" "contains no Android WebView surface" || return 1

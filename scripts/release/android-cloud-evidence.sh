@@ -5,6 +5,8 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
 # shellcheck source=scripts/release/android-ui-evidence-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/android-ui-evidence-lib.sh"
+# shellcheck source=scripts/release/android-navigation-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-navigation-lib.sh"
 # shellcheck source=scripts/release/native-cloud-evidence-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/native-cloud-evidence-lib.sh"
 
@@ -24,6 +26,8 @@ CLOUD_FORM="Cloud account sign in"
 FIELD_EMAIL="field:$CLOUD_FORM:0"
 FIELD_PASSWORD="field:$CLOUD_FORM:1"
 FIELD_PASSPHRASE="field:$CLOUD_FORM:2"
+CLOUD_SECTION_ACTION="Cloud sync Account, encryption and cloud status"
+CLOUD_SYNC_ERROR="Cloud sync failed. Check the connection and try again."
 
 now_ms() { python3 -c 'import time; print(time.time_ns() // 1000000)'; }
 
@@ -58,10 +62,20 @@ install_and_open() { # <apk>
     }
 }
 
+cloud_settings_pane_holds() { # <artifact>
+    enabled_node_exists_exact "$1" "Preference sections"
+}
+
+cloud_detail_holds() { # <artifact>
+    node_exists_exact "$1" "Cloud sync" \
+        && enabled_action_exists_exact "$1" "Back to Preferences"
+}
+
 open_cloud() {
-    tap_selector "Settings" "$OUT/settings-nav.xml" || return 1
-    tap_selector "Sync" "$OUT/settings-sync.xml" || return 1
-    find_scrolling "Cloud sync" "$OUT/cloud-visible.xml" up
+    tap_until_state "Settings" "$OUT/settings-nav.xml" \
+        cloud_settings_pane_holds none || return 1
+    tap_until_state "$CLOUD_SECTION_ACTION" "$OUT/settings-sync.xml" \
+        cloud_detail_holds up
 }
 
 capture_state() { # <state>
@@ -83,6 +97,13 @@ capture_state() { # <state>
 # whole configured account lifecycle as missing while the app rendered it.
 expect_label() { # <selector> <artifact> [timeout] [dump fn] [scroll fn]
     wait_selector_scrolling "$1" "$2" up "${3:-$WAIT_SECS}" any \
+        "${4:-dump_hierarchy}" "${5:-scroll_content}" \
+        && ok "cloud UI exposes $1" \
+        || bad "cloud UI exposes $1" "uiautomator did not find it"
+}
+
+expect_exact_label() { # <selector> <artifact> [timeout] [dump fn] [scroll fn]
+    wait_selector_scrolling "$1" "$2" up "${3:-$WAIT_SECS}" exact \
         "${4:-dump_hierarchy}" "${5:-scroll_content}" \
         && ok "cloud UI exposes $1" \
         || bad "cloud UI exposes $1" "uiautomator did not find it"
@@ -245,7 +266,7 @@ configured_scenario() {
     STUB_PID=""
     started="$(now_ms)"
     tap_selector_scrolling "Sync cloud now" "$OUT/offline-sync.xml" up || bad "cloud sync remains actionable offline"
-    expect_label "The last cloud sync failed" "$OUT/offline-error.xml"
+    expect_exact_label "$CLOUD_SYNC_ERROR" "$OUT/offline-error.xml"
     elapsed=$(( $(now_ms) - started ))
     cloud_latency_record "$LATENCIES" offline-error "$elapsed" 60000 \
         && ok "offline cloud error meets its latency budget" \
@@ -269,7 +290,7 @@ sign_out_precondition() { # <artifact>
         actionable) printf ready ;;
         # Exact: the sign-out toast reads "Signed out of cloud sync", and a
         # partial match on it would call a signed-in card signed out.
-        *) [[ -n "$(node_center_exact "$1" "Signed out")" ]] && printf restore || printf blocked ;;
+        *) signed_out_state_holds "$1" && printf restore || printf blocked ;;
     esac
 }
 
@@ -283,6 +304,77 @@ cloud_card_state() { # <artifact>
     done
     printf 'the cloud card reads %s and Sign out is %s' \
         "$badge" "$(control_state "$1" "Sign out")"
+}
+
+# A zero-sized badge is still useful semantic state when the WebView has
+# clipped its header. Require the complete visible form and reject signed-in
+# card state anywhere in XML; a blank form's submit action may be disabled.
+signed_out_form_holds() { # <artifact>
+    [[ "$(form_field_shape "$1" "$CLOUD_FORM")" == "3 2" ]] || return 1
+    python3 - "$1" "$CLOUD_FORM" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+label = sys.argv[2].casefold()
+
+def exact(node, value):
+    return any((node.get(name) or "").casefold() == value
+               for name in ("text", "content-desc"))
+
+def rect(node):
+    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+    return tuple(map(int, match.groups())) if match else None
+
+form = next((node for node in root.iter("node") if exact(node, label)), None)
+if form is None or form.get("enabled") != "true":
+    raise SystemExit(1)
+form_rect = rect(form)
+if form_rect is None or form_rect[2] - form_rect[0] < 8 or form_rect[3] - form_rect[1] < 8:
+    raise SystemExit(1)
+fields = [node for node in form.iter("node")
+          if (node.get("class") or "").endswith("EditText")]
+if len(fields) != 3 or sum(node.get("password") == "true" for node in fields) != 2:
+    raise SystemExit(1)
+left, top, right, bottom = form_rect
+for field in fields:
+    bounds = rect(field)
+    if bounds is None or field.get("enabled") != "true":
+        raise SystemExit(1)
+    if not (left <= bounds[0] <= bounds[2] <= right and top <= bounds[1] <= bounds[3] <= bottom):
+        raise SystemExit(1)
+actions = [node for node in form.iter("node")
+           if exact(node, "sign in") or exact(node, "create account")]
+if not any(node.get("clickable") == "true" and rect(node)
+           and rect(node)[2] - rect(node)[0] >= 8
+           and rect(node)[3] - rect(node)[1] >= 8
+           and left <= rect(node)[0] <= rect(node)[2] <= right
+           and top <= rect(node)[1] <= rect(node)[3] <= bottom
+           for node in actions):
+    raise SystemExit(1)
+PY
+}
+
+signed_out_state_holds() { # <artifact>
+    enabled_node_exists_exact "$1" "Signed out" \
+        && signed_out_form_holds "$1" \
+        && ! node_exists_exact "$1" "Sign out" \
+        && ! node_exists_exact "$1" "Connected"
+}
+
+wait_signed_out_state() { # <artifact> [timeout] [dump fn] [scroll fn]
+    local artifact="$1" timeout="${2:-$WAIT_SECS}"
+    local dump="${3:-dump_hierarchy}" scroll="${4:-scroll_content}"
+    local started="$SECONDS"
+    while (( SECONDS - started < timeout )); do
+        if "$dump" "$artifact" && signed_out_state_holds "$artifact"; then
+            return 0
+        fi
+        "$scroll" up
+        sleep 1
+    done
+    return 1
 }
 
 restore_session() { # <artifact>
@@ -347,7 +439,7 @@ sign_out_lifecycle() {
         bad "the native sign-out tap reaches the app"
         return
     }
-    wait_selector_scrolling "Signed out" "$OUT/signed-out-again.xml" up "$WAIT_SECS" exact \
+    wait_signed_out_state "$OUT/signed-out-again.xml" \
         && ok "signing out returns the account to Signed out" \
         || bad "signing out returns the account to Signed out" \
                "$(cloud_card_state "$OUT/signed-out-again.xml")"
@@ -447,19 +539,56 @@ PY
         || bad "a form missing a field fails without hint to read"
 }
 
+cloud_navigation_fixture_holds() { # <temp>
+    (
+        local OUT="$1" primary settings prefs_hidden prefs_visible detail
+        primary='<node text="Primary" bounds="[49,572][271,628]"><node text="Settings" bounds="[196,577][266,623]" enabled="true" clickable="true"/></node>'
+        settings='<node text="Preference sections" bounds="[12,184][308,640]" enabled="true"/>'
+        prefs_hidden="${settings}<node text=\"$CLOUD_SECTION_ACTION\" enabled=\"true\" clickable=\"true\"/>"
+        prefs_visible="${settings}<node text=\"$CLOUD_SECTION_ACTION\" bounds=\"[13,444][307,510]\" enabled=\"true\" clickable=\"true\"/>"
+        detail='<node text="Cloud sync" bounds="[12,12][308,640]" enabled="true"><node text="Back to Preferences" bounds="[12,29][56,74]" enabled="true" clickable="true"/></node>'
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary</hierarchy>" > "$OUT/cloud-library.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$settings</hierarchy>" > "$OUT/cloud-preferences.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$prefs_hidden</hierarchy>" > "$OUT/cloud-row-hidden.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$prefs_visible</hierarchy>" > "$OUT/cloud-row-visible.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$detail</hierarchy>" > "$OUT/cloud-detail.xml"
+        ui_fixtures "$OUT/cloud-library.xml" "$OUT/cloud-library.xml" \
+            "$OUT/cloud-preferences.xml" "$OUT/cloud-row-hidden.xml" \
+            "$OUT/cloud-row-visible.xml" "$OUT/cloud-detail.xml"
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        NAVIGATION_FIXTURE_DIRECTION=""
+        open_cloud \
+            && [[ $UI_FIXTURE_INDEX -eq 6 && $UI_FIXTURE_TAPS -eq 3 \
+                  && $UI_FIXTURE_SCROLLS -eq 1 \
+                  && "$NAVIGATION_FIXTURE_DIRECTION" == up ]] \
+            && cloud_settings_pane_holds "$OUT/settings-nav.xml" \
+            && cloud_detail_holds "$OUT/settings-sync.xml"
+    )
+}
+
+cloud_navigation_self_test() { # <temp>
+    cloud_navigation_fixture_holds "$1" \
+        && ok "Cloud settings retries a swallowed tab tap and verifies its detail pane" \
+        || bad "Cloud settings retries a swallowed tab tap and verifies its detail pane"
+}
+
 # Cards taken from run 31671766432's published dumps: the release leg signed in,
 # lost the session to the offline probe, and then asserted a sign-out against
 # the sign-in form that came back.
 sign_out_self_test() { # <temp>
-    local temp="$1" primary card badge form toast
+    local temp="$1" primary card badge form fields toast
     primary='<node text="Primary" bounds="[0,570][320,640]"><node text="Library" bounds="[17,583][113,635]" enabled="true" clickable="true"/></node>'
     card='<node text="Cloud sync" bounds="[24,411][93,427]"/><node text="native@example.test" bounds="[184,479][296,493]"/>'
-    form='<node text="Cloud account sign in" bounds="[24,346][296,546]"/><node text="Sign in" bounds="[24,502][296,546]" enabled="false" clickable="true"/>'
+    fields='<node class="android.widget.EditText" password="false" bounds="[24,360][296,404]" enabled="true"/><node class="android.widget.EditText" password="true" bounds="[24,414][296,458]" enabled="true"/><node class="android.widget.EditText" password="true" bounds="[24,462][296,506]" enabled="true"/>'
+    form='<node text="Cloud account sign in" bounds="[24,346][296,546]" enabled="true">'$fields'<node text="Sign in" bounds="[24,502][296,546]" enabled="false" clickable="true"/></node>'
     badge='<node text="Connected" bounds="[109,412][168,426]"/>'
     toast='<node text="Signed out of cloud sync" bounds="[49,543][263,563]"/>'
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card$badge<node text=\"Sign out\" bounds=\"[200,502][296,546]\" enabled=\"true\" clickable=\"true\"/></node></hierarchy>" > "$temp/connected.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card$badge<node text=\"Sign out\" bounds=\"[200,538][296,582]\" enabled=\"false\" clickable=\"true\"/><node text=\"The last cloud sync failed. Try again or sign in again.\" bounds=\"[24,470][296,502]\"/></node></hierarchy>" > "$temp/busy.xml"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card<node text=\"Signed out\" bounds=\"[109,280][168,294]\"/>$form</node></hierarchy>" > "$temp/signed-out.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card<node text=\"Signed out\" bounds=\"[109,280][168,294]\" enabled=\"true\"/>$form</node></hierarchy>" > "$temp/signed-out.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$card$badge<node text=\"Sign out\" bounds=\"[200,502][296,546]\" enabled=\"true\" clickable=\"true\"/>$toast</node></hierarchy>" > "$temp/toasted.xml"
 
     [[ "$(control_state "$temp/connected.xml" "Sign out")" == actionable ]] \
@@ -496,6 +625,9 @@ sign_out_self_test() { # <temp>
         && ok "a refused sign-out names the card it read" \
         || bad "a refused sign-out names the card it read" \
                "$(cloud_card_state "$temp/signed-out.xml")"
+    signed_out_state_holds "$temp/signed-out.xml" \
+        && ok "a visible sign-in form corroborates signed-out semantics" \
+        || bad "a visible sign-in form corroborates signed-out semantics"
 
     # The 45 s every release run spent rediscovering a session that had already
     # ended. One dump answers it, and the sample count is the assertion.
@@ -534,12 +666,79 @@ sign_out_self_test() { # <temp>
         || ok "a card that never settles times out"
 }
 
+cloud_lifecycle_self_test() { # <temp>
+    local temp="$1" primary form status action fields missing_fields wrong_passwords
+    primary='<node text="Primary" bounds="[0,570][320,640]"/>'
+    status='<node text="Signed out" bounds="[0,0][0,0]" enabled="true"/>'
+    action='<node text="Sign in" bounds="[24,482][296,527]" enabled="false" clickable="true"/>'
+    fields='<node class="android.widget.EditText" password="false" bounds="[24,114][296,159]" enabled="true"/><node class="android.widget.EditText" password="true" bounds="[24,188][296,233]" enabled="true"/><node class="android.widget.EditText" password="true" bounds="[24,262][296,307]" enabled="true"/>'
+    form="<node text=\"Cloud account sign in\" bounds=\"[24,96][296,527]\" enabled=\"true\">$fields$action</node>"
+    missing_fields="<node class=\"android.widget.EditText\" password=\"false\" bounds=\"[24,114][296,159]\" enabled=\"true\"/><node class=\"android.widget.EditText\" password=\"true\" bounds=\"[24,188][296,233]\" enabled=\"true\"/>"
+    wrong_passwords="<node class=\"android.widget.EditText\" password=\"false\" bounds=\"[24,114][296,159]\" enabled=\"true\"/><node class=\"android.widget.EditText\" password=\"false\" bounds=\"[24,188][296,233]\" enabled=\"true\"/><node class=\"android.widget.EditText\" password=\"false\" bounds=\"[24,262][296,307]\" enabled=\"true\"/>"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$status$form</node></hierarchy>" > "$temp/signed-out-zero.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary<node text=\"Connected\" bounds=\"[24,280][168,294]\" enabled=\"true\"/><node text=\"Sign out\" bounds=\"[24,502][296,546]\" enabled=\"true\" clickable=\"true\"/></node></hierarchy>" > "$temp/still-signed-in.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$status<node text=\"Cloud account sign in\" bounds=\"[24,96][296,527]\" enabled=\"false\">$fields$action</node></node></hierarchy>" > "$temp/disabled-form.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$status</node></hierarchy>" > "$temp/missing-form.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$status<node text=\"Cloud account\" bounds=\"[24,346][296,546]\" enabled=\"true\"/></node></hierarchy>" > "$temp/unrelated-label.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$status<node text=\"Cloud account sign in\" bounds=\"[24,96][296,527]\" enabled=\"true\">$missing_fields$action</node></node></hierarchy>" > "$temp/missing-field.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$status<node text=\"Cloud account sign in\" bounds=\"[24,96][296,527]\" enabled=\"true\">$wrong_passwords$action</node></node></hierarchy>" > "$temp/wrong-password-count.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$status<node text=\"Cloud account sign in\" bounds=\"[24,96][296,527]\" enabled=\"true\">$fields</node><node text=\"Sign in\" bounds=\"[24,502][296,546]\" enabled=\"false\" clickable=\"true\"/></node></hierarchy>" > "$temp/action-outside-form.xml"
+
+    signed_out_state_holds "$temp/signed-out-zero.xml" \
+        && ok "zero-sized Signed out semantics need visible signed-out UI" \
+        || bad "zero-sized Signed out semantics need visible signed-out UI"
+    signed_out_state_holds "$temp/still-signed-in.xml" \
+        && bad "a still-connected card cannot pass as signed out" \
+        || ok "a still-connected card cannot pass as signed out"
+    signed_out_state_holds "$temp/disabled-form.xml" \
+        && bad "a disabled signed-out form cannot corroborate state" \
+        || ok "a disabled signed-out form cannot corroborate state"
+    signed_out_state_holds "$temp/missing-form.xml" \
+        && bad "a missing signed-out form cannot corroborate state" \
+        || ok "a missing signed-out form cannot corroborate state"
+    signed_out_state_holds "$temp/unrelated-label.xml" \
+        && bad "an unrelated label cannot corroborate signed-out state" \
+        || ok "an unrelated label cannot corroborate signed-out state"
+    signed_out_state_holds "$temp/missing-field.xml" \
+        && bad "a form missing a field cannot corroborate signed-out state" \
+        || ok "a form missing a field cannot corroborate signed-out state"
+    signed_out_state_holds "$temp/wrong-password-count.xml" \
+        && bad "a form with the wrong password count cannot corroborate signed-out state" \
+        || ok "a form with the wrong password count cannot corroborate signed-out state"
+    signed_out_state_holds "$temp/action-outside-form.xml" \
+        && bad "an action outside the sign-in form cannot corroborate state" \
+        || ok "an action outside the sign-in form cannot corroborate state"
+
+    local actual='<node text="Cloud sync failed. Check the connection and try again." bounds="[77,92][295,121]" enabled="true"/>'
+    local wrong='<node text="The last cloud sync failed. Try again or sign in again." bounds="[77,92][295,121]" enabled="true"/>'
+    local unrelated='<node text="Cloud sync finished" bounds="[77,92][295,121]" enabled="true"/>'
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$actual</node></hierarchy>" > "$temp/sync-error.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$wrong</node></hierarchy>" > "$temp/wrong-sync-error.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$unrelated</node></hierarchy>" > "$temp/unrelated-sync-label.xml"
+    ui_fixtures "$temp/sync-error.xml"
+    expect_exact_label "$CLOUD_SYNC_ERROR" "$temp/observed-sync-error.xml" 1 \
+        ui_fixture_dump ui_fixture_scroll
+    ui_fixtures "$temp/wrong-sync-error.xml"
+    requirement_fails expect_exact_label "$CLOUD_SYNC_ERROR" \
+        "$temp/observed-wrong-sync-error.xml" 1 ui_fixture_dump ui_fixture_scroll \
+        && ok "the persisted cloud error is not mistaken for the immediate error" \
+        || bad "the persisted cloud error is not mistaken for the immediate error"
+    ui_fixtures "$temp/unrelated-sync-label.xml"
+    requirement_fails expect_exact_label "$CLOUD_SYNC_ERROR" \
+        "$temp/observed-unrelated-sync-label.xml" 1 ui_fixture_dump ui_fixture_scroll \
+        && ok "an unrelated cloud label is not a sync error" \
+        || bad "an unrelated cloud label is not a sync error"
+}
+
 if [[ "$MODE" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
     android_ui_self_test
+    android_navigation_self_test "$SELF_TEST_TMP"
+    cloud_navigation_self_test "$SELF_TEST_TMP"
     cloud_form_self_test "$SELF_TEST_TMP"
     sign_out_self_test "$SELF_TEST_TMP"
+    cloud_lifecycle_self_test "$SELF_TEST_TMP"
     cloud_evidence_self_test "$SELF_TEST_TMP"
     unconfigured_evidence_self_test "$SELF_TEST_TMP/unconfigured-leg"
     cloud_evidence_summary Android

@@ -56,7 +56,9 @@ on:
         type: boolean
 
 concurrency:
-  group: release-${{ github.ref }}
+  # The default single pending slot can replace an older queued rerun. This
+  # still protects the active build and serializes the low-frequency version.
+  group: release-${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
   cancel-in-progress: false
 
 permissions:

@@ -11,6 +11,13 @@ on:
         default: false
         type: boolean
 
+# Scheduled evidence must remain visible when someone starts a manual spot
+# check. The default single pending slot may replace an older queued run, but
+# schedule and dispatch are separate and never cancel their active evidence.
+concurrency:
+  group: native-nightly-${{ github.event_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 

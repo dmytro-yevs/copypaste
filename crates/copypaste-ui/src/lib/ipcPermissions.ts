@@ -7,7 +7,7 @@ import type {
 } from "@/generated/ipc";
 import { UI_COMMANDS } from "@/generated/ipc";
 import type { ReadonlyDeep } from "type-fest";
-import { call, hasWebBridge } from "./ipcCall";
+import { call, hasWebBridge, type IpcCallOptions } from "./ipcCall";
 
 export type PermissionHost = GeneratedPermissionHost;
 export type OnboardingPermissionId = GeneratedPermissionId;
@@ -22,14 +22,47 @@ let androidPreviewPermissions: OnboardingPermissions = {
   clipboardStatus: "not_required",
 };
 
+/** Permission reads are local platform probes, not user-driven operations.
+ * Match the native short-read boundary so a stopped Android host cannot keep
+ * permission UI pending for the generic five-minute IPC allowance. */
+export const PERMISSION_SNAPSHOT_TIMEOUT_MS = 10_000;
+
+type PermissionSnapshotPhase = "started" | "ready" | "failed";
+
+function reportPermissionSnapshot(
+  phase: PermissionSnapshotPhase,
+  startedAt: number,
+): void {
+  console.info("[copypaste] permission snapshot", {
+    phase,
+    durationMs: Math.max(0, Date.now() - startedAt),
+  });
+}
+
 function isAndroidWebPreview(): boolean {
   return hasWebBridge() &&
     new URLSearchParams(window.location.search).get("platform") === "android";
 }
 
-export function permissionSnapshot(): Promise<OnboardingPermissions> {
+export function permissionSnapshot(
+  options: Pick<IpcCallOptions, "signal"> = {},
+): Promise<OnboardingPermissions> {
   if (isAndroidWebPreview()) return Promise.resolve(androidPreviewPermissions);
-  return call(UI_COMMANDS.permission_snapshot);
+  const startedAt = Date.now();
+  reportPermissionSnapshot("started", startedAt);
+  return call(UI_COMMANDS.permission_snapshot, undefined, {
+    signal: options.signal,
+    timeoutMs: PERMISSION_SNAPSHOT_TIMEOUT_MS,
+  }).then(
+    (snapshot) => {
+      reportPermissionSnapshot("ready", startedAt);
+      return snapshot;
+    },
+    (failure: unknown) => {
+      reportPermissionSnapshot("failed", startedAt);
+      throw failure;
+    },
+  );
 }
 
 export function permissionRequest(

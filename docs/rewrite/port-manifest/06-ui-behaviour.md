@@ -237,6 +237,9 @@ bounded and safely formatted; missing device class uses the generic glyph.
 
 Pairing requirements:
 
+- Allow screenshots applies to the product shell and Quick Paste, never native
+  pairing prompts. Windows pairing evidence is accessibility-only, proves
+  `WDA_EXCLUDEFROMCAPTURE`, and reads no protected field value.
 - QR generation happens only while its protected renderer is visible;
 - hiding the modal pauses regeneration so single-use tokens are not burned;
 - regenerate re-blurs/protects the new code before display;

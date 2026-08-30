@@ -14,6 +14,12 @@ import {
 } from "./env.js";
 import { startDaemon, type Daemon } from "./daemon.js";
 import { sleep, track, type Child } from "./process.js";
+import {
+  aggregateErrors,
+  createIdempotentStop,
+  runCleanup,
+  waitForPortsClosed,
+} from "./teardown.js";
 import { assertReallyRunning, type Browser } from "./webview-guard.js";
 import { dismissFirstRun } from "./ui.js";
 
@@ -31,6 +37,15 @@ export interface StartOptions {
   sessionTimeoutMs?: number;
 }
 
+/** Keep ephemeral selections ordered: concurrent probes can pick the same port. */
+export async function allocateDriverPorts(
+  allocatePort: () => Promise<number> = freePort,
+): Promise<readonly [driverPort: number, nativePort: number]> {
+  const driverPort = await allocatePort();
+  const nativePort = await allocatePort();
+  return [driverPort, nativePort];
+}
+
 /**
  * DMY-54, run 31379514744: the job's first app launch aborted at 60s while the
  * next file opened its session in seconds. A first WebView2 start pays for a new
@@ -40,6 +55,7 @@ export interface StartOptions {
  * would hide a product crash behind a second attempt.
  */
 const COLD_SESSION_BUDGET_MS = 120_000;
+const SESSION_CLOSE_BUDGET_MS = 10_000;
 
 /**
  * No GPU or software-rendering flags are set here, and none are needed:
@@ -57,22 +73,30 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   try {
     daemon = await startDaemon();
   } catch (error) {
-    await clipboard.restore();
+    const cleanupError = await runCleanup(() => clipboard.restore());
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
     throw error;
   }
   try {
     if (options.seed?.length) await daemon.addMany(options.seed);
   } catch (error) {
-    try {
-      await daemon.stop();
-    } finally {
-      await clipboard.restore();
-    }
+    const cleanupError = await runCleanup(() => daemon.stop(), () => clipboard.restore());
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
     throw error;
   }
 
-  const driverPort = await freePort();
-  const nativePort = await freePort();
+  let driverPort: number;
+  let nativePort: number;
+  try {
+    [driverPort, nativePort] = await allocateDriverPorts();
+  } catch (error) {
+    const cleanupError = await runCleanup(
+      () => daemon.stop(),
+      () => clipboard.restore(),
+    );
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
+    throw error;
+  }
 
   // tauri-driver 2.0.6 takes no pass-through for the native driver's own log
   // flags, and it drops msedgedriver's stdout while forwarding its stderr
@@ -105,11 +129,11 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   try {
     await waitForDriver(driverPort, driver);
   } catch (error) {
-    try {
-      await shutdown(driver, daemon);
-    } finally {
-      await clipboard.restore();
-    }
+    const cleanupError = await runCleanup(
+      () => shutdown(driver, daemon, [driverPort, nativePort]),
+      () => clipboard.restore(),
+    );
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
     throw error;
   }
 
@@ -131,12 +155,7 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       },
     });
   } catch (cause) {
-    try {
-      await shutdown(driver, daemon);
-    } finally {
-      await clipboard.restore();
-    }
-    throw new Error(
+    const sessionError = new Error(
       describeSessionFailure({
         budgetMs: sessionBudgetMs,
         elapsedMs: Date.now() - sessionStarted,
@@ -146,32 +165,38 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       }),
       { cause },
     );
+    const cleanupError = await runCleanup(
+      () => shutdown(driver, daemon, [driverPort, nativePort]),
+      () => clipboard.restore(),
+    );
+    if (cleanupError) throw aggregateErrors(sessionError, cleanupError);
+    throw sessionError;
   }
 
   const app: App = {
     browser,
     daemon,
-    async stop() {
-      // Every WebDriver call goes through the page's main thread, so a frozen
-      // app makes a polite session close hang as surely as the probe does.
-      // Killing the driver is what actually reclaims the process.
+    stop: createIdempotentStop(async () => {
+      // Every WebDriver call goes through the page's main thread, so a
+      // frozen app makes a polite close hang as surely as the probe does.
       await Promise.race([
         browser.deleteSession().catch(() => undefined),
-        sleep(10_000),
+        sleep(SESSION_CLOSE_BUDGET_MS),
       ]);
-      try {
-        await shutdown(driver, daemon);
-      } finally {
-        await clipboard.restore();
-      }
-    },
+      const cleanupError = await runCleanup(
+        () => shutdown(driver, daemon, [driverPort, nativePort]),
+        () => clipboard.restore(),
+      );
+      if (cleanupError) throw cleanupError;
+    }),
   };
 
   try {
     await assertReallyRunning(browser, driver);
     await dismissFirstRun(browser);
   } catch (error) {
-    await app.stop();
+    const cleanupError = await runCleanup(app.stop);
+    if (cleanupError) throw aggregateErrors(error, cleanupError);
     throw error;
   }
 
@@ -221,9 +246,17 @@ async function waitForDriver(port: number, driver: Child): Promise<void> {
   }
 }
 
-async function shutdown(driver: Child, daemon: Daemon): Promise<void> {
-  await driver.stop();
-  await daemon.stop();
+async function shutdown(
+  driver: Child,
+  daemon: Daemon,
+  ports: readonly number[] = [],
+): Promise<void> {
+  const cleanupError = await runCleanup(
+    () => driver.stop(),
+    () => waitForPortsClosed(ports, SESSION_CLOSE_BUDGET_MS),
+    () => daemon.stop(),
+  );
+  if (cleanupError) throw cleanupError;
 }
 
 /**

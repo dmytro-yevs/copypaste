@@ -1,9 +1,14 @@
 import type { Browser } from "./webview-guard.js";
 
 export const HISTORY_LIST = '[role="list"][aria-label="Clipboard history"]';
-export const ROW = '[role="listitem"]';
+// Group separators also use listitem semantics, but only ids identify clipboard rows.
+export const ROW = '[role="listitem"][id^="history-row-"]';
 export const PRIMARY_NAVIGATION =
   'aside[aria-label="Primary"], nav[aria-label="Primary"]';
+const HISTORY_SEARCHBOX =
+  '[role="searchbox"][aria-label^="Search clipboard history,"]';
+const HISTORY_SEARCH_TRIGGER =
+  'button[aria-controls][aria-label^="Search clipboard history,"]';
 
 export interface RowBox {
   id: string;
@@ -215,6 +220,49 @@ export async function focusList(browser: Browser): Promise<void> {
   }, HISTORY_LIST);
 }
 
+/**
+ * Focus the search input a user can operate at the current toolbar width.
+ * Compact history keeps the inline input in the DOM but exposes search through
+ * a button and a second overlay input, so selecting the first matching input
+ * can target a zero-sized control. Interaction remains real WebDriver input.
+ */
+export async function openHistorySearch(browser: Browser) {
+  let search = await displayedElement(browser, HISTORY_SEARCHBOX);
+  if (!search) {
+    const trigger = await browser.$(HISTORY_SEARCH_TRIGGER);
+    await trigger.waitForClickable({
+      timeout: 15_000,
+      timeoutMsg: "the compact history search trigger was not clickable",
+    });
+    await trigger.click();
+    await browser.waitUntil(
+      async () => (await displayedElement(browser, HISTORY_SEARCHBOX)) !== null,
+      {
+        timeout: 15_000,
+        timeoutMsg: "the compact history search input did not render",
+      },
+    );
+    search = await displayedElement(browser, HISTORY_SEARCHBOX);
+  }
+  if (!search) throw new Error("history search has no rendered input");
+  await search.waitForClickable({
+    timeout: 15_000,
+    timeoutMsg: "the rendered history search input was not interactable",
+  });
+  await search.click();
+  if (!(await search.isFocused())) {
+    throw new Error("the rendered history search input did not receive focus");
+  }
+  return search;
+}
+
+async function displayedElement(browser: Browser, selector: string) {
+  for (const element of await browser.$$(selector)) {
+    if (await element.isDisplayed()) return element;
+  }
+  return null;
+}
+
 export async function activeRowId(browser: Browser): Promise<string | null> {
   return (await browser.execute(function (selector: string) {
     const el = document.querySelector(selector) as HTMLElement | null;
@@ -225,14 +273,15 @@ export async function activeRowId(browser: Browser): Promise<string | null> {
 /**
  * Switch screens the way a user does.
  *
- * The landmark is located first and the text selector applied to it: WebDriver
- * has no "CSS then text" syntax, and a combined selector is rejected as one
- * malformed selector rather than treated as two.
+ * The landmark is located first and its navigation button is selected by the
+ * accessible name exposed by the product shell. WebDriver has no "CSS then
+ * text" syntax, and a combined selector is rejected as one malformed selector
+ * rather than treated as two.
  */
 export async function gotoView(browser: Browser, label: string): Promise<void> {
   const nav = await browser.$(PRIMARY_NAVIGATION);
   await nav.waitForExist({ timeout: 15_000 });
-  const button = await nav.$(`button=${label}`);
+  const button = await nav.$(`button[aria-label="${label}"]`);
   await button.waitForClickable({ timeout: 15_000 });
   await button.click();
   await browser.waitUntil(
@@ -291,7 +340,7 @@ export async function byLabel(
 }
 
 /**
- * First launch owns the window until the welcome screen is dismissed. History
+ * First launch owns the window until the welcome screen is dismissed. Library
  * E2E is the product shell, not the welcome flow.
  */
 export async function dismissFirstRun(browser: Browser): Promise<void> {

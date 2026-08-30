@@ -23,6 +23,8 @@ on:
   # No branch filter: a dependency change on a stacked or release branch has
   # the same advisory surface as one onto main.
   pull_request:
+  merge_group:
+    types: [checks_requested]
   schedule:
     # Mondays, 06:17 UTC. Off the hour so this is not queued behind everyone
     # else's midnight cron.
@@ -30,8 +32,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: supply-chain-${{ github.ref }}
-  cancel-in-progress: true
+  group: supply-chain-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -84,17 +86,17 @@ jobs:
         check: [advisories, bans, licenses, sources]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
-          command: check ${{ matrix.check }}
-          # `arguments` go before the subcommand, `command-arguments` after —
-          # the action distinguishes them and `--show-stats` is a check flag.
-          arguments: --all-features
-          # Stats print the duplicate count. The inclusion graph is left on
-          # (it is only suppressed by --hide-inclusion-graph), which is what
-          # makes a licence or ban rejection diagnosable: it names who pulled
-          # the crate in.
-          command-arguments: --show-stats
+          tool: cargo-deny@0.20.2
+          checksum: true
+          fallback: none
+
+      # Stats retain the duplicate count and inclusion graph, which names the
+      # dependency responsible for a licence or ban rejection.
+      - name: Check ${{ matrix.check }}
+        run: cargo deny --manifest-path Cargo.toml --config deny.toml --all-features --locked check ${{ matrix.check }} --show-stats
 
   audit:
     name: cargo-audit

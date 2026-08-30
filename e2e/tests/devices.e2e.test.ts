@@ -1,5 +1,5 @@
 /**
- * The Devices security boundary and established-device management.
+ * The Connections security boundary and established-device management.
  *
  * A second real daemon and the CLI establish the peer fixture; that setup is
  * not browser coverage for the native renderer. The browser proves that it can
@@ -25,6 +25,7 @@ import { clickButton, gotoView, visibleText, waitForText } from "../src/harness/
 interface PairingData {
   code: string;
   pairing_id: string;
+  listen_addr: string | null;
   expires_in_secs: number;
 }
 
@@ -191,7 +192,7 @@ beforeAll(async () => {
   expect(existsSync(path.join(app.daemon.dataHome, "peers.json"))).toBe(true);
   expect(existsSync(path.join(other.dataHome, "peers.json"))).toBe(true);
 
-  await gotoView(app.browser, "Devices");
+  await gotoView(app.browser, "Connections");
   await waitForText(app.browser, paired.name);
 }, 300_000);
 
@@ -221,66 +222,243 @@ async function interactiveSurface(): Promise<string> {
   })) as string;
 }
 
+async function openPairingChoices(): Promise<void> {
+  await clickButton(app.browser, "Connect a device");
+  await waitForText(
+    app.browser,
+    process.platform === "linux"
+      ? "Protected pairing requires a current native CopyPaste build."
+      : "Choose how to open the protected pairing flow on this device.",
+  );
+}
+
+async function closePairingChoices(): Promise<void> {
+  const close = await app.browser.$('[data-slot="dialog-close"]');
+  await close.waitForClickable({ timeout: 10_000 });
+  await close.click();
+  await app.browser.waitUntil(
+    async () =>
+      !(await visibleText(app.browser)).includes(
+        process.platform === "linux"
+          ? "Protected pairing requires a current native CopyPaste build."
+          : "Choose how to open the protected pairing flow on this device.",
+      ),
+    { timeout: 10_000, timeoutMsg: "pairing choices did not close" },
+  );
+}
+
+function peerCardSelector(pairingId: string): string {
+  return `button[data-device-selection-key="peer:${pairingId}"]`;
+}
+
+interface RosterState {
+  peerPresent: boolean;
+  capacity: string | null;
+  capacityLabel: string | null;
+}
+
+async function readRosterState(pairingId: string): Promise<RosterState> {
+  return (await app.browser.execute(function (expectedPairingId) {
+    const peerPresent = Array.from(
+      document.querySelectorAll("button[data-device-selection-key]"),
+    ).some(
+      (card) =>
+        card.getAttribute("data-device-selection-key") ===
+        `peer:${expectedPairingId}`,
+    );
+    const note = document.querySelector(
+      'section[aria-labelledby="your-devices-heading"] > p',
+    );
+    return {
+      peerPresent,
+      capacity: note?.querySelector("strong")?.textContent?.trim() ?? null,
+      capacityLabel:
+        note?.querySelector("strong + span")?.textContent?.trim() ?? null,
+    };
+  }, pairingId)) as RosterState;
+}
+
+async function waitForRosterRemoval(
+  pairingId: string,
+  expectedCapacity: number,
+): Promise<void> {
+  const expectedLabel =
+    `more device pairing${expectedCapacity === 1 ? "" : "s"} available.`;
+  let observed: RosterState | undefined;
+  try {
+    await app.browser.waitUntil(
+      async () => {
+        observed = await readRosterState(pairingId);
+        return (
+          !observed.peerPresent &&
+          observed.capacity === String(expectedCapacity) &&
+          observed.capacityLabel === expectedLabel
+        );
+      },
+      {
+        timeout: 20_000,
+        timeoutMsg: `device roster did not return capacity to ${expectedCapacity}`,
+      },
+    );
+  } catch {
+    throw new Error(
+      `device roster did not remove ${pairingId} and return capacity to ` +
+        `${expectedCapacity}; last state: ${JSON.stringify(observed)}`,
+    );
+  }
+}
+
+async function openPeerDetails(peer: Pick<PeerInfo, "pairing_id" | "name">) {
+  const details = await app.browser.$('section[aria-label$=" details"]');
+  if (await details.isDisplayed()) {
+    expect(await details.getText()).toContain(peer.name);
+    return details;
+  }
+
+  const card = await app.browser.$(peerCardSelector(peer.pairing_id));
+  await card.waitForClickable({
+    timeout: 30_000,
+    timeoutMsg: `the paired device card for ${peer.name} did not render`,
+  });
+  await card.click();
+
+  await details.waitForDisplayed({
+    timeout: 10_000,
+    timeoutMsg: `details for ${peer.name} did not open`,
+  });
+  return details;
+}
+
+async function waitForManualSync(): Promise<void> {
+  await app.browser.waitUntil(
+    async () => {
+      const text = await visibleText(app.browser);
+      return (
+        text.includes("Last sync requested here") &&
+        !text.includes("No sync requested here yet")
+      );
+    },
+    { timeout: 45_000, timeoutMsg: "the browser did not record the sync" },
+  );
+}
+
+function pairingUri(invite: PairingData): string {
+  const uri = new URL("copypaste://pair");
+  uri.searchParams.set("code", invite.code);
+  uri.searchParams.set("id", invite.pairing_id);
+  if (invite.listen_addr !== null) {
+    uri.searchParams.set("addr", invite.listen_addr);
+  }
+  return uri.toString();
+}
+
 describe("native-safe pairing", () => {
-  test("offers both native entry points", async () => {
+  test("reports launcher availability and entry-point wording", async () => {
+    await openPairingChoices();
     const text = await visibleText(app.browser);
-    expect(text).toMatch(/add a device/i);
-    expect(text).toMatch(/protected native view/i);
+    expect(text).toMatch(/connect a device/i);
     const controls = await interactiveSurface();
-    expect(controls).toMatch(/show pairing code/i);
-    expect(controls).toMatch(/scan pairing code/i);
+    if (process.platform === "linux") {
+      expect(text).toMatch(
+        /protected pairing requires a current native copypaste build/i,
+      );
+      expect(controls).not.toMatch(/show pairing code|enter pairing code/i);
+    } else {
+      expect(text).toMatch(/protected pairing flow/i);
+      expect(controls).toMatch(/show pairing code/i);
+      expect(controls).toMatch(/enter pairing code/i);
+    }
     expect(controls).not.toMatch(/paste pairing details|copy pairing details/i);
+    await closePairingChoices();
   });
 
-  test("renders no QR, credential field or pairing dialog", async () => {
+  test("renders no QR or pairing credentials in the launcher", async () => {
+    await openPairingChoices();
     const artifacts = (await app.browser.execute(function () {
       return document.querySelectorAll(
         'output, #pairing-code, #pairing-address,' +
-          ' #pairing-security-code, canvas, svg[role="img"], [role="dialog"]',
+          ' #pairing-security-code, canvas, img[alt="Pairing QR code"],' +
+          ' img[alt="QR code"], svg[role="img"][aria-label="Pairing QR code"],' +
+          ' [data-pairing-secret]',
       ).length;
     })) as number;
     expect(artifacts).toBe(0);
+    await closePairingChoices();
   });
 
   /** The credential must be absent from the document, not merely unrendered: a
    *  blur, a `display: none` or an `aria-label` all leave it in `outerHTML`. */
   test("never lets a pairing credential reach the page", async () => {
-    const minted = await other.json<PairingData>(["pair", "create"]);
+    const minted = await app.daemon.json<PairingData>(["pair", "create"]);
+    const uri = pairingUri(minted);
     try {
-      await clickButton(app.browser, "Refresh devices discovered on this network");
+      await clickButton(app.browser, "Refresh");
 
       const html = await outerHtml(app.browser);
-      expect(html).not.toContain(minted.code);
-      expect(html).not.toContain(minted.code.replace(/-/g, ""));
+      const surface = await accessibleSurface(app.browser);
+      for (const secret of [minted.code, minted.code.replace(/-/g, ""), uri]) {
+        expect(html).not.toContain(secret);
+        expect(surface).not.toContain(secret);
+      }
     } finally {
-      await other.json<PairingProgress>(["pair", "cancel"]);
+      await app.daemon.json<PairingProgress>(["pair", "cancel"]);
     }
   });
 
-  test("native presentation stays outside the page and remains cancellable", async () => {
+  test("executes native pairing and handles its platform boundary", async () => {
+    if (process.platform !== "linux" && process.platform !== "win32") {
+      throw new Error(
+        `native pairing E2E is only wired for Linux WebKitGTK and Windows WebView2 (got ${process.platform})`,
+      );
+    }
+    await openPairingChoices();
+
+    if (process.platform === "linux") {
+      const surface = await accessibleSurface(app.browser);
+      expect(surface).toMatch(
+        /protected pairing requires a current native copypaste build/i,
+      );
+      expect(surface).not.toMatch(/show pairing code|enter pairing code/i);
+      expectNoFilesystemPath(surface);
+      expectNoRawError(surface);
+      const html = await outerHtml(app.browser);
+      expect(html).not.toMatch(/Pairing QR code|pairing-security-code/i);
+      await closePairingChoices();
+      return;
+    }
+
     await clickButton(app.browser, "Show pairing code");
 
     if (process.platform === "win32") {
-      await waitForText(app.browser, "Waiting for the other device");
-      const cancel = await app.browser.$("button=Cancel pairing");
-      expect(await cancel.isDisplayed()).toBe(true);
-      await clickButton(app.browser, "Cancel pairing");
-    }
+      const waiting = await waitForPairing(app.daemon, "waiting_for_peer");
+      expect(waiting.state).toBe("waiting_for_peer");
 
-    await waitForText(app.browser, "Pairing cancelled", 30_000);
+      // This is backend cleanup, not evidence that the native Close action
+      // invoked the abort callback. That behavior belongs to the Windows
+      // native pairing gate.
+      const cancelled = await app.daemon.json<PairingProgress>([
+        "pair",
+        "cancel",
+      ]);
+      expect(cancelled.state).toBe("cancelled");
+      await waitForPairing(app.daemon, "cancelled");
+    } else {
+      const cancelled = await waitForPairing(app.daemon, "cancelled");
+      expect(cancelled.state).toBe("cancelled");
+    }
 
     const surface = await accessibleSurface(app.browser);
-    if (process.platform !== "win32") {
-      expect(surface).toMatch(/protected pairing view didn't open/i);
-    }
     expectNoFilesystemPath(surface);
     expectNoRawError(surface);
+    const html = await outerHtml(app.browser);
+    expect(html).not.toMatch(/Pairing QR code|pairing-security-code/i);
   });
 });
 
 describe("a known device", () => {
   test("reports online and offline network presence", async () => {
-    await waitForText(app.browser, "On this network");
+    await openPeerDetails(paired);
+    await waitForText(app.browser, "Seen on this network");
 
     await app.daemon.json<unknown>([
       "config",
@@ -290,7 +468,7 @@ describe("a known device", () => {
     ]);
     try {
       await waitForPeerPresence(app.daemon, paired.pairing_id, false);
-      await waitForText(app.browser, "Not seen on this network", 30_000);
+      await waitForText(app.browser, "Not currently discovered", 30_000);
     } finally {
       await app.daemon.json<unknown>([
         "config",
@@ -301,34 +479,31 @@ describe("a known device", () => {
     }
 
     paired = await waitForPeerPresence(app.daemon, paired.pairing_id, true);
-    await waitForText(app.browser, "On this network", 30_000);
+    await waitForText(app.browser, "Seen on this network", 30_000);
   }, 90_000);
 
   test("is listed with an explicitly unverified name", async () => {
-    await waitForText(
-      app.browser,
-      paired.last_seen_ms > 0 ? "Last synced" : "Never synced",
-    );
-
-    const hint = await app.browser.$(
-      '[title="Name reported by the device itself — not verified"]',
-    );
-    expect(await hint.isDisplayed()).toBe(true);
+    const details = await openPeerDetails(paired);
+    await waitForText(app.browser, "Last successful sync");
+    expect(await details.getText()).toContain("Device name is self-reported");
 
     for (const label of [
-      `Sync with ${paired.name} now`,
-      `Unpair ${paired.name}`,
-      `Revoke ${paired.name}`,
+      "Sync now",
+      "Unpair",
+      "Revoke pairing…",
     ]) {
-      const action = await app.browser.$(`button[aria-label="${label}"]`);
+      const action = await details.$(`button=${label}`);
       expect(await action.isDisplayed(), label).toBe(true);
       expect(await action.isEnabled(), label).toBe(true);
     }
   });
 
   test("can run a real sync from the browser", async () => {
-    await clickButton(app.browser, `Sync with ${paired.name} now`);
-    await waitForText(app.browser, "Last sync from here", 45_000);
+    await openPeerDetails(paired);
+    await clickButton(app.browser, "Sync now", {
+      within: 'section[aria-label$=" details"]',
+    });
+    await waitForManualSync();
 
     expectNoRawError(await outerHtml(app.browser));
     expectNoFilesystemPath(
@@ -351,17 +526,32 @@ describe("a known device", () => {
 
   test("shows a failure and recovers after reconnect", async () => {
     await other.kill();
-    await clickButton(app.browser, `Sync with ${paired.name} now`);
+    const details = await openPeerDetails(paired);
+    await clickButton(app.browser, "Sync now", {
+      within: 'section[aria-label$=" details"]',
+    });
     await waitForText(app.browser, "Sync failed", 45_000);
+    const status = await details.$('[data-slot="device-status"]');
+    expect(await status.getAttribute("data-tone")).toBe("danger");
 
     await other.restart();
-    await clickButton(app.browser, `Sync with ${paired.name} now`);
-    await waitForText(app.browser, "Last sync from here", 45_000);
+    await clickButton(app.browser, "Sync now", {
+      within: 'section[aria-label$=" details"]',
+    });
+    await app.browser.waitUntil(
+      async () => (await status.getAttribute("data-tone")) === "ready",
+      {
+        timeout: 45_000,
+        timeoutMsg: "the browser did not show a new post-reconnect sync state",
+      },
+    );
     expectNoRawError(await outerHtml(app.browser));
   });
 
   test("offers the irreversible revoke confirmation", async () => {
-    await clickButton(app.browser, `Revoke ${paired.name}`);
+    await clickButton(app.browser, "Revoke pairing…", {
+      within: 'section[aria-label$=" details"]',
+    });
 
     const dialog = await app.browser.$('[role="alertdialog"]');
     await dialog.waitForDisplayed({
@@ -407,7 +597,9 @@ describe("an expired code", () => {
 
 describe("unpairing", () => {
   test("asks first, and says that it is one-sided", async () => {
-    await clickButton(app.browser, `Unpair ${paired.name}`);
+    await clickButton(app.browser, "Unpair", {
+      within: 'section[aria-label$=" details"]',
+    });
     const dialog = await app.browser.$('[role="alertdialog"]');
     await dialog.waitForDisplayed({
       timeout: 10_000,
@@ -429,7 +621,7 @@ describe("unpairing", () => {
       },
       { timeout: 20_000, timeoutMsg: "the peer store still holds the device" },
     );
-    await waitForText(app.browser, "No other devices paired");
+    await waitForRosterRemoval(paired.pairing_id, 16);
   });
 });
 
@@ -441,9 +633,12 @@ describe("revoking", () => {
       (candidate) => candidate.pairing_id === minted.pairing_id,
     );
     if (!peer) throw new Error("the revoke fixture did not establish");
-    await clickButton(app.browser, "Refresh devices discovered on this network");
+    await clickButton(app.browser, "Refresh");
+    await openPeerDetails(peer);
 
-    await clickButton(app.browser, `Revoke ${peer.name}`);
+    await clickButton(app.browser, "Revoke pairing…", {
+      within: 'section[aria-label$=" details"]',
+    });
     const acknowledgement = await app.browser.$('label[for="revoke-ack"]');
     await acknowledgement.waitForClickable({ timeout: 10_000 });
     await acknowledgement.click();
@@ -456,6 +651,6 @@ describe("revoking", () => {
         ),
       { timeout: 20_000, timeoutMsg: "the revoked peer remained in the store" },
     );
-    await waitForText(app.browser, "No other devices paired");
+    await waitForRosterRemoval(minted.pairing_id, 16);
   });
 });

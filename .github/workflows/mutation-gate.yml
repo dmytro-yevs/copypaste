@@ -12,11 +12,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
-  group: mutation-gate-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: mutation-gate-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -48,6 +50,10 @@ jobs:
 
       - name: Prove no self-test in the manifest is stranded off CI
         run: python3 scripts/mutation-gate/run.py --platforms-covered linux,windows
+
+      - name: Run protected UIA diagnostic fixture self-tests
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/release/windows-protected-failure-diagnostics.test.ps1 -RunProtectedFixtureTests
 
       - name: Run every mutation declared for Linux
         run: python3 scripts/mutation-gate/run.py --platform linux --require-all

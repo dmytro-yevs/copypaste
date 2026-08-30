@@ -40,6 +40,13 @@ export async function adb(...args: string[]): Promise<string> {
   return stdout.replace(/\r\n/g, "\n");
 }
 
+/** Keep a native evidence sequence bound to the serial it selected. */
+export async function adbForSerial(serial: string, ...args: string[]): Promise<string> {
+  if (!serial.trim()) throw new Error("Android device serial was empty");
+  const { stdout } = await execa(binary(), ["-s", serial, ...args], { timeout: 60_000 });
+  return stdout.replace(/\r\n/g, "\n");
+}
+
 /**
  * adb concatenates the argument vector into one string and the device's shell
  * parses it again, so anything with a space has to survive that second parse.
@@ -52,6 +59,10 @@ export async function shell(...args: string[]): Promise<string> {
   return adb("shell", ...args);
 }
 
+export async function shellForSerial(serial: string, ...args: string[]): Promise<string> {
+  return adbForSerial(serial, "shell", ...args);
+}
+
 export type Attempt<T> = { ok: true; value: T } | { ok: false; failure: CommandFailure };
 
 /** adb's own exit code, stdout and stderr, so a caller can tell a transport that
@@ -59,6 +70,26 @@ export type Attempt<T> = { ok: true; value: T } | { ok: false; failure: CommandF
 export async function tryShell(...args: string[]): Promise<Attempt<string>> {
   try {
     return { ok: true, value: await shell(...args) };
+  } catch (error) {
+    const failure = error as CommandFailure & { exitCode?: number };
+    return {
+      ok: false,
+      failure: {
+        exitCode: failure.exitCode,
+        stderr: String(failure.stderr ?? "").replace(/\r\n/g, "\n"),
+        stdout: String(failure.stdout ?? "").replace(/\r\n/g, "\n"),
+        message: failure.message,
+      },
+    };
+  }
+}
+
+export async function tryShellForSerial(
+  serial: string,
+  ...args: string[]
+): Promise<Attempt<string>> {
+  try {
+    return { ok: true, value: await shellForSerial(serial, ...args) };
   } catch (error) {
     const failure = error as CommandFailure & { exitCode?: number };
     return {

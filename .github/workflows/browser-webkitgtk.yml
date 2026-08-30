@@ -23,11 +23,13 @@ on:
   # No branch filter: this layer owns shared React behaviour, and a pull
   # request onto a stacked or release branch changes the same code.
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
-  group: browser-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: browser-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -45,9 +47,13 @@ env:
 
 jobs:
   browser:
-    name: shared frontend in WebKitGTK
+    name: shared frontend in WebKitGTK (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -71,7 +77,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: linux-1.96-e2e
+          shared-key: linux-1.96-e2e-${{ matrix.shard }}
 
       - name: Install tauri-driver
         # Keep the WebDriver bridge reproducible too: an unversioned install
@@ -113,6 +119,8 @@ jobs:
         run: npm run test:dmy-45:browser-repeat
 
       - name: Run the suite
+        env:
+          COPYPASTE_E2E_SHARD: ${{ matrix.shard }}/2
         working-directory: e2e
         run: npm test
 
@@ -120,7 +128,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: browser-webkitgtk-logs
+          name: browser-webkitgtk-logs-${{ matrix.shard }}
           path: /tmp/cp-e2e/**
           if-no-files-found: ignore
           retention-days: 7

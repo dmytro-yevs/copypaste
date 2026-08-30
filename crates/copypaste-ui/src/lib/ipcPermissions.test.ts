@@ -1,6 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const invoke = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 import {
+  PERMISSION_SNAPSHOT_TIMEOUT_MS,
   permissionRequest,
   permissionSnapshot,
 } from "@/lib/ipcPermissions";
@@ -8,6 +13,10 @@ import {
 afterEach(() => {
   window.history.replaceState({}, "", "/");
   delete window.__COPYPASTE_WEB_BRIDGE__;
+  Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+  invoke.mockReset();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("Android permission preview", () => {
@@ -25,5 +34,59 @@ describe("Android permission preview", () => {
       tile: { status: "granted" },
       notifications: { status: "granted" },
     });
+  });
+
+  it("bounds a native snapshot to the platform short-read contract", async () => {
+    vi.useFakeTimers();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    invoke.mockReturnValue(new Promise(() => {}));
+
+    const outcome = permissionSnapshot();
+    const rejection = expect(outcome).rejects.toMatchObject({
+      code: "timeout",
+      retryable: true,
+    });
+    await vi.advanceTimersByTimeAsync(PERMISSION_SNAPSHOT_TIMEOUT_MS);
+
+    await rejection;
+    expect(invoke).toHaveBeenCalledWith("permission_snapshot", undefined);
+    expect(info).toHaveBeenNthCalledWith(1, "[copypaste] permission snapshot", {
+      phase: "started",
+      durationMs: 0,
+    });
+    expect(info).toHaveBeenNthCalledWith(2, "[copypaste] permission snapshot", {
+      phase: "failed",
+      durationMs: PERMISSION_SNAPSHOT_TIMEOUT_MS,
+    });
+    expect(info).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("forwards cancellation to the caller-facing native boundary", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    invoke.mockReturnValue(new Promise(() => {}));
+    const controller = new AbortController();
+
+    const outcome = permissionSnapshot({ signal: controller.signal });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(outcome).rejects.toMatchObject({
+      code: "cancelled",
+      retryable: false,
+    });
+    expect(invoke).toHaveBeenCalledWith("permission_snapshot", undefined);
+    expect(info.mock.calls.map(([, detail]) => detail)).toEqual([
+      { phase: "started", durationMs: expect.any(Number) },
+      { phase: "failed", durationMs: expect.any(Number) },
+    ]);
   });
 });

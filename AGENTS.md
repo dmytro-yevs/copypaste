@@ -464,38 +464,27 @@ allowed when they follow these rules.
 
 ## Parallel agent operating standard
 
-Parallel work runs in bounded waves. The goal is completed, reviewed work on a
-green `main`, not maximum task or terminal count.
+Parallel work runs in coordinated waves. The goal is completed, reviewed work
+on a green `main`.
 
 ### Roles and capacity
 
 | Role | Authority |
 |---|---|
-| Coordinator/integrator | Owns the DAG, WIP limit, integration branch, merge order and `main` |
+| Coordinator/integrator | Owns the DAG, integration branch, merge order and `main` |
 | Worker | Owns one task, one worktree and the declared paths; never writes or pushes `main` |
 | Reviewer | Checks the diff, acceptance criteria and evidence; does not silently repair the worker's branch |
 | Platform validator | Runs checks on the required target host and reports evidence; does not waive a missing platform |
 
-The default WIP limit is four active agents total: one coordinator/integrator
-and three execution slots. Reserve an execution slot for review or platform
-validation before dispatching editing workers, so the normal wave is two
-workers plus one reviewer or validator. A third editing worker is allowed only
-when the coordinator is the named reviewer and no concurrent platform validator
-is required. A queued task consumes no slot. Agent or terminal capacity is not
-permission to fill every slot.
+There is no fixed limit on the number of parallel agents. The coordinator sets
+parallelism from task independence, review capacity, CI and target-host
+capacity, and the state of the integration queue. Keep one named coordinator as
+the only owner allowed to advance `main`, and reserve enough capacity for review
+and platform validation.
 
-The coordinator may raise the limit for a run only after recording why all of
-these are true:
-
-- the tasks have independent production paths and no hidden dependency;
-- every additional group of three or four workers has review capacity;
-- CI runners and target hosts can validate the wave without cancellation churn;
-- the integration queue is empty and both `main` and the integration base are
-  green;
-- one named coordinator remains the only owner allowed to advance `main`.
-
-Lower WIP immediately when completed work waits for review, agents collide on
-files, CI queues or cancellations grow, or workers are using stale bases.
+Lower parallelism immediately when completed work waits for review, agents
+collide on files, CI queues or cancellations grow, or workers are using stale
+bases.
 
 ### One identity per unit of work
 

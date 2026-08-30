@@ -161,11 +161,14 @@ class Report:
         self.line(f"\n== {entry['id']}: not declared for {target}")
 
     def baseline_failed(self, entry, code, output):
-        tail = "\n".join(output.strip().splitlines()[-8:])
         self.failures.append(
             (entry["id"], "<baseline>", f"the unmutated self-test exited {code}")
         )
-        self.line(f"  BASELINE FAILED  exit {code}\n{tail}")
+        self.line(f"  BASELINE FAILED  exit {code}")
+        self.stream.write(output)
+        if output and not output.endswith("\n"):
+            self.stream.write("\n")
+        self.stream.flush()
 
     def killed(self, entry, mutation, code):
         self.killed_count += 1

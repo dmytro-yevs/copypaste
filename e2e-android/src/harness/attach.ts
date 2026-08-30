@@ -32,6 +32,53 @@ export interface AttachSample {
   msLeft: number;
 }
 
+export interface AttachTargetObservation {
+  type: string;
+  appOrigin: boolean;
+  webSocketPresent: boolean;
+}
+
+export interface AttachPagesDiagnostic {
+  status: "ok" | "error";
+  count: number;
+  appOriginMatchCount: number;
+}
+
+export interface AttachRawDiagnostic {
+  status: "ok" | "http-error" | "fetch-error" | "invalid-json";
+  count: number;
+  targetTypeHistogram: { page: number; webview: number; other: number };
+  appOriginMatchCount: number;
+  webSocketPresent: boolean;
+}
+
+export type PageAutoAttachOutcome =
+  | "not-attempted"
+  | "page-autoattach-enabled"
+  | "browser-target-unavailable"
+  | "browser-session-unavailable"
+  | "root-connection-unavailable"
+  | "page-autoattach-rejected"
+  | "deadline-exceeded";
+
+export type PageAutoAttachCleanup = "not-needed" | "confirmed" | "unconfirmed";
+
+export interface AttachFinalDiagnostic {
+  pages: AttachPagesDiagnostic;
+  raw: AttachRawDiagnostic;
+  pageAutoAttachOutcome: PageAutoAttachOutcome;
+  pageAutoAttachCleanup: PageAutoAttachCleanup;
+}
+
+export function finalAttachDiagnostic(
+  pages: AttachPagesDiagnostic,
+  raw: AttachRawDiagnostic,
+  pageAutoAttachOutcome: PageAutoAttachOutcome,
+  pageAutoAttachCleanup: PageAutoAttachCleanup,
+): AttachFinalDiagnostic {
+  return { pages, raw, pageAutoAttachOutcome, pageAutoAttachCleanup };
+}
+
 export type AttachStep =
   | { do: "wait" }
   | { do: "reopen"; why: string }
@@ -57,7 +104,7 @@ function stale(sample: AttachSample): string | undefined {
 function settled(sample: AttachSample): string {
   const targets = sample.targets ?? [];
   return targets.length
-    ? `pid ${sample.pid} exposes ${targets.join(", ")}`
+    ? `pid ${sample.pid} exposes ${targets.length} page target(s)`
     : `pid ${sample.pid} is running and its WebView exposes no page target at all`;
 }
 

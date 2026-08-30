@@ -1,6 +1,6 @@
 /**
- * Settings on Android: the compact section index, a preference that reaches
- * layout, and a preference that has to survive a reload.
+ * Preferences on Android: adaptive section navigation, a display-only history
+ * limit, and a product theme that has to survive a reload.
  *
  * The persistence half is a genuinely different mechanism here. The browser
  * layer round-trips the daemon's own settings over a socket; Android has no
@@ -8,68 +8,179 @@
  * (`preferences.json`) and the service-shaped ones to the in-process core
  * (ADR-0003). Neither path exists on the other layer.
  *
- * Below the expanded width boundary Settings is an index + one subpage at a
- * time (DMY-154 / A11Y-15), not a tab strip — so this suite measures the
- * ladder, not `[role="tab"]`. Android also shows a different set of sections
- * — no Shortcut, plus Background capture.
+ * Below the expanded width boundary Preferences is a category menu plus one
+ * detail at a time (DMY-154 / A11Y-15); wider windows use a tablist and panel.
+ * The harness follows either shape while holding the same section contract.
  */
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
+import { PACKAGE } from "../src/harness/adb.js";
 import { accessibleSurface, expectNoFilesystemPath } from "../src/harness/leaks.js";
-import { rowBoxes } from "../src/harness/list.js";
-import { addItems, cleanUpItems } from "../src/harness/bridge.js";
+import {
+  addItems,
+  cleanUpItems,
+  missingFixtureIds,
+  storedItems,
+} from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
+import {
+  withSoftKeyboardScenario,
+  type SoftKeyboardDiagnostics,
+} from "../src/harness/native-input.js";
+import { beforeAllWithEvidence } from "../src/harness/suite.js";
+import {
+  ensureSettingsNavigation,
+  openSettingsSection,
+  settingsPanel,
+  settingsSectionGeometry,
+  settingsSectionLabels,
+  settingsSliderIndex,
+} from "../src/harness/settings.js";
 import {
   filterHistoryTo,
   gotoView,
   resetHistoryFilters,
   reloadHistoryWith,
   scrollListToTop,
-  tapButton,
+  tapElement,
   visibleText,
   waitFor,
   waitForRows,
   waitForText,
 } from "../src/harness/ui.js";
 
-/** `rowHeight(n)` and `TITLE_LINE_PX` from
- *  `crates/copypaste-ui/src/lib/layout.ts`, duplicated deliberately: a test
- *  that imported them could not catch them changing. This file is where the
- *  setting-to-reservation mapping is pinned. */
-const ROW_HEIGHT = { 1: 67, 2: 88 } as const;
-const TITLE_LINE_PX = 21;
-
-/**
- * The reservation is a floor on Android, an exact height on desktop:
- * `HistoryList` sets `minHeight` here and `height` there, so the virtualiser
- * measures the row back and a one-line row settles at 68 rather than 67. What
- * the setting must still decide is the band — one line may not reach what two
- * lines reserve — and that every row is the same height whatever it holds.
- */
-function expectReservedFor(lines: 1 | 2, heights: number[]): boolean {
-  const distinct = new Set(heights.map(Math.round));
-  if (heights.length === 0 || distinct.size !== 1) return false;
-  const height = [...distinct][0]!;
-  return height >= ROW_HEIGHT[lines] && height < ROW_HEIGHT[lines] + TITLE_LINE_PX;
-}
-
-/** The compact Settings index — not Diagnostics' own nested tab strip. */
-const INDEX = 'nav[aria-label="Settings sections"]';
-const INDEX_ITEM = `${INDEX} button[data-settings-index-item]`;
-const SUBPAGE = 'section[aria-labelledby="settings-subpage-title"]';
-const BACK = "All settings";
+const SECTIONS = [
+  "Appearance",
+  "Clipboard behavior",
+  "Privacy & retention",
+  "Device sync",
+  "Cloud sync",
+  "Storage & history",
+  "Diagnostics",
+  "Runtime events",
+  "About",
+] as const;
 
 let app: AndroidApp;
 let seeded: string[] = [];
 let marker = "";
+let originalHistoryDisplayIndex: number | null = null;
+let originalProductTheme: string | null = null;
 
-beforeAll(async () => {
+type ImePageObservation = {
+  innerHeight: number;
+  visualHeight: number | null;
+  focused: boolean;
+  activeElement: string | null;
+};
+
+async function historyDisplayIndex(): Promise<number> {
+  const state = await app.withPage((page) =>
+    page.evaluate(() => {
+      const slider = document.querySelector('[aria-label="History display limit"]');
+      const row = slider?.closest("[data-settings-search-target]");
+      return {
+        exists: slider !== null,
+        index: slider?.getAttribute("aria-valuenow") ?? null,
+        min: slider?.getAttribute("aria-valuemin") ?? null,
+        max: slider?.getAttribute("aria-valuemax") ?? null,
+        output: row?.querySelector("output")?.textContent?.trim() ?? null,
+      };
+    }),
+  );
+  return settingsSliderIndex(state);
+}
+
+async function setHistoryDisplayLimit(
+  index: number,
+  rendered?: string,
+): Promise<void> {
+  await gotoView(app, "Settings");
+  await openSettingsSection(app, "Clipboard behavior");
+  await app.withPage(async (page) => {
+    await page.click('[aria-label="History display limit"]');
+    await page.keyboard.press("Home");
+    for (let step = 0; step < index; step++) await page.keyboard.press("ArrowRight");
+  });
+  let observed: { index: string | null; output: string | null } | null = null;
+  await waitFor(
+    async () => {
+      observed = await app.withPage((page) =>
+        page.evaluate(() => {
+          const slider = document.querySelector('[aria-label="History display limit"]');
+          const row = slider?.closest("[data-settings-search-target]");
+          return {
+            index: slider?.getAttribute("aria-valuenow") ?? null,
+            output: row?.querySelector("output")?.textContent?.trim() ?? null,
+          };
+        }),
+      );
+      return observed.index === String(index) &&
+        (rendered === undefined || observed.output === rendered);
+    },
+    () =>
+      `the history display limit never reached index ${index}` +
+      `${rendered === undefined ? "" : ` with output ${JSON.stringify(rendered)}`}: ` +
+      JSON.stringify(observed),
+  );
+}
+
+async function restoreHistoryDisplayLimit(): Promise<void> {
+  if (originalHistoryDisplayIndex === null) return;
+  await setHistoryDisplayLimit(originalHistoryDisplayIndex);
+  originalHistoryDisplayIndex = null;
+}
+
+async function restoreProductTheme(): Promise<void> {
+  if (originalProductTheme === null) return;
+  const theme = originalProductTheme;
+  await gotoView(app, "Settings");
+  await openSettingsSection(app, "Appearance");
+  await tapElement(app, `[data-product-theme="${theme}"]`);
+  await waitFor(
+    async () =>
+      (await app.withPage((page) =>
+        page.evaluate(() => document.documentElement.dataset.theme ?? ""),
+      )) === theme,
+    `the original product theme ${JSON.stringify(theme)} was not restored`,
+  );
+  originalProductTheme = null;
+}
+
+async function attemptSettingsRestore(
+  name: string,
+  restore: () => Promise<void>,
+): Promise<void> {
+  try {
+    await restore();
+  } catch {
+    console.warn(`settings cleanup could not restore ${name}`);
+  }
+}
+
+async function restoreAfterTest(
+  name: string,
+  restore: () => Promise<void>,
+  primaryFailed: boolean,
+): Promise<void> {
+  try {
+    await restore();
+  } catch (error) {
+    if (!primaryFailed) throw error;
+    console.warn(`settings cleanup also failed to restore ${name}`);
+  }
+}
+
+beforeAllWithEvidence("settings", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
   marker = fixtureMarker("settings");
-  seeded = await addItems(app, [`${marker} first fixture`, `${marker} second fixture`]);
-  await reloadHistoryWith(app, `${marker} second fixture`);
+  seeded = await addItems(
+    app,
+    Array.from({ length: 101 }, (_, index) => `${marker} fixture ${index}`),
+  );
+  await reloadHistoryWith(app, `${marker} fixture 100`);
   await filterHistoryTo(app, marker, marker);
   await waitForRows(app, 2);
   // The previous file may have left the list scrolled: a virtualised list
@@ -78,124 +189,40 @@ beforeAll(async () => {
   await scrollListToTop(app);
   await gotoView(app, "Settings");
   await waitFor(
-    async () => (await sectionLabels()).length > 0,
-    "the Settings screen never rendered its section index",
+    async () => (await settingsSectionLabels(app)).length > 0,
+    "the Preferences screen never rendered its section navigation",
   );
 }, 300_000);
 
 afterAll(async () => {
+  await attemptSettingsRestore("History display limit", restoreHistoryDisplayLimit);
+  await attemptSettingsRestore("product theme", restoreProductTheme);
   await gotoView(app, "Library").catch(() => undefined);
   await resetHistoryFilters(app).catch(() => undefined);
   await cleanUpItems(app, seeded);
   await app?.detach();
 });
 
-async function sectionLabels(): Promise<string[]> {
-  return app.withPage((page) =>
-    page.evaluate(
-      (selector: string) =>
-        Array.from(document.querySelectorAll(selector), (node) =>
-          (node as HTMLElement).textContent!.trim(),
-        ),
-      INDEX_ITEM,
-    ),
-  );
-}
-
-async function settingsLevel(): Promise<"index" | "subpage" | "neither"> {
-  return app.withPage((page) =>
-    page.evaluate(
-      (index: string, subpage: string) => {
-        if (document.querySelector(index)) return "index";
-        if (document.querySelector(subpage)) return "subpage";
-        return "neither";
-      },
-      INDEX,
-      SUBPAGE,
-    ),
-  );
-}
-
-/**
- * After a WebView reload Settings remounts empty for a beat: neither the index
- * nor a subpage is in the document yet. Tapping Back in that window fails —
- * wait for one of the two levels, then climb if needed.
- */
-async function ensureIndex(): Promise<void> {
-  await waitFor(
-    async () => {
-      const level = await settingsLevel();
-      if (level === "index") return true;
-      if (level === "subpage") {
-        await tapButton(app, BACK);
-        return false;
-      }
-      return false;
-    },
-    "the Settings index never became available",
-    60_000,
-  );
-}
-
-async function openSection(label: string): Promise<void> {
-  await ensureIndex();
-  await tapButton(app, label, { within: INDEX });
-  await waitFor(
-    async () =>
-      app.withPage((page) =>
-        page.evaluate(
-          (subpage: string, name: string) => {
-            const title = document.querySelector(`${subpage} #settings-subpage-title`);
-            return title?.textContent?.trim() === name;
-          },
-          SUBPAGE,
-          label,
-        ),
-      ),
-    `the ${label} section never opened`,
-  );
-}
-
-/**
- * The open subpage, as the engine laid it out.
- *
- * Compact Settings keeps only one section mounted, so there is no hidden
- * tabpanel sibling to exclude the way the desktop strip does.
- */
-async function panel() {
-  return app.withPage((page) =>
-    page.evaluate((selector: string) => {
-      const el = document.querySelector(selector) as HTMLElement | null;
-      if (!el) return null;
-      const rect = el.getBoundingClientRect();
-      return { width: rect.width, height: rect.height, text: el.innerText.trim() };
-    }, SUBPAGE),
-  );
-}
-
 describe("the section index", () => {
   test("Android shows its own set, and every one opens onto a pane with a real box", async () => {
-    const labels = await sectionLabels();
-    // Shortcut is desktop-only; Background capture is Android's.
-    expect(labels).toContain("Background capture");
-    expect(labels).toContain("Storage");
-    expect(labels).not.toContain("Shortcut");
+    const labels = await settingsSectionLabels(app);
+    expect(labels).toEqual(SECTIONS);
 
     for (const label of labels) {
-      await openSection(label);
+      await openSettingsSection(app, label);
       // Waited for, not sampled: Diagnostics fills in from a command and was
       // measured mid-flight at exactly its heading.
-      let pane: Awaited<ReturnType<typeof panel>> = null;
+      let pane: Awaited<ReturnType<typeof settingsPanel>> = null;
       await waitFor(
         async () => {
-          pane = await panel();
+          pane = await settingsPanel(app, label);
           return pane !== null && pane.height > 20 && pane.width > 100 && pane.text.length > 20;
         },
         () => `the ${label} pane never laid out with content: ${JSON.stringify(pane)}`,
         20_000,
       );
     }
-    await ensureIndex();
+    await ensureSettingsNavigation(app);
   }, 120_000);
 
   /**
@@ -203,158 +230,367 @@ describe("the section index", () => {
    * labels stole neighbouring taps. Every index row must still own a tap at
    * its own centre — `elementFromPoint`, not only its box.
    */
-  test("every section row is laid out, unclipped, and answers a tap at its own centre", async () => {
-    await ensureIndex();
-    const strip = await app.withPage((page) =>
-      page.evaluate((selector: string) => {
-        const list = document.querySelector(
-          'nav[aria-label="Settings sections"]',
-        ) as HTMLElement | null;
-        if (!list) return null;
-        return {
-          documentOverflow:
-            document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          rows: Array.from(document.querySelectorAll(selector), (node) => {
-            const row = node as HTMLElement;
-            const rect = row.getBoundingClientRect();
-            const hit = document.elementFromPoint(
-              rect.x + rect.width / 2,
-              rect.y + rect.height / 2,
-            );
-            return {
-              text: row.textContent!.trim(),
-              width: rect.width,
-              height: rect.height,
-              clipped: row.scrollWidth - row.clientWidth,
-              hit:
-                hit?.closest("[data-settings-index-item]")?.textContent?.trim() ?? null,
-            };
-          }),
-        };
-      }, INDEX_ITEM),
-    );
-
-    expect(strip).not.toBeNull();
-    expect(strip!.documentOverflow).toBeLessThanOrEqual(1);
-
-    for (const row of strip!.rows) {
-      expect(row.width, row.text).toBeGreaterThan(0);
-      expect(row.height, row.text).toBeGreaterThanOrEqual(44);
-      expect(row.clipped, `${row.text} does not fit its own box`).toBeLessThanOrEqual(1);
-      expect(row.hit, `a tap on the middle of ${row.text} lands elsewhere`).toBe(row.text);
+  test("scrolls every section into reach without clipping its tap target", async () => {
+    for (const label of SECTIONS) {
+      const row = await settingsSectionGeometry(app, label);
+      expect(row.width, label).toBeGreaterThan(0);
+      expect(row.height, label).toBeGreaterThanOrEqual(44);
+      expect(row.clipped, `${label} does not fit its own box`).toBeLessThanOrEqual(1);
+      expect(row.documentOverflow, label).toBeLessThanOrEqual(1);
+      expect(row.centerHit, `a tap on the middle of ${label} lands elsewhere`).toBe(true);
     }
   });
 
-  test("names no filesystem path on any pane (INV-12)", async () => {
-    for (const label of await sectionLabels()) {
-      await openSection(label);
+  test("names no filesystem path on any pane (INV-20 / AT-24)", async () => {
+    for (const label of await settingsSectionLabels(app)) {
+      await openSettingsSection(app, label);
       expectNoFilesystemPath(await accessibleSurface(app));
     }
-    await ensureIndex();
+    await ensureSettingsNavigation(app);
   }, 120_000);
+
+  test("keeps the Android document fixed while compact Preferences scrolls", async () => {
+    await withSoftKeyboardScenario(async (softKeyboard) => {
+      await openSettingsSection(app, "Cloud sync");
+      let primaryFailed = false;
+      let imeDiagnostics: {
+        before: { native: SoftKeyboardDiagnostics | null; page: unknown };
+        after: { native: SoftKeyboardDiagnostics | null; page: unknown };
+      } = {
+        before: { native: null, page: null },
+        after: { native: null, page: null },
+      };
+      let imeAfter: ImePageObservation | null = null;
+      try {
+        const imeBefore = await app.withPage((page) =>
+          page.evaluate(() => {
+            const panel = Array.from(
+              document.querySelectorAll<HTMLElement>(
+                'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
+              ),
+            ).find((candidate) => candidate.getClientRects().length > 0);
+            const field = Array.from(
+              panel?.querySelectorAll<HTMLInputElement>("input") ?? [],
+            ).find((candidate) => {
+              const box = candidate.getBoundingClientRect();
+              return box.bottom > 0 && box.top < innerHeight;
+            });
+            if (!field) throw new Error("Cloud sync has no visible input");
+            field.dataset.androidRootScrollProbe = "";
+            const box = field.getBoundingClientRect();
+            return {
+              innerHeight: window.innerHeight,
+              visualHeight: window.visualViewport?.height ?? null,
+              focused: document.activeElement === field,
+              activeElement: document.activeElement?.tagName ?? null,
+              field: {
+                tagName: field.tagName,
+                type: field.type,
+                inputMode: field.inputMode,
+                readOnly: field.readOnly,
+                disabled: field.disabled,
+              },
+              point: { x: box.left + box.width / 2, y: box.top + box.height / 2 },
+              metrics: {
+                width: window.innerWidth,
+                height: window.innerHeight,
+                devicePixelRatio: window.devicePixelRatio,
+              },
+            };
+          }),
+        );
+        imeDiagnostics.before.native = await softKeyboard.diagnostics();
+        imeDiagnostics.before.page = {
+          innerHeight: imeBefore.innerHeight,
+          visualHeight: imeBefore.visualHeight,
+          focused: imeBefore.focused,
+          activeElement: imeBefore.activeElement,
+          field: imeBefore.field,
+        };
+        const nativeTap = await softKeyboard.tap(
+          imeBefore.point,
+          imeBefore.metrics,
+          PACKAGE,
+        );
+        const nativeTapDiagnostic = {
+          point: nativeTap.point,
+          frame: nativeTap.frame,
+          display: nativeTap.display,
+        };
+        await waitFor(
+          async () => {
+            imeAfter = await app.withPage((page) =>
+              page.evaluate(() => ({
+                innerHeight: window.innerHeight,
+                visualHeight: window.visualViewport?.height ?? null,
+                focused:
+                  document.activeElement?.matches(
+                    "[data-android-root-scroll-probe]",
+                  ) ?? false,
+                activeElement: document.activeElement?.tagName ?? null,
+              })),
+            );
+            return imeBefore.visualHeight !== null &&
+              imeAfter.visualHeight !== null &&
+              imeAfter.focused &&
+              imeBefore.visualHeight - imeAfter.visualHeight >= 80;
+          },
+          () =>
+            "required Android viewport predicate was not observed: " +
+            JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap: nativeTapDiagnostic }),
+          15_000,
+        );
+        expect(
+          imeBefore.visualHeight! - imeAfter!.visualHeight!,
+          JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap: nativeTapDiagnostic }),
+        ).toBeGreaterThanOrEqual(80);
+        expect(
+          imeBefore.focused,
+          JSON.stringify({ before: imeBefore, nativeTap: nativeTapDiagnostic }),
+        ).toBe(false);
+        expect(
+          imeAfter!.focused,
+          JSON.stringify({ after: imeAfter, nativeTap: nativeTapDiagnostic }),
+        ).toBe(true);
+        imeDiagnostics.after.native = await softKeyboard.diagnostics();
+        imeDiagnostics.after.page = imeAfter;
+
+      const evidence = await app.withPage((page) =>
+        page.evaluate(async () => {
+          const field = document.querySelector<HTMLInputElement>(
+            "[data-android-root-scroll-probe]",
+          );
+          const panel = field?.closest<HTMLElement>(
+            'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
+          );
+          let viewport = panel?.parentElement ?? null;
+          while (
+            viewport &&
+            !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY)
+          ) {
+            viewport = viewport.parentElement;
+          }
+          const root = document.querySelector<HTMLElement>("#root");
+          const dock = document.querySelector<HTMLElement>(
+            'nav[aria-label="Primary"]',
+          );
+          if (!field || !panel || !viewport || !root || !dock) {
+            throw new Error("the focused Cloud app frame is incomplete");
+          }
+
+          const beforeRoot = root.getBoundingClientRect();
+          const beforeDock = dock.getBoundingClientRect();
+          const beforeField = field.getBoundingClientRect();
+          const before = {
+            windowScrollY: window.scrollY,
+            documentScrollY: document.documentElement.scrollTop,
+            bodyScrollY: document.body.scrollTop,
+            rootTop: beforeRoot.top,
+            rootBottom: beforeRoot.bottom,
+            dockTop: beforeDock.top,
+            dockBottom: beforeDock.bottom,
+            fieldWidth: beforeField.width,
+            fieldHeight: beforeField.height,
+            focused: document.activeElement === field,
+          };
+
+          const spacer = document.createElement("div");
+          spacer.dataset.androidRootScrollSpacer = "";
+          spacer.setAttribute("aria-hidden", "true");
+          spacer.style.blockSize = `${innerHeight}px`;
+          spacer.style.flex = "none";
+          panel.append(spacer);
+          const previousScrollTop = viewport.scrollTop;
+          const maximumScrollTop = viewport.scrollHeight - viewport.clientHeight;
+          viewport.scrollTop = Math.min(maximumScrollTop, previousScrollTop + 48);
+          viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+
+          const afterRoot = root.getBoundingClientRect();
+          const afterDock = dock.getBoundingClientRect();
+          const afterField = field.getBoundingClientRect();
+          const x = afterField.left + afterField.width / 2;
+          const y = afterField.top + afterField.height / 2;
+          const after = {
+            windowScrollY: window.scrollY,
+            documentScrollY: document.documentElement.scrollTop,
+            bodyScrollY: document.body.scrollTop,
+            rootTop: afterRoot.top,
+            rootBottom: afterRoot.bottom,
+            dockTop: afterDock.top,
+            dockBottom: afterDock.bottom,
+            fieldWidth: afterField.width,
+            fieldHeight: afterField.height,
+            fieldVisible:
+              afterField.bottom > 0 && afterField.top < window.innerHeight,
+            fieldHit: field.contains(document.elementFromPoint(x, y)),
+            focused: document.activeElement === field,
+            viewportScrollDelta: viewport.scrollTop - previousScrollTop,
+          };
+          spacer.remove();
+          field.removeAttribute("data-android-root-scroll-probe");
+          return { before, after };
+        }),
+      );
+
+      expect(evidence.before.focused).toBe(true);
+      expect(evidence.after.focused).toBe(true);
+      expect(evidence.after.viewportScrollDelta).toBeGreaterThan(0);
+      expect(evidence.before.windowScrollY).toBe(0);
+      expect(evidence.before.documentScrollY).toBe(0);
+      expect(evidence.before.bodyScrollY).toBe(0);
+      expect(evidence.after.windowScrollY).toBe(0);
+      expect(evidence.after.documentScrollY).toBe(0);
+      expect(evidence.after.bodyScrollY).toBe(0);
+      expect(evidence.after.rootTop).toBeCloseTo(evidence.before.rootTop, 1);
+      expect(evidence.after.rootBottom).toBeCloseTo(evidence.before.rootBottom, 1);
+      expect(evidence.after.dockTop).toBeCloseTo(evidence.before.dockTop, 1);
+      expect(evidence.after.dockBottom).toBeCloseTo(evidence.before.dockBottom, 1);
+      expect(evidence.after.fieldWidth).toBeCloseTo(evidence.before.fieldWidth, 1);
+      expect(evidence.after.fieldHeight).toBeCloseTo(evidence.before.fieldHeight, 1);
+      expect(evidence.after.fieldHeight).toBeGreaterThanOrEqual(44);
+      expect(evidence.after.fieldVisible).toBe(true);
+      expect(evidence.after.fieldHit).toBe(true);
+      await ensureSettingsNavigation(app);
+      } catch (error) {
+        primaryFailed = true;
+        imeDiagnostics.after.native = await softKeyboard.diagnostics().catch(() => null);
+        imeDiagnostics.after.page = imeAfter;
+        console.warn(
+          `Android soft-keyboard diagnostics: ${JSON.stringify(imeDiagnostics)}`,
+        );
+        throw error;
+      } finally {
+        try {
+          await app.withPage((page) =>
+            page.evaluate(() => {
+              document
+                .querySelectorAll("[data-android-root-scroll-spacer]")
+                .forEach((node) => node.remove());
+              document
+                .querySelectorAll("[data-android-root-scroll-probe]")
+                .forEach((node) =>
+                  node.removeAttribute("data-android-root-scroll-probe"),
+                );
+            }),
+          );
+        } catch (error) {
+          if (!primaryFailed) throw error;
+          console.warn("settings cleanup could not clear the Android scroll probe");
+        }
+      }
+    });
+  });
 });
 
-describe("a preference that changes layout", () => {
-  /** The slider is a `role="slider"`; Home and ArrowRight are how a keyboard
-   *  drives it, and the WebView taking them at all is part of the claim. */
-  async function setPreviewLines(
-    key: "Home" | "ArrowRight",
-    lines: 1 | 2,
-    rendered: string,
-  ): Promise<void> {
-    await openSection("List");
-    await app.withPage(async (page) => {
-      await page.click('[aria-label="Preview lines"]');
-      await page.keyboard.press(key);
-    });
-    await waitFor(
-      async () =>
-        (await app.withPage((page) =>
-          page.evaluate(
-            () =>
-              document.querySelector('[aria-label="Preview lines"]')?.getAttribute("aria-valuenow") ??
-              "",
+describe("a preference that limits only the visible list", () => {
+  test("caps rendering, never deletes, and survives a WebView reload", async () => {
+    await gotoView(app, "Settings");
+    await openSettingsSection(app, "Clipboard behavior");
+    originalHistoryDisplayIndex = await historyDisplayIndex();
+    let primaryFailed = false;
+    try {
+      await setHistoryDisplayLimit(0, "100");
+      await gotoView(app, "Library");
+      await waitForText(app, "Showing first 100 of 101 results");
+      expect(missingFixtureIds(await storedItems(app), seeded)).toEqual([]);
+
+      await app.withPage((page) => page.reload({ waitUntil: "domcontentloaded" }));
+      await waitFor(
+        async () =>
+          app.withPage((page) =>
+            page.evaluate(() => document.querySelectorAll("nav").length > 0),
           ),
-        )) === String(lines),
-      `the preview-lines slider never reached ${lines}`,
-    );
-    // The words beside it, not only the value: "1 line" and "2 lines" are what
-    // the user reads back, and they are rendered text rather than a key.
-    await waitForText(app, rendered);
-  }
-
-  test("preview lines re-reserves every row (INV-5)", async () => {
-    await setPreviewLines("Home", 1, "1 line");
-    await gotoView(app, "Library");
-    await waitFor(
-      async () => expectReservedFor(1, (await rowBoxes(app)).map((row) => row.height)),
-      "rows never shrank to the one-line reservation",
-      20_000,
-    );
-
-    await gotoView(app, "Settings");
-    await setPreviewLines("ArrowRight", 2, "2 lines");
-    await gotoView(app, "Library");
-    await waitFor(
-      async () => expectReservedFor(2, (await rowBoxes(app)).map((row) => row.height)),
-      "rows never returned to the two-line reservation",
-      20_000,
-    );
-    await gotoView(app, "Settings");
+        "the WebView never came back after the display-limit reload",
+        60_000,
+      );
+      await gotoView(app, "Settings");
+      await openSettingsSection(app, "Clipboard behavior");
+      expect(await historyDisplayIndex()).toBe(0);
+    } catch (error) {
+      primaryFailed = true;
+      throw error;
+    } finally {
+      await restoreAfterTest(
+        "History display limit",
+        restoreHistoryDisplayLimit,
+        primaryFailed,
+      );
+    }
   }, 120_000);
 });
 
 describe("appearance", () => {
   /**
-   * INV-22, through the Tauri store plugin rather than a daemon: the value has
+   * INV-32 / AT-49, through the Tauri store plugin: the value has
    * to be written to `preferences.json` and read back by the bootstrap before
    * the reloaded document paints.
-   */
+  */
   test("survives a reload of the WebView", async () => {
-    await openSection("Appearance");
-    await tapButton(app, "Teal");
-    await waitFor(
-      async () =>
-        (await app.withPage((page) =>
-          page.evaluate(() => document.documentElement.dataset.accent ?? ""),
-        )) === "teal",
-      "the accent never reached <html>",
+    await openSettingsSection(app, "Appearance");
+    const initialProductTheme = await app.withPage((page) =>
+      page.evaluate(() => document.documentElement.dataset.theme ?? ""),
     );
+    expect(["midnight", "aurora", "ember", "graphite"]).toContain(initialProductTheme);
+    originalProductTheme = initialProductTheme;
+    const selected = initialProductTheme === "aurora" ? "ember" : "aurora";
+    let primaryFailed = false;
+    try {
+      await tapElement(app, `[data-product-theme="${selected}"]`);
+      await waitFor(
+        async () =>
+          (await app.withPage((page) =>
+            page.evaluate(() => document.documentElement.dataset.theme ?? ""),
+          )) === selected,
+        "the product theme never reached <html>",
+      );
 
-    await app.withPage((page) => page.evaluate(() => location.reload()));
-    await waitFor(
-      async () =>
-        (await app.withPage((page) =>
-          page.evaluate(() => document.querySelectorAll("nav").length),
-        )) > 0,
-      "the WebView never came back after a reload",
-      60_000,
-    );
+      await app.withPage((page) => page.evaluate(() => location.reload()));
+      await waitFor(
+        async () =>
+          (await app.withPage((page) =>
+            page.evaluate(() => document.querySelectorAll("nav").length),
+          )) > 0,
+        "the WebView never came back after a reload",
+        60_000,
+      );
 
-    expect(
-      await app.withPage((page) =>
-        page.evaluate(() => document.documentElement.dataset.accent),
-      ),
-    ).toBe("teal");
+      expect(
+        await app.withPage((page) =>
+          page.evaluate(() => document.documentElement.dataset.theme),
+        ),
+      ).toBe(selected);
 
-    await gotoView(app, "Settings");
-    await openSection("Appearance");
-    const pressed = await app.withPage((page) =>
-      page.evaluate(
-        () => document.querySelector('[aria-label="Teal"]')?.getAttribute("aria-pressed") ?? null,
-      ),
-    );
-    expect(pressed).toBe("true");
-
-    // The device keeps its preferences between runs, so the next run starts
-    // where this one left off unless it is put back.
-    await tapButton(app, "System accent");
+      await gotoView(app, "Settings");
+      await openSettingsSection(app, "Appearance");
+      const pressed = await app.withPage((page) =>
+        page.evaluate(
+          (theme) =>
+            document
+              .querySelector(`[data-product-theme="${theme}"]`)
+              ?.getAttribute("aria-pressed") ?? null,
+          selected,
+        ),
+      );
+      expect(pressed).toBe("true");
+    } catch (error) {
+      primaryFailed = true;
+      throw error;
+    } finally {
+      await restoreAfterTest(
+        "product theme",
+        restoreProductTheme,
+        primaryFailed,
+      );
+    }
   }, 180_000);
 });
 
 describe("the service-shaped settings", () => {
   test("Background capture reports its state in words a user can act on", async () => {
-    await openSection("Background capture");
+    await openSettingsSection(app, "Clipboard behavior");
     const text = await visibleText(app);
     expect(text).toContain("Background capture");
     expectNoFilesystemPath(await accessibleSurface(app));

@@ -176,6 +176,9 @@ export const EXEMPTIONS = [
 /** Exactly these, under `@media (pointer: coarse)`, and nothing else. */
 export const COARSE_TOKENS = ['tap-min', 'hit-slop', 'sz-iconbtn'];
 
+/** The capability fallback from ViewportMetricsProvider uses this same token set. */
+export const TOUCH_CAPABILITY_FALLBACK_SELECTOR = ':root[data-pointer="coarse"]';
+
 export const exemptions = (rule) => EXEMPTIONS.filter((e) => e.rule === rule);
 
 export const isExempt = (rule, file) =>

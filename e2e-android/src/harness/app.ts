@@ -1,7 +1,18 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
 import { appPid, logcatDump, sleep } from "./adb.js";
-import { APP_ORIGIN, isAppTarget, nextAttachStep, webviewComplaints } from "./attach.js";
+import {
+  APP_ORIGIN,
+  finalAttachDiagnostic,
+  isAppTarget,
+  nextAttachStep,
+  type AttachFinalDiagnostic,
+  type AttachPagesDiagnostic,
+  type AttachRawDiagnostic,
+  type PageAutoAttachCleanup,
+  type PageAutoAttachOutcome,
+  webviewComplaints,
+} from "./attach.js";
 import { DEFAULT_PORT, openDevtools, type DevtoolsEndpoint } from "./devtools.js";
 import { rememberAttachedApp, writeAttachFailure } from "./evidence.js";
 
@@ -47,10 +58,9 @@ async function open(port: number, msLeft: number): Promise<{ browser: Browser; e
 }
 
 /**
- * Raw CDP target from `/json/list`, used when Puppeteer's `pages()` does not
- * expose the app target. Old WebView engines (109, API 33) publish the page
- * with type `"webview"` which `pages(includeAll)` should surface but doesn't
- * always — the raw endpoint is the ground truth.
+ * Raw CDP target from `/json/list`, used to detect the API 34 flat-page
+ * attachment case after Puppeteer's `pages()` omits the otherwise valid app
+ * page.
  */
 interface RawTarget {
   type: string;
@@ -59,50 +69,283 @@ interface RawTarget {
   webSocketDebuggerUrl: string;
 }
 
-async function rawTargets(browserUrl: string): Promise<RawTarget[]> {
+interface RawTargetResult {
+  status: "ok" | "http-error" | "fetch-error" | "invalid-json";
+  targets: RawTarget[];
+}
+
+function rawDiagnostic(result: RawTargetResult): AttachRawDiagnostic {
+  const targetTypeHistogram = { page: 0, webview: 0, other: 0 };
+  for (const target of result.targets) {
+    if (target.type === "page") targetTypeHistogram.page += 1;
+    else if (target.type === "webview") targetTypeHistogram.webview += 1;
+    else targetTypeHistogram.other += 1;
+  }
+  return {
+    status: result.status,
+    count: result.targets.length,
+    targetTypeHistogram,
+    appOriginMatchCount: result.targets.filter((target) => isAppTarget(target.url)).length,
+    webSocketPresent: result.targets.some((target) => Boolean(target.webSocketDebuggerUrl)),
+  };
+}
+
+async function rawTargets(browserUrl: string): Promise<RawTargetResult> {
   try {
     const response = await fetch(`${browserUrl}/json/list`, { signal: AbortSignal.timeout(3_000) });
-    if (!response.ok) return [];
-    return (await response.json()) as RawTarget[];
+    if (!response.ok) return { status: "http-error", targets: [] };
+    try {
+      const body: unknown = await response.json();
+      return Array.isArray(body)
+        ? { status: "ok", targets: body as RawTarget[] }
+        : { status: "invalid-json", targets: [] };
+    } catch {
+      return { status: "invalid-json", targets: [] };
+    }
   } catch {
-    return [];
+    return { status: "fetch-error", targets: [] };
   }
+}
+
+class AttachResolutionError extends Error {
+  constructor(message: string, readonly diagnostic: AttachFinalDiagnostic) {
+    super(message);
+  }
+}
+
+const PAGE_AUTO_ATTACH = {
+  autoAttach: true,
+  waitForDebuggerOnStart: true,
+  flatten: true,
+  filter: [{ type: "tab", exclude: true }, {}],
+};
+
+export interface PublicRootConnection {
+  send(
+    method: "Target.setAutoAttach",
+    params: typeof PAGE_AUTO_ATTACH,
+    options: { timeout: number },
+  ): Promise<unknown>;
+}
+
+export interface PublicBrowserSession {
+  connection(): PublicRootConnection | undefined;
+  detach(): Promise<void>;
+}
+
+export interface PublicBrowserTarget {
+  createCDPSession(): Promise<PublicBrowserSession>;
+}
+
+export interface PublicBrowser {
+  target(): PublicBrowserTarget | undefined;
+  disconnect(): Promise<void>;
+}
+
+class AttachDeadlineExceeded extends Error {}
+
+async function withinRemainingDeadline<T>(
+  msLeft: () => number,
+  start: () => Promise<T>,
+  onLateResult?: (result: T) => void,
+): Promise<T> {
+  const remaining = msLeft();
+  if (remaining <= 0) throw new AttachDeadlineExceeded();
+
+  const operation = Promise.resolve().then(start);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new AttachDeadlineExceeded()), remaining);
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof AttachDeadlineExceeded && onLateResult) {
+      void operation.then(onLateResult).catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function detachWithinRemainingDeadline(session: PublicBrowserSession, msLeft: () => number): Promise<boolean> {
+  const detach = Promise.resolve().then(() => session.detach());
+  if (msLeft() <= 0) {
+    void detach.catch(() => undefined);
+    return false;
+  }
+  try {
+    await withinRemainingDeadline(msLeft, () => detach);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * API 34 exposes the app page in `/json/list` but Puppeteer's initial target
+ * filter can omit it. Configure the root connection once and let Puppeteer's
+ * TargetManager receive the resulting page attachment.
+ */
+export async function enablePageAutoAttach(
+  browser: PublicBrowser,
+  msLeft: () => number,
+): Promise<{ outcome: PageAutoAttachOutcome; cleanup: PageAutoAttachCleanup }> {
+  if (msLeft() <= 0) return { outcome: "deadline-exceeded", cleanup: "not-needed" };
+
+  let target: PublicBrowserTarget | undefined;
+  try {
+    target = browser.target();
+  } catch {
+    return { outcome: "browser-target-unavailable", cleanup: "not-needed" };
+  }
+  if (!target) return { outcome: "browser-target-unavailable", cleanup: "not-needed" };
+
+  let session: PublicBrowserSession;
+  try {
+    session = await withinRemainingDeadline(
+      msLeft,
+      () => target.createCDPSession(),
+      (lateSession) => { void lateSession.detach().catch(() => undefined); },
+    );
+  } catch (error) {
+    return {
+      outcome: error instanceof AttachDeadlineExceeded ? "deadline-exceeded" : "browser-session-unavailable",
+      cleanup: error instanceof AttachDeadlineExceeded ? "unconfirmed" : "not-needed",
+    };
+  }
+
+  let outcome: PageAutoAttachOutcome;
+  try {
+    const rootConnection = session.connection();
+    if (!rootConnection) {
+      outcome = "root-connection-unavailable";
+    } else {
+      const timeout = msLeft();
+      if (timeout <= 0) {
+        outcome = "deadline-exceeded";
+      } else {
+        await withinRemainingDeadline(msLeft, () =>
+          rootConnection.send("Target.setAutoAttach", PAGE_AUTO_ATTACH, { timeout }),
+        );
+        outcome = "page-autoattach-enabled";
+      }
+    }
+  } catch (error) {
+    outcome = error instanceof AttachDeadlineExceeded ? "deadline-exceeded" : "page-autoattach-rejected";
+  }
+
+  return {
+    outcome,
+    cleanup: (await detachWithinRemainingDeadline(session, msLeft)) ? "confirmed" : "unconfirmed",
+  };
+}
+
+export interface PageAutoAttachState {
+  attempted: boolean;
+  outcome: PageAutoAttachOutcome;
+  cleanup: PageAutoAttachCleanup;
+}
+
+export interface PageAutoAttachCandidate {
+  pagesStatus: AttachPagesDiagnostic["status"];
+  defaultPageCount: number | undefined;
+  rawTarget: { type: string; url: string } | undefined;
+  currentPid: number | undefined;
+  endpointPid: number;
+}
+
+export async function resolvePageAutoAttach(
+  browser: PublicBrowser,
+  state: PageAutoAttachState,
+  candidate: PageAutoAttachCandidate,
+  msLeft: () => number,
+): Promise<{ state: PageAutoAttachState; blocked: boolean }> {
+  const eligible = candidate.pagesStatus === "ok" &&
+    candidate.defaultPageCount === 0 &&
+    candidate.rawTarget?.type === "page" &&
+    isAppTarget(candidate.rawTarget.url) &&
+    candidate.currentPid === candidate.endpointPid;
+  if (state.attempted || !eligible) return { state, blocked: false };
+
+  const result = await enablePageAutoAttach(browser, msLeft);
+  const next = { attempted: true, ...result };
+  if (result.cleanup !== "unconfirmed") return { state: next, blocked: false };
+
+  await browser.disconnect().catch(() => undefined);
+  return { state: next, blocked: true };
 }
 
 async function resolveAppPage(port: number, deadline: number): Promise<Attached> {
   const msLeft = () => Math.max(0, deadline - Date.now());
   let { browser, endpoint } = await open(port, msLeft());
+  let pageAutoAttachState: PageAutoAttachState = {
+    attempted: false,
+    outcome: "not-attempted",
+    cleanup: "not-needed",
+  };
+  let diagnostic: AttachFinalDiagnostic = finalAttachDiagnostic(
+    { status: "error", count: 0, appOriginMatchCount: 0 },
+    {
+      status: "fetch-error",
+      count: 0,
+      targetTypeHistogram: { page: 0, webview: 0, other: 0 },
+      appOriginMatchCount: 0,
+      webSocketPresent: false,
+    },
+    "not-attempted",
+    "not-needed",
+  );
 
   for (;;) {
-    const pages = await browser.pages(true).then(
-      (found) => found,
-      () => undefined,
+    const pageResult = await browser.pages(true).then(
+      (found) => ({ status: "ok" as const, pages: found }),
+      () => ({ status: "error" as const, pages: [] as Page[] }),
     );
+    const pages = pageResult.pages;
     const page = pages?.find((candidate) => isAppTarget(candidate.url()));
     if (page) return { browser, page, endpoint };
 
-    // Old WebView engines (109, API 29/33) may list the app target in the raw
-    // `/json/list` response while `pages()` omits it.  The page is the ground
-    // truth — if it exists there with the right origin, open it directly.
-    const targets = await rawTargets(endpoint.browserUrl);
-    const raw = targets.find((t) => isAppTarget(t.url));
-    if (raw?.webSocketDebuggerUrl) {
-      try {
-        const directBrowser = await puppeteer.connect({
-          browserWSEndpoint: raw.webSocketDebuggerUrl,
-          defaultViewport: null,
-        });
-        const [directPage] = await directBrowser.pages();
-        if (directPage) return { browser: directBrowser, page: directPage, endpoint };
-      } catch {
-        // The direct WebSocket may be rejected; fall through to normal wait.
-      }
-    }
+    const rawResult = await rawTargets(endpoint.browserUrl);
+    const targets = rawResult.targets;
+    const raw = targets.find((target) => target.type === "page" && isAppTarget(target.url));
+    const defaultPageCount = raw
+      ? await withinRemainingDeadline(msLeft, () => browser.pages()).then(
+        (found) => found.length,
+        () => undefined,
+      )
+      : undefined;
+    const currentPid = await appPid();
+    const autoAttach = await resolvePageAutoAttach(browser, pageAutoAttachState, {
+      pagesStatus: pageResult.status,
+      defaultPageCount,
+      rawTarget: raw,
+      currentPid,
+      endpointPid: endpoint.pid,
+    }, msLeft);
+    pageAutoAttachState = autoAttach.state;
 
-    const allTargets = pages?.map((c) => c.url()) ?? targets.map((t) => t.url);
+    const pagesDiagnostic: AttachPagesDiagnostic = {
+      status: pageResult.status,
+      count: pages.length,
+      appOriginMatchCount: pages.filter((candidate) => isAppTarget(candidate.url())).length,
+    };
+    diagnostic = finalAttachDiagnostic(
+      pagesDiagnostic,
+      rawDiagnostic(rawResult),
+      pageAutoAttachState.outcome,
+      pageAutoAttachState.cleanup,
+    );
+    if (autoAttach.blocked) {
+      throw new AttachResolutionError("page auto-attach session cleanup could not be confirmed", diagnostic);
+    }
+    const allTargets = pages.map((c) => c.url()).concat(targets.map((t) => t.url));
     const step = nextAttachStep({
       targets: allTargets,
-      pid: await appPid(),
+      pid: currentPid,
       endpointPid: endpoint.pid,
       msLeft: msLeft(),
     });
@@ -111,8 +354,9 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
       continue;
     }
     await browser.disconnect().catch(() => undefined);
-    if (step.do === "give-up") throw new Error(step.why);
+    if (step.do === "give-up") throw new AttachResolutionError(step.why, diagnostic);
     ({ browser, endpoint } = await open(port, msLeft()));
+    pageAutoAttachState = { attempted: false, outcome: "not-attempted", cleanup: "not-needed" };
   }
 }
 
@@ -122,7 +366,8 @@ async function explained(error: unknown, waitedMs: number): Promise<Error> {
   const reason = error instanceof Error ? error.message : String(error);
   const waited = `${Math.round(waitedMs / 1000)}s`;
   const complaints = webviewComplaints(await logcatDump().catch(() => ""));
-  writeAttachFailure({ waited, origin: APP_ORIGIN, reason, complaints });
+  const diagnostic = error instanceof AttachResolutionError ? error.diagnostic : undefined;
+  writeAttachFailure({ waited, origin: APP_ORIGIN, reason, complaints, diagnostic });
   return new Error(
     `no ${APP_ORIGIN} page target after ${waited}: ${reason}` +
       (complaints.length ? `. The device said: ${complaints.join(" | ")}` : ""),

@@ -21,6 +21,8 @@ CANARY="CopyPasteStorageTransferT$(date +%s)-R$RANDOM"
 SEED_FILE="copypaste-seed.json"
 EXPORT_FILE="copypaste-export.json"
 INVALID_FILE="copypaste-invalid.json"
+SETTINGS_PREFERENCE_SECTIONS="Preference sections"
+STORAGE_SECTION_ACTION="Storage & history Stored items, cleanup, transfer and recovery"
 
 open_downloads() { # <artifact prefix>
     local prefix="$1" focus
@@ -58,12 +60,17 @@ restart_app() { # <stage>
 }
 
 settings_pane_holds() { # <artifact>
-    [[ -n "$(node_center_exact "$1" "Settings sections")" ]]
+    enabled_node_exists_exact "$1" "$SETTINGS_PREFERENCE_SECTIONS"
 }
 
 storage_transfer_actions_holds() { # <artifact>
-    [[ -n "$(action_center "$1" "Export…")" ]] \
-        && [[ -n "$(action_center "$1" "Import…")" ]]
+    node_exists_exact "$1" "Storage & history" \
+        && enabled_action_exists_exact "$1" "Export…" \
+        && enabled_action_exists_exact "$1" "Import…"
+}
+
+tap_storage_import() { # <artifact>
+    tap_scrolling "Import…" "$1" up
 }
 
 # Four stages open this pane, and every one of them wrote the same three
@@ -72,38 +79,50 @@ storage_transfer_actions_holds() { # <artifact>
 # Each step also names itself, because "Storage exposes import for the seed" was
 # what a swallowed Settings tap reported.
 #
-# `prepare_action` leaves the dump it aimed each tap from, so every stage already
-# holds the state immediately before its own tap: pass it, and the diagnostic can
-# tell a control that changed from one that was current all along.
+# Each transition overwrites only its own stage artifact with a fresh hierarchy;
+# a swallowed tap therefore leaves the exact source pane that failed to advance.
 open_storage() { # <stage>
     local stage="$1" nav="$OUT/$1-settings-nav.xml"
-    local pane="$OUT/$1-settings-pane.xml" tab="$OUT/$1-settings-storage.xml"
     local ready="$OUT/$1-storage-ready.xml"
-    tap_selector "Settings" "$nav" || {
-        bad "the Settings tab is actionable at $stage" "$(navigation_state "$nav")"
+    tap_until_state "Settings" "$nav" settings_pane_holds none || {
+        bad "Settings opens at $stage" "$(navigation_state "$nav")"
         return 1
     }
-    wait_history_state "$pane" settings_pane_holds || {
-        bad "Settings opens at $stage" "$(tap_landing "$pane" Settings "$nav")"
-        return 1
-    }
-    tap_selector "Storage" "$tab" || {
-        bad "the Storage tab is actionable at $stage" "$(navigation_state "$pane")"
-        return 1
-    }
-    wait_history_state "$ready" storage_transfer_actions_holds || {
-        bad "Storage exposes its transfer actions at $stage" "$(tap_landing "$ready" Storage "$tab")"
+    tap_until_state "$STORAGE_SECTION_ACTION" "$ready" \
+        storage_transfer_actions_holds up || {
+        bad "Storage & history exposes its transfer actions at $stage" \
+            "$(control_state "$ready" "$STORAGE_SECTION_ACTION"); $(navigation_state "$ready")"
         return 1
     }
 }
 
 history_toolbar_holds() { # <artifact>
-    [[ -n "$(node_center_exact "$1" "Select multiple items")" ]]
+    enabled_node_exists_exact "$1" "Search clipboard history, default|Search clipboard history, active"
 }
 
 history_unfiltered_holds() { # <artifact>
-    history_toolbar_holds "$1" \
-        && [[ -z "$(node_center_exact "$1" "Clear search")" ]]
+    enabled_node_exists_exact "$1" "Search clipboard history, default" \
+        && ! node_exists_exact "$1" "Clear search"
+}
+
+history_item_count_holds() { # <artifact>
+    python3 - "$1" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    raise SystemExit(1)
+counts = []
+for node in root.iter("node"):
+    for name in ("text", "content-desc", "hint"):
+        match = re.fullmatch(r"(\d+) items?", (node.get(name) or "").casefold())
+        if match:
+            counts.append(int(match.group(1)))
+raise SystemExit(0 if not counts or all(count == 0 for count in counts) else 1)
+PY
 }
 
 # Two authored titles mean "this history is empty", and which one the app shows
@@ -122,9 +141,9 @@ ERROR_CATALOGUE="crates/copypaste-ui/src/i18n/en/common.ts"
 
 cleared_history_holds() { # <artifact>
     history_unfiltered_holds "$1" \
-        && [[ -n "$(node_center_exact "$1" "$EMPTY_HISTORY_TITLES")" ]] \
-        && [[ -n "$(node_center_exact "$1" "0 items")" ]] \
-        && [[ -z "$(node_center_exact "$1" "$CANARY")" ]]
+        && node_exists_exact "$1" "$EMPTY_HISTORY_TITLES" \
+        && history_item_count_holds "$1" \
+        && ! node_exists_exact "$1" "$CANARY"
 }
 
 history_state_holds() { # <artifact> <predicate> <dump function>
@@ -143,12 +162,13 @@ wait_cleared_history() { # <artifact> [timeout] [dump function]
 }
 
 open_history() { # <artifact>
-    local artifact="$1" point
-    tap_selector "Library" "$artifact" || return 1
-    wait_history_state "$artifact" history_toolbar_holds || return 1
-    point="$(action_center "$artifact" "Clear search")"
-    [[ -z "$point" ]] || sh_ input tap $point >/dev/null
-    wait_history_state "$artifact" history_unfiltered_holds || return 1
+    local artifact="$1"
+    tap_until_state "Library" "$artifact" history_toolbar_holds none || return 1
+    tap_until_state "Clear search" "$artifact" history_unfiltered_holds none
+}
+
+clear_confirmation_holds() { # <artifact>
+    enabled_action_exists_exact "$1" "Clear all"
 }
 
 capture_screen() { # <name>
@@ -162,6 +182,17 @@ capture_screen() { # <name>
     fi
 }
 
+storage_transfer_summary() {
+    printf '\n## Android storage transfer: %s\n\n%d assertions passed, %d failed.\n' \
+        "$([[ $FAIL -eq 0 ]] && echo passed || echo FAILED)" "$PASS" "$FAIL" \
+        | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+}
+
+stop_storage_transfer() {
+    storage_transfer_summary
+    exit 1
+}
+
 # `open_storage` against a screen it cannot open, with adb stubbed out: the
 # verdict has to name the step that failed and leave that step's screen behind
 # under its own stage.
@@ -171,12 +202,12 @@ storage_stage_self_test() { # <temp>
     nav_starting="${nav_open//enabled=\"true\" clickable/enabled=\"false\" clickable}"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open<node text=\"0 items\" bounds=\"[12,126][52,142]\"/></node></hierarchy>" > "$temp/stuck-history.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\"/></node></hierarchy>" > "$temp/stuck-start.xml"
-    # Settings open and the transfer actions never rendered, with Storage already
-    # selected and not yet selected: the stage may only claim the transition when
-    # it observed one, and `prepare_action`'s own dump is what it observes it in.
-    local sections="<node text=\"Settings sections\" bounds=\"[12,73][308,223]\"/>"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"Storage\" bounds=\"[217,126][284,170]\" enabled=\"true\" clickable=\"true\" selected=\"true\"/></node></hierarchy>" > "$temp/storage-empty-pane.xml"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"Storage\" bounds=\"[217,126][284,170]\" enabled=\"true\" clickable=\"true\" selected=\"false\"/></node></hierarchy>" > "$temp/storage-unselected.xml"
+    # Settings is open while the detail pane never renders. The final stage dump
+    # must retain whether the card stayed unselected or became current.
+    local sections="<node text=\"Preference sections\" bounds=\"[12,73][308,223]\" enabled=\"true\"/>"
+    local storage_card="Storage &amp; history Stored items, cleanup, transfer and recovery"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"$storage_card\" bounds=\"[13,285][307,351]\" enabled=\"true\" clickable=\"true\" selected=\"true\"/></node></hierarchy>" > "$temp/storage-empty-pane.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"$storage_card\" bounds=\"[13,285][307,351]\" enabled=\"true\" clickable=\"true\" selected=\"false\"/></node></hierarchy>" > "$temp/storage-unselected.xml"
 
     verdict="$(
         OUT="$temp" WAIT_SECS=2
@@ -186,8 +217,7 @@ storage_stage_self_test() { # <temp>
         open_storage seed-import
     )"
     [[ "$verdict" == *"FAIL  Settings opens at seed-import"* \
-       && "$verdict" == *"actionable and not current"* \
-       && "$verdict" != *"did not reach"* ]] \
+       && "$verdict" == *"Library=actionable Devices=actionable Settings=actionable"* ]] \
         && ok "a stage that never opened names its step without blaming the tap" \
         || bad "a stage that never opened names its step without blaming the tap" "$verdict"
 
@@ -198,14 +228,13 @@ storage_stage_self_test() { # <temp>
         PASS=0 FAIL=0
         open_storage export
     )"
-    [[ "$verdict" == *"FAIL  Storage exposes its transfer actions at export"* \
-       && "$verdict" == *"already current before the tap"* \
-       && "$verdict" != *"current now"* ]] \
-        && ok "a stage whose tab was already current claims no transition" \
-        || bad "a stage whose tab was already current claims no transition" "$verdict"
+    [[ "$verdict" == *"FAIL  Storage & history exposes its transfer actions at export"* \
+       && "$verdict" == *"actionable; Library=actionable"* ]] \
+        && ok "a current card without its detail pane is not ready" \
+        || bad "a current card without its detail pane is not ready" "$verdict"
 
-    # The three dumps `open_storage` takes before its Storage tap see the tab
-    # unselected; every dump after it sees the pane it selected but never filled.
+    # The three dumps before the storage tap see the card unselected; every dump
+    # after it sees the section selected but never filled.
     verdict="$(
         OUT="$temp" WAIT_SECS=2
         sh_() { :; }
@@ -218,10 +247,13 @@ storage_stage_self_test() { # <temp>
         PASS=0 FAIL=0
         open_storage import
     )"
-    [[ "$verdict" == *"FAIL  Storage exposes its transfer actions at import"* \
-       && "$verdict" == *"was not current before the tap and is current now"* ]] \
-        && ok "a stage that observed the tab change reports the transition" \
-        || bad "a stage that observed the tab change reports the transition" "$verdict"
+    if [[ "$verdict" == *"FAIL  Storage & history exposes its transfer actions at import"* \
+          && -s "$temp/import-storage-ready.xml" ]] \
+        && enabled_action_exists_exact "$temp/import-storage-ready.xml" "$STORAGE_SECTION_ACTION"; then
+        ok "a failed detail transition retains its final stage artifact"
+    else
+        bad "a failed detail transition retains its final stage artifact" "$verdict"
+    fi
 
     verdict="$(
         OUT="$temp" WAIT_SECS=2
@@ -230,15 +262,39 @@ storage_stage_self_test() { # <temp>
         PASS=0 FAIL=0
         open_storage rejected-import
     )"
-    [[ "$verdict" == *"FAIL  the Settings tab is actionable at rejected-import"* \
+    [[ "$verdict" == *"FAIL  Settings opens at rejected-import"* \
        && "$verdict" == *"Settings=disabled"* ]] \
         && ok "an app that has not settled is reported as disabled navigation" \
         || bad "an app that has not settled is reported as disabled navigation" "$verdict"
 
-    [[ -s "$temp/seed-import-settings-pane.xml" && -s "$temp/rejected-import-settings-nav.xml" ]] \
-        && ! cmp -s "$temp/seed-import-settings-pane.xml" "$temp/rejected-import-settings-nav.xml" \
+    [[ -s "$temp/seed-import-settings-nav.xml" && -s "$temp/rejected-import-settings-nav.xml" ]] \
+        && ! cmp -s "$temp/seed-import-settings-nav.xml" "$temp/rejected-import-settings-nav.xml" \
         && ok "each stage keeps its own screen instead of overwriting the last one's" \
         || bad "each stage keeps its own screen instead of overwriting the last one's"
+}
+
+storage_import_scroll_fixture_holds() { # <temp>
+    (
+        local temp="$1"
+        ui_fixtures "$temp/storage-import-below-fold.xml" "$temp/storage-import-visible.xml"
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { [[ "$1" == up ]] && ui_fixture_scroll; }
+        sh_() { UI_FIXTURE_TAPS=$((UI_FIXTURE_TAPS + 1)); }
+        tap_storage_import "$temp/storage-import-observed.xml" \
+            && [[ $UI_FIXTURE_SCROLLS -eq 1 && $UI_FIXTURE_TAPS -eq 1 ]]
+    )
+}
+
+storage_clear_scroll_fixture_holds() { # <temp>
+    local temp="$1"
+    ui_fixtures "$temp/storage-clear-above-fold.xml" \
+        "$temp/storage-clear-visible.xml" "$temp/storage-clear-confirm.xml"
+    NAVIGATION_FIXTURE_DIRECTION=""
+    tap_until_state "Clear history" "$temp/storage-clear-observed.xml" \
+        clear_confirmation_holds down 3 ui_fixture_dump navigation_fixture_scroll \
+        navigation_fixture_tap ui_fixture_pace \
+        && [[ "$NAVIGATION_FIXTURE_DIRECTION" == down \
+              && $UI_FIXTURE_SCROLLS -eq 1 && $UI_FIXTURE_TAPS -eq 1 ]]
 }
 
 self_test_transfer() {
@@ -247,11 +303,14 @@ self_test_transfer() {
     temp="$(mktemp -d)"
     android_navigation_self_test "$temp"
     storage_stage_self_test "$temp"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history\" bounds=\"[0,0][200,40]\"/><node content-desc=\"Select multiple items\" clickable=\"true\" bounds=\"[240,0][280,40]\"/><node text=\"0 items\" bounds=\"[280,0][340,40]\"/><node text=\"$CANARY\" bounds=\"[0,50][300,90]\"/></hierarchy>" > "$temp/delayed.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/paused.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history" bounds="[0,0][200,40]"/><node content-desc="Select multiple items" clickable="true" bounds="[240,0][280,40]"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Waiting for the key store" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/locked.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, active" bounds="[0,0][200,40]" enabled="true"/><node content-desc="Clear search" clickable="true" bounds="[200,0][240,40]" enabled="true"/><node text="0 items" bounds="[280,0][340,40]"/><node text="No results for &quot;fixture&quot;" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/filtered.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" bounds=\"[0,0][200,40]\" enabled=\"true\"/><node text=\"0 items\" bounds=\"[15,141][16,143]\"/><node text=\"$CANARY\"/></hierarchy>" > "$temp/delayed.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="true"/><node text="Nothing copied yet" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="true"/><node text="0 items" bounds="[15,141][16,143]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/paused.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="true"/><node text="3 items" bounds="[15,141][16,143]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/nonzero.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="false"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/search-disabled.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]"/><node text="Clipboard capture is paused" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/search-missing-enabled.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" bounds="[0,0][200,40]" enabled="true"/><node text="0 items" bounds="[280,0][340,40]"/><node text="Waiting for the key store" bounds="[0,50][300,90]"/></hierarchy>' > "$temp/locked.xml"
     cleared_history_holds "$temp/filtered.xml" \
         && bad "a retained zero-result search cannot prove cleared history" \
         || ok "a retained zero-result search cannot prove cleared history"
@@ -264,6 +323,15 @@ self_test_transfer() {
     cleared_history_holds "$temp/paused.xml" \
         && ok "a paused-capture empty history is also cleared" \
         || bad "a paused-capture empty history is also cleared"
+    cleared_history_holds "$temp/nonzero.xml" \
+        && bad "a present nonzero count is not cleared history" \
+        || ok "a present nonzero count is not cleared history"
+    cleared_history_holds "$temp/search-disabled.xml" \
+        && bad "a disabled default search is not settled history" \
+        || ok "a disabled default search is not settled history"
+    cleared_history_holds "$temp/search-missing-enabled.xml" \
+        && bad "default search needs explicit enabled evidence" \
+        || ok "default search needs explicit enabled evidence"
     cleared_history_holds "$temp/locked.xml" \
         && bad "an unreadable history is not a cleared one" \
         || ok "an unreadable history is not a cleared one"
@@ -275,14 +343,34 @@ self_test_transfer() {
     ! grep -Eq '[0-9]([[:space:]-]?[0-9]){12,18}' <<<"$canary_sample" \
         && ok "the storage canary cannot look like a card number" \
         || bad "the storage canary cannot look like a card number" "$canary_sample"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage" bounds="[0,0][60,44]" enabled="true" clickable="true" selected="true"/><node text="Import history" bounds="[24,70][140,90]" enabled="true"/><node text="Import…" bounds="[0,0][0,0]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-title-only.xml"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage" bounds="[0,0][60,44]" enabled="true" clickable="true" selected="true"/><node text="Export…" bounds="[20,80][120,124]" enabled="true" clickable="true"/><node text="Import…" bounds="[20,140][120,184]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[0,0][180,44]" enabled="true"/><node text="Import history" bounds="[24,70][140,90]" enabled="true"/><node text="Import…" bounds="[0,0][0,0]" enabled="true" clickable="true"/></hierarchy>' > "$temp/storage-title-only.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-ready.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="false" clickable="true"/></node></hierarchy>' > "$temp/storage-disabled.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" clickable="true"/></node></hierarchy>' > "$temp/storage-missing-enabled.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="CopyPaste" class="android.webkit.WebView" enabled="true" bounds="[0,0][320,640]"/></hierarchy>' > "$temp/blank-webview.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-import-below-fold.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Import…" bounds="[192,420][291,465]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-import-visible.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,0][308,544]" enabled="true"><node text="Clear history" enabled="true" clickable="true"/><node text="Import…" bounds="[191,186][291,231]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-clear-above-fold.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,0][308,544]" enabled="true"><node text="Clear history" bounds="[163,351][291,396]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-clear-visible.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Clear all clipboard history?" bounds="[12,190][308,430]" enabled="true"><node text="Clear all" bounds="[180,360][290,410]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-clear-confirm.xml"
     storage_transfer_actions_holds "$temp/storage-title-only.xml" \
         && bad "storage readiness requires actionable transfer buttons" \
         || ok "storage readiness requires actionable transfer buttons"
     storage_transfer_actions_holds "$temp/storage-ready.xml" \
-        && ok "storage readiness accepts visible transfer actions" \
-        || bad "storage readiness accepts visible transfer actions"
+        && ok "storage readiness accepts an enabled transfer action below the fold" \
+        || bad "storage readiness accepts an enabled transfer action below the fold"
+    storage_transfer_actions_holds "$temp/storage-disabled.xml" \
+        && bad "storage readiness rejects a disabled transfer action" \
+        || ok "storage readiness rejects a disabled transfer action"
+    storage_transfer_actions_holds "$temp/storage-missing-enabled.xml" \
+        && bad "storage readiness requires explicit enabled actions" \
+        || ok "storage readiness requires explicit enabled actions"
+    storage_transfer_actions_holds "$temp/blank-webview.xml" \
+        && bad "a blank WebView is not a ready storage pane" \
+        || ok "a blank WebView is not a ready storage pane"
+    cleared_history_holds "$temp/blank-webview.xml" \
+        && bad "a blank WebView is not a cleared history" \
+        || ok "a blank WebView is not a cleared history"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node text=\"Notifications alt+T\" bounds=\"[12,572][308,572]\"><node text=\"CopyPaste $IMPORT_FAILURE_COPY. Try again.\" bounds=\"[49,524][263,563]\"/></node></hierarchy>" > "$temp/rejected.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Notifications alt+T" bounds="[12,572][308,572]"><node text="Imported 1 item" bounds="[49,524][263,563]"/></node></hierarchy>' > "$temp/accepted.xml"
     ui_fixtures "$temp/rejected.xml"
@@ -298,6 +386,15 @@ self_test_transfer() {
         && [[ "$UI_FIXTURE_INDEX" == 3 ]] \
         && ok "clear readiness waits through retained search and delayed convergence" \
         || bad "clear readiness waits through retained search and delayed convergence"
+    storage_import_scroll_fixture_holds "$temp" \
+        && ok "seed import scrolls up and reacquires the below-fold action" \
+        || bad "seed import scrolls up and reacquires the below-fold action"
+    storage_import_scroll_fixture_holds "$temp" \
+        && ok "post-clear import scrolls up and reacquires the below-fold action" \
+        || bad "post-clear import scrolls up and reacquires the below-fold action"
+    storage_clear_scroll_fixture_holds "$temp" \
+        && ok "clear history scrolls down to its above-viewport action" \
+        || bad "clear history scrolls down to its above-viewport action"
     rm -rf "$temp"
     printf '\n%d transfer selector tests passed, %d failed\n' "$PASS" "$FAIL"
     [[ $FAIL -eq 0 ]]
@@ -322,7 +419,7 @@ sh_ mkdir -p /sdcard/Download >/dev/null
 # picker-automation and failed much later with a confusing toast timeout.
 cleanup_out="$(sh_ rm -f "/sdcard/Download/$SEED_FILE" "/sdcard/Download/$EXPORT_FILE" "/sdcard/Download/$INVALID_FILE" 2>&1)" || {
     bad "the transfer fixtures are cleared on the device" "${cleanup_out:-cleanup backend failure}"
-    summary; exit 1
+    stop_storage_transfer
 }
 python3 - "$CANARY" <<'PY' | adb_ shell dd "of=/sdcard/Download/$SEED_FILE" >/dev/null
 import json
@@ -342,11 +439,13 @@ print(json.dumps({
     "skipped_undecryptable": 0,
 }))
 PY
-restart_app seed-launch
+restart_app seed-launch || stop_storage_transfer
 if ! open_storage seed-import; then
     note "the seeded import through the picker" "Storage never opened at seed-import"
-elif ! tap_selector "Import…" "$OUT/seed-import-action.xml"; then
+    stop_storage_transfer
+elif ! tap_storage_import "$OUT/seed-import-action.xml"; then
     bad "Storage exposes import for the seed"
+    stop_storage_transfer
 else
     sleep 2
     open_downloads seed-picker || bad "Downloads is selectable for the seed import"
@@ -357,15 +456,19 @@ else
         && ok "seed import reports user-visible success" \
         || bad "seed import reports user-visible success" "no Imported toast appeared"
 fi
-open_history "$OUT/seed-history-nav.xml" \
-    || bad "History is reachable before export" "$(navigation_state "$OUT/seed-history-nav.xml")"
+if ! open_history "$OUT/seed-history-nav.xml"; then
+    bad "History is reachable before export" "$(navigation_state "$OUT/seed-history-nav.xml")"
+    stop_storage_transfer
+fi
 wait_selector "$CANARY" "$OUT/seed-history.xml" 30 && ok "the canary is visible before export" || bad "the canary is visible before export" "uiautomator did not expose it"
 
 group "Export through DocumentsUI"
 if ! open_storage export; then
     note "the export through the picker" "Storage never opened at export"
+    stop_storage_transfer
 elif ! tap_selector "Export…" "$OUT/export-action.xml"; then
     bad "Storage exposes the export action"
+    stop_storage_transfer
 else
     tap_selector "Choose where to save" "$OUT/export-confirm.xml" || bad "the export confirmation is actionable"
     sleep 2
@@ -386,14 +489,24 @@ else
 fi
 
 group "Clear and import through DocumentsUI"
-tap_scrolling "Clear history" "$OUT/clear-action.xml" up || bad "Storage exposes the clear action"
-prepare_action "Clear all" "$OUT/clear-confirm.xml" || bad "the clear confirmation is actionable"
-tap_prepared_action || bad "the clear confirmation remains actionable"
+if tap_until_state "Clear history" "$OUT/clear-confirm.xml" \
+    clear_confirmation_holds down; then
+    tap_found_action "Clear all" "$OUT/clear-confirm.xml" || {
+        bad "the clear confirmation remains actionable"
+        stop_storage_transfer
+    }
+else
+    bad "the clear confirmation is actionable" \
+        "Clear history did not open its confirmation"
+    stop_storage_transfer
+fi
 wait_authored_feedback "Cleared" "$OUT/clear-toast.xml" 15 \
     && ok "clear reports user-visible success" \
     || bad "clear reports user-visible success" "no Cleared toast appeared"
-open_history "$OUT/clear-history-nav.xml" \
-    || bad "History is reachable after clearing" "$(navigation_state "$OUT/clear-history-nav.xml")"
+if ! open_history "$OUT/clear-history-nav.xml"; then
+    bad "History is reachable after clearing" "$(navigation_state "$OUT/clear-history-nav.xml")"
+    stop_storage_transfer
+fi
 if wait_cleared_history "$OUT/cleared-history.xml" 30; then
     ok "cleared unfiltered history settles without the exported canary"
 else
@@ -401,8 +514,12 @@ else
 fi
 if ! open_storage import; then
     note "the import through the picker" "Storage never opened at import"
+    stop_storage_transfer
 else
-    tap_scrolling "Import…" "$OUT/import-action.xml" down || bad "Storage exposes the import action"
+    tap_storage_import "$OUT/import-action.xml" || {
+        bad "Storage exposes the import action"
+        stop_storage_transfer
+    }
     sleep 2
     open_downloads import-picker || bad "Downloads is selectable in the open picker"
     tap_selector "$EXPORT_FILE" "$OUT/import-file.xml" 15 || bad "the exported document is selectable"
@@ -416,10 +533,12 @@ else
 fi
 
 group "Persisted ciphertext"
-restart_app post-import-restart
+restart_app post-import-restart || stop_storage_transfer
 transfer_pid="$(app_pid)"
-open_history "$OUT/transfer-history-nav.xml" \
-    || bad "History is reachable after restart" "$(navigation_state "$OUT/transfer-history-nav.xml")"
+if ! open_history "$OUT/transfer-history-nav.xml"; then
+    bad "History is reachable after restart" "$(navigation_state "$OUT/transfer-history-nav.xml")"
+    stop_storage_transfer
+fi
 if wait_selector "$CANARY" "$OUT/transfer-persisted.xml" 45; then
     ok "the imported history survives a process restart"
 else
@@ -449,8 +568,12 @@ group "Rejected import is visible and non-destructive"
 printf 'not-json\n' | adb_ shell dd "of=/sdcard/Download/$INVALID_FILE" >/dev/null
 if ! open_storage rejected-import; then
     note "the rejected import through the picker" "Storage never opened at rejected-import"
+    stop_storage_transfer
 else
-    tap_scrolling "Import…" "$OUT/invalid-action.xml" up || bad "Storage exposes import for the failure case"
+    tap_storage_import "$OUT/invalid-action.xml" || {
+        bad "Storage exposes import for the failure case"
+        stop_storage_transfer
+    }
     sleep 2
     open_downloads invalid-picker || bad "Downloads is selectable for the failure case"
     prepare_action "$INVALID_FILE" "$OUT/invalid-file.xml" 15 || bad "the invalid document is selectable"
@@ -462,13 +585,15 @@ else
     fi
     capture_screen import-failure
 fi
-open_history "$OUT/history-nav.xml" \
-    || bad "History remains reachable after the rejected import" "$(navigation_state "$OUT/history-nav.xml")"
+if ! open_history "$OUT/history-nav.xml"; then
+    bad "History remains reachable after the rejected import" "$(navigation_state "$OUT/history-nav.xml")"
+    stop_storage_transfer
+fi
 wait_selector "$CANARY" "$OUT/history-after-failure.xml" 20 && ok "a rejected import leaves persisted history intact" || bad "a rejected import leaves persisted history intact"
 
 dump_logcat storage-transfer
 crashes="$(crash_report "$OUT/storage-transfer.log" "$transfer_pid")"
 [[ -z "$crashes" ]] && ok "no app crash occurred during storage transfer" || bad "no app crash occurred during storage transfer" "$(head -n 20 <<<"$crashes")"
 
-printf '\n## Android storage transfer: %s\n\n%d assertions passed, %d failed.\n' "$([[ $FAIL -eq 0 ]] && echo passed || echo FAILED)" "$PASS" "$FAIL" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+storage_transfer_summary
 [[ $FAIL -eq 0 ]]

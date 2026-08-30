@@ -243,6 +243,7 @@ fi
 
 second_launch() {
     adb logcat -c || true
+    second_launched_at="$SECONDS"
     start2="$(sh_ am start -W -n "$MAIN")"
     wait_for 60 has_pid || true
     pid2="$(app_pid)"
@@ -266,6 +267,38 @@ if [[ -n "$foreign_kill" ]]; then
     probe "the platform killed the second launch once" "$foreign_kill"
     second_launch
     foreign_kill="$(second_launch_foreign_kill)"
+fi
+
+# A new PID does not prove that the recreated WebView painted. Reuse the same
+# bounded native paint assertion immediately after the restart and collect the
+# new process's socket alongside its XML and screenshot.
+if [[ -n "$pid2" ]]; then
+    wake_screen
+    restart_focus_before="$(sh_ dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | head -n 4)"
+    if [[ "$(app_pid)" == "$pid2" && "$restart_focus_before" == *"$PKG"* ]]; then
+        ok "the restarted process owns the foreground package before paint"
+    else
+        bad "the restarted process owns the foreground package before paint" \
+            "expected pid $pid2 and package $PKG; native ownership was not established"
+    fi
+    assert_painted "$PAINT_TIMEOUT" "$second_launched_at" "$OUT/ui-launch2.xml" "$OUT/launch2.png"
+    restart_focus_after="$(sh_ dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | head -n 4)"
+    if [[ "$(app_pid)" == "$pid2" && "$restart_focus_after" == *"$PKG"* ]]; then
+        ok "the restarted process owns the foreground package after paint"
+    else
+        bad "the restarted process owns the foreground package after paint" \
+            "expected pid $pid2 and package $PKG; native ownership changed during paint"
+    fi
+    unix_sockets2="$(sh_ cat /proc/net/unix)"
+    webview_socket2="$(devtools_sockets "$unix_sockets2" "$pid2")"
+    if [[ -n "$webview_socket2" ]]; then
+        ok "the restarted WebView published a devtools socket"
+    else
+        bad "the restarted WebView published a devtools socket" \
+            "nothing matching @webview_devtools_remote_$pid2 is open"
+    fi
+else
+    bad "the restarted WebView painted a UI with content" "the second launch produced no process"
 fi
 
 if [[ -n "$pid2" && "$pid2" != "$pid1" ]]; then
