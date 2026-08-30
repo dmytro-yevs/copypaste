@@ -264,6 +264,53 @@ impl Message {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Corpus {
+        display_leak_cases: Vec<DisplayCase>,
+        safe_display_cases: Vec<SafeCase>,
+        #[serde(default)]
+        redaction_cases: Vec<RedactionCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DisplayCase {
+        id: String,
+        surface: String,
+        expected_surface: String,
+        forbidden_fragments: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct SafeCase {
+        id: String,
+        surface: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RedactionCase {
+        id: String,
+        surface: String,
+        expected_surface: String,
+        forbidden_fragments: Vec<String>,
+    }
+
+    fn corpus() -> Corpus {
+        serde_json::from_str(include_str!(
+            "../../../test-support/security/path-security-vectors.json"
+        ))
+        .expect("path security corpus is valid")
+    }
+
+    fn export_surface(surface: &str) -> String {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("daemon.2026-08-01.log"), surface).unwrap();
+        export(directory.path(), Process::Daemon).unwrap()
+    }
 
     #[test]
     fn export_redacts_a_path_and_ignores_unrelated_files() {
@@ -303,5 +350,50 @@ mod tests {
 
         let json = serde_json::to_value(event).unwrap();
         assert_eq!(json["timestamp_ms"], serde_json::json!(i64::MAX));
+    }
+
+    #[test]
+    fn support_log_export_path_security_corpus() {
+        let corpus = corpus();
+        for case in corpus.display_leak_cases {
+            let rendered = export_surface(&case.surface);
+            assert_eq!(
+                rendered,
+                format!("{}\n", case.expected_surface),
+                "{} rendered unexpectedly",
+                case.id
+            );
+            for fragment in case.forbidden_fragments {
+                assert!(
+                    !rendered.contains(&fragment),
+                    "{} kept a forbidden fragment",
+                    case.id
+                );
+            }
+        }
+        for case in corpus.safe_display_cases {
+            assert_eq!(
+                export_surface(&case.surface),
+                format!("{}\n", case.surface),
+                "{} was changed",
+                case.id
+            );
+        }
+        for case in corpus.redaction_cases {
+            let rendered = export_surface(&case.surface);
+            assert_eq!(
+                rendered,
+                format!("{}\n", case.expected_surface),
+                "{} rendered unexpectedly",
+                case.id
+            );
+            for fragment in case.forbidden_fragments {
+                assert!(
+                    !rendered.contains(&fragment),
+                    "{} kept a forbidden fragment",
+                    case.id
+                );
+            }
+        }
     }
 }

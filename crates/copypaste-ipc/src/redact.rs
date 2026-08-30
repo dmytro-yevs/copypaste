@@ -20,8 +20,8 @@
 /// A path may contain a space, and the one that matters does:
 /// `~/Library/Application Support/com.copypaste.CopyPaste/daemon.sock`.
 /// Redacting one token at a time left the path tail on screen. So once a token is
-/// path-shaped, following tokens carrying a `/` are absorbed into the same
-/// redaction.
+/// path-shaped, following tokens that remain inside its quotes or carry a path
+/// separator are absorbed into the same redaction.
 pub fn scrub_paths(message: &str) -> String {
     let tokens: Vec<&str> = message.split_inclusive(char::is_whitespace).collect();
     let mut out = String::with_capacity(message.len());
@@ -35,8 +35,12 @@ pub fn scrub_paths(message: &str) -> String {
         }
         // Absorb the continuation, then keep the whitespace that ended it so
         // the sentence still reads normally.
+        let quote = opening_quote(trimmed);
         let mut last = i;
-        while last + 1 < tokens.len() && tokens[last + 1].trim_end().contains('/') {
+        while last + 1 < tokens.len()
+            && (contains_path_separator(tokens[last + 1].trim_end())
+                || quote.is_some_and(|quote| !ends_with_quote(tokens[last], quote)))
+        {
             last += 1;
         }
         let token = tokens[last];
@@ -53,24 +57,192 @@ pub fn scrub_paths(message: &str) -> String {
 /// message, a false negative leaks the username.
 fn looks_like_path(token: &str) -> bool {
     // A message may wrap a path in punctuation — strip it before deciding.
-    let core = token.trim_start_matches(['(', '[', '"', '\'', '`']);
+    let core = token.trim_start_matches(['(', '[', '{', '"', '\'', '`']);
     if core.is_empty() {
         return false;
     }
+    if starts_with_ignore_ascii_case(core, "http://")
+        || starts_with_ignore_ascii_case(core, "https://")
+    {
+        return false;
+    }
+    if starts_with_ignore_ascii_case(core, "file://") {
+        return true;
+    }
+    let core = path_value(core).trim_start_matches(['"', '\'', '`']);
+    if starts_with_ignore_ascii_case(core, "http://")
+        || starts_with_ignore_ascii_case(core, "https://")
+    {
+        return false;
+    }
+
     core.starts_with('/')
         || core.starts_with("~/")
+        || core.starts_with("~\\")
         || core.starts_with("./")
+        || core.starts_with(".\\")
         || core.starts_with("../")
-        || core.starts_with("file://")
+        || core.starts_with("..\\")
+        || starts_with_ignore_ascii_case(core, "file://")
         || core.contains("/Users/")
         || core.contains("/home/")
-        // Windows-shaped, for completeness: C:\Users\name
-        || (core.len() > 3 && core.as_bytes()[1] == b':' && core.contains('\\'))
+        || starts_with_path_variable(core)
+        || core.starts_with("\\\\")
+        || starts_with_windows_drive(core)
+        || core.starts_with("copypaste-v2.db")
+}
+
+fn path_value(token: &str) -> &str {
+    token
+        .split_once('=')
+        .filter(|(label, _)| is_label(label))
+        .or_else(|| token.split_once(':').filter(|(label, _)| is_label(label)))
+        .map_or(token, |(_, value)| value)
+}
+
+fn is_label(value: &str) -> bool {
+    value.len() > 1
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
+    value
+        .get(..prefix.len())
+        .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+}
+
+fn starts_with_path_variable(value: &str) -> bool {
+    if let Some(rest) = value.strip_prefix('$') {
+        let variable_end = rest
+            .bytes()
+            .position(|byte| !(byte.is_ascii_alphanumeric() || byte == b'_'))
+            .unwrap_or(rest.len());
+        return variable_end > 0 && matches!(rest.as_bytes().get(variable_end), Some(b'/' | b'\\'));
+    }
+
+    value
+        .strip_prefix('%')
+        .and_then(|rest| rest.find('%').map(|end| (end, rest)))
+        .is_some_and(|(end, rest)| {
+            end > 0 && matches!(rest.as_bytes().get(end + 1), Some(b'/' | b'\\'))
+        })
+}
+
+fn starts_with_windows_drive(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+}
+
+fn opening_quote(token: &str) -> Option<char> {
+    path_value(token.trim_start_matches(['(', '[', '{']))
+        .chars()
+        .next()
+        .filter(|character| matches!(character, '"' | '\'' | '`'))
+}
+
+fn ends_with_quote(token: &str, quote: char) -> bool {
+    token
+        .trim_end()
+        .trim_end_matches([')', ']', '}', ',', ';', '.'])
+        .ends_with(quote)
+}
+
+fn contains_path_separator(token: &str) -> bool {
+    token.contains('/') || token.contains('\\')
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Corpus {
+        display_leak_cases: Vec<DisplayCase>,
+        safe_display_cases: Vec<SafeCase>,
+        #[serde(default)]
+        redaction_cases: Vec<RedactionCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DisplayCase {
+        id: String,
+        surface: String,
+        expected_surface: String,
+        forbidden_fragments: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct SafeCase {
+        id: String,
+        surface: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RedactionCase {
+        id: String,
+        surface: String,
+        expected_surface: String,
+        forbidden_fragments: Vec<String>,
+    }
+
+    fn corpus() -> Corpus {
+        serde_json::from_str(include_str!(
+            "../../../test-support/security/path-security-vectors.json"
+        ))
+        .expect("path security corpus is valid")
+    }
+
+    #[test]
+    fn shared_redaction_path_security_corpus() {
+        let corpus = corpus();
+        for case in corpus.display_leak_cases {
+            let rendered = scrub_paths(&case.surface);
+            assert_eq!(
+                rendered, case.expected_surface,
+                "{} rendered unexpectedly",
+                case.id
+            );
+            for fragment in case.forbidden_fragments {
+                assert!(
+                    !rendered.contains(&fragment),
+                    "{} kept a forbidden fragment",
+                    case.id
+                );
+            }
+        }
+        for case in corpus.safe_display_cases {
+            assert_eq!(
+                scrub_paths(&case.surface),
+                case.surface,
+                "{} was changed",
+                case.id
+            );
+        }
+        for case in corpus.redaction_cases {
+            let rendered = scrub_paths(&case.surface);
+            assert_eq!(
+                rendered, case.expected_surface,
+                "{} rendered unexpectedly",
+                case.id
+            );
+            for fragment in case.forbidden_fragments {
+                assert!(
+                    !rendered.contains(&fragment),
+                    "{} kept a forbidden fragment",
+                    case.id
+                );
+            }
+        }
+    }
 
     #[test]
     fn redacts_unix_paths_and_keeps_the_sentence() {
