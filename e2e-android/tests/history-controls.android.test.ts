@@ -19,11 +19,13 @@ import { addItems, cleanUpItems } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
 import {
   controlledMenuReached,
+  historyFilterDiagnostic,
+  safeJSON,
   sameSortedItemIds,
   sortedItemIds,
   withCleanupPreservingPrimary,
 } from "../src/harness/history-controls.js";
-import { itemRows, rowBoxes } from "../src/harness/list.js";
+import { itemRows, listSnapshot, rowBoxes } from "../src/harness/list.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   readTouchCapabilityDiagnostic,
@@ -140,6 +142,28 @@ async function closeKindMenu(): Promise<void> {
   await waitForKindMenu(false);
 }
 
+async function kindMenuDiagnostic() {
+  return app.withPage((page) =>
+    page.evaluate((selector) => {
+      const trigger = document.querySelector(selector);
+      const menuId = trigger?.getAttribute("aria-controls");
+      const menu = menuId ? document.getElementById(menuId) : null;
+      const checkedValue = (name: string): string | null => {
+        const item = Array.from(
+          menu?.querySelectorAll('[role="menuitemcheckbox"]') ?? [],
+        ).find((node) => node.textContent?.trim() === name);
+        return item?.getAttribute("aria-checked") ?? null;
+      };
+      return {
+        allKindsAriaChecked: checkedValue("All kinds"),
+        linksAriaChecked: checkedValue("Links"),
+        menuPresent: menu !== null,
+        menuExpanded: trigger?.getAttribute("aria-expanded") === "true",
+      };
+    }, KIND_FILTER),
+  );
+}
+
 describe("the toolbar", () => {
   test("lays every control out with a real box, inside the screen", async () => {
     const width = await app.withPage((page) =>
@@ -240,18 +264,29 @@ describe("the toolbar", () => {
         // Restore All from that live menu; the trigger is occluded until Escape.
         await waitForKindMenu(true);
         await tapElement(app, '[role="menuitemcheckbox"]', "All kinds");
+        let lastObservation: ReturnType<typeof historyFilterDiagnostic> | null =
+          null;
         await waitFor(async () => {
-          const restoredIds = itemRows(await rowBoxes(app)).map(
-            (row) => row.id,
+          const snapshot = await listSnapshot(app);
+          const restoredIds = itemRows(snapshot.rows).map((row) => row.id);
+          const defaultTriggerCount = await count(
+            app,
+            'button[aria-label="Filter by kind, default: All kinds"]',
+          );
+          lastObservation = historyFilterDiagnostic(
+            beforeIds,
+            restoredIds,
+            defaultTriggerCount,
+            await kindMenuDiagnostic(),
+            snapshot,
           );
           return (
             sameSortedItemIds(beforeIds, restoredIds) &&
-            (await count(
-              app,
-              'button[aria-label="Filter by kind, default: All kinds"]',
-            )) === 1
+            defaultTriggerCount === 1
           );
-        }, "clearing the kind filter never restored the exact list");
+        }, () =>
+          `clearing the kind filter never restored the exact list; lastObservation=${safeJSON(lastObservation)}`,
+        );
         await waitForKindMenu(true);
       },
       closeKindMenu,
