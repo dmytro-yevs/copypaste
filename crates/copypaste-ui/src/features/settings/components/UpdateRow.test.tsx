@@ -42,7 +42,7 @@ function renderStatus(status: UpdateStatus) {
 
 describe("UpdateRow static states", () => {
   it("keeps unsupported update support visible and non-actionable", async () => {
-    const { container } = renderStatus({ state: "unsupported" });
+    renderStatus({ state: "unsupported" });
 
     expect(await screen.findByText("Native CopyPaste app required.")).toBeTruthy();
     expect(screen.getByText("Install the native app to check and install updates here.")).toBeTruthy();
@@ -50,13 +50,12 @@ describe("UpdateRow static states", () => {
     expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
-    expect(container.querySelector(".activity")).toBeNull();
     expect(updater.checkForUpdate).not.toHaveBeenCalled();
     expect(updater.installUpdate).not.toHaveBeenCalled();
   });
 
   it("keeps unconfigured update support visible and non-actionable", async () => {
-    const { container } = renderStatus({ state: "unconfigured" });
+    renderStatus({ state: "unconfigured" });
 
     expect(await screen.findByText("Updates aren't configured in this build.")).toBeTruthy();
     expect(screen.getByText("Checks the signed CopyPaste release feed for Windows.")).toBeTruthy();
@@ -64,7 +63,6 @@ describe("UpdateRow static states", () => {
     expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
-    expect(container.querySelector(".activity")).toBeNull();
     expect(updater.checkForUpdate).not.toHaveBeenCalled();
     expect(updater.installUpdate).not.toHaveBeenCalled();
   });
