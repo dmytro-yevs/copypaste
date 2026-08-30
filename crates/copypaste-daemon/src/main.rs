@@ -11,6 +11,9 @@ mod cloud;
 mod meta;
 mod notify;
 mod p2p;
+mod runtime;
+#[cfg(test)]
+mod runtime_tests;
 mod server;
 mod settings;
 mod shutdown;
@@ -34,6 +37,7 @@ use crate::cli::{cloud_config, Args};
 use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
+use crate::runtime::run_with_bounded_shutdown;
 use crate::settings::Settings;
 use crate::startup::{halt_or_fail, relocate, wait_for_shutdown};
 
@@ -42,9 +46,12 @@ pub use crate::state::AppState;
 /// Reported by `status`. Single source: the crate version.
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     initialize_macos_workspace();
+    run_with_bounded_shutdown(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // `--data-dir` moves both defaults; an explicit `COPYPASTE_SOCKET` still
