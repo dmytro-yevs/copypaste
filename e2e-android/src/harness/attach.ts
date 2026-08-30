@@ -38,40 +38,44 @@ export interface AttachTargetObservation {
   webSocketPresent: boolean;
 }
 
+export interface AttachPagesDiagnostic {
+  status: "ok" | "error";
+  count: number;
+  appOriginMatchCount: number;
+}
+
+export interface AttachRawDiagnostic {
+  status: "ok" | "http-error" | "fetch-error" | "invalid-json";
+  count: number;
+  targetTypeHistogram: { page: number; webview: number; other: number };
+  appOriginMatchCount: number;
+  webSocketPresent: boolean;
+}
+
 export type DirectOutcome =
   | "not-attempted"
   | "connected"
+  | "connect-failed"
+  | "pages-failed"
   | "no-page"
-  | "failed"
+  | "wrong-origin"
+  | "ownership-failed"
   | "no-websocket"
   | "raw-empty"
   | "raw-error";
 
 export interface AttachFinalDiagnostic {
-  targetTypeHistogram: { page: number; webview: number; other: number };
-  appOriginMatchCount: number;
-  webSocketPresent: boolean;
+  pages: AttachPagesDiagnostic;
+  raw: AttachRawDiagnostic;
   directOutcome: DirectOutcome;
 }
 
 export function finalAttachDiagnostic(
-  pages: readonly AttachTargetObservation[],
-  raw: { status: "ok" | "error"; targets: readonly AttachTargetObservation[] },
+  pages: AttachPagesDiagnostic,
+  raw: AttachRawDiagnostic,
   directOutcome: DirectOutcome,
 ): AttachFinalDiagnostic {
-  const observations = raw.status === "ok" ? raw.targets : pages;
-  const targetTypeHistogram = { page: 0, webview: 0, other: 0 };
-  for (const observation of observations) {
-    if (observation.type === "page") targetTypeHistogram.page += 1;
-    else if (observation.type === "webview") targetTypeHistogram.webview += 1;
-    else targetTypeHistogram.other += 1;
-  }
-  return {
-    targetTypeHistogram,
-    appOriginMatchCount: observations.filter((target) => target.appOrigin).length,
-    webSocketPresent: observations.some((target) => target.webSocketPresent),
-    directOutcome,
-  };
+  return { pages, raw, directOutcome };
 }
 
 export type AttachStep =

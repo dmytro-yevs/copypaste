@@ -10,6 +10,7 @@ import {
   webviewComplaints,
   type AttachSample,
 } from "../src/harness/attach.js";
+import { directAppTarget, type DirectBrowserLike } from "../src/harness/app.js";
 
 const RUNNING: AttachSample = {
   targets: [],
@@ -167,43 +168,118 @@ describe("bounded final attach diagnostics", () => {
   test("uses a raw app target when pages() is empty", () => {
     expect(
       finalAttachDiagnostic(
-        [],
         {
           status: "ok",
-          targets: [{ type: "webview", appOrigin: true, webSocketPresent: true }],
+          count: 0,
+          appOriginMatchCount: 0,
+        },
+        {
+          status: "ok",
+          count: 1,
+          targetTypeHistogram: { page: 0, webview: 1, other: 0 },
+          appOriginMatchCount: 1,
+          webSocketPresent: true,
         },
         "connected",
       ),
     ).toEqual({
-      targetTypeHistogram: { page: 0, webview: 1, other: 0 },
-      appOriginMatchCount: 1,
-      webSocketPresent: true,
+      pages: { status: "ok", count: 0, appOriginMatchCount: 0 },
+      raw: {
+        status: "ok",
+        count: 1,
+        targetTypeHistogram: { page: 0, webview: 1, other: 0 },
+        appOriginMatchCount: 1,
+        webSocketPresent: true,
+      },
       directOutcome: "connected",
     });
   });
 
   test("distinguishes a raw target-list error from an empty list", () => {
-    const error = finalAttachDiagnostic([], { status: "error", targets: [] }, "raw-error");
-    const empty = finalAttachDiagnostic([], { status: "ok", targets: [] }, "raw-empty");
-    expect(error.directOutcome).toBe("raw-error");
-    expect(empty.directOutcome).toBe("raw-empty");
+    const pages = { status: "error" as const, count: 0, appOriginMatchCount: 0 };
+    const rawError = { status: "fetch-error" as const, count: 0, targetTypeHistogram: { page: 0, webview: 0, other: 0 }, appOriginMatchCount: 0, webSocketPresent: false };
+    const rawEmpty = { ...rawError, status: "ok" as const };
+    const error = finalAttachDiagnostic(pages, rawError, "raw-error");
+    const empty = finalAttachDiagnostic(pages, rawEmpty, "raw-empty");
+    expect(error.raw.status).toBe("fetch-error");
+    expect(empty.raw.status).toBe("ok");
     expect(JSON.stringify(error)).not.toMatch(/https?:|title|provider|secret/i);
   });
 
   test("counts unknown target types as other without retaining target values", () => {
     const diagnostic = finalAttachDiagnostic(
-      [{ type: "page", appOrigin: false, webSocketPresent: false }],
       {
-        status: "ok",
-        targets: [{ type: "service", appOrigin: false, webSocketPresent: true }],
+        status: "ok", count: 1, appOriginMatchCount: 0,
+      },
+      {
+        status: "ok", count: 1,
+        targetTypeHistogram: { page: 0, webview: 0, other: 1 },
+        appOriginMatchCount: 0, webSocketPresent: true,
       },
       "no-page",
     );
     expect(diagnostic).toEqual({
-      targetTypeHistogram: { page: 0, webview: 0, other: 1 },
-      appOriginMatchCount: 0,
-      webSocketPresent: true,
+      pages: { status: "ok", count: 1, appOriginMatchCount: 0 },
+      raw: {
+        status: "ok", count: 1,
+        targetTypeHistogram: { page: 0, webview: 0, other: 1 },
+        appOriginMatchCount: 0, webSocketPresent: true,
+      },
       directOutcome: "no-page",
     });
+  });
+});
+
+function fakeBrowser(
+  pages: readonly string[],
+  events: string[],
+  pagesFailure = false,
+): DirectBrowserLike {
+  return {
+    pages: async () => {
+      events.push("pages");
+      if (pagesFailure) throw new Error("pages failed");
+      return pages.map((url) => ({ url: () => url }));
+    },
+    disconnect: async () => {
+      events.push("direct-disconnect");
+    },
+  };
+}
+
+describe("direct CDP target ownership", () => {
+  test("disconnects the original before transferring an app page", async () => {
+    const events: string[] = [];
+    const original = { disconnect: async () => { events.push("original-disconnect"); } };
+    const direct = fakeBrowser(["http://tauri.localhost/"], events);
+    const result = await directAppTarget(original, "socket-a", async (socket) => {
+      events.push(`connect:${socket}`);
+      return direct;
+    });
+    expect(result.outcome).toBe("connected");
+    expect(events).toEqual(["connect:socket-a", "pages", "original-disconnect"]);
+  });
+
+  test.each([
+    ["connect-failed", async () => { throw new Error("connect failed"); }, false],
+    ["pages-failed", async () => fakeBrowser([], [], true), true],
+    ["no-page", async () => fakeBrowser([], [], false), true],
+    ["wrong-origin", async () => fakeBrowser(["http://example.test/"], [], false), true],
+  ] as const)("handles an unused direct connection on %s", async (outcome, connect, shouldClose) => {
+    const events: string[] = [];
+    const original = { disconnect: async () => { events.push("original-disconnect"); } };
+    const direct = await directAppTarget(original, "socket-a", async (socket) => {
+      events.push(`connect:${socket}`);
+      const browser = await connect();
+      const originalDisconnect = browser.disconnect;
+      browser.disconnect = async () => {
+        events.push("direct-disconnect");
+        await originalDisconnect();
+      };
+      return browser;
+    });
+    expect(direct.outcome).toBe(outcome);
+    expect(events.includes("direct-disconnect")).toBe(shouldClose);
+    expect(events).not.toContain("original-disconnect");
   });
 });
