@@ -26,11 +26,12 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
     // keeps its order — which puts every one of them *below* the cloud upload
     // floor on a device that has already synced. Taken before the items move.
     let oldest = items.iter().map(|item| item.created_at).min();
-    match copypaste_core::import(
+    match copypaste_core::transfer::import_with_current_retention(
         &state.store,
         &state.detector,
         &state.keyring,
         &settings,
+        || state.settings.get().clone(),
         items,
     ) {
         Ok(result) => {
