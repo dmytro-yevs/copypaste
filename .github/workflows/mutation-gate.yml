@@ -51,6 +51,10 @@ jobs:
       - name: Prove no self-test in the manifest is stranded off CI
         run: python3 scripts/mutation-gate/run.py --platforms-covered linux,windows
 
+      - name: Run protected UIA diagnostic fixture self-tests
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/release/windows-protected-failure-diagnostics.test.ps1 -RunProtectedFixtureTests
+
       - name: Run every mutation declared for Linux
         run: python3 scripts/mutation-gate/run.py --platform linux --require-all
 
