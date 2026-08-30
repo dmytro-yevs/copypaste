@@ -25,10 +25,15 @@ function sourceMask(value: string): number | undefined {
     return Number.parseInt(value.slice(2), 16);
   }
   const names = value.split(" | ");
-  if (names.length === 0 || names.some((name) => SOURCE_MASKS[name] === undefined)) {
-    return undefined;
+  if (names.length === 0) return undefined;
+  let mask = 0;
+  for (const name of names) {
+    if (!Object.hasOwn(SOURCE_MASKS, name)) return undefined;
+    const source = SOURCE_MASKS[name];
+    if (typeof source !== "number" || !Number.isSafeInteger(source)) return undefined;
+    mask = (mask | source) >>> 0;
   }
-  return names.reduce((mask, name) => (mask | SOURCE_MASKS[name]!) >>> 0, 0);
+  return mask;
 }
 
 export function parseInputSourceMasks(inputDump: string | undefined): number[] | "unknown" {
