@@ -4,8 +4,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::task::{JoinError, JoinHandle};
+use tokio::time::{timeout, timeout_at, Instant};
 use tracing::warn;
 
 use crate::startup::remove_socket;
@@ -41,20 +41,35 @@ pub async fn requested(shutdown: Option<watch::Receiver<bool>>) {
 }
 
 /// Wait out the background loops, then persist and clean up either way.
+///
+/// `loops` contains cooperative async owners only. A started `spawn_blocking`
+/// handle needs a lifecycle owner that can signal its closure; Tokio cannot
+/// abort the blocking closure through its outer handle.
 pub async fn teardown(
     state: &AppState,
     loops: Vec<(&'static str, JoinHandle<()>)>,
     socket_path: &Path,
 ) {
-    let joined = async {
-        for (name, task) in loops {
-            if let Err(e) = task.await {
-                warn!(loop_name = name, error = ?e, "a background loop did not shut down cleanly");
+    let mut loops = loops;
+    let deadline = Instant::now() + TEARDOWN_BUDGET;
+    let mut joined = 0;
+    for (name, task) in &mut loops {
+        match timeout_at(deadline, task).await {
+            Ok(result) => record_loop_result(*name, result),
+            Err(_) => {
+                warn!("a background loop outlived the shutdown budget");
+                break;
             }
         }
-    };
-    if timeout(TEARDOWN_BUDGET, joined).await.is_err() {
-        warn!("a background loop outlived the shutdown budget");
+        joined += 1;
+    }
+    if joined != loops.len() {
+        for (_, task) in loops.iter().skip(joined) {
+            task.abort();
+        }
+        for (name, task) in loops.iter_mut().skip(joined) {
+            record_loop_result(*name, task.await);
+        }
     }
 
     if let Err(e) = state.p2p.peers().flush() {
@@ -63,13 +78,42 @@ pub async fn teardown(
     remove_socket(socket_path);
 }
 
+fn record_loop_result(name: &'static str, result: Result<(), JoinError>) {
+    match result {
+        Ok(()) => {}
+        Err(error) if error.is_cancelled() => {
+            warn!(
+                loop_name = name,
+                "a background loop was cancelled during shutdown"
+            );
+        }
+        Err(error) if error.is_panic() => {
+            warn!(loop_name = name, error = ?error, "a background loop panicked during shutdown");
+        }
+        Err(error) => {
+            warn!(loop_name = name, error = ?error, "a background loop did not shut down cleanly");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::{Condvar, Mutex};
+
+    use tokio::sync::oneshot;
 
     use super::*;
     use crate::testutil::{peer_at, test_state};
+
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
 
     /// The property DMY-159 asks for from the daemon side: a loop that never
     /// observes shutdown must not cost the paired-device list or leave the
@@ -112,6 +156,119 @@ mod tests {
 
         assert!(done.load(Ordering::SeqCst), "teardown did not wait");
         assert!(!socket.exists());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_teardown_cancels_and_joins_every_owned_loop() {
+        let (state, dir) = test_state("teardown-owned-tasks");
+        let socket = dir.path().join("copypaste.sock");
+        std::fs::write(&socket, b"").unwrap();
+        let stalled_dropped = Arc::new(AtomicBool::new(false));
+        let later_dropped = Arc::new(AtomicBool::new(false));
+        let later_completed = Arc::new(AtomicBool::new(false));
+        let release_later = Arc::new(tokio::sync::Notify::new());
+        let (stalled_ready_tx, stalled_ready_rx) = oneshot::channel();
+        let (later_ready_tx, later_ready_rx) = oneshot::channel();
+        let stalled = tokio::spawn({
+            let stalled_dropped = Arc::clone(&stalled_dropped);
+            async move {
+                let _drop = DropFlag(stalled_dropped);
+                stalled_ready_tx.send(()).unwrap();
+                std::future::pending::<()>().await;
+            }
+        });
+        let later = tokio::spawn({
+            let later_dropped = Arc::clone(&later_dropped);
+            let later_completed = Arc::clone(&later_completed);
+            let release_later = Arc::clone(&release_later);
+            async move {
+                let _drop = DropFlag(later_dropped);
+                later_ready_tx.send(()).unwrap();
+                release_later.notified().await;
+                later_completed.store(true, Ordering::SeqCst);
+            }
+        });
+        stalled_ready_rx.await.unwrap();
+        later_ready_rx.await.unwrap();
+
+        teardown(
+            &state,
+            vec![("stalled", stalled), ("later", later)],
+            &socket,
+        )
+        .await;
+
+        assert!(stalled_dropped.load(Ordering::SeqCst));
+        assert!(later_dropped.load(Ordering::SeqCst));
+        release_later.notify_one();
+        tokio::task::yield_now().await;
+        assert!(
+            !later_completed.load(Ordering::SeqCst),
+            "a handle after the timed-out loop kept running after teardown"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_teardown_cleans_up_before_an_aborted_outer_blocking_task_finishes() {
+        let (state, dir) = test_state("teardown-blocking-child");
+        let socket = dir.path().join("copypaste.sock");
+        std::fs::write(&socket, b"").unwrap();
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let blocking_finished = Arc::new(AtomicBool::new(false));
+        let (stalled_ready_tx, stalled_ready_rx) = oneshot::channel();
+        let (blocking_ready_tx, blocking_ready_rx) = oneshot::channel();
+        let (blocking_finished_tx, blocking_finished_rx) = oneshot::channel();
+        let stalled = tokio::spawn(async move {
+            stalled_ready_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        let blocking_outer = tokio::spawn({
+            let release = Arc::clone(&release);
+            let blocking_finished = Arc::clone(&blocking_finished);
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    blocking_ready_tx.send(()).unwrap();
+                    let (released, wake) = &*release;
+                    let mut released = released.lock().unwrap();
+                    while !*released {
+                        released = wake.wait(released).unwrap();
+                    }
+                    blocking_finished.store(true, Ordering::SeqCst);
+                    blocking_finished_tx.send(()).unwrap();
+                })
+                .await
+                .unwrap();
+            }
+        });
+        stalled_ready_rx.await.unwrap();
+        blocking_ready_rx.await.unwrap();
+        let teardown = tokio::spawn({
+            let state = Arc::clone(&state);
+            let socket = socket.clone();
+            async move {
+                teardown(
+                    &state,
+                    vec![("stalled", stalled), ("blocking outer", blocking_outer)],
+                    &socket,
+                )
+                .await;
+            }
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(TEARDOWN_BUDGET).await;
+        teardown.await.unwrap();
+
+        let socket_removed = !socket.exists();
+        let blocking_still_running = !blocking_finished.load(Ordering::SeqCst);
+        let (released, wake) = &*release;
+        *released.lock().unwrap() = true;
+        wake.notify_one();
+        blocking_finished_rx.await.unwrap();
+        assert!(socket_removed, "cleanup waited for the blocking child");
+        assert!(
+            blocking_still_running,
+            "aborting the outer handle was treated as stopping blocking work"
+        );
     }
 
     #[tokio::test]
