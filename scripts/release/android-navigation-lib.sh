@@ -44,6 +44,7 @@ tap_until_state() { # <selector> <artifact> <predicate> <none|up|down> [timeout]
     [[ "$direction" == none || "$direction" == up || "$direction" == down ]] || return 2
     while (( SECONDS - started < timeout )); do
         if "$dump" "$artifact"; then
+            (( SECONDS - started < timeout )) || return 1
             "$predicate" "$artifact" && return 0
             point=""
             if enabled_action_exists_exact "$artifact" "$selector"; then
@@ -60,19 +61,10 @@ tap_until_state() { # <selector> <artifact> <predicate> <none|up|down> [timeout]
     return 1
 }
 
-wait_app_navigable() { # <artifact> [timeout] [dump function]
-    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}" dump="${3:-dump_hierarchy}"
-    local started="$SECONDS"
-    while (( SECONDS - started < timeout )); do
-        if "$dump" "$artifact"; then
-            app_navigation_holds "$artifact" && return 0
-            if [[ "$dump" == dump_hierarchy ]]; then
-                tap_selector_scrolling "Explore first" "$artifact" up 8 || true
-            fi
-        fi
-        sleep 1
-    done
-    return 1
+wait_app_navigable() { # <artifact> [timeout] [dump] [scroll] [tap] [pace]
+    tap_until_state "Explore first" "$1" app_navigation_holds up \
+        "${2:-${WAIT_SECS:-45}}" "${3:-dump_hierarchy}" \
+        "${4:-scroll_content}" "${5:-tap_transition_point}" "${6:-settle_pace}"
 }
 
 navigation_fixture_destination_holds() { # <artifact>
@@ -140,15 +132,101 @@ navigation_transition_self_test() { # <temp>
     cmp -s "$temp/transition-never.xml" "$temp/transition-source.xml" \
         && ok "a failed transition retains its last stage artifact" \
         || bad "a failed transition retains its last stage artifact"
+
+    (
+        navigation_fixture_late_dump() {
+            ui_fixture_dump "$@"
+            SECONDS=$((SECONDS + 2))
+        }
+
+        ui_fixtures "$temp/transition-ready.xml"
+        ! tap_until_state "Open destination" "$temp/transition-late.xml" \
+            navigation_fixture_destination_holds none 1 navigation_fixture_late_dump \
+            navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
+            && cmp -s "$temp/transition-late.xml" "$temp/transition-ready.xml"
+    ) \
+        && ok "a dump completing after the deadline cannot prove a transition" \
+        || bad "a dump completing after the deadline cannot prove a transition"
+}
+
+navigation_shell_readiness_self_test() { # <temp>
+    local temp="$1" onboarding ready disabled absent observed
+    onboarding='<node text="Explore first" bounds="[20,400][300,450]" enabled="true" clickable="true"/>'
+    ready='<node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/>'
+    disabled='<node text="Settings" bounds="[207,583][303,635]" enabled="false" clickable="true"/>'
+    absent='<node text="Loading…" bounds="[29,405][291,434]" enabled="true"/>'
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$onboarding</hierarchy>" > "$temp/onboarding.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$ready</hierarchy>" > "$temp/settings-ready.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$disabled</hierarchy>" > "$temp/settings-disabled.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$absent</hierarchy>" > "$temp/settings-absent.xml"
+    observed="$temp/settings-observed.xml"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/onboarding.xml" "$temp/settings-ready.xml"
+        reach_settings_tab "$observed" 3 \
+            && [[ $UI_FIXTURE_INDEX -eq 2 && $UI_FIXTURE_TAPS -eq 1 ]] \
+            && cmp -s "$observed" "$temp/settings-ready.xml"
+    ) \
+        && ok "shell readiness rechecks Settings after Explore first" \
+        || bad "shell readiness rechecks Settings after Explore first"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/settings-ready.xml"
+        reach_settings_tab "$observed" 3 \
+            && [[ $UI_FIXTURE_INDEX -eq 1 && $UI_FIXTURE_TAPS -eq 0 ]] \
+            && cmp -s "$observed" "$temp/settings-ready.xml"
+    ) \
+        && ok "ready Settings does not tap onboarding again" \
+        || bad "ready Settings does not tap onboarding again"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/settings-disabled.xml"
+        ! reach_settings_tab "$observed" 1 \
+            && [[ $UI_FIXTURE_TAPS -eq 0 ]] \
+            && cmp -s "$observed" "$temp/settings-disabled.xml"
+    ) \
+        && ok "a disabled Settings tab fails closed" \
+        || bad "a disabled Settings tab fails closed"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/settings-absent.xml"
+        ! reach_settings_tab "$observed" 1 \
+            && [[ $UI_FIXTURE_TAPS -eq 0 ]] \
+            && cmp -s "$observed" "$temp/settings-absent.xml"
+    ) \
+        && ok "an absent Settings tab fails closed" \
+        || bad "an absent Settings tab fails closed"
 }
 
 android_navigation_self_test() { # <temp>
-    local temp="$1" nav_open nav_starting
+    local temp="$1" nav_open nav_starting nav_onboarding
     nav_open='<node text="Primary" bounds="[0,570][320,640]"><node text="Library" bounds="[17,583][113,635]" enabled="true" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="true" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/></node>'
     nav_starting='<node text="Primary" bounds="[0,570][320,640]"><node text="Library" bounds="[17,583][113,635]" enabled="false" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="false" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="false" clickable="true"/></node>'
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open</node></hierarchy>" > "$temp/navigable.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\" enabled=\"true\"/></node></hierarchy>" > "$temp/starting.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node><node text="Loading…" bounds="[29,405][291,434]" enabled="true"/></node></hierarchy>' > "$temp/shell-less.xml"
+    nav_onboarding='<node text="Explore first" bounds="[20,400][300,450]" enabled="true" clickable="true"/>'
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_onboarding</node></hierarchy>" > "$temp/onboarding.xml"
 
     app_navigation_holds "$temp/navigable.xml" \
         && ok "an actionable tab bar is navigable" \
@@ -169,12 +247,22 @@ android_navigation_self_test() { # <temp>
 
     ui_fixtures "$temp/starting.xml" "$temp/starting.xml" "$temp/navigable.xml"
     wait_app_navigable "$temp/observed.xml" 8 ui_fixture_dump \
+        navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
         && [[ "$UI_FIXTURE_INDEX" == 3 ]] \
         && ok "readiness waits through a start that has not settled" \
         || bad "readiness waits through a start that has not settled" "$UI_FIXTURE_INDEX samples"
+    ui_fixtures "$temp/onboarding.xml" "$temp/navigable.xml"
+    wait_app_navigable "$temp/observed.xml" 3 ui_fixture_dump \
+        navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
+        && [[ "$UI_FIXTURE_INDEX" == 2 && $UI_FIXTURE_TAPS -eq 1 ]] \
+        && cmp -s "$temp/observed.xml" "$temp/navigable.xml" \
+        && ok "readiness rechecks navigation after Explore first" \
+        || bad "readiness rechecks navigation after Explore first"
     ui_fixtures "$temp/starting.xml" "$temp/starting.xml"
     wait_app_navigable "$temp/observed.xml" 2 ui_fixture_dump \
+        navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
         && bad "an app that never settles is never navigable" \
         || ok "an app that never settles is never navigable"
     navigation_transition_self_test "$temp"
+    navigation_shell_readiness_self_test "$temp"
 }
