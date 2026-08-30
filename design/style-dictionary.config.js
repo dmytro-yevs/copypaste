@@ -13,6 +13,10 @@
 import { writeFile } from 'node:fs/promises';
 import { formatRgb } from 'culori';
 import StyleDictionary from 'style-dictionary';
+import {
+  COARSE_TOKENS,
+  TOUCH_CAPABILITY_FALLBACK_SELECTOR,
+} from './lib/component-usage.mjs';
 import { resolve } from './lib/tokens.mjs';
 
 const EXT = 'com.copypaste';
@@ -120,6 +124,15 @@ StyleDictionary.registerFormat({
     const main = all.filter((t) => t.path[0] !== 'translucency' || t.path[1] === 'solid');
     const reduced = all.filter((t) => ext(t).reducedMotion !== undefined);
     const coarse = all.filter((t) => ext(t).coarsePointer !== undefined);
+    if (coarse.length) {
+      const coarseNames = coarse.map((t) => t.name).sort();
+      const expectedCoarseNames = [...COARSE_TOKENS].sort();
+      if (coarseNames.join(',') !== expectedCoarseNames.join(',')) {
+        throw new Error(
+          `coarse pointer tokens must be exactly ${expectedCoarseNames.join(', ')}`,
+        );
+      }
+    }
 
     const out = [banner(options.title)];
     const selectors = options.selectors.join(',\n');
@@ -141,14 +154,22 @@ StyleDictionary.registerFormat({
     }
 
     if (coarse.length) {
+      const coarseDeclarations = coarse
+        .map((t) => `  --${t.name}: ${ext(t).coarsePointer};`)
+        .join('\n');
       out.push(
         '/* Touch targets. `pointer: coarse` is the primary pointer being a finger,',
         ' * which is the Android build and a Mac in tablet-mirroring — not a screen',
-        ' * width, because a narrow window on a Mac is still driven by a mouse. */',
+        ' * width, because a narrow window on a Mac is still driven by a mouse. The',
+        ' * same values also cover a touch-capable legacy WebView that reports a fine',
+        ' * primary pointer and no hover capability. */',
         '@media (pointer: coarse) {',
         indent(`${selectors} {`, '  '),
-        coarse.map((t) => `    --${t.name}: ${ext(t).coarsePointer};`).join('\n'),
+        indent(coarseDeclarations, '  '),
         '  }',
+        '}\n',
+        `${TOUCH_CAPABILITY_FALLBACK_SELECTOR} {`,
+        coarseDeclarations,
         '}\n',
       );
     }

@@ -12,11 +12,8 @@
 
 .input {
   min-inline-size: 0;
+  min-block-size: max(var(--control-block-size), var(--tap-min));
   flex: 1;
-}
-
-@media (pointer: coarse) {
-  .input { min-block-size: var(--tap-min); }
 }
 
 .input::-webkit-search-cancel-button {

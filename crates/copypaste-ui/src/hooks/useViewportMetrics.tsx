@@ -45,6 +45,19 @@ function windowSize(): ElementSize {
   };
 }
 
+function hasTouchCapability(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return Number.isFinite(navigator.maxTouchPoints) && navigator.maxTouchPoints > 0;
+}
+
+function pointerKind(
+  pointerMedia: MediaQueryList | null,
+  hoverMedia: MediaQueryList | null,
+): PointerKind {
+  if (pointerMedia?.matches) return "coarse";
+  return hasTouchCapability() && hoverMedia?.matches ? "coarse" : "fine";
+}
+
 const initialSize = windowSize();
 const FALLBACK: ViewportContextValue = {
   ...initialSize,
@@ -62,8 +75,13 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
       ? window.matchMedia("(pointer: coarse)")
       : null,
   );
+  const [hoverMedia] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia("(hover: none)")
+      : null,
+  );
   const [pointer, setPointer] = useState<PointerKind>(() =>
-    pointerMedia?.matches ? "coarse" : "fine",
+    pointerKind(pointerMedia, hoverMedia),
   );
   const [registry] = useState(() => new Map<Element, Set<SizeSubscriber>>());
   const [observerRef] = useState<{
@@ -158,12 +176,16 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
   }, [observerRef, queueMeasurement, registry]);
 
   useEffect(() => {
-    if (!pointerMedia) return;
-    const update = () => setPointer(pointerMedia.matches ? "coarse" : "fine");
+    if (!pointerMedia && !hoverMedia) return;
+    const update = () => setPointer(pointerKind(pointerMedia, hoverMedia));
     update();
-    pointerMedia.addEventListener("change", update);
-    return () => pointerMedia.removeEventListener("change", update);
-  }, [pointerMedia]);
+    pointerMedia?.addEventListener("change", update);
+    hoverMedia?.addEventListener("change", update);
+    return () => {
+      pointerMedia?.removeEventListener("change", update);
+      hoverMedia?.removeEventListener("change", update);
+    };
+  }, [hoverMedia, pointerMedia]);
 
   useLayoutEffect(() => {
     document.documentElement.dataset.pointer = pointer;
