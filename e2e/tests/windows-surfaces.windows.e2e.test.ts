@@ -142,18 +142,31 @@ describe("desktop settings", () => {
 });
 
 describe("fail-closed product surfaces", () => {
-  test("hides unavailable updater controls in unsigned builds", async () => {
+  test("names the updater as unconfigured in unsigned builds", async () => {
     await openTab("About");
     await app.browser.waitUntil(
       async () =>
         (await app.browser.$$('[data-settings-search-target="row:App updates"]').length) ===
-        0,
+        1,
       {
         timeout: 15_000,
-        timeoutMsg: "the unavailable updater row remained visible",
+        timeoutMsg: "the unconfigured updater row did not render exactly once",
       },
     );
+    const updater = await app.browser.$(
+      '[data-settings-search-target="row:App updates"]',
+    );
+    await updater.waitForDisplayed({ timeout: 15_000 });
+    expect(await updater.getAttribute("data-state")).toBe("unconfigured");
+    expect(await updater.getText()).toContain(
+      "Updates aren't configured in this build.",
+    );
+    expect(await updater.getText()).toContain(
+      "Checks the signed CopyPaste release feed for Windows.",
+    );
+    expect(await updater.getText()).toContain("Not configured");
     expect(await app.browser.$$("button=Check for updates")).toHaveLength(0);
+    expect(await app.browser.$$("progress")).toHaveLength(0);
   });
 
   test("keeps cloud controls absent when no deployment is configured", async () => {
