@@ -41,6 +41,7 @@
 //! must match it exactly before connection pragmas or application queries run.
 
 mod connection;
+mod creation;
 mod dbfile;
 mod identity;
 mod items;
@@ -55,6 +56,9 @@ mod search;
 mod state;
 mod store;
 mod versions;
+
+#[cfg(test)]
+mod creation_tests;
 
 pub use dbfile::{
     attach_key_literal, open_validated, verify_integrity, verify_schema, RestoreError,
