@@ -5,6 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
+fn deserialize_optional_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    u32::deserialize(deserializer).map(Some)
+}
+
 mod cloud;
 mod device;
 
@@ -250,6 +257,15 @@ pub struct SyncResult {
     pub name: String,
     pub sent: u32,
     pub received: u32,
+    /// Locally withheld outgoing items whose payload exceeds the P2P limit.
+    /// Missing means the daemon did not report the count; a present zero is a
+    /// known zero.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_u32"
+    )]
+    pub skipped_too_large: Option<u32>,
     /// End-to-end duration of this sync session. This is not an ICMP ping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
@@ -455,4 +471,57 @@ pub struct Item {
 
     #[serde(default)]
     pub truncated: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SyncResult;
+    use serde_json::json;
+
+    fn result(value: serde_json::Value) -> Result<SyncResult, serde_json::Error> {
+        serde_json::from_value(value)
+    }
+
+    fn base() -> serde_json::Value {
+        json!({
+            "pairing_id": "peer-1",
+            "name": "Phone",
+            "sent": 1,
+            "received": 2,
+            "duration_ms": null,
+            "error": null,
+            "error_code": null,
+        })
+    }
+
+    #[test]
+    fn sync_size_refusal_count_distinguishes_missing_and_known_values() {
+        assert_eq!(result(base()).unwrap().skipped_too_large, None);
+
+        let mut zero = base();
+        zero["skipped_too_large"] = json!(0);
+        assert_eq!(result(zero).unwrap().skipped_too_large, Some(0));
+
+        let mut positive = base();
+        positive["skipped_too_large"] = json!(7);
+        let decoded = result(positive).unwrap();
+        assert_eq!(decoded.skipped_too_large, Some(7));
+        let encoded = serde_json::to_value(decoded).unwrap();
+        assert_eq!(encoded["skipped_too_large"], json!(7));
+    }
+
+    #[test]
+    fn sync_size_refusal_count_rejects_non_u32_values() {
+        for value in [
+            json!(null),
+            json!(-1),
+            json!(1.5),
+            json!("1"),
+            json!(4_294_967_296u64),
+        ] {
+            let mut invalid = base();
+            invalid["skipped_too_large"] = value;
+            assert!(result(invalid).is_err());
+        }
+    }
 }
