@@ -77,6 +77,34 @@ pub(crate) struct SettingsApplied {
     pub(crate) private_mode_epoch: u64,
 }
 
+/// One persisted settings value and the runtime work it requires.
+///
+/// The transition owner keeps the serialising mutex until its effects finish.
+/// Readers only hold `current` long enough to copy a snapshot, so persistence
+/// and retention never block a capture tick that is reading settings.
+pub(crate) struct SettingsTransition {
+    before: ConfigData,
+    applied: SettingsApplied,
+}
+
+impl SettingsTransition {
+    pub(crate) fn config(&self) -> &ConfigData {
+        &self.applied.config
+    }
+
+    pub(crate) fn should_enforce_retention(&self) -> bool {
+        self.applied.config.storage_quota_bytes < self.before.storage_quota_bytes
+            || self.applied.config.history_limit < self.before.history_limit
+            || (self.applied.config.retention_days > 0
+                && (self.before.retention_days == 0
+                    || self.applied.config.retention_days < self.before.retention_days))
+    }
+
+    pub(crate) fn lan_visibility_changed(&self) -> bool {
+        self.applied.config.lan_visibility != self.before.lan_visibility
+    }
+}
+
 impl Settings {
     /// Read the stored settings, failing closed on anything that will not read.
     ///
@@ -146,7 +174,7 @@ impl Settings {
     /// (5 s `busy_timeout`, 10 s pool wait) inside it, and `capture::run`
     /// reads that lock on the reactor thread. F-LOCK-1, ADR-0016.
     pub fn apply(&self, meta: &Meta, patch: &ConfigPatch) -> Result<ConfigData, SettingsError> {
-        self.apply_with_epoch(meta, patch)
+        self.apply_with_effects(meta, patch, |_| {})
             .map(|applied| applied.config)
     }
 
@@ -155,12 +183,29 @@ impl Settings {
         meta: &Meta,
         patch: &ConfigPatch,
     ) -> Result<SettingsApplied, SettingsError> {
+        self.apply_with_effects(meta, patch, |_| {})
+    }
+
+    /// Apply a whole settings transition, including its runtime effects.
+    ///
+    /// Effects run after the new value has been persisted and published, but
+    /// before the next transition may begin. This prevents an older retention
+    /// sweep from deleting history after a later transition relaxed its limit.
+    pub(crate) fn apply_with_effects<F>(
+        &self,
+        meta: &Meta,
+        patch: &ConfigPatch,
+        effects: F,
+    ) -> Result<SettingsApplied, SettingsError>
+    where
+        F: FnOnce(&SettingsTransition),
+    {
         let _serialised = self
             .applying
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        let (next, next_epoch) = {
+        let (before, next, next_epoch) = {
             let current = self.get();
             let next = patch.apply(&current)?;
             let next_epoch = if patch.private_mode.is_some() {
@@ -171,7 +216,7 @@ impl Settings {
             } else {
                 current.private_mode_epoch()
             };
-            (next, next_epoch)
+            (current.0.config.clone(), next, next_epoch)
         };
 
         let encoded = serde_json::to_string(&next).map_err(|e| {
@@ -190,10 +235,25 @@ impl Settings {
         // degraded any more and the notice has to go — leaving it would outlive
         // the condition and disagree with what the next start reports.
         current.health = None;
-        Ok(SettingsApplied {
-            config: next,
-            private_mode_epoch: next_epoch,
-        })
+        drop(current);
+
+        let transition = SettingsTransition {
+            before,
+            applied: SettingsApplied {
+                config: next,
+                private_mode_epoch: next_epoch,
+            },
+        };
+        effects(&transition);
+        Ok(transition.applied)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn transition_is_in_progress(&self) -> bool {
+        matches!(
+            self.applying.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        )
     }
 }
 
@@ -215,8 +275,11 @@ impl From<MetaError> for SettingsError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
+
+    use copypaste_core::storage::open_validated;
 
     use super::*;
     use crate::testutil::test_state;
@@ -296,6 +359,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_persistence_failure_preserves_the_current_config_epoch_and_effects() {
+        let (state, _dir) = test_state("settings-persistence-failure");
+        let initial = state
+            .settings
+            .apply_with_epoch(
+                &state.meta,
+                &ConfigPatch {
+                    private_mode: Some(true),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_settings_update
+             BEFORE UPDATE OF value ON sync_device_state
+             WHEN OLD.key = 'settings'
+             BEGIN SELECT RAISE(ABORT, 'test settings write failure'); END;",
+        )
+        .unwrap();
+        drop(conn);
+
+        let effects_ran = AtomicBool::new(false);
+        let err = state.settings.apply_with_effects(
+            &state.meta,
+            &ConfigPatch {
+                poll_interval_ms: Some(250),
+                private_mode: Some(false),
+                ..Default::default()
+            },
+            |_| effects_ran.store(true, Ordering::Release),
+        );
+        assert!(matches!(err, Err(SettingsError::Store)));
+        assert!(!effects_ran.load(Ordering::Acquire));
+
+        let current = state.settings.get();
+        assert_eq!(*current, initial.config);
+        assert_eq!(current.private_mode_epoch(), initial.private_mode_epoch);
+    }
+
     /// F-LOCK-1. A reader holds the lock for the whole of this test; before the
     /// fix `apply` blocked on `current.write()` and never reached the database,
     /// so the persisted record stayed on the old value until the guard dropped.
@@ -337,6 +441,41 @@ mod tests {
             .expect("a valid patch");
 
         assert!(persisted, "the settings write ran inside the read lock");
+    }
+
+    #[test]
+    fn a_paused_runtime_effect_does_not_hold_the_settings_reader_lock() {
+        let (state, _dir) = test_state("settings-effect-reader");
+        let (effect_started_tx, effect_started_rx) = std::sync::mpsc::channel();
+        let (release_effect_tx, release_effect_rx) = std::sync::mpsc::channel();
+        let writer = {
+            let state = Arc::clone(&state);
+            std::thread::spawn(move || {
+                state.settings.apply_with_effects(
+                    &state.meta,
+                    &ConfigPatch {
+                        poll_interval_ms: Some(250),
+                        ..Default::default()
+                    },
+                    |_| {
+                        effect_started_tx.send(()).unwrap();
+                        release_effect_rx.recv().unwrap();
+                    },
+                )
+            })
+        };
+
+        effect_started_rx.recv().unwrap();
+        let snapshot = state
+            .settings
+            .current
+            .try_read()
+            .ok()
+            .map(|current| current.config.clone());
+        release_effect_tx.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+
+        assert_eq!(snapshot.unwrap().poll_interval_ms, 250);
     }
 
     /// The defect the serialising mutex inherited from the write lock: two
