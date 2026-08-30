@@ -7,7 +7,8 @@ import {
   isAppTarget,
   nextAttachStep,
   type AttachFinalDiagnostic,
-  type AttachTargetObservation,
+  type AttachPagesDiagnostic,
+  type AttachRawDiagnostic,
   type DirectOutcome,
   webviewComplaints,
 } from "./attach.js";
@@ -69,25 +70,40 @@ interface RawTarget {
 }
 
 interface RawTargetResult {
-  status: "ok" | "error";
+  status: "ok" | "http-error" | "fetch-error" | "invalid-json";
   targets: RawTarget[];
 }
 
-function targetObservation(target: RawTarget): AttachTargetObservation {
+function rawDiagnostic(result: RawTargetResult): AttachRawDiagnostic {
+  const targetTypeHistogram = { page: 0, webview: 0, other: 0 };
+  for (const target of result.targets) {
+    if (target.type === "page") targetTypeHistogram.page += 1;
+    else if (target.type === "webview") targetTypeHistogram.webview += 1;
+    else targetTypeHistogram.other += 1;
+  }
   return {
-    type: target.type,
-    appOrigin: isAppTarget(target.url),
-    webSocketPresent: Boolean(target.webSocketDebuggerUrl),
+    status: result.status,
+    count: result.targets.length,
+    targetTypeHistogram,
+    appOriginMatchCount: result.targets.filter((target) => isAppTarget(target.url)).length,
+    webSocketPresent: result.targets.some((target) => Boolean(target.webSocketDebuggerUrl)),
   };
 }
 
 async function rawTargets(browserUrl: string): Promise<RawTargetResult> {
   try {
     const response = await fetch(`${browserUrl}/json/list`, { signal: AbortSignal.timeout(3_000) });
-    if (!response.ok) return { status: "error", targets: [] };
-    return { status: "ok", targets: (await response.json()) as RawTarget[] };
+    if (!response.ok) return { status: "http-error", targets: [] };
+    try {
+      const body: unknown = await response.json();
+      return Array.isArray(body)
+        ? { status: "ok", targets: body as RawTarget[] }
+        : { status: "invalid-json", targets: [] };
+    } catch {
+      return { status: "invalid-json", targets: [] };
+    }
   } catch {
-    return { status: "error", targets: [] };
+    return { status: "fetch-error", targets: [] };
   }
 }
 
@@ -97,20 +113,79 @@ class AttachResolutionError extends Error {
   }
 }
 
+export interface DirectPageLike {
+  url(): string;
+}
+
+export interface DirectBrowserLike {
+  pages(): Promise<readonly DirectPageLike[]>;
+  disconnect(): Promise<void>;
+}
+
+export type DirectResolution =
+  | { outcome: "connected"; browser: DirectBrowserLike; page: DirectPageLike }
+  | { outcome: Exclude<DirectOutcome, "connected"> };
+
+export async function directAppTarget(
+  originalBrowser: Pick<DirectBrowserLike, "disconnect">,
+  socket: string,
+  connect: (socket: string) => Promise<DirectBrowserLike>,
+): Promise<DirectResolution> {
+  let directBrowser: DirectBrowserLike;
+  try {
+    directBrowser = await connect(socket);
+  } catch {
+    return { outcome: "connect-failed" };
+  }
+
+  let keepDirectConnection = false;
+  try {
+    let pages: readonly DirectPageLike[];
+    try {
+      pages = await directBrowser.pages();
+    } catch {
+      return { outcome: "pages-failed" };
+    }
+    let directPage: DirectPageLike | undefined;
+    try {
+      directPage = pages.find((candidate) => isAppTarget(candidate.url()));
+    } catch {
+      return { outcome: "pages-failed" };
+    }
+    if (!directPage) return { outcome: pages.length ? "wrong-origin" : "no-page" };
+    try {
+      await originalBrowser.disconnect();
+    } catch {
+      return { outcome: "ownership-failed" };
+    }
+    keepDirectConnection = true;
+    return { outcome: "connected", browser: directBrowser, page: directPage };
+  } finally {
+    if (!keepDirectConnection) await directBrowser.disconnect().catch(() => undefined);
+  }
+}
+
 async function resolveAppPage(port: number, deadline: number): Promise<Attached> {
   const msLeft = () => Math.max(0, deadline - Date.now());
   let { browser, endpoint } = await open(port, msLeft());
   let diagnostic: AttachFinalDiagnostic = finalAttachDiagnostic(
-    [],
-    { status: "error", targets: [] },
+    { status: "error", count: 0, appOriginMatchCount: 0 },
+    {
+      status: "fetch-error",
+      count: 0,
+      targetTypeHistogram: { page: 0, webview: 0, other: 0 },
+      appOriginMatchCount: 0,
+      webSocketPresent: false,
+    },
     "not-attempted",
   );
 
   for (;;) {
-    const pages = await browser.pages(true).then(
-      (found) => found,
-      () => undefined,
+    const pageResult = await browser.pages(true).then(
+      (found) => ({ status: "ok" as const, pages: found }),
+      () => ({ status: "error" as const, pages: [] as Page[] }),
     );
+    const pages = pageResult.pages;
     const page = pages?.find((candidate) => isAppTarget(candidate.url()));
     if (page) return { browser, page, endpoint };
 
@@ -120,7 +195,7 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
     const rawResult = await rawTargets(endpoint.browserUrl);
     const targets = rawResult.targets;
     const raw = targets.find((t) => isAppTarget(t.url));
-    let directOutcome: DirectOutcome = rawResult.status === "error"
+    let directOutcome: DirectOutcome = rawResult.status !== "ok"
       ? "raw-error"
       : targets.length === 0
         ? "raw-empty"
@@ -130,44 +205,35 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
             ? "no-websocket"
             : "not-attempted";
     if (raw?.webSocketDebuggerUrl) {
-      let keepDirectConnection = false;
-      try {
-        const directBrowser = await puppeteer.connect({
-          browserWSEndpoint: raw.webSocketDebuggerUrl,
+      const direct = await directAppTarget(
+        browser,
+        raw.webSocketDebuggerUrl,
+        (socket) => puppeteer.connect({
+          browserWSEndpoint: socket,
           defaultViewport: null,
-        });
-        try {
-          const [directPage] = await directBrowser.pages();
-          if (directPage) {
-            keepDirectConnection = true;
-            directOutcome = "connected";
-            return { browser: directBrowser, page: directPage, endpoint };
-          }
-          directOutcome = "no-page";
-        } finally {
-          if (!keepDirectConnection) await directBrowser.disconnect().catch(() => undefined);
-        }
-      } catch {
-        directOutcome = "failed";
+        }),
+      );
+      directOutcome = direct.outcome;
+      if (direct.outcome === "connected") {
+        return {
+          browser: direct.browser as Browser,
+          page: direct.page as Page,
+          endpoint,
+        };
       }
     }
 
-    const pageObservations = pages?.map((page) => ({
-      type: "page",
-      appOrigin: isAppTarget(page.url()),
-      webSocketPresent: false,
-    })) ?? [];
+    const pagesDiagnostic: AttachPagesDiagnostic = {
+      status: pageResult.status,
+      count: pages.length,
+      appOriginMatchCount: pages.filter((candidate) => isAppTarget(candidate.url())).length,
+    };
     diagnostic = finalAttachDiagnostic(
-      pageObservations,
-      {
-        status: rawResult.status,
-        targets: targets.map(targetObservation),
-      },
+      pagesDiagnostic,
+      rawDiagnostic(rawResult),
       directOutcome,
     );
-    const allTargets = pages && pages.length > 0
-      ? pages.map((c) => c.url())
-      : targets.map((t) => t.url);
+    const allTargets = pages.map((c) => c.url()).concat(targets.map((t) => t.url));
     const step = nextAttachStep({
       targets: allTargets,
       pid: await appPid(),
