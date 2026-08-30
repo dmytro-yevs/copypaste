@@ -6,6 +6,7 @@ import {
   parseDisplaySize,
   foregroundFocusDiagnostic,
   tapNativeInput,
+  withSoftKeyboardScenario,
   type NativeInputCommands,
 } from "../src/harness/native-input.js";
 
@@ -52,6 +53,56 @@ function fixtureCommands(
     },
     tryShell: async (selected, ...args) => {
       calls.push(["-s", selected, ...args]);
+      return { ok: true, value: "" };
+    },
+  };
+}
+
+function softKeyboardCommands(
+  calls: string[][],
+  initial: "0" | "1" | null,
+  options: {
+    readValues?: string[];
+    failRestore?: boolean;
+    failTap?: boolean;
+    imeWindow?: boolean;
+  } = {},
+): NativeInputCommands {
+  let value = initial;
+  let settingsWrites = 0;
+  const reads = [...(options.readValues ?? [])];
+  return {
+    devices: async () => {
+      calls.push(["devices"]);
+      return "List of devices attached\ndevice-a\tdevice\n";
+    },
+    getSerialno: async (serial) => {
+      calls.push(["-s", serial, "get-serialno"]);
+      return serial;
+    },
+    shell: async (serial, ...args) => {
+      calls.push(["-s", serial, ...args]);
+      if (args[0] !== "settings") {
+        if (args[0] === "wm") return DISPLAY_OUTPUT;
+        return WINDOW_DUMP;
+      }
+      if (args[1] === "get") return reads.shift() ?? value ?? "null";
+      settingsWrites += 1;
+      if (options.failRestore && settingsWrites === 2) {
+        throw new Error("restore failed");
+      }
+      value = args[1] === "delete" ? null : args[4]! as "0" | "1";
+      return "";
+    },
+    tryShell: async (serial, ...args) => {
+      calls.push(["-s", serial, ...args]);
+      if (args[0] === "settings") return { ok: true, value: value ?? "null" };
+      if (args[0] === "dumpsys") {
+        return { ok: true, value: options.imeWindow ? "  mInputMethodWindow=Window{safe}" : "" };
+      }
+      if (options.failTap) {
+        return { ok: false, failure: { message: "tap failed" } };
+      }
       return { ok: true, value: "" };
     },
   };
@@ -273,5 +324,100 @@ describe("Android native input geometry", () => {
       ),
     ).rejects.toThrow(/window frame/);
     expect(calls.some((call) => call.includes("input"))).toBe(false);
+  });
+
+  test("pins the serial, verifies soft-keyboard setup, and restores zero after a tap", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await withSoftKeyboardScenario(
+      (scenario) => scenario.tap(POINT, METRICS, "com.copypaste.app"),
+      softKeyboardCommands(calls, "0"),
+    );
+    expect(calls).toEqual([
+      ["devices"],
+      ["-s", "device-a", "get-serialno"],
+      ["-s", "device-a", "settings", "get", "secure", "show_ime_with_hard_keyboard"],
+      ["-s", "device-a", "settings", "put", "secure", "show_ime_with_hard_keyboard", "1"],
+      ["-s", "device-a", "settings", "get", "secure", "show_ime_with_hard_keyboard"],
+      ["-s", "device-a", "wm", "size"],
+      ["-s", "device-a", "dumpsys", "window", "-a"],
+      ["-s", "device-a", "input", "tap", "540", "1008"],
+      ["-s", "device-a", "settings", "put", "secure", "show_ime_with_hard_keyboard", "0"],
+      ["-s", "device-a", "settings", "get", "secure", "show_ime_with_hard_keyboard"],
+    ]);
+  });
+
+  test.each(["1", null] as const)("restores soft-keyboard preference %j exactly", async (original) => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await withSoftKeyboardScenario(async () => undefined, softKeyboardCommands(calls, original));
+    const restore = original === null
+      ? ["settings", "delete", "secure", "show_ime_with_hard_keyboard"]
+      : ["settings", "put", "secure", "show_ime_with_hard_keyboard", original];
+    expect(calls.at(-2)).toEqual(["-s", "device-a", ...restore]);
+  });
+
+  test("restores the soft-keyboard preference when the native tap fails", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await expect(
+      withSoftKeyboardScenario(
+        (scenario) => scenario.tap(POINT, METRICS, "com.copypaste.app"),
+        softKeyboardCommands(calls, "0", { failTap: true }),
+      ),
+    ).rejects.toThrow(/native Android tap failed/);
+    expect(calls.at(-2)).toEqual([
+      "-s", "device-a", "settings", "put", "secure", "show_ime_with_hard_keyboard", "0",
+    ]);
+  });
+
+  test("does not tap when soft-keyboard readback is not enabled", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await expect(
+      withSoftKeyboardScenario(
+        async () => undefined,
+        softKeyboardCommands(calls, "0", { readValues: ["0", "2", "0"] }),
+      ),
+    ).rejects.toThrow(/was unavailable/);
+    expect(calls.some((call) => call.includes("input"))).toBe(false);
+    expect(calls.at(-2)).toEqual([
+      "-s", "device-a", "settings", "put", "secure", "show_ime_with_hard_keyboard", "0",
+    ]);
+  });
+
+  test("returns a restoration failure after a successful callback", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await expect(
+      withSoftKeyboardScenario(async () => undefined, softKeyboardCommands(calls, "0", { failRestore: true })),
+    ).rejects.toThrow("restore failed");
+  });
+
+  test("preserves callback failure when restoration also fails", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await expect(
+      withSoftKeyboardScenario(
+        async () => {
+          throw new Error("scenario failed");
+        },
+        softKeyboardCommands(calls, "0", { failRestore: true }),
+      ),
+    ).rejects.toThrow("scenario failed");
+  });
+
+  test("returns only redacted serial-bound IME diagnostics", async () => {
+    delete process.env.ANDROID_SERIAL;
+    const calls: string[][] = [];
+    await withSoftKeyboardScenario(
+      async (scenario) => {
+        expect(await scenario.diagnostics()).toEqual({ preference: "1", imeWindow: "present" });
+      },
+      softKeyboardCommands(calls, "0", { imeWindow: true }),
+    );
+    expect(calls.filter((call) => call.includes("dumpsys"))).toEqual([
+      ["-s", "device-a", "dumpsys", "window", "-a"],
+    ]);
   });
 });

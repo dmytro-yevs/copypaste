@@ -39,6 +39,23 @@ export interface NativeTapReceipt {
   display: DisplaySize;
 }
 
+type ShowImeWithHardKeyboard = "0" | "1" | null;
+
+export interface SoftKeyboardDiagnostics {
+  preference: ShowImeWithHardKeyboard | "unknown";
+  imeWindow: "present" | "unknown";
+}
+
+export interface SoftKeyboardScenario {
+  serial: string;
+  diagnostics: () => Promise<SoftKeyboardDiagnostics>;
+  tap: (
+    point: WebViewPoint,
+    metrics: WebViewMetrics,
+    packageName?: string,
+  ) => Promise<NativeTapReceipt>;
+}
+
 export type FocusDiagnostic = {
   status: "present" | "missing" | "null" | "malformed";
   packageName: string | null;
@@ -251,13 +268,97 @@ async function selectedSerial(nativeCommands: NativeInputCommands): Promise<stri
   return serial;
 }
 
-export async function tapNativeInput(
+function showImeWithHardKeyboard(output: string): ShowImeWithHardKeyboard {
+  const value = output.trim();
+  if (value === "0" || value === "1") return value;
+  if (value === "null") return null;
+  throw new Error("Android show_ime_with_hard_keyboard was unavailable");
+}
+
+async function readShowImeWithHardKeyboard(
+  serial: string,
+  nativeCommands: NativeInputCommands,
+): Promise<ShowImeWithHardKeyboard> {
+  return showImeWithHardKeyboard(
+    await nativeCommands.shell(
+      serial,
+      "settings",
+      "get",
+      "secure",
+      "show_ime_with_hard_keyboard",
+    ),
+  );
+}
+
+async function restoreShowImeWithHardKeyboard(
+  serial: string,
+  original: ShowImeWithHardKeyboard,
+  nativeCommands: NativeInputCommands,
+): Promise<void> {
+  if (original === null) {
+    await nativeCommands.shell(
+      serial,
+      "settings",
+      "delete",
+      "secure",
+      "show_ime_with_hard_keyboard",
+    );
+  } else {
+    await nativeCommands.shell(
+      serial,
+      "settings",
+      "put",
+      "secure",
+      "show_ime_with_hard_keyboard",
+      original,
+    );
+  }
+  if (await readShowImeWithHardKeyboard(serial, nativeCommands) !== original) {
+    throw new Error("Android show_ime_with_hard_keyboard was not restored");
+  }
+}
+
+function imeWindowDiagnostic(output: string): "present" | "unknown" {
+  // Android 14 and 16 emit this full-dump line only for a current IME window.
+  // Nothing infers absence because dump variants may omit it.
+  return /^\s*mInputMethodWindow=Window\{[^\n]*\}$/m.test(output)
+    ? "present"
+    : "unknown";
+}
+
+async function softKeyboardDiagnostics(
+  serial: string,
+  nativeCommands: NativeInputCommands,
+): Promise<SoftKeyboardDiagnostics> {
+  const [preference, window] = await Promise.all([
+    nativeCommands.tryShell(
+      serial,
+      "settings",
+      "get",
+      "secure",
+      "show_ime_with_hard_keyboard",
+    ),
+    nativeCommands.tryShell(serial, "dumpsys", "window", "-a"),
+  ]);
+  return {
+    preference: preference.ok ? (() => {
+      try {
+        return showImeWithHardKeyboard(preference.value);
+      } catch {
+        return "unknown" as const;
+      }
+    })() : "unknown",
+    imeWindow: window.ok ? imeWindowDiagnostic(window.value) : "unknown",
+  };
+}
+
+async function tapNativeInputForSerial(
+  serial: string,
   point: WebViewPoint,
   metrics: WebViewMetrics,
-  packageName = PACKAGE,
-  nativeCommands: NativeInputCommands = commands,
+  packageName: string,
+  nativeCommands: NativeInputCommands,
 ): Promise<NativeTapReceipt> {
-  const serial = await selectedSerial(nativeCommands);
   const [displayOutput, windowOutput] = await Promise.all([
     nativeCommands.shell(serial, "wm", "size"),
     nativeCommands.shell(serial, "dumpsys", "window", "-a"),
@@ -278,4 +379,54 @@ export async function tapNativeInput(
     );
   }
   return { serial, point: screenPoint, frame, display };
+}
+
+export async function withSoftKeyboardScenario<T>(
+  callback: (scenario: SoftKeyboardScenario) => Promise<T>,
+  nativeCommands: NativeInputCommands = commands,
+): Promise<T> {
+  const serial = await selectedSerial(nativeCommands);
+  const original = await readShowImeWithHardKeyboard(serial, nativeCommands);
+  let primaryFailure: unknown;
+  try {
+    await nativeCommands.shell(
+      serial,
+      "settings",
+      "put",
+      "secure",
+      "show_ime_with_hard_keyboard",
+      "1",
+    );
+    if (await readShowImeWithHardKeyboard(serial, nativeCommands) !== "1") {
+      throw new Error("Android show_ime_with_hard_keyboard did not enable");
+    }
+    return await callback({
+      serial,
+      diagnostics: () => softKeyboardDiagnostics(serial, nativeCommands),
+      tap: (point, metrics, packageName = PACKAGE) =>
+        tapNativeInputForSerial(serial, point, metrics, packageName, nativeCommands),
+    });
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
+  } finally {
+    try {
+      await restoreShowImeWithHardKeyboard(serial, original, nativeCommands);
+    } catch (error) {
+      if (primaryFailure === undefined) throw error;
+      console.warn(
+        `Android show_ime_with_hard_keyboard cleanup also failed: ${String(error)}`,
+      );
+    }
+  }
+}
+
+export async function tapNativeInput(
+  point: WebViewPoint,
+  metrics: WebViewMetrics,
+  packageName = PACKAGE,
+  nativeCommands: NativeInputCommands = commands,
+): Promise<NativeTapReceipt> {
+  const serial = await selectedSerial(nativeCommands);
+  return tapNativeInputForSerial(serial, point, metrics, packageName, nativeCommands);
 }
