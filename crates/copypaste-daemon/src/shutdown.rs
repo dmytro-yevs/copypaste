@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 use tokio::task::{JoinError, JoinHandle};
-use tokio::time::{timeout, timeout_at, Instant};
+#[cfg(test)]
+use tokio::time::timeout;
+use tokio::time::{timeout_at, Instant};
 use tracing::warn;
 
 use crate::startup::remove_socket;
