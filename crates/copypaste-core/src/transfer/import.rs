@@ -47,6 +47,31 @@ pub fn import(
     settings: &ConfigData,
     items: Vec<ExportItem>,
 ) -> Result<ImportData, ImportError> {
+    let ingress_settings = settings.clone();
+    let retention_settings = settings.clone();
+    import_with_current_retention(
+        store,
+        detector,
+        keyring,
+        &ingress_settings,
+        move || retention_settings.clone(),
+        items,
+    )
+}
+
+/// Import with a live retention policy for the batch's terminal sweep.
+///
+/// `settings` is deliberately still the ingress snapshot: its size and
+/// sensitive-content decisions applied to every item before it reached this
+/// batch.
+pub fn import_with_current_retention(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    settings: &ConfigData,
+    current_settings: impl Fn() -> ConfigData,
+    items: Vec<ExportItem>,
+) -> Result<ImportData, ImportError> {
     if items.is_empty() {
         return Err(ImportError::Empty);
     }
@@ -63,7 +88,7 @@ pub fn import(
         pins_failed: 0,
     };
     let mut pin: Vec<String> = Vec::new();
-    let batch = retention::batch(store, settings);
+    let batch = retention::batch_with_current_policy(store, settings.clone(), &current_settings);
     let mut fatal: Option<ImportError> = None;
 
     for item in items {
@@ -157,6 +182,8 @@ pub fn import(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{mpsc, Arc, Mutex};
+
     use super::*;
     use crate::transfer::export;
     use crate::transfer::testkit::{fixture, fixture_named, Fixture};
@@ -173,6 +200,62 @@ mod tests {
 
     fn import_into(f: &Fixture, items: Vec<ExportItem>) -> Result<ImportData, ImportError> {
         import(&f.store, &f.detector, &f.keyring, &f.settings, items)
+    }
+
+    #[test]
+    fn an_import_terminal_sweep_reads_the_policy_published_after_admission() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let keyring = Arc::new(Keyring::from_secret(&[5u8; 32]));
+        let db_key = keyring.db_key();
+        let store = Store::open(&dir.path().join("history.db"), &db_key).unwrap();
+        let detector = Arc::new(Detector::new().unwrap());
+        let ingress = ConfigData {
+            history_limit: 1,
+            ..ConfigData::default()
+        };
+        crate::ingest::ingest_into(
+            &store,
+            &detector,
+            &keyring,
+            "first",
+            copypaste_ipc::content_type::TEXT,
+            1_700_000_000_000,
+            &ingress,
+        )
+        .unwrap();
+
+        let current = Arc::new(Mutex::new(ingress.clone()));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        store.before_next_retention(move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        let worker = {
+            let store = store.clone();
+            let detector = Arc::clone(&detector);
+            let keyring = Arc::clone(&keyring);
+            let current = Arc::clone(&current);
+            let ingress = ingress.clone();
+            std::thread::spawn(move || {
+                import_with_current_retention(
+                    &store,
+                    &detector,
+                    &keyring,
+                    &ingress,
+                    || current.lock().unwrap().clone(),
+                    vec![item("second")],
+                )
+            })
+        };
+        entered_rx.recv().unwrap();
+        current.lock().unwrap().history_limit = 2;
+        release_tx.send(()).unwrap();
+
+        worker.join().unwrap().unwrap();
+        assert_eq!(store.count().unwrap(), 2);
+        assert_eq!(store.search("first", 10).unwrap().len(), 1);
+        assert_eq!(store.search("second", 10).unwrap().len(), 1);
     }
 
     #[test]

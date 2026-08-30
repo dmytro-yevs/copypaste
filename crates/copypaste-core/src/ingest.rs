@@ -80,14 +80,40 @@ pub fn ingest(
     content_type: &str,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
-    ingest_into(
+    ingest_with_current_retention(
+        store,
+        detector,
+        keyring,
+        content,
+        content_type,
+        settings,
+        || settings.clone(),
+    )
+}
+
+/// Ingest a captured value while retaining the ingress snapshot for admission
+/// and reading the destructive retention policy only after the store barrier.
+pub fn ingest_with_current_retention(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    settings: &copypaste_ipc::ConfigData,
+    current_settings: impl Fn() -> copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_source_with_current_retention(
         store,
         detector,
         keyring,
         content,
         content_type,
         now_ms(),
+        false,
+        None,
+        None,
         settings,
+        current_settings,
     )
 }
 
@@ -201,6 +227,37 @@ pub fn ingest_into_with_capture_source(
     app_name: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_source_with_current_retention(
+        store,
+        detector,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        sensitive_floor,
+        app_bundle_id,
+        app_name,
+        settings,
+        || settings.clone(),
+    )
+}
+
+/// [`ingest_into_with_capture_source`] with a live policy read for its
+/// terminal destructive retention pass.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_source_with_current_retention(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    settings: &copypaste_ipc::ConfigData,
+    current_settings: impl Fn() -> copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
     ingest_text(
         store,
         detector,
@@ -212,13 +269,13 @@ pub fn ingest_into_with_capture_source(
         app_bundle_id,
         app_name,
         settings,
-        Sweep::Now,
+        Sweep::Now(&current_settings),
     )
 }
 
 /// Whether this write pays for its own retention sweep.
-enum Sweep {
-    Now,
+enum Sweep<'a> {
+    Now(&'a dyn Fn() -> copypaste_ipc::ConfigData),
     Deferred,
 }
 
@@ -234,7 +291,7 @@ fn ingest_text(
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
-    sweep: Sweep,
+    sweep: Sweep<'_>,
 ) -> Result<Ingested, IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
@@ -285,8 +342,8 @@ fn ingest_text(
         },
     )?;
 
-    if matches!(sweep, Sweep::Now) {
-        enforce_retention(store, settings);
+    if let Sweep::Now(current_settings) = sweep {
+        crate::retention::enforce_retention_with(store, current_settings);
     }
 
     Ok(ingested.into())
@@ -378,6 +435,8 @@ pub fn ingest_binary_into_with_capture_source(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{mpsc, Arc, Mutex};
+
     use super::*;
     use crate::storage::test_support::fts_row_count;
     use copypaste_ipc::ConfigData;
@@ -434,6 +493,58 @@ mod tests {
                 .expect("the local key must open it");
             String::from_utf8(bytes.to_vec()).unwrap()
         }
+    }
+
+    #[test]
+    fn terminal_retention_uses_the_policy_published_after_capture_admission() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let keyring = Arc::new(Keyring::from_secret(&[5u8; 32]));
+        let db_key = keyring.db_key();
+        let store = Store::open(&dir.path().join("history.db"), &db_key).unwrap();
+        let detector = Arc::new(Detector::new().unwrap());
+        let ingress = ConfigData {
+            history_limit: 1,
+            ..ConfigData::default()
+        };
+        ingest_into(&store, &detector, &keyring, "first", "text", T0, &ingress).unwrap();
+
+        let current = Arc::new(Mutex::new(ingress.clone()));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        store.before_next_retention(move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        let worker = {
+            let store = store.clone();
+            let detector = Arc::clone(&detector);
+            let keyring = Arc::clone(&keyring);
+            let current = Arc::clone(&current);
+            let ingress = ingress.clone();
+            std::thread::spawn(move || {
+                ingest_into_with_capture_source_with_current_retention(
+                    &store,
+                    &detector,
+                    &keyring,
+                    "second",
+                    "text",
+                    T0 + 1,
+                    false,
+                    None,
+                    None,
+                    &ingress,
+                    || current.lock().unwrap().clone(),
+                )
+            })
+        };
+        entered_rx.recv().unwrap();
+        current.lock().unwrap().history_limit = 2;
+        release_tx.send(()).unwrap();
+
+        worker.join().unwrap().unwrap();
+        assert_eq!(store.count().unwrap(), 2);
+        assert_eq!(store.search("first", 10).unwrap().len(), 1);
+        assert_eq!(store.search("second", 10).unwrap().len(), 1);
     }
 
     #[test]
