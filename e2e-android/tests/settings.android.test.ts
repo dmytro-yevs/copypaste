@@ -24,7 +24,10 @@ import {
   storedItems,
 } from "../src/harness/bridge.js";
 import { fixtureMarker } from "../src/harness/fixtures.js";
-import { tapNativeInput } from "../src/harness/native-input.js";
+import {
+  withSoftKeyboardScenario,
+  type SoftKeyboardDiagnostics,
+} from "../src/harness/native-input.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   ensureSettingsNavigation,
@@ -242,85 +245,108 @@ describe("the section index", () => {
   }, 120_000);
 
   test("keeps the Android document fixed while compact Preferences scrolls", async () => {
-    await openSettingsSection(app, "Cloud sync");
-    let primaryFailure: unknown;
-    try {
-      const imeBefore = await app.withPage((page) =>
-        page.evaluate(() => {
-          const panel = Array.from(
-            document.querySelectorAll<HTMLElement>(
-              'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
-            ),
-          ).find((candidate) => candidate.getClientRects().length > 0);
-          const field = Array.from(
-            panel?.querySelectorAll<HTMLInputElement>("input") ?? [],
-          ).find((candidate) => {
-            const box = candidate.getBoundingClientRect();
-            return box.bottom > 0 && box.top < innerHeight;
-          });
-          if (!field) throw new Error("Cloud sync has no visible input");
-          field.dataset.androidRootScrollProbe = "";
-          const box = field.getBoundingClientRect();
-          return {
-            innerHeight: window.innerHeight,
-            visualHeight: window.visualViewport?.height ?? null,
-            focused: document.activeElement === field,
-            activeElement: document.activeElement?.tagName ?? null,
-            activeLabel: document.activeElement?.getAttribute("aria-label") ?? null,
-            point: { x: box.left + box.width / 2, y: box.top + box.height / 2 },
-            metrics: {
-              width: window.innerWidth,
-              height: window.innerHeight,
-              devicePixelRatio: window.devicePixelRatio,
-            },
-          };
-        }),
-      );
-      const nativeTap = await tapNativeInput(
-        imeBefore.point,
-        imeBefore.metrics,
-        PACKAGE,
-      );
-      let imeAfter: Pick<
-        typeof imeBefore,
-        "innerHeight" | "visualHeight" | "focused" | "activeElement" | "activeLabel"
-      > | null = null;
-      await waitFor(
-        async () => {
-          imeAfter = await app.withPage((page) =>
-            page.evaluate(() => ({
+    await withSoftKeyboardScenario(async (softKeyboard) => {
+      await openSettingsSection(app, "Cloud sync");
+      let primaryFailure: unknown;
+      let imeDiagnostics: {
+        before: { native: SoftKeyboardDiagnostics | null; page: unknown };
+        after: { native: SoftKeyboardDiagnostics | null; page: unknown };
+      } = {
+        before: { native: null, page: null },
+        after: { native: null, page: null },
+      };
+      try {
+        const imeBefore = await app.withPage((page) =>
+          page.evaluate(() => {
+            const panel = Array.from(
+              document.querySelectorAll<HTMLElement>(
+                'section[aria-label="Cloud sync"], [role="tabpanel"][aria-label="Cloud sync"]',
+              ),
+            ).find((candidate) => candidate.getClientRects().length > 0);
+            const field = Array.from(
+              panel?.querySelectorAll<HTMLInputElement>("input") ?? [],
+            ).find((candidate) => {
+              const box = candidate.getBoundingClientRect();
+              return box.bottom > 0 && box.top < innerHeight;
+            });
+            if (!field) throw new Error("Cloud sync has no visible input");
+            field.dataset.androidRootScrollProbe = "";
+            const box = field.getBoundingClientRect();
+            return {
               innerHeight: window.innerHeight,
               visualHeight: window.visualViewport?.height ?? null,
-              focused:
-                document.activeElement?.matches(
-                  "[data-android-root-scroll-probe]",
-                ) ?? false,
+              focused: document.activeElement === field,
               activeElement: document.activeElement?.tagName ?? null,
-              activeLabel: document.activeElement?.getAttribute("aria-label") ?? null,
-            })),
-          );
-          return imeBefore.visualHeight !== null &&
-            imeAfter.visualHeight !== null &&
-            imeAfter.focused &&
-            imeBefore.visualHeight - imeAfter.visualHeight >= 80;
-        },
-        () =>
-          "focusing the Cloud input never opened the Android IME: " +
+              field: {
+                tagName: field.tagName,
+                type: field.type,
+                inputMode: field.inputMode,
+                readOnly: field.readOnly,
+                disabled: field.disabled,
+              },
+              point: { x: box.left + box.width / 2, y: box.top + box.height / 2 },
+              metrics: {
+                width: window.innerWidth,
+                height: window.innerHeight,
+                devicePixelRatio: window.devicePixelRatio,
+              },
+            };
+          }),
+        );
+        imeDiagnostics.before.native = await softKeyboard.diagnostics();
+        imeDiagnostics.before.page = {
+          innerHeight: imeBefore.innerHeight,
+          visualHeight: imeBefore.visualHeight,
+          focused: imeBefore.focused,
+          activeElement: imeBefore.activeElement,
+          field: imeBefore.field,
+        };
+        const nativeTap = await softKeyboard.tap(
+          imeBefore.point,
+          imeBefore.metrics,
+          PACKAGE,
+        );
+        let imeAfter: Pick<
+          typeof imeBefore,
+          "innerHeight" | "visualHeight" | "focused" | "activeElement"
+        > | null = null;
+        await waitFor(
+          async () => {
+            imeAfter = await app.withPage((page) =>
+              page.evaluate(() => ({
+                innerHeight: window.innerHeight,
+                visualHeight: window.visualViewport?.height ?? null,
+                focused:
+                  document.activeElement?.matches(
+                    "[data-android-root-scroll-probe]",
+                  ) ?? false,
+                activeElement: document.activeElement?.tagName ?? null,
+              })),
+            );
+            return imeBefore.visualHeight !== null &&
+              imeAfter.visualHeight !== null &&
+              imeAfter.focused &&
+              imeBefore.visualHeight - imeAfter.visualHeight >= 80;
+          },
+          () =>
+            "focusing the Cloud input never opened the Android IME: " +
+            JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap }),
+          15_000,
+        );
+        expect(
+          imeBefore.visualHeight! - imeAfter!.visualHeight!,
           JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap }),
-        15_000,
-      );
-      expect(
-        imeBefore.visualHeight! - imeAfter!.visualHeight!,
-        JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap }),
-      ).toBeGreaterThanOrEqual(80);
-      expect(
-        imeBefore.focused,
-        JSON.stringify({ before: imeBefore, nativeTap }),
-      ).toBe(false);
-      expect(
-        imeAfter!.focused,
-        JSON.stringify({ after: imeAfter, nativeTap }),
-      ).toBe(true);
+        ).toBeGreaterThanOrEqual(80);
+        expect(
+          imeBefore.focused,
+          JSON.stringify({ before: imeBefore, nativeTap }),
+        ).toBe(false);
+        expect(
+          imeAfter!.focused,
+          JSON.stringify({ after: imeAfter, nativeTap }),
+        ).toBe(true);
+        imeDiagnostics.after.native = await softKeyboard.diagnostics();
+        imeDiagnostics.after.page = imeAfter;
 
       const evidence = await app.withPage((page) =>
         page.evaluate(async () => {
@@ -421,30 +447,35 @@ describe("the section index", () => {
       expect(evidence.after.fieldVisible).toBe(true);
       expect(evidence.after.fieldHit).toBe(true);
       await ensureSettingsNavigation(app);
-    } catch (error) {
-      primaryFailure = error;
-      throw error;
-    } finally {
-      try {
-        await app.withPage((page) =>
-          page.evaluate(() => {
-            document
-              .querySelectorAll("[data-android-root-scroll-spacer]")
-              .forEach((node) => node.remove());
-            document
-              .querySelectorAll("[data-android-root-scroll-probe]")
-              .forEach((node) =>
-                node.removeAttribute("data-android-root-scroll-probe"),
-              );
-          }),
-        );
       } catch (error) {
-        if (primaryFailure === undefined) throw error;
+        primaryFailure = error;
+        imeDiagnostics.after.native = await softKeyboard.diagnostics().catch(() => null);
         console.warn(
-          `settings cleanup could not clear the Android scroll probe: ${String(error)}`,
+          `Android soft-keyboard diagnostics: ${JSON.stringify(imeDiagnostics)}`,
         );
+        throw error;
+      } finally {
+        try {
+          await app.withPage((page) =>
+            page.evaluate(() => {
+              document
+                .querySelectorAll("[data-android-root-scroll-spacer]")
+                .forEach((node) => node.remove());
+              document
+                .querySelectorAll("[data-android-root-scroll-probe]")
+                .forEach((node) =>
+                  node.removeAttribute("data-android-root-scroll-probe"),
+                );
+            }),
+          );
+        } catch (error) {
+          if (primaryFailure === undefined) throw error;
+          console.warn(
+            `settings cleanup could not clear the Android scroll probe: ${String(error)}`,
+          );
+        }
       }
-    }
+    });
   });
 });
 
