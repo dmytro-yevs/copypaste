@@ -38,21 +38,29 @@ export function CloudSyncSettings() {
         : "settings.sync.cloud.notConfigured");
 
   const connectionNote = controller.syncError ? (
-    <FieldFeedback state="error">
-      {t("settings.sync.cloud.syncError")}
-    </FieldFeedback>
+    <span>
+      <FieldFeedback state="error">
+        {t("settings.sync.cloud.syncError")}
+      </FieldFeedback>
+    </span>
   ) : controller.signOutError ? (
-    <FieldFeedback state="error">
-      {t("settings.sync.cloud.signOutError")}
-    </FieldFeedback>
+    <span>
+      <FieldFeedback state="error">
+        {t("settings.sync.cloud.signOutError")}
+      </FieldFeedback>
+    </span>
   ) : status?.last_error ? (
-    <FieldFeedback state="error">
-      {t("settings.sync.cloud.lastError")}
-    </FieldFeedback>
+    <span>
+      <FieldFeedback state="error">
+        {t("settings.sync.cloud.lastError")}
+      </FieldFeedback>
+    </span>
   ) : status?.unreadable_uploads ? (
-    <FieldFeedback state="error">
-      {t("settings.sync.cloud.unreadableUploads", { count: status.unreadable_uploads })}
-    </FieldFeedback>
+    <span>
+      <FieldFeedback state="error">
+        {t("settings.sync.cloud.unreadableUploads", { count: status.unreadable_uploads })}
+      </FieldFeedback>
+    </span>
   ) : undefined;
 
   const statusControl = cloud.isLoading ? (
