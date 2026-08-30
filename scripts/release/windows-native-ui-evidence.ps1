@@ -459,6 +459,26 @@ function Test-WindowsUiEvidenceHelpers {
         $partialDiagnosticRejected = $_.Exception.Message -match "partial protected accessibility snapshot"
     }
     Assert-True $partialDiagnosticRejected "a partial protected snapshot became a failure diagnostic"
+    $missingFieldSnapshot = [ordered]@{
+        nodes = $partialSnapshot.nodes
+    }
+    $missingFieldRoot = Join-Path ([IO.Path]::GetTempPath()) "copypaste-protected-missing-field-$([guid]::NewGuid())"
+    [IO.Directory]::CreateDirectory($missingFieldRoot) | Out-Null
+    try {
+        $missingFieldRejected = $false
+        try {
+            Save-WindowsProtectedFailureDiagnostic `
+                $missingFieldRoot "devices" "entry" "Pairing code" $missingFieldSnapshot @("Pairing code")
+        } catch {
+            $missingFieldRejected = $true
+        }
+        Assert-True $missingFieldRejected "a snapshot missing completeness fields was accepted"
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $missingFieldRoot `
+            "failure-diagnostics/protected-accessibility-failure.json"))) `
+            "a snapshot missing completeness fields emitted a diagnostic"
+    } finally {
+        Remove-Item -LiteralPath $missingFieldRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
     $failureRoot = Join-Path ([IO.Path]::GetTempPath()) "copypaste-protected-failure-$([guid]::NewGuid())"
     [IO.Directory]::CreateDirectory($failureRoot) | Out-Null
     try {
@@ -472,7 +492,11 @@ function Test-WindowsUiEvidenceHelpers {
             offscreen = $false; bounds = [ordered]@{ x = 0; y = 0; width = 2; height = 2 }
             is_password = $false
         }
-        $missingPasswordSnapshot = [ordered]@{ nodes = @($missingPasswordRoot, $missingPasswordNode) }
+        $missingPasswordSnapshot = [ordered]@{
+            nodes = @($missingPasswordRoot, $missingPasswordNode)
+            unreadable = @()
+            retried = @()
+        }
         $missingPasswordNodes = @(
             New-ProtectedUiaNode `
                 $missingPasswordRoot["name"] $missingPasswordRoot["control_type"] `
