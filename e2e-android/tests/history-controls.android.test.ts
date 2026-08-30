@@ -62,6 +62,7 @@ const CONTROL_SELECTORS = CONTROLS.map(
 
 let app: AndroidApp;
 let seeded: string[] = [];
+let linkItemIds: string[] = [];
 let marker = "";
 
 beforeAllWithEvidence("history-controls", async () => {
@@ -75,6 +76,7 @@ beforeAllWithEvidence("history-controls", async () => {
     `${marker} just some words`,
     `${marker} more plain words`,
   ]);
+  linkItemIds = sortedItemIds(seeded.slice(0, 2));
   await reloadHistoryWith(app, `${marker} more plain words`);
   await waitForRows(app, 4);
 }, 300_000);
@@ -230,10 +232,8 @@ describe("the toolbar", () => {
         await tapElement(app, '[role="menuitemcheckbox"]', "Links");
         await waitFor(async () => {
           const rows = itemRows(await rowBoxes(app));
-          return (
-            rows.length > 0 &&
-            rows.every((row) => row.text.includes("https://example.com"))
-          );
+          const actualIds = sortedItemIds(rows.map((row) => row.id));
+          return rows.length === linkItemIds.length && sameSortedItemIds(linkItemIds, actualIds);
         }, "the kind filter left rows that are not links on screen");
 
         // MultiSelect prevents item selection from closing its Radix portal.

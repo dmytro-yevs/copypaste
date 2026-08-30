@@ -610,7 +610,11 @@ test("rejects incomplete, nonpassword, and raw Windows pairing accessibility", (
   }, "devices");
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [passwordPath], required: new Set(["windows"]), runId: RUN_ID }),
-    /lacks protected Pairing address/,
+    (error) => {
+      assert.match(error.message, /lacks protected field 2/);
+      assert.doesNotMatch(error.message, /Pairing address/);
+      return true;
+    },
   );
 
   const rawPath = await fixture(root, "windows");
