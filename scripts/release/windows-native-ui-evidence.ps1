@@ -349,6 +349,10 @@ function Test-WindowsUiEvidenceHelpers {
     $redacted = New-ProtectedUiaNode "secret-value" "ControlType.Edit" $true $false `
         ([ordered]@{ x = 0; y = 0; width = 1; height = 1 }) $true @("Pairing code")
     Assert-True ($null -eq $redacted.name) "protected accessibility retained an unapproved name"
+    $unknownControlType = New-ProtectedUiaNode "Pairing code" "ControlType.Secret123" $true $false `
+        ([ordered]@{ x = 0; y = 0; width = 1; height = 1 }) $true @("Pairing code")
+    Assert-True ($null -eq $unknownControlType.control_type) `
+        "protected accessibility retained an unknown control type"
     $pairingNames = @("Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel")
     $pairingVisibleNames = @("Add a CopyPaste device")
     $pairingEnabledNames = @("Pairing code", "Pairing address", "Pair", "Cancel")
@@ -402,14 +406,14 @@ function Test-WindowsUiEvidenceHelpers {
     $privatePath = "C:\Users\private\pairing-secret.txt"
     $unsafeSnapshot = [ordered]@{
         nodes = @([ordered]@{
-            name = $secret; control_type = "ControlType.Edit"; enabled = $true
+            name = $secret; control_type = "ControlType.Secret123"; enabled = $true
             offscreen = $false; bounds = [ordered]@{
                 x = 0; y = 0; width = 1; height = 1
                 raw_bounds = [ordered]@{ path = $privatePath }
             }
             is_password = $true; value = "192.0.2.1:48654"; peer_text = "Unverified peer"
         })
-        unreadable = @([ordered]@{ index = 1; attempts = 3; reason = $privatePath })
+        unreadable = @()
         retried = @([ordered]@{ index = 0; attempts = 2; last_failure = $privatePath })
     }
     $summary = Get-ProtectedUiaSnapshotSummary $unsafeSnapshot @("Pairing code")
@@ -421,10 +425,40 @@ function Test-WindowsUiEvidenceHelpers {
     $serialized = $document | ConvertTo-Json -Depth 8
     Assert-True (-not ($serialized -match $unsafePattern)) `
         "protected accessibility artifact exposed a secret or local path"
+    Assert-True (-not ($serialized -match "ControlType\.Secret123")) `
+        "protected accessibility artifact retained an unknown control type"
     Assert-True ($null -eq $document.nodes[0].name -and -not $document.node_read.retried[0].Contains("last_failure")) `
         "protected accessibility artifact did not project onto its safe schema"
     Assert-True (-not $document.nodes[0].bounds.Contains("raw_bounds")) `
         "protected accessibility artifact retained an unknown nested bounds field"
+    $unknownControlJson = $unknownControlType | ConvertTo-Json -Depth 8
+    Assert-True (-not ($unknownControlJson -match "ControlType\.Secret123")) `
+        "protected accessibility artifact retained an unknown control type"
+    $partialSnapshot = [ordered]@{
+        nodes = @([ordered]@{
+            name = "Pairing code"; control_type = "ControlType.Secret123"; enabled = $true
+            offscreen = $false; bounds = [ordered]@{ x = 0; y = 0; width = 1; height = 1 }
+            is_password = $true
+        })
+        unreadable = @([ordered]@{ index = 1; attempts = 3; reason = $privatePath })
+        retried = @()
+    }
+    $partialRejected = $false
+    try {
+        New-WindowsProtectedAccessibilityDocument "devices" "entry" "Pairing code" `
+            $protected $partialSnapshot @("Pairing code") | Out-Null
+    } catch {
+        $partialRejected = $_.Exception.Message -match "partial protected accessibility snapshot"
+    }
+    Assert-True $partialRejected "a partial protected snapshot became an accessibility document"
+    $partialDiagnosticRejected = $false
+    try {
+        New-WindowsProtectedFailureDiagnostic "devices" "entry" "Pairing code" `
+            $partialSnapshot @("Pairing code") | Out-Null
+    } catch {
+        $partialDiagnosticRejected = $_.Exception.Message -match "partial protected accessibility snapshot"
+    }
+    Assert-True $partialDiagnosticRejected "a partial protected snapshot became a failure diagnostic"
     $failureRoot = Join-Path ([IO.Path]::GetTempPath()) "copypaste-protected-failure-$([guid]::NewGuid())"
     [IO.Directory]::CreateDirectory($failureRoot) | Out-Null
     try {
@@ -484,6 +518,8 @@ function Test-WindowsUiEvidenceHelpers {
                     is_password = $true
                 }
             })
+            unreadable = @()
+            retried = @()
         }
         $bounded = New-WindowsProtectedFailureDiagnostic `
             "devices" "desktop-pairing-entry" "Pairing code" $largeSnapshot $pairingNames

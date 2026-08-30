@@ -1,4 +1,46 @@
 $MAX_PROTECTED_FAILURE_NODES = 256
+$PROTECTED_CONTROL_TYPES = @(
+    "ControlType.AppBar",
+    "ControlType.Button",
+    "ControlType.Calendar",
+    "ControlType.CheckBox",
+    "ControlType.ComboBox",
+    "ControlType.Custom",
+    "ControlType.DataGrid",
+    "ControlType.DataItem",
+    "ControlType.Document",
+    "ControlType.Edit",
+    "ControlType.Group",
+    "ControlType.Header",
+    "ControlType.HeaderItem",
+    "ControlType.Hyperlink",
+    "ControlType.Image",
+    "ControlType.List",
+    "ControlType.ListItem",
+    "ControlType.Menu",
+    "ControlType.MenuBar",
+    "ControlType.MenuItem",
+    "ControlType.Pane",
+    "ControlType.ProgressBar",
+    "ControlType.RadioButton",
+    "ControlType.ScrollBar",
+    "ControlType.SemanticZoom",
+    "ControlType.Separator",
+    "ControlType.Slider",
+    "ControlType.Spinner",
+    "ControlType.SplitButton",
+    "ControlType.StatusBar",
+    "ControlType.Tab",
+    "ControlType.TabItem",
+    "ControlType.Text",
+    "ControlType.Thumb",
+    "ControlType.TitleBar",
+    "ControlType.ToolBar",
+    "ControlType.ToolTip",
+    "ControlType.Tree",
+    "ControlType.TreeItem",
+    "ControlType.Window"
+)
 
 function Convert-ProtectedUiaBounds($Bounds) {
     if ($Bounds -isnot [Collections.IDictionary]) { return $null }
@@ -18,7 +60,7 @@ function Convert-ProtectedUiaBounds($Bounds) {
 }
 
 function Convert-ProtectedUiaControlType([AllowNull()][string]$ControlType) {
-    if ($ControlType -match '^ControlType\.[A-Za-z0-9]{1,48}$') { return $ControlType }
+    if ($ControlType -in $PROTECTED_CONTROL_TYPES) { return $ControlType }
     return $null
 }
 
@@ -328,6 +370,7 @@ function New-WindowsProtectedAccessibilityDocument(
     $Snapshot,
     [string[]]$AllowedNames
 ) {
+    Assert-ProtectedUiaSnapshotComplete $Snapshot "$Feature/$State protected evidence"
     $nodes = @($Snapshot.nodes | ForEach-Object {
         New-ProtectedUiaNode `
             $_["name"] $_["control_type"] $_["enabled"] $_["offscreen"] `
@@ -358,6 +401,7 @@ function New-WindowsProtectedFailureDiagnostic(
     $Snapshot,
     [string[]]$AllowedNames
 ) {
+    Assert-ProtectedUiaSnapshotComplete $Snapshot "$Feature/$State protected failure diagnostic"
     $allNodes = @($Snapshot.nodes)
     $count = [Math]::Min($allNodes.Count, $MAX_PROTECTED_FAILURE_NODES)
     $nodes = @(
@@ -432,7 +476,7 @@ function Assert-WindowsProtectedNodesWithFailureDiagnostic(
             Save-WindowsProtectedFailureDiagnostic `
                 $EvidenceRoot $Feature $State $ExpectedName $Snapshot $AllowedNames
         } catch {
-            Write-Warning "protected accessibility failure diagnostic could not be persisted"
+            $null = $_
         }
         throw $assertionFailure
     }
