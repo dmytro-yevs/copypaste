@@ -11,6 +11,7 @@ import {
   parseImeRuntimeDiagnostics,
   type ImeRuntimeDiagnostics,
 } from "./native-ime-diagnostics.js";
+import { parseInputSourceMasks } from "./native-touch-diagnostics.js";
 
 export interface DisplaySize {
   width: number;
@@ -47,6 +48,7 @@ type ShowImeWithHardKeyboard = "0" | "1" | null;
 
 export interface SoftKeyboardDiagnostics extends ImeRuntimeDiagnostics {
   preference: ShowImeWithHardKeyboard | "unknown";
+  sourceMasks: number[] | "unknown";
 }
 
 export interface SoftKeyboardScenario {
@@ -325,7 +327,7 @@ async function softKeyboardDiagnostics(
   serial: string,
   nativeCommands: NativeInputCommands,
 ): Promise<SoftKeyboardDiagnostics> {
-  const [preference, inputMethod, window] = await Promise.all([
+  const [preference, inputMethod, window, input] = await Promise.all([
     nativeCommands.tryShell(
       serial,
       "settings",
@@ -335,6 +337,7 @@ async function softKeyboardDiagnostics(
     ),
     nativeCommands.tryShell(serial, "dumpsys", "input_method"),
     nativeCommands.tryShell(serial, "dumpsys", "window", "-a"),
+    nativeCommands.tryShell(serial, "dumpsys", "input"),
   ]);
   return {
     preference: preference.ok ? (() => {
@@ -348,6 +351,7 @@ async function softKeyboardDiagnostics(
       inputMethod.ok ? inputMethod.value : undefined,
       window.ok ? window.value : undefined,
     ),
+    sourceMasks: parseInputSourceMasks(input.ok ? input.value : undefined),
   };
 }
 

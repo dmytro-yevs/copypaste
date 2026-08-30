@@ -74,6 +74,7 @@ function softKeyboardCommands(
     failTap?: boolean;
     inputMethodDump?: string;
     imeWindowDump?: string;
+    inputDump?: string;
   } = {},
 ): NativeInputCommands {
   let value = initial;
@@ -110,7 +111,9 @@ function softKeyboardCommands(
           ok: true,
           value: args[1] === "input_method"
             ? (options.inputMethodDump ?? "")
-            : (options.imeWindowDump ?? ""),
+            : args[1] === "input"
+              ? (options.inputDump ?? "")
+              : (options.imeWindowDump ?? ""),
         };
       }
       if (options.failTap) {
@@ -446,16 +449,19 @@ describe("Android native input geometry", () => {
           imeWindowPresent: true,
           imeWindowVisible: true,
           imeWindowFrame: { left: 0, top: 1320, width: 1080, height: 600 },
+          sourceMasks: [0x00005002],
         });
       },
       softKeyboardCommands(calls, "0", {
         inputMethodDump: "      mImeWindowVis=3\n      mInputShown=true",
         imeWindowDump: IME_WINDOW_DUMP,
+        inputDump: "    Sources: TOUCHSCREEN | STYLUS",
       }),
     );
     expect(calls.filter((call) => call.includes("dumpsys"))).toEqual([
       ["-s", "device-a", "dumpsys", "input_method"],
       ["-s", "device-a", "dumpsys", "window", "-a"],
+      ["-s", "device-a", "dumpsys", "input"],
     ]);
   });
 });

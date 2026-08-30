@@ -10,6 +10,7 @@ import {
 const savedDocument = (globalThis as { document?: unknown }).document;
 const savedWindow = (globalThis as { window?: unknown }).window;
 const savedGetComputedStyle = globalThis.getComputedStyle;
+const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
 
 function restoreGlobals(): void {
   if (savedDocument === undefined)
@@ -19,6 +20,8 @@ function restoreGlobals(): void {
     delete (globalThis as { window?: unknown }).window;
   else (globalThis as { window?: unknown }).window = savedWindow;
   globalThis.getComputedStyle = savedGetComputedStyle;
+  if (savedNavigator === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+  else Object.defineProperty(globalThis, "navigator", savedNavigator);
 }
 
 describe("touch capability diagnostics", () => {
@@ -36,6 +39,7 @@ describe("touch capability diagnostics", () => {
         },
         viewport: { width: 412, height: 915 },
         dataPointer: "coarse",
+        maxTouchPoints: 5,
         tapMin: "44px",
         controls: [
           {
@@ -60,6 +64,7 @@ describe("touch capability diagnostics", () => {
     });
     expect(parsed.viewport).toEqual({ width: 412, height: 915 });
     expect(parsed.dataPointer).toBe("coarse");
+    expect(parsed.maxTouchPoints).toBe(5);
     expect(parsed.tapMin).toEqual({ value: 44, unit: "px" });
     expect(parsed.controls[0]).toEqual({
       index: 0,
@@ -96,6 +101,7 @@ describe("touch capability diagnostics", () => {
     expect(normalized.viewport).toEqual({ width: null, height: 0 });
     expect(normalized.tapMin).toBe(null);
     expect(normalized.dataPointer).toBe(null);
+    expect(normalized.maxTouchPoints).toBe(null);
     expect(normalized.controls[0]).toEqual({
       index: 0,
       present: false,
@@ -141,6 +147,10 @@ describe("touch capability diagnostics", () => {
         matches: query === "(pointer: coarse)" || query === "(any-pointer: coarse)",
       }),
     };
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { maxTouchPoints: 5 },
+    });
     globalThis.getComputedStyle = (() => ({
       getPropertyValue: (name: string) =>
         name === "--tap-min" || name === "min-block-size" ? "44px" : "",
@@ -153,6 +163,7 @@ describe("touch capability diagnostics", () => {
       expect(snapshot.media.pointerFine).toBe(false);
       expect(snapshot.media.hover).toBe(false);
       expect(snapshot.dataPointer).toBe("coarse");
+      expect(snapshot.maxTouchPoints).toBe(5);
       expect(snapshot.controls).toEqual([
         {
           index: 0,
@@ -178,6 +189,7 @@ describe("touch capability diagnostics", () => {
     expect(snapshot.media.pointerCoarse).toBe(null);
     expect(snapshot.media.pointerFine).toBe(null);
     expect(snapshot.viewport).toEqual({ width: null, height: null });
+    expect(snapshot.maxTouchPoints).toBe(null);
     expect(JSON.stringify(snapshot)).not.toContain("private");
   });
 });
