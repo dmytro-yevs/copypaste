@@ -87,6 +87,7 @@ function Get-UiaSummary([Diagnostics.Process]$App) {
 }
 $UIA_NAMED_DIAGNOSTIC_CANDIDATE_LIMIT = 8
 $UIA_NAMED_DIAGNOSTIC_MAXIMUM_LENGTH = 4096
+$UIA_OFFSCREEN_SCROLL_FAILURE = "the offscreen UI Automation element could not be revealed"
 
 function Get-UiaDiagnosticBounds($Bounds) {
     $coordinates = @($Bounds.X, $Bounds.Y, $Bounds.Width, $Bounds.Height)
@@ -171,11 +172,87 @@ function Get-UiaNamedWaitDiagnostics($App, [string]$Name, [bool]$Actionable = $f
     $candidateReport = try { & $Candidates $App $Name $Actionable } catch { "UIA exact-name candidates unavailable" }
     return @($summaryReport, $candidateReport)
 }
-function Get-UiaNamedElement([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
+function Test-UiaFinitePositiveBounds($Bounds) {
+    if ($null -eq $Bounds) { return $false }
+    $coordinates = @($Bounds.X, $Bounds.Y, $Bounds.Width, $Bounds.Height)
+    if (@($coordinates | Where-Object { [double]::IsNaN($_) -or [double]::IsInfinity($_) }).Count -gt 0) {
+        return $false
+    }
+    return $Bounds.Width -gt 0 -and $Bounds.Height -gt 0
+}
+
+function Test-UiaNamedCandidateReady([Collections.IDictionary]$Candidate) {
+    return $null -ne $Candidate -and $Candidate["enabled"] -and -not $Candidate["offscreen"] -and
+        $Candidate["actionable"] -and (Test-UiaFinitePositiveBounds $Candidate["bounds"])
+}
+
+function Test-UiaNamedCandidateScrollable([Collections.IDictionary]$Candidate) {
+    return $null -ne $Candidate -and $Candidate["enabled"] -and $Candidate["offscreen"] -and
+        $Candidate["actionable"] -and $null -ne $Candidate["scroll_item"] -and
+        (Test-UiaFinitePositiveBounds $Candidate["bounds"])
+}
+
+function Test-UiaScrollItemPatternNeeded([bool]$ScrollOptIn, [bool]$Offscreen) {
+    return $ScrollOptIn -and $Offscreen
+}
+
+function Get-UiaOptionalScrollItemPattern(
+    [bool]$ScrollOptIn,
+    [bool]$Offscreen,
+    [scriptblock]$ReadPattern
+) {
+    if (-not (Test-UiaScrollItemPatternNeeded $ScrollOptIn $Offscreen)) { return $null }
+    try {
+        return & $ReadPattern
+    } catch {
+        return $null
+    }
+}
+
+function Find-UiaReadyNamedCandidate([object[]]$Candidates) {
+    foreach ($candidate in @($Candidates)) {
+        if (Test-UiaNamedCandidateReady $candidate) { return $candidate }
+    }
+    return $null
+}
+
+# ScrollItemPattern is the documented UIA client pattern for bringing an item
+# into its container's viewport. One wait owns at most one such interaction;
+# it must still observe a fresh, normally-ready element afterward.
+function Invoke-UiaSingleOffscreenScroll([object[]]$Candidates, [hashtable]$ScrollState, [scriptblock]$Scroll) {
+    if ($null -eq $ScrollState -or $ScrollState["attempted"]) { return $false }
+    foreach ($candidate in @($Candidates)) {
+        if (-not (Test-UiaNamedCandidateScrollable $candidate)) { continue }
+        $ScrollState["attempted"] = $true
+        try {
+            & $Scroll $candidate["scroll_item"]
+            return $true
+        } catch {
+            $ScrollState["failure"] = $UIA_OFFSCREEN_SCROLL_FAILURE
+            return $false
+        }
+    }
+    return $false
+}
+
+function Resolve-UiaNamedCandidate([scriptblock]$ReadCandidates, [hashtable]$ScrollState = $null, [scriptblock]$Scroll = $null) {
+    $candidates = @(& $ReadCandidates)
+    $ready = Find-UiaReadyNamedCandidate $candidates
+    if ($null -ne $ready) { return $ready }
+    if ($null -eq $Scroll -or -not (Invoke-UiaSingleOffscreenScroll $candidates $ScrollState $Scroll)) { return $null }
+    return Find-UiaReadyNamedCandidate @(& $ReadCandidates)
+}
+
+function Get-UiaNamedCandidateRecords(
+    [Diagnostics.Process]$App,
+    [string]$Name,
+    [bool]$Actionable = $false,
+    [bool]$NeedScrollPattern = $false
+) {
     $App.Refresh()
-    if ($App.HasExited) { return $null }
+    if ($App.HasExited) { return @() }
     $root = Get-AppAutomationRoot $App
-    if ($null -eq $root) { return $null }
+    if ($null -eq $root) { return @() }
     $condition = [Windows.Automation.PropertyCondition]::new(
         [Windows.Automation.AutomationElement]::NameProperty,
         $Name
@@ -183,34 +260,87 @@ function Get-UiaNamedElement([Diagnostics.Process]$App, [string]$Name, [bool]$Ac
     try {
         $candidates = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
     } catch {
-        return $null
+        return @()
     }
+    $records = @()
     foreach ($match in $candidates) {
         try {
             $bounds = $match.Current.BoundingRectangle
+            $enabled = $match.Current.IsEnabled
+            $offscreen = $match.Current.IsOffscreen
             $canAct = -not $Actionable -or $match.Current.IsKeyboardFocusable -or @(
                 $match.GetSupportedPatterns() | Where-Object {
                     $_ -eq [Windows.Automation.InvokePattern]::Pattern -or
                     $_ -eq [Windows.Automation.SelectionItemPattern]::Pattern
                 }
             ).Count -gt 0
-            if ($canAct -and $match.Current.IsEnabled -and -not $match.Current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
-                return $match
+            $scrollItem = Get-UiaOptionalScrollItemPattern $NeedScrollPattern $offscreen {
+                $pattern = $null
+                if ($match.TryGetCurrentPattern([Windows.Automation.ScrollItemPattern]::Pattern, [ref]$pattern)) {
+                    return $pattern
+                }
+                return $null
+            }
+            $records += [ordered]@{
+                element = $match
+                enabled = $enabled
+                offscreen = $offscreen
+                bounds = $bounds
+                actionable = $canAct
+                scroll_item = $scrollItem
             }
         } catch {
             continue
         }
     }
-    return $null
+    return @($records)
 }
-function Wait-UiaName([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
+
+function Get-UiaNamedElement(
+    [Diagnostics.Process]$App,
+    [string]$Name,
+    [bool]$Actionable = $false,
+    [hashtable]$ScrollState = $null
+) {
+    $scrollOptIn = $null -ne $ScrollState
+    $recordReader = { Get-UiaNamedCandidateRecords $App $Name $Actionable $scrollOptIn }
+    $record = Resolve-UiaNamedCandidate $recordReader $ScrollState {
+        param($ScrollItem)
+        ([Windows.Automation.ScrollItemPattern]$ScrollItem).ScrollIntoView()
+    }
+    if ($null -eq $record) { return $null }
+    return $record["element"]
+}
+
+function Get-UiaNamedWaitProbeOutcome(
+    [string]$Name,
+    [scriptblock]$Find,
+    [scriptblock]$HasRoot,
+    [hashtable]$ScrollState = $null
+) {
+    $match = & $Find
+    if ($null -ne $match) { return New-ProbeReady $match }
+    if ($null -ne $ScrollState -and $ScrollState.Contains("failure")) {
+        return New-ProbeInvariant $ScrollState["failure"]
+    }
+    if (-not (& $HasRoot)) { return New-ProbeNotReady "the app has published no native window handle" }
+    return New-ProbeNotReady "no enabled, on-screen element is named '$Name'"
+}
+
+function Wait-UiaName(
+    [Diagnostics.Process]$App,
+    [string]$Name,
+    [bool]$Actionable = $false,
+    [bool]$ScrollOffscreen = $false
+) {
+    $scrollState = if ($ScrollOffscreen) { @{ attempted = $false } } else { $null }
     return Wait-Readiness "UI state '$Name'" {
         $App.Refresh()
         if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
-        $match = Get-UiaNamedElement $App $Name $Actionable
-        if ($null -ne $match) { return New-ProbeReady $match }
-        if ($null -eq (Get-AppAutomationRoot $App)) { return New-ProbeNotReady "the app has published no native window handle" }
-        return New-ProbeNotReady "no enabled, on-screen element is named '$Name'"
+        return Get-UiaNamedWaitProbeOutcome $Name `
+            { Get-UiaNamedElement $App $Name $Actionable $scrollState } `
+            { $null -ne (Get-AppAutomationRoot $App) } `
+            $scrollState
     } { Get-UiaNamedWaitDiagnostics $App $Name $Actionable } 15000
 }
 
@@ -246,9 +376,9 @@ function Complete-WindowsFirstRun([Diagnostics.Process]$App) {
 }
 
 function Invoke-UiaNamedControl([Diagnostics.Process]$App, [string]$Name, [string]$ExpectedName) {
-    $element = Wait-UiaName $App $Name $true
+    $element = Wait-UiaName $App $Name $true $true
     Invoke-UiaElement $element $Name
-    Wait-UiaName $App $ExpectedName | Out-Null
+    Wait-UiaName $App $ExpectedName $false $true | Out-Null
 }
 
 function Get-WindowsPairingEntryState(
@@ -294,7 +424,7 @@ function Set-UiaScreenshots(
     [bool]$Allow,
     [string]$CaptureTracePath = ""
 ) {
-    $element = Wait-UiaName $App "Allow screenshots" $true
+    $element = Wait-UiaName $App "Allow screenshots" $true $true
     $pattern = $null
     if (-not $element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) {
         $supported = @($element.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ", "
@@ -342,7 +472,7 @@ function Save-WindowsFeatureState(
     [string]$ArtifactDirectory = "",
     [string]$CaptureTracePath = ""
 ) {
-    Wait-UiaName $App $ExpectedName | Out-Null
+    Wait-UiaName $App $ExpectedName $false $true | Out-Null
     $root = Get-AppAutomationRoot $App
     $snapshot = Get-UiaSnapshot $root
     Assert-UiaSnapshotComplete $snapshot "$Feature/$State evidence"
@@ -419,8 +549,139 @@ function Test-UiaNamedCandidateDiagnostics {
     Assert-True ($waitSource -match 'Get-UiaNamedWaitDiagnostics \$App \$Name \$Actionable') `
         "named UIA candidate diagnostics are not limited to the named-wait failure path"
     $matchSource = ${function:Get-UiaNamedElement}.ToString()
-    Assert-True ($matchSource -match '\$canAct -and \$match.Current.IsEnabled -and -not \$match.Current.IsOffscreen' -and $matchSource -match '\$bounds.Width -gt 0 -and \$bounds.Height -gt 0') `
+    Assert-True ($matchSource -match 'Resolve-UiaNamedCandidate \$recordReader \$ScrollState' -and $matchSource -match 'ScrollItemPattern.*ScrollIntoView') `
+        "named UIA waits no longer use the documented single-item scroll pattern"
+    $readySource = ${function:Test-UiaNamedCandidateReady}.ToString()
+    Assert-True ($readySource -match 'Candidate\["enabled"\]' -and $readySource -match '-not \$Candidate\["offscreen"\]' -and
+        $readySource -match 'Candidate\["actionable"\]' -and $readySource -match 'Test-UiaFinitePositiveBounds') `
         "named UIA candidate diagnostics changed the existing readiness predicate"
+    $recordSource = ${function:Get-UiaNamedCandidateRecords}.ToString()
+    Assert-True ($recordSource -match 'Get-UiaOptionalScrollItemPattern \$NeedScrollPattern \$offscreen' -and
+        ${function:Get-UiaOptionalScrollItemPattern}.ToString() -match 'Test-UiaScrollItemPatternNeeded \$ScrollOptIn \$Offscreen') `
+        "optional ScrollItem reads can discard a visible or protected named candidate"
+    $outcomeSource = ${function:Get-UiaNamedWaitProbeOutcome}.ToString()
+    Assert-True ($outcomeSource -match 'ScrollState\.Contains\("failure"\)' -and $outcomeSource -match 'New-ProbeInvariant') `
+        "a ScrollItem failure no longer fails the named wait closed"
+}
+
+function Test-UiaOffscreenNamedNavigation {
+    $visible = [ordered]@{
+        element = "visible"
+        enabled = $true
+        offscreen = $false
+        bounds = [pscustomobject]@{ X = 4; Y = 5; Width = 20; Height = 21 }
+        actionable = $true
+        scroll_item = $null
+    }
+    $offscreen = [ordered]@{
+        element = "offscreen"
+        enabled = $true
+        offscreen = $true
+        bounds = [pscustomobject]@{ X = 4; Y = 50; Width = 20; Height = 21 }
+        actionable = $true
+        scroll_item = "scroll"
+    }
+
+    $visibleSeen = @{ reads = 0; scrolls = 0 }
+    $visibleResult = Resolve-UiaNamedCandidate {
+        $visibleSeen["reads"]++
+        return @($visible)
+    } @{ attempted = $false } {
+        param($ScrollItem)
+        $visibleSeen["scrolls"]++
+    }
+    Assert-True ($visibleResult["element"] -eq "visible" -and $visibleSeen["reads"] -eq 1 -and $visibleSeen["scrolls"] -eq 0) `
+        "a visible named UIA target triggered a scroll"
+    Assert-True (-not (Test-UiaScrollItemPatternNeeded $false $false) -and -not (Test-UiaScrollItemPatternNeeded $false $true) -and
+        -not (Test-UiaScrollItemPatternNeeded $true $false) -and (Test-UiaScrollItemPatternNeeded $true $true)) `
+        "ScrollItemPattern lookup was not limited to explicit offscreen navigation"
+    $patternReads = @{ count = 0 }
+    $visiblePattern = Get-UiaOptionalScrollItemPattern $false $false {
+        $patternReads["count"]++
+        throw "visible fixture pattern read"
+    }
+    $protectedPattern = Get-UiaOptionalScrollItemPattern $false $true {
+        $patternReads["count"]++
+        throw "protected fixture pattern read"
+    }
+    $failedPattern = Get-UiaOptionalScrollItemPattern $true $true {
+        $patternReads["count"]++
+        throw "offscreen fixture pattern read"
+    }
+    Assert-True ($null -eq $visiblePattern -and $null -eq $protectedPattern -and $null -eq $failedPattern -and
+        $patternReads["count"] -eq 1 -and (Test-UiaNamedCandidateReady $visible)) `
+        "an optional ScrollItem read was attempted outside opt-in offscreen navigation or rejected a ready candidate"
+
+    $afterScroll = [ordered]@{
+        element = "after-scroll"
+        enabled = $true
+        offscreen = $false
+        bounds = [pscustomobject]@{ X = 4; Y = 6; Width = 20; Height = 21 }
+        actionable = $true
+        scroll_item = $null
+    }
+    $transition = @{ phase = 0; reads = 0; scrolls = 0 }
+    $scrollState = @{ attempted = $false }
+    $scrolledResult = Resolve-UiaNamedCandidate {
+        $transition["reads"]++
+        if ($transition["phase"] -eq 0) { return @($offscreen) }
+        return @($afterScroll)
+    } $scrollState {
+        param($ScrollItem)
+        Assert-True ($ScrollItem -eq "scroll") "the offscreen target lost its ScrollItemPattern"
+        $transition["scrolls"]++
+        $transition["phase"] = 1
+    }
+    Assert-True ($scrolledResult["element"] -eq "after-scroll" -and $transition["reads"] -eq 2 -and $transition["scrolls"] -eq 1 -and $scrollState["attempted"]) `
+        "an offscreen named target was not scrolled once then re-read as normally ready"
+
+    $unchangedAfterScroll = @{ calls = 0 }
+    $unchangedResult = Resolve-UiaNamedCandidate { return @($offscreen) } @{ attempted = $false } {
+        param($ScrollItem)
+        $unchangedAfterScroll["calls"]++
+    }
+    Assert-True ($null -eq $unchangedResult -and $unchangedAfterScroll["calls"] -eq 1) `
+        "a target that remained offscreen after ScrollItem was accepted"
+
+    $unacceptable = @(
+        @(),
+        @($null),
+        @([ordered]@{ element = "disabled"; enabled = $false; offscreen = $true; bounds = $offscreen["bounds"]; actionable = $true; scroll_item = "scroll" }),
+        @([ordered]@{ element = "no-pattern"; enabled = $true; offscreen = $true; bounds = $offscreen["bounds"]; actionable = $true; scroll_item = $null }),
+        @([ordered]@{ element = "not-actionable"; enabled = $true; offscreen = $true; bounds = $offscreen["bounds"]; actionable = $false; scroll_item = "scroll" }),
+        @([ordered]@{ element = "zero"; enabled = $true; offscreen = $true; bounds = [pscustomobject]@{ X = 4; Y = 5; Width = 0; Height = 21 }; actionable = $true; scroll_item = "scroll" }),
+        @([ordered]@{ element = "non-finite"; enabled = $true; offscreen = $true; bounds = [pscustomobject]@{ X = [double]::NaN; Y = 5; Width = 20; Height = 21 }; actionable = $true; scroll_item = "scroll" })
+    )
+    foreach ($caseCandidates in $unacceptable) {
+        $seen = @{ scrolls = 0 }
+        $result = Resolve-UiaNamedCandidate { return $caseCandidates } @{ attempted = $false } {
+            param($ScrollItem)
+            $seen["scrolls"]++
+        }
+        Assert-True ($null -eq $result -and $seen["scrolls"] -eq 0) "an absent, stale, disabled, non-actionable, unscrollable, zero, or non-finite target was accepted"
+    }
+
+    $failedScrollState = @{ attempted = $false }
+    $failedScroll = @{ calls = 0 }
+    $failedResult = Resolve-UiaNamedCandidate { return @($offscreen) } $failedScrollState {
+        param($ScrollItem)
+        $failedScroll["calls"]++
+        throw "fixture scroll failure"
+    }
+    $secondFailedResult = Resolve-UiaNamedCandidate { return @($offscreen) } $failedScrollState {
+        param($ScrollItem)
+        $failedScroll["calls"]++
+    }
+    Assert-True ($null -eq $failedResult -and $null -eq $secondFailedResult -and $failedScroll["calls"] -eq 1 -and $failedScrollState["attempted"] -and
+        $failedScrollState["failure"] -eq $UIA_OFFSCREEN_SCROLL_FAILURE) `
+        "a failed UIA ScrollItem interaction was accepted or repeated"
+    $rootProbe = @{ calls = 0 }
+    $failureOutcome = Get-UiaNamedWaitProbeOutcome "fixture" { return $null } {
+        $rootProbe["calls"]++
+        return $true
+    } $failedScrollState
+    Assert-True ($failureOutcome["kind"] -eq "invariant" -and $failureOutcome["why"] -eq $UIA_OFFSCREEN_SCROLL_FAILURE -and $rootProbe["calls"] -eq 0) `
+        "a ScrollItem failure did not stop the named wait before a generic retry"
 }
 
 function Test-WindowsUiEvidenceHelpers {
@@ -443,6 +704,7 @@ function Test-WindowsUiEvidenceHelpers {
     Assert-True ($null -eq (Get-UiaControlTypeName $null)) `
         "a control type the client cannot name was given a name anyway"
     Test-UiaNamedCandidateDiagnostics
+    Test-UiaOffscreenNamedNavigation
     Assert-True ((Get-WindowsPairingEntryState $true $true $false $false) -eq "ready") `
         "both native pairing fields did not identify the entry state"
     Assert-True ((Get-WindowsPairingEntryState $false $false $true $false) -eq "invoke") `
@@ -497,4 +759,10 @@ function Test-WindowsUiEvidenceHelpers {
         "Windows pairing caller bypassed the protected close transition"
     Assert-True (-not (${function:Read-ProtectedUiaNode}.ToString() -match "ValuePattern")) `
         "protected accessibility queried ValuePattern"
+    $invokeSource = ${function:Invoke-UiaElement}.ToString()
+    Assert-True ($invokeSource -match "InvokePattern" -and $invokeSource -match "SelectionItemPattern" -and -not ($invokeSource -match "TogglePattern")) `
+        "generic UIA invocation widened into toggle semantics"
+    $pairingSource = ${function:Open-WindowsPairingEntry}.ToString()
+    Assert-True (-not ($pairingSource -match 'Wait-UiaName\s+\$App\s+"Connect a device"\s+\$true\s+\$true')) `
+        "protected pairing entry enabled ordinary offscreen scrolling"
 }
