@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudCredentials, CloudStatusData } from "@/lib/ipc";
 import { withUser } from "@/test/harness";
 import { CloudSyncSettings } from "./CloudSyncSettings";
+import styles from "./CloudSyncSettings.module.css";
 
 const ipc = vi.hoisted(() => ({
   cloudSetEndpoint: vi.fn(),
@@ -100,6 +101,7 @@ describe("connection error announcements", () => {
     expect(alerts).toHaveLength(1);
     const [alert] = alerts;
     expect(alert.getAttribute("aria-live")).toBe("assertive");
+    expect(alert.parentElement?.classList.contains(styles.connectionNote)).toBe(true);
     expect(alert.parentElement?.tagName).toBe("SPAN");
     expect(alert.textContent).toContain(message);
   }
