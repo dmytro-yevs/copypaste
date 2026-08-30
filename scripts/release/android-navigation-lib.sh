@@ -150,15 +150,19 @@ navigation_transition_self_test() { # <temp>
 }
 
 navigation_shell_readiness_self_test() { # <temp>
-    local temp="$1" onboarding ready disabled absent observed
+    local temp="$1" onboarding ready disabled absent zero covered observed
     onboarding='<node text="Explore first" bounds="[20,400][300,450]" enabled="true" clickable="true"/>'
     ready='<node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/>'
     disabled='<node text="Settings" bounds="[207,583][303,635]" enabled="false" clickable="true"/>'
     absent='<node text="Loading…" bounds="[29,405][291,434]" enabled="true"/>'
+    zero='<node text="Settings" bounds="[0,0][0,0]" enabled="true" clickable="true"/>'
+    covered='<node text="Primary" bounds="[0,570][320,640]"><node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/></node><node bounds="[0,570][320,640]"><node content-desc="Close toast" bounds="[280,580][310,610]" enabled="true" clickable="true"/></node>'
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$onboarding</hierarchy>" > "$temp/onboarding.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$ready</hierarchy>" > "$temp/settings-ready.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$disabled</hierarchy>" > "$temp/settings-disabled.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$absent</hierarchy>" > "$temp/settings-absent.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$zero</hierarchy>" > "$temp/settings-zero.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$covered</hierarchy>" > "$temp/settings-covered.xml"
     observed="$temp/settings-observed.xml"
 
     (
@@ -216,6 +220,34 @@ navigation_shell_readiness_self_test() { # <temp>
     ) \
         && ok "an absent Settings tab fails closed" \
         || bad "an absent Settings tab fails closed"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/settings-zero.xml"
+        ! reach_settings_tab "$observed" 1 \
+            && [[ $UI_FIXTURE_TAPS -eq 0 ]] \
+            && cmp -s "$observed" "$temp/settings-zero.xml"
+    ) \
+        && ok "a zero-sized Settings tab fails closed" \
+        || bad "a zero-sized Settings tab fails closed"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/settings-covered.xml"
+        ! reach_settings_tab "$observed" 1 \
+            && [[ $UI_FIXTURE_TAPS -eq 0 ]] \
+            && cmp -s "$observed" "$temp/settings-covered.xml"
+    ) \
+        && ok "a toast-covered Settings tab fails closed" \
+        || bad "a toast-covered Settings tab fails closed"
 }
 
 android_navigation_self_test() { # <temp>
