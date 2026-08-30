@@ -85,7 +85,92 @@ function Get-UiaSummary([Diagnostics.Process]$App) {
     $names = @(Get-UiaSnapshotNames $snapshot)
     return "UIA names: $($names -join ' | ') [$(Get-UiaSnapshotReport $snapshot)]"
 }
+$UIA_NAMED_DIAGNOSTIC_CANDIDATE_LIMIT = 8
+$UIA_NAMED_DIAGNOSTIC_MAXIMUM_LENGTH = 4096
 
+function Get-UiaDiagnosticBounds($Bounds) {
+    $coordinates = @($Bounds.X, $Bounds.Y, $Bounds.Width, $Bounds.Height)
+    if (@($coordinates | Where-Object { [double]::IsNaN($_) -or [double]::IsInfinity($_) }).Count -gt 0) {
+        return "non-finite"
+    }
+    return "($($Bounds.X),$($Bounds.Y),$($Bounds.Width),$($Bounds.Height))"
+}
+function Format-UiaNamedCandidateDiagnostics([string]$Name, [int]$MatchCount, [object[]]$Candidates) {
+    $parts = @("UIA exact-name candidates for '$Name': $MatchCount match(es); showing $(@($Candidates).Count) of $MatchCount")
+    $index = 0
+    foreach ($candidate in @($Candidates)) {
+        $index++
+        if ($candidate["status"] -eq "stale-or-unreadable") {
+            $parts += "candidate[$index]=stale-or-unreadable"
+            continue
+        }
+        $patterns = @($candidate["patterns"] | Select-Object -First 5) -join ","
+        $parts += ("candidate[{0}]: control_type={1}; enabled={2}; offscreen={3}; bounds={4}; keyboard_focusable={5}; relevant_patterns={6}; actionable={7}" -f @(
+            $index, $candidate["control_type"], $candidate["enabled"], $candidate["offscreen"], $candidate["bounds"],
+            $candidate["keyboard_focusable"], $patterns, $candidate["actionable"]
+        ))
+    }
+    $text = $parts -join "; "
+    if ($text.Length -gt $UIA_NAMED_DIAGNOSTIC_MAXIMUM_LENGTH) {
+        return $text.Substring(0, $UIA_NAMED_DIAGNOSTIC_MAXIMUM_LENGTH - 12) + " [truncated]"
+    }
+    return $text
+}
+# Failure-only evidence excludes candidate Name, Value, AutomationId,
+# exception text, and arbitrary provider data.
+function Get-UiaNamedCandidateDiagnostics([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
+    $App.Refresh()
+    if ($App.HasExited) { return "UIA exact-name candidates: the app exited" }
+    $root = Get-AppAutomationRoot $App
+    if ($null -eq $root) { return "UIA exact-name candidates: native window handle is not ready" }
+    $condition = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::NameProperty,
+        $Name
+    )
+    try {
+        $matches = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+    } catch {
+        return "UIA exact-name candidates for '$Name': scan unavailable"
+    }
+    try { $count = $matches.Count } catch {
+        return "UIA exact-name candidates for '$Name': scan unavailable"
+    }
+    $records = @()
+    for ($index = 0; $index -lt [Math]::Min($count, $UIA_NAMED_DIAGNOSTIC_CANDIDATE_LIMIT); $index++) {
+        try {
+            $match = $matches[$index]
+            $controlType = try { Get-UiaControlTypeName $match.Current.ControlType } catch { "unavailable" }
+            $patterns = @()
+            foreach ($pattern in @($match.GetSupportedPatterns())) {
+                if ($pattern -eq [Windows.Automation.InvokePattern]::Pattern) { $patterns += "invoke" }
+                if ($pattern -eq [Windows.Automation.SelectionItemPattern]::Pattern) { $patterns += "selection-item" }
+                if ($pattern -eq [Windows.Automation.TogglePattern]::Pattern) { $patterns += "toggle" }
+                if ($pattern -eq [Windows.Automation.ScrollItemPattern]::Pattern) { $patterns += "scroll-item" }
+                if ($pattern -eq [Windows.Automation.ScrollPattern]::Pattern) { $patterns += "scroll" }
+            }
+            $keyboardFocusable = $match.Current.IsKeyboardFocusable
+            $canAct = -not $Actionable -or $keyboardFocusable -or
+                $patterns -contains "invoke" -or $patterns -contains "selection-item"
+            $records += [ordered]@{
+                control_type = $controlType
+                enabled = $match.Current.IsEnabled
+                offscreen = $match.Current.IsOffscreen
+                bounds = Get-UiaDiagnosticBounds $match.Current.BoundingRectangle
+                keyboard_focusable = $keyboardFocusable
+                patterns = @($patterns)
+                actionable = $canAct
+            }
+        } catch {
+            $records += [ordered]@{ status = "stale-or-unreadable" }
+        }
+    }
+    return Format-UiaNamedCandidateDiagnostics $Name $count $records
+}
+function Get-UiaNamedWaitDiagnostics($App, [string]$Name, [bool]$Actionable = $false, [scriptblock]$Summary = { param($Process) Get-UiaSummary $Process }, [scriptblock]$Candidates = { param($Process, $Target, $RequireAction) Get-UiaNamedCandidateDiagnostics $Process $Target $RequireAction }) {
+    $summaryReport = try { & $Summary $App } catch { "UIA summary unavailable" }
+    $candidateReport = try { & $Candidates $App $Name $Actionable } catch { "UIA exact-name candidates unavailable" }
+    return @($summaryReport, $candidateReport)
+}
 function Get-UiaNamedElement([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
     $App.Refresh()
     if ($App.HasExited) { return $null }
@@ -118,7 +203,6 @@ function Get-UiaNamedElement([Diagnostics.Process]$App, [string]$Name, [bool]$Ac
     }
     return $null
 }
-
 function Wait-UiaName([Diagnostics.Process]$App, [string]$Name, [bool]$Actionable = $false) {
     return Wait-Readiness "UI state '$Name'" {
         $App.Refresh()
@@ -127,7 +211,7 @@ function Wait-UiaName([Diagnostics.Process]$App, [string]$Name, [bool]$Actionabl
         if ($null -ne $match) { return New-ProbeReady $match }
         if ($null -eq (Get-AppAutomationRoot $App)) { return New-ProbeNotReady "the app has published no native window handle" }
         return New-ProbeNotReady "no enabled, on-screen element is named '$Name'"
-    } { Get-UiaSummary $App } 15000
+    } { Get-UiaNamedWaitDiagnostics $App $Name $Actionable } 15000
 }
 
 function Invoke-UiaElement([Windows.Automation.AutomationElement]$Element, [string]$Name) {
@@ -305,6 +389,40 @@ function Write-WindowsFeatureManifest([string]$EvidenceRoot, [object[]]$States) 
         Set-Content -LiteralPath (Join-Path $EvidenceRoot "feature-states.json") -Encoding utf8
 }
 
+function Test-UiaNamedCandidateDiagnostics {
+    Assert-True ((Get-UiaDiagnosticBounds ([pscustomobject]@{ X = 1; Y = 2; Width = 0; Height = 44 })) -eq "(1,2,0,44)") "finite UIA candidate bounds were not retained"
+    Assert-True ((Get-UiaDiagnosticBounds ([pscustomobject]@{ X = [double]::NaN; Y = 2; Width = 1; Height = 1 })) -eq "non-finite") "non-finite UIA candidate bounds were reported as coordinates"
+    $candidateDiagnostic = Format-UiaNamedCandidateDiagnostics "fixture" 12 @(
+        [ordered]@{ control_type = "ControlType.CheckBox"; enabled = $false; offscreen = $true; bounds = "(1,2,0,44)"; keyboard_focusable = $true
+            patterns = @("invoke", "selection-item", "toggle", "scroll-item", "scroll", "other"); actionable = $true },
+        [ordered]@{ status = "stale-or-unreadable" }
+    )
+    Assert-True ($candidateDiagnostic -match '12 match\(es\); showing 2 of 12' -and $candidateDiagnostic -match 'control_type=ControlType.CheckBox' -and
+        $candidateDiagnostic -match 'bounds=\(1,2,0,44\)' -and $candidateDiagnostic -match 'relevant_patterns=invoke,selection-item,toggle,scroll-item,scroll' -and -not ($candidateDiagnostic -match 'other') -and $candidateDiagnostic -match 'candidate\[2\]=stale-or-unreadable') `
+        "named UIA candidate diagnostics did not preserve bounded candidate facts"
+    $longCandidate = [ordered]@{ control_type = ("x" * $UIA_NAMED_DIAGNOSTIC_MAXIMUM_LENGTH); enabled = $true; offscreen = $false
+        bounds = "(0,0,1,1)"; keyboard_focusable = $false; patterns = @(); actionable = $false }
+    $boundedDiagnostic = Format-UiaNamedCandidateDiagnostics "fixture" 1 @($longCandidate)
+    Assert-True ($boundedDiagnostic.Length -eq $UIA_NAMED_DIAGNOSTIC_MAXIMUM_LENGTH -and $boundedDiagnostic.EndsWith(" [truncated]")) `
+        "named UIA candidate diagnostics exceeded their serialized bound"
+    $callbackDiagnostics = @(Get-UiaNamedWaitDiagnostics $null "fixture" $true { throw "summary leak" } { throw "candidate leak" })
+    Assert-True ($callbackDiagnostics.Count -eq 2 -and $callbackDiagnostics[0] -eq "UIA summary unavailable" -and $callbackDiagnostics[1] -eq "UIA exact-name candidates unavailable") `
+        "named UIA wait diagnostics leaked a collection failure"
+    $candidateFallback = @(Get-UiaNamedWaitDiagnostics $null "fixture" $true { "summary retained" } { throw "candidate leak" })
+    Assert-True ($candidateFallback.Count -eq 2 -and $candidateFallback[0] -eq "summary retained" -and $candidateFallback[1] -eq "UIA exact-name candidates unavailable") `
+        "named UIA wait diagnostics lost a surviving summary"
+    $candidateSource = ${function:Get-UiaNamedCandidateDiagnostics}.ToString()
+    Assert-True ($candidateSource -match '\[Math\]::Min\(\$count, \$UIA_NAMED_DIAGNOSTIC_CANDIDATE_LIMIT\)' -and $candidateSource -match "stale-or-unreadable" -and $candidateSource -match "ScrollItemPattern" -and $candidateSource -match "ScrollPattern" -and
+        -not ($candidateSource -match 'Current\.Name|Current\.Value|Current\.AutomationId')) `
+        "named UIA candidate diagnostics lost their bounded, path-free failure posture"
+    $waitSource = ${function:Wait-UiaName}.ToString()
+    Assert-True ($waitSource -match 'Get-UiaNamedWaitDiagnostics \$App \$Name \$Actionable') `
+        "named UIA candidate diagnostics are not limited to the named-wait failure path"
+    $matchSource = ${function:Get-UiaNamedElement}.ToString()
+    Assert-True ($matchSource -match '\$canAct -and \$match.Current.IsEnabled -and -not \$match.Current.IsOffscreen' -and $matchSource -match '\$bounds.Width -gt 0 -and \$bounds.Height -gt 0') `
+        "named UIA candidate diagnostics changed the existing readiness predicate"
+}
+
 function Test-WindowsUiEvidenceHelpers {
     Test-WindowsUiaClientBootstrapHelpers
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
@@ -324,6 +442,7 @@ function Test-WindowsUiEvidenceHelpers {
         "a registered control type was not read from the element"
     Assert-True ($null -eq (Get-UiaControlTypeName $null)) `
         "a control type the client cannot name was given a name anyway"
+    Test-UiaNamedCandidateDiagnostics
     Assert-True ((Get-WindowsPairingEntryState $true $true $false $false) -eq "ready") `
         "both native pairing fields did not identify the entry state"
     Assert-True ((Get-WindowsPairingEntryState $false $false $true $false) -eq "invoke") `
