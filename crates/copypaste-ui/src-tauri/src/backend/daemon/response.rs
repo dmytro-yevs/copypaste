@@ -55,7 +55,7 @@ pub(super) fn expect_status(data: Option<ResponseData>) -> Result<StatusData> {
 
 pub(super) fn expect_empty(data: Option<ResponseData>) -> Result<()> {
     match data {
-        Some(ResponseData::Empty {}) | None => Ok(()),
+        Some(ResponseData::Empty {}) => Ok(()),
         _ => Err(BackendError::wrong_shape("an empty response")),
     }
 }
@@ -137,11 +137,23 @@ pub(super) fn expect_backup(data: Option<ResponseData>) -> Result<BackupData> {
     }
 }
 
-/// An omitted count still acknowledges a clear that deleted no rows.
 pub(super) fn expect_count(data: Option<ResponseData>) -> Result<u64> {
     match data {
         Some(ResponseData::Count(count)) => Ok(count),
-        Some(ResponseData::Empty {}) | None => Ok(0),
+        Some(ResponseData::Empty {}) => Ok(0),
         _ => Err(BackendError::wrong_shape("a count")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn destructive_acknowledgements_require_explicit_payloads() {
+        assert!(expect_empty(None).is_err());
+        assert!(expect_count(None).is_err());
+        assert!(expect_empty(Some(ResponseData::Empty {})).is_ok());
+        assert_eq!(expect_count(Some(ResponseData::Empty {})).unwrap(), 0);
     }
 }

@@ -99,13 +99,36 @@ struct ResponseRef<'a> {
 struct ResponseOwned {
     id: u64,
     ok: bool,
-    data: Option<ResponseData>,
-    error: Option<String>,
-    error_code: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_option")]
+    data: Presence<Option<ResponseData>>,
+    #[serde(default, deserialize_with = "deserialize_present_option")]
+    error: Presence<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_present_option")]
+    error_code: Presence<Option<String>>,
+}
+
+enum Presence<T> {
+    Missing,
+    Present(T),
+}
+
+impl<T> Default for Presence<T> {
+    fn default() -> Self {
+        Self::Missing
+    }
+}
+
+fn deserialize_present_option<'de, D, T>(deserializer: D) -> Result<Presence<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer).map(Presence::Present)
 }
 
 impl Serialize for Response {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.validate().map_err(serde::ser::Error::custom)?;
         ResponseRef {
             id: self.id,
             ok: self.ok,
@@ -124,24 +147,96 @@ impl Serialize for Response {
 impl<'de> Deserialize<'de> for Response {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let response = ResponseOwned::deserialize(deserializer)?;
-        let error_code = response.error_code.as_deref().and_then(ErrorCode::parse);
+        let (data, error, wire_error_code) = if response.ok {
+            if !matches!(response.error, Presence::Missing)
+                || !matches!(response.error_code, Presence::Missing)
+            {
+                return Err(serde::de::Error::custom(
+                    "successful response requires data and no failure fields",
+                ));
+            }
+            let Presence::Present(Some(data)) = response.data else {
+                return Err(serde::de::Error::custom(
+                    "successful response requires data and no failure fields",
+                ));
+            };
+            (Some(data), None, None)
+        } else {
+            if !matches!(response.data, Presence::Missing) {
+                return Err(serde::de::Error::custom(
+                    "failed response requires error and error_code without data",
+                ));
+            }
+            let Presence::Present(Some(error)) = response.error else {
+                return Err(serde::de::Error::custom(
+                    "failed response requires error and error_code without data",
+                ));
+            };
+            let Presence::Present(Some(error_code)) = response.error_code else {
+                return Err(serde::de::Error::custom(
+                    "failed response requires error and error_code without data",
+                ));
+            };
+            if error.is_empty() || error_code.is_empty() {
+                return Err(serde::de::Error::custom(
+                    "failed response requires error and error_code without data",
+                ));
+            }
+            (None, Some(error), Some(error_code))
+        };
+
+        let error_code = wire_error_code.as_deref().and_then(ErrorCode::parse);
         let raw_error_code = if error_code.is_none() {
-            response.error_code
+            wire_error_code
         } else {
             None
         };
-        Ok(Self {
+        if raw_error_code
+            .as_deref()
+            .is_some_and(|code| !is_safe_raw_error_code(code))
+        {
+            return Err(serde::de::Error::custom("invalid unknown error code"));
+        }
+        let response = Self {
             id: response.id,
             ok: response.ok,
-            data: response.data,
-            error: response.error,
+            data,
+            error,
             error_code,
             raw_error_code,
-        })
+        };
+        response.validate().map_err(serde::de::Error::custom)?;
+        Ok(response)
     }
 }
 
 impl Response {
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.ok {
+            if self.data.is_none()
+                || self.error.is_some()
+                || self.error_code.is_some()
+                || self.raw_error_code.is_some()
+            {
+                return Err("successful response requires data and no failure fields");
+            }
+            return Ok(());
+        }
+
+        if self.data.is_some()
+            || self.error.as_deref().is_none_or(str::is_empty)
+            || (self.error_code.is_some() == self.raw_error_code.is_some())
+            || self
+                .raw_error_code
+                .as_deref()
+                .is_some_and(|code| !is_safe_raw_error_code(code))
+        {
+            return Err("failed response requires error and exactly one error code without data");
+        }
+
+        Ok(())
+    }
+
     pub fn ok(id: u64, data: ResponseData) -> Self {
         Self {
             id,
@@ -168,6 +263,13 @@ impl Response {
             raw_error_code: None,
         }
     }
+}
+
+fn is_safe_raw_error_code(code: &str) -> bool {
+    (1..=64).contains(&code.len())
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 /// The payload of a successful reply.
@@ -197,4 +299,115 @@ pub enum ResponseData {
     CloudSync(CloudSyncData),
     PrivateMode(PrivateModeData),
     Empty {},
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn success_requires_one_payload_and_no_failure_fields() {
+        for json in [
+            r#"{"id":1,"ok":true}"#,
+            r#"{"id":1,"ok":true,"data":null}"#,
+            r#"{"id":1,"ok":true,"data":{"empty":{}},"error":"no"}"#,
+            r#"{"id":1,"ok":true,"data":{"empty":{}},"error_code":"internal"}"#,
+        ] {
+            assert!(serde_json::from_str::<Response>(json).is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn failure_requires_a_message_and_one_error_code_without_data() {
+        for json in [
+            r#"{"id":1,"ok":false}"#,
+            r#"{"id":1,"ok":false,"error":"no"}"#,
+            r#"{"id":1,"ok":false,"error_code":"internal"}"#,
+            r#"{"id":1,"ok":false,"error":"no","error_code":"internal","data":{"empty":{}}}"#,
+        ] {
+            assert!(serde_json::from_str::<Response>(json).is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn explicit_null_fields_are_not_treated_as_missing() {
+        for json in [
+            r#"{"id":1,"ok":true,"data":{"empty":{}},"error":null}"#,
+            r#"{"id":1,"ok":true,"data":{"empty":{}},"error_code":null}"#,
+            r#"{"id":1,"ok":true,"data":{"empty":{}},"error":null,"error_code":null}"#,
+            r#"{"id":1,"ok":false,"data":null,"error":"no","error_code":"internal"}"#,
+            r#"{"id":1,"ok":false,"error":null,"error_code":"internal"}"#,
+            r#"{"id":1,"ok":false,"error":"no","error_code":null}"#,
+        ] {
+            assert!(serde_json::from_str::<Response>(json).is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn safe_future_error_code_is_preserved_without_a_retry_policy() {
+        let response: Response = serde_json::from_str(
+            r#"{"id":1,"ok":false,"error":"new refusal","error_code":"future_state_2"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(response.error_code, None);
+        assert_eq!(response.raw_error_code.as_deref(), Some("future_state_2"));
+    }
+
+    #[test]
+    fn unsafe_raw_error_codes_are_rejected_at_the_ipc_boundary() {
+        let too_long = "a".repeat(65);
+        for code in ["", "UPPER", "path/name", "future.state", too_long.as_str()] {
+            let json =
+                format!(r#"{{"id":1,"ok":false,"error":"new refusal","error_code":"{code}"}}"#);
+            assert!(serde_json::from_str::<Response>(&json).is_err(), "{code:?}");
+
+            let response = Response {
+                id: 1,
+                ok: false,
+                data: None,
+                error: Some("new refusal".into()),
+                error_code: None,
+                raw_error_code: Some(code.into()),
+            };
+            assert!(serde_json::to_string(&response).is_err(), "{code:?}");
+        }
+
+        let known = Response::err(1, ErrorCode::Internal, "failed");
+        assert!(serde_json::to_string(&known).is_ok());
+    }
+
+    #[test]
+    fn invalid_direct_envelopes_do_not_serialize() {
+        let cases = [
+            Response {
+                id: 1,
+                ok: true,
+                data: None,
+                error: None,
+                error_code: None,
+                raw_error_code: None,
+            },
+            Response {
+                id: 1,
+                ok: false,
+                data: Some(ResponseData::Empty {}),
+                error: Some("no".into()),
+                error_code: Some(ErrorCode::Internal),
+                raw_error_code: None,
+            },
+            Response {
+                id: 1,
+                ok: false,
+                data: None,
+                error: Some("no".into()),
+                error_code: Some(ErrorCode::Internal),
+                raw_error_code: Some("future_state_2".into()),
+            },
+        ];
+
+        for response in cases {
+            assert!(serde_json::to_string(&response).is_err());
+        }
+    }
 }

@@ -1,8 +1,8 @@
 /**
  * INV-12: no raw error string is ever rendered. Tauri returns a deliberately
  * small object and the view chooses localized copy from its stable code.
- * Unknown future codes keep their retry flag while falling back to generic
- * copy, so adding a backend code does not break an older UI.
+ * Unknown future codes keep their safe spelling for diagnostics but never
+ * receive a guessed retry policy.
  */
 import {
   UI_BOUNDARY_ERROR_CODES,
@@ -90,7 +90,7 @@ export class IpcFailure extends Error {
     this.name = "IpcFailure";
     this.code = safe;
     this.kind = kind;
-    this.retryable = retryable;
+    this.retryable = kind === UI_BOUNDARY_ERROR_CODES.unknown ? false : retryable;
   }
 }
 
@@ -112,9 +112,8 @@ export function ipcFailure(raw: unknown): IpcFailure {
   // value itself.
   console.error("[copypaste] malformed IPC failure");
 
-  // A malformed rejection has no trustworthy retry policy. Keeping the
-  // historical unknown retry action is safe and does not reconstruct a code.
-  return new IpcFailure(UI_BOUNDARY_ERROR_CODES.unknown, true);
+  // A malformed rejection has no trustworthy retry policy.
+  return new IpcFailure(UI_BOUNDARY_ERROR_CODES.unknown, false);
 }
 
 export function classifyError(raw: unknown): ErrorKind {

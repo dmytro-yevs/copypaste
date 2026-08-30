@@ -552,8 +552,11 @@ mod tests {
     }
 
     #[test]
-    fn an_untagged_failure_still_becomes_an_error() {
-        assert!(into_data(parse(r#"{"id":1,"ok":false,"error":"unknown method"}"#)).is_err());
+    fn a_failure_without_an_error_code_is_malformed() {
+        assert!(serde_json::from_str::<Response>(
+            r#"{"id":1,"ok":false,"error":"unknown method"}"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -930,13 +933,13 @@ mod tests {
     /// receiver whose first "event" is somebody else's answer.
     #[test]
     fn a_watch_acknowledgement_must_match_the_request_and_be_empty() {
-        assert!(acknowledged(7, r#"{"id":7,"ok":true}"#).is_ok());
         assert!(acknowledged(7, r#"{"id":7,"ok":true,"data":{"empty":{}}}"#).is_ok());
 
         for reply in [
             // Another request's answer, arriving first.
             r#"{"id":8,"ok":true,"data":{"empty":{}}}"#,
-            r#"{"id":8,"ok":true}"#,
+            // This cannot prove an acknowledgement because success omitted its payload.
+            r#"{"id":7,"ok":true}"#,
             // Acknowledged with a payload, so this is not a subscription.
             r#"{"id":7,"ok":true,"data":{"count":3}}"#,
             r#"{"id":7,"ok":true,"data":{"peers":[]}}"#,

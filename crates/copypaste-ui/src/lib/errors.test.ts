@@ -54,12 +54,12 @@ describe("structured IPC failures", () => {
     expect(exposed).toContain("internal");
   });
 
-  it("preserves a safe future code and uses fallback localized copy", () => {
+  it("preserves a safe future code without guessing its retry policy", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const failure = ipcFailure({ code: "future_state_2", retryable: true });
     expect(failure.code).toBe("future_state_2");
     expect(failure.kind).toBe("unknown");
-    expect(failure.retryable).toBe(true);
+    expect(failure.retryable).toBe(false);
     expect(toFriendly(failure)).toBe(friendlyError("unknown"));
   });
 
@@ -85,7 +85,7 @@ describe("structured IPC failures", () => {
     expect(failure).toEqual(expect.objectContaining({
       code: "unknown",
       kind: "unknown",
-      retryable: true,
+      retryable: false,
     }));
   });
 });
