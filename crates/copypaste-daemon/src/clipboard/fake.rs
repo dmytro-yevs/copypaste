@@ -26,6 +26,9 @@ use super::{Capture, CapturePolicy, ClipboardSource};
 
 /// Environment variable naming a file the [`FakeClipboard`] watches.
 const FAKE_CLIPBOARD_ENV: &str = "COPYPASTE_FAKE_CLIPBOARD";
+/// Development-only acknowledgement for a consumed fake generation.
+#[cfg(feature = "dev-fake-clipboard")]
+const FAKE_CLIPBOARD_ACK_ENV: &str = "COPYPASTE_FAKE_CLIPBOARD_ACK";
 
 /// Test/dev backend. Polls the file named by `COPYPASTE_FAKE_CLIPBOARD` (if
 /// set) and otherwise holds content in memory. Public so tests and the demo can
@@ -40,6 +43,8 @@ pub struct FakeClipboard {
     /// "the last change was dropped by a gate" (I-3: the cursor still moved).
     contents: Option<String>,
     watched: Option<WatchedFile>,
+    #[cfg(feature = "dev-fake-clipboard")]
+    acknowledgement: Option<PathBuf>,
     rejected_too_large: u64,
     frontmost_app: Option<String>,
 }
@@ -60,9 +65,22 @@ struct FileStamp {
 
 impl FakeClipboard {
     pub fn new() -> Self {
-        match std::env::var_os(FAKE_CLIPBOARD_ENV) {
-            Some(path) if !path.is_empty() => Self::watching(PathBuf::from(path)),
+        let clipboard = match std::env::var_os(FAKE_CLIPBOARD_ENV) {
+            Some(path) if !path.is_empty() => Self::watching_file(PathBuf::from(path)),
             _ => Self::in_memory(),
+        };
+        #[cfg(feature = "dev-fake-clipboard")]
+        {
+            return Self {
+                acknowledgement: std::env::var_os(FAKE_CLIPBOARD_ACK_ENV)
+                    .filter(|path| !path.is_empty())
+                    .map(PathBuf::from),
+                ..clipboard
+            };
+        }
+        #[cfg(not(feature = "dev-fake-clipboard"))]
+        {
+            clipboard
         }
     }
 
@@ -72,12 +90,14 @@ impl FakeClipboard {
             change_count: 0,
             contents: None,
             watched: None,
+            #[cfg(feature = "dev-fake-clipboard")]
+            acknowledgement: None,
             rejected_too_large: 0,
             frontmost_app: None,
         }
     }
 
-    fn watching(path: PathBuf) -> Self {
+    fn watching_file(path: PathBuf) -> Self {
         Self {
             watched: Some(WatchedFile {
                 path,
@@ -169,6 +189,19 @@ impl FakeClipboard {
             }
         }
     }
+
+    /// The development demo must know that a private-mode file edit reached
+    /// the same acknowledgement boundary as a native sequence change. This
+    /// writes only the monotonic generation, never content or a path.
+    #[cfg(feature = "dev-fake-clipboard")]
+    fn acknowledge_generation(&self) {
+        let Some(path) = &self.acknowledgement else {
+            return;
+        };
+        if let Err(error) = std::fs::write(path, self.change_count.to_string()) {
+            debug!(kind = ?error.kind(), "fake clipboard acknowledgement failed");
+        }
+    }
 }
 
 impl Default for FakeClipboard {
@@ -200,6 +233,8 @@ impl ClipboardSource for FakeClipboard {
                         "clipboard burst: intermediate values are irrecoverable"
                     );
                 }
+                #[cfg(feature = "dev-fake-clipboard")]
+                self.acknowledge_generation();
             }
         }
 
@@ -451,7 +486,7 @@ mod tests {
     fn watched_file_is_captured_once_per_edit() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("clip");
-        let mut cb = FakeClipboard::watching(path.clone());
+        let mut cb = FakeClipboard::watching_file(path.clone());
         assert_eq!(cb.backend_name(), "fake-file");
 
         // A missing file is a silent no-op, never an error (§3.11's contract).
@@ -476,7 +511,7 @@ mod tests {
     fn file_backed_set_contents_does_not_self_capture() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("clip");
-        let mut cb = FakeClipboard::watching(path.clone());
+        let mut cb = FakeClipboard::watching_file(path.clone());
 
         cb.set_contents("pasted by us").expect("file write");
         assert_eq!(
@@ -500,7 +535,7 @@ mod tests {
     fn oversized_content_is_rejected_and_counted() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("clip");
-        let mut cb = FakeClipboard::watching(path.clone());
+        let mut cb = FakeClipboard::watching_file(path.clone());
 
         std::fs::write(&path, vec![b'x'; crate::clipboard::MAX_CAPTURE_BYTES + 1]).expect("write");
         assert_eq!(cb.poll(), None);
@@ -569,6 +604,25 @@ mod tests {
             cb.poll().map(|capture| capture.content),
             Some("after private".into())
         );
+    }
+
+    #[cfg(feature = "dev-fake-clipboard")]
+    #[test]
+    fn acknowledgement_confirms_a_private_file_change_without_exposing_content() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let clip = dir.path().join("clip");
+        let acknowledgement = dir.path().join("ack");
+        let mut cb = FakeClipboard::watching_file(clip.clone());
+        cb.acknowledgement = Some(acknowledgement.clone());
+        std::fs::write(&clip, b"private value").expect("write private value");
+        let settings = copypaste_ipc::ConfigData {
+            private_mode: true,
+            ..Default::default()
+        };
+
+        assert!(cb.poll_with_policy(CapturePolicy::new(&settings)).is_none());
+        assert_eq!(std::fs::read_to_string(&acknowledgement).unwrap(), "1");
+        assert!(cb.poll().is_none(), "private value was replayed");
     }
 
     #[test]
