@@ -15,6 +15,7 @@ import {
   captureRowSelectionClick,
   type RowSelectionClickReceipt,
 } from "../src/harness/row-selection-diagnostics.js";
+import { pinnedBadgeSnapshot } from "../src/harness/pinned-badge-diagnostics.js";
 import {
   selectionDiagnosticFailure,
   type SelectionProbeRead,
@@ -326,23 +327,31 @@ describe("the bulk bar", () => {
       }
 
       const afterSelection = await probe.read();
+      const afterSelectionPinnedBadges = await pinnedBadgeSnapshot(
+        app.browser,
+        pinnedIds,
+      );
+      let lastPinnedBadgeState = afterSelectionPinnedBadges;
       let lastRenderedState = afterSelection;
       let renderedPolls = 0;
       try {
         await app.browser.waitUntil(
           async () => {
             renderedPolls += 1;
+            lastPinnedBadgeState = await pinnedBadgeSnapshot(
+              app.browser,
+              pinnedIds,
+            );
             lastRenderedState = await probe.read();
-            for (const id of pinnedIds) {
-              const row = await app.browser.$(`#history-row-${id}`);
-              if (!(await row.isExisting())) return false;
-              const badges = await row.$$('[title="Pinned"]');
-              if ((await badges.length) !== 1) return false;
-              if (!(await badges[0]!.isDisplayed())) return false;
-              const size = await badges[0]!.getSize();
-              if (size.width <= 0 || size.height <= 0) return false;
-            }
-            return true;
+            return lastPinnedBadgeState.rows.every(
+              (row) =>
+                row.rowCount === 1 &&
+                row.badgeCount === 1 &&
+                row.row?.displayed === true &&
+                row.badge?.displayed === true &&
+                row.badge.rect.width > 0 &&
+                row.badge.rect.height > 0,
+            );
           },
           {
             timeout: 10_000,
@@ -357,7 +366,9 @@ describe("the bulk bar", () => {
           stateChanged: boundaryChanged(afterSelection, lastRenderedState),
           afterDaemon,
           afterSelection,
+          afterSelectionPinnedBadges,
           lastRenderedState,
+          lastRenderedPinnedBadges: lastPinnedBadgeState,
         });
       }
 
