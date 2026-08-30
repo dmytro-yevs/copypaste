@@ -218,3 +218,80 @@ pub(super) fn prepare_remote_version(
         },
     }))
 }
+
+#[cfg(test)]
+mod limit_mirror_tests {
+    const ANDROID_CLIP_QUEUE: &str = include_str!(
+        "../../../copypaste-ui/src-tauri/gen/android/app/src/main/java/com/copypaste/app/ClipQueue.kt"
+    );
+    const DECLARATION: &str = "const val MAX_TEXT_BYTES = ";
+
+    fn kotlin_max_text_bytes(source: &str) -> Option<usize> {
+        let mut candidates = source.lines().map(str::trim).filter(|line| {
+            line.contains("MAX_TEXT_BYTES") && line.split_whitespace().any(|word| word == "const")
+        });
+        let expression = candidates.next()?.strip_prefix(DECLARATION)?;
+        let value = parse_positive_product(expression)?;
+
+        candidates.next().is_none().then_some(value)
+    }
+
+    fn parse_positive_product(expression: &str) -> Option<usize> {
+        let mut factors = expression.split('*').map(str::trim);
+        let first = parse_positive_integer(factors.next()?)?;
+        let mut value = first;
+        let mut has_product = false;
+
+        for factor in factors {
+            has_product = true;
+            value = value.checked_mul(parse_positive_integer(factor)?)?;
+        }
+
+        has_product.then_some(value)
+    }
+
+    fn parse_positive_integer(value: &str) -> Option<usize> {
+        (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| value.parse().ok())
+            .flatten()
+            .filter(|value| *value > 0)
+    }
+
+    #[test]
+    fn content_limits_match_across_ipc_p2p_and_android_capture() {
+        assert_eq!(
+            copypaste_ipc::MAX_CONTENT_BYTES,
+            copypaste_p2p::protocol::MAX_CONTENT_BYTES
+        );
+        assert_eq!(
+            kotlin_max_text_bytes(ANDROID_CLIP_QUEUE),
+            Some(copypaste_ipc::MAX_CONTENT_BYTES)
+        );
+    }
+
+    #[test]
+    fn kotlin_limit_guard_rejects_unknown_or_ambiguous_source() {
+        for source in [
+            "",
+            "const val MAX_TEXT_BYTES = 4 * 1024 * 1024\nconst val MAX_TEXT_BYTES = 4 * 1024 * 1024",
+            "const val MAX_TEXT_BYTES = 4 * 1024 * 1024\nconst val MAX_TEXT_BYTES=4 * 1024 * 1024",
+            "const val MAX_TEXT_BYTES = 4 * 1024 * 1024\nconst\tval MAX_TEXT_BYTES = 4 * 1024 * 1024",
+            "const val MAX_TEXT_BYTES = 4194304",
+            "const val MAX_TEXT_BYTES = 4 * 1024 * nope",
+            "const val MAX_TEXT_BYTES = 18446744073709551615 * 2",
+            "const val MAX_TEXT_BYTES = 0 * 1024 * 1024",
+        ] {
+            assert_eq!(kotlin_max_text_bytes(source), None, "{source}");
+        }
+    }
+
+    #[test]
+    fn kotlin_limit_guard_detects_a_changed_value() {
+        let changed = "const val MAX_TEXT_BYTES = 3 * 1024 * 1024";
+
+        assert_ne!(
+            kotlin_max_text_bytes(changed),
+            Some(copypaste_ipc::MAX_CONTENT_BYTES)
+        );
+    }
+}
