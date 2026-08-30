@@ -128,7 +128,7 @@ export type SettingsHealth = { record_unreadable: boolean, unreadable_fields: Ar
 
 export type StatusData = { device_name: string, version: string, protocol_version: number, listen_addr?: string | null, device_details?: DeviceDetails, item_count: number, capture_running: boolean, clipboard_backend: string, private_mode: boolean, private_mode_epoch: number, counters: DiagnosticCounters, settings_health: SettingsHealth | null, };
 
-export type SyncResult = { pairing_id: string, name: string, sent: number, received: number, duration_ms: number | null, error: UiError | null, };
+export type SyncResult = { pairing_id: string, name: string, sent: number, received: number, skipped_too_large?: number, duration_ms: number | null, error: UiError | null, };
 
 export type UiError = { code: string, retryable: boolean, };
 
