@@ -56,7 +56,10 @@ mod change;
 mod fake;
 // `test` so the module is exercised off macOS, but only where it compiles:
 // every syscall in it is `rustix::fs`, which has no Windows implementation.
-#[cfg(any(target_os = "macos", all(test, unix)))]
+#[cfg(all(
+    not(feature = "dev-fake-clipboard"),
+    any(target_os = "macos", all(test, unix))
+))]
 mod file_materialize;
 pub(crate) mod format;
 /// The Windows opt-out vocabulary, and which application a change belongs to.
@@ -94,10 +97,10 @@ impl<'a> CapturePolicy<'a> {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "dev-fake-clipboard")))]
 mod macos;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(feature = "dev-fake-clipboard")))]
 mod windows;
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -247,21 +250,29 @@ pub trait ClipboardSource: Send {
     }
 }
 
-/// macOS -> `NSPasteboard`. Windows -> the system clipboard. Everything else ->
-/// the fake.
+/// The development fake wins before platform selection, so a demo cannot
+/// instantiate a native clipboard backend by accident.
 pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn ClipboardSource>> {
-    #[cfg(target_os = "macos")]
+    #[cfg(feature = "dev-fake-clipboard")]
+    {
+        let _ = data_dir;
+        return Ok(Box::new(fake::FakeClipboard::new()));
+    }
+    #[cfg(all(target_os = "macos", not(feature = "dev-fake-clipboard")))]
     {
         Ok(Box::new(macos::MacOsClipboard::new(data_dir)?))
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", not(feature = "dev-fake-clipboard")))]
     {
         // No staging directory: this backend refuses a file paste-back rather
         // than materialising plaintext it has no sweeper for.
         let _ = data_dir;
         Ok(Box::new(windows::WindowsClipboard::new()?))
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(all(
+        not(feature = "dev-fake-clipboard"),
+        not(any(target_os = "macos", target_os = "windows"))
+    ))]
     {
         let _ = data_dir;
         Ok(Box::new(FakeClipboard::new()))
@@ -323,5 +334,13 @@ mod tests {
             assert!(is_password_manager_app(bundle_id), "{bundle_id}");
         }
         assert!(!is_password_manager_app("com.apple.TextEdit"));
+    }
+
+    #[cfg(feature = "dev-fake-clipboard")]
+    #[test]
+    fn development_feature_selects_the_fake_before_native_platforms() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = super::new_source(dir.path()).expect("development fake source");
+        assert_eq!(source.backend_name(), "fake-memory");
     }
 }

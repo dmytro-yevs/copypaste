@@ -96,6 +96,9 @@ tracing-subscriber.workspace = true
 [features]
 # Demos and profiling only. Release and product builds pass no features.
 dev-ephemeral-key = ["copypaste-core/dev-ephemeral-key"]
+# Compile the watched-file clipboard source for isolated demos. It selects no
+# platform backend and is never enabled by product builds.
+dev-fake-clipboard = []
 
 # The pipe's access list. These maintained wrappers own token/SID querying,
 # SDDL memory and listener instance creation.
