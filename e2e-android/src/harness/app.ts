@@ -1,7 +1,16 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
 import { appPid, logcatDump, sleep } from "./adb.js";
-import { APP_ORIGIN, isAppTarget, nextAttachStep, webviewComplaints } from "./attach.js";
+import {
+  APP_ORIGIN,
+  finalAttachDiagnostic,
+  isAppTarget,
+  nextAttachStep,
+  type AttachFinalDiagnostic,
+  type AttachTargetObservation,
+  type DirectOutcome,
+  webviewComplaints,
+} from "./attach.js";
 import { DEFAULT_PORT, openDevtools, type DevtoolsEndpoint } from "./devtools.js";
 import { rememberAttachedApp, writeAttachFailure } from "./evidence.js";
 
@@ -59,19 +68,43 @@ interface RawTarget {
   webSocketDebuggerUrl: string;
 }
 
-async function rawTargets(browserUrl: string): Promise<RawTarget[]> {
+interface RawTargetResult {
+  status: "ok" | "error";
+  targets: RawTarget[];
+}
+
+function targetObservation(target: RawTarget): AttachTargetObservation {
+  return {
+    type: target.type,
+    appOrigin: isAppTarget(target.url),
+    webSocketPresent: Boolean(target.webSocketDebuggerUrl),
+  };
+}
+
+async function rawTargets(browserUrl: string): Promise<RawTargetResult> {
   try {
     const response = await fetch(`${browserUrl}/json/list`, { signal: AbortSignal.timeout(3_000) });
-    if (!response.ok) return [];
-    return (await response.json()) as RawTarget[];
+    if (!response.ok) return { status: "error", targets: [] };
+    return { status: "ok", targets: (await response.json()) as RawTarget[] };
   } catch {
-    return [];
+    return { status: "error", targets: [] };
+  }
+}
+
+class AttachResolutionError extends Error {
+  constructor(message: string, readonly diagnostic: AttachFinalDiagnostic) {
+    super(message);
   }
 }
 
 async function resolveAppPage(port: number, deadline: number): Promise<Attached> {
   const msLeft = () => Math.max(0, deadline - Date.now());
   let { browser, endpoint } = await open(port, msLeft());
+  let diagnostic: AttachFinalDiagnostic = finalAttachDiagnostic(
+    [],
+    { status: "error", targets: [] },
+    "not-attempted",
+  );
 
   for (;;) {
     const pages = await browser.pages(true).then(
@@ -84,22 +117,57 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
     // Old WebView engines (109, API 29/33) may list the app target in the raw
     // `/json/list` response while `pages()` omits it.  The page is the ground
     // truth — if it exists there with the right origin, open it directly.
-    const targets = await rawTargets(endpoint.browserUrl);
+    const rawResult = await rawTargets(endpoint.browserUrl);
+    const targets = rawResult.targets;
     const raw = targets.find((t) => isAppTarget(t.url));
+    let directOutcome: DirectOutcome = rawResult.status === "error"
+      ? "raw-error"
+      : targets.length === 0
+        ? "raw-empty"
+        : raw?.webSocketDebuggerUrl
+          ? "not-attempted"
+          : raw
+            ? "no-websocket"
+            : "not-attempted";
     if (raw?.webSocketDebuggerUrl) {
+      let keepDirectConnection = false;
       try {
         const directBrowser = await puppeteer.connect({
           browserWSEndpoint: raw.webSocketDebuggerUrl,
           defaultViewport: null,
         });
-        const [directPage] = await directBrowser.pages();
-        if (directPage) return { browser: directBrowser, page: directPage, endpoint };
+        try {
+          const [directPage] = await directBrowser.pages();
+          if (directPage) {
+            keepDirectConnection = true;
+            directOutcome = "connected";
+            return { browser: directBrowser, page: directPage, endpoint };
+          }
+          directOutcome = "no-page";
+        } finally {
+          if (!keepDirectConnection) await directBrowser.disconnect().catch(() => undefined);
+        }
       } catch {
-        // The direct WebSocket may be rejected; fall through to normal wait.
+        directOutcome = "failed";
       }
     }
 
-    const allTargets = pages?.map((c) => c.url()) ?? targets.map((t) => t.url);
+    const pageObservations = pages?.map((page) => ({
+      type: "page",
+      appOrigin: isAppTarget(page.url()),
+      webSocketPresent: false,
+    })) ?? [];
+    diagnostic = finalAttachDiagnostic(
+      pageObservations,
+      {
+        status: rawResult.status,
+        targets: targets.map(targetObservation),
+      },
+      directOutcome,
+    );
+    const allTargets = pages && pages.length > 0
+      ? pages.map((c) => c.url())
+      : targets.map((t) => t.url);
     const step = nextAttachStep({
       targets: allTargets,
       pid: await appPid(),
@@ -111,7 +179,7 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
       continue;
     }
     await browser.disconnect().catch(() => undefined);
-    if (step.do === "give-up") throw new Error(step.why);
+    if (step.do === "give-up") throw new AttachResolutionError(step.why, diagnostic);
     ({ browser, endpoint } = await open(port, msLeft()));
   }
 }
@@ -122,7 +190,8 @@ async function explained(error: unknown, waitedMs: number): Promise<Error> {
   const reason = error instanceof Error ? error.message : String(error);
   const waited = `${Math.round(waitedMs / 1000)}s`;
   const complaints = webviewComplaints(await logcatDump().catch(() => ""));
-  writeAttachFailure({ waited, origin: APP_ORIGIN, reason, complaints });
+  const diagnostic = error instanceof AttachResolutionError ? error.diagnostic : undefined;
+  writeAttachFailure({ waited, origin: APP_ORIGIN, reason, complaints, diagnostic });
   return new Error(
     `no ${APP_ORIGIN} page target after ${waited}: ${reason}` +
       (complaints.length ? `. The device said: ${complaints.join(" | ")}` : ""),
