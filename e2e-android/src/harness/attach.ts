@@ -32,6 +32,48 @@ export interface AttachSample {
   msLeft: number;
 }
 
+export interface AttachTargetObservation {
+  type: string;
+  appOrigin: boolean;
+  webSocketPresent: boolean;
+}
+
+export type DirectOutcome =
+  | "not-attempted"
+  | "connected"
+  | "no-page"
+  | "failed"
+  | "no-websocket"
+  | "raw-empty"
+  | "raw-error";
+
+export interface AttachFinalDiagnostic {
+  targetTypeHistogram: { page: number; webview: number; other: number };
+  appOriginMatchCount: number;
+  webSocketPresent: boolean;
+  directOutcome: DirectOutcome;
+}
+
+export function finalAttachDiagnostic(
+  pages: readonly AttachTargetObservation[],
+  raw: { status: "ok" | "error"; targets: readonly AttachTargetObservation[] },
+  directOutcome: DirectOutcome,
+): AttachFinalDiagnostic {
+  const observations = raw.status === "ok" ? raw.targets : pages;
+  const targetTypeHistogram = { page: 0, webview: 0, other: 0 };
+  for (const observation of observations) {
+    if (observation.type === "page") targetTypeHistogram.page += 1;
+    else if (observation.type === "webview") targetTypeHistogram.webview += 1;
+    else targetTypeHistogram.other += 1;
+  }
+  return {
+    targetTypeHistogram,
+    appOriginMatchCount: observations.filter((target) => target.appOrigin).length,
+    webSocketPresent: observations.some((target) => target.webSocketPresent),
+    directOutcome,
+  };
+}
+
 export type AttachStep =
   | { do: "wait" }
   | { do: "reopen"; why: string }
@@ -57,7 +99,7 @@ function stale(sample: AttachSample): string | undefined {
 function settled(sample: AttachSample): string {
   const targets = sample.targets ?? [];
   return targets.length
-    ? `pid ${sample.pid} exposes ${targets.join(", ")}`
+    ? `pid ${sample.pid} exposes ${targets.length} page target(s)`
     : `pid ${sample.pid} is running and its WebView exposes no page target at all`;
 }
 
