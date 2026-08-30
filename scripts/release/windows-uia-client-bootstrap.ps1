@@ -133,6 +133,29 @@ function Get-WindowsUiaFixtureReferences {
     return @($referenceSets | ForEach-Object { Resolve-WindowsUiaFixtureReference $_ } | Select-Object -Unique)
 }
 
+function Get-WindowsUiaProviderLoaderReferences([Reflection.Assembly]$ClientAssembly) {
+    return @(
+        $ClientAssembly.Location
+        Resolve-WindowsUiaFixtureReference @("System.Runtime", "mscorlib")
+        Resolve-WindowsUiaFixtureReference @("System.Reflection", "mscorlib")
+        Resolve-WindowsUiaFixtureReference @("System.Collections", "mscorlib")
+    ) | Select-Object -Unique
+}
+
+function Add-WindowsUiaProviderLoaderType([Reflection.Assembly]$ClientAssembly) {
+    if ($null -ne ("CopyPaste.UiaProviderLoader.Client" -as [type])) { return }
+    Add-Type -Path (Join-Path $PSScriptRoot "windows-uia-provider-loader.cs") `
+        -ReferencedAssemblies @(Get-WindowsUiaProviderLoaderReferences $ClientAssembly)
+}
+
+function Invoke-WindowsUiaProviderRegistration(
+    [Reflection.Assembly]$ClientAssembly,
+    [Reflection.AssemblyName]$ProviderAssembly
+) {
+    Add-WindowsUiaProviderLoaderType $ClientAssembly
+    [CopyPaste.UiaProviderLoader.Client]::Register($ProviderAssembly)
+}
+
 function Add-WindowsUiaCanaryFixtureType {
     if ($null -ne ("CopyPaste.UiaCanary.Session" -as [type])) { return }
     Add-Type -Path (Join-Path $PSScriptRoot "windows-uia-canary-fixture.cs") `
@@ -238,7 +261,8 @@ function Write-WindowsUiaProviderBootstrapDiagnostic([Collections.IDictionary]$D
 
 function Initialize-WindowsUiaClientProviders {
     if ($script:WindowsUiaClientProviderReady) { return $script:WindowsUiaClientProviderBootstrap }
-    $client = [Windows.Automation.ClientSettings].Assembly.GetName()
+    $clientAssembly = [Windows.Automation.ClientSettings].Assembly
+    $client = $clientAssembly.GetName()
     $provider = Get-WindowsUiaProviderAssemblyName $client
     $before = @(Get-LoadedWindowsUiaProviderIdentities)
     $after = @()
@@ -246,7 +270,7 @@ function Initialize-WindowsUiaClientProviders {
     $phase = "provider-registration"
     try {
         try {
-            [Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly($provider)
+            Invoke-WindowsUiaProviderRegistration $clientAssembly $provider
         } catch {
             $registrationExceptionChain = @(Get-WindowsUiaSafeExceptionChain $_.Exception)
             throw
@@ -258,6 +282,7 @@ function Initialize-WindowsUiaClientProviders {
         if (-not (Test-WindowsUiaCanaryMappings $canary)) { throw "client-side provider canary mismatch" }
         $phase = "complete"
     } catch {
+        $after = @(Get-LoadedWindowsUiaProviderIdentities)
         $script:WindowsUiaClientProviderBootstrap = New-WindowsUiaProviderBootstrapDiagnostic `
             $phase "failed" $client $provider $before $after $script:WindowsUiaClientProviderCanaryDiagnostic $registrationExceptionChain
         Write-WindowsUiaProviderBootstrapDiagnostic $script:WindowsUiaClientProviderBootstrap

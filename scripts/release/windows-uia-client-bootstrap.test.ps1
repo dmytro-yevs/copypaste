@@ -19,6 +19,20 @@ function Test-WindowsUiaClientBootstrapHelpers {
     if ($bootstrapDiagnostic["registration_exception_chain"][1]["type"] -ne "System.Runtime.InteropServices.COMException") {
         throw "the UIA bootstrap did not emit registration exception facts"
     }
+    $loader = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "windows-uia-provider-loader.cs"))
+    if ($loader -notmatch "MethodImplOptions\.NoInlining" -or
+        $loader -notmatch "ClientSettings\.RegisterClientSideProviderAssembly" -or
+        $loader -notmatch "AssemblyName providerAssembly") {
+        throw "the UIA provider loader did not preserve the typed non-inlined registration boundary"
+    }
+    $bootstrapSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "windows-uia-client-bootstrap.ps1"))
+    if ($bootstrapSource -notmatch "\[CopyPaste\.UiaProviderLoader\.Client\]::Register" -or
+        $bootstrapSource -match "\[Windows\.Automation\.ClientSettings\]::RegisterClientSideProviderAssembly") {
+        throw "the UIA bootstrap bypassed the typed provider loader"
+    }
+    if (@([regex]::Matches($bootstrapSource, 'Invoke-WindowsUiaProviderRegistration \$clientAssembly \$provider')).Count -ne 1) {
+        throw "the UIA bootstrap did not perform one provider registration"
+    }
     $facts = @(Get-WindowsUiaCanaryExpectations)
     if (-not (Test-WindowsUiaCanaryMappings $facts)) { throw "the native UIA canary expectations were rejected" }
     if (Test-WindowsUiaCanaryMappings @($facts | Select-Object -Skip 1)) { throw "the native UIA canary accepted a missing control" }
