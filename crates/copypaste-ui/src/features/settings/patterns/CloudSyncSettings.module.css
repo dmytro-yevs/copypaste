@@ -20,6 +20,7 @@
 }
 
 .setupCopy { min-inline-size: 0; }
+.setupCopy > .connectionNote:empty { margin-block-start: 0; }
 .connectionNote { display: inline-flex; }
 .setupCopy h3,
 .setupCopy p,
