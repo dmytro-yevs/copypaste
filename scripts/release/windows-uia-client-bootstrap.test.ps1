@@ -4,6 +4,21 @@ function Test-WindowsUiaClientBootstrapHelpers {
     if ($provider.Name -ne "UIAutomationClientsideProviders" -or $provider.Version -ne $client.Version) {
         throw "UIA provider identity did not retain the compatible client identity"
     }
+    $inner = [Runtime.InteropServices.COMException]::new("C:\\private\\provider-load", -2147024894)
+    $outer = [Exception]::new("C:\\private\\wrapper", $inner)
+    $exceptionChain = @(Get-WindowsUiaSafeExceptionChain $outer)
+    if ($exceptionChain.Count -ne 2 -or $exceptionChain[0]["type"] -notmatch '^System\.' -or
+        $exceptionChain[1]["hresult"] -ne -2147024894) {
+        throw "the UIA bootstrap did not retain bounded safe exception facts"
+    }
+    if (${function:Get-WindowsUiaSafeExceptionChain}.ToString() -match "Message|ToString|StackTrace") {
+        throw "the UIA bootstrap exception facts exposed raw exception text"
+    }
+    $bootstrapDiagnostic = New-WindowsUiaProviderBootstrapDiagnostic `
+        "provider-registration" "failed" $client $provider @() @() $null $exceptionChain
+    if ($bootstrapDiagnostic["registration_exception_chain"][1]["type"] -ne "System.Runtime.InteropServices.COMException") {
+        throw "the UIA bootstrap did not emit registration exception facts"
+    }
     $facts = @(Get-WindowsUiaCanaryExpectations)
     if (-not (Test-WindowsUiaCanaryMappings $facts)) { throw "the native UIA canary expectations were rejected" }
     if (Test-WindowsUiaCanaryMappings @($facts | Select-Object -Skip 1)) { throw "the native UIA canary accepted a missing control" }
