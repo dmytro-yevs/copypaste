@@ -507,7 +507,7 @@ mod tests {
         });
         let json = serde_json::to_string(&result).unwrap();
         assert!(
-            json.contains(r#""error":{"code":"unknown","retryable":true}"#),
+            json.contains(r#""error":{"code":"unknown","retryable":false}"#),
             "{json}"
         );
         assert!(!json.contains("future failure"), "{json}");
