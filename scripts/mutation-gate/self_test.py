@@ -152,9 +152,12 @@ def main():
         else:
             bad("every mutation is restored before the next one", scratch.read("verdict.txt"))
 
-        scratch.seed("verdict.txt", "the fixture starts broken\n")
+        baseline_lines = [f"baseline diagnostic {number}" for number in range(12)]
+        scratch.seed("verdict.txt", "\n".join(baseline_lines) + "\n")
         report = verdicts(scratch, entry("baseline", "broken", "x", "anything"))
-        if report.failures and report.failures[0][1] == "<baseline>":
+        baseline_report = report.stream.getvalue()
+        if (report.failures and report.failures[0][1] == "<baseline>" and
+                baseline_lines[0] in baseline_report and baseline_lines[-1] in baseline_report):
             ok("a self-test that is already red is reported instead of mutated")
         else:
             bad("a self-test that is already red is reported instead of mutated")
