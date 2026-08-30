@@ -165,8 +165,8 @@ describe("fail-closed product surfaces", () => {
       "Checks the signed CopyPaste release feed for Windows.",
     );
     expect(await updater.getText()).toContain("Not configured");
-    expect(await app.browser.$$("button=Check for updates")).toHaveLength(0);
-    expect(await app.browser.$$("progress")).toHaveLength(0);
+    expect(await updater.$$("button")).toHaveLength(0);
+    expect(await updater.$$("progress")).toHaveLength(0);
   });
 
   test("keeps cloud controls absent when no deployment is configured", async () => {
