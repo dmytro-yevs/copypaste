@@ -1,19 +1,14 @@
 //! The [`Store`] handle: what it takes to get a keyed, schema-validated, pooled
 //! connection, and nothing about what is then done with it.
 
-use std::fs::OpenOptions;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::Connection;
 use zeroize::Zeroizing;
 
-use super::connection::{
-    apply_connection_pragmas, apply_key, build_pool, run_pragma, validate_key,
-};
+use super::connection::{build_pool, run_pragma};
 use super::model::StoreError;
 use super::schema::create;
 
@@ -44,24 +39,12 @@ impl Store {
     /// read and no unkeyed plaintext probe.
     pub fn open(path: &Path, db_key: &[u8; 32]) -> Result<Self, StoreError> {
         let db_key = Zeroizing::new(*db_key);
-        let fresh = match OpenOptions::new().write(true).create_new(true).open(path) {
-            Ok(file) => {
-                drop(file);
-                true
-            }
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => false,
-            Err(error) => return Err(error.into()),
-        };
         let flags =
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        let conn = if fresh {
-            let mut conn = Connection::open_with_flags(path, flags)?;
-            apply_key(&conn, &db_key)?;
-            validate_key(&conn)?;
-            apply_connection_pragmas(&conn)?;
-            create(&mut conn)?;
-            conn
+        let conn = if path.try_exists()? {
+            super::dbfile::open_validated(path, &db_key)?
         } else {
+            super::creation::create_and_publish(path, &db_key)?;
             super::dbfile::open_validated(path, &db_key)?
         };
         // A restart onto a populated history would otherwise plan every query
