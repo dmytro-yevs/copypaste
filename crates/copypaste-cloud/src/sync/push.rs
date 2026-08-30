@@ -15,15 +15,13 @@ use crate::rest::CloudItem;
 /// Rows per upsert request. Bounds request size without needing to measure it.
 const UPLOAD_BATCH: usize = 50;
 
-/// Per-item upload cap for text.
+/// Compatibility aliases for callers that present the shared upload boundary.
 ///
-/// Split from [`MAX_BINARY_BYTES`] rather than unified at the larger number
-/// because manifest 05 §5.1 row 13 requires suspiciously large text to be
-/// refused while allowing an image of the same size.
-pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
-
-/// Per-item upload cap for anything that is not text.
-pub const MAX_BINARY_BYTES: usize = 10 * 1024 * 1024;
+/// The IPC owner defines the one product content cap. Keeping the historical
+/// names avoids changing their public surface while making text and binary
+/// upload gates agree with capture and P2P.
+pub const MAX_TEXT_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
+pub const MAX_BINARY_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// Seal every local change since the upload floor and upsert it.
@@ -168,9 +166,10 @@ pub fn too_large_to_sync(content_type: &str, byte_len: usize) -> bool {
 }
 
 fn upload_limit(content_type: &str) -> usize {
-    if content_type == copypaste_ipc::content_type::TEXT {
+    if copypaste_ipc::content_type::is_text(content_type) {
         MAX_TEXT_BYTES
     } else {
+        debug_assert!(copypaste_ipc::content_type::is_binary(content_type));
         MAX_BINARY_BYTES
     }
 }
@@ -403,47 +402,33 @@ mod tests {
         assert!(row.ciphertext.is_empty(), "a tombstone carried ciphertext");
     }
 
-    /// Manifest 05 §5.1 row 13: the caps are the client's, split by type, and
-    /// an item over one of them is withheld rather than lost or uploaded.
+    /// Manifest 05 §9.2: an item over the shared cap is withheld rather than
+    /// lost or uploaded, and a later eligible item still proceeds.
     #[tokio::test]
-    async fn an_item_over_the_per_type_cap_is_withheld_and_the_rest_still_upload() {
+    async fn an_item_over_the_shared_cap_is_withheld_and_the_rest_still_upload() {
+        let over_cap = copypaste_ipc::MAX_CONTENT_BYTES + 1;
         let big_text = || {
             let mut item = item("huge-text", 1_000, "");
-            item.content = zeroize::Zeroizing::new(vec![b'x'; MAX_TEXT_BYTES + 1]);
+            item.content = zeroize::Zeroizing::new(vec![b'x'; over_cap]);
             item
         };
-        // The same bytes as an image are under the binary cap and go up.
         let big_image = || {
-            let mut item = item("big-image", 2_000, "");
-            item.content = zeroize::Zeroizing::new(vec![0u8; MAX_TEXT_BYTES + 1]);
-            item.content_type = "image".into();
-            item
-        };
-        let huge_image = || {
-            let mut item = item("huge-image", 3_000, "");
-            item.content = zeroize::Zeroizing::new(vec![0u8; MAX_BINARY_BYTES + 1]);
-            item.content_type = "image".into();
+            let mut item = item("huge-image", 2_000, "");
+            item.content = zeroize::Zeroizing::new(vec![0u8; over_cap]);
+            item.content_type = "image/png".into();
             item
         };
 
-        let source = FakeSource::with_outgoing(vec![
-            big_text(),
-            big_image(),
-            huge_image(),
-            item("ok", 4_000, "small"),
-        ]);
+        let source =
+            FakeSource::with_outgoing(vec![big_text(), big_image(), item("ok", 3_000, "small")]);
         let sync = driver(FakeRest::default(), FakeAuth::default());
 
         let stats = sync.push(&source).await.unwrap();
 
         assert_eq!(stats.skipped_too_large, 2);
-        assert_eq!(stats.uploaded, 2);
+        assert_eq!(stats.uploaded, 1);
         let rows = sync.rest.rows.lock().unwrap();
         assert!(rows.contains_key("ok"));
-        assert!(
-            rows.contains_key("big-image"),
-            "8 MiB is under the binary cap"
-        );
         assert!(!rows.contains_key("huge-text"));
         assert!(!rows.contains_key("huge-image"));
     }
@@ -458,11 +443,12 @@ mod tests {
         at_limit.content.push(b'x');
         assert_eq!(over_size_limit(&at_limit), Some(MAX_TEXT_BYTES));
         assert!(too_large_to_sync("text", MAX_TEXT_BYTES + 1));
-        assert!(!too_large_to_sync("text/rtf", MAX_TEXT_BYTES + 1));
+        assert!(too_large_to_sync("text/rtf", MAX_TEXT_BYTES + 1));
         assert!(too_large_to_sync("image/png", MAX_BINARY_BYTES + 1));
 
-        assert_eq!(MAX_TEXT_BYTES, 8 * 1024 * 1024);
-        assert_eq!(MAX_BINARY_BYTES, 10 * 1024 * 1024);
+        assert_eq!(MAX_TEXT_BYTES, copypaste_ipc::MAX_CONTENT_BYTES);
+        assert_eq!(MAX_BINARY_BYTES, copypaste_ipc::MAX_CONTENT_BYTES);
+        assert!(too_large_to_sync("text", 5 * 1024 * 1024));
     }
 
     #[tokio::test]
