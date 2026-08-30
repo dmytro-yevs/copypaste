@@ -419,23 +419,34 @@ the metadata projection rather than the whole row — is wave 2.
 
 ## 7. One peer sync round — **T for the bytes, S for the time**
 
-Host M, `cargo bench -p copypaste-p2p --bench session`, load 9.5 to 12.8. Both
-devices hold the same history, so nothing is fetched and nothing is applied:
-this is the round a converged pair performs every tick to discover there is
-nothing to do. The duplex is an in-process channel — the real encoder, the real
-decoder and the real protocol bounds, but no TCP, no Noise and no LAN.
+### Historical pre-cursor measurement
 
-| summaries each side | bytes across the duplex, per round | wall |
+Host M, `cargo bench -p copypaste-p2p --bench session`, load 9.5 to 12.8, on
+the pre-cursor protocol. Both devices held the same history, so nothing was
+fetched or applied, but each round advertised the full eligible summary set.
+The duplex was an in-process channel — the real encoder, decoder and protocol
+bounds, but no TCP, Noise or LAN.
+
+| summaries each side | historical bytes across the duplex, per round | wall |
 |---|---|---|
 | 100 | 51 732 | 324 µs |
 | 1 000 | 514 332 | 2.73 ms |
 | 10 000 | **5 140 332** | 46.1 ms |
 
-**514 bytes per summary per round**, exactly linear, both directions counted.
-The byte column is deterministic and does not depend on the host or its load;
-only the wall column does.
+The historical rows are **514 bytes per summary per round**, both directions
+counted. They describe the full-summary protocol before per-peer cursors, not
+the traffic of a current converged pair.
 
-At `MIN_POLL_INTERVAL` = 5 s, a converged pair at the default `history_limit`
-of 10 000 moves **61.7 MB per minute, per peer, to learn nothing** — that
-figure is arithmetic over a measured byte count, and the cadence is the
-constant to check before quoting it.
+### Current cursor exchange
+
+The current benchmark separates two exchanges: it starts one with
+`SyncCursor::default()` to establish cursors, then clears the byte counter and
+times the next exchange with those returned cursors. The first or reset exchange
+can advertise the eligible history; it is not periodic converged traffic.
+
+A current converged exchange is cursor-bounded, not an assertion of zero
+summaries. The bound is inclusive, so the summary at the cursor boundary may be
+advertised again; content or pin updates at or above that boundary are included.
+The relay floor can deliberately lower the advertised start so an older relayed
+tombstone crosses a peer's cursor. No current byte total or per-minute rate is
+recorded here until a cursor-aware measurement covers those cases.
