@@ -4,9 +4,7 @@
 //! product `Backend` contract. They own publication and version bookkeeping so
 //! every successful item mutation has the same observable side effects.
 
-use copypaste_core::{
-    ingest, ingest_into_with_capture_source, IngestError, Ingested, ItemCursor, StoredItem,
-};
+use copypaste_core::{IngestError, Ingested, ItemCursor, StoredItem};
 use copypaste_ipc::{ImagePreview, Item};
 
 use super::messages::{
@@ -72,13 +70,14 @@ pub(super) async fn add(backend: &EmbeddedBackend, content: &str) -> Result<Item
     backend
         .blocking(move |inner| {
             let settings = inner.settings();
-            match ingest(
+            match copypaste_core::ingest::ingest_with_current_retention(
                 &inner.state.store,
                 &inner.state.detector,
                 &inner.state.keyring,
                 &content,
                 copypaste_ipc::content_type::TEXT,
                 &settings,
+                || inner.settings(),
             ) {
                 Ok(ingested) => {
                     let item = inner.to_wire(ingested.into_item())?;
@@ -131,7 +130,7 @@ pub(super) async fn add_captured(
             let sensitive_floor = app_bundle_id
                 .as_deref()
                 .is_some_and(copypaste_core::sensitive::is_password_manager_app);
-            match ingest_into_with_capture_source(
+            match copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
                 &inner.state.store,
                 &inner.state.detector,
                 &inner.state.keyring,
@@ -142,6 +141,7 @@ pub(super) async fn add_captured(
                 app_bundle_id.as_deref(),
                 app_name.as_deref(),
                 &settings,
+                || inner.settings(),
             ) {
                 Ok(ingested) => {
                     let (item, saved) = match ingested {

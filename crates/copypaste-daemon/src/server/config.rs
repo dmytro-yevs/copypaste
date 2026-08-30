@@ -59,15 +59,16 @@ where
 }
 
 fn apply_runtime_effects(state: &AppState, transition: &SettingsTransition) {
-    if transition.should_enforce_retention() {
-        let removed =
-            copypaste_core::retention::enforce_retention_report(&state.store, transition.config());
-        if removed > 0 {
-            // Retention is local housekeeping, not a sync deletion. This only
-            // wakes watchers; `note_local_change` would advance transport
-            // cursors for rows that must remain local to this device.
-            state.note_remote_change();
-        }
+    let removed = copypaste_core::retention::reconcile_policy(
+        &state.store,
+        || state.settings.get().clone(),
+        transition.should_enforce_retention(),
+    );
+    if removed > 0 {
+        // Retention is local housekeeping, not a sync deletion. This only
+        // wakes watchers; `note_local_change` would advance transport cursors
+        // for rows that must remain local to this device.
+        state.note_remote_change();
     }
     if transition.lan_visibility_changed() {
         state

@@ -6,16 +6,20 @@ use super::open::Inner;
 const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) fn sweep(inner: &Inner) {
-    let ttl = Duration::from_secs(inner.settings().sensitive_ttl_secs);
-    // Same bound as daemon wipe: floor must not land above tombstone stamps.
-    let mutation_started = copypaste_core::now_ms();
-    match copypaste_core::sweep_sensitive(
-        &inner.state.store,
-        &inner.state.detector,
-        &inner.state.keyring.item_key(),
-        ttl,
-        mutation_started,
-    ) {
+    let (mutation_started, removed) = inner.state.store.with_retention(|| {
+        let ttl = Duration::from_secs(inner.settings().sensitive_ttl_secs);
+        // Same bound as daemon wipe: floor must not land above tombstone stamps.
+        let mutation_started = copypaste_core::now_ms();
+        let removed = copypaste_core::sweep_sensitive(
+            &inner.state.store,
+            &inner.state.detector,
+            &inner.state.keyring.item_key(),
+            ttl,
+            mutation_started,
+        );
+        (mutation_started, removed)
+    });
+    match removed {
         Ok(0) => {}
         Ok(removed) => {
             inner.note_version_written(mutation_started);
@@ -171,11 +175,29 @@ mod tests {
     #[tokio::test]
     async fn disabled_auto_wipe_emits_no_event() {
         let (backend, _clipboard, _dir) = backend();
-        backend.add(SECRET).await.unwrap();
+        backend
+            .set_config(copypaste_ipc::ConfigPatch {
+                sensitive_ttl_secs: Some(0),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let item = copypaste_core::ingest_into(
+            &backend.inner.state.store,
+            &backend.inner.state.detector,
+            &backend.inner.state.keyring,
+            SECRET,
+            copypaste_ipc::content_type::TEXT,
+            copypaste_core::now_ms().saturating_sub(120_000),
+            &backend.inner.settings(),
+        )
+        .unwrap()
+        .into_item();
         let mut events = backend.watch().await.unwrap();
 
         sweep(&backend.inner);
 
         assert!(events.try_recv().is_err());
+        assert!(backend.inner.state.store.get(&item.id).unwrap().is_some());
     }
 }
