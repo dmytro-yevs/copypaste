@@ -9,7 +9,7 @@ import {
   type AttachFinalDiagnostic,
   type AttachPagesDiagnostic,
   type AttachRawDiagnostic,
-  type DirectOutcome,
+  type PageAutoAttachOutcome,
   webviewComplaints,
 } from "./attach.js";
 import { DEFAULT_PORT, openDevtools, type DevtoolsEndpoint } from "./devtools.js";
@@ -57,10 +57,9 @@ async function open(port: number, msLeft: number): Promise<{ browser: Browser; e
 }
 
 /**
- * Raw CDP target from `/json/list`, used when Puppeteer's `pages()` does not
- * expose the app target. Old WebView engines (109, API 33) publish the page
- * with type `"webview"` which `pages(includeAll)` should surface but doesn't
- * always — the raw endpoint is the ground truth.
+ * Raw CDP target from `/json/list`, used to detect the API 34 flat-page
+ * attachment case after Puppeteer's `pages()` omits the otherwise valid app
+ * page.
  */
 interface RawTarget {
   type: string;
@@ -113,61 +112,137 @@ class AttachResolutionError extends Error {
   }
 }
 
-export interface DirectPageLike {
-  url(): string;
+const PAGE_AUTO_ATTACH = {
+  autoAttach: true,
+  waitForDebuggerOnStart: true,
+  flatten: true,
+  filter: [{ type: "tab", exclude: true }, {}],
+};
+
+export interface PublicRootConnection {
+  send(
+    method: "Target.setAutoAttach",
+    params: typeof PAGE_AUTO_ATTACH,
+    options: { timeout: number },
+  ): Promise<unknown>;
 }
 
-export interface DirectBrowserLike {
-  pages(): Promise<readonly DirectPageLike[]>;
-  disconnect(): Promise<void>;
+export interface PublicBrowserSession {
+  connection(): PublicRootConnection | undefined;
+  detach(): Promise<void>;
 }
 
-export type DirectResolution =
-  | { outcome: "connected"; browser: DirectBrowserLike; page: DirectPageLike }
-  | { outcome: Exclude<DirectOutcome, "connected"> };
+export interface PublicBrowserTarget {
+  createCDPSession(): Promise<PublicBrowserSession>;
+}
 
-export async function directAppTarget(
-  originalBrowser: Pick<DirectBrowserLike, "disconnect">,
-  socket: string,
-  connect: (socket: string) => Promise<DirectBrowserLike>,
-): Promise<DirectResolution> {
-  let directBrowser: DirectBrowserLike;
-  try {
-    directBrowser = await connect(socket);
-  } catch {
-    return { outcome: "connect-failed" };
-  }
+export interface PublicBrowser {
+  target(): PublicBrowserTarget | undefined;
+}
 
-  let keepDirectConnection = false;
+class AttachDeadlineExceeded extends Error {}
+
+async function withinRemainingDeadline<T>(
+  msLeft: () => number,
+  start: () => Promise<T>,
+  onLateResult?: (result: T) => void,
+): Promise<T> {
+  const remaining = msLeft();
+  if (remaining <= 0) throw new AttachDeadlineExceeded();
+
+  const operation = Promise.resolve().then(start);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    let pages: readonly DirectPageLike[];
-    try {
-      pages = await directBrowser.pages();
-    } catch {
-      return { outcome: "pages-failed" };
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new AttachDeadlineExceeded()), remaining);
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof AttachDeadlineExceeded && onLateResult) {
+      void operation.then(onLateResult).catch(() => undefined);
     }
-    let directPage: DirectPageLike | undefined;
-    try {
-      directPage = pages.find((candidate) => isAppTarget(candidate.url()));
-    } catch {
-      return { outcome: "pages-failed" };
-    }
-    if (!directPage) return { outcome: pages.length ? "wrong-origin" : "no-page" };
-    try {
-      await originalBrowser.disconnect();
-    } catch {
-      return { outcome: "ownership-failed" };
-    }
-    keepDirectConnection = true;
-    return { outcome: "connected", browser: directBrowser, page: directPage };
+    throw error;
   } finally {
-    if (!keepDirectConnection) await directBrowser.disconnect().catch(() => undefined);
+    if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+async function detachWithinRemainingDeadline(session: PublicBrowserSession, msLeft: () => number): Promise<boolean> {
+  const detach = Promise.resolve().then(() => session.detach());
+  if (msLeft() <= 0) {
+    void detach.catch(() => undefined);
+    return false;
+  }
+  try {
+    await withinRemainingDeadline(msLeft, () => detach);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * API 34 exposes the app page in `/json/list` but Puppeteer's initial target
+ * filter can omit it. Configure the root connection once and let Puppeteer's
+ * TargetManager receive the resulting page attachment.
+ */
+export async function enablePageAutoAttach(
+  browser: PublicBrowser,
+  msLeft: () => number,
+): Promise<PageAutoAttachOutcome> {
+  if (msLeft() <= 0) return "deadline-exceeded";
+
+  let target: PublicBrowserTarget | undefined;
+  try {
+    target = browser.target();
+  } catch {
+    return "browser-target-unavailable";
+  }
+  if (!target) return "browser-target-unavailable";
+
+  let session: PublicBrowserSession;
+  try {
+    session = await withinRemainingDeadline(
+      msLeft,
+      () => target.createCDPSession(),
+      (lateSession) => { void lateSession.detach().catch(() => undefined); },
+    );
+  } catch (error) {
+    return error instanceof AttachDeadlineExceeded ? "deadline-exceeded" : "browser-session-unavailable";
+  }
+
+  let outcome: PageAutoAttachOutcome;
+  try {
+    const rootConnection = session.connection();
+    if (!rootConnection) {
+      outcome = "root-connection-unavailable";
+    } else {
+      const timeout = msLeft();
+      if (timeout <= 0) {
+        outcome = "deadline-exceeded";
+      } else {
+        await withinRemainingDeadline(msLeft, () =>
+          rootConnection.send("Target.setAutoAttach", PAGE_AUTO_ATTACH, { timeout }),
+        );
+        outcome = "page-autoattach-enabled";
+      }
+    }
+  } catch (error) {
+    outcome = error instanceof AttachDeadlineExceeded ? "deadline-exceeded" : "page-autoattach-rejected";
+  }
+
+  return (await detachWithinRemainingDeadline(session, msLeft))
+    ? outcome
+    : "browser-session-detach-failed";
 }
 
 async function resolveAppPage(port: number, deadline: number): Promise<Attached> {
   const msLeft = () => Math.max(0, deadline - Date.now());
   let { browser, endpoint } = await open(port, msLeft());
+  let autoAttachAttempted = false;
+  let pageAutoAttachOutcome: PageAutoAttachOutcome = "not-attempted";
   let diagnostic: AttachFinalDiagnostic = finalAttachDiagnostic(
     { status: "error", count: 0, appOriginMatchCount: 0 },
     {
@@ -189,38 +264,18 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
     const page = pages?.find((candidate) => isAppTarget(candidate.url()));
     if (page) return { browser, page, endpoint };
 
-    // Old WebView engines (109, API 29/33) may list the app target in the raw
-    // `/json/list` response while `pages()` omits it.  The page is the ground
-    // truth — if it exists there with the right origin, open it directly.
     const rawResult = await rawTargets(endpoint.browserUrl);
     const targets = rawResult.targets;
     const raw = targets.find((t) => isAppTarget(t.url));
-    let directOutcome: DirectOutcome = rawResult.status !== "ok"
-      ? "raw-error"
-      : targets.length === 0
-        ? "raw-empty"
-        : raw?.webSocketDebuggerUrl
-          ? "not-attempted"
-          : raw
-            ? "no-websocket"
-            : "not-attempted";
-    if (raw?.webSocketDebuggerUrl) {
-      const direct = await directAppTarget(
-        browser,
-        raw.webSocketDebuggerUrl,
-        (socket) => puppeteer.connect({
-          browserWSEndpoint: socket,
-          defaultViewport: null,
-        }),
-      );
-      directOutcome = direct.outcome;
-      if (direct.outcome === "connected") {
-        return {
-          browser: direct.browser as Browser,
-          page: direct.page as Page,
-          endpoint,
-        };
-      }
+    const defaultPageCount = raw
+      ? await withinRemainingDeadline(msLeft, () => browser.pages()).then(
+        (found) => found.length,
+        () => undefined,
+      )
+      : undefined;
+    if (pageResult.status === "ok" && defaultPageCount === 0 && raw && !autoAttachAttempted) {
+      autoAttachAttempted = true;
+      pageAutoAttachOutcome = await enablePageAutoAttach(browser, msLeft);
     }
 
     const pagesDiagnostic: AttachPagesDiagnostic = {
@@ -231,7 +286,7 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
     diagnostic = finalAttachDiagnostic(
       pagesDiagnostic,
       rawDiagnostic(rawResult),
-      directOutcome,
+      pageAutoAttachOutcome,
     );
     const allTargets = pages.map((c) => c.url()).concat(targets.map((t) => t.url));
     const step = nextAttachStep({
@@ -247,6 +302,8 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
     await browser.disconnect().catch(() => undefined);
     if (step.do === "give-up") throw new AttachResolutionError(step.why, diagnostic);
     ({ browser, endpoint } = await open(port, msLeft()));
+    autoAttachAttempted = false;
+    pageAutoAttachOutcome = "not-attempted";
   }
 }
 
