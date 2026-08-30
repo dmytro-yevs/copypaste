@@ -122,20 +122,20 @@
 }
 
 .compact {
-  min-block-size: var(--ctl-h-sm);
+  min-block-size: max(var(--ctl-h-sm), var(--tap-min));
   padding-inline: var(--s-3);
 }
 
 .compactIcon {
-  inline-size: var(--ctl-h-sm);
-  block-size: var(--ctl-h-sm);
-  min-inline-size: var(--ctl-h-sm);
-  min-block-size: var(--ctl-h-sm);
+  inline-size: max(var(--ctl-h-sm), var(--tap-min));
+  block-size: max(var(--ctl-h-sm), var(--tap-min));
+  min-inline-size: max(var(--ctl-h-sm), var(--tap-min));
+  min-block-size: max(var(--ctl-h-sm), var(--tap-min));
   padding: 0;
 }
 
 .sm {
-  min-block-size: var(--ctl-h-sm);
+  min-block-size: max(var(--ctl-h-sm), var(--tap-min));
   padding-inline: var(--s-3);
 }
 
@@ -170,9 +170,4 @@
     transform: none;
   }
 
-}
-
-@media (pointer: coarse) {
-  .compact, .sm { min-block-size: var(--tap-min); }
-  .compactIcon { inline-size: var(--tap-min); block-size: var(--tap-min); min-inline-size: var(--tap-min); min-block-size: var(--tap-min); }
 }
