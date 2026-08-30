@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
+  finalAttachDiagnostic,
   isAppTarget,
   nextAttachStep,
   webviewComplaints,
@@ -106,6 +107,12 @@ test("falls back to /json/list when pages() hides the app target", () => {
   expect(app).toMatch(/rawTargets/);
 });
 
+test("disconnects a direct CDP connection when it exposes no page", () => {
+  const here = fileURLToPath(import.meta.url);
+  const app = readFileSync(resolve(here, "../../src/harness/app.ts"), "utf8");
+  expect(app).toMatch(/if \(!keepDirectConnection\) await directBrowser\.disconnect\(\)/);
+});
+
 // The ground-truth query must be bounded: a devtools endpoint that never
 // answers `/json/list` must not delay attachment beyond its normal backoff.
 test("raw target discovery bounds its fetch", () => {
@@ -129,7 +136,7 @@ describe("giving up", () => {
     });
     expect(nextAttachStep({ ...RUNNING, msLeft: 0, targets: ["about:blank"] })).toEqual({
       do: "give-up",
-      why: "pid 3761 exposes about:blank",
+      why: "pid 3761 exposes 1 page target(s)",
     });
   });
 
@@ -153,5 +160,50 @@ describe("giving up", () => {
 
     expect(webviewComplaints(logcat, 2)).toEqual(["FATAL EXCEPTION 2", "E AndroidRuntime 3"]);
     expect(webviewComplaints("nothing interesting here")).toEqual([]);
+  });
+});
+
+describe("bounded final attach diagnostics", () => {
+  test("uses a raw app target when pages() is empty", () => {
+    expect(
+      finalAttachDiagnostic(
+        [],
+        {
+          status: "ok",
+          targets: [{ type: "webview", appOrigin: true, webSocketPresent: true }],
+        },
+        "connected",
+      ),
+    ).toEqual({
+      targetTypeHistogram: { page: 0, webview: 1, other: 0 },
+      appOriginMatchCount: 1,
+      webSocketPresent: true,
+      directOutcome: "connected",
+    });
+  });
+
+  test("distinguishes a raw target-list error from an empty list", () => {
+    const error = finalAttachDiagnostic([], { status: "error", targets: [] }, "raw-error");
+    const empty = finalAttachDiagnostic([], { status: "ok", targets: [] }, "raw-empty");
+    expect(error.directOutcome).toBe("raw-error");
+    expect(empty.directOutcome).toBe("raw-empty");
+    expect(JSON.stringify(error)).not.toMatch(/https?:|title|provider|secret/i);
+  });
+
+  test("counts unknown target types as other without retaining target values", () => {
+    const diagnostic = finalAttachDiagnostic(
+      [{ type: "page", appOrigin: false, webSocketPresent: false }],
+      {
+        status: "ok",
+        targets: [{ type: "service", appOrigin: false, webSocketPresent: true }],
+      },
+      "no-page",
+    );
+    expect(diagnostic).toEqual({
+      targetTypeHistogram: { page: 0, webview: 0, other: 1 },
+      appOriginMatchCount: 0,
+      webSocketPresent: true,
+      directOutcome: "no-page",
+    });
   });
 });
