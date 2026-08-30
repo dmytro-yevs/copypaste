@@ -65,8 +65,7 @@
 `cargo-deny` із checksum-перевіркою та прямі locked-перевірки вже інтегровані.
 Репрезентативні первинні сигнали — [locked Cargo.lock failure у E2E
 30588916123](https://github.com/dmytro-yevs/copypaste/actions/runs/30588916123),
-де inventory підтверджує `E2E (real WebView)` і точний `cargo build --locked`
-error, та [відсутній Tcl у Nightly
+де inventory підтверджує належність запуску до `E2E (real WebView)`, а повний кешований журнал містить помилку `cargo build --locked`, та [відсутній Tcl у Nightly
 30254035876](https://github.com/dmytro-yevs/copypaste/actions/runs/30254035876).
 У поточному [Supply chain run
 33280200416](https://github.com/dmytro-yevs/copypaste/actions/runs/33280200416)
