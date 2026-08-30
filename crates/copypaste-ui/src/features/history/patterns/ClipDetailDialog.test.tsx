@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui";
+import { t } from "@/i18n";
 import { item } from "@/test/harness";
 import { ClipDetailDialog } from "./ClipDetailDialog";
 
@@ -41,10 +42,21 @@ describe("ClipDetailDialog notices", () => {
     );
 
     expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(t("history.inspector.tooLarge")).toBe(
+      "Too large to sync — this item stays on this device",
+    );
+    expect(t("history.inspector.tooLarge")).not.toBe(
+      "Too large · peer sync only",
+    );
+    const syncNotice = screen
+      .getAllByText("Too large to sync — this item stays on this device")
+      .map((element) => element.closest<HTMLElement>('[data-slot="surface"]'))
+      .find((element) => element !== null);
+    expect(syncNotice).toBeTruthy();
     expect(
-      screen
-        .getByText("Too large to sync — this item stays on this device")
-        .closest('[data-slot="surface"]'),
+      within(syncNotice!).getByText(
+        "Too large to sync — this item stays on this device",
+      ),
     ).toBeTruthy();
     expect(screen.getByText("Potentially sensitive content")).toBeTruthy();
   });
