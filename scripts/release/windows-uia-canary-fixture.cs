@@ -34,6 +34,7 @@ namespace CopyPaste.UiaCanary
         private const int WaitMilliseconds = 5000;
         private readonly ManualResetEvent ready = new ManualResetEvent(false);
         private volatile bool stopRequested;
+        private volatile bool cleanupFailed;
         private bool disposed;
         private Thread thread;
         private Form form;
@@ -45,6 +46,7 @@ namespace CopyPaste.UiaCanary
         public IntPtr PasswordEditHandle { get; private set; }
         public IntPtr ButtonHandle { get; private set; }
         public IntPtr StaticHandle { get; private set; }
+        public bool CleanupFailed { get { return cleanupFailed; } }
 
         public static Session Start()
         {
@@ -64,6 +66,7 @@ namespace CopyPaste.UiaCanary
             {
                 StopAndJoin(deadline);
                 ready.Close();
+                if (cleanupFailed) throw new InvalidOperationException("UIA canary fixture cleanup failed.");
                 throw new InvalidOperationException("UIA canary fixture could not start.");
             }
         }
@@ -117,24 +120,25 @@ namespace CopyPaste.UiaCanary
             {
                 CloseControl(passwordEdit);
                 CloseControl(button);
+                CloseControl(staticText);
                 CloseForm(localForm);
                 form = null;
                 ready.Set();
             }
         }
 
-        private static void CloseControl(NativeControl control)
+        private void CloseControl(NativeControl control)
         {
             if (control == null) return;
             try { control.Close(); }
-            catch (Exception) { }
+            catch (Exception) { cleanupFailed = true; }
         }
 
-        private static void CloseForm(Form localForm)
+        private void CloseForm(Form localForm)
         {
             if (localForm == null) return;
             try { localForm.Dispose(); }
-            catch (Exception) { }
+            catch (Exception) { cleanupFailed = true; }
         }
 
         private void RequestStop()
@@ -167,6 +171,7 @@ namespace CopyPaste.UiaCanary
             StopAndJoin(DateTime.UtcNow.AddMilliseconds(WaitMilliseconds));
             ready.Close();
             disposed = true;
+            if (cleanupFailed) throw new InvalidOperationException("UIA canary fixture cleanup failed.");
         }
     }
 }

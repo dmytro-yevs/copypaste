@@ -63,4 +63,9 @@ function Test-WindowsUiaClientBootstrapHelpers {
     )) {
         if ($referenceSource -notmatch [regex]::Escape($name)) { throw "the UIA fixture omitted an explicit compiler reference" }
     }
+    $fixture = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "windows-uia-canary-fixture.cs"))
+    if ($fixture -notmatch "cleanupFailed" -or $fixture -notmatch "CloseControl\(staticText\)" -or
+        $fixture -notmatch "UIA canary fixture cleanup failed") {
+        throw "the UIA fixture did not retain teardown failure state"
+    }
 }
