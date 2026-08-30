@@ -226,9 +226,16 @@ pub async fn sync_now(state: &Arc<AppState>, id: u64) -> Response {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_NOT_CONFIGURED);
     }
     match poll::sync_round(state).await {
-        Some(Ok(stats)) => Response::ok(id, ResponseData::CloudSync(stats)),
-        Some(Err(e)) => Response::err(id, sync_error_code(&e), poll::describe(&e)),
-        None => Response::err(id, ErrorCode::AuthFailed, MSG_SIGNED_OUT),
+        poll::RoundOutcome::Completed(Ok(stats)) => {
+            Response::ok(id, ResponseData::CloudSync(stats))
+        }
+        poll::RoundOutcome::Completed(Err(e)) => {
+            Response::err(id, sync_error_code(&e), poll::describe(&e))
+        }
+        poll::RoundOutcome::SyncDisabled => {
+            Response::err(id, ErrorCode::NotReady, "Sync is turned off.")
+        }
+        poll::RoundOutcome::NoAccount => Response::err(id, ErrorCode::AuthFailed, MSG_SIGNED_OUT),
     }
 }
 
