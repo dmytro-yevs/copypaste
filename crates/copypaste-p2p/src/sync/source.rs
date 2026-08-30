@@ -20,6 +20,7 @@ pub struct SyncStats {
     pub sent: usize,
     pub received: usize,
     pub skipped: usize,
+    pub skipped_too_large: usize,
 }
 
 /// The result of one completed session.

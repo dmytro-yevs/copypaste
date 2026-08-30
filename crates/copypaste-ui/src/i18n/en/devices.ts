@@ -300,6 +300,18 @@ export const devices = {
     synced_other:
       "Synced {{count}} devices — sent {{sent}}, received {{received}}",
     syncedPartial: "Synced {{done}} of {{total}} devices — {{failed}} failed",
+    syncedWithSizeRefusals_one:
+      "Synced {{count}} device — sent {{sent}}, received {{received}}; oversized-item refusals: {{skipped}}",
+    syncedWithSizeRefusals_other:
+      "Synced {{count}} devices — sent {{sent}}, received {{received}}; oversized-item refusals: {{skipped}}",
+    syncedWithKnownSizeRefusals_one:
+      "Synced {{count}} device — sent {{sent}}, received {{received}}; oversized-item refusals: {{skipped}}, and counts are unavailable for one or more peer syncs",
+    syncedWithKnownSizeRefusals_other:
+      "Synced {{count}} devices — sent {{sent}}, received {{received}}; oversized-item refusals: {{skipped}}, and counts are unavailable for one or more peer syncs",
+    syncedWithUnknownSizeRefusals_one:
+      "Synced {{count}} device — sent {{sent}}, received {{received}}; oversized-item refusal counts are unavailable for one or more peer syncs",
+    syncedWithUnknownSizeRefusals_other:
+      "Synced {{count}} devices — sent {{sent}}, received {{received}}; oversized-item refusal counts are unavailable for one or more peer syncs",
   },
 
 } as const;
