@@ -147,23 +147,21 @@ async function attemptSettingsRestore(
 ): Promise<void> {
   try {
     await restore();
-  } catch (error) {
-    console.warn(`settings cleanup could not restore ${name}: ${String(error)}`);
+  } catch {
+    console.warn(`settings cleanup could not restore ${name}`);
   }
 }
 
 async function restoreAfterTest(
   name: string,
   restore: () => Promise<void>,
-  primaryFailure: unknown,
+  primaryFailed: boolean,
 ): Promise<void> {
   try {
     await restore();
   } catch (error) {
-    if (primaryFailure === undefined) throw error;
-    console.warn(
-      `settings cleanup also failed to restore ${name}: ${String(error)}`,
-    );
+    if (!primaryFailed) throw error;
+    console.warn(`settings cleanup also failed to restore ${name}`);
   }
 }
 
@@ -247,7 +245,7 @@ describe("the section index", () => {
   test("keeps the Android document fixed while compact Preferences scrolls", async () => {
     await withSoftKeyboardScenario(async (softKeyboard) => {
       await openSettingsSection(app, "Cloud sync");
-      let primaryFailure: unknown;
+      let primaryFailed = false;
       let imeDiagnostics: {
         before: { native: SoftKeyboardDiagnostics | null; page: unknown };
         after: { native: SoftKeyboardDiagnostics | null; page: unknown };
@@ -448,7 +446,7 @@ describe("the section index", () => {
       expect(evidence.after.fieldHit).toBe(true);
       await ensureSettingsNavigation(app);
       } catch (error) {
-        primaryFailure = error;
+        primaryFailed = true;
         imeDiagnostics.after.native = await softKeyboard.diagnostics().catch(() => null);
         console.warn(
           `Android soft-keyboard diagnostics: ${JSON.stringify(imeDiagnostics)}`,
@@ -469,10 +467,8 @@ describe("the section index", () => {
             }),
           );
         } catch (error) {
-          if (primaryFailure === undefined) throw error;
-          console.warn(
-            `settings cleanup could not clear the Android scroll probe: ${String(error)}`,
-          );
+          if (!primaryFailed) throw error;
+          console.warn("settings cleanup could not clear the Android scroll probe");
         }
       }
     });
@@ -484,7 +480,7 @@ describe("a preference that limits only the visible list", () => {
     await gotoView(app, "Settings");
     await openSettingsSection(app, "Clipboard behavior");
     originalHistoryDisplayIndex = await historyDisplayIndex();
-    let primaryFailure: unknown;
+    let primaryFailed = false;
     try {
       await setHistoryDisplayLimit(0, "100");
       await gotoView(app, "Library");
@@ -504,13 +500,13 @@ describe("a preference that limits only the visible list", () => {
       await openSettingsSection(app, "Clipboard behavior");
       expect(await historyDisplayIndex()).toBe(0);
     } catch (error) {
-      primaryFailure = error;
+      primaryFailed = true;
       throw error;
     } finally {
       await restoreAfterTest(
         "History display limit",
         restoreHistoryDisplayLimit,
-        primaryFailure,
+        primaryFailed,
       );
     }
   }, 120_000);
@@ -530,7 +526,7 @@ describe("appearance", () => {
     expect(["midnight", "aurora", "ember", "graphite"]).toContain(initialProductTheme);
     originalProductTheme = initialProductTheme;
     const selected = initialProductTheme === "aurora" ? "ember" : "aurora";
-    let primaryFailure: unknown;
+    let primaryFailed = false;
     try {
       await tapElement(app, `[data-product-theme="${selected}"]`);
       await waitFor(
@@ -570,13 +566,13 @@ describe("appearance", () => {
       );
       expect(pressed).toBe("true");
     } catch (error) {
-      primaryFailure = error;
+      primaryFailed = true;
       throw error;
     } finally {
       await restoreAfterTest(
         "product theme",
         restoreProductTheme,
-        primaryFailure,
+        primaryFailed,
       );
     }
   }, 180_000);

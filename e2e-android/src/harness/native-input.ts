@@ -387,7 +387,7 @@ export async function withSoftKeyboardScenario<T>(
 ): Promise<T> {
   const serial = await selectedSerial(nativeCommands);
   const original = await readShowImeWithHardKeyboard(serial, nativeCommands);
-  let primaryFailure: unknown;
+  let primaryFailed = false;
   try {
     await nativeCommands.shell(
       serial,
@@ -407,16 +407,14 @@ export async function withSoftKeyboardScenario<T>(
         tapNativeInputForSerial(serial, point, metrics, packageName, nativeCommands),
     });
   } catch (error) {
-    primaryFailure = error;
+    primaryFailed = true;
     throw error;
   } finally {
     try {
       await restoreShowImeWithHardKeyboard(serial, original, nativeCommands);
     } catch (error) {
-      if (primaryFailure === undefined) throw error;
-      console.warn(
-        `Android show_ime_with_hard_keyboard cleanup also failed: ${String(error)}`,
-      );
+      if (!primaryFailed) throw error;
+      console.warn("Android show_ime_with_hard_keyboard cleanup also failed");
     }
   }
 }
