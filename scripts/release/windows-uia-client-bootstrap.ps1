@@ -1,5 +1,6 @@
 $script:WindowsUiaClientProviderReady = $false
 $script:WindowsUiaClientProviderBootstrap = $null
+$script:WindowsUiaClientProviderCanaryDiagnostic = $null
 
 function Get-WindowsUiaProviderAssemblyName([Reflection.AssemblyName]$ClientAssembly) {
     $provider = [Reflection.AssemblyName]::new()
@@ -29,14 +30,14 @@ function New-WindowsUiaCanaryExpectation(
     [string]$ClassName,
     [string]$ControlType,
     [bool]$IsPassword,
-    [string]$StyleFlags
+    [string]$ConfiguredStyleFlags
 ) {
     return [ordered]@{
         role = $Role
         class_name = $ClassName
         control_type = $ControlType
         is_password = $IsPassword
-        style_flags = $StyleFlags
+        configured_style_flags = $ConfiguredStyleFlags
     }
 }
 
@@ -61,134 +62,64 @@ function Test-WindowsUiaCanaryMappings([object[]]$Facts) {
             $_["class_name"] -eq $requirement["class_name"] -and
             $_["control_type"] -eq $requirement["control_type"] -and
             $_["is_password"] -eq $requirement["is_password"] -and
-            $_["style_flags"] -eq $requirement["style_flags"]
+            $_["configured_style_flags"] -eq $requirement["configured_style_flags"]
         })
         if ($matches.Count -ne 1) { return $false }
     }
     return $true
 }
 
+function New-WindowsUiaCanaryDiagnostic([string]$Phase, [string]$Outcome, [object[]]$Controls) {
+    return [ordered]@{
+        schema_version = 1
+        phase = $Phase
+        outcome = $Outcome
+        controls = @($Controls)
+    }
+}
+
+function Write-WindowsUiaCanaryDiagnostic([Collections.IDictionary]$Diagnostic) {
+    Write-Information ("Windows UIA canary diagnostics: " + ($Diagnostic | ConvertTo-Json -Compress -Depth 6)) `
+        -InformationAction Continue
+}
+
+function Resolve-WindowsUiaFixtureReference([string[]]$Names) {
+    foreach ($name in $Names) {
+        $reference = Join-Path $PSHOME (Join-Path "ref" "$name.dll")
+        if (Test-Path -LiteralPath $reference -PathType Leaf) { return $reference }
+        $loaded = [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object {
+            $_.GetName().Name -eq $name -and $_.Location
+        } | Select-Object -First 1
+        if ($null -ne $loaded) { return $loaded.Location }
+        try {
+            $assembly = [Reflection.Assembly]::Load($name)
+            if ($assembly.Location) { return $assembly.Location }
+        } catch { }
+    }
+    throw "Windows UIA canary compiler reference is unavailable"
+}
+
+function Get-WindowsUiaFixtureReferences {
+    $referenceSets = @(
+        @("System.Runtime", "mscorlib"),
+        @("System.Runtime.InteropServices", "mscorlib"),
+        @("System.Threading", "mscorlib"),
+        @("System.Threading.Thread", "mscorlib"),
+        @("System.Windows.Forms"),
+        @("System.Windows.Forms.Primitives", "System.Windows.Forms"),
+        @("System.Drawing", "System.Drawing.Common"),
+        @("System.Drawing.Primitives", "System.Drawing"),
+        @("System.ComponentModel.Primitives", "System"),
+        @("System.Collections", "mscorlib"),
+        @("System.ObjectModel", "System")
+    )
+    return @($referenceSets | ForEach-Object { Resolve-WindowsUiaFixtureReference $_ } | Select-Object -Unique)
+}
+
 function Add-WindowsUiaCanaryFixtureType {
-    if ($null -ne ("CopyPasteUiaCanarySession" -as [type])) { return }
-    Add-Type -TypeDefinition @'
-using System;
-using System.Threading;
-using System.Windows.Forms;
-
-public sealed class CopyPasteUiaCanaryWindow : NativeWindow
-{
-    public void Create(string className, int style, IntPtr parent, int x, int y)
-    {
-        CreateParams parameters = new CreateParams();
-        parameters.ClassName = className;
-        parameters.Caption = String.Empty;
-        parameters.Style = style;
-        parameters.Parent = parent;
-        parameters.X = x;
-        parameters.Y = y;
-        parameters.Width = 40;
-        parameters.Height = 22;
-        CreateHandle(parameters);
-    }
-
-    public void Close()
-    {
-        if (Handle != IntPtr.Zero)
-            DestroyHandle();
-    }
-}
-
-public sealed class CopyPasteUiaCanarySession : IDisposable
-{
-    private const int ChildVisibleBorder = 0x50800000;
-    private const int PasswordEditStyle = ChildVisibleBorder | 0x0020;
-    private readonly ManualResetEvent ready = new ManualResetEvent(false);
-    private readonly ManualResetEvent closed = new ManualResetEvent(false);
-    private Thread thread;
-    private Form form;
-    private Exception failure;
-    private CopyPasteUiaCanaryWindow passwordEdit;
-    private CopyPasteUiaCanaryWindow button;
-    private CopyPasteUiaCanaryWindow staticText;
-
-    public IntPtr PasswordEditHandle { get; private set; }
-    public IntPtr ButtonHandle { get; private set; }
-    public IntPtr StaticHandle { get; private set; }
-
-    public static CopyPasteUiaCanarySession Start()
-    {
-        CopyPasteUiaCanarySession session = new CopyPasteUiaCanarySession();
-        session.StartCore();
-        return session;
-    }
-
-    private void StartCore()
-    {
-        thread = new Thread(new ThreadStart(ThreadMain));
-        thread.IsBackground = true;
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        if (!ready.WaitOne(5000) || failure != null)
-        {
-            Dispose();
-            throw new InvalidOperationException("UIA canary fixture could not start.");
-        }
-    }
-
-    private void ThreadMain()
-    {
-        try
-        {
-            form = new Form();
-            form.Text = String.Empty;
-            form.ShowInTaskbar = false;
-            form.StartPosition = FormStartPosition.Manual;
-            form.Left = -32000;
-            form.Top = -32000;
-            form.Width = 160;
-            form.Height = 80;
-            IntPtr parent = form.Handle;
-            passwordEdit = new CopyPasteUiaCanaryWindow();
-            button = new CopyPasteUiaCanaryWindow();
-            staticText = new CopyPasteUiaCanaryWindow();
-            passwordEdit.Create("Edit", PasswordEditStyle, parent, 4, 4);
-            button.Create("Button", ChildVisibleBorder, parent, 48, 4);
-            staticText.Create("Static", ChildVisibleBorder, parent, 92, 4);
-            PasswordEditHandle = passwordEdit.Handle;
-            ButtonHandle = button.Handle;
-            StaticHandle = staticText.Handle;
-            form.Show();
-            ready.Set();
-            Application.Run(form);
-        }
-        catch (Exception error)
-        {
-            failure = error;
-        }
-        finally
-        {
-            if (passwordEdit != null) passwordEdit.Close();
-            if (button != null) button.Close();
-            if (staticText != null) staticText.Close();
-            if (form != null) form.Dispose();
-            ready.Set();
-            closed.Set();
-        }
-    }
-
-    public void Dispose()
-    {
-        Form current = form;
-        if (current != null && current.IsHandleCreated)
-        {
-            try { current.BeginInvoke(new MethodInvoker(current.Close)); }
-            catch (InvalidOperationException) { }
-        }
-        if (thread != null && thread.IsAlive)
-            closed.WaitOne(5000);
-    }
-}
-'@ -ReferencedAssemblies "System.Windows.Forms"
+    if ($null -ne ("CopyPaste.UiaCanary.Session" -as [type])) { return }
+    Add-Type -Path (Join-Path $PSScriptRoot "windows-uia-canary-fixture.cs") `
+        -ReferencedAssemblies @(Get-WindowsUiaFixtureReferences)
 }
 
 function Read-WindowsUiaCanaryControl(
@@ -201,7 +132,7 @@ function Read-WindowsUiaCanaryControl(
         class_name = $element.Current.ClassName
         control_type = $element.Current.ControlType.ProgrammaticName
         is_password = $element.Current.IsPassword
-        style_flags = $Expectation["style_flags"]
+        configured_style_flags = $Expectation["configured_style_flags"]
     }
 }
 
@@ -211,23 +142,33 @@ function Invoke-WindowsUiaCanaryProbe(
     [scriptblock]$Close
 ) {
     $session = $null
-    $facts = $null
-    $failure = $null
+    $facts = @()
+    $phase = "fixture-start"
+    $primaryFailed = $false
+    $cleanupFailed = $false
     try {
         $session = & $Start
+        $phase = "control-read"
         $facts = @(& $Read $session)
-        if (-not (Test-WindowsUiaCanaryMappings $facts)) {
-            throw "UIA canary provider mapping mismatch"
-        }
+        $phase = "mapping-check"
+        if (-not (Test-WindowsUiaCanaryMappings $facts)) { throw "UIA canary provider mapping mismatch" }
+        $phase = "complete"
     } catch {
-        $failure = $_
+        $primaryFailed = $true
     } finally {
         if ($null -ne $session) {
-            try { & $Close $session } catch { }
+            try { & $Close $session } catch { $cleanupFailed = $true }
         }
     }
-    if ($null -ne $failure) {
+    $outcome = if ($primaryFailed -or $cleanupFailed) { "failed" } else { "ready" }
+    $script:WindowsUiaClientProviderCanaryDiagnostic = New-WindowsUiaCanaryDiagnostic $phase $outcome $facts
+    Write-WindowsUiaCanaryDiagnostic $script:WindowsUiaClientProviderCanaryDiagnostic
+    if ($primaryFailed) {
+        if ($cleanupFailed) { Write-Warning "Windows UIA canary cleanup failed; preserving the primary observer failure." }
         throw "Windows UI Automation client provider canary failed. The native control observer is unavailable."
+    }
+    if ($cleanupFailed) {
+        throw "Windows UI Automation client provider canary cleanup failed. The native control observer is unavailable."
     }
     return $facts
 }
@@ -235,7 +176,7 @@ function Invoke-WindowsUiaCanaryProbe(
 function Invoke-WindowsUiaClientProviderCanary {
     Add-WindowsUiaCanaryFixtureType
     $probe = @{
-        Start = { [CopyPasteUiaCanarySession]::Start() }
+        Start = { [CopyPaste.UiaCanary.Session]::Start() }
         Read = {
             param($session)
             $expected = @(Get-WindowsUiaCanaryExpectations)
@@ -250,67 +191,56 @@ function Invoke-WindowsUiaClientProviderCanary {
     return Invoke-WindowsUiaCanaryProbe @probe
 }
 
+function New-WindowsUiaProviderBootstrapDiagnostic(
+    [string]$Phase,
+    [string]$Outcome,
+    [Reflection.AssemblyName]$Client,
+    [Reflection.AssemblyName]$Provider,
+    [string[]]$Before,
+    [string[]]$After,
+    [Collections.IDictionary]$Canary
+) {
+    return [ordered]@{
+        schema_version = 1
+        phase = $Phase
+        outcome = $Outcome
+        client_assembly = Format-WindowsUiaAssemblyIdentity $Client
+        requested_provider_assembly = Format-WindowsUiaAssemblyIdentity $Provider
+        provider_assemblies_before = @($Before)
+        provider_assemblies_after = @($After)
+        canary = $Canary
+    }
+}
+
+function Write-WindowsUiaProviderBootstrapDiagnostic([Collections.IDictionary]$Diagnostic) {
+    Write-Information ("Windows UIA provider diagnostics: " + ($Diagnostic | ConvertTo-Json -Compress -Depth 8)) `
+        -InformationAction Continue
+}
+
 function Initialize-WindowsUiaClientProviders {
     if ($script:WindowsUiaClientProviderReady) { return $script:WindowsUiaClientProviderBootstrap }
     $client = [Windows.Automation.ClientSettings].Assembly.GetName()
     $provider = Get-WindowsUiaProviderAssemblyName $client
     $before = @(Get-LoadedWindowsUiaProviderIdentities)
+    $after = @()
+    $phase = "provider-registration"
     try {
         [Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly($provider)
         $after = @(Get-LoadedWindowsUiaProviderIdentities)
         if ($after.Count -eq 0) { throw "client-side provider assembly is not loaded" }
+        $phase = "native-control-canary"
         $canary = @(Invoke-WindowsUiaClientProviderCanary)
         if (-not (Test-WindowsUiaCanaryMappings $canary)) { throw "client-side provider canary mismatch" }
+        $phase = "complete"
     } catch {
+        $script:WindowsUiaClientProviderBootstrap = New-WindowsUiaProviderBootstrapDiagnostic `
+            $phase "failed" $client $provider $before $after $script:WindowsUiaClientProviderCanaryDiagnostic
+        Write-WindowsUiaProviderBootstrapDiagnostic $script:WindowsUiaClientProviderBootstrap
         throw "Windows UI Automation environment bootstrap failed: explicit client-side provider registration and the native-control canary must succeed before product evidence runs."
     }
     $script:WindowsUiaClientProviderReady = $true
-    $script:WindowsUiaClientProviderBootstrap = [ordered]@{
-        client_assembly = Format-WindowsUiaAssemblyIdentity $client
-        requested_provider_assembly = Format-WindowsUiaAssemblyIdentity $provider
-        provider_assemblies_before = $before
-        provider_assemblies_after = $after
-        controls = $canary
-    }
+    $script:WindowsUiaClientProviderBootstrap = New-WindowsUiaProviderBootstrapDiagnostic `
+        $phase "ready" $client $provider $before $after $script:WindowsUiaClientProviderCanaryDiagnostic
+    Write-WindowsUiaProviderBootstrapDiagnostic $script:WindowsUiaClientProviderBootstrap
     return $script:WindowsUiaClientProviderBootstrap
-}
-
-function Test-WindowsUiaClientBootstrapHelpers {
-    $client = [Reflection.AssemblyName]::new("UIAutomationClient, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35")
-    $provider = Get-WindowsUiaProviderAssemblyName $client
-    if ($provider.Name -ne "UIAutomationClientsideProviders") {
-        throw "UIA provider identity did not use the default provider assembly"
-    }
-    if ($provider.Version -ne $client.Version) { throw "UIA provider identity did not retain the client version" }
-    if ((Format-WindowsUiaAssemblyIdentity $provider) -notmatch "UIAutomationClientsideProviders, Version=4.0.0.0") {
-        throw "UIA provider report omitted its allowlisted assembly identity"
-    }
-    $facts = @(Get-WindowsUiaCanaryExpectations)
-    if (-not (Test-WindowsUiaCanaryMappings $facts)) { throw "the native UIA canary expectations were rejected" }
-    $facts[0]["is_password"] = $false
-    if (Test-WindowsUiaCanaryMappings $facts) { throw "the native UIA canary accepted an unprotected Edit" }
-    $cleanup = [ordered]@{ called = $false }
-    $failed = $null
-    try {
-        $probe = @{
-            Start = { [pscustomobject]@{ fixture = $true } }
-            Read = { param($session) throw "C:\\private\\canary-failure" }
-            Close = { param($session) $cleanup["called"] = $true }
-        }
-        Invoke-WindowsUiaCanaryProbe @probe | Out-Null
-    } catch {
-        $failed = $_.Exception.Message
-    }
-    if (-not $cleanup["called"] -or $failed -ne "Windows UI Automation client provider canary failed. The native control observer is unavailable.") {
-        throw "the UIA canary did not fail closed and clean up"
-    }
-    $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "windows-native-ui-evidence.ps1"))
-    $bootstrap = $source.IndexOf("Initialize-WindowsUiaClientProviders")
-    $productElement = $source.IndexOf("[Windows.Automation.AutomationElement]::FromHandle")
-    if ($bootstrap -lt 0 -or $bootstrap -ge $productElement) {
-        throw "UIA provider bootstrap did not precede the first product AutomationElement"
-    }
-    if (${function:Invoke-WindowsUiaClientProviderCanary}.ToString() -match "ValuePattern|Exception.Message|Screenshot") {
-        throw "UIA provider bootstrap exposed a protected value, raw exception, or screenshot path"
-    }
 }
