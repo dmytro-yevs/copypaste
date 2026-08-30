@@ -91,6 +91,9 @@ pub(super) fn prepare_remote_version(
     let content = incoming
         .binary_content
         .unwrap_or(incoming.content.as_bytes());
+    if !incoming.deleted && content.len() > copypaste_ipc::MAX_CONTENT_BYTES {
+        return Err(MergeError::TooLarge);
+    }
     // One digest for a binary payload: the same bytes are both merge key 2 and
     // the envelope header the seal below writes.
     let digest = (!incoming.deleted

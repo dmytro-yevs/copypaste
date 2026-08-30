@@ -57,6 +57,7 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
             }
             if item.deleted {
                 item.content.clear();
+                item.binary_content.clear();
             }
             let payload_bytes = item.content.len().saturating_add(item.binary_content.len());
             if payload_bytes > MAX_CONTENT_BYTES {
@@ -65,6 +66,7 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
                     max = MAX_CONTENT_BYTES,
                     "item is too large to send; skipping it"
                 );
+                stats.skipped += 1;
                 continue;
             }
 
@@ -142,6 +144,78 @@ mod tests {
             &channel.sent[..],
             [SyncMessage::Items { items }, SyncMessage::Done]
                 if items.len() == 1 && items[0].item_id == "public"
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_oversized_item_is_skipped_without_blocking_the_next_item() {
+        let mut oversized = item("oversized", 100, "", "dev-a");
+        oversized.content = "x".repeat(MAX_CONTENT_BYTES + 1);
+        let valid = item("valid", 200, "fits", "dev-a");
+        let advertised = HashMap::from([
+            (oversized.item_id.clone(), oversized.summary()),
+            (valid.item_id.clone(), valid.summary()),
+        ]);
+        let source = TestSource::new("dev-a", vec![oversized, valid]);
+        let mut channel = ScriptChannel::new(vec![]);
+        let mut stats = SyncStats::default();
+
+        serve_items(
+            &mut channel,
+            &source,
+            &advertised,
+            vec!["oversized".into(), "valid".into()],
+            &mut stats,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stats.sent, 1);
+        assert_eq!(stats.skipped, 1);
+        assert!(
+            source.get("oversized").is_some(),
+            "the source row was deleted"
+        );
+        assert!(matches!(
+            &channel.sent[..],
+            [SyncMessage::Items { items }, SyncMessage::Done]
+                if items.len() == 1 && items[0].item_id == "valid"
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_tombstone_drops_stale_binary_payload_before_the_size_gate() {
+        let mut tombstone = item("gone", 100, "stale text", "dev-a");
+        tombstone.deleted = true;
+        tombstone.binary_content = vec![0; MAX_CONTENT_BYTES + 1];
+        let valid = item("valid", 200, "fits", "dev-a");
+        let advertised = HashMap::from([
+            (tombstone.item_id.clone(), tombstone.summary()),
+            (valid.item_id.clone(), valid.summary()),
+        ]);
+        let source = TestSource::new("dev-a", vec![tombstone, valid]);
+        let mut channel = ScriptChannel::new(vec![]);
+        let mut stats = SyncStats::default();
+
+        serve_items(
+            &mut channel,
+            &source,
+            &advertised,
+            vec!["gone".into(), "valid".into()],
+            &mut stats,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!((stats.sent, stats.skipped), (2, 0));
+        assert!(matches!(
+            &channel.sent[..],
+            [SyncMessage::Items { items }, SyncMessage::Done]
+                if items.len() == 2
+                    && items[0].item_id == "gone"
+                    && items[0].content.is_empty()
+                    && items[0].binary_content.is_empty()
+                    && items[1].item_id == "valid"
         ));
     }
 }

@@ -33,8 +33,9 @@ use super::transport::{AuthApi, RestApi};
 // `SystemTime` read that every expiry and every stamp comparison uses, and a
 // second copy of it here would be a second thing to get wrong.
 use crate::auth::now_ms;
-use crate::crypto::decrypt_row;
+use crate::crypto::{decrypt_row, TAG_LEN};
 use crate::rest::CloudItem;
+use base64::encoded_len;
 use zeroize::Zeroizing;
 
 /// Rows requested per page.
@@ -177,6 +178,20 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     continue;
                 }
 
+                // The signature authenticates the base64 spelling, so this
+                // length check cannot let an unsigned row choose a refusal
+                // class. It avoids decoding or opening ciphertext that cannot
+                // possibly contain a product-sized plaintext.
+                if !row.deleted && ciphertext_exceeds_content_limit(&row.ciphertext) {
+                    stats.skipped_too_large += 1;
+                    tracing::warn!(
+                        item_id = %row.item_id,
+                        "skipping a signed row whose ciphertext exceeds the content cap"
+                    );
+                    advanced.advance_after_refusal(created_at, &row.item_id, now);
+                    continue;
+                }
+
                 let content = if row.deleted {
                     Zeroizing::new(Vec::new())
                 } else {
@@ -195,6 +210,16 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                         }
                     }
                 };
+
+                if !row.deleted && super::too_large_to_sync(&row.content_type, content.len()) {
+                    stats.skipped_too_large += 1;
+                    tracing::warn!(
+                        item_id = %row.item_id,
+                        "skipping a signed row whose plaintext exceeds the content cap"
+                    );
+                    advanced.advance_after_refusal(created_at, &row.item_id, now);
+                    continue;
+                }
 
                 batch.push(LocalItem {
                     item_id: row.item_id,
@@ -259,6 +284,14 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 
         Ok((stats, republish))
     }
+}
+
+fn ciphertext_exceeds_content_limit(ciphertext: &str) -> bool {
+    encoded_len(
+        copypaste_ipc::MAX_CONTENT_BYTES.saturating_add(TAG_LEN),
+        true,
+    )
+    .is_none_or(|max_encoded_len| ciphertext.len() > max_encoded_len)
 }
 
 /// Where the download has reached, as a keyset over `(created_at, item_id)`.
@@ -570,6 +603,36 @@ mod tests {
         assert!(source.get("b").is_none(), "a poison row was persisted");
         // INV-I4: the cursor advanced past the unreadable row, so it is not
         // re-fetched forever.
+        assert_eq!(source.watermark().unwrap(), 2_000);
+    }
+
+    #[tokio::test]
+    async fn a_signed_oversized_row_is_skipped_and_the_cursor_reaches_the_next_row() {
+        let mut old_local = item("oversized", 500, "");
+        old_local.content = Zeroizing::new(vec![b'l'; copypaste_ipc::MAX_CONTENT_BYTES + 1]);
+        let source = FakeSource::with_local(old_local);
+        let oversized = "r".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1);
+        let sync = driver(
+            FakeRest::seeded(vec![
+                cloud_row("oversized", 1_000, &oversized),
+                cloud_row("valid", 2_000, "still reachable"),
+            ]),
+            FakeAuth::default(),
+        );
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.skipped_too_large, 1);
+        assert_eq!(stats.applied, 1);
+        assert_eq!(
+            source.get("oversized").unwrap().content.len(),
+            copypaste_ipc::MAX_CONTENT_BYTES + 1,
+            "a remote refusal modified the pre-existing local row"
+        );
+        assert_eq!(
+            source.get("valid").unwrap().content.as_slice(),
+            b"still reachable"
+        );
         assert_eq!(source.watermark().unwrap(), 2_000);
     }
 
