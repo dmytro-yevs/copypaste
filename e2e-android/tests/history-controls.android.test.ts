@@ -26,6 +26,10 @@ import {
 import { itemRows, rowBoxes } from "../src/harness/list.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
+  readTouchCapabilityDiagnostic,
+  touchCapabilityDiagnosticJson,
+} from "../src/harness/touch-capabilities.js";
+import {
   ROW_SELECTION,
   SEARCH,
   SEARCH_DEFAULT_LABEL,
@@ -52,6 +56,9 @@ const CONTROLS = [
   "Sort order, default: Newest first",
 ];
 const KIND_FILTER = 'button[aria-label^="Filter by kind,"]';
+const CONTROL_SELECTORS = CONTROLS.map(
+  (label) => `[aria-label="${label}"]`,
+);
 
 let app: AndroidApp;
 let seeded: string[] = [];
@@ -194,8 +201,19 @@ describe("the toolbar", () => {
   test("every control meets the touch target the tokens promise", async () => {
     // `--tap-min`, 44px. A pointer-sized control is the failure this catches
     // on a phone and cannot catch on a desktop engine.
+    const diagnostic = await readTouchCapabilityDiagnostic(
+      app,
+      CONTROL_SELECTORS,
+    );
     for (const control of await controlBoxes()) {
-      expect(control.height, control.label).toBeGreaterThanOrEqual(44);
+      try {
+        expect(control.height, control.label).toBeGreaterThanOrEqual(44);
+      } catch (error) {
+        if (error instanceof Error) {
+          error.message += `; touch-capability=${touchCapabilityDiagnosticJson(diagnostic)}`;
+        }
+        throw error;
+      }
     }
   });
 
