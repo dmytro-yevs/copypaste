@@ -30,6 +30,7 @@ use copypaste_ipc::{
     DiscoveredDevice, PairingInviteData, PairingProgressData, PeerInfo, SyncResult,
 };
 use copypaste_p2p::discovery::Discovery;
+use copypaste_p2p::node::SyncCycle;
 use copypaste_p2p::peers::{Peer, PeerStore};
 use copypaste_p2p::sync::SyncOutcome;
 use copypaste_p2p::{Node, NodeError, PairingInvite, PairingPhase, PairingStatus};
@@ -42,6 +43,7 @@ use crate::backend::{BackendError, Result};
 pub(super) struct PeerNode {
     node: Arc<Node>,
     rounds: RoundGate,
+    sync_cycle: SyncCycle,
     /// Dropped with the backend, which ends the accept loop. Held rather than
     /// discarded because a `watch::Sender` that goes out of scope closes the
     /// channel and the listener would stop immediately.
@@ -98,6 +100,7 @@ impl PeerNode {
         Ok(Self {
             node,
             rounds: RoundGate::new(),
+            sync_cycle: SyncCycle::new(),
             _shutdown: shutdown,
         })
     }
@@ -236,23 +239,46 @@ impl PeerNode {
         // An explicit request queues behind an active request. Two outbound
         // passes would dial the same peer and race the same sync cursor.
         let _round = self.rounds.enter().await;
+        if !inner.settings().sync_enabled {
+            return Err(BackendError::NotReady);
+        }
+        let cycle = self.sync_cycle();
         let source = source(inner);
         let mut results = Vec::with_capacity(targets.len());
         for peer in &targets {
-            results.push(self.sync_one(inner, &source, peer).await);
+            results.push(self.sync_one(inner, &source, peer, &cycle).await);
         }
         Ok(results)
     }
 
     /// One peer, start to finish. Never returns `Err`: a failure is a field.
-    async fn sync_one(&self, inner: &Arc<Inner>, source: &StoreSource, peer: &Peer) -> SyncResult {
+    async fn sync_one(
+        &self,
+        inner: &Arc<Inner>,
+        source: &StoreSource,
+        peer: &Peer,
+        cycle: &SyncCycle,
+    ) -> SyncResult {
         let started = Instant::now();
-        let result = self.node.sync_one(peer, source).await;
+        let cancel = cycle.cancel_token();
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(NodeError::Session),
+            result = self.node.sync_one_in_cycle(peer, source, cycle) => result,
+        };
         let duration = started.elapsed();
         if let Ok(outcome) = &result {
             remember(inner, outcome);
         }
         p2p_contract::sync_result(peer, result, duration)
+    }
+
+    pub(super) fn sync_enabled_changed(&self, enabled: bool) {
+        self.sync_cycle.set_enabled(enabled);
+    }
+
+    fn sync_cycle(&self) -> SyncCycle {
+        self.sync_cycle.clone()
     }
 
     /// LAN devices, paired or not.
@@ -372,5 +398,29 @@ fn invite_data(invite: PairingInvite) -> PairingInviteData {
         pairing_id: invite.pairing_id,
         listen_addr: invite.listen_addr,
         expires_in_secs: invite.expires_in_secs,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabling_sync_replaces_the_embedded_nodes_cycle_without_starting_network_services() {
+        let dir = tempfile::tempdir().unwrap();
+        let peers = PeerStore::open(&dir.path().join("peers.json")).unwrap();
+        let (shutdown, _receiver) = watch::channel(false);
+        let node = PeerNode {
+            node: Arc::new(Node::new(peers, None, 0, false)),
+            rounds: RoundGate::new(),
+            sync_cycle: SyncCycle::new(),
+            _shutdown: shutdown,
+        };
+        let active = node.sync_cycle().cancel_token();
+
+        node.sync_enabled_changed(false);
+        assert!(active.is_cancelled());
+        node.sync_enabled_changed(true);
+        assert!(!node.sync_cycle().cancel_token().is_cancelled());
     }
 }

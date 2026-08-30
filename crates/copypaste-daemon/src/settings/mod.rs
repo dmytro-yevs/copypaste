@@ -99,6 +99,11 @@ impl SettingsTransition {
     pub(crate) fn lan_visibility_changed(&self) -> bool {
         self.applied.config.lan_visibility != self.before.lan_visibility
     }
+
+    pub(crate) fn sync_enabled_changed(&self) -> Option<bool> {
+        (self.applied.config.sync_enabled != self.before.sync_enabled)
+            .then_some(self.applied.config.sync_enabled)
+    }
 }
 
 impl Settings {

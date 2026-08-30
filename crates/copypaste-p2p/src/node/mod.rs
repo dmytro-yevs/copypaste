@@ -30,9 +30,12 @@ mod pairing_ceremony;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
+#[cfg(test)]
+use tokio::sync::oneshot;
 use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::discovery::{DiscoveredPeer, Discovery};
@@ -47,6 +50,153 @@ pub use pairing::{
     PairingInvite, PairingPeer, PairingPhase, PairingRole, PairingStatus, PAIRING_CONFIRM_TIMEOUT,
     PAIRING_INVITE_TTL,
 };
+
+#[derive(Clone)]
+pub struct SyncCycle {
+    cancel: Arc<Mutex<CancellationToken>>,
+    #[cfg(test)]
+    pause: Arc<Mutex<Option<CommitPause>>>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct CommitPause {
+    entered_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    entered_rx: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
+    release_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    release_rx: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
+}
+
+#[cfg(test)]
+impl CommitPause {
+    pub(crate) async fn wait_entered(&self) {
+        self.entered_rx
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .expect("commit pause was already observed")
+            .await
+            .expect("commit pause was dropped");
+    }
+
+    pub(crate) fn release(&self) {
+        self.release_tx
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .expect("commit pause was already released")
+            .send(())
+            .expect("commit pause was dropped");
+    }
+}
+
+impl SyncCycle {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            cancel: Arc::new(Mutex::new(CancellationToken::new())),
+            #[cfg(test)]
+            pause: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        let mut cancel = self
+            .cancel
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if enabled {
+            if cancel.is_cancelled() {
+                *cancel = CancellationToken::new();
+            }
+        } else {
+            cancel.cancel();
+        }
+    }
+
+    #[must_use]
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    pub(crate) fn commit<T>(
+        &self,
+        cancel: &CancellationToken,
+        action: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _cycle = self
+            .cancel
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        (!cancel.is_cancelled() && !_cycle.is_cancelled()).then(action)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pause_before_commit(&self) -> CommitPause {
+        let pause = CommitPause {
+            entered_tx: Arc::new(Mutex::new(None)),
+            entered_rx: Arc::new(Mutex::new(None)),
+            release_tx: Arc::new(Mutex::new(None)),
+            release_rx: Arc::new(Mutex::new(None)),
+        };
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        *pause
+            .entered_tx
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(entered_tx);
+        *pause
+            .entered_rx
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(entered_rx);
+        *pause
+            .release_tx
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(release_tx);
+        *pause
+            .release_rx
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(release_rx);
+        *self.pause.lock().unwrap_or_else(|error| error.into_inner()) = Some(pause.clone());
+        pause
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_before_commit(&self) {
+        let pause = self
+            .pause
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        if let Some(pause) = pause {
+            pause
+                .entered_tx
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take()
+                .expect("commit pause was already entered")
+                .send(())
+                .expect("commit pause observer was dropped");
+            pause
+                .release_rx
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take()
+                .expect("commit pause was already released")
+                .await
+                .expect("commit pause releaser was dropped");
+        }
+    }
+}
+
+impl Default for SyncCycle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// How many peers may be mid-session at once, inbound.
 ///
