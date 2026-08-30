@@ -75,6 +75,10 @@ fn apply_runtime_effects(state: &AppState, transition: &SettingsTransition) {
             .node()
             .set_lan_visibility(transition.config().lan_visibility);
     }
+    if let Some(enabled) = transition.sync_enabled_changed() {
+        state.cloud.sync_enabled_changed(enabled);
+        state.p2p.sync_enabled_changed(enabled);
+    }
 }
 
 pub(super) fn private_mode(state: &AppState, id: u64) -> Response {
@@ -340,6 +344,37 @@ mod tests {
             state.settings.get().poll_interval_ms,
             ConfigData::default().poll_interval_ms
         );
+    }
+
+    #[test]
+    fn the_live_sync_switch_replaces_cancelled_transport_cycles() {
+        let (state, _dir) = test_state("sync-transition");
+        let cloud_before = state.cloud.sync_cancel();
+        let peers_before = state.p2p.sync_cycle().cancel_token();
+
+        let off = set(
+            &state,
+            1,
+            &ConfigPatch {
+                sync_enabled: Some(false),
+                ..Default::default()
+            },
+        );
+        assert!(off.ok);
+        assert!(cloud_before.is_cancelled());
+        assert!(peers_before.is_cancelled());
+
+        let on = set(
+            &state,
+            2,
+            &ConfigPatch {
+                sync_enabled: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(on.ok);
+        assert!(!state.cloud.sync_cancel().is_cancelled());
+        assert!(!state.p2p.sync_cycle().cancel_token().is_cancelled());
     }
 
     #[test]
