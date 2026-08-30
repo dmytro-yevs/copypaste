@@ -188,9 +188,13 @@ pub async fn sync_now(state: &Arc<AppState>, id: u64, pairing_id: Option<&str>) 
     // session limit refuse the second, and the user asked after the running
     // pass had already read its summaries.
     let _permit = state.p2p.begin_round().await;
+    if !state.settings.get().sync_enabled {
+        return sync_disabled(id);
+    }
+    let cycle = state.p2p.sync_cycle();
     let mut results = Vec::with_capacity(targets.len());
     for peer in &targets {
-        results.push(sync_one(state, peer).await);
+        results.push(sync_one(state, peer, &cycle).await);
     }
     if results.iter().any(|result| result.received > 0) {
         state.note_remote_change();
@@ -242,10 +246,19 @@ fn devices(state: &Arc<AppState>) -> DiscoveredData {
 }
 
 /// One peer, start to finish. Never returns `Err`: a failure is a field.
-pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
+pub(super) async fn sync_one(
+    state: &Arc<AppState>,
+    peer: &Peer,
+    cycle: &copypaste_p2p::node::SyncCycle,
+) -> SyncResult {
     let source = peer_source(state);
     let started = Instant::now();
-    let result = state.p2p.node().sync_one(peer, &source).await;
+    let cancel = cycle.cancel_token();
+    let result = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(NodeError::Session),
+        result = state.p2p.node().sync_one_in_cycle(peer, &source, cycle) => result,
+    };
     let duration = started.elapsed();
     if let Ok(outcome) = &result {
         crate::p2p::remember_device(state, outcome);
@@ -261,8 +274,23 @@ fn failed(id: u64, error: NodeError) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::test_state;
+    use crate::testutil::{peer_at, test_state};
     use copypaste_p2p::transport::{PairingToken, TOKEN_LEN};
+    use tokio::io::AsyncReadExt;
+    use tokio::sync::oneshot;
+
+    fn set_sync_enabled(state: &AppState, enabled: bool) -> Response {
+        crate::server::dispatch::dispatch_store(
+            state,
+            99,
+            copypaste_ipc::Method::SetConfig {
+                patch: copypaste_ipc::ConfigPatch {
+                    sync_enabled: Some(enabled),
+                    ..Default::default()
+                },
+            },
+        )
+    }
 
     #[tokio::test]
     async fn creating_an_invite_returns_a_code_and_stores_no_peer() {
@@ -557,6 +585,110 @@ mod tests {
         drop(held);
         assert!(queued.await.unwrap());
         assert!(state.p2p.try_begin_round().is_some(), "the permit leaked");
+    }
+
+    #[tokio::test]
+    async fn disabling_sync_cancels_an_active_pass_and_a_reenabled_pass_dials_again() {
+        let (state, _dir) = test_state("cancel-active-peer-sync");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let peer = peer_at(
+            &state,
+            "blocked peer",
+            &listener.local_addr().expect("address").to_string(),
+        );
+        let (first_tx, first_rx) = oneshot::channel();
+        let (second_tx, second_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.expect("first connection");
+            first_tx.send(()).expect("record first connection");
+            let mut byte = [0];
+            let _ = first.read(&mut byte).await;
+            let (mut second, _) = listener.accept().await.expect("second connection");
+            second_tx.send(()).expect("record second connection");
+            let _ = second.read(&mut byte).await;
+        });
+
+        let active = tokio::spawn({
+            let state = Arc::clone(&state);
+            let pairing_id = peer.pairing_id.clone();
+            async move { sync_now(&state, 1, Some(&pairing_id)).await }
+        });
+        first_rx
+            .await
+            .expect("outbound pass entered the owned transport");
+
+        assert!(
+            set_sync_enabled(&state, false).ok,
+            "the off transition failed"
+        );
+        let stopped = active.await.expect("sync task");
+        let stopped_results = match stopped.data {
+            Some(ResponseData::Sync(results)) => results,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(stopped_results.len(), 1);
+        assert_eq!(stopped_results[0].error_code, Some(ErrorCode::PeerFailed));
+        assert_eq!(state.p2p.node().cursors().get(&peer.pairing_id).since_ms, 0);
+
+        assert!(
+            set_sync_enabled(&state, true).ok,
+            "the on transition failed"
+        );
+        let replay = tokio::spawn({
+            let state = Arc::clone(&state);
+            let pairing_id = peer.pairing_id.clone();
+            async move { sync_now(&state, 2, Some(&pairing_id)).await }
+        });
+        second_rx
+            .await
+            .expect("the fresh enabled cycle re-offered the same peer");
+        assert!(set_sync_enabled(&state, false).ok);
+        let _ = replay.await.expect("replayed sync task");
+        server.await.expect("owned transport task");
+    }
+
+    #[tokio::test]
+    async fn a_queued_sync_disabled_before_its_turn_never_dials() {
+        let (state, _dir) = test_state("cancel-queued-peer-sync");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let peer = peer_at(
+            &state,
+            "queued peer",
+            &listener.local_addr().expect("address").to_string(),
+        );
+        let (entered_tx, mut entered_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let _ = listener.accept().await;
+            let _ = entered_tx.send(());
+        });
+        let held = state.p2p.begin_round().await;
+        let queued = tokio::spawn({
+            let state = Arc::clone(&state);
+            let pairing_id = peer.pairing_id.clone();
+            async move { sync_now(&state, 1, Some(&pairing_id)).await }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !queued.is_finished(),
+            "the request skipped the running pass"
+        );
+
+        assert!(
+            set_sync_enabled(&state, false).ok,
+            "the off transition failed"
+        );
+        drop(held);
+        let response = queued.await.expect("queued request task");
+        assert_eq!(response.error_code, Some(ErrorCode::NotReady));
+        assert!(
+            entered_rx.try_recv().is_err(),
+            "a request queued before the off acknowledgement dialled afterwards"
+        );
+        server.abort();
     }
 
     #[tokio::test]

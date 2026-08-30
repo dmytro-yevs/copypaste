@@ -76,6 +76,8 @@ async fn round(
     if !state.settings.get().sync_enabled {
         return;
     }
+    let cycle = state.p2p.sync_cycle();
+    let cancel = cycle.cancel_token();
     let peers = state.p2p.peers().list();
     if peers.is_empty() {
         return;
@@ -109,11 +111,15 @@ async fn round(
         // completes.
         let result = tokio::select! {
             biased;
+            _ = cancel.cancelled() => {
+                debug!("a peer sync pass was cut short because sync was disabled");
+                break;
+            }
             () = crate::shutdown::requested(Some(shutdown.clone())) => {
                 debug!("a peer sync pass was cut short for shutdown");
                 break;
             }
-            result = super::handlers::sync_one(state, peer) => result,
+            result = super::handlers::sync_one(state, peer, &cycle) => result,
         };
         moved += u64::from(result.sent) + u64::from(result.received);
         if result.received > 0 {
