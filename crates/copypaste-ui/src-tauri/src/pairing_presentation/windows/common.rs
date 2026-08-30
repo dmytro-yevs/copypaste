@@ -239,6 +239,7 @@ mod tests {
     fn production_source(source: &'static str) -> &'static str {
         source
             .split_once("\n#[cfg(test)]\nmod tests {")
+            .or_else(|| source.split_once("\r\n#[cfg(test)]\r\nmod tests {"))
             .map_or("", |(production, _)| production)
     }
 
@@ -302,6 +303,28 @@ mod tests {
         assert!(
             production_source("pub fn production() {}\n#[cfg(test)]\nfn helper() {}").is_empty()
         );
+    }
+
+    #[test]
+    fn production_source_handles_crlf_module_boundaries() {
+        let fixture = concat!(
+            "impl Type {\r\n",
+            "    #[cfg(test)]\r\n",
+            "    fn test_helper() {}\r\n",
+            "}\r\n",
+            "\r\n",
+            "pub fn production() {}\r\n",
+            "\r\n",
+            "#[cfg(test)]\r\n",
+            "mod tests {\r\n",
+            "    #[test]\r\n",
+            "    fn regression() {}\r\n",
+            "}\r\n",
+        );
+        let production = production_source(fixture);
+        assert!(production.contains("fn test_helper()"));
+        assert!(production.contains("pub fn production()"));
+        assert!(!production.contains("fn regression()"));
     }
 
     /// The window whose affinity is being set is the one that was asked about;
