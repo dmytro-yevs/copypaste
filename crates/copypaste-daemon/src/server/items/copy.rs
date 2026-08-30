@@ -2,9 +2,10 @@ use copypaste_core::{ClipboardPayload, ClipboardWriteError};
 use copypaste_ipc::{ErrorCode, Response, ResponseData};
 use tracing::error;
 
-use super::wire::to_wire_and_payload;
+use super::wire::{is_oversized_text, to_wire_and_payload};
 use crate::server::messages::{
-    decrypt_error, storage_error, MSG_CLIPBOARD, MSG_NOT_FOUND, MSG_UNSUPPORTED_CONTENT,
+    decrypt_error, storage_error, MSG_CLIPBOARD, MSG_CONTENT_TOO_LARGE, MSG_NOT_FOUND,
+    MSG_UNSUPPORTED_CONTENT,
 };
 use crate::AppState;
 
@@ -50,7 +51,16 @@ fn fetch(
         }
         Err(error) => return Err(Box::new(storage_error(id, "get", &error))),
     };
-    to_wire_and_payload(state, row).map_err(|error| Box::new(decrypt_error(id, &error)))
+    let (item, payload) =
+        to_wire_and_payload(state, row).map_err(|error| Box::new(decrypt_error(id, &error)))?;
+    if is_oversized_text(&payload) {
+        return Err(Box::new(Response::err(
+            id,
+            ErrorCode::ContentTooLarge,
+            MSG_CONTENT_TOO_LARGE,
+        )));
+    }
+    Ok((item, payload))
 }
 
 fn write_error(id: u64, error: ClipboardWriteError) -> Response {

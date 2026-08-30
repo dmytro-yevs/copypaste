@@ -197,6 +197,10 @@ pub enum BackendError {
     /// The item exists, but the requested clipboard representation does not.
     #[error("{0}")]
     UnsupportedContent(&'static str),
+
+    /// An authenticated legacy text body cannot cross the bounded UI boundary.
+    #[error("{0}")]
+    ContentTooLarge(&'static str),
 }
 
 impl BackendError {
@@ -268,6 +272,9 @@ impl BackendError {
             ErrorCode::UnsupportedContent => {
                 Self::UnsupportedContent("That item cannot be copied in the requested format.")
             }
+            ErrorCode::ContentTooLarge => {
+                Self::ContentTooLarge("That older text item is too large to return or copy safely.")
+            }
             ErrorCode::PairingCode
             | ErrorCode::PairingAddress
             | ErrorCode::RateLimited
@@ -310,6 +317,7 @@ impl BackendError {
             Self::UnsupportedContent(_) => {
                 UiError::from_error_code(Some(ErrorCode::UnsupportedContent))
             }
+            Self::ContentTooLarge(_) => UiError::from_error_code(Some(ErrorCode::ContentTooLarge)),
         }
     }
 }
@@ -380,6 +388,9 @@ mod tests {
             BackendError::Invalid("There is nothing to add."),
             BackendError::Unsupported("Pairing is not available in this build."),
             BackendError::UnsupportedContent("That item cannot be copied in the requested format."),
+            BackendError::ContentTooLarge(
+                "That older text item is too large to return or copy safely.",
+            ),
             BackendError::wrong_shape("a list of items"),
             BackendError::from_daemon("plain trouble"),
             BackendError::internal("plain trouble"),
@@ -409,6 +420,10 @@ mod tests {
         assert!(matches!(
             BackendError::from_code(Some(ErrorCode::UnsupportedContent), None, Some("ignored")),
             BackendError::UnsupportedContent(_)
+        ));
+        assert!(matches!(
+            BackendError::from_code(Some(ErrorCode::ContentTooLarge), None, Some("ignored")),
+            BackendError::ContentTooLarge(_)
         ));
         // An untagged failure still becomes an error rather than a success.
         assert!(matches!(

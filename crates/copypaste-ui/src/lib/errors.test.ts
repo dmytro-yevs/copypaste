@@ -21,6 +21,7 @@ describe("structured IPC failures", () => {
     ["pairing_limit", false],
     ["peer_not_found", false],
     ["auth_failed", false],
+    ["content_too_large", false],
   ] as const)("uses the %s code and Rust retry flag", (code, retryable) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const failure = ipcFailure({ code, retryable });
