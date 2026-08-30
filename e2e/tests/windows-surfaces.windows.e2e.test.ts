@@ -161,7 +161,8 @@ describe("fail-closed product surfaces", () => {
     expect(await updater.getText()).toContain(
       "Updates aren't configured in this build.",
     );
-    expect(await updater.getText()).toContain(
+    const description = await updater.$("p");
+    expect(await description.getProperty("textContent")).toBe(
       "Checks the signed CopyPaste release feed for Windows.",
     );
     expect(await updater.getText()).toContain("Not configured");
