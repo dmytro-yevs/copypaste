@@ -9,6 +9,7 @@ import {
   type AttachFinalDiagnostic,
   type AttachPagesDiagnostic,
   type AttachRawDiagnostic,
+  type PageAutoAttachCleanup,
   type PageAutoAttachOutcome,
   webviewComplaints,
 } from "./attach.js";
@@ -138,6 +139,7 @@ export interface PublicBrowserTarget {
 
 export interface PublicBrowser {
   target(): PublicBrowserTarget | undefined;
+  disconnect(): Promise<void>;
 }
 
 class AttachDeadlineExceeded extends Error {}
@@ -191,16 +193,16 @@ async function detachWithinRemainingDeadline(session: PublicBrowserSession, msLe
 export async function enablePageAutoAttach(
   browser: PublicBrowser,
   msLeft: () => number,
-): Promise<PageAutoAttachOutcome> {
-  if (msLeft() <= 0) return "deadline-exceeded";
+): Promise<{ outcome: PageAutoAttachOutcome; cleanup: PageAutoAttachCleanup }> {
+  if (msLeft() <= 0) return { outcome: "deadline-exceeded", cleanup: "not-needed" };
 
   let target: PublicBrowserTarget | undefined;
   try {
     target = browser.target();
   } catch {
-    return "browser-target-unavailable";
+    return { outcome: "browser-target-unavailable", cleanup: "not-needed" };
   }
-  if (!target) return "browser-target-unavailable";
+  if (!target) return { outcome: "browser-target-unavailable", cleanup: "not-needed" };
 
   let session: PublicBrowserSession;
   try {
@@ -210,7 +212,10 @@ export async function enablePageAutoAttach(
       (lateSession) => { void lateSession.detach().catch(() => undefined); },
     );
   } catch (error) {
-    return error instanceof AttachDeadlineExceeded ? "deadline-exceeded" : "browser-session-unavailable";
+    return {
+      outcome: error instanceof AttachDeadlineExceeded ? "deadline-exceeded" : "browser-session-unavailable",
+      cleanup: error instanceof AttachDeadlineExceeded ? "unconfirmed" : "not-needed",
+    };
   }
 
   let outcome: PageAutoAttachOutcome;
@@ -233,16 +238,55 @@ export async function enablePageAutoAttach(
     outcome = error instanceof AttachDeadlineExceeded ? "deadline-exceeded" : "page-autoattach-rejected";
   }
 
-  return (await detachWithinRemainingDeadline(session, msLeft))
-    ? outcome
-    : "browser-session-detach-failed";
+  return {
+    outcome,
+    cleanup: (await detachWithinRemainingDeadline(session, msLeft)) ? "confirmed" : "unconfirmed",
+  };
+}
+
+export interface PageAutoAttachState {
+  attempted: boolean;
+  outcome: PageAutoAttachOutcome;
+  cleanup: PageAutoAttachCleanup;
+}
+
+export interface PageAutoAttachCandidate {
+  pagesStatus: AttachPagesDiagnostic["status"];
+  defaultPageCount: number | undefined;
+  rawTarget: { type: string; url: string } | undefined;
+  currentPid: number | undefined;
+  endpointPid: number;
+}
+
+export async function resolvePageAutoAttach(
+  browser: PublicBrowser,
+  state: PageAutoAttachState,
+  candidate: PageAutoAttachCandidate,
+  msLeft: () => number,
+): Promise<{ state: PageAutoAttachState; blocked: boolean }> {
+  const eligible = candidate.pagesStatus === "ok" &&
+    candidate.defaultPageCount === 0 &&
+    candidate.rawTarget?.type === "page" &&
+    isAppTarget(candidate.rawTarget.url) &&
+    candidate.currentPid === candidate.endpointPid;
+  if (state.attempted || !eligible) return { state, blocked: false };
+
+  const result = await enablePageAutoAttach(browser, msLeft);
+  const next = { attempted: true, ...result };
+  if (result.cleanup !== "unconfirmed") return { state: next, blocked: false };
+
+  await browser.disconnect().catch(() => undefined);
+  return { state: next, blocked: true };
 }
 
 async function resolveAppPage(port: number, deadline: number): Promise<Attached> {
   const msLeft = () => Math.max(0, deadline - Date.now());
   let { browser, endpoint } = await open(port, msLeft());
-  let autoAttachAttempted = false;
-  let pageAutoAttachOutcome: PageAutoAttachOutcome = "not-attempted";
+  let pageAutoAttachState: PageAutoAttachState = {
+    attempted: false,
+    outcome: "not-attempted",
+    cleanup: "not-needed",
+  };
   let diagnostic: AttachFinalDiagnostic = finalAttachDiagnostic(
     { status: "error", count: 0, appOriginMatchCount: 0 },
     {
@@ -253,6 +297,7 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
       webSocketPresent: false,
     },
     "not-attempted",
+    "not-needed",
   );
 
   for (;;) {
@@ -266,17 +311,22 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
 
     const rawResult = await rawTargets(endpoint.browserUrl);
     const targets = rawResult.targets;
-    const raw = targets.find((t) => isAppTarget(t.url));
+    const raw = targets.find((target) => target.type === "page" && isAppTarget(target.url));
     const defaultPageCount = raw
       ? await withinRemainingDeadline(msLeft, () => browser.pages()).then(
         (found) => found.length,
         () => undefined,
       )
       : undefined;
-    if (pageResult.status === "ok" && defaultPageCount === 0 && raw && !autoAttachAttempted) {
-      autoAttachAttempted = true;
-      pageAutoAttachOutcome = await enablePageAutoAttach(browser, msLeft);
-    }
+    const currentPid = await appPid();
+    const autoAttach = await resolvePageAutoAttach(browser, pageAutoAttachState, {
+      pagesStatus: pageResult.status,
+      defaultPageCount,
+      rawTarget: raw,
+      currentPid,
+      endpointPid: endpoint.pid,
+    }, msLeft);
+    pageAutoAttachState = autoAttach.state;
 
     const pagesDiagnostic: AttachPagesDiagnostic = {
       status: pageResult.status,
@@ -286,12 +336,16 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
     diagnostic = finalAttachDiagnostic(
       pagesDiagnostic,
       rawDiagnostic(rawResult),
-      pageAutoAttachOutcome,
+      pageAutoAttachState.outcome,
+      pageAutoAttachState.cleanup,
     );
+    if (autoAttach.blocked) {
+      throw new AttachResolutionError("page auto-attach session cleanup could not be confirmed", diagnostic);
+    }
     const allTargets = pages.map((c) => c.url()).concat(targets.map((t) => t.url));
     const step = nextAttachStep({
       targets: allTargets,
-      pid: await appPid(),
+      pid: currentPid,
       endpointPid: endpoint.pid,
       msLeft: msLeft(),
     });
@@ -302,8 +356,7 @@ async function resolveAppPage(port: number, deadline: number): Promise<Attached>
     await browser.disconnect().catch(() => undefined);
     if (step.do === "give-up") throw new AttachResolutionError(step.why, diagnostic);
     ({ browser, endpoint } = await open(port, msLeft()));
-    autoAttachAttempted = false;
-    pageAutoAttachOutcome = "not-attempted";
+    pageAutoAttachState = { attempted: false, outcome: "not-attempted", cleanup: "not-needed" };
   }
 }
 
