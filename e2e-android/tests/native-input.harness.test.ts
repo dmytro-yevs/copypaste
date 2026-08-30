@@ -25,6 +25,13 @@ const LEGACY_WINDOW_DUMP = WINDOW_DUMP.replace(
   "Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,48][1080,1920] last=[1,49][1081,1921]",
   "mFrame=[0,48][1080,1920]",
 );
+const IME_WINDOW_DUMP = [
+  "  mInputMethodWindow=Window{ime u0 com.android.inputmethod/.ImeService}",
+  "  Window #6 Window{ime u0 com.android.inputmethod/.ImeService}",
+  "    Frames: parent=[0,0][1080,1920] display=[0,0][1080,1920] frame=[0,1320][1080,1920] last=[0,1320][1080,1920]",
+  "    isOnScreen=true",
+  "    isVisible=true",
+].join("\n");
 
 const DISPLAY_OUTPUT = "Physical size: 1080x1920\n";
 const POINT = { x: 180, y: 320 };
@@ -65,7 +72,8 @@ function softKeyboardCommands(
     readValues?: string[];
     failRestore?: boolean;
     failTap?: boolean;
-    imeWindow?: boolean;
+    inputMethodDump?: string;
+    imeWindowDump?: string;
   } = {},
 ): NativeInputCommands {
   let value = initial;
@@ -98,7 +106,12 @@ function softKeyboardCommands(
       calls.push(["-s", serial, ...args]);
       if (args[0] === "settings") return { ok: true, value: value ?? "null" };
       if (args[0] === "dumpsys") {
-        return { ok: true, value: options.imeWindow ? "  mInputMethodWindow=Window{safe}" : "" };
+        return {
+          ok: true,
+          value: args[1] === "input_method"
+            ? (options.inputMethodDump ?? "")
+            : (options.imeWindowDump ?? ""),
+        };
       }
       if (options.failTap) {
         return { ok: false, failure: { message: "tap failed" } };
@@ -426,11 +439,22 @@ describe("Android native input geometry", () => {
     const calls: string[][] = [];
     await withSoftKeyboardScenario(
       async (scenario) => {
-        expect(await scenario.diagnostics()).toEqual({ preference: "1", imeWindow: "present" });
+        expect(await scenario.diagnostics()).toEqual({
+          preference: "1",
+          inputShown: true,
+          reportedImeVisible: true,
+          imeWindowPresent: true,
+          imeWindowVisible: true,
+          imeWindowFrame: { left: 0, top: 1320, width: 1080, height: 600 },
+        });
       },
-      softKeyboardCommands(calls, "0", { imeWindow: true }),
+      softKeyboardCommands(calls, "0", {
+        inputMethodDump: "      mImeWindowVis=3\n      mInputShown=true",
+        imeWindowDump: IME_WINDOW_DUMP,
+      }),
     );
     expect(calls.filter((call) => call.includes("dumpsys"))).toEqual([
+      ["-s", "device-a", "dumpsys", "input_method"],
       ["-s", "device-a", "dumpsys", "window", "-a"],
     ]);
   });

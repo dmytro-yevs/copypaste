@@ -68,6 +68,13 @@ let marker = "";
 let originalHistoryDisplayIndex: number | null = null;
 let originalProductTheme: string | null = null;
 
+type ImePageObservation = {
+  innerHeight: number;
+  visualHeight: number | null;
+  focused: boolean;
+  activeElement: string | null;
+};
+
 async function historyDisplayIndex(): Promise<number> {
   const state = await app.withPage((page) =>
     page.evaluate(() => {
@@ -253,6 +260,7 @@ describe("the section index", () => {
         before: { native: null, page: null },
         after: { native: null, page: null },
       };
+      let imeAfter: ImePageObservation | null = null;
       try {
         const imeBefore = await app.withPage((page) =>
           page.evaluate(() => {
@@ -304,10 +312,11 @@ describe("the section index", () => {
           imeBefore.metrics,
           PACKAGE,
         );
-        let imeAfter: Pick<
-          typeof imeBefore,
-          "innerHeight" | "visualHeight" | "focused" | "activeElement"
-        > | null = null;
+        const nativeTapDiagnostic = {
+          point: nativeTap.point,
+          frame: nativeTap.frame,
+          display: nativeTap.display,
+        };
         await waitFor(
           async () => {
             imeAfter = await app.withPage((page) =>
@@ -327,21 +336,21 @@ describe("the section index", () => {
               imeBefore.visualHeight - imeAfter.visualHeight >= 80;
           },
           () =>
-            "focusing the Cloud input never opened the Android IME: " +
-            JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap }),
+            "required Android viewport predicate was not observed: " +
+            JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap: nativeTapDiagnostic }),
           15_000,
         );
         expect(
           imeBefore.visualHeight! - imeAfter!.visualHeight!,
-          JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap }),
+          JSON.stringify({ before: imeBefore, after: imeAfter, nativeTap: nativeTapDiagnostic }),
         ).toBeGreaterThanOrEqual(80);
         expect(
           imeBefore.focused,
-          JSON.stringify({ before: imeBefore, nativeTap }),
+          JSON.stringify({ before: imeBefore, nativeTap: nativeTapDiagnostic }),
         ).toBe(false);
         expect(
           imeAfter!.focused,
-          JSON.stringify({ after: imeAfter, nativeTap }),
+          JSON.stringify({ after: imeAfter, nativeTap: nativeTapDiagnostic }),
         ).toBe(true);
         imeDiagnostics.after.native = await softKeyboard.diagnostics();
         imeDiagnostics.after.page = imeAfter;
@@ -448,6 +457,7 @@ describe("the section index", () => {
       } catch (error) {
         primaryFailed = true;
         imeDiagnostics.after.native = await softKeyboard.diagnostics().catch(() => null);
+        imeDiagnostics.after.page = imeAfter;
         console.warn(
           `Android soft-keyboard diagnostics: ${JSON.stringify(imeDiagnostics)}`,
         );
