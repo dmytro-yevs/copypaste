@@ -1,5 +1,5 @@
 param(
-    [switch]$SelfTest
+    [switch]$RunProtectedFixtureTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -256,7 +256,7 @@ function Test-WindowsProtectedFailureDiagnostics {
         "failed protected pairing dismissal exposed a secret or local path"
 }
 
-if ($SelfTest) {
+if ($RunProtectedFixtureTests) {
     Test-WindowsProtectedFailureDiagnostics
     Write-Output "PASS: protected UIA diagnostics fixture contracts"
 }
