@@ -59,7 +59,7 @@ describe("History filter harness contracts", () => {
       listSnapshotWith({
         totalSize: Number.NaN,
         scrollTop: Number.POSITIVE_INFINITY,
-        frame: Number.NaN,
+        frame: 1818,
         rows: Array.from({ length: 80 }, () => ({
           id: "opaque-row",
           start: 0,
@@ -79,9 +79,36 @@ describe("History filter harness contracts", () => {
     });
     expect(diagnostic.list.totalSize).toBeNull();
     expect(diagnostic.list.scrollTop).toBeNull();
-    expect(diagnostic.list.frame).toBeNull();
-    expect(diagnostic.list.visibleItemCount).toBe(64);
+    expect(diagnostic.list.frame).toBe(1818);
+    expect(diagnostic.list.visibleItemCount).toBeNull();
     expect(safeJSON(diagnostic)).not.toContain("must not be emitted");
+  });
+
+  test("caps a disjoint symmetric difference without truncating its JSON", () => {
+    const before = Array.from({ length: 64 }, (_, index) => `before-${index}`);
+    const restored = Array.from(
+      { length: 64 },
+      (_, index) => `restored-${index}`,
+    );
+    const diagnostic = historyFilterDiagnostic(
+      before,
+      restored,
+      1,
+      {
+        allKindsAriaChecked: "false",
+        linksAriaChecked: "true",
+        menuPresent: true,
+        menuExpanded: true,
+      },
+      listSnapshotWith(),
+    );
+
+    expect(diagnostic.matched).toBe(false);
+    expect(diagnostic.symmetricDifference.ids).toHaveLength(64);
+    expect(diagnostic.symmetricDifference.truncatedCount).toBe(64);
+    const encoded = safeJSON(diagnostic);
+    expect(encoded).not.toBe('{"diagnostic":"unavailable"}');
+    expect(encoded.length).toBeLessThanOrEqual(16_384);
   });
 
   test("does not let a hostile serializer replace the timeout diagnostic", () => {
