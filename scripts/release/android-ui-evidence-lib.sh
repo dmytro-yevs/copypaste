@@ -301,7 +301,7 @@ reach_settings_tab() { # <artifact> [timeout]
 }
 
 settings_tab_holds() { # <artifact>
-    enabled_action_exists_exact "$1" "Settings"
+    [[ -n "$(action_center "$1" "Settings")" ]]
 }
 
 screen_size() {
