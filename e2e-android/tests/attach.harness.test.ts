@@ -10,7 +10,12 @@ import {
   webviewComplaints,
   type AttachSample,
 } from "../src/harness/attach.js";
-import { directAppTarget, type DirectBrowserLike } from "../src/harness/app.js";
+import {
+  enablePageAutoAttach,
+  type PublicBrowser,
+  type PublicBrowserSession,
+  type PublicRootConnection,
+} from "../src/harness/app.js";
 
 const RUNNING: AttachSample = {
   targets: [],
@@ -108,12 +113,6 @@ test("falls back to /json/list when pages() hides the app target", () => {
   expect(app).toMatch(/rawTargets/);
 });
 
-test("disconnects a direct CDP connection when it exposes no page", () => {
-  const here = fileURLToPath(import.meta.url);
-  const app = readFileSync(resolve(here, "../../src/harness/app.ts"), "utf8");
-  expect(app).toMatch(/if \(!keepDirectConnection\) await directBrowser\.disconnect\(\)/);
-});
-
 // The ground-truth query must be bounded: a devtools endpoint that never
 // answers `/json/list` must not delay attachment beyond its normal backoff.
 test("raw target discovery bounds its fetch", () => {
@@ -180,7 +179,7 @@ describe("bounded final attach diagnostics", () => {
           appOriginMatchCount: 1,
           webSocketPresent: true,
         },
-        "connected",
+        "page-autoattach-enabled",
       ),
     ).toEqual({
       pages: { status: "ok", count: 0, appOriginMatchCount: 0 },
@@ -191,7 +190,7 @@ describe("bounded final attach diagnostics", () => {
         appOriginMatchCount: 1,
         webSocketPresent: true,
       },
-      directOutcome: "connected",
+      pageAutoAttachOutcome: "page-autoattach-enabled",
     });
   });
 
@@ -199,8 +198,8 @@ describe("bounded final attach diagnostics", () => {
     const pages = { status: "error" as const, count: 0, appOriginMatchCount: 0 };
     const rawError = { status: "fetch-error" as const, count: 0, targetTypeHistogram: { page: 0, webview: 0, other: 0 }, appOriginMatchCount: 0, webSocketPresent: false };
     const rawEmpty = { ...rawError, status: "ok" as const };
-    const error = finalAttachDiagnostic(pages, rawError, "raw-error");
-    const empty = finalAttachDiagnostic(pages, rawEmpty, "raw-empty");
+    const error = finalAttachDiagnostic(pages, rawError, "page-autoattach-rejected");
+    const empty = finalAttachDiagnostic(pages, rawEmpty, "not-attempted");
     expect(error.raw.status).toBe("fetch-error");
     expect(empty.raw.status).toBe("ok");
     expect(JSON.stringify(error)).not.toMatch(/https?:|title|provider|secret/i);
@@ -216,7 +215,7 @@ describe("bounded final attach diagnostics", () => {
         targetTypeHistogram: { page: 0, webview: 0, other: 1 },
         appOriginMatchCount: 0, webSocketPresent: true,
       },
-      "no-page",
+      "not-attempted",
     );
     expect(diagnostic).toEqual({
       pages: { status: "ok", count: 1, appOriginMatchCount: 0 },
@@ -225,61 +224,139 @@ describe("bounded final attach diagnostics", () => {
         targetTypeHistogram: { page: 0, webview: 0, other: 1 },
         appOriginMatchCount: 0, webSocketPresent: true,
       },
-      directOutcome: "no-page",
+      pageAutoAttachOutcome: "not-attempted",
     });
   });
 });
 
-function fakeBrowser(
-  pages: readonly string[],
+function publicBrowser(
+  session: PublicBrowserSession,
   events: string[],
-  pagesFailure = false,
-): DirectBrowserLike {
+): PublicBrowser {
   return {
-    pages: async () => {
-      events.push("pages");
-      if (pagesFailure) throw new Error("pages failed");
-      return pages.map((url) => ({ url: () => url }));
-    },
-    disconnect: async () => {
-      events.push("direct-disconnect");
-    },
+    target: () => ({
+      createCDPSession: async () => {
+        events.push("create-session");
+        return session;
+      },
+    }),
   };
 }
 
-describe("direct CDP target ownership", () => {
-  test("disconnects the original before transferring an app page", async () => {
+describe("public root CDP auto-attach", () => {
+  test("uses the exact page-safe filter once and detaches its temporary session", async () => {
     const events: string[] = [];
-    const original = { disconnect: async () => { events.push("original-disconnect"); } };
-    const direct = fakeBrowser(["http://tauri.localhost/"], events);
-    const result = await directAppTarget(original, "socket-a", async (socket) => {
-      events.push(`connect:${socket}`);
-      return direct;
-    });
-    expect(result.outcome).toBe("connected");
-    expect(events).toEqual(["connect:socket-a", "pages", "original-disconnect"]);
+    const root: PublicRootConnection = {
+      send: async (method, params, options) => {
+        events.push("set-auto-attach");
+        expect(method).toBe("Target.setAutoAttach");
+        expect(params).toEqual({
+          autoAttach: true,
+          waitForDebuggerOnStart: true,
+          flatten: true,
+          filter: [{ type: "tab", exclude: true }, {}],
+        });
+        expect(options).toEqual({ timeout: 137 });
+      },
+    };
+    const session: PublicBrowserSession = {
+      connection: () => root,
+      detach: async () => { events.push("detach-session"); },
+    };
+
+    await expect(enablePageAutoAttach(publicBrowser(session, events), () => 137))
+      .resolves.toBe("page-autoattach-enabled");
+    expect(events).toEqual(["create-session", "set-auto-attach", "detach-session"]);
   });
 
-  test.each([
-    ["connect-failed", async () => { throw new Error("connect failed"); }, false],
-    ["pages-failed", async () => fakeBrowser([], [], true), true],
-    ["no-page", async () => fakeBrowser([], [], false), true],
-    ["wrong-origin", async () => fakeBrowser(["http://example.test/"], [], false), true],
-  ] as const)("handles an unused direct connection on %s", async (outcome, connect, shouldClose) => {
+  test("reports temporary-session cleanup failure without exposing a provider error", async () => {
+    const root: PublicRootConnection = { send: async () => undefined };
+    const session: PublicBrowserSession = {
+      connection: () => root,
+      detach: async () => { throw new Error("provider error https://secret.test"); },
+    };
+
+    await expect(enablePageAutoAttach(publicBrowser(session, []), () => 100))
+      .resolves.toBe("browser-session-detach-failed");
+  });
+
+  test("does not begin a public CDP operation after the attachment budget expires", async () => {
     const events: string[] = [];
-    const original = { disconnect: async () => { events.push("original-disconnect"); } };
-    const direct = await directAppTarget(original, "socket-a", async (socket) => {
-      events.push(`connect:${socket}`);
-      const browser = await connect();
-      const originalDisconnect = browser.disconnect;
-      browser.disconnect = async () => {
-        events.push("direct-disconnect");
-        await originalDisconnect();
-      };
-      return browser;
-    });
-    expect(direct.outcome).toBe(outcome);
-    expect(events.includes("direct-disconnect")).toBe(shouldClose);
-    expect(events).not.toContain("original-disconnect");
+    const session: PublicBrowserSession = {
+      connection: () => undefined,
+      detach: async () => { events.push("detach-session"); },
+    };
+
+    await expect(enablePageAutoAttach(publicBrowser(session, events), () => 0))
+      .resolves.toBe("deadline-exceeded");
+    expect(events).toEqual([]);
+
+    const expiringEvents: string[] = [];
+    const root: PublicRootConnection = {
+      send: async () => { expiringEvents.push("set-auto-attach"); },
+    };
+    const expiringSession: PublicBrowserSession = {
+      connection: () => root,
+      detach: async () => { expiringEvents.push("detach-session"); },
+    };
+    let remainingCalls = 0;
+    const remaining = () => (++remainingCalls === 5 ? 0 : 100);
+
+    await expect(enablePageAutoAttach(publicBrowser(expiringSession, expiringEvents), remaining))
+      .resolves.toBe("browser-session-detach-failed");
+    await Promise.resolve();
+    expect(expiringEvents).toEqual(["create-session", "set-auto-attach", "detach-session"]);
+  });
+
+  test("reports an unavailable browser target without creating a session", async () => {
+    const browser: PublicBrowser = { target: () => undefined };
+
+    await expect(enablePageAutoAttach(browser, () => 100))
+      .resolves.toBe("browser-target-unavailable");
+  });
+
+  test("reports a rejected browser session without a provider error", async () => {
+    const browser: PublicBrowser = {
+      target: () => ({ createCDPSession: async () => { throw new Error("provider error"); } }),
+    };
+
+    await expect(enablePageAutoAttach(browser, () => 100))
+      .resolves.toBe("browser-session-unavailable");
+  });
+
+  test("detaches a temporary session whose root connection is unavailable", async () => {
+    const events: string[] = [];
+    const session: PublicBrowserSession = {
+      connection: () => undefined,
+      detach: async () => { events.push("detach-session"); },
+    };
+
+    await expect(enablePageAutoAttach(publicBrowser(session, events), () => 100))
+      .resolves.toBe("root-connection-unavailable");
+    expect(events).toEqual(["create-session", "detach-session"]);
+  });
+
+  test("rejects the auto-attach request and still detaches its temporary session", async () => {
+    const events: string[] = [];
+    const root: PublicRootConnection = {
+      send: async () => { throw new Error("rejected"); },
+    };
+    const session: PublicBrowserSession = {
+      connection: () => root,
+      detach: async () => { events.push("detach-session"); },
+    };
+
+    await expect(enablePageAutoAttach(publicBrowser(session, events), () => 100))
+      .resolves.toBe("page-autoattach-rejected");
+    expect(events).toEqual(["create-session", "detach-session"]);
+  });
+
+  test("has no private Puppeteer or direct-page connection dependency", () => {
+    const here = fileURLToPath(import.meta.url);
+    const app = readFileSync(resolve(here, "../../src/harness/app.ts"), "utf8");
+    expect(app).toMatch(/browser\.target\(\).*createCDPSession/s);
+    expect(app).toMatch(/session\.connection\(\)/);
+    expect(app).toMatch(/defaultPageCount === 0 && raw && !autoAttachAttempted/);
+    expect(app).not.toMatch(/browserWSEndpoint|directAppTarget|_targetManager|_connection/);
   });
 });
