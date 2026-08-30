@@ -103,6 +103,7 @@
         "cargo test -p copypaste-core clipboard",
         "cargo test -p copypaste-feedback",
         "cargo test -p copypaste-daemon notify",
+        "bash -c 'bash scripts/demo.sh && test $? -eq 0'",
         "cd crates/copypaste-ui/src-tauri/gen/android && ./gradlew :app:testArmDebugUnitTest"
       ],
       "ui_tests": [
@@ -299,7 +300,10 @@
       ],
       "backend_tests": [
         "cargo test --workspace",
-        "cargo test -p copypaste-ui installed_source_apps"
+        "cargo test -p copypaste-ui installed_source_apps",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key settings::tests'",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::config::tests'",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::settings::tests'"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -349,7 +353,8 @@
           "evidence_status": "pending",
           "unverified_states": [
             "storage-transfer-persisted",
-            "source-exclusion-catalog"
+            "source-exclusion-catalog",
+            "live-settings-runtime-effects"
           ]
         },
         "macos": {
@@ -357,7 +362,8 @@
           "evidence_status": "pending",
           "unverified_states": [
             "settings-ui",
-            "source-exclusion-catalog"
+            "source-exclusion-catalog",
+            "live-settings-runtime-effects"
           ]
         },
         "windows": {
@@ -368,7 +374,8 @@
             "updater-configured"
           ],
           "unverified_states": [
-            "source-exclusion-catalog"
+            "source-exclusion-catalog",
+            "live-settings-runtime-effects"
           ],
           "release_artifact": "release-windows-native-evidence"
         }
