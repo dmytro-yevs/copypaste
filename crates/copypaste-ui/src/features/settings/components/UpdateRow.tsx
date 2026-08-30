@@ -120,20 +120,20 @@ export function UpdateRow() {
       state.kind === "update_permission_required"
     ? state.version
     : undefined;
-  if (state.state === "unsupported" || state.state === "unconfigured") {
-    return null;
-  }
-
-  const description = platform === "macos"
-      ? t("settings.about.updates.descriptionMacos")
-      : platform === "windows"
-        ? t("settings.about.updates.descriptionWindows")
-        : platform === "android"
-          ? t("settings.about.updates.descriptionAndroid")
-          : t("settings.about.updates.description");
+  const description = state.state === "unsupported"
+      ? t("settings.about.updates.descriptionUnsupported")
+      : platform === "macos"
+        ? t("settings.about.updates.descriptionMacos")
+        : platform === "windows"
+          ? t("settings.about.updates.descriptionWindows")
+          : platform === "android"
+            ? t("settings.about.updates.descriptionAndroid")
+            : t("settings.about.updates.description");
 
   let message: string;
   switch (state.state) {
+    case "unsupported": message = t("settings.about.updates.unsupported"); break;
+    case "unconfigured": message = t("settings.about.updates.unconfigured"); break;
     case "loading": message = t("settings.about.updates.loading"); break;
     case "ready": message = t("settings.about.updates.ready"); break;
     case "checking": message = t("settings.about.updates.checking"); break;
@@ -208,6 +208,10 @@ export function UpdateRow() {
     );
   } else if (state.state === "error") {
     action = <Badge variant="error">{t("settings.about.updates.attentionLabel")}</Badge>;
+  } else if (state.state === "unsupported") {
+    action = <Badge variant="secondary">{t("settings.about.updates.unavailableLabel")}</Badge>;
+  } else if (state.state === "unconfigured") {
+    action = <Badge variant="warn">{t("settings.about.updates.unconfiguredLabel")}</Badge>;
   } else {
     action = (
       <span className={styles.activity} aria-hidden="true">
