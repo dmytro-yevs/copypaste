@@ -11,6 +11,7 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { setTimeout as sleep } from "node:timers/promises";
+import type { ChainablePromiseElement } from "webdriverio";
 
 import type {
   DevicePresence,
@@ -90,25 +91,33 @@ async function waitForPeerPresence(
 }
 
 async function waitForPeerPresenceField(
+  details: ChainablePromiseElement,
   expected: string,
 ): Promise<void> {
   let observed: { term: string | null; value: string | null } | undefined;
   await app.browser.waitUntil(
     async () => {
-      observed = (await app.browser.execute(function () {
-        const details = document.querySelector(
-          'section[aria-label$=" details"]',
-        );
-        const term = Array.from(details?.querySelectorAll("dt") ?? []).find(
-          (element) => element.textContent?.trim() === "Network presence",
-        );
-        return {
-          term: term?.textContent?.trim() ?? null,
-          value:
-            term?.parentElement?.querySelector("dd")?.textContent?.trim() ??
-            null,
+      observed = { term: null, value: null };
+      if (!(await details.isDisplayed())) return false;
+
+      for (const row of await details.$$('[data-slot="metadata-row"]')) {
+        const term = await row.$('dt[data-slot="metadata-label"]');
+        if (
+          !(await term.isDisplayed()) ||
+          (await term.getText()).trim() !== "Network presence"
+        ) {
+          continue;
+        }
+
+        const value = await row.$('dd[data-slot="metadata-value"]');
+        observed = {
+          term: (await term.getText()).trim(),
+          value: (await value.isDisplayed())
+            ? (await value.getText()).trim()
+            : null,
         };
-      })) as { term: string | null; value: string | null };
+        break;
+      }
       return (
         observed.term === "Network presence" && observed.value === expected
       );
@@ -487,8 +496,8 @@ describe("native-safe pairing", () => {
 
 describe("a known device", () => {
   test("reports online and unavailable network presence", async () => {
-    await openPeerDetails(paired);
-    await waitForPeerPresenceField("Seen on this network");
+    const details = await openPeerDetails(paired);
+    await waitForPeerPresenceField(details, "Seen on this network");
 
     await app.daemon.json<unknown>([
       "config",
@@ -503,7 +512,7 @@ describe("a known device", () => {
         "unknown",
       );
       expect(peerPresenceSnapshot(unknown)?.freshUntilMs).toBeNull();
-      await waitForPeerPresenceField("Not available");
+      await waitForPeerPresenceField(details, "Not available");
     } finally {
       await app.daemon.json<unknown>([
         "config",
@@ -518,7 +527,7 @@ describe("a known device", () => {
       paired.pairing_id,
       "online",
     );
-    await waitForPeerPresenceField("Seen on this network");
+    await waitForPeerPresenceField(details, "Seen on this network");
   }, 90_000);
 
   test("is listed with an explicitly unverified name", async () => {
