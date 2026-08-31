@@ -480,7 +480,7 @@ rec("supabase-gate" in closure(release_jobs, "publish"),
     "release.yml blocks publish on the real-Supabase gate")
 
 macos_smoke = pathlib.Path("scripts/release/smoke-macos-dmg.sh").read_text()
-rec('macos-native-evidence.sh artifacts/release-macos-native "$DMG"' in macos_smoke,
+rec('macos-native-evidence.sh artifacts/release-macos-native "$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"' in macos_smoke,
     "macOS smoke binds native evidence to the exercised DMG before removing the installed app")
 rec("macos-cloud-evidence.sh artifacts/release-macos-cloud" in macos_smoke,
     "macOS smoke captures the cloud account lifecycle from the installed app")
