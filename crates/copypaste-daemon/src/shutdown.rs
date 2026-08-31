@@ -47,6 +47,7 @@ pub async fn requested(shutdown: Option<watch::Receiver<bool>>) {
 /// `loops` contains cooperative async owners only. A started `spawn_blocking`
 /// handle needs a lifecycle owner that can signal its closure; Tokio cannot
 /// abort the blocking closure through its outer handle.
+#[cfg(test)]
 pub async fn teardown(
     state: &AppState,
     loops: Vec<(&'static str, JoinHandle<()>)>,
@@ -83,6 +84,7 @@ pub async fn stop_loops(loops: Vec<(&'static str, JoinHandle<()>)>) {
     }
 }
 
+#[cfg(test)]
 pub async fn flush_peers(state: &AppState) -> anyhow::Result<()> {
     let node = std::sync::Arc::clone(state.p2p.node());
     flush_before_release(move || node.peers().flush().map_err(anyhow::Error::from)).await
