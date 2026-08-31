@@ -55,8 +55,9 @@ if [[ "${1:-}" == "--self-test" ]]; then
   exit 0
 fi
 
-out="${1:?usage: macos-native-evidence.sh OUTPUT_DIRECTORY QUALIFIED_ARTIFACT}"
-qualified_artifact="${2:?usage: macos-native-evidence.sh OUTPUT_DIRECTORY QUALIFIED_ARTIFACT}"
+out="${1:?usage: macos-native-evidence.sh OUTPUT_DIRECTORY QUALIFIED_ARTIFACT QUALIFIED_ARTIFACT_IDENTITY}"
+qualified_artifact="${2:?usage: macos-native-evidence.sh OUTPUT_DIRECTORY QUALIFIED_ARTIFACT QUALIFIED_ARTIFACT_IDENTITY}"
+qualified_artifact_identity="${3:?usage: macos-native-evidence.sh OUTPUT_DIRECTORY QUALIFIED_ARTIFACT QUALIFIED_ARTIFACT_IDENTITY}"
 mkdir -p "$out"
 
 app="${COPYPASTE_APP:-/Applications/CopyPaste.app}"
@@ -125,6 +126,7 @@ python3 scripts/release/write-native-evidence.py \
   --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
   --elapsed-ms "$((ready_ms - start_ms))" \
   --qualified-artifact "$qualified_artifact" \
+  --qualified-artifact-identity "$qualified_artifact_identity" \
   --feature-state devices=native-shell,screenshot=screenshot.png,accessibility=ax.log \
   --artifact screenshot=screenshot.png \
   --artifact accessibility=ax.log \
