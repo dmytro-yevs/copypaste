@@ -55,11 +55,34 @@ type SettingsNavigationControl =
   | { kind: "navigation"; element: WebdriverIO.Element }
   | { kind: "back"; element: WebdriverIO.Element };
 
+const SETTINGS_PANEL = '[role="tabpanel"], section[aria-label]';
+
 async function displayed(selector: string) {
   for (const element of await app.browser.$$(selector)) {
     if (await element.isDisplayed()) return element;
   }
   return null;
+}
+
+async function namedSettingsPanel(label: string) {
+  for (const candidate of await app.browser.$$(SETTINGS_PANEL)) {
+    if (
+      (await candidate.isDisplayed()) &&
+      (await candidate.getComputedLabel()) === label
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+async function desktopTabSelectionMatches(label: string) {
+  for (const tab of await app.browser.$$('[role="tab"]')) {
+    if ((await tab.isDisplayed()) && (await tab.getComputedLabel()) === label) {
+      return (await tab.getAttribute("aria-selected")) === "true";
+    }
+  }
+  return true;
 }
 
 async function withSettingsNavigation(
@@ -97,51 +120,18 @@ async function openSection(label: string): Promise<void> {
   }, `the ${label} section control never became interactable`);
   await app.browser.waitUntil(
     async () => {
-      return (await app.browser.execute(function (sectionLabel: string) {
-        const visible = (element: Element) =>
-          element.getClientRects().length > 0;
-        const selectedDesktopTab = Array.from(
-          document.querySelectorAll<HTMLElement>('[role="tab"]'),
-        ).find(
-          (tab) =>
-            tab.textContent?.trim() === sectionLabel && visible(tab),
-        );
-        const opened = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'section[aria-label], [role="tabpanel"][aria-label]',
-          ),
-        ).some(
-          (section) =>
-            section.getAttribute("aria-label") === sectionLabel &&
-            visible(section),
-        );
-        return (
-          opened &&
-          (!selectedDesktopTab ||
-            selectedDesktopTab.getAttribute("aria-selected") === "true")
-        );
-      }, label)) as boolean;
+      const section = await namedSettingsPanel(label);
+      return section !== null && await desktopTabSelectionMatches(label);
     },
     { timeout: 10_000, timeoutMsg: `the ${label} section never opened` },
   );
   // DMY-138: the section is selected but its content may still be loading
   // asynchronously. Wait for aria-busy to clear so assertions see real content.
   await app.browser.waitUntil(
-    async () =>
-      (await app.browser.execute(function (sectionLabel: string) {
-        const section = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'section[aria-label], [role="tabpanel"][aria-label]',
-          ),
-        ).find(
-          (candidate) =>
-            candidate.getAttribute("aria-label") === sectionLabel &&
-            candidate.getClientRects().length > 0,
-        );
-        return (
-          section !== undefined && section.querySelector("[aria-busy]") === null
-        );
-      }, label)) === true,
+    async () => {
+      const section = await namedSettingsPanel(label);
+      return section !== null && !(await section.$("[aria-busy]").isExisting());
+    },
     {
       timeout: 30_000,
       timeoutMsg: `the ${label} section never finished loading`,
@@ -149,26 +139,11 @@ async function openSection(label: string): Promise<void> {
   );
 }
 
-/** The selected desktop tabpanel or compact detail, as WebKit laid it out. */
 async function panel(label: string) {
-  return (await app.browser.execute(function (sectionLabel: string) {
-    const el = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        'section[aria-label], [role="tabpanel"][aria-label]',
-      ),
-    ).find(
-      (candidate) =>
-        candidate.getAttribute("aria-label") === sectionLabel &&
-        candidate.getClientRects().length > 0,
-    );
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    return {
-      width: rect.width,
-      height: rect.height,
-      text: el.innerText.trim(),
-    };
-  }, label)) as { width: number; height: number; text: string } | null;
+  const section = await namedSettingsPanel(label);
+  if (!section) return null;
+  const { width, height } = await section.getSize();
+  return { width, height, text: (await section.getText()).trim() };
 }
 
 describe("the sections", () => {
