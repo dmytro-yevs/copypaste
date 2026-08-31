@@ -1,6 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
+    "resources": {
+      "binaries/copypaste-x86_64-pc-windows-msvc.exe": "copypaste-installer-helper.exe"
+    },
     "externalBin": [
       "binaries/copypaste",
       "binaries/copypaste-daemon"
