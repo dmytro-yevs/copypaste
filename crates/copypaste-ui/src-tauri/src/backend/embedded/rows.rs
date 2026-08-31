@@ -17,7 +17,7 @@ pub(super) use copypaste_ipc::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAG
 
 const MSG_NO_ITEM: &str = "That item is no longer there.";
 pub(super) const MSG_CONTENT_TOO_LARGE: &str =
-    "That older text item is too large to return or copy safely.";
+    "This content is too large for this operation. Your history is unchanged.";
 
 pub(super) fn bound_item_preview(item: &mut Item) {
     item.truncated = copypaste_ipc::limits::bound_preview(&mut item.content);
