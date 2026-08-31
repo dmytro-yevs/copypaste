@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDebounceValue } from "usehooks-ts";
 import { toast } from "sonner";
 
-import { type OriginDevice, originsOf } from "../model/origin";
+import { type OriginDevice, originsOf } from "@/lib/itemOrigin";
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
 import { historyOf, useHistory, useHistorySearch } from "@/hooks/useHistory";
 import { statusItemCount, useStatus } from "@/hooks/useStatus";

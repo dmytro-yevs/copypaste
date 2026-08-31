@@ -1,6 +1,6 @@
 import type { Item } from "@/lib/ipc";
 import { arrayMove } from "@dnd-kit/helpers";
-import { originName, originOf } from "./origin";
+import { originName, originOf } from "@/lib/itemOrigin";
 
 export type HistoryEntry =
   | { readonly type: "item"; readonly itemIndex: number }

@@ -17,6 +17,7 @@ import {
   QUICK_PASTE_POLL_ACTIVE_MS,
   QUICK_PASTE_POLL_BACKOFF_MS,
 } from "@/features/quick-paste/model/quickPastePolling";
+import { quickPastePresentation } from "@/features/quick-paste/model/quickPastePresentation";
 import {
   copyItem,
   copyItemAsPlainText,
@@ -30,20 +31,9 @@ import { classifyError, isRetryable } from "@/lib/errors";
 import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { rankFuzzy } from "@/lib/fuzzy";
-import { kindOf } from "@/lib/format";
 import { markedOrigin, markedOrigins } from "@/lib/itemOrigin";
 import styles from "./QuickPasteScreen.module.css";
 const LIMIT = 100;
-
-export function quickPasteSearchLabel(item: Item): string {
-  if (item.is_sensitive) return "••••••••";
-  const kind = kindOf(item);
-  if (kind === "image") return t("quickPaste.row.image");
-  if (kind === "file") return t("quickPaste.row.file");
-  if (kind === "unknown") return t("quickPaste.row.unsupported");
-  if (item.sensitive_finding) return item.sensitive_finding.redacted_preview;
-  return item.content ?? "";
-}
 
 export function QuickPasteScreen() {
   const searchRef = useRef<HTMLInputElement>(null);
@@ -76,7 +66,7 @@ export function QuickPasteScreen() {
   const { refetch } = history;
 
   const items = useMemo(
-    () => rankFuzzy(history.data?.items ?? [], query, (item) => [quickPasteSearchLabel(item)]),
+    () => rankFuzzy(history.data?.items ?? [], query, (item) => [quickPastePresentation(item).searchLabel]),
     [history.data?.items, query],
   );
   const originMarks = useMemo(

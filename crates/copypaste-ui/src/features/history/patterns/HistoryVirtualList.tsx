@@ -6,7 +6,7 @@ import {
 } from "@/features/history/components/ClipCard";
 import { ClipImageLoader } from "@/features/clip-content";
 import type { HistoryEntry } from "@/features/history/model/historyEntries";
-import { markedOrigin } from "@/features/history/model/origin";
+import { markedOrigin } from "@/lib/itemOrigin";
 import { kindOf } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 import {
