@@ -81,11 +81,25 @@ class PairingDialogControllerTest {
         val dialogs = PairingDialogController(activity)
         var aborted = 0
 
-        assertTrue(dialogs.presentProgress("handshaking") { aborted += 1 })
+        assertTrue(
+            dialogs.presentProgress(
+                "securing_connection",
+                "Securing the connection",
+                "Keep both devices nearby while CopyPaste establishes a secure connection.",
+                active = true,
+            ) { aborted += 1 },
+        )
         val progress = latestDialog()
         assertTrue(progress.isShowing)
 
-        assertTrue(dialogs.presentProgress("awaiting_confirmation") { aborted += 1 })
+        assertTrue(
+            dialogs.presentProgress(
+                "compare_codes",
+                "Compare security codes",
+                "Confirm the code in the native security prompt.",
+                active = true,
+            ) { aborted += 1 },
+        )
         shadowOf(Looper.getMainLooper()).idle()
         assertFalse(progress.isShowing)
         assertEquals(0, aborted)
@@ -102,7 +116,14 @@ class PairingDialogControllerTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(1, aborted)
 
-        assertTrue(dialogs.presentProgress("handshaking") { aborted += 1 })
+        assertTrue(
+            dialogs.presentProgress(
+                "securing_connection",
+                "Securing the connection",
+                "Keep both devices nearby while CopyPaste establishes a secure connection.",
+                active = true,
+            ) { aborted += 1 },
+        )
         latestDialog().getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(2, aborted)
@@ -120,12 +141,26 @@ class PairingDialogControllerTest {
         invite.findViewById<View>(R.id.pairing_reveal)!!.performClick()
         assertEquals(View.VISIBLE, invite.findViewById<View>(R.id.pairing_qr)!!.visibility)
 
-        assertTrue(dialogs.presentProgress("waiting_for_peer") { aborted += 1 })
+        assertTrue(
+            dialogs.presentProgress(
+                "waiting_for_peer",
+                "Waiting for a device",
+                "Waiting for the other device to join.",
+                active = true,
+            ) { aborted += 1 },
+        )
         assertTrue(invite.isShowing)
         assertEquals(View.VISIBLE, invite.findViewById<View>(R.id.pairing_qr)!!.visibility)
         assertEquals(0, aborted)
 
-        assertTrue(dialogs.presentProgress("handshaking") { aborted += 1 })
+        assertTrue(
+            dialogs.presentProgress(
+                "securing_connection",
+                "Securing the connection",
+                "Keep both devices nearby while CopyPaste establishes a secure connection.",
+                active = true,
+            ) { aborted += 1 },
+        )
         assertFalse(invite.isShowing)
         assertEquals(0, aborted)
         assertNull(latestDialog().findViewById(R.id.pairing_qr))
@@ -186,9 +221,14 @@ class PairingDialogControllerTest {
         assertTrue(confirmation.getButton(AlertDialog.BUTTON_POSITIVE).visibility != View.VISIBLE)
         assertTrue(confirmation.getButton(AlertDialog.BUTTON_NEGATIVE).visibility != View.VISIBLE)
 
-        dialogs.presentProgress("timed_out")
+        dialogs.presentProgress(
+            "timed_out",
+            "Pairing timed out",
+            "Check that both devices are on the same network and try again.",
+            active = false,
+        )
         val timedOut = latestDialog()
-        assertTrue(allText(timedOut.window!!.decorView).contains("Pairing timed out."))
+        assertTrue(allText(timedOut.window!!.decorView).contains("Pairing timed out"))
         assertNull(timedOut.findViewById<View>(R.id.pairing_sas))
         assertTrue(timedOut.getButton(AlertDialog.BUTTON_POSITIVE)?.visibility != View.VISIBLE)
     }
@@ -241,18 +281,48 @@ class PairingDialogControllerTest {
         assertEquals(listOf("cancel"), decisions)
         assertFalse(confirmation.isShowing)
         assertTrue(qr!!.isRecycled)
-        assertFalse(dialogs.presentProgress("handshaking") {})
+        assertFalse(
+            dialogs.presentProgress(
+                "securing_connection",
+                "Securing the connection",
+                "Keep both devices nearby while CopyPaste establishes a secure connection.",
+                active = true,
+            ) {},
+        )
     }
 
     @Test
-    fun progressCopyIsFixedAndDoesNotEchoUntrustedInput() {
+    fun progressRendersCanonicalCopyWithoutAnInactiveCancelAction() {
         val dialogs = PairingDialogController(activity)
         val untrusted = "failed at /data/user/0/name with 192.0.2.1"
 
-        assertTrue(dialogs.presentProgress(untrusted) {})
+        assertTrue(
+            dialogs.presentProgress(
+                "failed",
+                "Pairing failed",
+                "Pairing failed. No device was paired.",
+                active = false,
+            ) {},
+        )
         val dialog = latestDialog()
         assertNoViewValue(dialog.window!!.decorView, untrusted)
-        assertTrue(allText(dialog.window!!.decorView).contains("Pairing is ready."))
+        assertTrue(allText(dialog.window!!.decorView).contains("Pairing failed. No device was paired."))
+        assertTrue(dialog.getButton(AlertDialog.BUTTON_NEGATIVE).visibility != View.VISIBLE)
+    }
+
+    @Test
+    fun progressPayloadValidationRejectsUnknownOrMalformedValues() {
+        val known = PairingProgressSemantics().apply { messageId = "unreachable" }
+        val unknown = PairingProgressSemantics().apply { messageId = "future_daemon_state" }
+        val safe = PairingProgressCopy().apply {
+            title = "Pairing couldn't finish"
+            detail = "Could not reach the other device. Check that both devices are on the same network."
+        }
+
+        assertTrue(known.isKnown())
+        assertFalse(unknown.isKnown())
+        assertTrue(safe.isSafe())
+        assertFalse(PairingProgressCopy().isSafe())
     }
 
     private fun latestDialog(): AlertDialog = ShadowDialog.getLatestDialog() as AlertDialog
