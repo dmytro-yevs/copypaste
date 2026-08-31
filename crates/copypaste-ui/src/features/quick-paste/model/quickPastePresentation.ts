@@ -18,6 +18,10 @@ export function quickPastePresentation(item: Item): QuickPastePresentation {
   if (kind === "image") return { rowLabel: t("quickPaste.row.image"), searchLabel: t("quickPaste.row.image") };
   if (kind === "file") return { rowLabel: t("quickPaste.row.file"), searchLabel: t("quickPaste.row.file") };
   if (kind === "unknown") return { rowLabel: t("quickPaste.row.unsupported"), searchLabel: t("quickPaste.row.unsupported") };
-  const label = item.sensitive_finding?.redacted_preview.trim() || item.content?.trim() || t("quickPaste.row.empty");
+  if (item.sensitive_finding !== null) {
+    const label = item.sensitive_finding.redacted_preview.trim() || t("quickPaste.row.empty");
+    return { rowLabel: label, searchLabel: label };
+  }
+  const label = item.content?.trim() || t("quickPaste.row.empty");
   return { rowLabel: label, searchLabel: label };
 }
