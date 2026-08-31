@@ -22,8 +22,9 @@ mod report;
 #[cfg(any(windows, test))]
 mod shutdown;
 
+#[cfg(test)]
 use clap::Parser;
-use cli::{config_patch, Cli, CloudAction, Command, ConfigAction, PairAction};
+use cli::{config_patch, parse_cli, Cli, CloudAction, Command, ConfigAction, PairAction};
 use copypaste_ipc::{ExportData, Method, Response};
 use error::CliError;
 use std::io::{IsTerminal, Read, Write};
@@ -32,7 +33,7 @@ use std::path::Path;
 #[cfg_attr(windows, tokio::main(flavor = "multi_thread", worker_threads = 1))]
 #[cfg_attr(not(windows), tokio::main(flavor = "current_thread"))]
 async fn main() {
-    let cli = Cli::parse();
+    let cli = parse_cli();
     let code = match run(cli).await {
         Ok(()) => error::EXIT_OK,
         Err(err) => {
@@ -483,8 +484,17 @@ mod tests {
         else {
             panic!("expected the Windows wait-for-exit command");
         };
+        for args in [
+            ["copypaste", "--json", "shutdown", "--wait-for-exit"],
+            ["copypaste", "shutdown", "--json", "--wait-for-exit"],
+            ["copypaste", "shutdown", "--wait-for-exit", "--json"],
+        ] {
+            assert!(cli::try_parse_cli_from(args).is_err());
+        }
         assert!(
-            Cli::try_parse_from(["copypaste", "--json", "shutdown", "--wait-for-exit"]).is_err()
+            cli::try_parse_cli_from(["copypaste", "shutdown", "--json"])
+                .expect("ordinary JSON shutdown remains valid")
+                .json
         );
     }
 
