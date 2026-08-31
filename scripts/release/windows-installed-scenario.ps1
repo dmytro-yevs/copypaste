@@ -103,6 +103,33 @@ function Assert-InstalledAppLockRefusal([int]$InstallerExitCode, [bool]$AppExite
     }
 }
 
+function Remove-InstalledPayloadDirectoryLinkFixture([string]$Path) {
+    try {
+        [IO.Directory]::Delete($Path)
+    } catch [IO.DirectoryNotFoundException] {
+        try {
+            $attributes = [IO.File]::GetAttributes($Path)
+        } catch [IO.FileNotFoundException] {
+            return
+        } catch [IO.DirectoryNotFoundException] {
+            return
+        }
+        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { throw }
+        [IO.File]::Delete($Path)
+    }
+}
+
+function Assert-InstalledPayloadDirectoryLinkFixtureRemoved([string]$Path) {
+    try {
+        [IO.File]::GetAttributes($Path) | Out-Null
+    } catch [IO.FileNotFoundException] {
+        return
+    } catch [IO.DirectoryNotFoundException] {
+        return
+    }
+    throw "installed payload directory link fixture remained after cleanup"
+}
+
 function Test-WindowsInstalledScenarioHelpers {
     Assert-InstalledUpdateDrain 0 $true
     Assert-InstalledAppLockRefusal 1 $false "ready"
@@ -216,7 +243,12 @@ function Test-WindowsInstalledScenarioHelpers {
         } finally {
             Remove-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
         }
-        $rootLink = Join-Path ([IO.Path]::GetDirectoryName($root)) "copypaste-installed-payload-link-$([guid]::NewGuid())"
+        $rootLinkParent = [IO.Path]::GetDirectoryName($root)
+        $missingRootLink = Join-Path $rootLinkParent "copypaste-installed-payload-link-$([guid]::NewGuid())"
+        Remove-InstalledPayloadDirectoryLinkFixture $missingRootLink
+        Assert-InstalledPayloadDirectoryLinkFixtureRemoved $missingRootLink
+        $rootLink = Join-Path $rootLinkParent "copypaste-installed-payload-link-$([guid]::NewGuid())"
+        $rootLinkFailure = $null
         try {
             New-Item -ItemType SymbolicLink -Path $rootLink -Target $root -ErrorAction Stop | Out-Null
             $rejected = $false
@@ -224,8 +256,40 @@ function Test-WindowsInstalledScenarioHelpers {
             if (-not $rejected) { throw "reparse payload root passed the refusal proof" }
         } catch [System.PlatformNotSupportedException] {
             # The manifest still rejects reparse roots; this host cannot create one for the fixture.
+        } catch {
+            $rootLinkFailure = $_
+            throw
         } finally {
-            Remove-Item -LiteralPath $rootLink -Force -ErrorAction SilentlyContinue
+            try {
+                Remove-InstalledPayloadDirectoryLinkFixture $rootLink
+                Assert-InstalledPayloadDirectoryLinkFixtureRemoved $rootLink
+            } catch {
+                if ($null -eq $rootLinkFailure) { throw }
+            }
+        }
+        if (-not [IO.Directory]::Exists($root)) { throw "directory link cleanup removed the installed payload root" }
+        $danglingRootTarget = Join-Path $rootLinkParent "copypaste-installed-payload-target-$([guid]::NewGuid())"
+        $danglingRootLink = Join-Path $rootLinkParent "copypaste-installed-payload-link-$([guid]::NewGuid())"
+        $danglingRootLinkFailure = $null
+        try {
+            [IO.Directory]::CreateDirectory($danglingRootTarget) | Out-Null
+            New-Item -ItemType SymbolicLink -Path $danglingRootLink -Target $danglingRootTarget -ErrorAction Stop | Out-Null
+            [IO.Directory]::Delete($danglingRootTarget)
+            Remove-InstalledPayloadDirectoryLinkFixture $danglingRootLink
+            Assert-InstalledPayloadDirectoryLinkFixtureRemoved $danglingRootLink
+        } catch [System.PlatformNotSupportedException] {
+            # The manifest still rejects reparse roots; this host cannot create one for the fixture.
+        } catch {
+            $danglingRootLinkFailure = $_
+            throw
+        } finally {
+            try {
+                Remove-InstalledPayloadDirectoryLinkFixture $danglingRootLink
+                Assert-InstalledPayloadDirectoryLinkFixtureRemoved $danglingRootLink
+                if ([IO.Directory]::Exists($danglingRootTarget)) { [IO.Directory]::Delete($danglingRootTarget) }
+            } catch {
+                if ($null -eq $danglingRootLinkFailure) { throw }
+            }
         }
     } finally {
         Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
