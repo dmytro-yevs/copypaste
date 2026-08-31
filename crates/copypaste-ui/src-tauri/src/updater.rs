@@ -86,7 +86,7 @@ pub async fn check_for_update(
     }
     #[cfg(target_os = "android")]
     {
-        let Some(updater) = config::updater(&app, None, None)? else {
+        let Some(updater) = config::updater(&app, None)? else {
             return Ok(UpdateStatus::Unconfigured);
         };
         Ok(
@@ -129,7 +129,7 @@ pub async fn install_update(
     }
     #[cfg(target_os = "android")]
     {
-        let Some(updater) = config::updater(&app, None, None)? else {
+        let Some(updater) = config::updater(&app, None)? else {
             return Ok(UpdateStatus::Unconfigured);
         };
         let Some(update) = updater
