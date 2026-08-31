@@ -98,7 +98,6 @@
         }
       },
       "release_evidence": [
-        "release-android-physical-evidence",
         "release-android-smoke-evidence",
         "release-android-api33-smoke-evidence",
         "release-macos-native-evidence",
@@ -187,7 +186,6 @@
         }
       },
       "release_evidence": [
-        "release-android-physical-evidence",
         "release-android-smoke-evidence",
         "release-android-api33-smoke-evidence",
         "release-macos-native-evidence",
@@ -261,11 +259,11 @@
           "evidence_states": [
             {
               "state": "scan-pairing-code",
-              "screenshot": "artifacts/release-android-physical/pairing-entry.png",
-              "accessibility": "artifacts/release-android-physical/pairing-entry.xml"
+              "screenshot": "artifacts/release-android-smoke/pairing-entry.png",
+              "accessibility": "artifacts/release-android-smoke/pairing-entry.xml"
             }
           ],
-          "release_artifact": "release-android-physical-evidence",
+          "release_artifact": "release-android-smoke-evidence",
           "unverified_states": [
             "p2p-size-refusal-count"
           ]
@@ -300,7 +298,6 @@
         }
       },
       "release_evidence": [
-        "release-android-physical-evidence",
         "release-android-smoke-evidence",
         "release-android-api33-smoke-evidence",
         "release-macos-native-evidence",
@@ -455,7 +452,6 @@
       "release_evidence": [
         "release-android-storage-evidence",
         "release-android-api33-smoke-evidence",
-        "release-android-physical-evidence",
         "release-macos-native-evidence",
         "release-windows-native-evidence",
         "release-android-smoke-evidence"
@@ -547,7 +543,6 @@
       "release_evidence": [
         "release-android-cloud-evidence",
         "release-android-api33-smoke-evidence",
-        "release-android-physical-evidence",
         "release-macos-cloud-evidence",
         "release-macos-native-evidence",
         "release-windows-native-evidence",

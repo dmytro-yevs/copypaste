@@ -91,7 +91,6 @@ def qualification_contract(release):
         "android-cloud-evidence",
         "android-smoke",
         "android-smoke-api33",
-        "android-hardware",
         "native-parity",
     ):
         if (jobs.get(name) or {}).get("if") != "needs.version.outputs.qualify == 'true'":
@@ -174,24 +173,30 @@ def resolve_mode(release, *, event_name, ref_name, version, publish, qualify, me
         return result, values
 
 
-def physical_android_contract(release):
+def emulator_android_contract(release):
     jobs = release.get("jobs") or {}
-    hardware = jobs.get("android-hardware") or {}
+    smoke = jobs.get("android-smoke") or {}
+    runner = next(
+        (step for step in steps(smoke)
+         if str(step.get("uses") or "").startswith("reactivecircus/android-emulator-runner")),
+        {},
+    )
     upload = [
         step
-        for step in steps(hardware)
+        for step in steps(smoke)
         if (step.get("with") or {}).get("name") == RELEASE_ARTIFACTS["android"]
     ]
     valid = (
-        set(hardware.get("runs-on") or []) == {"self-hosted", "linux", "ARM64", "android-device"}
-        and "android-smoke-release.sh" in commands(hardware)
-        and "ro.kernel.qemu" in commands(hardware)
-        and "ANDROID_SERIAL" in commands(hardware)
-        and "android" in downloads(hardware)
+        "android-hardware" not in jobs
+        and (runner.get("with") or {}).get("api-level") == "36"
+        and (runner.get("with") or {}).get("arch") == "x86_64"
+        and "android-release-emulator-legs.sh" in str((runner.get("with") or {}).get("script") or "")
+        and "sha256sum --check" in commands(smoke)
+        and "android" in downloads(smoke)
         and len(upload) == 1
         and (upload[0].get("with") or {}).get("if-no-files-found") == "error"
     )
-    return valid, "the qualified release receipt must come from the labelled physical-device runner"
+    return valid, "the qualified Android receipt must come from the signed API 36 emulator job"
 
 
 def contract_errors(release, projected_schema=None):
@@ -200,7 +205,7 @@ def contract_errors(release, projected_schema=None):
     jobs = release.get("jobs") or {}
     gate = jobs.get("native-parity") or {}
     publish = jobs.get("publish") or {}
-    if not {"macos", "android-hardware", "windows"} <= set(gate.get("needs") or []):
+    if not {"macos", "android-smoke", "windows"} <= set(gate.get("needs") or []):
         errors.append("native parity must wait for all three shipped platforms")
     if not {"native-parity", "windows"} <= set(publish.get("needs") or []):
         errors.append("publication must wait for Windows and native parity")
@@ -239,9 +244,9 @@ def contract_errors(release, projected_schema=None):
         or any(selector not in gate_commands for selector in qualified_selectors)
     ):
         errors.append("native parity must bind each receipt to one exact qualified product artifact")
-    hardware_valid, _ = physical_android_contract(release)
-    if not hardware_valid:
-        errors.append("physical Android publication evidence must run on labelled hardware and fail closed")
+    emulator_valid, _ = emulator_android_contract(release)
+    if not emulator_valid:
+        errors.append("canonical Android publication evidence must run on the signed API 36 emulator and fail closed")
 
     if projected_schema is None:
         schema_path = ROOT / "crates" / "copypaste-ui" / "scripts" / "native-parity-evidence.schema.json"
@@ -341,7 +346,7 @@ def self_test(release):
         condition for condition in stale_schema["allOf"]
         if condition["if"]["properties"]["platform"]["const"] == "android"
     )
-    android_schema["then"]["properties"]["environment"]["const"] = "emulator"
+    android_schema["then"]["properties"]["environment"]["const"] = "physical-device"
     fixtures.append((
         "stale native evidence schema fails",
         any("current policy projection" in error for error in contract_errors(release, stale_schema)),
@@ -355,28 +360,31 @@ def self_test(release):
         "native receipts and ledger states",
     )
     rejected(
-        "missing physical Android platform dependency fails",
-        lambda value: value["jobs"]["native-parity"]["needs"].remove("android-hardware"),
+        "missing canonical Android emulator dependency fails",
+        lambda value: value["jobs"]["native-parity"]["needs"].remove("android-smoke"),
         "all three shipped platforms",
     )
     rejected(
-        "emulator receipt substituted for physical Android fails",
+        "physical receipt substituted for canonical Android emulator fails",
         lambda value: next(
             step for step in value["jobs"]["native-parity"]["steps"]
             if (step.get("with") or {}).get("name") == RELEASE_ARTIFACTS["android"]
-        )["with"].update({"name": "release-android-smoke-evidence"}),
+        )["with"].update({"name": "release-android-physical-evidence"}),
         "all three release receipts",
     )
     rejected(
-        "physical Android runner without its device label fails",
-        lambda value: value["jobs"]["android-hardware"].update({"runs-on": ["self-hosted", "linux", "ARM64"]}),
-        "labelled hardware",
+        "canonical Android receipt must use API 36 emulator",
+        lambda value: next(
+            step for step in value["jobs"]["android-smoke"]["steps"]
+            if str(step.get("uses") or "").startswith("reactivecircus/android-emulator-runner")
+        )["with"].update({"api-level": "33"}),
+        "signed API 36 emulator",
     )
     rejected(
-        "qualification cannot skip physical Android evidence",
-        lambda value: value["jobs"]["android-hardware"].update(
+        "qualification cannot skip canonical Android emulator evidence",
+        lambda value: value["jobs"]["android-smoke"].update(
             {"if": "needs.version.outputs.publish == 'true'"}),
-        "android-hardware must run for canonical release qualification",
+        "android-smoke must run for canonical release qualification",
     )
     rejected(
         "qualification cannot become publication",

@@ -33,7 +33,7 @@ rather than borrowing another platform's number.
 
 Run `npm --prefix crates/copypaste-ui run test:native-parity` to exercise the
 fail-closed receipt gate without native hardware. Release publication requires
-same-commit macOS, physical Android, and installed Windows release receipts.
+same-commit macOS, Android emulator, and installed Windows release receipts.
 The Windows receipt installs the canonical NSIS package, launches the installed
 UI with its installed sidecar, verifies artifact and update-feed integrity, and
 performs an in-place package update before uninstalling it. Manual nightly

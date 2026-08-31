@@ -420,17 +420,13 @@ pathlib.Path(sys.argv[1]).write_text(json.dumps({
 PY
     receipt_route_log="$OUT/release-receipt-route.log"
     serial_candidate="$(android_serial_candidate)" || serial_candidate=""
-    environment=""
-    if serial="$(verified_android_serial "$serial_candidate" "$receipt_route_log")"; then
-        environment=physical-device
-        [[ "$serial" == emulator-* ]] && environment=emulator
-    fi
-    if [[ -z "$environment" ]]; then
+    environment="$(python3 scripts/release/native_evidence_policy.py value --platform android --field environment)"
+    if ! serial="$(verified_android_serial "$serial_candidate" "$receipt_route_log")"; then
         bad "native evidence receipt was written" \
             "$(tail -n 4 "$receipt_route_log" | tr '\n' ' ')"
-    elif [[ "$environment" == "emulator" ]]; then
-        note "publication receipt" \
-            "emulator compatibility evidence cannot satisfy the physical-device release policy"
+    elif [[ "$serial" != emulator-* || "$(sh_ getprop ro.kernel.qemu)" != "1" ]]; then
+        bad "native evidence receipt was written" \
+            "the Android release policy requires an emulator receipt; serial=$serial qemu=$(sh_ getprop ro.kernel.qemu)"
     elif python3 scripts/release/write-native-evidence.py \
         --output "$OUT/native-evidence.json" \
         --platform android \

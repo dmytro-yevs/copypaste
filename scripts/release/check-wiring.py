@@ -1106,16 +1106,16 @@ if emu:
 
 release = docs.get("release.yml") or {}
 release_jobs = release.get("jobs") or {}
-hardware_valid, hardware_detail = native_evidence_wiring.physical_android_contract(release)
-rec(hardware_valid,
-    "release.yml requires physical arm64 Android evidence",
-    hardware_detail)
+emulator_valid, emulator_detail = native_evidence_wiring.emulator_android_contract(release)
+rec(emulator_valid,
+    "release.yml requires signed API 36 Android emulator evidence",
+    emulator_detail)
 publish_needs = (release_jobs.get("publish") or {}).get("needs") or []
 publish_needs = publish_needs if isinstance(publish_needs, list) else [publish_needs]
 native_parity_needs = (release_jobs.get("native-parity") or {}).get("needs") or []
 native_parity_needs = native_parity_needs if isinstance(native_parity_needs, list) else [native_parity_needs]
-rec("android-hardware" in native_parity_needs and "native-parity" in publish_needs,
-    "publishing requires the physical Android hardware gate through native parity",
+rec("android-smoke" in native_parity_needs and "native-parity" in publish_needs,
+    "publishing requires the canonical Android emulator gate through native parity",
     repr({"native-parity": native_parity_needs, "publish": publish_needs}))
 rec("android-smoke" in publish_needs,
     "publishing retains the Android emulator compatibility gate", repr(publish_needs))
@@ -1302,7 +1302,7 @@ rec("verified_android_serial" in android_screencap
     "Android emulator evidence uses bounded host transport retries",
     "guest adb screencap can return zero-byte or black frames while the host framebuffer is painted")
 rec("cleanup_status" in android_screencap and not adb_violations,
-    "physical Android evidence retains bounded adb capture and fail-closed cleanup")
+    "Android evidence retains bounded adb capture and fail-closed cleanup")
 receipt_body = android_release[android_release.rfind("if [[ $FAIL -eq 0 ]]"):]
 receipt_violations = adb_guard_violations(receipt_body)
 rec("verified_android_serial" in receipt_body

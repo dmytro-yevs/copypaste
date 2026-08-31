@@ -2,8 +2,8 @@
 
 `Release` accepts an explicit `qualify` dispatch input. It is false by default.
 With `qualify=true` and `publish=false`, the workflow builds the usual release
-artifacts and runs the signed Windows package, Android emulator and physical-device
-checks, and the three-platform native-parity gate. The resulting artifacts and
+artifacts and runs the signed Windows package and Android emulator checks, and the
+three-platform native-parity gate. The resulting artifacts and
 receipts remain run artifacts: no GitHub Release, tag, or Homebrew tap update is
 created.
 

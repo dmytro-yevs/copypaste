@@ -54,7 +54,7 @@ receipt installs and exercises the maintained unsigned release package.
 launching the bundle, the cask — is therefore post-hoc, and is marked below.
 
 Publication also waits for the native-parity gate. It verifies checksummed,
-same-commit receipts from macOS smoke, physical Android smoke, and the installed
+same-commit receipts from macOS smoke, Android emulator smoke, and the installed
 signed Windows package, and fails when any platform or measured evidence is absent. The macOS
 receipt producer has not been validated from this Windows recovery environment;
 until a macOS run succeeds, WKWebView remains **NOT VERIFIED IN CI** as recorded

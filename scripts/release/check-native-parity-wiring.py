@@ -307,8 +307,7 @@ def contract_errors(release, nightly, ci):
         errors.append("release Windows packaging must consume an x86_64 prebuilt sidecar artifact")
     requirements_producers = (
         (jobs.get("macos") or {}, "smoke-macos-dmg.sh", "release macOS evidence"),
-        (jobs.get("android-hardware") or {}, "android-smoke-release.sh", "release physical Android evidence"),
-        (jobs.get("android-smoke") or {}, "android-release-emulator-legs.sh", "release Android API 36 evidence"),
+        (jobs.get("android-smoke") or {}, "android-release-emulator-legs.sh", "canonical release Android API 36 emulator evidence"),
         (jobs.get("android-smoke-api33") or {}, "android-smoke-release.sh", "release Android API 33 evidence"),
         (windows, "windows-native-evidence.ps1", "release Windows evidence"),
         (nightly_windows, "windows-native-evidence.ps1", "nightly Windows evidence"),

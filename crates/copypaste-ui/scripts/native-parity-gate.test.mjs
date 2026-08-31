@@ -49,7 +49,7 @@ const RECEIPT_VALUES = {
     ],
   },
   android: {
-    environment: "physical-device",
+    environment: "emulator",
     scenario: { name: "release-webview-ready", elapsed_ms: 10, budget_ms: 115000 },
     assertions: [
       "signed release app launched",
@@ -254,7 +254,7 @@ async function validateEvidence(options) {
   });
 }
 
-test("accepts alpha.29 macOS, physical Android, and Windows release evidence", () => withRoot(async (root) => {
+test("accepts alpha.29 macOS, Android emulator, and Windows release evidence", () => withRoot(async (root) => {
   const evidence = await Promise.all([
     fixture(root, "macos"),
     fixture(root, "android"),
@@ -748,10 +748,10 @@ test("rejects Windows accessibility evidence mapped to another feature", () => w
   );
 }));
 
-test("rejects an emulator receipt in the physical Android release slot", () => withRoot(async (root) => {
+test("rejects a physical receipt in the Android emulator release slot", () => withRoot(async (root) => {
   const evidence = [
     await fixture(root, "macos"),
-    await fixture(root, "android", { environment: "emulator" }),
+    await fixture(root, "android", { environment: "physical-device" }),
   ];
   await assert.rejects(
     validateEvidence({

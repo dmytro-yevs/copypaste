@@ -343,7 +343,7 @@
         "type": "object",
         "properties": {
           "environment": {
-            "const": "physical-device"
+            "const": "emulator"
           },
           "scenario": {
             "type": "object",

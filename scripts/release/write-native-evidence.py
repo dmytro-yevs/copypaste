@@ -344,7 +344,7 @@ def self_test():
         }
         common = [
             sys.executable, __file__, "--platform", "android",
-            "--environment", "physical-device", "--os-version", "API 33",
+            "--environment", "emulator", "--os-version", "API 33",
             "--architecture", "x86_64", "--commit", "a" * 40,
             "--run-id", "self-test", "--elapsed-ms", "1",
             "--qualified-artifact", os.fspath(qualified),
@@ -373,12 +373,12 @@ def self_test():
                     raise SystemExit(f"valid PNG self-test failed: {result.stderr.strip()}")
             elif result.returncode == 0 or receipt.exists():
                 raise SystemExit(f"{name} produced a native evidence receipt")
-        emulator = list(common)
-        emulator[emulator.index("physical-device")] = "emulator"
-        emulator_receipt = root / "emulator.json"
+        physical = list(common)
+        physical[physical.index("emulator")] = "physical-device"
+        physical_receipt = root / "physical.json"
         result = subprocess.run(
-            emulator + [
-                "--output", os.fspath(emulator_receipt),
+            physical + [
+                "--output", os.fspath(physical_receipt),
                 "--artifact", "screenshot=good.png",
                 "--artifact", "accessibility=accessibility.txt",
                 "--artifact", "measurement=measurement.json",
@@ -389,8 +389,8 @@ def self_test():
             capture_output=True,
             text=True,
         )
-        if result.returncode == 0 or emulator_receipt.exists():
-            raise SystemExit("emulator produced a physical Android publication receipt")
+        if result.returncode == 0 or physical_receipt.exists():
+            raise SystemExit("physical Android produced an emulator publication receipt")
         label_only_receipt = root / "label-only.json"
         result = subprocess.run(
             common + [

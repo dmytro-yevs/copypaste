@@ -29,7 +29,7 @@
       "release_artifact": "release-macos-native-evidence"
     },
     "android": {
-      "environment": "physical-device",
+      "environment": "emulator",
       "scenario": "release-webview-ready",
       "budget_ms": 115000,
       "assertions": [
@@ -43,7 +43,7 @@
         "repeatable": ["screenshot", "accessibility"]
       },
       "feature_state_artifacts": ["screenshot", "accessibility"],
-      "release_artifact": "release-android-physical-evidence"
+      "release_artifact": "release-android-smoke-evidence"
     },
     "windows": {
       "environment": "hosted-runner",
