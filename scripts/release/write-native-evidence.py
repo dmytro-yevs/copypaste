@@ -39,6 +39,7 @@ def parser():
     result.add_argument("--assertion", action="append", default=[])
     result.add_argument("--artifact", action="append", default=[])
     result.add_argument("--qualified-artifact", required=True)
+    result.add_argument("--qualified-artifact-identity", required=True)
     result.add_argument("--feature-state", action="append", default=[])
     return result
 
@@ -73,26 +74,76 @@ def artifact_record(root, value):
     }
 
 
-def qualified_artifact_record(value):
+def file_identity(metadata):
+    return {
+        "device": metadata.st_dev,
+        "inode": metadata.st_ino,
+        "bytes": metadata.st_size,
+        "mtime_ns": metadata.st_mtime_ns,
+        "ctime_ns": metadata.st_ctime_ns,
+    }
+
+
+def qualified_artifact_snapshot(value):
     file = pathlib.Path(value)
     try:
-        metadata = file.lstat()
+        before = file.lstat()
     except OSError:
         raise ValueError("qualified artifact cannot be read") from None
-    if file.is_symlink() or not stat.S_ISREG(metadata.st_mode) or metadata.st_size < 1:
+    if file.is_symlink() or not stat.S_ISREG(before.st_mode) or before.st_size < 1:
         raise ValueError("qualified artifact must be a non-empty regular non-symlink file")
     digest = hashlib.sha256()
+    descriptor = None
     try:
-        with file.open("rb") as source:
-            while chunk := source.read(1024 * 1024):
-                digest.update(chunk)
+        descriptor = os.open(file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        opened = os.fstat(descriptor)
+        if file_identity(opened) != file_identity(before):
+            raise ValueError("qualified artifact changed while opening")
+        while chunk := os.read(descriptor, 1024 * 1024):
+            digest.update(chunk)
+        if file_identity(os.fstat(descriptor)) != file_identity(opened):
+            raise ValueError("qualified artifact changed while hashing")
+        if file_identity(file.lstat()) != file_identity(opened):
+            raise ValueError("qualified artifact changed while hashing")
     except OSError:
         raise ValueError("qualified artifact cannot be read") from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
     return {
-        "name": file.name,
-        "sha256": digest.hexdigest(),
-        "bytes": metadata.st_size,
+        "record": {
+            "name": file.name,
+            "sha256": digest.hexdigest(),
+            "bytes": opened.st_size,
+        },
+        "identity": file_identity(opened),
     }
+
+
+def qualified_artifact_identity(value):
+    try:
+        identity = json.loads(value)
+    except json.JSONDecodeError:
+        raise ValueError("qualified artifact identity is invalid") from None
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"record", "identity"}
+        or not isinstance(identity["record"], dict)
+        or set(identity["record"]) != {"name", "sha256", "bytes"}
+        or not isinstance(identity["identity"], dict)
+        or set(identity["identity"]) != {"device", "inode", "bytes", "mtime_ns", "ctime_ns"}
+        or not isinstance(identity["record"]["name"], str)
+        or not identity["record"]["name"]
+        or not re.fullmatch(r"[0-9a-f]{64}", identity["record"]["sha256"])
+        or not isinstance(identity["record"]["bytes"], int)
+        or identity["record"]["bytes"] < 1
+        or any(not isinstance(item, int) for item in identity["identity"].values())
+    ):
+        raise ValueError("qualified artifact identity is invalid")
+    return identity
 
 
 def feature_state_record(value, requirement, artifacts):
@@ -163,7 +214,10 @@ def main():
         raise SystemExit("write-native-evidence: evidence directory is unavailable") from None
     try:
         artifacts = [artifact_record(output.parent, item) for item in args.artifact]
-        qualified_artifact = qualified_artifact_record(args.qualified_artifact)
+        qualified_snapshot = qualified_artifact_snapshot(args.qualified_artifact)
+        if qualified_snapshot != qualified_artifact_identity(args.qualified_artifact_identity):
+            raise ValueError("qualified artifact changed after capture")
+        qualified_artifact = qualified_snapshot["record"]
     except ValueError as error:
         raise SystemExit(f"write-native-evidence: {error}") from None
     artifact_policy = requirement["artifacts"]
@@ -232,6 +286,7 @@ def self_test():
         image.save(good)
         qualified = root / "qualified.apk"
         qualified.write_bytes(b"qualified release artifact\n")
+        qualified_identity = json.dumps(qualified_artifact_snapshot(qualified), separators=(",", ":"))
         black = root / "black.png"
         Image.new("RGB", (8, 8), "black").save(black)
         white = root / "white.png"
@@ -273,6 +328,7 @@ def self_test():
             "--architecture", "x86_64", "--commit", "a" * 40,
             "--run-id", "self-test", "--elapsed-ms", "1",
             "--qualified-artifact", os.fspath(qualified),
+            "--qualified-artifact-identity", qualified_identity,
         ]
         for name, content in fixtures.items():
             screenshot = root / name
@@ -386,11 +442,64 @@ def self_test():
             )
             if result.returncode == 0 or receipt.exists():
                 raise SystemExit(f"{name} produced a native evidence receipt")
+        replacement = root / "replacement.apk"
+        replacement.write_bytes(b"x" * qualified.stat().st_size)
+        replacement.replace(qualified)
+        receipt = root / "replaced-qualified.json"
+        result = subprocess.run(
+            common + [
+                "--output", os.fspath(receipt),
+                "--artifact", "screenshot=good.png",
+                "--artifact", "accessibility=accessibility.txt",
+                "--artifact", "measurement=measurement.json",
+                "--feature-state",
+                "devices=scan-pairing-code,screenshot=good.png,accessibility=accessibility.txt",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 or receipt.exists():
+            raise SystemExit("same-size qualified artifact replacement produced a receipt")
+        qualified.write_bytes(b"qualified release artifact\n")
+        replacement.unlink(missing_ok=True)
+        qualified_identity = json.dumps(qualified_artifact_snapshot(qualified), separators=(",", ":"))
+        common[common.index("--qualified-artifact-identity") + 1] = qualified_identity
+        original_read = os.read
+        replacement = root / "during-hash.apk"
+        replacement.write_bytes(b"y" * qualified.stat().st_size)
+        replaced = False
+
+        def replace_during_hash(descriptor, size):
+            nonlocal replaced
+            chunk = original_read(descriptor, size)
+            if chunk and not replaced:
+                replacement.replace(qualified)
+                replaced = True
+            return chunk
+
+        os.read = replace_during_hash
+        try:
+            try:
+                qualified_artifact_snapshot(qualified)
+            except ValueError:
+                pass
+            else:
+                raise SystemExit("qualified artifact replacement during hashing was accepted")
+        finally:
+            os.read = original_read
+        if not replaced:
+            raise SystemExit("qualified artifact hash race fixture did not replace the file")
     print("native evidence writer self-test passed")
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         self_test()
+    elif len(sys.argv) == 3 and sys.argv[1] == "--capture-qualified-artifact":
+        try:
+            print(json.dumps(qualified_artifact_snapshot(sys.argv[2]), separators=(",", ":")))
+        except ValueError as error:
+            raise SystemExit(f"write-native-evidence: {error}") from None
     else:
         main()
