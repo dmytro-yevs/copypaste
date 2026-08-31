@@ -228,6 +228,11 @@ The shared enum distinguishes at least:
 
 Messages are presentation-independent and path-free. Clients select friendly
 copy from the code and preserve the raw message only for safe diagnostics.
+When the shared client redactor sees an unquoted path, it redacts to that
+line's end: whitespace cannot distinguish a filename tail from explanatory
+prose. An unescaped closing quote is a boundary, so its following suffix is
+retained. The redactor preserves LF/CRLF shape and leaves URLs or ordinary
+slash prose alone.
 
 Stable rule IDs used by source comments:
 

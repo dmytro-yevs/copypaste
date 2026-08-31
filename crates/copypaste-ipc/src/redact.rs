@@ -14,14 +14,12 @@
 //! second layer: a client-side net so a daemon-side regression degrades to an
 //! unhelpful message instead of a disclosure.
 
-/// Replace anything path-shaped in `message` with `<path>`, preserving
-/// whitespace so the rest of the sentence still reads normally.
+/// Replace anything path-shaped in `message` with `<path>`.
 ///
-/// A path may contain a space, and the one that matters does:
-/// `~/Library/Application Support/com.copypaste.CopyPaste/daemon.sock`.
-/// Redacting one token at a time left the path tail on screen. So once a token is
-/// path-shaped, following tokens that remain inside its quotes or carry a path
-/// separator are absorbed into the same redaction.
+/// Whitespace cannot safely end an unquoted path: it may be a filename tail.
+/// Redact its current line rather than guess. An unescaped closing quote is an
+/// explicit boundary, so text after a quoted path remains useful. Line endings
+/// stay intact and URLs or ordinary slash prose never enter the path branch.
 pub fn scrub_paths(message: &str) -> String {
     let tokens: Vec<&str> = message.split_inclusive(char::is_whitespace).collect();
     let mut out = String::with_capacity(message.len());
@@ -33,19 +31,26 @@ pub fn scrub_paths(message: &str) -> String {
             i += 1;
             continue;
         }
-        // Absorb the continuation, then keep the whitespace that ended it so
-        // the sentence still reads normally.
-        let quote = opening_quote(trimmed);
+        let mut quote = opening_quote(trimmed);
         let mut last = i;
         while last + 1 < tokens.len()
-            && (contains_path_separator(tokens[last + 1].trim_end())
-                || quote.is_some_and(|quote| !ends_with_quote(tokens[last], quote)))
+            && match quote {
+                Some(delimiter) if ends_with_quote(tokens[last], delimiter) => false,
+                Some(delimiter) if ends_with_escaped_quote(tokens[last], delimiter) => {
+                    quote = None;
+                    true
+                }
+                Some(_) => true,
+                None => !ends_line(tokens[last]),
+            }
         {
             last += 1;
         }
         let token = tokens[last];
         out.push_str("<path>");
-        out.push_str(&token[token.trim_end().len()..]);
+        if quote.is_some() || ends_line(token) {
+            out.push_str(&token[token.trim_end().len()..]);
+        }
         i = last + 1;
     }
     out
@@ -149,11 +154,20 @@ fn ends_with_quote(token: &str, quote: char) -> bool {
     token
         .trim_end()
         .trim_end_matches([')', ']', '}', ',', ';', '.'])
-        .ends_with(quote)
+        .strip_suffix(quote)
+        .is_some_and(|before_quote| !before_quote.ends_with('\\'))
 }
 
-fn contains_path_separator(token: &str) -> bool {
-    token.contains('/') || token.contains('\\')
+fn ends_with_escaped_quote(token: &str, quote: char) -> bool {
+    token
+        .trim_end()
+        .trim_end_matches([')', ']', '}', ',', ';', '.'])
+        .strip_suffix(quote)
+        .is_some_and(|before_quote| before_quote.ends_with('\\'))
+}
+
+fn ends_line(token: &str) -> bool {
+    token.ends_with('\r') || token.ends_with('\n')
 }
 
 #[cfg(test)]
@@ -245,10 +259,10 @@ mod tests {
     }
 
     #[test]
-    fn redacts_unix_paths_and_keeps_the_sentence() {
+    fn redacts_unquoted_paths_to_the_line_boundary() {
         assert_eq!(
             scrub_paths("could not open /Users/alice/Library/x.sock for writing"),
-            "could not open <path> for writing"
+            "could not open <path>"
         );
         assert_eq!(
             scrub_paths("failed at /home/bob/.local/share/db"),
@@ -288,7 +302,8 @@ mod tests {
 
     #[test]
     fn preserves_whitespace_shape() {
-        assert_eq!(scrub_paths("a  /home/x  b"), "a  <path>  b");
+        assert_eq!(scrub_paths("  /home/x  b"), "  <path>");
+        assert_eq!(scrub_paths("  /home/x  "), "  <path>");
         assert_eq!(scrub_paths("line\n/home/x\n"), "line\n<path>\n");
     }
 
@@ -296,12 +311,27 @@ mod tests {
     fn a_path_with_a_space_is_redacted_whole() {
         assert_eq!(
             scrub_paths("could not bind ~/Library/Application Support/com.copypaste.CopyPaste/daemon.sock here"),
-            "could not bind <path> here"
+            "could not bind <path>"
         );
-        // The word after a path is kept, so the sentence survives.
         assert_eq!(
             scrub_paths("opened /home/x/db for writing"),
-            "opened <path> for writing"
+            "opened <path>"
+        );
+    }
+
+    #[test]
+    fn unquoted_path_tails_do_not_cross_line_boundaries() {
+        assert_eq!(
+            scrub_paths(
+                "could not open /Users/alice/Library Application Support/private.sock while syncing\nretry later"
+            ),
+            "could not open <path>\nretry later"
+        );
+        assert_eq!(
+            scrub_paths(
+                "could not open /Users/alice/Library Application Support/private.sock while syncing\r\nretry later"
+            ),
+            "could not open <path>\r\nretry later"
         );
     }
 

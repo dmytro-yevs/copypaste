@@ -342,7 +342,7 @@ mod tests {
             "file:///etc/passwd",
         ] {
             let out = scrub_paths(&format!("failed at {raw} sorry"));
-            assert_eq!(out, "failed at <path> sorry", "{raw}");
+            assert_eq!(out, "failed at <path>", "{raw}");
         }
     }
 

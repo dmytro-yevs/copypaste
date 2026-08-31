@@ -146,16 +146,9 @@ const REDACTED: &str = "<redacted>";
 
 /// Drop the **whole value** when any part of it looked like a path.
 ///
-/// `scrub_paths` is the one redactor and stays the one detector, but it works
-/// token by token: it replaces the token that starts with `/` and leaves what
-/// follows a space. The real macOS socket path is
-/// `~/Library/Application Support/com.copypaste.CopyPaste/daemon.sock`, so token-wise
-/// redaction keeps the username out and still leaves a recognisable tail — in
-/// a block written to be pasted into a public issue.
-///
-/// A diagnostics value is a version, a backend name or a number. None of them
-/// has any business containing a path, so finding one is reason enough to
-/// distrust the field rather than to salvage part of it.
+/// `scrub_paths` remains the shared path detector. A diagnostics value is a
+/// version, backend name or number, so any path is reason enough to distrust
+/// the whole field rather than salvage part of it.
 fn safe_value(value: &str) -> String {
     if scrub_paths(value) == value {
         value.to_string()

@@ -76,8 +76,8 @@
       "platform": "android",
       "surface": "Database copypaste-v2.db could not be opened",
       "expectedRule": "android-private-database",
-      "expectedSurface": "Database <path> could not be opened",
-      "forbiddenFragments": ["copypaste-v2.db"]
+      "expectedSurface": "Database <path>",
+      "forbiddenFragments": ["copypaste-v2.db", "could not be opened"]
     }
   ],
   "safeDisplayCases": [
@@ -146,8 +146,20 @@
     {
       "id": "windows-forward-path-with-space",
       "surface": "Could not open D:/Profiles/Alice Smith/private.db now",
-      "expectedSurface": "Could not open <path> now",
-      "forbiddenFragments": ["Profiles", "Alice", "Smith", "private.db"]
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Profiles", "Alice", "Smith", "private.db", "now"]
+    },
+    {
+      "id": "unquoted-posix-path-tail-to-line-boundary",
+      "surface": "Could not open /Users/alice/Library Application Support/private.sock while syncing",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Users", "alice", "Application", "Support", "private.sock", "while syncing"]
+    },
+    {
+      "id": "unquoted-posix-path-tail-keeps-next-line",
+      "surface": "Could not open /Users/alice/Library Application Support/private.sock while syncing\nretry later",
+      "expectedSurface": "Could not open <path>\nretry later",
+      "forbiddenFragments": ["Users", "alice", "Application", "Support", "private.sock", "while syncing"]
     },
     {
       "id": "windows-extended-unc-with-space",
@@ -166,6 +178,12 @@
       "surface": "Failure path:'D:/Profiles/alice/device.key'",
       "expectedSurface": "Failure <path>",
       "forbiddenFragments": ["Profiles", "alice", "device.key"]
+    },
+    {
+      "id": "quoted-posix-path-with-escaped-quote",
+      "surface": "Could not open \"/Users/alice/Private\\\" folder/secret.db\" retry",
+      "expectedSurface": "Could not open <path>",
+      "forbiddenFragments": ["Users", "alice", "Private", "folder", "secret.db", "retry"]
     },
     {
       "id": "quoted-path-closing-punctuation",
