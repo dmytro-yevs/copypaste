@@ -66,18 +66,21 @@ function controller(
 function launcher(
     pairing: PairingController,
     onOpenChange: (open: boolean) => void = vi.fn(),
+    preview = true,
+    onCreate = vi.fn(),
+    onJoin = vi.fn(),
 ) {
     return (
         <TooltipProvider>
             <PairingLauncherDialog
                 open
                 available
-                preview
+                preview={preview}
                 disabled={false}
                 pairing={pairing}
                 onOpenChange={onOpenChange}
-                onCreate={vi.fn()}
-                onJoin={vi.fn()}
+                onCreate={onCreate}
+                onJoin={onJoin}
             />
         </TooltipProvider>
     );
@@ -210,6 +213,39 @@ describe("PairingLauncherDialog preview flows", () => {
         expect(onOpenChange).toHaveBeenCalledWith(false);
     });
 
+    it.each(["Escape", "close button", "backdrop"])(
+        "cancels an active ceremony despite a client error after %s dismissal",
+        async (dismissal) => {
+            const pairing = controller({
+                ceremony: waiting,
+                error: new IpcFailure("peer_unreachable", true),
+            });
+            const user = userEvent.setup();
+            render(<StatefulLauncher pairing={pairing} />);
+
+            if (dismissal === "Escape") {
+                fireEvent.keyDown(screen.getByRole("dialog"), {
+                    key: "Escape",
+                });
+            } else if (dismissal === "close button") {
+                await user.click(screen.getByRole("button", { name: "Close" }));
+            } else {
+                await user.click(
+                    document.querySelector<HTMLElement>(
+                        '[data-slot="dialog-overlay"]',
+                    ) as HTMLElement,
+                );
+            }
+
+            expect(pairing.run).toHaveBeenCalledWith("cancel");
+            await waitFor(() => {
+                expect(document.activeElement?.textContent).toBe(
+                    "Launch pairing",
+                );
+            });
+        },
+    );
+
     it("keeps preview pairing material out of DOM text, values, and attributes", () => {
         const pairing = {
             ...controller({ ceremony: waiting }),
@@ -223,11 +259,16 @@ describe("PairingLauncherDialog preview flows", () => {
 
         expect(pairing.startPreviewCreate).toHaveBeenCalledTimes(1);
         expect(baseElement.querySelector("img")).toBeNull();
-        for (const secret of Object.values(protectedInvite)) {
+        const forbidden = [
+            ...Object.values(protectedInvite),
+            encodeURIComponent(protectedInvite.qr_svg),
+        ];
+        for (const secret of forbidden) {
             expect(baseElement.textContent).not.toContain(secret);
             for (const element of baseElement.querySelectorAll<HTMLElement>("*")) {
-                expect(element.getAttributeNames().map((name) => element.getAttribute(name)))
-                    .not.toContain(secret);
+                for (const name of element.getAttributeNames()) {
+                    expect(element.getAttribute(name)).not.toContain(secret);
+                }
                 if (element instanceof HTMLInputElement) {
                     expect(element.value).not.toContain(secret);
                 }
@@ -250,6 +291,29 @@ describe("PairingLauncherDialog preview flows", () => {
         expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
         expect(pairing.run).not.toHaveBeenCalled();
     });
+
+    it.each([
+        ["Show pairing code", "create"],
+        ["Enter pairing code", "join"],
+    ] as const)(
+        "keeps native %s callbacks available outside preview",
+        async (label, action) => {
+            const onOpenChange = vi.fn();
+            const onCreate = vi.fn();
+            const onJoin = vi.fn();
+            const pairing = controller();
+            render(launcher(pairing, onOpenChange, false, onCreate, onJoin));
+
+            await userEvent.setup().click(
+                screen.getByRole("button", { name: label }),
+            );
+
+            expect(onOpenChange).toHaveBeenCalledWith(false);
+            expect(onCreate).toHaveBeenCalledTimes(action === "create" ? 1 : 0);
+            expect(onJoin).toHaveBeenCalledTimes(action === "join" ? 1 : 0);
+            expect(pairing.startPreviewCreate).not.toHaveBeenCalled();
+        },
+    );
 
     it.each([
         ["confirmed", "Done", false],
