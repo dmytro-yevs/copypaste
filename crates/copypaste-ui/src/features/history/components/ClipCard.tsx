@@ -168,7 +168,6 @@ function ClipCardImpl({
                 size="md"
                 className={styles.hit}
                 aria-label={label}
-                aria-selected={state === "active" || checked}
                 tabIndex={state === "active" ? 0 : -1}
                 onPointerDown={beginPress}
                 onPointerMove={movePress}

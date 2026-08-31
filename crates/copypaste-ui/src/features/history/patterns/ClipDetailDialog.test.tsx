@@ -93,7 +93,11 @@ describe("ClipDetailDialog notices", () => {
     render(
       <TooltipProvider>
         <ClipDetailDialog
-          item={item({ content: "image", content_type: "image/png" })}
+          item={item({
+            content: "image",
+            content_class: "image",
+            content_type: "image/png",
+          })}
           origin={null}
           initialExpanded
           fullContent={null}

@@ -1,9 +1,23 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui";
 import { item } from "@/test/harness";
 import { LibraryInspectorPanel } from "./LibraryInspectorPanel";
+import styles from "./LibraryInspectorPanel.module.css";
+
+vi.mock("@/features/source-apps", () => ({
+  SourceAppIcon: ({ fallbackText }: { fallbackText?: string }) => (
+    <span data-slot="source-app-icon">{fallbackText}</span>
+  ),
+}));
+
+const inspectorStyles = readFileSync(
+  resolve(process.cwd(), "src/features/history/patterns/LibraryInspectorPanel.module.css"),
+  "utf8",
+);
 
 const callbacks = {
   onReveal: vi.fn(),
@@ -65,6 +79,41 @@ describe("LibraryInspectorPanel", () => {
       ).toBeTruthy();
       expect(row.querySelector("dd[data-slot='metadata-value']")).not.toBeNull();
     }
+  });
+
+  it("keeps the timestamp in the content grid column without a source", () => {
+    const { container } = render(inspector());
+    const source = container.querySelector<HTMLElement>(`.${styles.source}`);
+    const sourceCopy = source?.querySelector<HTMLElement>(
+      `.${styles.sourceCopy}`,
+    );
+
+    expect(source?.children).toHaveLength(2);
+    expect(sourceCopy?.querySelector("small")).not.toBeNull();
+    expect(inspectorStyles).toMatch(
+      /\.sourceCopy\s*\{[^}]*grid-column:\s*2;/,
+    );
+  });
+
+  it("keeps source text and timestamp in the content grid column with a source", () => {
+    const { container } = render(
+      inspector({
+        item: item({
+          source_app_bundle_id: "com.example.editor",
+          source_app_name: "Example Editor",
+        }),
+      }),
+    );
+    const source = container.querySelector<HTMLElement>(`.${styles.source}`);
+    const sourceCopy = source?.querySelector<HTMLElement>(
+      `.${styles.sourceCopy}`,
+    );
+
+    expect(source?.children).toHaveLength(3);
+    expect(sourceCopy?.querySelector("strong")?.textContent).toBe(
+      "Example Editor",
+    );
+    expect(sourceCopy?.querySelector("small")).not.toBeNull();
   });
 
   it("keeps sensitive plaintext out until an ephemeral reveal is supplied", () => {

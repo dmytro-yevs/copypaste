@@ -85,7 +85,6 @@ export function HistoryVirtualList({
             // The card owns the accessible name; naming this wrapper would
             // announce every virtual row twice.
             aria-current={item.id === activeId ? "true" : undefined}
-            aria-checked={selectionActive ? selected.has(item.id) : undefined}
             className={styles.slot}
             data-index={row.index}
             data-dragging={sortable?.dragging || undefined}
