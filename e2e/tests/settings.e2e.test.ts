@@ -1,5 +1,5 @@
 /**
- * Preferences: the sections, and the controls that leave the screen.
+ * Settings: the sections, and the controls that leave the screen.
  *
  * The app's own preferences are round-tripped because they change what the
  * user sees — the history display limit must not delete items, and appearance
@@ -44,7 +44,7 @@ beforeAll(async () => {
     seed: Array.from({ length: 101 }, (_, index) => `a settings fixture ${index}`),
   });
   await waitForRows(app.browser, 2);
-  await gotoView(app.browser, "Preferences");
+  await gotoView(app.browser, "Settings");
 }, 300_000);
 
 afterAll(async () => {
@@ -68,9 +68,9 @@ async function withSettingsNavigation(
 ): Promise<void> {
   await retryResponsiveInteraction<SettingsNavigationControl>({
     acquire: async () => {
-      const navigation = await displayed('[aria-label="Preference sections"]');
+      const navigation = await displayed('[aria-label="Settings sections"]');
       if (navigation) return { kind: "navigation", element: navigation };
-      const back = await displayed('button[aria-label="Back to Preferences"]');
+      const back = await displayed('button[aria-label="Back to Settings"]');
       return back ? { kind: "back", element: back } : null;
     },
     interact: async (current) => {
@@ -199,7 +199,7 @@ describe("the sections", () => {
       row = (await app.browser.execute(function () {
         const list = Array.from(
           document.querySelectorAll<HTMLElement>(
-            '[aria-label="Preference sections"]',
+            '[aria-label="Settings sections"]',
           ),
         ).find((candidate) => candidate.getClientRects().length > 0);
         if (!list) return null;
@@ -291,7 +291,7 @@ describe("a preference that changes the visible list", () => {
 
 describe("appearance", () => {
   test("survives a reload of the window (INV-32)", async () => {
-    await gotoView(app.browser, "Preferences");
+    await gotoView(app.browser, "Settings");
     await openSection("Appearance");
     await (await app.browser.$('[data-product-theme="aurora"]')).click();
 
@@ -317,7 +317,7 @@ describe("appearance", () => {
       await app.browser.execute(() => document.documentElement.dataset.theme),
     ).toBe("aurora");
 
-    await gotoView(app.browser, "Preferences");
+    await gotoView(app.browser, "Settings");
     await openSection("Appearance");
     const aurora = await app.browser.$('[data-product-theme="aurora"]');
     expect(await aurora.getAttribute("aria-pressed")).toBe("true");
@@ -327,7 +327,7 @@ describe("appearance", () => {
 describe("with the service down", () => {
   test("the client-owned settings still work", async () => {
     await app.daemon.kill();
-    await gotoView(app.browser, "Preferences");
+    await gotoView(app.browser, "Settings");
     await openSection("Appearance");
 
     // Nothing on this pane needs the daemon, so it must still be operable.

@@ -32,7 +32,7 @@ afterAll(async () => {
 });
 
 async function openTab(label: string): Promise<void> {
-  await gotoView(app.browser, "Preferences");
+  await gotoView(app.browser, "Settings");
   const tab = await app.browser.$(`[role="tab"]=${label}`);
   await tab.waitForClickable({ timeout: 15_000 });
   await tab.click();
