@@ -10,6 +10,9 @@ mod native_copy;
 pub(crate) mod semantics;
 pub use semantics::{resolve_pairing_semantics, PairingSemantics};
 
+#[cfg(any(test, target_os = "android"))]
+mod android_payload;
+
 #[cfg(any(target_os = "android", target_os = "macos", target_os = "windows"))]
 pub type NativeAbort = Arc<dyn Fn() + Send + Sync>;
 

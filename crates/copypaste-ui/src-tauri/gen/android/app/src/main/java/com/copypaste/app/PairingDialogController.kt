@@ -108,41 +108,36 @@ internal class PairingDialogController(
         return true
     }
 
-    fun presentProgress(state: String, onAbort: (() -> Unit)? = null): Boolean {
-        if (destroyed) return false
-        if (state == "waiting_for_peer" && showingInvite && activeDialog?.isShowing == true) {
+    fun presentProgress(
+        messageId: String,
+        title: String,
+        detail: String,
+        active: Boolean,
+        onAbort: (() -> Unit)? = null,
+    ): Boolean {
+        if (destroyed || title.isBlank() || detail.isBlank()) return false
+        if (messageId == "waiting_for_peer" && showingInvite && activeDialog?.isShowing == true) {
             return true
         }
         // SAS confirmation is owned by confirm(). Opening a modal progress sheet
         // here would block WebView Confirm and abort on dismiss before the user
         // can compare codes — close any prior progress without aborting.
-        if (state == "awaiting_confirmation") {
+        if (messageId == "compare_codes") {
             dismissActive()
             this.onAbort = null
             showingInvite = false
             return true
         }
         dismissActive()
-        this.onAbort = onAbort
+        this.onAbort = if (active) onAbort else null
         showingInvite = false
-        val message = when (state) {
-            "waiting_for_peer" -> R.string.pairing_waiting
-            "handshaking" -> R.string.pairing_handshaking
-            "awaiting_confirmation" -> R.string.pairing_awaiting_confirmation
-            "confirmed" -> R.string.pairing_confirmed
-            "rejected" -> R.string.pairing_rejected
-            "cancelled" -> R.string.pairing_cancelled
-            "timed_out" -> R.string.pairing_timed_out
-            "failed" -> R.string.pairing_failed
-            else -> R.string.pairing_idle
+        val builder = MaterialAlertDialogBuilder(activity)
+            .setTitle(title)
+            .setMessage(detail)
+        if (active) {
+            builder.setNegativeButton(R.string.pairing_cancel) { dialog, _ -> dialog.dismiss() }
         }
-        show(
-            MaterialAlertDialogBuilder(activity)
-                .setTitle(R.string.pairing_progress_title)
-                .setMessage(message)
-                .setNegativeButton(R.string.pairing_cancel) { dialog, _ -> dialog.dismiss() }
-                .create(),
-        )
+        show(builder.create())
         return true
     }
 
