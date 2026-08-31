@@ -53,12 +53,13 @@ export function pairingClientErrorPresentation(
   error: unknown,
 ): PairingClientErrorPresentation | null {
   if (error === null || error === undefined) return null;
+  const kind = classifyError(error);
   return {
     title: t("common.error"),
-    body: friendlyError(classifyError(error)),
+    body: friendlyError(kind),
     icon: "alert",
     tone: "danger",
     live: "alert",
-    retry: isRetryable(error),
+    retry: kind !== "content_too_large" && kind !== "unknown" && isRetryable(error),
   };
 }

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { IpcFailure } from "@/lib/errors";
 import type { PairingCeremony, PairingSemantics } from "@/lib/ipc";
-import { pairingIsActive, pairingPresentation } from "./pairingPresentation";
+import {
+  pairingClientErrorPresentation,
+  pairingIsActive,
+  pairingPresentation,
+} from "./pairingPresentation";
 
 function ceremony(semantics: PairingSemantics): PairingCeremony {
   return {
@@ -57,5 +62,17 @@ describe("pairingPresentation", () => {
       expect(presentation.titleKey).toContain(message_id);
       expect(presentation.semantics.retry).toBe(true);
     }
+  });
+
+  it("does not invent retry for oversized or unknown client failures", () => {
+    expect(
+      pairingClientErrorPresentation(new IpcFailure("content_too_large", true))?.retry,
+    ).toBe(false);
+    expect(
+      pairingClientErrorPresentation(new IpcFailure("future_code", true))?.retry,
+    ).toBe(false);
+    expect(
+      pairingClientErrorPresentation(new IpcFailure("peer_unreachable", true))?.retry,
+    ).toBe(true);
   });
 });
