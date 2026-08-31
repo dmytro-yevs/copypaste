@@ -33,12 +33,16 @@
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::search_stops_at_the_ciphertext_budget_before_building_a_page'"
       ],
       "ui_tests": [
-        "npm --prefix crates/copypaste-ui test"
+        "npm --prefix crates/copypaste-ui test",
+        "bash -c 'cd crates/copypaste-ui && npm exec -- vitest run src/lib/clipPresentation.test.ts src/features/quick-paste src/features/history/screen/LibraryScreen.selection.integration.test.tsx src/features/history/patterns/LibraryInspectorPanel.test.tsx'"
       ],
       "accessibility_states": [
         "loading",
         "empty",
         "error",
+        "selected",
+        "masked",
+        "body_unavailable",
         "keyboard",
         "screen_reader"
       ],
@@ -214,14 +218,21 @@
         "cargo test -p copypaste-p2p oversized_item",
         "cargo test -p copypaste-core p2p_contract",
         "cargo test -p copypaste-ipc --test wire_roundtrip",
+        "cargo test --locked -p copypaste-ipc --test device_presence_wire",
+        "cargo test --locked -p copypaste-ui pairing_presentation::semantics::tests",
+        "cargo test --locked -p copypaste-ui commands::pairing::tests::failed_ceremony_serialization_uses_the_typed_retry_policy",
+        "cargo test --locked -p copypaste-ui android_payload",
         "bash -c 'cd crates/copypaste-ui && npm exec -- vitest run src/hooks/useDevices.test.ts'"
       ],
       "ui_tests": [
-        "npm --prefix crates/copypaste-ui test"
+        "npm --prefix crates/copypaste-ui test",
+        "bash -c 'cd crates/copypaste-ui && npm exec -- vitest run src/components/shared/DeviceMeta.test.tsx src/features/devices/patterns/DeviceRoster.test.tsx src/features/devices/patterns/PairingLauncherDialog.test.tsx'"
       ],
       "accessibility_states": [
         "progress",
         "confirmed",
+        "presence_unknown",
+        "cancel_pending",
         "error",
         "keyboard",
         "screen_reader"
@@ -352,7 +363,9 @@
         "pwsh -NoProfile -File scripts/release/test-windows-installer-template.ps1"
       ],
       "ui_tests": [
-        "npm --prefix crates/copypaste-ui test"
+        "npm --prefix crates/copypaste-ui test",
+        "npm --prefix design run check",
+        "bash -c 'cd crates/copypaste-ui && npm exec -- vitest run src/app/routes src/features/settings/screen/SettingsScreen.test.tsx src/features/settings/components/SettingsGroupSurface.style.test.ts'"
       ],
       "accessibility_states": [
         "loading",
