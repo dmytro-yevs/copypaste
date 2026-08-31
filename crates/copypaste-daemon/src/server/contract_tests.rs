@@ -269,6 +269,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
         }
     }
 
+    state.release_drain_listener();
     tokio::time::timeout(Duration::from_secs(5), server)
         .await
         .expect("shutdown must stop the server")
@@ -303,6 +304,7 @@ async fn retired_pairing_methods_are_rejected_before_dispatch() {
     }
 
     state.request_shutdown();
+    state.release_drain_listener();
     tokio::time::timeout(Duration::from_secs(5), server)
         .await
         .expect("server stops")
@@ -338,6 +340,7 @@ async fn every_parameterized_method_is_rejected_before_dispatch_when_malformed()
     }
 
     state.request_shutdown();
+    state.release_drain_listener();
     tokio::time::timeout(Duration::from_secs(5), server)
         .await
         .expect("server stops")
@@ -361,6 +364,7 @@ async fn dropping_watchers_cancels_them_and_releases_the_separate_cap() {
     }
 
     state.request_shutdown();
+    state.release_drain_listener();
     tokio::time::timeout(Duration::from_secs(5), server)
         .await
         .expect("server stops")
@@ -382,6 +386,7 @@ async fn an_idle_authenticated_connection_is_closed_at_the_shared_deadline() {
     );
 
     state.request_shutdown();
+    state.release_drain_listener();
     tokio::time::timeout(Duration::from_secs(1), server)
         .await
         .expect("server stops")

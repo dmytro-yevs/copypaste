@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use copypaste_core::{Detector, Keyring, Store};
 use copypaste_ipc::{DiagnosticCounters, EventData, EventKind};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, watch, OwnedRwLockReadGuard, RwLock};
 
 use crate::clipboard::ClipboardSource;
 use crate::cloud::Cloud;
@@ -49,6 +49,9 @@ pub struct AppState {
     /// process. `main` holds no second sender, so SIGTERM and the IPC verb take
     /// one teardown path rather than two.
     shutdown: watch::Sender<bool>,
+    drain_release: watch::Sender<bool>,
+    draining: AtomicBool,
+    admissions: Arc<RwLock<()>>,
     backend_name: &'static str,
     ready: AtomicBool,
     capture_running: AtomicBool,
@@ -92,6 +95,9 @@ impl AppState {
             db_path,
             events: broadcast::channel(EVENT_BUFFER).0,
             shutdown: watch::channel(false).0,
+            drain_release: watch::channel(false).0,
+            draining: AtomicBool::new(false),
+            admissions: Arc::new(RwLock::new(())),
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
@@ -105,11 +111,36 @@ impl AppState {
         self.shutdown.subscribe()
     }
 
+    pub fn drain_release_rx(&self) -> watch::Receiver<bool> {
+        self.drain_release.subscribe()
+    }
+
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::Acquire)
+    }
+
+    pub async fn admit_request(&self) -> Option<OwnedRwLockReadGuard<()>> {
+        if self.is_draining() {
+            return None;
+        }
+        let permit = Arc::clone(&self.admissions).read_owned().await;
+        (!self.is_draining()).then_some(permit)
+    }
+
+    pub async fn wait_for_admitted_requests(&self) {
+        drop(self.admissions.write().await);
+    }
+
+    pub fn release_drain_listener(&self) {
+        let _ = self.drain_release.send(true);
+    }
+
     /// Begin an orderly shutdown. Idempotent, and safe from any thread.
     ///
     /// Every task finishes the unit of work it is in before observing this, so
     /// a capture already past the clipboard read still reaches the database.
     pub fn request_shutdown(&self) {
+        self.draining.store(true, Ordering::Release);
         // Fails only if every receiver has been dropped, which means the tasks
         // this would have stopped are already gone.
         let _ = self.shutdown.send(true);
@@ -242,9 +273,32 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::test_state;
 
     #[test]
     fn event_buffer_capacity_is_two_fifty_six() {
         assert_eq!(EVENT_BUFFER, 256);
+    }
+
+    #[tokio::test]
+    async fn admission_rechecks_drain_after_waiting_for_a_permit() {
+        let (state, _dir) = test_state("admission-race");
+        let blocker = state.admissions.write().await;
+        let waiter = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { state.admit_request().await }
+        });
+        tokio::task::yield_now().await;
+
+        state.request_shutdown();
+        drop(blocker);
+
+        assert!(
+            waiter
+                .await
+                .expect("admission task must not panic")
+                .is_none(),
+            "a request that waited through drain was admitted"
+        );
     }
 }
