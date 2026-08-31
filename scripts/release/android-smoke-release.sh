@@ -49,6 +49,10 @@ abi="$(sh_ getprop ro.product.cpu.abi)"
 printf '  device: API %s, %s\n' "$sdk" "$abi"
 
 [[ -f "$APK" ]] || { echo "  FATAL APK not found at '${APK:-<unset>}'"; exit 1; }
+qualified_artifact_identity="$(python3 scripts/release/write-native-evidence.py --capture-qualified-artifact "$APK")" || {
+    echo "  FATAL release artifact identity could not be captured"
+    exit 1
+}
 printf '  apk: %s (%s bytes)\n' "$APK" "$(android_file_size "$APK")"
 
 apk_libs="$(unzip -l "$APK")"
@@ -358,6 +362,7 @@ PY
         --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
         --elapsed-ms "$paint_elapsed_ms" \
         --qualified-artifact "$APK" \
+        --qualified-artifact-identity "$qualified_artifact_identity" \
         --feature-state devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml \
         --artifact screenshot=pairing-entry.png \
         --artifact accessibility=pairing-entry.xml \

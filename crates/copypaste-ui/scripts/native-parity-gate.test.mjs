@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { link, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { main, validateEvidence as validateEvidenceImpl } from "./native-parity-gate.mjs";
+import { main, stableQualifiedArtifact, validateEvidence as validateEvidenceImpl } from "./native-parity-gate.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "123456789";
@@ -1266,6 +1266,44 @@ test("rejects missing, empty, directory, and symbolic-link qualified artifacts",
   }
 }));
 
+test("detects qualified artifact replacement before and during hashing", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "android");
+  const directory = path.dirname(receiptPath);
+  const qualified = path.join(directory, "android-release.bin");
+  const baseline = await stableQualifiedArtifact(qualified);
+  const replacement = path.join(directory, "replacement.apk");
+  await writeFile(replacement, Buffer.alloc(baseline.bytes, 1));
+  await rename(replacement, qualified);
+  const afterReplacement = await stableQualifiedArtifact(qualified);
+  assert.notEqual(afterReplacement.sha256, baseline.sha256);
+  const duringHash = path.join(directory, "during-hash.apk");
+  await writeFile(duringHash, Buffer.alloc(afterReplacement.bytes, 2));
+  let replaced = false;
+  const raced = await stableQualifiedArtifact(qualified, {
+    onChunk: async () => {
+      if (!replaced) {
+        await rename(duringHash, qualified);
+        replaced = true;
+      }
+    },
+  });
+  assert.equal(replaced, true);
+  assert.equal(raced.kind, "changed while hashing");
+}));
+
+test("native producers capture artifact identity before first artifact use", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const macos = await readFile(path.join(root, "scripts/release/smoke-macos-dmg.sh"), "utf8");
+  const android = await readFile(path.join(root, "scripts/release/android-smoke-release.sh"), "utf8");
+  const windows = await readFile(path.join(root, "scripts/release/windows-native-evidence.ps1"), "utf8");
+  assert(macos.indexOf("--capture-qualified-artifact \"$DMG\"") < macos.indexOf("hdiutil attach \"$DMG\""));
+  assert(android.indexOf("--capture-qualified-artifact \"$APK\"") < android.indexOf("adb install -r -g \"$APK\""));
+  assert(windows.indexOf("--capture-qualified-artifact $installerPath") < windows.indexOf("Get-AuthenticodeSignature -FilePath $installerPath"));
+  assert.match(macos, /macos-native-evidence\.sh artifacts\/release-macos-native "\$DMG" "\$QUALIFIED_ARTIFACT_IDENTITY"/);
+  assert.match(android, /--qualified-artifact-identity "\$qualified_artifact_identity"/);
+  assert.match(windows, /--qualified-artifact-identity \$qualifiedArtifactIdentity/);
+});
+
 test("the command-line gate requires one qualified artifact for each required platform", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "android");
   const qualified = path.join(path.dirname(receiptPath), "android-release.bin");
@@ -1288,6 +1326,12 @@ test("the shared receipt writer emits gate-valid evidence", () => withRoot(async
   await rm(receiptPath);
   const writer = fileURLToPath(new URL("../../../scripts/release/write-native-evidence.py", import.meta.url));
   const python = process.platform === "win32" ? "python" : "python3";
+  const qualifiedPath = path.join(path.dirname(receiptPath), seeded.qualified_artifact.name);
+  const { stdout: qualifiedIdentity } = await run(python, [
+    writer,
+    "--capture-qualified-artifact",
+    qualifiedPath,
+  ]);
   const args = [
     writer,
     "--output", receiptPath,
@@ -1298,7 +1342,8 @@ test("the shared receipt writer emits gate-valid evidence", () => withRoot(async
     "--commit", COMMIT,
     "--run-id", RUN_ID,
     "--elapsed-ms", "10",
-    "--qualified-artifact", path.join(path.dirname(receiptPath), seeded.qualified_artifact.name),
+    "--qualified-artifact", qualifiedPath,
+    "--qualified-artifact-identity", qualifiedIdentity.trim(),
     "--feature-state", "history=populated",
   ];
   for (const artifact of seeded.artifacts) args.push("--artifact", `${artifact.kind}=${artifact.path}`);

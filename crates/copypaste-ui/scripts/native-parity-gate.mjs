@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, open, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -226,29 +226,71 @@ async function verifyArtifacts(receiptPath, receipt, label) {
 }
 
 async function verifyQualifiedArtifact(receipt, artifactPath, label) {
-  let metadata;
+  let snapshot;
   try {
-    metadata = await lstat(artifactPath);
-  } catch {
-    throw new Error(`${label} qualified artifact is missing`);
+    snapshot = await stableQualifiedArtifact(artifactPath);
+  } catch (error) {
+    throw new Error(`${label} qualified artifact ${error.message}`);
   }
-  if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.size < 1) {
-    throw new Error(`${label} qualified artifact is not a non-empty regular file`);
+  if (snapshot.kind !== "valid") {
+    throw new Error(`${label} qualified artifact ${snapshot.kind}`);
   }
-  if (path.basename(artifactPath) !== receipt.qualified_artifact.name) {
+  if (snapshot.name !== receipt.qualified_artifact.name) {
     throw new Error(`${label} qualified artifact name changed`);
   }
-  if (metadata.size !== receipt.qualified_artifact.bytes) {
+  if (snapshot.bytes !== receipt.qualified_artifact.bytes) {
     throw new Error(`${label} qualified artifact byte count changed`);
   }
-  let digest;
-  try {
-    digest = await sha256(artifactPath);
-  } catch {
-    throw new Error(`${label} qualified artifact cannot be read`);
-  }
-  if (digest !== receipt.qualified_artifact.sha256) {
+  if (snapshot.sha256 !== receipt.qualified_artifact.sha256) {
     throw new Error(`${label} qualified artifact checksum changed`);
+  }
+}
+
+function sameFileState(left, right) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs;
+}
+
+export async function stableQualifiedArtifact(artifactPath, { onChunk } = {}) {
+  let before;
+  try {
+    before = await lstat(artifactPath, { bigint: true });
+  } catch {
+    throw new Error("is missing");
+  }
+  if (before.isSymbolicLink() || !before.isFile() || before.size < 1n) {
+    return { kind: "is not a non-empty regular file" };
+  }
+  let handle;
+  try {
+    handle = await open(artifactPath, "r");
+    const opened = await handle.stat({ bigint: true });
+    if (!sameFileState(before, opened)) return { kind: "changed while opening" };
+    if (opened.size > BigInt(Number.MAX_SAFE_INTEGER)) return { kind: "is too large" };
+    const hash = createHash("sha256");
+    const stream = handle.createReadStream({ autoClose: false });
+    for await (const chunk of stream) {
+      hash.update(chunk);
+      await onChunk?.();
+    }
+    const after = await handle.stat({ bigint: true });
+    const afterPath = await lstat(artifactPath, { bigint: true });
+    if (!sameFileState(opened, after) || !sameFileState(opened, afterPath)) {
+      return { kind: "changed while hashing" };
+    }
+    return {
+      kind: "valid",
+      name: path.basename(artifactPath),
+      bytes: Number(opened.size),
+      sha256: hash.digest("hex"),
+    };
+  } catch {
+    throw new Error("cannot be read");
+  } finally {
+    await handle?.close();
   }
 }
 

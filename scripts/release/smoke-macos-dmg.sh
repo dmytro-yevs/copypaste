@@ -66,6 +66,10 @@ fi
 
 DMG="dist/CopyPaste-v${VERSION}-macos-${ARCH}.dmg"
 [[ -f "$DMG" ]] || { echo "ERROR: $DMG not found — run make-dmg.sh first." >&2; exit 2; }
+QUALIFIED_ARTIFACT_IDENTITY="$(python3 scripts/release/write-native-evidence.py --capture-qualified-artifact "$DMG")" || {
+    echo "ERROR: release artifact identity could not be captured" >&2
+    exit 1
+}
 
 APP="/Applications/CopyPaste.app"
 MNT="$(mktemp -d)/CopyPaste"
@@ -327,7 +331,7 @@ fi
 # ---------------------------------------------------------------------------
 group "Native shell evidence (ENFORCED)"
 # ---------------------------------------------------------------------------
-if ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native "$DMG"; then
+if ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native "$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"; then
     ok "the installed app produced native accessibility, screenshot, and latency evidence"
 else
     bad "the installed app produced native accessibility, screenshot, and latency evidence"

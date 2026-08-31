@@ -319,6 +319,8 @@ if ($EvidenceDirectory) {
 }
 
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
+$qualifiedArtifactIdentity = (& python scripts/release/write-native-evidence.py --capture-qualified-artifact $installerPath)
+if ($LASTEXITCODE -ne 0) { throw "qualified artifact identity capture failed" }
 $packagePath = if ($PackageDirectory) {
     (Resolve-Path -LiteralPath $PackageDirectory).Path
 } else {
@@ -502,7 +504,8 @@ try {
             --commit $Commit `
             --run-id $RunId `
             --elapsed-ms $timer.ElapsedMilliseconds `
-            --qualified-artifact $Installer `
+            --qualified-artifact $installerPath `
+            --qualified-artifact-identity $qualifiedArtifactIdentity `
             @featureStateArguments `
             --artifact screenshot=history/screenshot.png `
             --artifact accessibility=history/accessibility.json `
