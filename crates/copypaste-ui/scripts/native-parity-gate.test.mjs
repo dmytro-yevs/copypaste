@@ -1266,7 +1266,7 @@ test("rejects missing, empty, directory, and symbolic-link qualified artifacts",
   }
 }));
 
-test("detects qualified artifact replacement before and during hashing", () => withRoot(async (root) => {
+test("detects qualified artifact replacement or Windows refusal during hashing", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "android");
   const directory = path.dirname(receiptPath);
   const qualified = path.join(directory, "android-release.bin");
@@ -1278,17 +1278,27 @@ test("detects qualified artifact replacement before and during hashing", () => w
   assert.notEqual(afterReplacement.sha256, baseline.sha256);
   const duringHash = path.join(directory, "during-hash.apk");
   await writeFile(duringHash, Buffer.alloc(afterReplacement.bytes, 2));
-  let replaced = false;
+  let replacementAttempted = false;
   const raced = await stableQualifiedArtifact(qualified, {
     onChunk: async () => {
-      if (!replaced) {
-        await rename(duringHash, qualified);
-        replaced = true;
+      if (!replacementAttempted) {
+        replacementAttempted = true;
+        if (process.platform === "win32") {
+          await assert.rejects(rename(duringHash, qualified), { code: "EPERM" });
+        } else {
+          await rename(duringHash, qualified);
+        }
       }
     },
   });
-  assert.equal(replaced, true);
-  assert.equal(raced.kind, "changed while hashing");
+  assert.equal(replacementAttempted, true);
+  if (process.platform === "win32") {
+    assert.equal(raced.kind, "valid");
+    assert.equal(raced.bytes, afterReplacement.bytes);
+    assert.equal(raced.sha256, afterReplacement.sha256);
+  } else {
+    assert.equal(raced.kind, "changed while hashing");
+  }
 }));
 
 test("native producers capture artifact identity before first artifact use", async () => {
