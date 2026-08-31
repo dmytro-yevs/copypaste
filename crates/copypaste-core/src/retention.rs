@@ -56,9 +56,11 @@ pub fn reconcile_policy(
     store.run_before_retention_hook();
     store.with_retention(|| {
         let settings = settings();
-        enforce
-            .then(|| enforce_retention_report_unlocked(store, &settings))
-            .unwrap_or(0)
+        if enforce {
+            enforce_retention_report_unlocked(store, &settings)
+        } else {
+            0
+        }
     })
 }
 

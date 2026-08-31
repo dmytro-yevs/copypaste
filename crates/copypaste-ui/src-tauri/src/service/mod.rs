@@ -238,9 +238,7 @@ impl Supervisor {
         {
             return Ok(ServiceState::Unhealthy);
         }
-        if let Err(error) = self.await_ready(backend).await {
-            return Err(error);
-        }
+        self.await_ready(backend).await?;
         let state = self.service_state_with(backend, locate).await;
         if state.is_live() {
             self.owned.clear_terminal_failure();

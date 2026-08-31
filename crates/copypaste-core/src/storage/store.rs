@@ -12,6 +12,9 @@ use super::connection::{build_pool, run_pragma};
 use super::model::StoreError;
 use super::schema::create;
 
+#[cfg(test)]
+type BeforeRetentionHook = Box<dyn FnOnce() + Send>;
+
 /// The clipboard store.
 ///
 /// Cheap to clone (the pool is reference-counted) and safe to share across
@@ -22,7 +25,7 @@ pub struct Store {
     pub(super) path: Option<Arc<PathBuf>>,
     retention: Arc<Mutex<()>>,
     #[cfg(test)]
-    before_retention: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
+    before_retention: Arc<Mutex<Option<BeforeRetentionHook>>>,
 }
 
 impl std::fmt::Debug for Store {

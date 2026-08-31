@@ -502,15 +502,12 @@ mod tests {
             };
             let (result, reservation) = received.await.expect("reap completion delivered").finish();
             assert!(reservation.is_none());
-            match result {
-                Ok(code) => {
-                    if code.is_success() {
-                        assert!(!owned.terminal_failure());
-                    } else {
-                        assert!(owned.terminal_failure());
-                    }
+            if let Ok(code) = result {
+                if code.is_success() {
+                    assert!(!owned.terminal_failure());
+                } else {
+                    assert!(owned.terminal_failure());
                 }
-                Err(_) => {}
             }
         }
     }

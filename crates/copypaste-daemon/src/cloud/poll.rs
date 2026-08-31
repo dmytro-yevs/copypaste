@@ -270,7 +270,7 @@ mod tests {
             .await
             .expect("listener");
         let config = CloudConfig::new_loopback(
-            &format!("http://{}", listener.local_addr().expect("address")),
+            format!("http://{}", listener.local_addr().expect("address")),
             "anon",
         )
         .expect("loopback config");
@@ -462,7 +462,7 @@ mod tests {
             .await
             .expect("listener");
         let config = CloudConfig::new_loopback(
-            &format!("http://{}", listener.local_addr().expect("address")),
+            format!("http://{}", listener.local_addr().expect("address")),
             "anon",
         )
         .expect("loopback config");
