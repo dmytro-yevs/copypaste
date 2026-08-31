@@ -33,6 +33,7 @@ const validateSchema = new Ajv({ allErrors: true, strict: true }).compile(schema
 
 function parseArguments(argv) {
   const evidence = [];
+  const qualifiedArtifacts = new Map();
   const required = new Set();
   let commit;
   let runId;
@@ -42,11 +43,25 @@ function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
     const value = argv[index + 1];
-    if (!["--evidence", "--require", "--commit", "--run-id", "--windows-updater-state", "--expect-feature-state"].includes(option) || value === undefined) {
+    if (!["--evidence", "--qualified-artifact", "--require", "--commit", "--run-id", "--windows-updater-state", "--expect-feature-state"].includes(option) || value === undefined) {
       throw new Error("invalid command-line arguments");
     }
     index += 1;
     if (option === "--evidence") evidence.push(value);
+    if (option === "--qualified-artifact") {
+      const separator = value.indexOf("=");
+      if (separator < 1 || separator === value.length - 1) {
+        throw new Error("qualified artifact must use PLATFORM=PATH");
+      }
+      const platform = value.slice(0, separator);
+      if (!(platform in PLATFORM_REQUIREMENTS)) {
+        throw new Error("qualified artifact has an invalid platform");
+      }
+      if (qualifiedArtifacts.has(platform)) {
+        throw new Error(`duplicate qualified artifact for ${platform}`);
+      }
+      qualifiedArtifacts.set(platform, value.slice(separator + 1));
+    }
     if (option === "--commit") commit = value;
     if (option === "--run-id") runId = value;
     if (option === "--windows-updater-state") windowsUpdaterState = value;
@@ -86,6 +101,12 @@ function parseArguments(argv) {
   for (const platform of required) {
     if (!(platform in PLATFORM_REQUIREMENTS)) throw new Error(`unknown required platform ${platform}`);
   }
+  for (const platform of qualifiedArtifacts.keys()) {
+    if (!required.has(platform)) throw new Error(`unrequired qualified artifact for ${platform}`);
+  }
+  for (const platform of required) {
+    if (!qualifiedArtifacts.has(platform)) throw new Error(`missing qualified artifact for ${platform}`);
+  }
   if (commit !== undefined && !/^[0-9a-f]{40}$/.test(commit)) {
     throw new Error("--commit must be a lowercase 40-character Git SHA");
   }
@@ -93,7 +114,7 @@ function parseArguments(argv) {
   if (!["updater-configured", "updater-unconfigured"].includes(windowsUpdaterState)) {
     throw new Error("--windows-updater-state must be updater-configured or updater-unconfigured");
   }
-  return { commit, evidence, expectedFeatureStates, required, runId, windowsUpdaterState };
+  return { commit, evidence, expectedFeatureStates, qualifiedArtifacts, required, runId, windowsUpdaterState };
 }
 
 function schemaErrors() {
@@ -204,6 +225,33 @@ async function verifyArtifacts(receiptPath, receipt, label) {
   if (missing.length > 0) throw new Error(`${label} lacks ${missing.join(", ")} evidence`);
 }
 
+async function verifyQualifiedArtifact(receipt, artifactPath, label) {
+  let metadata;
+  try {
+    metadata = await lstat(artifactPath);
+  } catch {
+    throw new Error(`${label} qualified artifact is missing`);
+  }
+  if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.size < 1) {
+    throw new Error(`${label} qualified artifact is not a non-empty regular file`);
+  }
+  if (path.basename(artifactPath) !== receipt.qualified_artifact.name) {
+    throw new Error(`${label} qualified artifact name changed`);
+  }
+  if (metadata.size !== receipt.qualified_artifact.bytes) {
+    throw new Error(`${label} qualified artifact byte count changed`);
+  }
+  let digest;
+  try {
+    digest = await sha256(artifactPath);
+  } catch {
+    throw new Error(`${label} qualified artifact cannot be read`);
+  }
+  if (digest !== receipt.qualified_artifact.sha256) {
+    throw new Error(`${label} qualified artifact checksum changed`);
+  }
+}
+
 function sameArtifact(left, right) {
   return left.path === right.path && left.sha256 === right.sha256 && left.bytes === right.bytes;
 }
@@ -232,11 +280,13 @@ export async function validateEvidence({
   commit,
   evidence,
   expectedFeatureStates,
+  qualifiedArtifacts,
   required,
   runId,
   windowsUpdaterState = "updater-configured",
 }) {
   if (!RUN_ID_PATTERN.test(runId ?? "")) throw new Error("expected workflow run ID is required");
+  if (!(qualifiedArtifacts instanceof Map)) throw new Error("qualified artifacts are required");
   const receipts = new Map();
   let observedCommit = commit;
   const featureScreenshotIdentities = new Set();
@@ -281,6 +331,15 @@ export async function validateEvidence({
   const unexpected = [...actual].filter((platform) => !required.has(platform));
   if (missing.length > 0) throw new Error(`missing required evidence for ${missing.join(", ")}`);
   if (unexpected.length > 0) throw new Error(`unexpected evidence for ${unexpected.join(", ")}`);
+  for (const platform of qualifiedArtifacts.keys()) {
+    if (!required.has(platform)) throw new Error(`unrequired qualified artifact for ${platform}`);
+  }
+  for (const platform of required) {
+    if (!qualifiedArtifacts.has(platform)) throw new Error(`missing qualified artifact for ${platform}`);
+  }
+  for (const [platform, receipt] of receipts) {
+    await verifyQualifiedArtifact(receipt, qualifiedArtifacts.get(platform), `receipt for ${platform}`);
+  }
   const observedFeatureStates = new Map();
   for (const receipt of receipts.values()) {
     for (const featureState of receipt.feature_states ?? []) {

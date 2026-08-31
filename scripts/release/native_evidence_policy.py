@@ -22,7 +22,7 @@ def load_policy():
             "artifact_kinds", "platforms",
         }
         or policy.get("schema_version") != 1
-        or policy.get("receipt_schema_version") != 1
+        or policy.get("receipt_schema_version") != 2
         or not isinstance(environments, list)
         or not environments
         or any(not isinstance(value, str) or not value for value in environments)
@@ -149,7 +149,7 @@ def schema_document(policy):
         "additionalProperties": False,
         "required": [
             "schema_version", "platform", "environment", "os_version", "architecture",
-            "source", "scenario", "assertions", "artifacts",
+            "source", "scenario", "assertions", "artifacts", "qualified_artifact",
         ],
         "properties": {
             "schema_version": {"const": policy["receipt_schema_version"]},
@@ -192,6 +192,18 @@ def schema_document(policy):
                         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "bytes": {"type": "integer", "minimum": 1},
                     },
+                },
+            },
+            "qualified_artifact": {
+                "type": "object", "additionalProperties": False,
+                "required": ["name", "sha256", "bytes"],
+                "properties": {
+                    "name": {
+                        "type": "string", "minLength": 1, "maxLength": 240,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                    },
+                    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                    "bytes": {"type": "integer", "minimum": 1},
                 },
             },
             "feature_states": {
