@@ -70,13 +70,13 @@ pub(crate) struct CommitPause {
 #[cfg(test)]
 impl CommitPause {
     pub(crate) async fn wait_entered(&self) {
-        self.entered_rx
+        let entered_rx = self
+            .entered_rx
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take()
-            .expect("commit pause was already observed")
-            .await
-            .expect("commit pause was dropped");
+            .expect("commit pause was already observed");
+        entered_rx.await.expect("commit pause was dropped");
     }
 
     pub(crate) fn release(&self) {
@@ -180,14 +180,13 @@ impl SyncCycle {
                 .expect("commit pause was already entered")
                 .send(())
                 .expect("commit pause observer was dropped");
-            pause
+            let release_rx = pause
                 .release_rx
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .take()
-                .expect("commit pause was already released")
-                .await
-                .expect("commit pause releaser was dropped");
+                .expect("commit pause was already released");
+            release_rx.await.expect("commit pause releaser was dropped");
         }
     }
 }
