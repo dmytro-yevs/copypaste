@@ -1,3 +1,18 @@
+function Get-InstalledPayloadRelativePath([string]$RootPath, [string]$EntryPath) {
+    $separator = [IO.Path]::DirectorySeparatorChar
+    $basePath = $RootPath.TrimEnd(@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)) + $separator
+    $baseUri = [Uri]::new($basePath, [UriKind]::Absolute)
+    $entryUri = [Uri]::new($EntryPath, [UriKind]::Absolute)
+    $relativeUri = $baseUri.MakeRelativeUri($entryUri)
+    if ($relativeUri.IsAbsoluteUri) { throw "installed payload has an invalid relative path" }
+    $relative = [Uri]::UnescapeDataString($relativeUri.ToString()).Replace('\', '/')
+    if ($relative -eq '.' -or $relative.StartsWith('../') -or
+        $relative -match '^(?:[A-Za-z]:/|//)' -or [IO.Path]::IsPathRooted($relative)) {
+        throw "installed payload has an invalid relative path"
+    }
+    return $relative
+}
+
 function Get-InstalledPayloadManifest([string]$InstallDirectory) {
     $root = Get-Item -LiteralPath $InstallDirectory -Force -ErrorAction Stop
     if (-not $root.PSIsContainer) { throw "installed payload root is not a directory" }
@@ -10,10 +25,7 @@ function Get-InstalledPayloadManifest([string]$InstallDirectory) {
         if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "installed payload contains a reparse point"
         }
-        $relative = [IO.Path]::GetRelativePath($rootPath, $entry.FullName).Replace('\', '/')
-        if ($relative -eq '.' -or $relative.StartsWith('../') -or [IO.Path]::IsPathRooted($relative)) {
-            throw "installed payload has an invalid relative path"
-        }
+        $relative = Get-InstalledPayloadRelativePath $rootPath $entry.FullName
         if ($entry.PSIsContainer) {
             $entries += [ordered]@{ path = $relative; kind = "directory"; sha256 = $null; bytes = $null }
         } elseif ($entry.PSIsContainer -eq $false) {
@@ -80,11 +92,36 @@ function Assert-InstalledAppLockRefusal([int]$InstallerExitCode, [bool]$AppExite
 function Test-WindowsInstalledScenarioHelpers {
     Assert-InstalledUpdateDrain 0 $true
     Assert-InstalledAppLockRefusal 1 $false "ready"
+    if ((Get-InstalledPayloadRelativePath 'C:\payload' 'C:\payload\nested\file # %.txt') -ne 'nested/file # %.txt') {
+        throw "Windows payload relative path compatibility contract failed"
+    }
+    $rejected = $false
+    try { Get-InstalledPayloadRelativePath 'C:\payload' 'C:\other\file.txt' | Out-Null } catch { $rejected = $true }
+    if (-not $rejected) { throw "Windows outside payload path passed the refusal proof" }
+    foreach ($path in @('D:\payload\file.txt', '\\other-server\payload\file.txt')) {
+        $rejected = $false
+        try { Get-InstalledPayloadRelativePath 'C:\payload' $path | Out-Null } catch { $rejected = $true }
+        if (-not $rejected) { throw "different Windows payload authority passed the refusal proof" }
+    }
     $root = Join-Path ([IO.Path]::GetTempPath()) "copypaste-installed-payload-$([guid]::NewGuid())"
     try {
-        [IO.Directory]::CreateDirectory((Join-Path $root "nested")) | Out-Null
-        [IO.File]::WriteAllText((Join-Path $root "payload.txt"), "before")
-        [IO.File]::WriteAllText((Join-Path $root "nested/child.txt"), "child")
+        $restoreFixture = {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+            [IO.Directory]::CreateDirectory((Join-Path $root "nested")) | Out-Null
+            [IO.File]::WriteAllText((Join-Path $root "payload.txt"), "before")
+            [IO.File]::WriteAllText((Join-Path $root "nested/child.txt"), "child")
+            [IO.File]::WriteAllText((Join-Path $root "nested/name # %.txt"), "escaped")
+        }
+        & $restoreFixture
+        if ((Get-InstalledPayloadRelativePath $root (Join-Path $root "nested/name # %.txt")) -ne "nested/name # %.txt") {
+            throw "installed payload relative path did not preserve escaped filename characters"
+        }
+        $outside = Join-Path ([IO.Path]::GetDirectoryName($root)) "copypaste-installed-payload-outside-$([guid]::NewGuid()).txt"
+        [IO.File]::WriteAllText($outside, "outside")
+        $rejected = $false
+        try { Get-InstalledPayloadRelativePath $root $outside | Out-Null } catch { $rejected = $true }
+        Remove-Item -LiteralPath $outside -Force
+        if (-not $rejected) { throw "outside installed payload path passed the refusal proof" }
         $baseline = Get-InstalledPayloadManifest $root
         Assert-InstalledPayloadUnchanged $baseline (Get-InstalledPayloadManifest $root)
         foreach ($snapshots in @(
@@ -101,14 +138,12 @@ function Test-WindowsInstalledScenarioHelpers {
             { [IO.Directory]::CreateDirectory((Join-Path $root "added-directory")) | Out-Null },
             { Remove-Item -LiteralPath (Join-Path $root "nested") -Recurse -Force }
         )) {
+            Assert-InstalledPayloadUnchanged $baseline (Get-InstalledPayloadManifest $root)
             & $mutation
             $rejected = $false
             try { Assert-InstalledPayloadUnchanged $baseline (Get-InstalledPayloadManifest $root) } catch { $rejected = $true }
             if (-not $rejected) { throw "installed payload change passed the refusal proof" }
-            Remove-Item -LiteralPath $root -Recurse -Force
-            [IO.Directory]::CreateDirectory((Join-Path $root "nested")) | Out-Null
-            [IO.File]::WriteAllText((Join-Path $root "payload.txt"), "before")
-            [IO.File]::WriteAllText((Join-Path $root "nested/child.txt"), "child")
+            & $restoreFixture
         }
         $rejected = $false
         try { Get-InstalledPayloadManifest (Join-Path $root "missing") | Out-Null } catch { $rejected = $true }
