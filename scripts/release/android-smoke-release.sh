@@ -32,9 +32,35 @@ INTAKE="$PKG/$APP_NAMESPACE.IntakeActivity"
 SETTLE_SECS="${SETTLE_SECS:-25}"
 PAINT_TIMEOUT="${PAINT_TIMEOUT:-90}"
 
+history_capture_holds() { # <accessibility artifact> <canary>
+    enabled_node_exists_exact "$1" "Search clipboard history, default|Search clipboard history, active" \
+        && node_exists_exact "$1" "$2"
+}
+
+release_history_self_test() { # <temporary directory>
+    local temp="$1" canary="CopyPasteReleaseCanaryFixture"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" enabled=\"true\"/><node text=\"$canary\"/></hierarchy>" \
+        > "$temp/release-history-good.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node content-desc="Search clipboard history, default" enabled="true"/></hierarchy>' \
+        > "$temp/release-history-missing-canary.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node text=\"$canary\"/></hierarchy>" \
+        > "$temp/release-history-no-toolbar.xml"
+
+    history_capture_holds "$temp/release-history-good.xml" "$canary" \
+        && ok "a release history receipt requires the canary and active history UI" \
+        || bad "a release history receipt requires the canary and active history UI"
+    history_capture_holds "$temp/release-history-missing-canary.xml" "$canary" \
+        && bad "a release history receipt rejects an empty history" \
+        || ok "a release history receipt rejects an empty history"
+    history_capture_holds "$temp/release-history-no-toolbar.xml" "$canary" \
+        && bad "a release history receipt rejects a canary outside Library" \
+        || ok "a release history receipt rejects a canary outside Library"
+}
+
 if [[ "${1:-}" == "--self-test" ]]; then
     self_test || exit $?
     android_navigation_self_test "$SELF_TEST_TMP"
+    release_history_self_test "$SELF_TEST_TMP"
     [[ $FAIL -eq 0 ]]
     exit $?
 fi
@@ -312,6 +338,17 @@ fi
     && ok "the app is still running after both doorways" \
     || bad "the app is still running after both doorways"
 
+group "4a. The captured text appears in history"
+if tap_until_state "Library" "$OUT/history-ui.xml" \
+    history_capture_holds none "$CANARY_SEND"; then
+    capture_png "$OUT/history-ui.png" \
+        && ok "the captured history screenshot is complete" \
+        || bad "the captured history screenshot is complete"
+else
+    bad "the captured text is visible in the active history UI" \
+        "Library did not expose the release canary with its history search control"
+fi
+
 note "that the captured text reached SQLCipher on this build" \
      "the database is inside a non-debuggable package's private directory and cannot be read from here; the debug leg asserts the storage half, this leg asserts that the doorways and the process survive R8"
 
@@ -364,8 +401,11 @@ PY
         --qualified-artifact "$APK" \
         --qualified-artifact-identity "$qualified_artifact_identity" \
         --feature-state devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml \
+        --feature-state history=history-ui,screenshot=history-ui.png,accessibility=history-ui.xml \
         --artifact screenshot=pairing-entry.png \
         --artifact accessibility=pairing-entry.xml \
+        --artifact screenshot=history-ui.png \
+        --artifact accessibility=history-ui.xml \
         --artifact measurement=latency.json \
         --artifact diagnostic-log=release-final.log; then
         ok "native evidence receipt was written"
