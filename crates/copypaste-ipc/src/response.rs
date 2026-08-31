@@ -107,15 +107,11 @@ struct ResponseOwned {
     error_code: Presence<Option<String>>,
 }
 
+#[derive(Default)]
 enum Presence<T> {
+    #[default]
     Missing,
     Present(T),
-}
-
-impl<T> Default for Presence<T> {
-    fn default() -> Self {
-        Self::Missing
-    }
 }
 
 fn deserialize_present_option<'de, D, T>(deserializer: D) -> Result<Presence<Option<T>>, D::Error>
