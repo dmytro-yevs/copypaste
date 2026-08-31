@@ -131,15 +131,15 @@ fn fetch(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BoundedFetch {
     Exhausted,
-    LimitReached,
+    CountReached,
     BudgetReached,
 }
 
 /// Read only the rows needed to allocate a bounded page.
 ///
-/// The row that crosses `budget` is mapped once so its ciphertext length can be
-/// measured, then discarded immediately. That one lookahead proves a cursor is
-/// needed without materializing rows that belong to a later page.
+/// One discarded row proves whether a count or byte limit has more history.
+/// It is mapped once, then discarded immediately without materializing later
+/// rows that belong to a following page.
 fn fetch_bounded(
     conn: &rusqlite::Connection,
     sql: &str,
@@ -152,7 +152,7 @@ fn fetch_bounded(
     let mut stmt = conn.prepare_cached(sql)?;
     let columns = ItemColumns::resolve(&stmt)?;
     let mut query = stmt.query(params)?;
-    while out.len() < limit {
+    loop {
         let Some(row) = query.next()? else {
             return Ok(BoundedFetch::Exhausted);
         };
@@ -160,6 +160,9 @@ fn fetch_bounded(
             row_to_item(row, &columns)?,
             row.get::<_, Option<f64>>(columns.pin_order_index())?,
         );
+        if out.len() == limit {
+            return Ok(BoundedFetch::CountReached);
+        }
         let next_bytes = bytes.saturating_add(row.0.content_ciphertext.len());
         if !out.is_empty() && next_bytes > budget {
             return Ok(BoundedFetch::BudgetReached);
@@ -167,7 +170,6 @@ fn fetch_bounded(
         *bytes = next_bytes;
         out.push(row);
     }
-    Ok(BoundedFetch::LimitReached)
 }
 
 fn cursor_of((item, pin_order): &Row) -> ItemCursor {
@@ -322,7 +324,7 @@ impl Store {
             None => fetch_bounded(
                 &conn,
                 PINNED_HEAD_SQL,
-                params![i64::try_from(limit).unwrap_or(i64::MAX)],
+                params![i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX)],
                 limit,
                 budget,
                 &mut bytes,
@@ -335,7 +337,7 @@ impl Store {
                     cursor.pin_order,
                     cursor.created_at,
                     cursor.id.as_str(),
-                    i64::try_from(limit).unwrap_or(i64::MAX),
+                    i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX),
                 ],
                 limit,
                 budget,
@@ -348,7 +350,7 @@ impl Store {
                 params![
                     cursor.created_at,
                     cursor.id.as_str(),
-                    i64::try_from(limit).unwrap_or(i64::MAX),
+                    i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX),
                 ],
                 limit,
                 budget,
@@ -357,12 +359,12 @@ impl Store {
             )?,
         };
 
-        let result = if result == BoundedFetch::Exhausted && in_pinned_run && rows.len() < limit {
+        let result = if result == BoundedFetch::Exhausted && in_pinned_run {
             let remaining = limit - rows.len();
             fetch_bounded(
                 &conn,
                 UNPINNED_HEAD_SQL,
-                params![i64::try_from(remaining).unwrap_or(i64::MAX)],
+                params![i64::try_from(remaining.saturating_add(1)).unwrap_or(i64::MAX)],
                 limit,
                 budget,
                 &mut bytes,
@@ -373,10 +375,13 @@ impl Store {
         };
 
         let next = (!rows.is_empty()
-            && (result == BoundedFetch::BudgetReached || rows.len() == limit))
-            .then(|| rows.last())
-            .flatten()
-            .map(cursor_of);
+            && matches!(
+                result,
+                BoundedFetch::BudgetReached | BoundedFetch::CountReached
+            ))
+        .then(|| rows.last())
+        .flatten()
+        .map(cursor_of);
         Ok(Page {
             items: rows.into_iter().map(|(item, _)| item).collect(),
             next,
@@ -768,6 +773,146 @@ mod tests {
         assert_eq!(
             second.items.iter().map(|row| &row.id).collect::<Vec<_>>(),
             vec![&follower]
+        );
+    }
+
+    #[test]
+    fn bounded_paging_omits_the_cursor_at_an_exact_final_count() {
+        for count in [1, 3] {
+            let s = store();
+            for n in 0..count {
+                insert_with_ciphertext(&s, &format!("row-{n}"), T0 + n as i64, 1);
+            }
+
+            let page = s.list_from_bounded(None, count as u32, 10).unwrap();
+            assert_eq!(page.items.len(), count);
+            assert!(
+                page.next.is_none(),
+                "an exact final page of {count} rows must not invite a retry"
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_paging_omits_the_cursor_for_an_exact_pins_only_page() {
+        let s = store();
+        let first = insert_with_ciphertext(&s, "first", T0, 1);
+        let second = insert_with_ciphertext(&s, "second", T0 + 1, 1);
+        s.set_pinned(&first, true).unwrap();
+        s.set_pinned(&second, true).unwrap();
+
+        let page = s.list_from_bounded(None, 2, 10).unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert!(
+            page.next.is_none(),
+            "the final pinned row must end the page"
+        );
+    }
+
+    #[test]
+    fn bounded_paging_checks_unpinned_after_an_exact_pinned_run() {
+        let s = store();
+        let first = insert_with_ciphertext(&s, "first", T0, 1);
+        let second = insert_with_ciphertext(&s, "second", T0 + 1, 1);
+        let follower = insert_with_ciphertext(&s, "follower", T0 + 2, 1);
+        s.set_pinned(&first, true).unwrap();
+        s.set_pinned(&second, true).unwrap();
+        let expected: Vec<String> = s
+            .list(1000, 0)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+
+        let page = s.list_from_bounded(None, 2, 10).unwrap();
+        assert_eq!(
+            page.items.iter().map(|row| &row.id).collect::<Vec<_>>(),
+            expected[..2].iter().collect::<Vec<_>>()
+        );
+        let cursor = page.next.expect("the unpinned follower requires a cursor");
+        assert_eq!(
+            s.list_from_bounded(Some(&cursor), 2, 10)
+                .unwrap()
+                .items
+                .iter()
+                .map(|row| &row.id)
+                .collect::<Vec<_>>(),
+            vec![&follower]
+        );
+    }
+
+    #[test]
+    fn bounded_paging_ends_after_an_exact_pinned_to_unpinned_page() {
+        let s = store();
+        let pinned = insert_with_ciphertext(&s, "pinned", T0, 1);
+        let unpinned = insert_with_ciphertext(&s, "unpinned", T0 + 1, 1);
+        s.set_pinned(&pinned, true).unwrap();
+
+        let page = s.list_from_bounded(None, 2, 10).unwrap();
+        assert_eq!(
+            page.items.iter().map(|row| &row.id).collect::<Vec<_>>(),
+            vec![&pinned, &unpinned]
+        );
+        assert!(page.next.is_none());
+    }
+
+    #[test]
+    fn bounded_paging_sets_a_cursor_after_a_byte_stop_or_oversize_only_with_a_follower() {
+        for first_bytes in [6, 11] {
+            let final_row = store();
+            insert_with_ciphertext(&final_row, "first", T0, first_bytes);
+            assert!(final_row
+                .list_from_bounded(None, 1000, 10)
+                .unwrap()
+                .next
+                .is_none());
+
+            let followed = store();
+            let follower = insert_with_ciphertext(&followed, "follower", T0, 5);
+            let first = insert_with_ciphertext(&followed, "first", T0 + 1, first_bytes);
+            let page = followed.list_from_bounded(None, 1000, 10).unwrap();
+            assert_eq!(
+                page.items.iter().map(|row| &row.id).collect::<Vec<_>>(),
+                vec![&first]
+            );
+            let cursor = page.next.expect("a following row must keep the cursor");
+            assert_eq!(
+                followed
+                    .list_from_bounded(Some(&cursor), 1000, 10)
+                    .unwrap()
+                    .items
+                    .iter()
+                    .map(|row| &row.id)
+                    .collect::<Vec<_>>(),
+                vec![&follower]
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_paging_reports_a_malformed_count_lookahead_but_not_later_rows() {
+        let malformed_lookahead = store();
+        let malformed = insert_with_ciphertext(&malformed_lookahead, "malformed", T0, 1);
+        insert_with_ciphertext(&malformed_lookahead, "admitted", T0 + 1, 1);
+        insert_with_ciphertext(&malformed_lookahead, "later", T0 - 1, 1);
+        make_row_unreadable(&malformed_lookahead, &malformed);
+        assert!(matches!(
+            malformed_lookahead.list_from_bounded(None, 1, 10),
+            Err(StoreError::Sqlite(_))
+        ));
+
+        let later_malformed = store();
+        let later = insert_with_ciphertext(&later_malformed, "later", T0, 1);
+        insert_with_ciphertext(&later_malformed, "lookahead", T0 + 1, 1);
+        insert_with_ciphertext(&later_malformed, "admitted", T0 + 2, 1);
+        make_row_unreadable(&later_malformed, &later);
+        assert!(
+            later_malformed
+                .list_from_bounded(None, 1, 10)
+                .unwrap()
+                .next
+                .is_some(),
+            "only one count lookahead may be decoded"
         );
     }
 
