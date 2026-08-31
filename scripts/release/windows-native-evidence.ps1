@@ -454,10 +454,12 @@ try {
         Set-UiaScreenshots $app $false $captureTrace
     }
 
+    $payloadBeforeLockRefusal = Get-InstalledPayloadManifest $installDir
     $blockedUpdate = Start-Process -FilePath $installerPath -ArgumentList "/S", "/D=$installDir" -Wait -PassThru
     $app.Refresh()
     $liveSidecar = Get-InstalledSidecarOutcome $daemonExe $null
     Assert-InstalledAppLockRefusal $blockedUpdate.ExitCode $app.HasExited $liveSidecar.kind
+    Assert-InstalledPayloadUnchanged $payloadBeforeLockRefusal (Get-InstalledPayloadManifest $installDir)
     Invoke-Json $cli @("status") | Out-Null
 
     Stop-Process -Id $app.Id -Force
