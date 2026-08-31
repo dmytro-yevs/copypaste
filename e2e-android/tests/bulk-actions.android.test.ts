@@ -186,7 +186,10 @@ describe("entering selection mode", () => {
           Array.from(document.querySelectorAll(selector))
             .filter((row) => (row as HTMLElement).id.startsWith("history-row-"))
             .map((row) => ({
-              checked: row.getAttribute("aria-checked"),
+              checkboxChecked: row
+                .querySelector('[role="checkbox"]')
+                ?.getAttribute("aria-checked"),
+              rowAriaChecked: row.getAttribute("aria-checked"),
               selections: row.querySelectorAll('[role="checkbox"]').length,
             })),
         ROW,
@@ -194,9 +197,13 @@ describe("entering selection mode", () => {
     );
     expect(states.length).toBeGreaterThan(0);
     expect(
-      states.every((row) => row.checked === "true" || row.checked === "false"),
+      states.every(
+        (row) =>
+          row.checkboxChecked === "true" || row.checkboxChecked === "false",
+      ),
     ).toBe(true);
     expect(states.every((row) => row.selections === 1)).toBe(true);
+    expect(states.every((row) => row.rowAriaChecked === null)).toBe(true);
     expect(await count(app, BULK_BAR)).toBe(1);
   });
 
@@ -320,15 +327,24 @@ describe("the bulk bar", () => {
   test("leaving selection mode keeps semantic selection controls available", async () => {
     await leaveSelectionMode();
     expect(await count(app, CHECKBOX)).toBeGreaterThan(0);
-    const checkedStates = await app.withPage((page) =>
+    const states = await app.withPage((page) =>
       page.evaluate(
         (selector) =>
           Array.from(document.querySelectorAll(selector))
             .filter((row) => (row as HTMLElement).id.startsWith("history-row-"))
-            .map((row) => row.getAttribute("aria-checked")),
+            .map((row) => ({
+              checkboxChecked: row
+                .querySelector('[role="checkbox"]')
+                ?.getAttribute("aria-checked"),
+              rowAriaChecked: row.getAttribute("aria-checked"),
+              selections: row.querySelectorAll('[role="checkbox"]').length,
+            })),
         ROW,
       ),
     );
-    expect(checkedStates.every((state) => state === null)).toBe(true);
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.every((row) => row.selections === 1)).toBe(true);
+    expect(states.every((row) => row.checkboxChecked === "false")).toBe(true);
+    expect(states.every((row) => row.rowAriaChecked === null)).toBe(true);
   });
 });
