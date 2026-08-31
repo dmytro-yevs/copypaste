@@ -301,7 +301,7 @@ export function DevicesScreen() {
                 >
                     <ScreenHeader
                         eyebrow="Your private network"
-                        title="Connections"
+                        title="Devices"
                         description="Every device, cloud and sync state in one place."
                         actions={
                             <DevicesHeaderActions

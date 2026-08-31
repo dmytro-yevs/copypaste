@@ -53,8 +53,9 @@ it("resets compact settings scroll when opening and leaving a detail", async () 
     </TooltipProvider>,
   );
 
+  expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
   const menu = screen.getByRole("navigation", {
-    name: "Preference sections",
+    name: "Settings sections",
   });
   const viewport = menu.parentElement?.parentElement;
   expect(viewport).toBeInstanceOf(HTMLDivElement);
@@ -67,10 +68,10 @@ it("resets compact settings scroll when opening and leaving a detail", async () 
   expect(viewport.scrollTop).toBe(0);
 
   viewport.scrollTop = 240;
-  fireEvent.click(screen.getByRole("button", { name: "Back to Preferences" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
 
   expect(await screen.findByRole("navigation", {
-    name: "Preference sections",
+    name: "Settings sections",
   })).toBeTruthy();
   expect(viewport.scrollTop).toBe(0);
 });
@@ -137,7 +138,7 @@ it("connects settings tabs to their panels and supports roving keyboard navigati
     </TooltipProvider>,
   );
 
-  const tablist = screen.getByRole("tablist", { name: "Preference sections" });
+  const tablist = screen.getByRole("tablist", { name: "Settings sections" });
   const appearance = screen.getByRole("tab", { name: "Appearance" });
   const panel = screen.getByRole("tabpanel");
   expect(tablist.contains(appearance)).toBe(true);

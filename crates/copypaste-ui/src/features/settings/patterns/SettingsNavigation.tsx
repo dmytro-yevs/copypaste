@@ -15,7 +15,7 @@ export function SettingsNavigation({
   return (
     <TabsList
       variant="bare"
-      aria-label="Preference sections"
+      aria-label="Settings sections"
       className={styles.root}
     >
       {sections.map((section) => {

@@ -18,9 +18,7 @@ export const nav = {
   primary: "Primary",
   history: "Library",
   devices: "Devices",
-  connections: "Connections",
   settings: "Settings",
-  preferences: "Preferences",
 } as const;
 
 /** Keyed by `ErrorKind`. These are *our* sentences for a classified failure —

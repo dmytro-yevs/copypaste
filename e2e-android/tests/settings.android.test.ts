@@ -1,5 +1,5 @@
 /**
- * Preferences on Android: adaptive section navigation, a display-only history
+ * Settings on Android: adaptive section navigation, a display-only history
  * limit, and a product theme that has to survive a reload.
  *
  * The persistence half is a genuinely different mechanism here. The browser
@@ -8,7 +8,7 @@
  * (`preferences.json`) and the service-shaped ones to the in-process core
  * (ADR-0003). Neither path exists on the other layer.
  *
- * Below the expanded width boundary Preferences is a category menu plus one
+ * Below the expanded width boundary Settings is a category menu plus one
  * detail at a time (DMY-154 / A11Y-15); wider windows use a tablist and panel.
  * The harness follows either shape while holding the same section contract.
  */
@@ -190,7 +190,7 @@ beforeAllWithEvidence("settings", async () => {
   await gotoView(app, "Settings");
   await waitFor(
     async () => (await settingsSectionLabels(app)).length > 0,
-    "the Preferences screen never rendered its section navigation",
+    "the Settings screen never rendered its section navigation",
   );
 }, 300_000);
 
@@ -249,7 +249,7 @@ describe("the section index", () => {
     await ensureSettingsNavigation(app);
   }, 120_000);
 
-  test("keeps the Android document fixed while compact Preferences scrolls", async () => {
+  test("keeps the Android document fixed while compact Settings scrolls", async () => {
     await withSoftKeyboardScenario(async (softKeyboard) => {
       await openSettingsSection(app, "Cloud sync");
       let primaryFailed = false;

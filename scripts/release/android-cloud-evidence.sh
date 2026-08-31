@@ -63,12 +63,12 @@ install_and_open() { # <apk>
 }
 
 cloud_settings_pane_holds() { # <artifact>
-    enabled_node_exists_exact "$1" "Preference sections"
+    enabled_node_exists_exact "$1" "Settings sections"
 }
 
 cloud_detail_holds() { # <artifact>
     node_exists_exact "$1" "Cloud sync" \
-        && enabled_action_exists_exact "$1" "Back to Preferences"
+        && enabled_action_exists_exact "$1" "Back to Settings"
 }
 
 open_cloud() {
@@ -543,10 +543,10 @@ cloud_navigation_fixture_holds() { # <temp>
     (
         local OUT="$1" primary settings prefs_hidden prefs_visible detail
         primary='<node text="Primary" bounds="[49,572][271,628]"><node text="Settings" bounds="[196,577][266,623]" enabled="true" clickable="true"/></node>'
-        settings='<node text="Preference sections" bounds="[12,184][308,640]" enabled="true"/>'
+        settings='<node text="Settings sections" bounds="[12,184][308,640]" enabled="true"/>'
         prefs_hidden="${settings}<node text=\"$CLOUD_SECTION_ACTION\" enabled=\"true\" clickable=\"true\"/>"
         prefs_visible="${settings}<node text=\"$CLOUD_SECTION_ACTION\" bounds=\"[13,444][307,510]\" enabled=\"true\" clickable=\"true\"/>"
-        detail='<node text="Cloud sync" bounds="[12,12][308,640]" enabled="true"><node text="Back to Preferences" bounds="[12,29][56,74]" enabled="true" clickable="true"/></node>'
+        detail='<node text="Cloud sync" bounds="[12,12][308,640]" enabled="true"><node text="Back to Settings" bounds="[12,29][56,74]" enabled="true" clickable="true"/></node>'
         printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary</hierarchy>" > "$OUT/cloud-library.xml"
         printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$settings</hierarchy>" > "$OUT/cloud-preferences.xml"
         printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$primary$prefs_hidden</hierarchy>" > "$OUT/cloud-row-hidden.xml"

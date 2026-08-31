@@ -1,6 +1,7 @@
 import { lazy, type ComponentType, type ReactNode } from "react";
 
 import type { View } from "@/store/ui";
+import { routeMetadata, type RouteMetadata } from "./routeMetadata";
 
 interface ScreenLoaders {
   history: () => Promise<{ default: ComponentType<{ pushLive?: boolean }> }>;
@@ -17,7 +18,6 @@ const screenLoaders: ScreenLoaders = {
 };
 
 interface ScreenDefinition {
-  label: "nav.history" | "nav.connections" | "nav.preferences" | "capture.title";
   render: (pushLive: boolean) => ReactNode;
   reset: () => void;
 }
@@ -38,17 +38,17 @@ function createLazyScreen<Props extends object>(loader: () => Promise<{ default:
   };
 }
 
-function createScreenRegistry(loaders: ScreenLoaders): Record<View, ScreenDefinition> {
+function createScreenRegistry(loaders: ScreenLoaders): Record<View, RouteMetadata & ScreenDefinition> {
   const history = createLazyScreen(loaders.history);
   const devices = createLazyScreen(loaders.devices);
   const settings = createLazyScreen(loaders.settings);
   const capture = createLazyScreen(loaders.capture);
   return {
-    history: { label: "nav.history", render: (pushLive) => history.render({ pushLive }), reset: history.reset },
-    devices: { label: "nav.connections", render: () => devices.render({}), reset: devices.reset },
-    settings: { label: "nav.preferences", render: () => settings.render({}), reset: settings.reset },
-    capture: { label: "capture.title", render: () => capture.render({}), reset: capture.reset },
-  };
+    history: { ...routeMetadata.history, render: (pushLive) => history.render({ pushLive }), reset: history.reset },
+    devices: { ...routeMetadata.devices, render: () => devices.render({}), reset: devices.reset },
+    settings: { ...routeMetadata.settings, render: () => settings.render({}), reset: settings.reset },
+    capture: { ...routeMetadata.capture, render: () => capture.render({}), reset: capture.reset },
+  } satisfies Record<View, RouteMetadata & ScreenDefinition>;
 }
 
 export const screenRegistry = createScreenRegistry(screenLoaders);
