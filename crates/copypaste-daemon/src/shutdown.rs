@@ -66,7 +66,7 @@ pub async fn stop_loops(loops: Vec<(&'static str, JoinHandle<()>)>) {
     let mut joined = 0;
     for (name, task) in &mut loops {
         match timeout_at(deadline, task).await {
-            Ok(result) => record_loop_result(*name, result),
+            Ok(result) => record_loop_result(name, result),
             Err(_) => {
                 warn!("a background loop outlived the shutdown budget");
                 break;
@@ -79,7 +79,7 @@ pub async fn stop_loops(loops: Vec<(&'static str, JoinHandle<()>)>) {
             task.abort();
         }
         for (name, task) in loops.iter_mut().skip(joined) {
-            record_loop_result(*name, task.await);
+            record_loop_result(name, task.await);
         }
     }
 }
