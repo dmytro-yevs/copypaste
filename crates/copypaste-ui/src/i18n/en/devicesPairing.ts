@@ -2,10 +2,11 @@ export const pairing = {
   heading: "Add a device",
   create: "Show pairing code",
   createHint: "Create and show a new pairing code in the native view",
-  createHintWeb: "Create and show a new pairing code in this preview",
+  createHintWeb: "Show safe pairing status in this preview.",
   join: "Scan pairing code",
   joinHint: "Scan a pairing code with this device",
-  joinHintWeb: "Enter the pairing code shown by the other device",
+  joinHintWeb:
+    "Pairing details are available only in the protected native app.",
   checking: "Checking for an active pairing…",
   cancelling: "Cancelling…",
   reviewSecure: "Review securely",
