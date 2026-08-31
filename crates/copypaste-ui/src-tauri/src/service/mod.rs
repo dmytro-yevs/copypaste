@@ -1,8 +1,8 @@
 use backon::{ExponentialBuilder, Retryable};
 use serde::Serialize;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -11,14 +11,19 @@ use crate::backend::{Backend, BackendError, Result};
 mod child;
 pub mod diagnostics;
 pub mod locate;
+mod owned_child;
 pub mod push;
 pub(crate) mod quit;
 mod spawn;
 pub(crate) mod startup_diagnostics;
 
-use child::{ChildProcess, ChildState};
+use child::ChildProcess;
+#[cfg(test)]
+use child::ChildState;
+use owned_child::{BeginReap, OwnedChild, StartReservation};
 use quit::{
-    ExitRequest, FailurePresentation, QuitGate, ReapCompletion, ShutdownPermit, MSG_QUIT_FAILED,
+    ExitRequest, FailurePresentation, QuitGate, ReapReservation, ShutdownPermit, UpdateDrainPermit,
+    MSG_QUIT_FAILED,
 };
 use spawn::spawn_process;
 
@@ -29,87 +34,6 @@ const MSG_START_FAILED: &str = "The background service could not be started.";
 const MSG_NEVER_READY: &str = "The background service started but didn't finish coming up.";
 
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
-
-#[cfg(test)]
-struct ReapDeliveryBarrier {
-    delivered: Arc<AtomicBool>,
-    release: std::sync::mpsc::Receiver<()>,
-    finished: Arc<AtomicBool>,
-}
-
-#[cfg(test)]
-struct ReapDeliveryHold {
-    delivered: Arc<AtomicBool>,
-    release: Option<std::sync::mpsc::Sender<()>>,
-    finished: Arc<AtomicBool>,
-}
-
-struct StartReservation {
-    child: Arc<Mutex<Option<Box<dyn ChildProcess>>>>,
-    pending: Arc<AtomicBool>,
-}
-
-#[cfg(test)]
-struct ChildTransferBarrier {
-    entered: std::sync::mpsc::Sender<()>,
-    release: std::sync::mpsc::Receiver<()>,
-}
-
-#[cfg(test)]
-struct ChildTransferHold {
-    entered: std::sync::mpsc::Receiver<()>,
-    release: Option<std::sync::mpsc::Sender<()>>,
-}
-
-#[cfg(test)]
-impl ChildTransferHold {
-    fn release(&mut self) {
-        if let Some(release) = self.release.take() {
-            let _ = release.send(());
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for ChildTransferHold {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
-
-impl Drop for StartReservation {
-    fn drop(&mut self) {
-        let _slot = self
-            .child
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.pending.store(false, Ordering::SeqCst);
-    }
-}
-
-#[cfg(test)]
-impl ReapDeliveryHold {
-    fn delivered(&self) -> bool {
-        self.delivered.load(Ordering::SeqCst)
-    }
-
-    fn finished(&self) -> bool {
-        self.finished.load(Ordering::SeqCst)
-    }
-
-    fn release(&mut self) {
-        if let Some(release) = self.release.take() {
-            let _ = release.send(());
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for ReapDeliveryHold {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
 
 /// What the background service is doing, as the UI needs to see it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -135,6 +59,61 @@ pub enum ServiceState {
     NotInstalled,
 }
 
+#[cfg(test)]
+impl Supervisor {
+    async fn start_injected<B, L, S>(
+        &self,
+        backend: &B,
+        locate: &L,
+        spawn: &S,
+    ) -> Result<ServiceState>
+    where
+        B: ServiceBackend,
+        L: Fn() -> Option<std::path::PathBuf>,
+        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
+    {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.start_locked(backend, locate, spawn).await
+    }
+    async fn restart_injected<B, L, S>(
+        &self,
+        backend: &B,
+        locate: &L,
+        spawn: &S,
+    ) -> Result<ServiceState>
+    where
+        B: ServiceBackend,
+        L: Fn() -> Option<std::path::PathBuf>,
+        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
+    {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.restart_locked(backend, locate, spawn).await
+    }
+    async fn shutdown_injected<B: ServiceBackend>(&self, backend: &B) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.shutdown_locked(backend).await.map(|_| ())
+    }
+    async fn install_after_update_drain_injected<B: ServiceBackend, T>(
+        &self,
+        backend: &B,
+        install: impl FnOnce(UpdateDrainPermit) -> T,
+    ) -> Result<T> {
+        self.install_after_update_drain_with(backend, install).await
+    }
+    fn child_slot(&self) -> std::sync::MutexGuard<'_, Option<Box<dyn ChildProcess>>> {
+        self.owned.test_slot()
+    }
+    fn take_child(&self) -> Option<Box<dyn ChildProcess>> {
+        self.owned.take_for_test()
+    }
+    fn holds_child(&self) -> bool {
+        self.owned.service_is_owned()
+    }
+    fn hold_next_reap_delivery(&self) -> owned_child::ReapDeliveryHold {
+        self.owned.hold_next_reap_delivery()
+    }
+}
+
 impl ServiceState {
     /// True when there is a live daemon, whatever shape it is in.
     pub fn is_live(&self) -> bool {
@@ -145,15 +124,8 @@ impl ServiceState {
 /// Owns the daemon child process for the life of this app process.
 pub struct Supervisor {
     lifecycle: AsyncMutex<()>,
-    child: Arc<Mutex<Option<Box<dyn ChildProcess>>>>,
-    child_pending: Arc<AtomicBool>,
-    start_pending: Arc<AtomicBool>,
-    terminal_failure: Arc<AtomicBool>,
+    owned: OwnedChild,
     quit_gate: QuitGate,
-    #[cfg(test)]
-    reap_delivery_barrier: Mutex<Option<ReapDeliveryBarrier>>,
-    #[cfg(test)]
-    child_transfer_barrier: Mutex<Option<ChildTransferBarrier>>,
 }
 
 impl std::fmt::Debug for Supervisor {
@@ -166,15 +138,8 @@ impl Default for Supervisor {
     fn default() -> Self {
         Self {
             lifecycle: AsyncMutex::new(()),
-            child: Arc::new(Mutex::new(None)),
-            child_pending: Arc::new(AtomicBool::new(false)),
-            start_pending: Arc::new(AtomicBool::new(false)),
-            terminal_failure: Arc::new(AtomicBool::new(false)),
+            owned: OwnedChild::default(),
             quit_gate: QuitGate::default(),
-            #[cfg(test)]
-            reap_delivery_barrier: Mutex::new(None),
-            #[cfg(test)]
-            child_transfer_barrier: Mutex::new(None),
         }
     }
 }
@@ -199,17 +164,17 @@ impl Supervisor {
         B: ServiceBackend,
         L: Fn() -> Option<std::path::PathBuf>,
     {
-        if self.child_pending.load(Ordering::SeqCst) {
+        if self.owned.is_reap_pending() {
             return ServiceState::Unhealthy;
         }
         match backend.service_status().await {
             Ok(status) => ServiceState::Running {
                 matches_app: status.version == APP_VERSION,
                 version: status.version,
-                ours: self.holds_child(),
+                ours: self.owned.service_is_owned(),
             },
             Err(BackendError::Unreachable) => {
-                if self.holds_child() {
+                if self.owned.service_is_owned() {
                     ServiceState::Unhealthy
                 } else if locate().is_some() {
                     ServiceState::Stopped
@@ -267,7 +232,10 @@ impl Supervisor {
         }
 
         let binary = locate().ok_or(BackendError::Unsupported(MSG_NOT_INSTALLED))?;
-        if !self.spawn(&binary, spawn)? {
+        if !self
+            .owned
+            .spawn_if_start_admitted(&self.quit_gate, spawn, &binary)?
+        {
             return Ok(ServiceState::Unhealthy);
         }
         if let Err(error) = self.await_ready(backend).await {
@@ -275,7 +243,7 @@ impl Supervisor {
         }
         let state = self.service_state_with(backend, locate).await;
         if state.is_live() {
-            self.terminal_failure.store(false, Ordering::SeqCst);
+            self.owned.clear_terminal_failure();
         }
         Ok(state)
     }
@@ -305,8 +273,8 @@ impl Supervisor {
         let state = self.service_state_with(backend, locate).await;
         if state.is_live() {
             backend.stop_service().await?;
-            if self.holds_child() {
-                self.reap_owned_child(false).await?;
+            if self.owned.service_is_owned() {
+                self.reap_owned_child(None).await?;
             } else {
                 self.await_stopped(backend).await?;
             }
@@ -322,28 +290,89 @@ impl Supervisor {
     }
 
     async fn shutdown_locked<B: ServiceBackend>(&self, backend: &B) -> Result<ShutdownPermit> {
-        if !self.holds_child() {
-            if self.terminal_failure.load(Ordering::SeqCst) {
+        self.owned.wait_for_reap_completion().await;
+        if !self.owned.service_is_owned() {
+            if self.owned.terminal_failure() {
                 return Err(BackendError::Internal(MSG_QUIT_FAILED.into()));
             }
             return Ok(ShutdownPermit(Some(self.quit_gate.clone())));
         }
         backend.stop_service().await?;
-        self.reap_owned_child(true).await.map(ShutdownPermit)
+        let reservation = self
+            .reap_owned_child(Some(ReapReservation::ordinary(self.quit_gate.clone())))
+            .await?;
+        reservation
+            .and_then(ReapReservation::into_ordinary)
+            .ok_or_else(|| BackendError::Internal(MSG_QUIT_FAILED.into()))
     }
 
-    fn spawn<S>(&self, binary: &Path, spawn: &S) -> Result<bool>
-    where
-        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
-    {
-        let mut slot = self.child_slot();
-        if self.quit_gate.is_reserved() {
-            return Ok(false);
+    /// Reserve update installation before changing the service state.
+    ///
+    /// The permit reaches the platform installer only after the owned child
+    /// has actually exited, so cancelling its async caller cannot admit a new
+    /// service while a synchronous reap or installer still owns the update.
+    async fn drain_for_update<B: ServiceBackend>(&self, backend: &B) -> Result<UpdateDrainPermit> {
+        let permit =
+            UpdateDrainPermit::reserve(self.quit_gate.clone()).ok_or(BackendError::NotReady)?;
+        let _lifecycle = self.lifecycle.lock().await;
+        self.drain_for_update_locked(backend, permit).await
+    }
+
+    pub(crate) async fn install_after_update_drain<B: Backend, T>(
+        &self,
+        backend: &B,
+        install: impl FnOnce(UpdateDrainPermit) -> T,
+    ) -> Result<T> {
+        self.install_after_update_drain_with(backend, install).await
+    }
+
+    async fn install_after_update_drain_with<B: ServiceBackend, T>(
+        &self,
+        backend: &B,
+        install: impl FnOnce(UpdateDrainPermit) -> T,
+    ) -> Result<T> {
+        Ok(install(self.drain_for_update(backend).await?))
+    }
+
+    async fn drain_for_update_locked<B: ServiceBackend>(
+        &self,
+        backend: &B,
+        permit: UpdateDrainPermit,
+    ) -> Result<UpdateDrainPermit> {
+        if self.owned.terminal_failure() {
+            return Err(BackendError::Internal(MSG_QUIT_FAILED.into()));
         }
-        let child = spawn(binary)?;
-        debug_assert!(slot.is_none(), "a live child cannot be replaced");
-        *slot = Some(child);
-        Ok(true)
+        self.owned.wait_for_reap_completion().await;
+        if self.owned.terminal_failure() {
+            return Err(BackendError::Internal(MSG_QUIT_FAILED.into()));
+        }
+        let state = self.service_state(backend).await;
+        if self.owned.terminal_failure() {
+            return Err(BackendError::Internal(MSG_QUIT_FAILED.into()));
+        }
+        match state {
+            ServiceState::Stopped | ServiceState::NotInstalled => Ok(permit),
+            ServiceState::Running { .. } | ServiceState::Unhealthy => {
+                backend.stop_service().await?;
+                if self.owned.service_is_owned() {
+                    let reservation = self
+                        .reap_owned_child(Some(ReapReservation::Update(permit)))
+                        .await?;
+                    reservation
+                        .and_then(ReapReservation::into_update)
+                        .ok_or_else(|| BackendError::Internal(MSG_QUIT_FAILED.into()))
+                } else {
+                    if self.owned.terminal_failure() {
+                        return Err(BackendError::Internal(MSG_QUIT_FAILED.into()));
+                    }
+                    self.await_stopped(backend).await?;
+                    if self.owned.terminal_failure() {
+                        return Err(BackendError::Internal(MSG_QUIT_FAILED.into()));
+                    }
+                    Ok(permit)
+                }
+            }
+        }
     }
 
     /// Wait for the daemon to answer, or for it to die trying.
@@ -361,7 +390,7 @@ impl Supervisor {
             // Checked before the probe, so a daemon that exited on startup —
             // a locked database, a refused port — is reported now instead of
             // after the full timeout.
-            if self.child_exited() {
+            if self.owned.child_exited() {
                 return Err(BackendError::Internal(MSG_START_FAILED.into()));
             }
             backend.service_status().await.map(|_| ())
@@ -394,115 +423,38 @@ impl Supervisor {
         .await
     }
 
-    /// Whether we hold a child that is still alive, reaping it if it is not.
-    fn holds_child(&self) -> bool {
-        let mut slot = self.child_slot();
-        match slot.as_mut().map(|child| child.state()) {
-            Some(Ok(ChildState::Running)) => true,
-            Some(Ok(ChildState::Exited(code))) => {
-                let failed = !code.is_success();
-                startup_diagnostics::child_exited(code);
-                if failed {
-                    self.terminal_failure.store(true, Ordering::SeqCst);
-                }
-                *slot = None;
-                self.child_pending.store(false, Ordering::SeqCst);
-                false
+    async fn reap_owned_child(
+        &self,
+        reservation: Option<ReapReservation>,
+    ) -> Result<Option<ReapReservation>> {
+        let received = match self.owned.begin_reap(reservation) {
+            BeginReap::Started(received) => received,
+            BeginReap::AlreadyExited(reservation) => {
+                return self
+                    .owned
+                    .terminal_failure()
+                    .then_some(())
+                    .map_or(Ok(reservation), |_| {
+                        Err(BackendError::Internal(MSG_QUIT_FAILED.into()))
+                    });
             }
-            Some(Err(_)) => true,
-            None => false,
-        }
-    }
-
-    fn child_exited(&self) -> bool {
-        let mut slot = self.child_slot();
-        if let Some(Ok(ChildState::Exited(code))) = slot.as_mut().map(|child| child.state()) {
-            let failed = !code.is_success();
-            startup_diagnostics::child_exited(code);
-            if failed {
-                self.terminal_failure.store(true, Ordering::SeqCst);
-            }
-            *slot = None;
-            self.child_pending.store(false, Ordering::SeqCst);
-            true
-        } else {
-            false
-        }
-    }
-
-    async fn reap_owned_child(&self, ordinary_quit: bool) -> Result<Option<QuitGate>> {
-        let Some(child) = self.take_child() else {
-            return Ok(None);
         };
-        let slot = Arc::clone(&self.child);
-        let pending = Arc::clone(&self.child_pending);
-        let terminal_failure = Arc::clone(&self.terminal_failure);
-        let quit_gate = self.quit_gate.clone();
-        #[cfg(test)]
-        let delivery_barrier = self
-            .reap_delivery_barrier
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take();
-        let (sent, received) = tokio::sync::oneshot::channel();
-        tokio::task::spawn_blocking(move || {
-            let mut child = child;
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| child.reap()));
-            let result = match result {
-                Ok(Ok(code)) if code.is_success() => {
-                    terminal_failure.store(false, Ordering::SeqCst);
-                    Ok(code)
-                }
-                Ok(Ok(code)) => {
-                    terminal_failure.store(true, Ordering::SeqCst);
-                    Ok(code)
-                }
-                Ok(Err(error)) => {
-                    let mut restored = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                    if restored.is_none() {
-                        *restored = Some(child);
-                    } else {
-                        std::mem::forget(child);
-                    }
-                    Err(error)
-                }
-                Err(_) => {
-                    let mut restored = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                    if restored.is_none() {
-                        *restored = Some(child);
-                    } else {
-                        std::mem::forget(child);
-                    }
-                    terminal_failure.store(true, Ordering::SeqCst);
-                    Err(std::io::Error::other("reap panicked"))
-                }
-            };
-            pending.store(false, Ordering::SeqCst);
-            let completion = ReapCompletion {
-                result: Some(result),
-                ordinary_quit: ordinary_quit.then_some(quit_gate),
-            };
-            if sent.send(completion).is_ok() {
-                #[cfg(test)]
-                if let Some(barrier) = delivery_barrier {
-                    barrier.delivered.store(true, Ordering::SeqCst);
-                    let _ = barrier.release.recv();
-                    barrier.finished.store(true, Ordering::SeqCst);
-                }
-            }
-        });
 
         match received.await {
             Err(_) => Err(BackendError::Internal(MSG_QUIT_FAILED.into())),
             Ok(completion) => match completion.finish() {
-                (Ok(code), gate) if code.is_success() => Ok(gate),
-                (Ok(code), gate) => {
-                    drop(gate);
+                (Ok(code), reservation) if code.is_success() => Ok(reservation),
+                (Ok(code), reservation) => {
+                    if let Some(reservation) = reservation {
+                        reservation.retain_ordinary_failure();
+                    }
                     startup_diagnostics::child_exited(code);
                     Err(BackendError::Internal(MSG_QUIT_FAILED.into()))
                 }
-                (Err(error), gate) => {
-                    drop(gate);
+                (Err(error), reservation) => {
+                    if let Some(reservation) = reservation {
+                        reservation.retain_ordinary_failure();
+                    }
                     tracing::warn!(%error, "the background service could not be reaped");
                     Err(BackendError::Internal(MSG_QUIT_FAILED.into()))
                 }
@@ -510,150 +462,19 @@ impl Supervisor {
         }
     }
 
-    fn take_child(&self) -> Option<Box<dyn ChildProcess>> {
-        let mut slot = self.child_slot();
-        let child = slot.take();
-        self.child_pending.store(child.is_some(), Ordering::SeqCst);
-        #[cfg(test)]
-        if let Some(barrier) = self
-            .child_transfer_barrier
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take()
-        {
-            let _ = barrier.entered.send(());
-            let _ = barrier.release.recv();
-        }
-        child
-    }
-
     pub(crate) fn request_quit(&self) -> ExitRequest {
-        let mut slot = self.child_slot();
-        let pending =
-            self.child_pending.load(Ordering::SeqCst) || self.start_pending.load(Ordering::SeqCst);
-        let owns = match slot.as_mut().map(|child| child.state()) {
-            Some(Ok(ChildState::Running)) => true,
-            Some(Ok(ChildState::Exited(code))) => {
-                let failed = !code.is_success();
-                startup_diagnostics::child_exited(code);
-                if failed {
-                    self.terminal_failure.store(true, Ordering::SeqCst);
-                }
-                *slot = None;
-                self.child_pending.store(false, Ordering::SeqCst);
-                false
-            }
-            Some(Err(_)) => true,
-            None => false,
-        };
-        if self.quit_gate.is_reserved() {
-            return self.quit_gate.request(pending || owns);
-        }
-        if self.terminal_failure.load(Ordering::SeqCst) {
-            self.quit_gate.reserve_failure();
-            return ExitRequest::Failure;
-        }
-        self.quit_gate.request(pending || owns)
+        self.owned.request_quit(&self.quit_gate)
     }
 
     fn reserve_start(&self) -> Option<StartReservation> {
-        let _slot = self.child_slot();
-        if self.quit_gate.is_reserved() || self.child_pending.load(Ordering::SeqCst) {
-            return None;
-        }
-        self.start_pending.store(true, Ordering::SeqCst);
-        Some(StartReservation {
-            child: Arc::clone(&self.child),
-            pending: Arc::clone(&self.start_pending),
-        })
+        self.owned.reserve_start(&self.quit_gate)
     }
 
     pub(crate) fn failure_presentation(&self) -> FailurePresentation {
         if !self.quit_gate.is_reserved() {
             self.quit_gate.reserve_failure();
         }
-        FailurePresentation::new(Arc::clone(&self.terminal_failure), self.quit_gate.clone())
-    }
-
-    fn child_slot(&self) -> std::sync::MutexGuard<'_, Option<Box<dyn ChildProcess>>> {
-        self.child
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    #[cfg(test)]
-    fn hold_next_reap_delivery(&self) -> ReapDeliveryHold {
-        let delivered = Arc::new(AtomicBool::new(false));
-        let finished = Arc::new(AtomicBool::new(false));
-        let (release, receiver) = std::sync::mpsc::channel();
-        *self
-            .reap_delivery_barrier
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ReapDeliveryBarrier {
-            delivered: Arc::clone(&delivered),
-            release: receiver,
-            finished: Arc::clone(&finished),
-        });
-        ReapDeliveryHold {
-            delivered,
-            release: Some(release),
-            finished,
-        }
-    }
-
-    #[cfg(test)]
-    fn hold_next_child_transfer(&self) -> ChildTransferHold {
-        let (entered, entered_at_transfer) = std::sync::mpsc::channel();
-        let (release, wait_for_release) = std::sync::mpsc::channel();
-        *self
-            .child_transfer_barrier
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ChildTransferBarrier {
-            entered,
-            release: wait_for_release,
-        });
-        ChildTransferHold {
-            entered: entered_at_transfer,
-            release: Some(release),
-        }
-    }
-
-    #[cfg(test)]
-    async fn start_injected<B, L, S>(
-        &self,
-        backend: &B,
-        locate: &L,
-        spawn: &S,
-    ) -> Result<ServiceState>
-    where
-        B: ServiceBackend,
-        L: Fn() -> Option<std::path::PathBuf>,
-        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
-    {
-        let _lifecycle = self.lifecycle.lock().await;
-        self.start_locked(backend, locate, spawn).await
-    }
-
-    #[cfg(test)]
-    async fn restart_injected<B, L, S>(
-        &self,
-        backend: &B,
-        locate: &L,
-        spawn: &S,
-    ) -> Result<ServiceState>
-    where
-        B: ServiceBackend,
-        L: Fn() -> Option<std::path::PathBuf>,
-        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
-    {
-        let _lifecycle = self.lifecycle.lock().await;
-        self.restart_locked(backend, locate, spawn).await
-    }
-
-    #[cfg(test)]
-    async fn shutdown_injected<B: ServiceBackend>(&self, backend: &B) -> Result<()> {
-        let _lifecycle = self.lifecycle.lock().await;
-        self.shutdown_locked(backend).await.map(|_| ())
+        FailurePresentation::new(self.owned.terminal_failure_handle(), self.quit_gate.clone())
     }
 }
 
@@ -675,13 +496,7 @@ impl<B: Backend> ServiceBackend for B {
 
 impl Drop for Supervisor {
     fn drop(&mut self) {
-        let mut slot = self
-            .child
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(child) = slot.take() {
-            std::mem::forget(child);
-        }
+        self.owned.forget_on_drop();
     }
 }
 
@@ -813,6 +628,73 @@ mod tests {
     }
 
     #[derive(Default)]
+    struct StubbornAdopted {
+        shutdown_calls: AtomicUsize,
+    }
+
+    #[derive(Default)]
+    struct UnhealthyAdopted {
+        stopped: AtomicBool,
+        shutdown_calls: AtomicUsize,
+    }
+
+    impl ServiceBackend for UnhealthyAdopted {
+        async fn service_status(&self) -> Result<StatusData> {
+            if self.stopped.load(Ordering::SeqCst) {
+                Err(BackendError::Unreachable)
+            } else {
+                Err(BackendError::Internal("controlled unhealthy status".into()))
+            }
+        }
+
+        async fn stop_service(&self) -> Result<()> {
+            self.shutdown_calls.fetch_add(1, Ordering::SeqCst);
+            self.stopped.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct UnhealthyStopFails {
+        shutdown_calls: AtomicUsize,
+    }
+
+    impl ServiceBackend for UnhealthyStopFails {
+        async fn service_status(&self) -> Result<StatusData> {
+            Err(BackendError::Internal("controlled unhealthy status".into()))
+        }
+
+        async fn stop_service(&self) -> Result<()> {
+            self.shutdown_calls.fetch_add(1, Ordering::SeqCst);
+            Err(BackendError::Internal("controlled shutdown failure".into()))
+        }
+    }
+
+    impl ServiceBackend for StubbornAdopted {
+        async fn service_status(&self) -> Result<StatusData> {
+            Ok(StatusData {
+                device_name: "Test device".into(),
+                version: APP_VERSION.into(),
+                protocol_version: PROTOCOL_VERSION,
+                listen_addr: None,
+                device_details: None,
+                item_count: 0,
+                capture_running: true,
+                clipboard_backend: "fake".into(),
+                private_mode: false,
+                private_mode_epoch: 0,
+                counters: DiagnosticCounters::default(),
+                settings_health: None,
+            })
+        }
+
+        async fn stop_service(&self) -> Result<()> {
+            self.shutdown_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
     struct ChildProbe {
         exited: AtomicBool,
         kills: AtomicUsize,
@@ -848,6 +730,22 @@ mod tests {
         finished: Option<tokio::sync::oneshot::Sender<()>>,
     }
 
+    struct BlockingRelease(Option<std::sync::mpsc::Sender<()>>);
+
+    impl BlockingRelease {
+        fn release(&mut self) {
+            if let Some(release) = self.0.take() {
+                let _ = release.send(());
+            }
+        }
+    }
+
+    impl Drop for BlockingRelease {
+        fn drop(&mut self) {
+            self.release();
+        }
+    }
+
     struct UnknownExitChild;
 
     struct ControlledExitChild {
@@ -855,7 +753,6 @@ mod tests {
         code: Option<ChildExitCode>,
     }
 
-    struct UnknownExitedChild;
     struct PanickingChild;
 
     impl ChildProcess for UnknownExitChild {
@@ -882,16 +779,6 @@ mod tests {
 
         fn reap(&mut self) -> std::io::Result<ChildExitCode> {
             unreachable!("an exited child is never reaped again")
-        }
-    }
-
-    impl ChildProcess for UnknownExitedChild {
-        fn state(&mut self) -> std::io::Result<ChildState> {
-            Ok(ChildState::Exited(ChildExitCode::unavailable()))
-        }
-
-        fn reap(&mut self) -> std::io::Result<ChildExitCode> {
-            Ok(ChildExitCode::unavailable())
         }
     }
 
@@ -931,6 +818,28 @@ mod tests {
 
     fn injected_binary() -> Option<PathBuf> {
         Some(PathBuf::from("injected-daemon"))
+    }
+
+    async fn update_drain_refuses_failed_reap(
+        child: Box<dyn ChildProcess>,
+        expected_quit: ExitRequest,
+    ) {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        let installed = AtomicBool::new(false);
+        *sup.child_slot() = Some(child);
+
+        let error = sup
+            .install_after_update_drain_injected(&backend, |permit| {
+                installed.store(true, Ordering::SeqCst);
+                drop(permit);
+            })
+            .await
+            .expect_err("a failed owned reap cannot install an update");
+
+        assert_eq!(error.to_string(), MSG_QUIT_FAILED);
+        assert!(!installed.load(Ordering::SeqCst));
+        assert_eq!(sup.request_quit(), expected_quit);
     }
 
     #[tokio::test]
@@ -1055,35 +964,6 @@ mod tests {
         assert_eq!(spawns.load(Ordering::SeqCst), 0);
     }
 
-    #[test]
-    fn quit_waits_for_a_child_transfer_and_then_drains_never_allows() {
-        let sup = Supervisor::default();
-        *sup.child_slot() = Some(Box::new(FakeChild {
-            probe: Arc::new(ChildProbe::default()),
-        }));
-        let mut transfer_hold = sup.hold_next_child_transfer();
-
-        std::thread::scope(|scope| {
-            let transfer_supervisor = &sup;
-            let transfer = scope.spawn(move || transfer_supervisor.take_child());
-            transfer_hold.entered.recv().expect("child was removed");
-            let (sent, result) = std::sync::mpsc::channel();
-            let quit_supervisor = &sup;
-            scope.spawn(move || {
-                sent.send(quit_supervisor.request_quit())
-                    .expect("report quit")
-            });
-
-            assert!(
-                matches!(result.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
-                "quit observed a half-transferred child"
-            );
-            transfer_hold.release();
-            assert_eq!(result.recv().expect("quit completed"), ExitRequest::Drain);
-            drop(transfer.join().expect("transfer completed"));
-        });
-    }
-
     #[tokio::test]
     async fn a_child_that_exits_during_start_is_reaped_once() {
         let sup = Supervisor::default();
@@ -1199,7 +1079,7 @@ mod tests {
     fn a_shown_terminal_failure_allows_the_next_no_child_quit() {
         let sup = Supervisor::default();
         let shown = AtomicBool::new(false);
-        sup.terminal_failure.store(true, Ordering::SeqCst);
+        sup.owned.set_terminal_failure_for_test();
 
         quit::finish_failure(&sup, |mut presentation| {
             shown.store(true, Ordering::SeqCst);
@@ -1214,7 +1094,7 @@ mod tests {
     async fn scheduling_failure_presentation_keeps_the_drain_reserved_until_acknowledged() {
         let sup = Supervisor::default();
         let scheduled = AtomicBool::new(false);
-        sup.terminal_failure.store(true, Ordering::SeqCst);
+        sup.owned.set_terminal_failure_for_test();
 
         let held = Mutex::new(None);
         quit::finish_failure(&sup, |presentation| {
@@ -1246,7 +1126,7 @@ mod tests {
     #[test]
     fn dropping_an_unacknowledged_presentation_keeps_the_failure_reportable() {
         let sup = Supervisor::default();
-        sup.terminal_failure.store(true, Ordering::SeqCst);
+        sup.owned.set_terminal_failure_for_test();
         let held = Mutex::new(None);
         quit::finish_failure(&sup, |presentation| {
             *held.lock().unwrap() = Some(presentation)
@@ -1270,6 +1150,372 @@ mod tests {
 
         assert_eq!(child.kills.load(Ordering::SeqCst), 0);
         assert_eq!(child.reaps.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn update_drain_reserves_quit_until_the_installer_receives_it() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        let (entered, at_reap) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        *sup.child_slot() = Some(Box::new(DelayedChild {
+            probe: Arc::new(ChildProbe::default()),
+            exit_code: 0,
+            reap_error: false,
+            entered: Some(entered),
+            release: Some(wait),
+            finished: None,
+        }));
+
+        let installed = AtomicBool::new(false);
+        let mut drain = Box::pin(sup.install_after_update_drain_injected(&backend, |permit| {
+            installed.store(true, Ordering::SeqCst);
+            permit
+        }));
+        assert!(matches!(futures_util::poll!(&mut drain), Poll::Pending));
+        at_reap.await.expect("owned reap began");
+        assert!(
+            !installed.load(Ordering::SeqCst),
+            "installation cannot begin before the owned child is reaped"
+        );
+        assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+        release.send(()).expect("release owned reap");
+
+        let permit = drain.await.expect("successful owned update drain");
+        assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+        let spawns = AtomicUsize::new(0);
+        let start = |_: &Path| -> Result<Box<dyn ChildProcess>> {
+            spawns.fetch_add(1, Ordering::SeqCst);
+            Err(BackendError::Internal(
+                "must not start during update".into(),
+            ))
+        };
+        assert_eq!(
+            sup.start_injected(&backend, &injected_binary, &start)
+                .await
+                .expect("reserved start is a safe no-op"),
+            ServiceState::Unhealthy
+        );
+        assert_eq!(spawns.load(Ordering::SeqCst), 0);
+        drop(permit);
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
+    }
+
+    #[tokio::test]
+    async fn cancelling_an_update_drain_keeps_the_reservation_until_owned_reap_finishes() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        let (entered, at_reap) = tokio::sync::oneshot::channel();
+        let (finished, reap_finished) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        *sup.child_slot() = Some(Box::new(DelayedChild {
+            probe: Arc::new(ChildProbe::default()),
+            exit_code: 0,
+            reap_error: false,
+            entered: Some(entered),
+            release: Some(wait),
+            finished: Some(finished),
+        }));
+
+        let mut drain =
+            Box::pin(sup.install_after_update_drain_injected(&backend, |permit| permit));
+        assert!(matches!(futures_util::poll!(&mut drain), Poll::Pending));
+        at_reap.await.expect("owned reap began");
+        drop(drain);
+        assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+
+        release.send(()).expect("release owned reap");
+        reap_finished.await.expect("owned reap completed");
+        while sup.owned.is_reap_pending_for_test() {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
+    }
+
+    #[tokio::test]
+    async fn cancelling_after_update_reap_delivery_releases_the_reservation() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        let (entered, at_reap) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        *sup.child_slot() = Some(Box::new(DelayedChild {
+            probe: Arc::new(ChildProbe::default()),
+            exit_code: 0,
+            reap_error: false,
+            entered: Some(entered),
+            release: Some(wait),
+            finished: None,
+        }));
+        let mut delivery = sup.hold_next_reap_delivery();
+        let mut update =
+            Box::pin(sup.install_after_update_drain_injected(&backend, |permit| permit));
+
+        assert!(matches!(futures_util::poll!(&mut update), Poll::Pending));
+        at_reap.await.expect("owned reap began");
+        release.send(()).expect("release owned reap");
+        while !delivery.delivered() {
+            tokio::task::yield_now().await;
+        }
+        drop(update);
+
+        let spawns = AtomicUsize::new(0);
+        let spawn = |_: &Path| -> Result<Box<dyn ChildProcess>> {
+            spawns.fetch_add(1, Ordering::SeqCst);
+            backend.set_running(true);
+            Ok(Box::new(FakeChild {
+                probe: Arc::new(ChildProbe::default()),
+            }))
+        };
+        assert!(sup
+            .start_injected(&backend, &injected_binary, &spawn)
+            .await
+            .expect("cancelled update releases start")
+            .is_live());
+        assert_eq!(sup.request_quit(), ExitRequest::Drain);
+        assert_eq!(spawns.load(Ordering::SeqCst), 1);
+        delivery.release();
+    }
+
+    #[tokio::test]
+    async fn update_drain_stops_an_adopted_service_without_a_child_signal() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+
+        let permit = sup
+            .install_after_update_drain_injected(&backend, |permit| permit)
+            .await
+            .expect("adopted service confirmed stopped");
+
+        assert_eq!(backend.shutdown_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+        drop(permit);
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
+    }
+
+    #[tokio::test]
+    async fn cancelling_an_update_before_shutdown_ack_keeps_the_owned_child() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        backend.shutdown_gate.arm();
+        *sup.child_slot() = Some(Box::new(FakeChild {
+            probe: Arc::new(ChildProbe::default()),
+        }));
+        let installed = AtomicBool::new(false);
+        let mut update = Box::pin(sup.install_after_update_drain_injected(&backend, |permit| {
+            installed.store(true, Ordering::SeqCst);
+            drop(permit);
+        }));
+
+        assert!(matches!(futures_util::poll!(&mut update), Poll::Pending));
+        backend.shutdown_gate.wait_until_entered().await;
+        drop(update);
+
+        assert!(!installed.load(Ordering::SeqCst));
+        assert!(sup.holds_child());
+        assert_eq!(sup.request_quit(), ExitRequest::Drain);
+    }
+
+    #[tokio::test]
+    async fn an_owned_child_that_exits_nonzero_after_update_ack_refuses_install() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        backend.shutdown_gate.arm();
+        let exited = Arc::new(AtomicBool::new(false));
+        *sup.child_slot() = Some(Box::new(ControlledExitChild {
+            exited: Arc::clone(&exited),
+            code: Some(ChildExitCode::from_test_code(23)),
+        }));
+        let installed = AtomicBool::new(false);
+        let mut update = Box::pin(sup.install_after_update_drain_injected(&backend, |permit| {
+            installed.store(true, Ordering::SeqCst);
+            drop(permit);
+        }));
+
+        assert!(matches!(futures_util::poll!(&mut update), Poll::Pending));
+        backend.shutdown_gate.wait_until_entered().await;
+        exited.store(true, Ordering::SeqCst);
+        backend.shutdown_gate.resume();
+        let error = update
+            .await
+            .expect_err("nonzero exit prevents update installation");
+
+        assert_eq!(error.to_string(), MSG_QUIT_FAILED);
+        assert!(!installed.load(Ordering::SeqCst));
+        assert_eq!(sup.request_quit(), ExitRequest::Failure);
+    }
+
+    #[tokio::test]
+    async fn a_no_service_update_hands_a_reservation_to_the_installer() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(false);
+
+        let permit = sup
+            .install_after_update_drain_injected(&backend, |permit| permit)
+            .await
+            .expect("no-service update can hand off to the installer");
+
+        assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+        drop(permit);
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
+    }
+
+    #[tokio::test]
+    async fn a_rejected_update_reservation_cannot_clear_an_ordinary_drain() {
+        let sup = Supervisor::default();
+        assert_eq!(sup.quit_gate.request(true), ExitRequest::Drain);
+
+        assert!(UpdateDrainPermit::reserve(sup.quit_gate.clone()).is_none());
+        assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+        let backend = ControlledBackend::new(false);
+        let spawns = AtomicUsize::new(0);
+        let spawn = |_: &Path| -> Result<Box<dyn ChildProcess>> {
+            spawns.fetch_add(1, Ordering::SeqCst);
+            unreachable!("the reserved drain blocks start")
+        };
+        assert_eq!(
+            sup.start_injected(&backend, &injected_binary, &spawn)
+                .await
+                .expect("reserved start is a no-op"),
+            ServiceState::Unhealthy
+        );
+        assert_eq!(spawns.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn update_refuses_an_adopted_service_that_never_confirms_stop() {
+        let sup = Supervisor::default();
+        let backend = StubbornAdopted::default();
+        let installed = AtomicBool::new(false);
+        let mut update = Box::pin(sup.install_after_update_drain_injected(&backend, |permit| {
+            installed.store(true, Ordering::SeqCst);
+            drop(permit);
+        }));
+
+        assert!(matches!(futures_util::poll!(&mut update), Poll::Pending));
+        tokio::time::advance(READY_TIMEOUT + Duration::from_secs(1)).await;
+        let error = update
+            .await
+            .expect_err("unconfirmed adopted stop refuses the update");
+
+        assert_eq!(error.to_string(), MSG_NEVER_READY);
+        assert_eq!(backend.shutdown_calls.load(Ordering::SeqCst), 1);
+        assert!(!installed.load(Ordering::SeqCst));
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
+    }
+
+    #[tokio::test]
+    async fn update_drain_refuses_nonzero_unknown_io_and_panic_without_installing() {
+        update_drain_refuses_failed_reap(
+            Box::new(DelayedChild {
+                probe: Arc::new(ChildProbe::default()),
+                exit_code: 23,
+                reap_error: false,
+                entered: None,
+                release: None,
+                finished: None,
+            }),
+            ExitRequest::Failure,
+        )
+        .await;
+        update_drain_refuses_failed_reap(Box::new(UnknownExitChild), ExitRequest::Failure).await;
+        update_drain_refuses_failed_reap(
+            Box::new(DelayedChild {
+                probe: Arc::new(ChildProbe::default()),
+                exit_code: 0,
+                reap_error: true,
+                entered: None,
+                release: None,
+                finished: None,
+            }),
+            ExitRequest::Drain,
+        )
+        .await;
+        update_drain_refuses_failed_reap(Box::new(PanickingChild), ExitRequest::Failure).await;
+    }
+
+    #[tokio::test]
+    async fn update_drain_stops_an_unhealthy_adopted_service_before_installing() {
+        let sup = Supervisor::default();
+        let backend = UnhealthyAdopted::default();
+
+        let permit = sup
+            .install_after_update_drain_injected(&backend, |permit| permit)
+            .await
+            .expect("shutdown acknowledgement and vanished endpoint drain the update");
+
+        assert_eq!(backend.shutdown_calls.load(Ordering::SeqCst), 1);
+        assert!(backend.stopped.load(Ordering::SeqCst));
+        assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+        drop(permit);
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
+    }
+
+    #[tokio::test]
+    async fn update_drain_refuses_an_unhealthy_service_when_shutdown_fails() {
+        let sup = Supervisor::default();
+        let backend = UnhealthyStopFails::default();
+        let installed = AtomicBool::new(false);
+        let error = sup
+            .install_after_update_drain_injected(&backend, |permit| {
+                installed.store(true, Ordering::SeqCst);
+                drop(permit);
+            })
+            .await
+            .expect_err("a failed shutdown cannot grant an update boundary");
+
+        assert!(matches!(error, BackendError::Internal(_)));
+        assert_eq!(backend.shutdown_calls.load(Ordering::SeqCst), 1);
+        assert!(!installed.load(Ordering::SeqCst));
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_blocking_installer_keeps_the_update_reservation() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(false);
+        let (entered, installer_entered) = tokio::sync::oneshot::channel();
+        let (finished, installer_finished) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+
+        let mut operation = Box::pin(async {
+            let installer = sup
+                .install_after_update_drain_injected(&backend, move |permit| {
+                    tokio::task::spawn_blocking(move || {
+                        let permit = permit;
+                        let _ = entered.send(());
+                        let _ = wait.recv();
+                        drop(permit);
+                        let _ = finished.send(());
+                    })
+                })
+                .await
+                .expect("update drain completed");
+            installer.await.expect("installer worker joined");
+        });
+        assert!(matches!(futures_util::poll!(&mut operation), Poll::Pending));
+        installer_entered.await.expect("blocking installer began");
+        drop(operation);
+        assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+
+        release.send(()).expect("release installer");
+        installer_finished.await.expect("installer finished");
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
+    }
+
+    #[tokio::test]
+    async fn an_installer_error_releases_the_update_reservation() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(false);
+        let result = sup
+            .install_after_update_drain_injected(&backend, |permit| {
+                drop(permit);
+                Err::<(), _>("installer failed")
+            })
+            .await
+            .expect("drain passed the installer result through");
+
+        assert_eq!(result, Err("installer failed"));
+        assert_eq!(sup.request_quit(), ExitRequest::Allow);
     }
 
     #[test]
@@ -1366,7 +1612,7 @@ mod tests {
         entered_at_reap.await.expect("reap worker entered");
         drop(shutdown);
 
-        assert!(sup.child_pending.load(Ordering::SeqCst));
+        assert!(sup.owned.is_reap_pending_for_test());
         assert_eq!(child.kills.load(Ordering::SeqCst), 0);
         release.send(()).expect("release reap worker");
         completed_reap.await.expect("reap worker completed");
@@ -1516,19 +1762,6 @@ mod tests {
         assert_eq!(unknown.request_quit(), ExitRequest::AlreadyDraining);
         quit::finish_failure(&unknown, |mut presentation| presentation.ack());
         assert_eq!(unknown.request_quit(), ExitRequest::Allow);
-    }
-
-    #[test]
-    fn already_exited_owned_children_refuse_quit_until_the_failure_is_surfaced() {
-        let nonzero = Supervisor::default();
-        let probe = Arc::new(ChildProbe::default());
-        probe.exited.store(true, Ordering::SeqCst);
-        *nonzero.child_slot() = Some(Box::new(FakeChild { probe }));
-        assert_eq!(nonzero.request_quit(), ExitRequest::Failure);
-
-        let unknown = Supervisor::default();
-        *unknown.child_slot() = Some(Box::new(UnknownExitedChild));
-        assert_eq!(unknown.request_quit(), ExitRequest::Failure);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1690,7 +1923,7 @@ mod tests {
         at_reap.await.unwrap();
         release.send(()).unwrap();
         done.await.unwrap();
-        while sup.child_pending.load(Ordering::SeqCst) {
+        while sup.owned.is_reap_pending_for_test() {
             tokio::task::yield_now().await;
         }
 
@@ -1711,7 +1944,7 @@ mod tests {
         let backend = ControlledBackend::new(true);
         *sup.child_slot() = Some(Box::new(PanickingChild));
         assert!(sup.shutdown_injected(&backend).await.is_err());
-        assert!(!sup.child_pending.load(Ordering::SeqCst));
+        assert!(!sup.owned.is_reap_pending_for_test());
         assert!(sup.holds_child());
         assert_eq!(sup.request_quit(), ExitRequest::Failure);
     }
@@ -1751,5 +1984,55 @@ mod tests {
         done.await.unwrap();
         assert!(sup.holds_child());
         assert_eq!(sup.request_quit(), ExitRequest::Drain);
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_a_cancelled_restart_reap_before_deciding_exit() {
+        for reap_error in [false, true] {
+            let sup = Supervisor::default();
+            let backend = ControlledBackend::new(true);
+            let (entered, at_reap) = tokio::sync::oneshot::channel();
+            let (release, wait) = std::sync::mpsc::channel();
+            let mut release = BlockingRelease(Some(release));
+            *sup.child_slot() = Some(Box::new(DelayedChild {
+                probe: Arc::new(ChildProbe::default()),
+                exit_code: 0,
+                reap_error,
+                entered: Some(entered),
+                release: Some(wait),
+                finished: None,
+            }));
+
+            let no_restart = |_: &Path| -> Result<Box<dyn ChildProcess>> {
+                Err(BackendError::Internal("restart must stay cancelled".into()))
+            };
+            let mut restart =
+                Box::pin(sup.restart_injected(&backend, &injected_binary, &no_restart));
+            assert!(matches!(futures_util::poll!(&mut restart), Poll::Pending));
+            at_reap.await.expect("restart began owned reap");
+            drop(restart);
+            assert!(matches!(
+                sup.request_quit(),
+                ExitRequest::Drain | ExitRequest::AlreadyDraining
+            ));
+
+            let mut shutdown = Box::pin(sup.shutdown_locked(&backend));
+            assert!(matches!(futures_util::poll!(&mut shutdown), Poll::Pending));
+            assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+
+            release.release();
+            if reap_error {
+                assert!(shutdown.await.is_err());
+                assert!(matches!(
+                    sup.request_quit(),
+                    ExitRequest::Drain | ExitRequest::AlreadyDraining
+                ));
+            } else {
+                let permit = shutdown.await.expect("clean reap permits exit");
+                assert_eq!(sup.request_quit(), ExitRequest::AlreadyDraining);
+                permit.allow_exit();
+                assert_eq!(sup.request_quit(), ExitRequest::Allow);
+            }
+        }
     }
 }
