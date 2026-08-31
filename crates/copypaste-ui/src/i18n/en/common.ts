@@ -45,7 +45,7 @@ export const errors = {
     "This device's encryption key can't be used, so its clipboard history can't be unlocked.",
   unsupported_content: "That item can't be copied in the requested format.",
   content_too_large:
-    "That older text item is too large to return or copy safely. Its stored data is unchanged.",
+    "This content is too large for this operation. Your history is unchanged.",
   /** Pairing and sync. Each names the next step, because that is the whole
    *  difference between these and the one sentence they used to share. */
   pairing_code:

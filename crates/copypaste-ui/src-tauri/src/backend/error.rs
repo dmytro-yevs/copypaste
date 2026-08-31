@@ -198,7 +198,7 @@ pub enum BackendError {
     #[error("{0}")]
     UnsupportedContent(&'static str),
 
-    /// An authenticated legacy text body cannot cross the bounded UI boundary.
+    /// Included content or an aggregate export cannot cross the bounded UI boundary.
     #[error("{0}")]
     ContentTooLarge(&'static str),
 }
@@ -272,9 +272,9 @@ impl BackendError {
             ErrorCode::UnsupportedContent => {
                 Self::UnsupportedContent("That item cannot be copied in the requested format.")
             }
-            ErrorCode::ContentTooLarge => {
-                Self::ContentTooLarge("That older text item is too large to return or copy safely.")
-            }
+            ErrorCode::ContentTooLarge => Self::ContentTooLarge(
+                "This content is too large for this operation. Your history is unchanged.",
+            ),
             ErrorCode::PairingCode
             | ErrorCode::PairingAddress
             | ErrorCode::RateLimited
@@ -389,7 +389,7 @@ mod tests {
             BackendError::Unsupported("Pairing is not available in this build."),
             BackendError::UnsupportedContent("That item cannot be copied in the requested format."),
             BackendError::ContentTooLarge(
-                "That older text item is too large to return or copy safely.",
+                "This content is too large for this operation. Your history is unchanged.",
             ),
             BackendError::wrong_shape("a list of items"),
             BackendError::from_daemon("plain trouble"),

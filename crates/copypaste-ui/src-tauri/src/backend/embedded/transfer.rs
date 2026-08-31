@@ -175,4 +175,31 @@ mod tests {
         assert_eq!(error.ui_error().code, "content_too_large");
         assert!(!error.ui_error().retryable);
     }
+
+    #[tokio::test]
+    async fn aggregate_export_overflow_is_a_nonretryable_refusal() {
+        let (backend, _clip, _dir) = backend();
+        let first = "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES);
+        let second = format!(
+            "\u{2}{}",
+            "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES - 1)
+        );
+        seed_legacy_text(&backend, "embedded-aggregate-first", &first);
+        backend
+            .inner
+            .state
+            .store
+            .set_pinned("embedded-aggregate-first", true)
+            .unwrap();
+        seed_legacy_text(&backend, "embedded-aggregate-second", &second);
+
+        let error = backend.export(0, false).await.unwrap_err();
+        assert!(matches!(error, BackendError::ContentTooLarge(_)));
+        assert_eq!(
+            error.to_string(),
+            "This content is too large for this operation. Your history is unchanged."
+        );
+        assert_eq!(error.ui_error().code, "content_too_large");
+        assert!(!error.ui_error().retryable);
+    }
 }

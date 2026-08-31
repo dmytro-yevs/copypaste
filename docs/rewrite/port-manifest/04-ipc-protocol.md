@@ -155,6 +155,9 @@ as a known code and do not acquire a guessed retry policy.
   non-text export exclusions retain their filtering-before-authentication
   precedence. List, search and pin/unpin instead return a bounded preview
   marked `truncated`; the stored ciphertext is never altered.
+- An export whose included aggregate would exceed one response frame is refused
+  whole as non-retryable `content_too_large`; it has no partial-success or
+  truncation result.
 - Restore requires affirmative confirmation before any replacement work.
 
 ### 5.2.1 Sync size-refusal count
@@ -238,7 +241,7 @@ The shared enum distinguishes at least:
 | `auth_failed` | content authentication failed | no fallback |
 | `key_locked` | keystore state is temporarily unavailable | bounded retry |
 | `key_unusable` | stored secret cannot open this history | no |
-| `content_too_large` | authenticated legacy text cannot fit a full bounded reply | no |
+| `content_too_large` | authenticated included content or aggregate cannot fit a bounded reply | no |
 | pairing validation/limit/version errors | ceremony cannot proceed as requested | only the explicitly transient peer failures retry |
 | `internal` | bounded unexpected failure | retry only where shared policy says so |
 
@@ -271,6 +274,8 @@ Stable rule IDs used by source comments:
 - Get, native copy, plain-text copy and included export refuse authenticated
   legacy text over the supported full-body limit before any clipboard write;
   list, search and pin/unpin retain bounded previews and protection controls.
+- Export refuses, rather than truncates, an included aggregate that cannot fit
+  its one bounded typed response.
 - Export defaults to excluding sensitive items. Import reruns detector, size and
   dedup policy rather than inserting rows directly.
 - Backup refuses overwrite. Restore validates current key, schema, integrity

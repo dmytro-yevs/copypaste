@@ -1,3 +1,6 @@
+use std::ops::ControlFlow;
+
+use copypaste_ipc::limits::ExportFrameBudget;
 use copypaste_ipc::{ExportData, ExportItem};
 use tracing::{info, warn};
 
@@ -8,12 +11,9 @@ use crate::Keyring;
 pub enum ExportError {
     #[error("the history database could not be accessed")]
     Store(#[from] StoreError),
-    #[error("an authenticated text item is too large to export")]
+    #[error("included content or the aggregate export is too large")]
     ContentTooLarge,
 }
-
-/// How many rows one export reads out of the store at a time.
-const EXPORT_CHUNK: u32 = 500;
 
 /// Read history out as plaintext, counting everything it declines to include.
 ///
@@ -27,6 +27,7 @@ pub fn export(
     include_sensitive: bool,
 ) -> Result<ExportData, ExportError> {
     let key = keyring.item_key();
+    let mut budget = ExportFrameBudget::new();
     let mut data = ExportData {
         items: Vec::new(),
         skipped_non_text: 0,
@@ -34,51 +35,43 @@ pub fn export(
         skipped_undecryptable: 0,
     };
 
-    // Paged rather than one unbounded `list`: a full history is 10 000 rows of
-    // plaintext and this holds one page of ciphertext at a time on the way to
-    // holding all of the plaintext anyway — but the query stays cheap and the
-    // limit stops early.
-    let mut offset = 0u32;
-    loop {
-        let rows = store.list(EXPORT_CHUNK, offset)?;
-        if rows.is_empty() {
-            break;
+    store.visit_live_items(|row| {
+        if row.is_sensitive && !include_sensitive {
+            data.skipped_sensitive = data.skipped_sensitive.saturating_add(1);
+            return Ok(ControlFlow::Continue(()));
         }
-        offset = offset.saturating_add(EXPORT_CHUNK);
-
-        for row in rows {
-            if row.is_sensitive && !include_sensitive {
-                data.skipped_sensitive += 1;
-                continue;
-            }
-            if !copypaste_ipc::content_type::is_text(&row.content_type) {
-                data.skipped_non_text += 1;
-                continue;
-            }
-            let plaintext = match crate::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
-            {
-                Ok(plaintext) => plaintext,
-                Err(e) => {
-                    warn!(id = %row.id, error = ?e, "export skipped an item that failed to decrypt");
-                    data.skipped_undecryptable += 1;
-                    continue;
-                }
-            };
-            if plaintext.len() > copypaste_ipc::MAX_CONTENT_BYTES {
-                return Err(ExportError::ContentTooLarge);
-            }
-            data.items.push(ExportItem {
-                content: String::from_utf8_lossy(&plaintext).into_owned(),
-                content_type: row.content_type,
-                created_at: row.created_at,
-                pinned: row.pinned,
-                is_sensitive: row.is_sensitive,
-            });
-            if limit > 0 && data.items.len() as u32 >= limit {
-                return Ok(finish(data));
-            }
+        if !copypaste_ipc::content_type::is_text(&row.content_type) {
+            data.skipped_non_text = data.skipped_non_text.saturating_add(1);
+            return Ok(ControlFlow::Continue(()));
         }
-    }
+        let plaintext = match crate::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id) {
+            Ok(plaintext) => plaintext,
+            Err(e) => {
+                warn!(id = %row.id, error = ?e, "export skipped an item that failed to decrypt");
+                data.skipped_undecryptable = data.skipped_undecryptable.saturating_add(1);
+                return Ok(ControlFlow::Continue(()));
+            }
+        };
+        if plaintext.len() > copypaste_ipc::MAX_CONTENT_BYTES {
+            return Err(ExportError::ContentTooLarge);
+        }
+        let item = ExportItem {
+            content: String::from_utf8_lossy(&plaintext).into_owned(),
+            content_type: row.content_type,
+            created_at: row.created_at,
+            pinned: row.pinned,
+            is_sensitive: row.is_sensitive,
+        };
+        budget
+            .try_push(&item)
+            .map_err(|_| ExportError::ContentTooLarge)?;
+        data.items.push(item);
+        Ok(if limit > 0 && data.items.len() as u32 >= limit {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        })
+    })?;
 
     Ok(finish(data))
 }
@@ -228,6 +221,25 @@ mod tests {
     }
 
     #[test]
+    fn an_explicit_limit_stops_before_a_following_oversized_row() {
+        let f = fixture();
+        seed_legacy_text(
+            &f,
+            "\u{1}"
+                .repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1)
+                .as_bytes(),
+            copypaste_ipc::content_type::TEXT,
+            false,
+        );
+        let first = f.add("first");
+        f.store.set_pinned(&first, true).unwrap();
+
+        let data = export(&f.store, &f.keyring, 1, false).unwrap();
+        assert_eq!(data.items.len(), 1);
+        assert_eq!(data.items[0].content, "first");
+    }
+
+    #[test]
     fn an_authenticated_legacy_text_body_over_the_limit_refuses_the_whole_export() {
         let f = fixture();
         let ordinary = f.add("ordinary");
@@ -301,19 +313,60 @@ mod tests {
         assert_eq!(data.skipped_undecryptable, 1);
     }
 
-    /// More rows than one page, so the paging loop is exercised rather than
-    /// assumed.
     #[test]
-    fn an_export_reads_past_the_first_page() {
+    fn legal_items_that_overflow_the_aggregate_refuse_without_changing_ciphertext() {
         let f = fixture();
-        let count = EXPORT_CHUNK + 7;
-        for n in 0..count {
-            f.add(&format!("item-{n}"));
-        }
-        assert_eq!(
-            export_of(&f, false).items.len(),
-            count as usize,
-            "the paging loop stopped early"
+        let content = "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES);
+        seed_legacy_text(
+            &f,
+            content.as_bytes(),
+            copypaste_ipc::content_type::TEXT,
+            false,
         );
+        let first_id = f.store.list(10, 0).unwrap()[0].id.clone();
+        f.store.set_pinned(&first_id, true).unwrap();
+        let second_id = format!("aggregate-second-{}", crate::now_ms());
+        let second_content = format!(
+            "\u{2}{}",
+            "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES - 1)
+        );
+        let key = f.keyring.item_key();
+        let (nonce, content_ciphertext) =
+            crate::encrypt(second_content.as_bytes(), &key, &second_id).unwrap();
+        f.store
+            .insert(crate::NewItem {
+                id: second_id.clone(),
+                content_ciphertext,
+                nonce,
+                content_type: copypaste_ipc::content_type::TEXT.to_string(),
+                content_hash: crate::compute_content_hash(second_content.as_bytes()),
+                is_sensitive: false,
+                search_text: Some(second_content),
+                created_at: crate::now_ms(),
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+        let before: Vec<_> = f
+            .store
+            .list(10, 0)
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.id, row.content_ciphertext))
+            .collect();
+
+        assert!(matches!(
+            export(&f.store, &f.keyring, 0, false),
+            Err(ExportError::ContentTooLarge)
+        ));
+        let after: Vec<_> = f
+            .store
+            .list(10, 0)
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.id, row.content_ciphertext))
+            .collect();
+        assert_eq!(after, before);
     }
 }

@@ -339,7 +339,10 @@
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::config::tests'",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::settings::tests'",
         "cargo test -p copypaste-core transfer::export::tests::an_authenticated_legacy_text_body_over_the_limit_refuses_the_whole_export",
-        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::transfer::tests::an_authenticated_legacy_text_body_refuses_export_with_the_ipc_code'"
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::transfer::tests::an_authenticated_legacy_text_body_refuses_export_with_the_ipc_code'",
+        "cargo test -p copypaste-core transfer::export::tests::legal_items_that_overflow_the_aggregate_refuse_without_changing_ciphertext",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::transfer::tests::aggregate_export_overflow_is_a_typed_non_retryable_refusal'",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::transfer::tests::aggregate_export_overflow_is_a_nonretryable_refusal'"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -391,7 +394,8 @@
             "storage-transfer-persisted",
             "source-exclusion-catalog",
             "live-settings-runtime-effects",
-            "legacy-content-size-refusal"
+            "legacy-content-size-refusal",
+            "bounded-aggregate-export"
           ]
         },
         "macos": {
@@ -403,7 +407,8 @@
             "graceful-update-owned-daemon-drain",
             "source-exclusion-catalog",
             "live-settings-runtime-effects",
-            "legacy-content-size-refusal"
+            "legacy-content-size-refusal",
+            "bounded-aggregate-export"
           ]
         },
         "windows": {
@@ -419,7 +424,8 @@
             "graceful-update-owned-daemon-drain",
             "installer-shutdown-wait-for-exit",
             "live-settings-runtime-effects",
-            "legacy-content-size-refusal"
+            "legacy-content-size-refusal",
+            "bounded-aggregate-export"
           ],
           "release_artifact": "release-windows-native-evidence"
         }

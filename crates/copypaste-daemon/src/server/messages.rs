@@ -34,7 +34,7 @@ pub(super) const MSG_CLIPBOARD: &str = "the system clipboard could not be writte
 pub(super) const MSG_UNSUPPORTED_CONTENT: &str =
     "this item has no supported representation for that clipboard action";
 pub(super) const MSG_CONTENT_TOO_LARGE: &str =
-    "this legacy text item is too large to return or copy safely";
+    "This content is too large for this operation. Your history is unchanged.";
 pub(super) const MSG_INTERNAL: &str = "the daemon failed to process the request";
 pub(super) const MSG_WATCHERS_FULL: &str = "too many clients are already watching for changes";
 pub(super) const MSG_TOO_BIG: &str = "the item is larger than the configured size limit";

@@ -277,4 +277,30 @@ mod tests {
         assert!(response.data.is_none());
         assert!(!ErrorCode::ContentTooLarge.retryable());
     }
+
+    #[test]
+    fn aggregate_export_overflow_is_a_typed_non_retryable_refusal() {
+        let (state, _dir) = test_state("aggregate-export");
+        let first = "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES);
+        let second = format!(
+            "\u{2}{}",
+            "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES - 1)
+        );
+        seed_legacy_text(&state, "daemon-aggregate-first", &first, false);
+        state
+            .store
+            .set_pinned("daemon-aggregate-first", true)
+            .unwrap();
+        seed_legacy_text(&state, "daemon-aggregate-second", &second, false);
+
+        let response = export(&state, 1, 0, false);
+        assert!(!response.ok);
+        assert_eq!(response.error_code, Some(ErrorCode::ContentTooLarge));
+        assert_eq!(
+            response.error.as_deref(),
+            Some("This content is too large for this operation. Your history is unchanged.")
+        );
+        assert!(response.data.is_none());
+        assert!(!ErrorCode::ContentTooLarge.retryable());
+    }
 }

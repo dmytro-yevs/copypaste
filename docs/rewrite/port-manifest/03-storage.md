@@ -183,6 +183,8 @@ live, non-sensitive content even when the index is stale.
   content ceiling remains stored unchanged. Full-body read, copy and export
   refuse it safely; list, search and pin responses use a bounded grapheme-safe
   preview so the row can still be protected or deleted.
+- Export also refuses the whole operation when the included aggregate cannot
+  fit one bounded IPC response; it never truncates or writes a partial result.
 - Backup creates a new destination and never overwrites one implicitly.
 - Restore requires explicit confirmation, validates the candidate with the
   current device key, exact schema and integrity check, and durably swaps only

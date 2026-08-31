@@ -3,6 +3,8 @@
 //! the sensitive/FTS exclusion (in [`Store::insert_or_bump`]), and that
 //! a delete is a *tombstone*, not a row removal.
 
+use std::ops::ControlFlow;
+
 use rusqlite::{params, OptionalExtension};
 
 use super::connection::write_tx;
@@ -13,6 +15,13 @@ use super::model::{
 use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_hash};
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
+
+const LIVE_ITEMS_SQL: &str = concat!(
+    "SELECT ",
+    item_columns!(),
+    " FROM clipboard_items WHERE deleted = 0 \
+      ORDER BY pinned DESC, pin_order ASC, created_at DESC, id DESC"
+);
 
 fn promote_sensitive_in_tx(
     tx: &rusqlite::Transaction<'_>,
@@ -236,18 +245,44 @@ impl Store {
     /// under a list that grows at the top, which is `CopyPaste-8ebg.57`.
     pub fn list(&self, limit: u32, offset: u32) -> Result<Vec<StoredItem>, StoreError> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(concat!(
-            "SELECT ",
-            item_columns!(),
-            " FROM clipboard_items WHERE deleted = 0 \
-              ORDER BY pinned DESC, pin_order ASC, created_at DESC, id DESC \
-              LIMIT ?1 OFFSET ?2"
-        ))?;
+        let mut stmt = conn.prepare_cached(&format!("{LIVE_ITEMS_SQL} LIMIT ?1 OFFSET ?2"))?;
         let columns = ItemColumns::resolve(&stmt)?;
         let rows = stmt.query_map(params![i64::from(limit), i64::from(offset)], |row| {
             row_to_item(row, &columns)
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Visits live history in the legacy export order using one pooled read.
+    ///
+    /// The callback must not call back into this store or persist while the
+    /// cursor is open. `Break` stops the SQL read immediately, so callers can
+    /// refuse an aggregate result or honour an output limit without buffering.
+    pub(crate) fn visit_live_items<E>(
+        &self,
+        mut visit: impl FnMut(StoredItem) -> Result<ControlFlow<()>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<StoreError>,
+    {
+        let conn = self.conn().map_err(E::from)?;
+        let mut stmt = conn
+            .prepare_cached(LIVE_ITEMS_SQL)
+            .map_err(StoreError::from)
+            .map_err(E::from)?;
+        let columns = ItemColumns::resolve(&stmt)
+            .map_err(StoreError::from)
+            .map_err(E::from)?;
+        let mut rows = stmt.query([]).map_err(StoreError::from).map_err(E::from)?;
+        while let Some(row) = rows.next().map_err(StoreError::from).map_err(E::from)? {
+            let item = row_to_item(row, &columns)
+                .map_err(StoreError::from)
+                .map_err(E::from)?;
+            if matches!(visit(item)?, ControlFlow::Break(())) {
+                return Ok(());
+            }
+        }
+        Ok(())
     }
 
     /// Fetches one live item. Tombstones are not live and return `None`.
@@ -423,11 +458,13 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::ControlFlow;
+
     use super::super::model::NewItem;
     use super::super::test_support::{
         fts_dump, fts_row_count, item, plant_fts_row, sensitive_item, store, KEY, T0,
     };
-    use super::super::Store;
+    use super::super::{Store, StoreError};
 
     #[test]
     fn a_capture_writes_its_payload_to_the_wal_once() {
@@ -525,6 +562,33 @@ mod tests {
         let all: Vec<_> = s2.list(10, 0).unwrap().into_iter().map(|i| i.id).collect();
         let page2: Vec<_> = s2.list(2, 2).unwrap().into_iter().map(|i| i.id).collect();
         assert_eq!(page2, all[2..4].to_vec());
+    }
+
+    #[test]
+    fn live_visitor_stops_before_mapping_a_malformed_later_row() {
+        let s = store();
+        let pinned = s.insert(item("pinned", T0)).unwrap();
+        s.set_pinned(&pinned.id, true).unwrap();
+        let malformed = s.insert(item("later", T0 + 60_000)).unwrap();
+        s.conn()
+            .unwrap()
+            .execute(
+                "UPDATE clipboard_items SET created_at = 'not a timestamp' WHERE id = ?1",
+                [&malformed.id],
+            )
+            .unwrap();
+        let mut seen = Vec::new();
+
+        s.visit_live_items(|row| {
+            seen.push(row.id);
+            Ok::<_, StoreError>(ControlFlow::Break(()))
+        })
+        .unwrap();
+
+        assert_eq!(seen, [pinned.id]);
+        assert!(s
+            .visit_live_items(|_| Ok::<_, StoreError>(ControlFlow::Continue(())))
+            .is_err());
     }
 
     #[test]
