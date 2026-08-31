@@ -45,6 +45,7 @@
 .sourceCopy {
     display: grid;
     min-inline-size: 0;
+    grid-column: 2;
     gap: var(--s-1);
     line-height: var(--lh-tight);
 }

@@ -37,9 +37,14 @@ vi.mock("@/lib/ipc", async (load) => ({
 
 function checkedIds(): string[] {
     return screen
-        .getAllByRole("listitem")
-        .filter((row) => row.getAttribute("aria-checked") === "true")
-        .map((row) => row.id.replace(/^history-row-/, ""));
+        .getAllByRole("checkbox")
+        .filter((checkbox) => checkbox.getAttribute("aria-checked") === "true")
+        .map((checkbox) =>
+            checkbox
+                .closest<HTMLElement>('[role="listitem"]')
+                ?.id.replace(/^history-row-/, ""),
+        )
+        .filter((id): id is string => id !== undefined);
 }
 
 function deferred<T>() {
@@ -151,6 +156,36 @@ describe("LibraryScreen selection integration", () => {
             screen.queryByRole("toolbar", { name: "Selection actions" }),
         ).toBeNull();
         expectLibraryToolbarReplaced(toolbar);
+    });
+
+    it("keeps history rows as current list items and selection on checkboxes", async () => {
+        const { user } = renderScreen();
+        await screen.findByRole("button", { name: /first entry/i });
+        const list = await screen.findByRole("list", {
+            name: "Clipboard history",
+        });
+
+        list.focus();
+        await user.keyboard("{ArrowDown}");
+        await waitFor(() =>
+            expect(
+                screen
+                    .getAllByRole("listitem")
+                    .some((row) => row.getAttribute("aria-current") === "true"),
+            ).toBe(true),
+        );
+        await user.keyboard(" ");
+        const row = screen
+            .getAllByRole("listitem")
+            .find((candidate) => candidate.getAttribute("aria-current") === "true");
+        const card = row?.querySelector<HTMLButtonElement>(
+            'button:not([role="checkbox"])',
+        );
+        const checkbox = row?.querySelector<HTMLElement>('[role="checkbox"]');
+
+        expect(row?.getAttribute("aria-checked")).toBeNull();
+        expect(card?.getAttribute("aria-selected")).toBeNull();
+        expect(checkbox?.getAttribute("aria-checked")).toBe("true");
     });
 
     it("reconciles a successful bulk pin into the rendered rows", async () => {
