@@ -94,40 +94,50 @@ async function waitForPeerPresenceField(
   details: ChainablePromiseElement,
   expected: string,
 ): Promise<void> {
-  let observed: { term: string | null; value: string | null } | undefined;
-  await app.browser.waitUntil(
-    async () => {
-      observed = { term: null, value: null };
-      if (!(await details.isDisplayed())) return false;
+  const label = "Network discovery";
+  let observed: { term: string | null; value: string | null } = {
+    term: null,
+    value: null,
+  };
+  try {
+    await app.browser.waitUntil(
+      async () => {
+        observed = { term: null, value: null };
+        if (!(await details.isDisplayed())) return false;
 
-      for (const row of await details.$$('[data-slot="metadata-row"]')) {
-        const term = await row.$('dt[data-slot="metadata-label"]');
-        if (
-          !(await term.isDisplayed()) ||
-          (await term.getText()).trim() !== "Network presence"
-        ) {
-          continue;
+        for (const row of await details.$$('[data-slot="metadata-row"]')) {
+          const term = await row.$('dt[data-slot="metadata-label"]');
+          if (
+            !(await term.isDisplayed()) ||
+            (await term.getText()).trim() !== label
+          ) {
+            continue;
+          }
+
+          const value = await row.$('dd[data-slot="metadata-value"]');
+          observed = {
+            term: (await term.getText()).trim(),
+            value: (await value.isDisplayed())
+              ? (await value.getText()).trim()
+              : null,
+          };
+          break;
         }
-
-        const value = await row.$('dd[data-slot="metadata-value"]');
-        observed = {
-          term: (await term.getText()).trim(),
-          value: (await value.isDisplayed())
-            ? (await value.getText()).trim()
-            : null,
-        };
-        break;
-      }
-      return (
-        observed.term === "Network presence" && observed.value === expected
-      );
-    },
-    {
-      timeout: 30_000,
-      interval: 250,
-      timeoutMsg: `Network presence stayed ${JSON.stringify(observed)}`,
-    },
-  );
+        return observed.term === label && observed.value === expected;
+      },
+      {
+        timeout: 30_000,
+        interval: 250,
+        timeoutMsg: "peer network presence did not reach the expected value",
+      },
+    );
+  } catch (cause) {
+    throw new Error(
+      `${label} stayed ${JSON.stringify(observed)}; expected ` +
+        `${JSON.stringify({ term: label, value: expected })}`,
+      { cause },
+    );
+  }
 }
 
 async function completePairing(
