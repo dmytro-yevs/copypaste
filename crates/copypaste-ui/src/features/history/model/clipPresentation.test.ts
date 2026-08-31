@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { item } from "@/test/harness";
-import {
-  clipCopyAction,
-  clipTypeMetadata,
-  fileDisplayName,
-  historyKindFilterLabel,
-  resolveClipBodyPresentation,
-} from "./clipPresentation";
+import { clipTypeMetadata, fileDisplayName, resolveClipBodyPresentation } from "@/lib/clipPresentation";
+import { clipCopyAction, historyKindFilterLabel } from "./clipPresentation";
 
 describe("resolveClipBodyPresentation", () => {
   it.each([

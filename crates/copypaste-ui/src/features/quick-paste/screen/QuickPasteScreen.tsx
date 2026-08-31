@@ -17,7 +17,6 @@ import {
   QUICK_PASTE_POLL_ACTIVE_MS,
   QUICK_PASTE_POLL_BACKOFF_MS,
 } from "@/features/quick-paste/model/quickPastePolling";
-import { markedOrigin, markedOrigins } from "@/features/history/model/origin";
 import {
   copyItem,
   copyItemAsPlainText,
@@ -27,11 +26,12 @@ import {
   setPinned,
   type Item,
 } from "@/lib/ipc";
-import { classifyError } from "@/lib/errors";
+import { classifyError, isRetryable } from "@/lib/errors";
 import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { rankFuzzy } from "@/lib/fuzzy";
 import { kindOf } from "@/lib/format";
+import { markedOrigin, markedOrigins } from "@/lib/itemOrigin";
 import styles from "./QuickPasteScreen.module.css";
 const LIMIT = 100;
 
@@ -104,12 +104,17 @@ export function QuickPasteScreen() {
       } catch (error: unknown) {
         console.error("Quick Paste copy failed", error);
         if (!isCacheGenerationCurrent(generation)) return;
-        toast.error(t("quickPaste.toast.copyFailed"), {
-          action: {
-            label: t("quickPaste.toast.retry"),
-            onClick: () => void copyAndDismiss(item, plainText),
-          },
-        });
+        toast.error(
+          t("quickPaste.toast.copyFailed"),
+          isRetryable(error)
+            ? {
+                action: {
+                  label: t("quickPaste.toast.retry"),
+                  onClick: () => void copyAndDismiss(item, plainText),
+                },
+              }
+            : undefined,
+        );
       }
     },
     [currentCacheGeneration, dismiss, isCacheGenerationCurrent],

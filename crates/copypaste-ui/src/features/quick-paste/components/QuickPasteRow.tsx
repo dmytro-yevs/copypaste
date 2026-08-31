@@ -1,6 +1,14 @@
-import { ActionButton } from "@/components/shared";
 import {
-  Button,
+  ActionButton,
+  ClipBodyPreview,
+  HighlightedCode,
+  SourceMeta,
+  SourceMetaBadge,
+} from "@/components/shared";
+import { ClipImageLoader } from "@/features/clip-content";
+import {
+    Button,
+  iconComponent,
   ShortcutBadge,
   Surface,
   TooltipContent,
@@ -8,13 +16,10 @@ import {
   TooltipRoot,
   TooltipTrigger,
 } from "@/components/ui";
-import { ClipCardBody } from "@/features/history/components/ClipCardBody";
-import { HighlightedCode } from "@/features/history/components/HighlightedCode";
-import { SourceMeta } from "@/features/history/components/SourceMeta";
-import { SourceMetaBadge } from "@/features/history/components/SourceMetaBadge";
-import type { OriginDevice } from "@/features/history/model/origin";
-import { ClipImageLoader } from "@/features/history/patterns/ClipImageLoader";
-import { clipSourceMetadata } from "@/features/history/model";
+import type { OriginDevice } from "@/lib/itemOrigin";
+import { resolveClipBodyPresentation } from "@/lib/clipPresentation";
+import { clipSourceMetadata } from "@/lib/clipSourcePresentation";
+import { SourceAppIcon } from "@/features/source-apps";
 import { type Item } from "@/lib/ipc";
 import { t } from "@/i18n";
 import { kindOf } from "@/lib/format";
@@ -63,29 +68,31 @@ export function QuickPasteRow({
   const image = kind === "image";
   const text = quickPasteRowLabel(item);
   const source = clipSourceMetadata(item);
-  const potentiallySensitive = !item.is_sensitive && item.sensitive_finding !== null;
-  const canPreview = !item.is_sensitive && !potentiallySensitive && kind !== "unknown";
+  const body = resolveClipBodyPresentation({
+    item,
+    fullContent,
+    fullContentFailed,
+    revealedContent: null,
+  });
+  const potentiallySensitive = body.state === "content" && body.source === "redacted";
+  const canPreview =
+    body.state === "unavailable" ||
+    (body.state === "content" && body.source !== "redacted" && kind !== "unknown");
   const cardContent = kind === "unknown"
     ? text
     : potentiallySensitive
-    ? item.sensitive_finding?.redacted_preview ?? ""
-    : item.content ?? "";
+      ? body.content
+      : item.content ?? "";
   const preview = image ? (
     <ClipImageLoader id={item.id} size="detail" />
-  ) : item.truncated ? (
-    fullContentFailed ? (
-      <p role="status">{t("quickPaste.row.fullUnavailable")}</p>
-    ) : fullContent === null ? (
-      <p role="status">{t("quickPaste.row.fullLoading")}</p>
-    ) : kind === "code" || kind === "json" ? (
-      <HighlightedCode content={fullContent} kind={kind} mode="expanded" />
-    ) : (
-      <pre>{fullContent}</pre>
-    )
+  ) : body.state === "unavailable" ? (
+    <p role="status">{t("quickPaste.row.fullUnavailable")}</p>
+  ) : item.truncated && body.state === "content" && body.source === "preview" ? (
+    <p role="status">{t("quickPaste.row.fullLoading")}</p>
   ) : kind === "code" || kind === "json" ? (
-    <HighlightedCode content={text} kind={kind} mode="expanded" />
+    <HighlightedCode content={cardContent} kind={kind} mode="expanded" />
   ) : (
-    <pre>{text}</pre>
+    <pre>{cardContent}</pre>
   );
 
   const copyButton = (
@@ -122,17 +129,25 @@ export function QuickPasteRow({
       {canPreview ? <TooltipTrigger asChild>{copyButton}</TooltipTrigger> : copyButton}
       <div className={styles.content}>
         <div className={styles.body}>
-          <ClipCardBody
+          <ClipBodyPreview
             kind={kind}
-            masked={item.is_sensitive}
+            masked={body.state === "masked"}
             content={cardContent}
             previewLines={previewLines}
             imagePreview={image ? <ClipImageLoader id={item.id} size="fill" /> : undefined}
           />
         </div>
         <SourceMeta
-          item={item}
           source={source}
+          createdAt={item.created_at}
+          sourceIcon={
+            <SourceAppIcon
+              bundleId={item.source_app_bundle_id}
+              Fallback={iconComponent(source.icon)}
+              fallbackText={source.label.slice(0, 2)}
+              size="xs"
+            />
+          }
           origin={origin}
           kind={kind}
           content={cardContent}

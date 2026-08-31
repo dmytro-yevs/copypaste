@@ -1,0 +1,19 @@
+.root { position: relative; inline-size: 100%; min-inline-size: 0; min-block-size: 0; overflow: hidden; border: var(--stroke-1) solid var(--border); border-radius: var(--r-card); color: var(--text); background: var(--elevated); font-family: var(--f-mono); }
+.language { display: block; block-size: var(--s-5); padding-inline: var(--s-2); color: var(--dim); font-family: var(--f-ui); font-size: var(--fs-xs); line-height: var(--s-5); text-align: end; }
+.root pre { margin: 0; }
+.root code { display: block; min-inline-size: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.card .language { display: none; }
+.card code { display: -webkit-box; padding: calc(var(--s-1) + var(--stroke-1)) var(--s-2); overflow: hidden; font-size: var(--fs-sm); line-height: var(--lh-normal); -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.inspector { block-size: 100%; }
+.inspector pre { block-size: calc(100% - var(--s-5)); overflow: auto; }
+.inspector code, .expanded code { padding: var(--s-3); font-size: var(--fs-xs); line-height: var(--lh-normal); }
+.expanded { overflow: visible; }
+.root :global(.hljs-comment), .root :global(.hljs-quote) { color: var(--dim); }
+.root :global(.hljs-keyword), .root :global(.hljs-selector-tag), .root :global(.hljs-literal) { color: var(--accent-2); }
+.root :global(.hljs-string), .root :global(.hljs-regexp), .root :global(.hljs-addition) { color: var(--c-url); }
+.root :global(.hljs-number), .root :global(.hljs-built_in), .root :global(.hljs-variable) { color: var(--c-num); }
+.root :global(.hljs-title), .root :global(.hljs-section), .root :global(.hljs-type) { color: var(--c-code); }
+.root :global(.hljs-attr), .root :global(.hljs-attribute), .root :global(.hljs-property) { color: var(--c-json); }
+.root :global(.hljs-deletion) { color: var(--err-strong); }
+.root :global(.hljs-emphasis) { font-style: italic; }
+.root :global(.hljs-strong) { font-weight: var(--fw-bold); }
