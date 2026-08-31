@@ -327,7 +327,7 @@ fi
 # ---------------------------------------------------------------------------
 group "Native shell evidence (ENFORCED)"
 # ---------------------------------------------------------------------------
-if ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native; then
+if ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native "$DMG"; then
     ok "the installed app produced native accessibility, screenshot, and latency evidence"
 else
     bad "the installed app produced native accessibility, screenshot, and latency evidence"
