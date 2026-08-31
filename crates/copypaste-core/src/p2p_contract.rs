@@ -185,9 +185,11 @@ fn profile_observation(
 
 fn discovery_presence_state(found: &DiscoveredPeer, now_ms: i64) -> DevicePresence {
     let ttl_ms = i64::try_from(PEER_TTL.as_millis()).unwrap_or(i64::MAX);
-    (now_ms.saturating_sub(found.last_seen_ms) < ttl_ms)
-        .then_some(DevicePresence::Online)
-        .unwrap_or(DevicePresence::Unknown)
+    if now_ms.saturating_sub(found.last_seen_ms) < ttl_ms {
+        DevicePresence::Online
+    } else {
+        DevicePresence::Unknown
+    }
 }
 
 fn peer_presence(
