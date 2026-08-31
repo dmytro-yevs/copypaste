@@ -42,6 +42,19 @@ describe("QuickPasteRow", () => {
     expect(quickPastePresentation(unsupported).rowLabel).toBe("Unsupported clipboard content");
   });
 
+  it.each(["", "   "])("keeps a %j finding redaction out of the row label and DOM", (redacted_preview) => {
+    const raw = "raw secret fragment";
+    render(
+      <TooltipProvider>
+        <QuickPasteRow item={item({ content: raw, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview } })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Copy Empty item" })).toBeTruthy();
+    expect(screen.queryByText(raw)).toBeNull();
+    expect(screen.queryByLabelText(raw)).toBeNull();
+  });
+
   it("uses the resolved full body in the tooltip while keeping the card preview", async () => {
     const user = userEvent.setup();
     render(
