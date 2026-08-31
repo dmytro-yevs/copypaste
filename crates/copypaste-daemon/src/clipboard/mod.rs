@@ -95,6 +95,19 @@ impl<'a> CapturePolicy<'a> {
     pub fn limit_bytes(self, content_type: &str) -> u64 {
         self.settings.capture_limit_bytes(content_type)
     }
+
+    pub fn allows_materialized(self, capture: &Capture) -> bool {
+        !self.settings.private_mode
+            && (self.settings.excluded_app_bundle_ids.is_empty()
+                || capture.app_bundle_id.as_ref().is_some_and(|id| {
+                    self.settings
+                        .excluded_app_bundle_ids
+                        .iter()
+                        .all(|excluded| excluded != id)
+                }))
+            && !capture.content.is_empty()
+            && capture.content.len() as u64 <= self.limit_bytes(&capture.content_type)
+    }
 }
 
 #[cfg(all(target_os = "macos", not(feature = "dev-fake-clipboard")))]

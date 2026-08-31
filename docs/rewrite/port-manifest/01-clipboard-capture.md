@@ -121,6 +121,13 @@ refuses the operation instead of coercing bytes through text.
 - **I-39:** A size rejection increments a readable diagnostic counter. It is not
   represented only by a log line.
 
+An accepted capture retries only typed transient storage busy/locked and
+interrupted/would-block/timed-out file failures. It retains its original payload
+and timestamp, rechecks current privacy and exclusion policy before each retry,
+and reads current retention at persistence. Policy cancellation, storage, and
+permanent failure are distinct terminal outcomes; no capture event precedes
+successful persistence.
+
 The platform poll interval, live limits, private mode and exclusion policy are
 read from current settings. A change takes effect without restarting the
 daemon. The event channel may coalesce refresh work, but it must preserve
@@ -223,6 +230,11 @@ display string.
   events.
 - Long-running blocking work does not stall service status, shutdown or another
   ready request.
+- A shutdown keeps its endpoint and refuses new mutations until an accepted
+  capture and every admitted request reach an explicit terminal outcome.
+- A transiently busy accepted capture can drain past the cooperative shutdown
+  budget without polling a newer value; permanent persistence failure or a
+  blocking-task panic makes shutdown fail after ownership cleanup.
 
 ## 8. Module and dependency rules
 

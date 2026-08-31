@@ -46,7 +46,7 @@ use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
 use super::dispatch::{dispatch_request, gate, parse};
-use super::messages::{MSG_TOO_LARGE, MSG_WATCHERS_FULL};
+use super::messages::{MSG_NOT_READY, MSG_TOO_LARGE, MSG_WATCHERS_FULL};
 use crate::AppState;
 
 /// Connections served at once (manifest 04 §3.5). Over-cap connections are
@@ -201,9 +201,12 @@ pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::
     let permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     let watchers = Arc::new(Semaphore::new(MAX_WATCHERS));
 
+    let mut release = state.drain_release_rx();
+    let mut draining = state.is_draining();
     loop {
         tokio::select! {
-            _ = shutdown.changed() => break,
+            _ = shutdown.changed(), if !draining => draining = true,
+            _ = release.changed(), if draining => break,
             Some(_) = connections.join_next() => {}
             accepted = listener.accept() => match accepted {
                 Ok(stream) => {
@@ -217,9 +220,10 @@ pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::
                     let state = Arc::clone(&state);
                     let watchers = Arc::clone(&watchers);
                     let shutdown = shutdown.clone();
+                    let release = release.clone();
                     connections.spawn(async move {
                         let _permit = permit;
-                        handle_connection(stream, state, watchers, shutdown).await;
+                        handle_connection(stream, state, watchers, shutdown, release).await;
                     });
                 }
                 Err(e) => warn!(error = %e, "could not accept an ipc connection"),
@@ -227,7 +231,7 @@ pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::
         }
     }
 
-    connections.shutdown().await;
+    while connections.join_next().await.is_some() {}
 }
 
 /// One connection: read lines, answer each with exactly one line, until EOF —
@@ -237,6 +241,7 @@ async fn handle_connection(
     state: Arc<AppState>,
     watchers: Arc<Semaphore>,
     mut shutdown: watch::Receiver<bool>,
+    mut release: watch::Receiver<bool>,
 ) {
     let (reader, mut writer) = stream.into_split();
     let mut lines = FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
@@ -245,7 +250,10 @@ async fn handle_connection(
         // A client that connects and then says nothing holds a permit and, if
         // it is mid-request, the database mutex. The deadline is per read, so a
         // client that keeps talking is never cut off (`CopyPaste-cce1`).
-        let next = match tokio::time::timeout(READ_TIMEOUT, lines.next()).await {
+        let next = match tokio::select! {
+            _ = release.changed() => break,
+            next = tokio::time::timeout(READ_TIMEOUT, lines.next()) => next,
+        } {
             Ok(next) => next,
             Err(_) => {
                 // Deliberately no response: the client sees EOF, which its
@@ -351,11 +359,23 @@ async fn handle_connection(
             break;
         }
 
+        let admission = if matches!(request.method, Method::Status) {
+            None
+        } else {
+            let Some(admission) = state.admit_request().await else {
+                let response = Response::err(request.id, ErrorCode::NotReady, MSG_NOT_READY);
+                let _ = send(&mut writer, &response).await;
+                break;
+            };
+            Some(admission)
+        };
+
         let response = dispatch_request(&state, request).await;
 
         if send(&mut writer, &response).await.is_err() {
             break;
         }
+        drop(admission);
     }
 
     // `interprocess` puts dirty Windows pipes in limbo on drop. Flush before
@@ -689,7 +709,94 @@ mod tests {
         assert_eq!(response.id, 9);
 
         shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
         let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_keeps_the_endpoint_and_refuses_new_mutations_until_final_release() {
+        let (state, dir) = test_state("draining-endpoint");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
+
+        state.request_shutdown();
+        tokio::task::yield_now().await;
+
+        assert!(
+            !server.is_finished(),
+            "shutdown released the live endpoint before accepted capture work finished"
+        );
+        assert!(
+            bind(&path).is_err(),
+            "a second daemon could bind while the first one was draining"
+        );
+
+        let stream = transport::connect(&path).await.expect("draining endpoint");
+        let mut client = Client::new(stream);
+        let status = client.call(request(80, Method::Status)).await;
+        assert!(
+            status.ok,
+            "status must stay usable while draining: {status:?}"
+        );
+
+        let stream = transport::connect(&path).await.expect("draining endpoint");
+        let mut client = Client::new(stream);
+        let response = client
+            .call(request(
+                81,
+                Method::Add {
+                    content: "must not be accepted while draining".into(),
+                },
+            ))
+            .await;
+        assert_eq!(response.id, 81);
+        assert_eq!(response.error_code, Some(ErrorCode::NotReady));
+        assert_eq!(state.store.count().unwrap(), 0);
+
+        let stream = transport::connect(&path).await.expect("draining endpoint");
+        let mut client = Client::new(stream);
+        let mut wrong_protocol = request(
+            82,
+            Method::Add {
+                content: "must fail protocol validation first".into(),
+            },
+        );
+        wrong_protocol.protocol_version += 1;
+        let response = client.call(wrong_protocol).await;
+        assert_eq!(response.id, 82);
+        assert_eq!(response.error_code, Some(ErrorCode::ProtocolMismatch));
+
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn final_release_closes_idle_and_keepalive_clients_before_listener_join() {
+        let (state, dir) = test_state("drain-client-cleanup");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
+
+        state.request_shutdown();
+        let stream = transport::connect(&path).await.expect("draining endpoint");
+        let (reader, mut writer) = stream.into_split();
+        writer.write_all(b"\n\n").await.expect("keepalive");
+        writer.flush().await.expect("flush keepalive");
+        let mut lines = FramedRead::new(reader, LinesCodec::new());
+
+        state.release_drain_listener();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), lines.next())
+                .await
+                .expect("release must close idle client")
+                .is_none(),
+            "idle keepalive client outlived final listener release"
+        );
+        tokio::time::timeout(Duration::from_secs(1), server)
+            .await
+            .expect("listener joins after client cleanup")
+            .expect("listener task must not panic");
     }
 
     #[tokio::test]
@@ -718,6 +825,7 @@ mod tests {
         }
 
         shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
         let _ = server.await;
     }
 
@@ -740,6 +848,7 @@ mod tests {
         assert_connection_closed(&mut client).await;
 
         shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
         let _ = server.await;
     }
 
@@ -764,6 +873,7 @@ mod tests {
         assert_eq!(response.id, 24);
 
         shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
         let _ = server.await;
     }
 
@@ -783,6 +893,7 @@ mod tests {
         assert!(matches!(ack.data, Some(ResponseData::Empty {})));
 
         shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
         let _ = server.await;
     }
 
@@ -823,6 +934,7 @@ mod tests {
         }
 
         shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
         let _ = server.await;
     }
 
@@ -924,6 +1036,7 @@ mod tests {
         assert!(*stopping.borrow());
 
         // And the accept loop unwinds on it, exactly as it does on SIGTERM.
+        state.release_drain_listener();
         tokio::time::timeout(Duration::from_secs(5), server)
             .await
             .expect("the server must stop")
@@ -958,6 +1071,7 @@ mod tests {
         let reply = Client::new(stream).call(request(2, Method::Shutdown)).await;
         assert!(reply.ok, "{:?}", reply.error);
 
+        state.release_drain_listener();
         let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
     }
 
@@ -988,6 +1102,7 @@ mod tests {
             .expect("the signal must follow the reply")
             .expect("the sender outlives this");
         assert!(*stopping.borrow());
+        state.release_drain_listener();
         let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
     }
 
@@ -1032,6 +1147,7 @@ mod tests {
         );
 
         shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
         let _ = server.await;
     }
 
@@ -1082,6 +1198,7 @@ mod tests {
 
         drop(idle);
         shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
         let _ = server.await;
     }
 

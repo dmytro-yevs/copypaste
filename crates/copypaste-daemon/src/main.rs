@@ -244,16 +244,28 @@ async fn run() -> anyhow::Result<()> {
     // so a capture already past the clipboard read still reaches the database —
     // but the wait for them is bounded, because the peer flush and the socket
     // removal below are what a killed daemon never reaches.
-    let mut loops = vec![
-        ("capture", capture),
+    let loops = vec![
         ("cloud sync", cloud_task),
         ("cloud refresh", refresh_task),
         ("cloud realtime", realtime_task),
         ("peer sync", peer_sync),
-        ("ipc server", server),
     ];
+    let mut loops = loops;
     loops.extend(peers_task.map(|task| ("peer listener", task)));
-    shutdown::teardown(&state, loops, &socket_path).await;
+    shutdown::stop_loops(loops).await;
+    let capture_result = capture
+        .await
+        .context("join the critical clipboard capture task")
+        .and_then(|result| result.context("finish the critical clipboard capture task"));
+    state.wait_for_admitted_requests().await;
+    let flush_result =
+        shutdown::flush_peers_before_listener_release(&state, || state.release_drain_listener())
+            .await;
+    let server_result = server.await.context("join the IPC listener task");
+    shutdown::release_endpoint(&socket_path);
+    capture_result?;
+    flush_result?;
+    server_result?;
     info!("daemon process stopped pid={}", std::process::id());
     Ok(())
 }

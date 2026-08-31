@@ -205,8 +205,14 @@ backoff; protocol mismatch, invalid request, authentication failure and unusable
 key are not.
 
 Shutdown acknowledges first, then begins graceful stop. It finishes or rolls
-back in-flight atomic work and removes the endpoint. A closed socket is not the
-only success signal.
+back in-flight atomic work and removes the endpoint. During the drain, protocol
+validation still wins; status and shutdown remain usable, while no new mutable
+request is admitted. The listener stays owner of its endpoint until accepted
+work, final peer flush, and connection cleanup reach terminal outcomes. A
+critical capture may outlive the cooperative five-second loop budget; a
+permanent capture, blocking-task, peer-flush, or listener failure remains a
+failed daemon exit after cleanup. A closed socket is not the only success
+signal.
 
 ## 7. Error taxonomy
 

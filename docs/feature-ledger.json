@@ -110,6 +110,9 @@
         "cargo test -p copypaste-core clipboard",
         "cargo test -p copypaste-feedback",
         "cargo test -p copypaste-daemon notify",
+        "cargo test -p copypaste-daemon capture::tests::shutdown_",
+        "cargo test -p copypaste-daemon server::listener::tests::shutdown_keeps_the_endpoint_and_refuses_new_mutations_until_final_release",
+        "cargo test -p copypaste-daemon shutdown::tests::final_flush_failure_releases_the_listener_and_remains_an_error",
         "bash -c 'bash scripts/demo.sh && test $? -eq 0'",
         "cd crates/copypaste-ui/src-tauri/gen/android && ./gradlew :app:testArmDebugUnitTest"
       ],
@@ -150,15 +153,19 @@
           "scenario": "./scripts/release/smoke-macos-dmg.sh",
           "evidence_status": "pending",
           "unverified_states": [
-            "capture-ui"
+            "capture-ui",
+            "graceful-shutdown-critical-drain"
           ]
         },
         "windows": {
           "scenario": "./scripts/release/windows-native-evidence.ps1",
-          "evidence_status": "verified",
+          "evidence_status": "partial",
           "evidence_states": [
             "service-capture-status",
             "copy-feedback-setting"
+          ],
+          "unverified_states": [
+            "graceful-shutdown-critical-drain"
           ],
           "release_artifact": "release-windows-native-evidence"
         }

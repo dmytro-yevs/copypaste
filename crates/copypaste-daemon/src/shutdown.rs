@@ -52,6 +52,14 @@ pub async fn teardown(
     loops: Vec<(&'static str, JoinHandle<()>)>,
     socket_path: &Path,
 ) {
+    stop_loops(loops).await;
+    if let Err(e) = flush_peers(state).await {
+        warn!(error = ?e, "could not persist the paired-device list on shutdown");
+    }
+    remove_socket(socket_path);
+}
+
+pub async fn stop_loops(loops: Vec<(&'static str, JoinHandle<()>)>) {
     let mut loops = loops;
     let deadline = Instant::now() + TEARDOWN_BUDGET;
     let mut joined = 0;
@@ -73,10 +81,48 @@ pub async fn teardown(
             record_loop_result(*name, task.await);
         }
     }
+}
 
-    if let Err(e) = state.p2p.peers().flush() {
-        warn!(error = ?e, "could not persist the paired-device list on shutdown");
-    }
+pub async fn flush_peers(state: &AppState) -> anyhow::Result<()> {
+    let node = std::sync::Arc::clone(state.p2p.node());
+    flush_before_release(move || node.peers().flush().map_err(anyhow::Error::from)).await
+}
+
+pub async fn flush_peers_before_listener_release(
+    state: &AppState,
+    release_listener: impl FnOnce(),
+) -> anyhow::Result<()> {
+    let node = std::sync::Arc::clone(state.p2p.node());
+    flush_before_listener_release(
+        move || node.peers().flush().map_err(anyhow::Error::from),
+        release_listener,
+    )
+    .await
+}
+
+async fn flush_before_release<F>(flush: F) -> anyhow::Result<()>
+where
+    F: FnOnce() -> anyhow::Result<()> + Send + 'static,
+{
+    tokio::task::spawn_blocking(flush)
+        .await
+        .map_err(anyhow::Error::from)??;
+    Ok(())
+}
+
+async fn flush_before_listener_release<F>(
+    flush: F,
+    release_listener: impl FnOnce(),
+) -> anyhow::Result<()>
+where
+    F: FnOnce() -> anyhow::Result<()> + Send + 'static,
+{
+    let result = flush_before_release(flush).await;
+    release_listener();
+    result
+}
+
+pub fn release_endpoint(socket_path: &Path) {
     remove_socket(socket_path);
 }
 
@@ -158,6 +204,42 @@ mod tests {
 
         assert!(done.load(Ordering::SeqCst), "teardown did not wait");
         assert!(!socket.exists());
+    }
+
+    #[tokio::test]
+    async fn final_flush_failure_releases_the_listener_and_remains_an_error() {
+        let flushed = Arc::new(AtomicBool::new(false));
+        let released = Arc::new(AtomicBool::new(false));
+        let result = flush_before_listener_release(
+            {
+                let flushed = Arc::clone(&flushed);
+                move || {
+                    flushed.store(true, Ordering::SeqCst);
+                    Err(anyhow::anyhow!("test flush failure"))
+                }
+            },
+            {
+                let flushed = Arc::clone(&flushed);
+                let released = Arc::clone(&released);
+                move || {
+                    assert!(
+                        flushed.load(Ordering::SeqCst),
+                        "listener released before final flush"
+                    );
+                    released.store(true, Ordering::SeqCst);
+                }
+            },
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "final flush failure was reported as clean shutdown"
+        );
+        assert!(
+            released.load(Ordering::SeqCst),
+            "listener was not released after flush failure"
+        );
     }
 
     #[tokio::test(start_paused = true)]
