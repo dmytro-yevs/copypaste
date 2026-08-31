@@ -13,6 +13,8 @@ use copypaste_ipc::{ExportData, ImportData, ResponseData};
 
 use crate::cli::{CloudAction, Command, PairAction};
 use crate::error::CliError;
+#[cfg(any(windows, test))]
+use crate::shutdown::Completion;
 use crate::{client, now_ms, out, render};
 
 /// Apply command work that remains necessary when human-readable output is off.
@@ -74,7 +76,7 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
             )),
             None => out("cleared"),
         },
-        Command::Shutdown => out("the daemon is stopping"),
+        Command::Shutdown { .. } => out("the daemon is stopping"),
         Command::Pair { action } => match action {
             PairAction::Create => {
                 let pairing = client::expect_pairing(data)?;
@@ -158,6 +160,19 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
         }
     }
     Ok(())
+}
+
+#[cfg(windows)]
+pub fn report_shutdown_completion(completion: Completion) {
+    out(shutdown_completion_text(completion));
+}
+
+#[cfg(any(windows, test))]
+fn shutdown_completion_text(completion: Completion) -> &'static str {
+    match completion {
+        Completion::AlreadyStopped => "the daemon was already stopped",
+        Completion::ExitedZero => "the daemon exited cleanly",
+    }
 }
 
 /// Say when a page was shortened, and by how much.
@@ -369,6 +384,18 @@ mod tests {
             }),
             "imported 3 items; skipped 1 item: 1 duplicate already present; \
              2 items could not be pinned"
+        );
+    }
+
+    #[test]
+    fn completion_states_have_human_output_without_an_ipc_response() {
+        assert_eq!(
+            shutdown_completion_text(Completion::AlreadyStopped),
+            "the daemon was already stopped"
+        );
+        assert_eq!(
+            shutdown_completion_text(Completion::ExitedZero),
+            "the daemon exited cleanly"
         );
     }
 }
