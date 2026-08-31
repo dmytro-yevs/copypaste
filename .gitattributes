@@ -7,3 +7,4 @@ crates/copypaste-ui/src/styles/media.css text eol=lf
 crates/copypaste-ui/src-tauri/windows/installer.upstream.nsi text eol=lf
 crates/copypaste-ui/src-tauri/windows/installer.upstream.LICENSE-MIT text eol=lf
 crates/copypaste-ui/src-tauri/windows/installer.nsi text eol=lf
+scripts/release/windows-installer-template.ps1 text eol=lf
