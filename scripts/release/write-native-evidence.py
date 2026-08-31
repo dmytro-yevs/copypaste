@@ -84,6 +84,10 @@ def file_identity(metadata):
     }
 
 
+def qualified_artifact_open_flags():
+    return os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+
+
 def qualified_artifact_snapshot(value):
     file = pathlib.Path(value)
     try:
@@ -95,7 +99,7 @@ def qualified_artifact_snapshot(value):
     digest = hashlib.sha256()
     descriptor = None
     try:
-        descriptor = os.open(file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(file, qualified_artifact_open_flags())
         opened = os.fstat(descriptor)
         if file_identity(opened) != file_identity(before):
             raise ValueError("qualified artifact changed while opening")
@@ -287,6 +291,22 @@ def self_test():
         qualified = root / "qualified.apk"
         qualified.write_bytes(b"qualified release artifact\n")
         qualified_identity = json.dumps(qualified_artifact_snapshot(qualified), separators=(",", ":"))
+        binary_bytes = b"release\r\nartifact\x1aafter-eof\r\n"
+        binary = root / "binary-qualified.apk"
+        binary.write_bytes(binary_bytes)
+        binary_snapshot = qualified_artifact_snapshot(binary)
+        if binary_snapshot["record"]["sha256"] != hashlib.sha256(binary_bytes).hexdigest():
+            raise SystemExit("qualified artifact binary bytes changed while hashing")
+        original_binary = getattr(os, "O_BINARY", None)
+        os.O_BINARY = 0x4000
+        try:
+            if not qualified_artifact_open_flags() & os.O_BINARY:
+                raise SystemExit("qualified artifact open flags omit O_BINARY")
+        finally:
+            if original_binary is None:
+                del os.O_BINARY
+            else:
+                os.O_BINARY = original_binary
         black = root / "black.png"
         Image.new("RGB", (8, 8), "black").save(black)
         white = root / "white.png"
