@@ -13,6 +13,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "windows-native-ui-evidence.ps1")
 . (Join-Path $PSScriptRoot "windows-process-trace.ps1")
+. (Join-Path $PSScriptRoot "windows-installed-scenario.ps1")
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -201,6 +202,7 @@ function Invoke-SelfTest {
         Test-WindowsReadinessHelpers
         Test-WindowsProcessTraceHelpers
         Test-WindowsProcessTraceCollector
+        Test-WindowsInstalledScenarioHelpers
 
         $logs = Join-Path $root "logs"
         [IO.Directory]::CreateDirectory($logs) | Out-Null
@@ -391,11 +393,10 @@ try {
     Assert-True (Test-Path -LiteralPath $transfer -PathType Leaf) "export wrote no file"
     $imported = Invoke-Json $cli @("import", $transfer)
     Assert-True ($imported.data.import.skipped_duplicate -ge 1) "import bypassed duplicate detection"
-    Invoke-Json $cli @("shutdown") | Out-Null
-    Assert-True ($daemon.WaitForExit(10000)) "daemon ignored shutdown"
-
     $update = Start-Process -FilePath $installerPath -ArgumentList "/S", "/D=$installDir" -Wait -PassThru
-    Assert-True ($update.ExitCode -eq 0) "in-place installer update exited $($update.ExitCode)"
+    $daemon.Refresh()
+    Assert-InstalledUpdateDrain $update.ExitCode $daemon.HasExited
+    Assert-Unreachable $cli
     Assert-InstalledLayout $installDir
 
     Remove-Item Env:COPYPASTE_DAEMON_BIN -ErrorAction SilentlyContinue
@@ -453,6 +454,12 @@ try {
         Set-UiaScreenshots $app $false $captureTrace
     }
 
+    $blockedUpdate = Start-Process -FilePath $installerPath -ArgumentList "/S", "/D=$installDir" -Wait -PassThru
+    $app.Refresh()
+    $liveSidecar = Get-InstalledSidecarOutcome $daemonExe $null
+    Assert-InstalledAppLockRefusal $blockedUpdate.ExitCode $app.HasExited $liveSidecar.kind
+    Invoke-Json $cli @("status") | Out-Null
+
     Stop-Process -Id $app.Id -Force
     Assert-True ($app.WaitForExit(10000)) "installed Tauri app did not exit"
     $app = $null
@@ -481,6 +488,8 @@ try {
             "named-pipe and clipboard passed"
             "update feed contract matched signing mode: $ExpectedSignature"
             "in-place update passed"
+            "in-place update drained the explicit daemon"
+            "installer refused while the installed app and sidecar stayed live"
             "feature-specific UI states captured"
             "screenshot protection restored"
             "uninstall passed"
