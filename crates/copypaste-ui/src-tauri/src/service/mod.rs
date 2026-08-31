@@ -1986,6 +1986,9 @@ mod tests {
         assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
         release.send(()).unwrap();
         done.await.unwrap();
+        while sup.owned.is_reap_pending_for_test() {
+            tokio::task::yield_now().await;
+        }
         assert!(sup.holds_child());
         assert_eq!(sup.request_quit(), ExitRequest::Drain);
     }
