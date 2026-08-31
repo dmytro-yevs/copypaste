@@ -1,4 +1,4 @@
-import type { Item } from "@/lib/ipc";
+import type { DeviceClass, Item } from "@/lib/ipc";
 
 export interface OriginDevice {
   readonly id: string;
@@ -6,7 +6,7 @@ export interface OriginDevice {
   readonly kind: OriginDeviceKind;
 }
 
-export type OriginDeviceKind = "desktop" | "phone" | "tablet" | "unknown";
+export type OriginDeviceKind = DeviceClass;
 
 export function originOf(item: Item): OriginDevice | null {
   const id = item.origin_device_id;
