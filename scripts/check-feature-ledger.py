@@ -31,7 +31,6 @@ CLOUD_STATES = {"unconfigured", "signed-out", "signed-in", "sync-with-skips", "o
 CLOUD_RELEASE = {
     "release-android-api33-smoke-evidence",
     "release-android-cloud-evidence",
-    "release-android-physical-evidence",
     "release-android-smoke-evidence",
     "release-macos-cloud-evidence",
     "release-macos-native-evidence",
@@ -43,7 +42,7 @@ CLOUD_UI_TEST_FILE = "crates/copypaste-ui/src/features/settings/patterns/CloudSy
 SHIPPED_PLATFORMS = {"android", "macos", "windows"}
 PERFORMANCE_PLATFORMS = SHIPPED_PLATFORMS
 REQUIRED_RELEASE = {
-    "release-android-physical-evidence",
+    "release-android-smoke-evidence",
     "release-macos-native-evidence",
     "release-windows-native-evidence",
 }
@@ -434,7 +433,7 @@ def self_test():
         (root / "scripts").mkdir()
         (root / ".github/workflows").mkdir(parents=True)
         artifact_names = {
-            "android": "release-android-physical-evidence",
+            "android": "release-android-smoke-evidence",
             "macos": "release-macos-native-evidence",
             "windows": "release-windows-native-evidence",
         }
@@ -537,7 +536,7 @@ def self_test():
         checks.append((
             "artifact provenance retains the producing workflow job",
             producer_jobs == {
-                "release-android-physical-evidence": "android",
+                "release-android-smoke-evidence": "android",
                 "release-macos-native-evidence": "macos",
                 "release-windows-native-evidence": "windows",
             },
