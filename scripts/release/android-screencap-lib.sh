@@ -341,18 +341,25 @@ fi
 SH
     chmod +x "$temp/bounded-adb-bin/adb"
 
-    local started elapsed
+    local started elapsed route_timeout_argv route_child_argv route_serial
     # macOS `date` prints the unsupported `%3N` literally; use a portable
     # millisecond clock so an arithmetic error cannot fall through to real adb.
     epoch_millis() {
         python3 -c 'import time; print(time.time_ns() // 1_000_000)'
     }
+    route_timeout_argv="$temp/route-timeout.timeout-argv"
+    route_child_argv="$temp/route-timeout.argv"
+    : > "$route_timeout_argv"
     started="$(epoch_millis)"
     if (export PATH="$temp/bounded-adb-bin:$PATH"
         export ANDROID_TIMEOUT_FIXTURE_MODE=route-hang
         export ANDROID_TIMEOUT_FIXTURE_GOOD="$temp/good.png"
-        export ANDROID_TIMEOUT_FIXTURE_ARGV="$temp/route-timeout.argv"
+        export ANDROID_TIMEOUT_FIXTURE_ARGV="$route_child_argv"
         export ANDROID_EMULATOR_SCREENCAP_TIMEOUT=0.3
+        timeout() {
+            printf '%s\n' "$*" > "$route_timeout_argv"
+            command timeout "$@"
+        }
         capture_android_png "$temp/route-timeout.png" "$PKG" emulator-5554); then
         bad "a hung adb route selection fails closed"
     else
@@ -361,13 +368,39 @@ SH
               && ! -e "$temp/route-timeout.png.failed" \
               && "$(< "$temp/route-timeout-screencap.log")" == *"route=trusted-serial status=124"* \
               && "$(< "$temp/route-timeout-screencap.log")" == *"screenshot not attempted"* \
-              && "$(< "$temp/route-timeout.argv")" == "-s emulator-5554 get-serialno" \
+              && "$(< "$route_timeout_argv")" == "--foreground 0.3s adb -s emulator-5554 get-serialno" \
               && "$(< "$temp/route-timeout-screencap.log")" != *"== adb state"* ]]; then
             ok "a hung targeted route check fails closed without device diagnostics"
         else
+            route_child_argv="$(if [[ -e "$route_child_argv" ]]; then cat "$route_child_argv"; else printf '<not-started>'; fi)"
             bad "a hung targeted route check fails closed without device diagnostics" \
-                "elapsed=${elapsed}ms; argv=$(< "$temp/route-timeout.argv"); $(< "$temp/route-timeout-screencap.log")"
+                "elapsed=${elapsed}ms; timeout_argv=$(< "$route_timeout_argv"); child_argv=${route_child_argv}; $(< "$temp/route-timeout-screencap.log")"
         fi
+    fi
+
+    route_timeout_argv="$temp/route-success.timeout-argv"
+    : > "$route_timeout_argv"
+    if route_serial="$(export PATH="$temp/bounded-adb-bin:$PATH"
+        export ANDROID_TIMEOUT_FIXTURE_MODE=route-success
+        export ANDROID_TIMEOUT_FIXTURE_GOOD="$temp/good.png"
+        export ANDROID_TIMEOUT_FIXTURE_ARGV="$temp/route-success.argv"
+        export ANDROID_EMULATOR_SCREENCAP_TIMEOUT=0.3
+        timeout() {
+            printf '%s\n' "$*" > "$route_timeout_argv"
+            command timeout "$@"
+        }
+        verified_android_serial emulator-5554 "$temp/route-success.log")"; then
+        if [[ "$route_serial" == emulator-5554 \
+              && "$(< "$route_timeout_argv")" == "--foreground 0.3s adb -s emulator-5554 get-serialno" \
+              && "$(< "$temp/route-success.log")" == *"route=trusted-serial status=0 timeout=0.3s requested=emulator-5554 actual=emulator-5554"* ]]; then
+            ok "a targeted route proves the requested serial through the timeout wrapper"
+        else
+            bad "a targeted route proves the requested serial through the timeout wrapper" \
+                "serial=${route_serial}; timeout_argv=$(< "$route_timeout_argv"); $(< "$temp/route-success.log")"
+        fi
+    else
+        bad "a targeted route proves the requested serial through the timeout wrapper" \
+            "$(< "$temp/route-success.log")"
     fi
 
     started="$(epoch_millis)"
