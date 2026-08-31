@@ -480,8 +480,8 @@ rec("supabase-gate" in closure(release_jobs, "publish"),
     "release.yml blocks publish on the real-Supabase gate")
 
 macos_smoke = pathlib.Path("scripts/release/smoke-macos-dmg.sh").read_text()
-rec("macos-native-evidence.sh artifacts/release-macos-native" in macos_smoke,
-    "macOS smoke captures native evidence before removing the installed app")
+rec('macos-native-evidence.sh artifacts/release-macos-native "$DMG"' in macos_smoke,
+    "macOS smoke binds native evidence to the exercised DMG before removing the installed app")
 rec("macos-cloud-evidence.sh artifacts/release-macos-cloud" in macos_smoke,
     "macOS smoke captures the cloud account lifecycle from the installed app")
 
@@ -551,7 +551,17 @@ for wf, doc in docs.items():
             continue
         sid, skey = m.groups()
         body = "".join(s.get("run") or "" for s in steps(jobs[jn]) if s.get("id") == sid)
-        rec(re.search(r"{}=.*>>[^\n]*GITHUB_OUTPUT".format(re.escape(skey)), body) is not None,
+        grouped_outputs = re.findall(
+            r"(?m)^[ \t]*\{(.*?)^[ \t]*\}[ \t]*>>[^\n]*GITHUB_OUTPUT",
+            body,
+            re.DOTALL,
+        )
+        writes_output = (
+            re.search(r"{}=.*>>[^\n]*GITHUB_OUTPUT".format(re.escape(skey)), body) is not None
+            or any(re.search(r"{}=".format(re.escape(skey)), group) is not None
+                   for group in grouped_outputs)
+        )
+        rec(writes_output,
             "{}: step '{}' writes {} to GITHUB_OUTPUT".format(wf, sid, skey),
             "no line in step '{}' assigns {} into GITHUB_OUTPUT".format(sid, skey))
 

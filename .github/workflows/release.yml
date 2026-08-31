@@ -54,6 +54,11 @@ on:
         required: false
         default: false
         type: boolean
+      qualify:
+        description: "Run signed cross-platform release qualification without publishing"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   # The default single pending slot can replace an older queued rerun. This
@@ -106,6 +111,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       publish: ${{ steps.resolve.outputs.publish }}
+      qualify: ${{ steps.resolve.outputs.qualify }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -127,14 +133,29 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_PUBLISH: ${{ inputs.publish }}
+          INPUT_QUALIFY: ${{ inputs.qualify }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "push" ]]; then
             version="${GITHUB_REF_NAME#v}"
             publish=true
-          else
+            qualify=true
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             version="${INPUT_VERSION:-}"
             publish="${INPUT_PUBLISH:-false}"
+            qualify="${INPUT_QUALIFY:-false}"
+            for mode in "$publish" "$qualify"; do
+              case "$mode" in
+                true|false) ;;
+                *) echo "::error::release mode must be true or false"; exit 1 ;;
+              esac
+            done
+            if [[ "$publish" == "true" ]]; then
+              qualify=true
+            fi
+          else
+            echo "::error::unsupported release event '$EVENT_NAME'"
+            exit 1
           fi
           version="${version#v}"
 
@@ -147,9 +168,12 @@ jobs:
             exit 1
           fi
 
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "publish=$publish" >> "$GITHUB_OUTPUT"
-          echo "Building $version (publish=$publish)"
+          {
+            echo "version=$version"
+            echo "publish=$publish"
+            echo "qualify=$qualify"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building $version (publish=$publish, qualify=$qualify)"
 
   pairing-e2e:
     name: Pairing native E2E gate
@@ -825,7 +849,7 @@ jobs:
   android-upgrade-fixture:
     name: Build Android upgrade fixture (x86_64)
     needs: version
-    if: needs.version.outputs.publish == 'true'
+    if: needs.version.outputs.qualify == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -954,7 +978,7 @@ jobs:
   android-cloud-evidence:
     name: Build Android cloud-evidence APK
     needs: version
-    if: needs.version.outputs.publish == 'true'
+    if: needs.version.outputs.qualify == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -1065,14 +1089,13 @@ jobs:
           retention-days: 7
 
   # Test the signed universal artifact, not a separately assembled emulator
-  # APK. This job downloads exactly what `publish` will later download, checks
-  # its sidecar digest, and installs/runs it through the release smoke harness.
-  # It runs only when a release can be published; a non-publishing dispatch may
-  # still build artifacts without spending an emulator runner.
+  # APK. This job downloads the release artifact, checks its sidecar digest,
+  # and installs/runs it through the release smoke harness. It runs for a
+  # publish or an explicit non-publishing qualification dispatch.
   android-smoke:
-    name: Smoke-test published Android APK
+    name: Smoke-test signed Android APK
     needs: [version, android, android-cloud-evidence, android-upgrade-fixture]
-    if: needs.version.outputs.publish == 'true'
+    if: needs.version.outputs.qualify == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1174,9 +1197,9 @@ jobs:
           retention-days: 14
 
   android-smoke-api33:
-    name: Smoke-test published Android APK (API 33)
+    name: Smoke-test signed Android APK (API 33)
     needs: [version, android]
-    if: needs.version.outputs.publish == 'true'
+    if: needs.version.outputs.qualify == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1226,9 +1249,9 @@ jobs:
           retention-days: 14
 
   android-hardware:
-    name: Validate published Android APK on a physical device
+    name: Validate signed Android APK on a physical device
     needs: [version, android]
-    if: needs.version.outputs.publish == 'true'
+    if: needs.version.outputs.qualify == 'true'
     runs-on: [self-hosted, linux, ARM64, android-device]
     timeout-minutes: 20
     steps:
@@ -1347,7 +1370,7 @@ jobs:
           ./scripts/release/build-windows.ps1 -SelfTest
           ./scripts/release/windows-sign.ps1 -Operation SelfTest
       - name: Prepare Windows release signing
-        if: needs.version.outputs.publish == 'true'
+        if: needs.version.outputs.qualify == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
@@ -1359,7 +1382,7 @@ jobs:
             -PersistEnvironment `
             -SmokeSign
       - name: Build signed Windows release package
-        if: needs.version.outputs.publish == 'true'
+        if: needs.version.outputs.qualify == 'true'
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -1371,7 +1394,7 @@ jobs:
             -PrebuiltSidecarsDirectory artifacts/windows-sidecars `
             -OutputDirectory artifacts/windows-x86_64
       - name: Build unsigned Windows release package
-        if: needs.version.outputs.publish != 'true'
+        if: needs.version.outputs.qualify != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -1380,7 +1403,7 @@ jobs:
             -PrebuiltSidecarsDirectory artifacts/windows-sidecars `
             -OutputDirectory artifacts/windows-x86_64
       - name: Remove Windows signing material
-        if: always() && needs.version.outputs.publish == 'true'
+        if: always() && needs.version.outputs.qualify == 'true'
         shell: pwsh
         run: ./scripts/release/windows-sign.ps1 -Operation Cleanup
       - name: Install, launch with packaged sidecar, and uninstall
@@ -1389,7 +1412,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $version = '${{ needs.version.outputs.version }}'
           $installer = "artifacts/windows-x86_64/CopyPaste-v$version-windows-x86_64-setup.exe"
-          $signature = if ('${{ needs.version.outputs.publish }}' -eq 'true') { 'Valid' } else { 'NotSigned' }
+          $signature = if ('${{ needs.version.outputs.qualify }}' -eq 'true') { 'Valid' } else { 'NotSigned' }
           ./scripts/release/windows-native-evidence.ps1 `
             -Installer $installer `
             -PackageDirectory artifacts/windows-x86_64 `
@@ -1411,9 +1434,9 @@ jobs:
           retention-days: 30
 
   native-parity:
-    name: Gate publication on native evidence
+    name: Gate release qualification on native evidence
     needs: [version, macos, android-hardware, windows]
-    if: needs.version.outputs.publish == 'true'
+    if: needs.version.outputs.qualify == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1433,6 +1456,18 @@ jobs:
         with:
           name: release-windows-native-evidence
           path: artifacts/native-parity/windows
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: macos-app-arm64
+          path: artifacts/qualified-artifacts/macos
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android
+          path: artifacts/qualified-artifacts/android
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-x86_64
+          path: artifacts/qualified-artifacts/windows
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
@@ -1456,6 +1491,9 @@ jobs:
             --evidence ${{ github.workspace }}/artifacts/native-parity/macos/native-evidence.json \
             --evidence ${{ github.workspace }}/artifacts/native-parity/android/native-evidence.json \
             --evidence ${{ github.workspace }}/artifacts/native-parity/windows/native-evidence.json \
+            --qualified-artifact macos=${{ github.workspace }}/artifacts/qualified-artifacts/macos/CopyPaste-v${{ needs.version.outputs.version }}-macos-arm64.dmg \
+            --qualified-artifact android=${{ github.workspace }}/artifacts/qualified-artifacts/android/CopyPaste-v${{ needs.version.outputs.version }}-android.apk \
+            --qualified-artifact windows=${{ github.workspace }}/artifacts/qualified-artifacts/windows/CopyPaste-v${{ needs.version.outputs.version }}-windows-x86_64-setup.exe \
             "${expected[@]}"
 
   # Generate the cask and the formula from the artefacts that were actually
