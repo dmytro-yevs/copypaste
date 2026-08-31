@@ -357,7 +357,7 @@ SH
         export ANDROID_TIMEOUT_FIXTURE_ARGV="$route_child_argv"
         export ANDROID_EMULATOR_SCREENCAP_TIMEOUT=0.3
         timeout() {
-            printf '%s\n' "$*" > "$route_timeout_argv"
+            printf '%s\n' "$*" >> "$route_timeout_argv"
             command timeout "$@"
         }
         capture_android_png "$temp/route-timeout.png" "$PKG" emulator-5554); then
@@ -386,21 +386,25 @@ SH
         export ANDROID_TIMEOUT_FIXTURE_ARGV="$temp/route-success.argv"
         export ANDROID_EMULATOR_SCREENCAP_TIMEOUT=0.3
         timeout() {
-            printf '%s\n' "$*" > "$route_timeout_argv"
+            printf '%s\n' "$*" >> "$route_timeout_argv"
             command timeout "$@"
         }
-        verified_android_serial emulator-5554 "$temp/route-success.log")"; then
+        first="$(verified_android_serial emulator-5554 "$temp/route-success-first.log")"
+        second="$(verified_android_serial emulator-5554 "$temp/route-success-second.log")"
+        [[ "$first" == emulator-5554 && "$second" == emulator-5554 ]] || exit 1
+        printf '%s\n' "$second")"; then
         if [[ "$route_serial" == emulator-5554 \
-              && "$(< "$route_timeout_argv")" == "--foreground 0.3s adb -s emulator-5554 get-serialno" \
-              && "$(< "$temp/route-success.log")" == *"route=trusted-serial status=0 timeout=0.3s requested=emulator-5554 actual=emulator-5554"* ]]; then
-            ok "a targeted route proves the requested serial through the timeout wrapper"
+              && "$(wc -l < "$route_timeout_argv")" -eq 2 ]] \
+           && awk 'NF && $0 != "--foreground 0.3s adb -s emulator-5554 get-serialno" { bad=1 } END { exit bad }' "$route_timeout_argv" \
+           && [[ "$(cat "$temp/route-success-first.log" "$temp/route-success-second.log")" == *"route=trusted-serial status=0 timeout=0.3s requested=emulator-5554 actual=emulator-5554"* ]]; then
+            ok "targeted routes retain each serial proof through the timeout wrapper"
         else
-            bad "a targeted route proves the requested serial through the timeout wrapper" \
-                "serial=${route_serial}; timeout_argv=$(< "$route_timeout_argv"); $(< "$temp/route-success.log")"
+            bad "targeted routes retain each serial proof through the timeout wrapper" \
+                "serial=${route_serial}; timeout_argv=$(< "$route_timeout_argv"); $(cat "$temp/route-success-first.log" "$temp/route-success-second.log")"
         fi
     else
-        bad "a targeted route proves the requested serial through the timeout wrapper" \
-            "$(< "$temp/route-success.log")"
+        bad "targeted routes retain each serial proof through the timeout wrapper" \
+            "$(cat "$temp/route-success-first.log" "$temp/route-success-second.log" 2>/dev/null || true)"
     fi
 
     started="$(epoch_millis)"
