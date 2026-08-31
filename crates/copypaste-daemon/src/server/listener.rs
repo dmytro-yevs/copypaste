@@ -204,6 +204,10 @@ pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::
     let mut release = state.drain_release_rx();
     let mut draining = state.is_draining();
     loop {
+        if release_requested(&mut release) {
+            break;
+        }
+
         tokio::select! {
             _ = shutdown.changed(), if !draining => draining = true,
             _ = release.changed(), if draining => break,
@@ -247,6 +251,10 @@ async fn handle_connection(
     let mut lines = FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
 
     loop {
+        if release_requested(&mut release) {
+            break;
+        }
+
         // A client that connects and then says nothing holds a permit and, if
         // it is mid-request, the database mutex. The deadline is per read, so a
         // client that keeps talking is never cut off (`CopyPaste-cce1`).
@@ -382,6 +390,10 @@ async fn handle_connection(
     // closing so a response the client already consumed cannot keep the pipe
     // alive and hide the EOF promised by the read deadline.
     let _ = tokio::time::timeout(WRITE_TIMEOUT, writer.shutdown()).await;
+}
+
+fn release_requested(release: &mut watch::Receiver<bool>) -> bool {
+    *release.borrow_and_update()
 }
 
 /// One request, one line, one response line.
@@ -797,6 +809,16 @@ mod tests {
             .await
             .expect("listener joins after client cleanup")
             .expect("listener task must not panic");
+    }
+
+    #[test]
+    fn a_release_before_a_connection_handler_starts_is_observed() {
+        let (release_tx, _release_rx) = watch::channel(false);
+        release_tx
+            .send(true)
+            .expect("release receiver remains held");
+
+        assert!(release_requested(&mut release_tx.subscribe()));
     }
 
     #[tokio::test]
