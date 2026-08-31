@@ -791,20 +791,37 @@ mod tests {
         let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
 
         state.request_shutdown();
-        let stream = transport::connect(&path).await.expect("draining endpoint");
-        let (reader, mut writer) = stream.into_split();
-        writer.write_all(b"\n\n").await.expect("keepalive");
-        writer.flush().await.expect("flush keepalive");
-        let mut lines = FramedRead::new(reader, LinesCodec::new());
+
+        // A Unix connect may finish while the peer is still only queued on the
+        // listener. A status round trip proves that each connection task owns
+        // its accepted stream before final release starts closing clients.
+        let mut idle = Client::new(transport::connect(&path).await.expect("draining endpoint"));
+        assert!(idle.call(request(83, Method::Status)).await.ok);
+
+        let mut keepalive =
+            Client::new(transport::connect(&path).await.expect("draining endpoint"));
+        assert!(keepalive.call(request(84, Method::Status)).await.ok);
+        keepalive
+            .writer
+            .write_all(b"\n\n")
+            .await
+            .expect("keepalive");
+        keepalive.writer.flush().await.expect("flush keepalive");
 
         state.release_drain_listener();
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), lines.next())
+        for client in [&mut idle, &mut keepalive] {
+            let next = tokio::time::timeout(Duration::from_secs(1), client.lines.next())
                 .await
-                .expect("release must close idle client")
-                .is_none(),
-            "idle keepalive client outlived final listener release"
-        );
+                .expect("release must close the client");
+            match next {
+                None => {}
+                Some(Err(LinesCodecError::Io(error)))
+                    if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+                other => {
+                    panic!("accepted client remained open after final listener release: {other:?}")
+                }
+            }
+        }
         tokio::time::timeout(Duration::from_secs(1), server)
             .await
             .expect("listener joins after client cleanup")
