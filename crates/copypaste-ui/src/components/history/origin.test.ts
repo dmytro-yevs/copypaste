@@ -11,7 +11,7 @@ import {
   originLabel,
   originsOf,
   wontSync,
-} from "@/features/history/model/origin";
+} from "@/lib/itemOrigin";
 import { item } from "@/test/harness";
 import type { Item } from "@/lib/ipc";
 

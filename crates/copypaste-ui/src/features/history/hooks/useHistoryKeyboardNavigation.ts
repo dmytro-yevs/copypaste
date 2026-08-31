@@ -10,7 +10,7 @@ import {
 import type { CardSelectionIntent } from "@/features/history/components/ClipCard";
 import { rowLabel } from "@/features/history/model/clipPresentation";
 import { keyboardPinnedOrder } from "@/features/history/model/historyEntries";
-import { markedOrigins, originLabel } from "@/features/history/model/origin";
+import { markedOrigins, originLabel } from "@/lib/itemOrigin";
 import { HISTORY_LAYOUT_METRICS } from "@/features/history/model/virtualizationMetrics";
 import type { Selection } from "@/features/history/hooks/useSelection";
 import { useTranslation } from "@/i18n";

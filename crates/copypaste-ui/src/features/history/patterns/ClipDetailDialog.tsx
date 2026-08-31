@@ -17,11 +17,7 @@ import {
     PreviewSurface,
 } from "@/components/shared";
 import { ClipImageLoader } from "@/features/clip-content";
-import {
-    originName,
-    wontSync,
-    type OriginDevice,
-} from "@/features/history/model/origin";
+import { originName, wontSync, type OriginDevice } from "@/lib/itemOrigin";
 import { clipCopyAction } from "@/features/history/model/clipPresentation";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { useViewportMetrics } from "@/hooks/useViewportMetrics";

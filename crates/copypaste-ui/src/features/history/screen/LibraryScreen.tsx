@@ -9,7 +9,7 @@ import { ClipDetailDialog } from "@/features/history/patterns/ClipDetailDialog";
 import { HistoryContentState } from "@/features/history/patterns/HistoryContentState";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { LibraryToolbar } from "@/features/history/patterns/LibraryToolbar";
-import { markedOrigin, markedOrigins } from "@/features/history/model/origin";
+import { markedOrigin, markedOrigins } from "@/lib/itemOrigin";
 import { HISTORY_LAYOUT_METRICS } from "@/features/history/model/virtualizationMetrics";
 import {
     useCopy,

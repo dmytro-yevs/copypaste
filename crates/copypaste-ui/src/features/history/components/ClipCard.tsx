@@ -15,11 +15,7 @@ import {
 } from "@/components/shared";
 import { Button, iconComponent, SelectionControl, Surface } from "@/components/ui";
 import { rowLabel } from "@/features/history/model/clipPresentation";
-import {
-    originName,
-    wontSync,
-    type OriginDevice,
-} from "@/features/history/model/origin";
+import { originName, wontSync, type OriginDevice } from "@/lib/itemOrigin";
 import { HISTORY_LAYOUT_METRICS } from "@/features/history/model/virtualizationMetrics";
 import { SourceAppIcon } from "@/features/source-apps";
 import { useTranslation } from "@/i18n";
