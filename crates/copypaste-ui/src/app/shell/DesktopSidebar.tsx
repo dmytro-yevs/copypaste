@@ -1,15 +1,11 @@
 import { BrandLockup } from "@/components/shared";
 import { NavigationItem } from "@/app/shell/NavigationItem";
-import type { IconName } from "@/components/ui";
+import { navigationRoutes } from "@/app/routes/routeMetadata";
 import { useTranslation } from "@/i18n";
-import { type View, useUi } from "@/store/ui";
+import { useUi } from "@/store/ui";
 import styles from "./DesktopSidebar.module.css";
 
-const ITEMS = [
-  { view: "history", label: "nav.history", icon: "library" },
-  { view: "devices", label: "nav.connections", icon: "devices" },
-  { view: "settings", label: "nav.preferences", icon: "settings" },
-] as const satisfies ReadonlyArray<{ view: View; label: string; icon: IconName }>;
+const ITEMS = navigationRoutes("sidebar");
 
 export function DesktopSidebar({ navigationReady = true }: { navigationReady?: boolean }) {
   const { t } = useTranslation();

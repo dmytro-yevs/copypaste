@@ -47,7 +47,7 @@ describe("the Settings history fixture query", () => {
   });
 });
 
-describe("adaptive Preferences navigation", () => {
+describe("adaptive Settings navigation", () => {
   const fixtures: ReadonlyArray<{
     name: string;
     snapshot: SettingsViewSnapshot;
@@ -155,7 +155,7 @@ describe("adaptive Preferences navigation", () => {
   });
 });
 
-describe("a Preferences category trigger", () => {
+describe("a Settings category trigger", () => {
   const actionable: SettingsTriggerSnapshot = {
     exists: true,
     disabled: false,
