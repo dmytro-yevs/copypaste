@@ -1,8 +1,9 @@
 # CopyPaste design tokens
 
 `design/tokens/` is the only source of visual constants for the product. Style
-Dictionary generates `design/dist/css/`; generated CSS is committed so native
-and web builds consume the same artifact.
+Dictionary generates `design/dist/css/` and Android Material resources;
+generated output is committed so native and web builds consume the same
+artifact.
 
 ## Appearance model
 
@@ -52,6 +53,7 @@ values at runtime.
 | `tokens/motion.json` | durations and easing, including reduced-motion values |
 | `tokens/translucency.json` | solid/frosted chrome with platform fallbacks |
 | `tokens/elevation.*.json` | shadows and the focus halo |
+| `tokens/android.json` | Android resource aliases and native-only geometry |
 
 Feature and component styles may compose geometry with `calc()`, but colour
 recipes belong in `tokens/color/recipes*.json`. Components consume the emitted
@@ -72,6 +74,8 @@ instead of carrying hand-written colour maths or another dependency.
 - `themes.dark.css` and `themes.light.css` for product palettes;
 - `swatches.dark.css` and `swatches.light.css` for derived picker previews;
 - `index.css` as the maintained import order.
+- `values/colors.xml`, `values-night/colors.xml` and `values/dimens.xml` for
+  Android Material resource consumers.
 
 Dark Midnight is the safe pre-bootstrap fallback. Once the bootstrap runs, the
 resolved scheme and product theme selectors take over before first paint.
@@ -87,6 +91,7 @@ Run from this directory:
 npm run build
 npm run check:contrast
 npm run check:usage
+npm run check:android
 ```
 
 The contrast gate reads generated CSS and evaluates all eight palettes. It
@@ -98,3 +103,11 @@ unsafe sensitive-content treatments and required semantic roles.
 backdrop filtering is supported, and `prefers-reduced-transparency` restores
 solid values. Sensitive content is absent rather than visually obscured, so no
 clipboard-content blur token exists.
+
+Android resource colours take the same Midnight fallback that the WebView uses
+before appearance bootstrap; the WebView continues to render the selected
+product theme. The Android token source aliases that fallback and semantic
+scheme roles instead of owning a second palette. Its 48dp touch target is a
+deliberate native Material variant of the WebView's 44px coarse-pointer floor.
+The QR background is intentionally true white because its renderer's modules
+are true black; it is a scanner contrast exception, not a themed surface.

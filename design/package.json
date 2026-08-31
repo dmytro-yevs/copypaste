@@ -14,7 +14,8 @@
     "lib",
     "style-dictionary.config.js",
     "check-contrast.mjs",
-    "check-usage.mjs"
+    "check-usage.mjs",
+    "check-android.mjs"
   ],
   "exports": {
     "./css": "./dist/css/index.css",
@@ -23,7 +24,9 @@
   },
   "scripts": {
     "build": "node style-dictionary.config.js",
-    "check": "node check-contrast.mjs && node check-usage.mjs",
+    "check": "npm run check:generated && node check-contrast.mjs && node check-usage.mjs && node check-android.mjs",
+    "check:generated": "npm run build && git diff --exit-code -- dist ../crates/copypaste-ui/src-tauri/gen/android/app/src/main/res/values/colors.xml ../crates/copypaste-ui/src-tauri/gen/android/app/src/main/res/values/dimens.xml ../crates/copypaste-ui/src-tauri/gen/android/app/src/main/res/values-night/colors.xml",
+    "check:android": "node check-android.mjs",
     "check:contrast": "node check-contrast.mjs",
     "check:usage": "node check-usage.mjs",
     "clean": "node -e \"import('node:fs').then(fs=>fs.rmSync('dist',{recursive:true,force:true}))\"",
