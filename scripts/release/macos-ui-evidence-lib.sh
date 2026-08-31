@@ -98,6 +98,15 @@ on run argv
                 try
                     set roleText to role of elementRef as text
                 end try
+                if actionMode is "find-safe-role" and nameText is targetLabel and roleText is inputValue then
+                    return roleText & tab & nameText
+                end if
+                if actionMode is "press-exact" and nameText is targetLabel and roleText is "AXButton" then
+                    try
+                        perform action "AXPress" of elementRef
+                        return "ok"
+                    end try
+                end if
                 if actionMode is "surface" then
                     set end of outputLines to roleText & tab & nameText
                 else
@@ -168,6 +177,41 @@ mac_wait_label() { # <label> <dump> [timeout]
     return 1
 }
 
+mac_wait_safe_role_label() { # <label> <role> <dump> [timeout]
+    local label="$1" role="$2" dump="$3" timeout="${4:-30}" started="$SECONDS"
+    while (( SECONDS - started < timeout )); do
+        mac_ax find-safe-role "$label" "$role" > "$dump" 2>/dev/null && return 0
+        sleep 1
+    done
+    return 1
+}
+
+mac_press_exact_button() { # <accessible name>
+    mac_ax press-exact "$1"
+}
+
+mac_recover_onboarding() { # <safe probe artifact> [timeout]
+    local probe="$1" timeout="${2:-30}" error="${1}.err" started="$SECONDS" pressed=no
+    mkdir -p "$(dirname "$probe")"
+    while (( SECONDS - started < timeout )); do
+        if mac_ax find-safe-role "Library" "AXButton" > "$probe" 2> "$error"; then
+            return 0
+        elif ! grep -Fq "no accessible element named" "$error"; then
+            return 2
+        fi
+        if [[ "$pressed" == no ]]; then
+            if mac_ax find-safe-role "Explore first" "AXButton" > "$probe" 2> "$error"; then
+                mac_press_exact_button "Explore first" > /dev/null 2> "$error" || return 2
+                pressed=yes
+            elif ! grep -Fq "no accessible element named" "$error"; then
+                return 2
+            fi
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 mac_reach_settings() { # <dump> [timeout]
     local dump="$1" timeout="${2:-30}" started="$SECONDS"
     mac_ax enable >/dev/null 2>&1 || true
@@ -189,10 +233,20 @@ mac_reach_settings() { # <dump> [timeout]
 }
 
 mac_capture_state() { # <directory>
-    mkdir -p "$1"
-    mac_ax dump > "$1/ax.txt"
-    screencapture -x "$1/screenshot.png"
-    [[ -s "$1/ax.txt" && -s "$1/screenshot.png" ]]
+    local directory="$1" temporary
+    mkdir -p "$directory"
+    temporary="$(mktemp -d "$directory/.capture.XXXXXX")" || return 1
+    if ! mac_ax dump > "$temporary/ax.txt" || [[ ! -s "$temporary/ax.txt" ]]; then
+        rm -rf "$temporary"
+        return 1
+    fi
+    if ! screencapture -x "$temporary/screenshot.png" || [[ ! -s "$temporary/screenshot.png" ]]; then
+        rm -rf "$temporary"
+        return 1
+    fi
+    mv "$temporary/ax.txt" "$directory/ax.txt"
+    mv "$temporary/screenshot.png" "$directory/screenshot.png"
+    rmdir "$temporary"
 }
 
 mac_ui_self_test() {
@@ -224,6 +278,24 @@ mac_ui_self_test() {
             surface) printf 'AXMenuBar\tCopyPaste\nAXMenuBarItem\tCopyPaste\n' ;;
             dump) printf 'AXButton\tSign in\t\t\t\nAXStaticText\tConnected\t\t\t\n' ;;
             find) [[ "$4" == "skipped" ]] && printf 'AXStaticText\tCloud sync finished: 1 skipped\t\t\t\n' ;;
+            find-safe-role)
+                if [[ "$4" == "Library" && "$5" == "AXHeading" ]]; then
+                    printf 'AXHeading\tLibrary\n'
+                elif [[ "$4" == "Library" && "$5" == "AXButton" ]]; then
+                    printf 'AXButton\tLibrary\n'
+                elif [[ "$4" == "Explore first" && "$5" == "AXButton" ]]; then
+                    printf 'AXButton\tExplore first\n'
+                else
+                    return 1
+                fi
+                ;;
+            press-exact)
+                if [[ "$4" == "Library" || "$4" == "Explore first" ]]; then
+                    printf 'ok\n'
+                else
+                    return 1
+                fi
+                ;;
             press) [[ "$4" == "Sign in" ]] && printf 'ok\n' ;;
             set) [[ "$4" == "Email" && "$5" == "native@example.test" ]] && printf 'ok\n' ;;
             *) return 1 ;;
@@ -234,6 +306,8 @@ mac_ui_self_test() {
     mac_ax surface > "$1/surface.txt"
     mac_ax dump > "$fixture"
     mac_wait_label "skipped" "$probe" 1
+    mac_wait_safe_role_label "Library" "AXHeading" "$1/heading.txt" 1
+    mac_recover_onboarding "$1/onboarding.txt"
     if mac_ax find "Skipped" > "$absent"; then
         bad "absent label probes return failure"
     elif [[ -s "$absent" ]]; then
@@ -243,7 +317,7 @@ mac_ui_self_test() {
     fi
     press_result="$(mac_ax press "Sign in")"
     set_result="$(mac_ax set "Email" "native@example.test")"
-    unset -f osascript
+    mac_press_exact_button "Library" >/dev/null
     mac_ax_contains "$1/surface.txt" "AXMenuBar" \
         && ok "the full native surface retains menu bar evidence" \
         || bad "the full native surface retains menu bar evidence"
@@ -256,6 +330,25 @@ mac_ui_self_test() {
     [[ "$(cat "$probe")" == $'AXStaticText\tCloud sync finished: 1 skipped\t\t\t' ]] \
         && ok "label probes retain the matched accessibility row" \
         || bad "label probes retain the matched accessibility row"
+    [[ "$(cat "$1/heading.txt")" == $'AXHeading\tLibrary' ]] \
+        && ok "route headings require an exact AX heading" \
+        || bad "route headings require an exact AX heading"
+    if mac_wait_safe_role_label "Settings" "AXHeading" "$1/wrong-heading.txt" 1; then
+        bad "wrong route headings are rejected"
+    else
+        ok "wrong route headings are rejected"
+    fi
+    if mac_press_exact_button "Settings" >/dev/null 2>&1; then
+        bad "wrong route buttons are rejected"
+    else
+        ok "wrong route buttons are rejected"
+    fi
+    declare -F osascript >/dev/null \
+        && ok "accessibility stub remains installed through negative probes" \
+        || bad "accessibility stub remains installed through negative probes"
+    [[ "$(cat "$1/onboarding.txt")" == $'AXButton\tLibrary' ]] \
+        && ok "onboarding recovery accepts an already reachable Library control" \
+        || bad "onboarding recovery accepts an already reachable Library control"
     [[ "$press_result" == "ok" && "$set_result" == "ok" ]] \
         && ok "accessibility actions retain their result shapes" \
         || bad "accessibility actions retain their result shapes"
@@ -271,4 +364,5 @@ mac_ui_self_test() {
     mac_ax_contains "$fixture" "Signed out" \
         && bad "an absent accessibility state is not found" \
         || ok "an absent accessibility state is not found"
+    unset -f osascript
 }

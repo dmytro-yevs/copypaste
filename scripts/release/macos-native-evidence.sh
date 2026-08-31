@@ -30,6 +30,14 @@ print(f"VoiceOver accessibility surface: {len(rows)} elements, {len(named)} name
 PY
 }
 
+capture_route_state() { # <state> <navigation label> <heading>
+  local navigation="$2" heading="$3" state_dir="$out/ui-$1"
+  mkdir -p "$state_dir"
+  mac_press_exact_button "$navigation" >/dev/null || return 1
+  mac_wait_safe_role_label "$heading" "AXHeading" "$state_dir/heading.tsv" 30 || return 1
+  mac_capture_state "$state_dir"
+}
+
 if [[ "${1:-}" == "--self-test" ]]; then
   fixture_dir="$(mktemp -d)"
   trap 'rm -rf "$fixture_dir"' EXIT
@@ -50,6 +58,122 @@ if [[ "${1:-}" == "--self-test" ]]; then
     exit 1
   fi
   mac_ui_self_test "$fixture_dir"
+  out="$fixture_dir/ui"
+  osascript() { echo "self-test attempted a native accessibility command" >&2; return 97; }
+  mac_capture_state_self_test() {
+    local original_ax
+    original_ax="$(declare -f mac_ax)"
+    local screenshot_calls=0
+    mac_ax() { return 1; }
+    screencapture() { screenshot_calls=$((screenshot_calls + 1)); return 97; }
+    if mac_capture_state "$out/failed-ax"; then bad "failed AX dumps cannot produce artifacts"; else ok "failed AX dumps cannot produce artifacts"; fi
+    [[ "$screenshot_calls" == 0 ]] \
+      && ok "failed AX dumps do not invoke screenshot capture" \
+      || bad "failed AX dumps do not invoke screenshot capture"
+    mac_ax() { printf 'AXHeading\tLibrary\n'; }
+    screencapture() { screenshot_calls=$((screenshot_calls + 1)); return 1; }
+    mkdir -p "$out/stale-screenshot"
+    printf 'stale ax' > "$out/stale-screenshot/ax.txt"
+    printf 'stale png' > "$out/stale-screenshot/screenshot.png"
+    if mac_capture_state "$out/stale-screenshot"; then bad "stale screenshots cannot mask capture failure"; else ok "stale screenshots cannot mask capture failure"; fi
+    [[ "$screenshot_calls" == 1 && "$(cat "$out/stale-screenshot/ax.txt")" == "stale ax" && "$(cat "$out/stale-screenshot/screenshot.png")" == "stale png" ]] \
+      && ok "failed screenshots preserve prior artifacts" \
+      || bad "failed screenshots preserve prior artifacts"
+    screenshot_calls=0
+    screencapture() { screenshot_calls=$((screenshot_calls + 1)); :; }
+    if mac_capture_state "$out/empty-png"; then bad "empty screenshots cannot produce artifacts"; else ok "empty screenshots cannot produce artifacts"; fi
+    [[ "$screenshot_calls" == 1 ]] \
+      && ok "empty PNG fixtures exercise the screenshot command" \
+      || bad "empty PNG fixtures exercise the screenshot command"
+    mac_ax() { printf 'AXHeading\tLibrary\n'; }
+    screencapture() { printf 'png' > "$2"; }
+    if mac_capture_state "$out/fresh-success" \
+      && [[ -s "$out/fresh-success/ax.txt" && -s "$out/fresh-success/screenshot.png" ]]; then
+      ok "fresh native artifacts are committed only after both commands succeed"
+    else
+      bad "fresh native artifacts are committed only after both commands succeed"
+    fi
+    unset -f mac_ax screencapture
+    eval "$original_ax"
+  }
+  mac_capture_state_self_test
+  mac_recovery_self_test() {
+    local original_ax mode=delayed library_queries=0 explore_queries=0 presses=0
+    original_ax="$(declare -f mac_ax)"
+    mac_ax() {
+      case "$1" in
+        find-safe-role)
+          if [[ "$2" == "Library" ]]; then
+            library_queries=$((library_queries + 1))
+            if [[ "$mode" == delayed && "$library_queries" -gt 1 ]]; then
+              printf 'AXButton\tLibrary\n'
+              return 0
+            fi
+          elif [[ "$2" == "Explore first" && "$mode" == delayed ]]; then
+            explore_queries=$((explore_queries + 1))
+            printf 'AXButton\tExplore first\n'
+            return 0
+          fi
+          echo "no accessible element named $2" >&2
+          return 1
+          ;;
+        press-exact)
+          [[ "$2" == "Explore first" && "$mode" == delayed ]] || return 1
+          presses=$((presses + 1))
+          return 0
+          ;;
+        *) return 97 ;;
+      esac
+    }
+    mac_recover_onboarding "$out/recovery-delayed.tsv" 2 \
+      && [[ "$presses" == 1 && "$library_queries" -ge 2 && "$explore_queries" == 1 ]] \
+      && ok "delayed onboarding presses Explore first once before Library appears" \
+      || bad "delayed onboarding presses Explore first once before Library appears"
+    mode=absent
+    if mac_recover_onboarding "$out/recovery-absent.tsv" 1; then
+      bad "absent onboarding controls fail by deadline"
+    else
+      local recovery_status=$?
+      if [[ "$recovery_status" == 1 ]]; then
+        ok "absent onboarding controls fail by deadline"
+      else
+        bad "absent onboarding controls fail by deadline"
+      fi
+    fi
+    mode=provider-error
+    mac_ax() { echo "System Events provider denied request" >&2; return 1; }
+    if mac_recover_onboarding "$out/recovery-error.tsv" 1; then
+      bad "provider errors do not masquerade as absent controls"
+    else
+      local recovery_status=$?
+      if [[ "$recovery_status" == 2 ]]; then
+        ok "provider errors do not masquerade as absent controls"
+      else
+        bad "provider errors do not masquerade as absent controls"
+      fi
+    fi
+    unset -f mac_ax
+    eval "$original_ax"
+  }
+  mac_recovery_self_test
+  mac_press_exact_button() { [[ "$1" == "Library" || "$1" == "Explore first" ]]; }
+  mac_wait_safe_role_label() {
+    [[ "$1" == "Library" && "$2" == "AXHeading" ]] || return 1
+    printf 'AXHeading\tLibrary\n' > "$3"
+  }
+  mac_capture_state() { mkdir -p "$1"; printf 'AXHeading\tLibrary\n' > "$1/ax.txt"; printf 'png' > "$1/screenshot.png"; }
+  mac_recover_onboarding() { [[ "$1" == "$out/onboarding.tsv" ]] && printf 'AXButton\tExplore first\n' > "$1"; }
+  mac_recover_onboarding "$out/onboarding.tsv" 2 || bad "onboarding recovery remains bounded"
+  capture_route_state history "Library" "Library" \
+    && [[ -s "$out/ui-history/heading.tsv" && -s "$out/ui-history/ax.txt" && -s "$out/ui-history/screenshot.png" ]] \
+    && ok "route evidence requires navigation, a unique heading, and both artifacts" \
+    || bad "route evidence requires navigation, a unique heading, and both artifacts"
+  if capture_route_state settings "Settings" "Settings"; then
+    bad "wrong routes cannot produce route evidence"
+  else
+    ok "wrong routes cannot produce route evidence"
+  fi
+  unset -f osascript mac_press_exact_button mac_wait_safe_role_label mac_capture_state mac_recover_onboarding mac_capture_state_self_test
   [[ "$FAIL" -eq 0 ]] || exit 1
   echo "macOS native accessibility self-test passed"
   exit 0
@@ -115,6 +239,26 @@ PY
 test -s "$out/ax.log"
 test -s "$out/screenshot.png"
 test -s "$out/latency.json"
+
+# These exact-DMG observations are deliberately not receipt feature states:
+# root owns the ledger bindings. Each route requires its source-confirmed
+# navigation control, its own AXHeading, and both native artifacts.
+mac_recover_onboarding "$out/onboarding.tsv" 30 || {
+  echo "Onboarding recovery could not reach the exact Explore first control" >&2
+  exit 1
+}
+capture_route_state history "Library" "Library" || {
+  echo "History route did not expose its Library heading and artifacts" >&2
+  exit 1
+}
+capture_route_state devices "Devices" "Devices" || {
+  echo "Devices route did not expose its Devices heading and artifacts" >&2
+  exit 1
+}
+capture_route_state settings "Settings" "Settings" || {
+  echo "Settings route did not expose its Settings heading and artifacts" >&2
+  exit 1
+}
 
 python3 scripts/release/write-native-evidence.py \
   --output "$out/native-evidence.json" \
