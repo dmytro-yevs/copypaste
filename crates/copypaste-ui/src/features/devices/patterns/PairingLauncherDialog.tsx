@@ -61,7 +61,8 @@ export function PairingLauncherDialog({
     const presentation = pairingPresentation(pairing.ceremony);
     const clientError = pairingClientErrorPresentation(pairing.error);
     const { semantics } = presentation;
-    const active = pairing.isPending || (clientError === null && semantics.active);
+    const lifecycleActive = pairing.isPending || semantics.active;
+    const active = clientError === null && lifecycleActive;
     const failed =
         clientError !== null ||
         (semantics.terminal && semantics.message_id !== "paired");
@@ -92,7 +93,7 @@ export function PairingLauncherDialog({
     }, [android, open]);
 
     const close = (nextOpen: boolean) => {
-        if (!nextOpen && active && pairing.pendingAction !== "cancel") {
+        if (!nextOpen && lifecycleActive && pairing.pendingAction !== "cancel") {
             pairing.run("cancel");
         }
         onOpenChange(nextOpen);
