@@ -263,7 +263,7 @@ def main():
         if projected == schema_document(mutated):
             raise SystemExit("native-evidence-policy: stale schema fixture passed")
         mutated = copy.deepcopy(policy)
-        mutated["platforms"]["android"]["environment"] = "emulator"
+        mutated["platforms"]["android"]["environment"] = "physical-device"
         if projected == schema_document(mutated):
             raise SystemExit("native-evidence-policy: stale Android environment fixture passed")
         mutated = copy.deepcopy(policy)
