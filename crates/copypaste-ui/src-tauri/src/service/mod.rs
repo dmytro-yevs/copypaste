@@ -1877,6 +1877,9 @@ mod tests {
         drop(quit);
         release.send(()).unwrap();
         done.await.unwrap();
+        while sup.owned.is_reap_pending_for_test() {
+            tokio::task::yield_now().await;
+        }
         assert_eq!(sup.request_quit(), ExitRequest::Failure);
     }
 
@@ -1901,6 +1904,9 @@ mod tests {
         drop(quit);
         release.send(()).unwrap();
         done.await.unwrap();
+        while sup.owned.is_reap_pending_for_test() {
+            tokio::task::yield_now().await;
+        }
         assert!(sup.holds_child());
         assert_eq!(sup.request_quit(), ExitRequest::Drain);
     }
