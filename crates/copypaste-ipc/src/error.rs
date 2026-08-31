@@ -17,7 +17,7 @@ pub enum ErrorCode {
     KeyUnusable,
     /// The item exists, but the requested clipboard representation does not.
     UnsupportedContent,
-    /// An authenticated legacy text body cannot fit the bounded full-body reply.
+    /// Authenticated included content or an aggregate export cannot fit its bounded reply.
     ContentTooLarge,
 
     PairingCode,

@@ -541,20 +541,25 @@ mod tests {
             limit: 0,
             include_sensitive: false,
         };
-        let response = Response::err(43, ErrorCode::NotFound, "nothing to export");
-        let mut emitted = Vec::new();
+        for (code, expected_exit) in [
+            (ErrorCode::NotFound, error::EXIT_NOT_FOUND),
+            (ErrorCode::ContentTooLarge, error::EXIT_OTHER),
+        ] {
+            let response = Response::err(43, code, "export refused");
+            let mut emitted = Vec::new();
 
-        let err = finish_response(&command, true, response, |text| {
-            emitted.push(text.to_string())
-        })
-        .expect_err("daemon failure should determine the exit");
+            let err = finish_response(&command, true, response, |text| {
+                emitted.push(text.to_string())
+            })
+            .expect_err("daemon failure should determine the exit");
 
-        assert_eq!(err.exit_code(), error::EXIT_NOT_FOUND);
-        assert_eq!(emitted.len(), 1);
-        let machine: Response = serde_json::from_str(&emitted[0]).expect("typed response JSON");
-        assert!(!machine.ok);
-        assert_eq!(machine.error_code, Some(ErrorCode::NotFound));
-        assert!(!path.exists());
+            assert_eq!(err.exit_code(), expected_exit);
+            assert_eq!(emitted.len(), 1);
+            let machine: Response = serde_json::from_str(&emitted[0]).expect("typed response JSON");
+            assert!(!machine.ok);
+            assert_eq!(machine.error_code, Some(code));
+            assert!(!path.exists());
+        }
     }
 
     #[test]
