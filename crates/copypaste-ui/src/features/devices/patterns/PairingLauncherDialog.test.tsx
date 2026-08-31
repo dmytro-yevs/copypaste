@@ -213,6 +213,33 @@ describe("PairingLauncherDialog preview flows", () => {
         expect(onOpenChange).toHaveBeenCalledWith(false);
     });
 
+    it("keeps a pending cancellation ahead of a client retry error", async () => {
+        const pairing = controller({
+            ceremony: waiting,
+            error: new IpcFailure("peer_unreachable", true),
+            isPending: true,
+            pendingAction: "cancel",
+            canRetry: true,
+        });
+        const onOpenChange = vi.fn();
+        render(launcher(pairing, onOpenChange));
+
+        fireEvent.click(
+            screen.getByRole("button", { name: /Show pairing code/ }),
+        );
+
+        expect(
+            (screen.getByRole("button", {
+                name: "Cancelling…",
+            }) as HTMLButtonElement).disabled,
+        ).toBe(true);
+        expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+        await userEvent.setup().click(screen.getByRole("button", { name: "Close" }));
+
+        expect(pairing.run).not.toHaveBeenCalled();
+        expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+
     it.each(["Escape", "close button", "backdrop"])(
         "cancels an active ceremony despite a client error after %s dismissal",
         async (dismissal) => {
