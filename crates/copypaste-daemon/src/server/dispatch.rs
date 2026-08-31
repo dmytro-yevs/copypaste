@@ -51,6 +51,16 @@ pub(super) fn gate(state: &AppState, request: &Request) -> Option<GateRejection>
             was_watch: matches!(request.method, Method::Watch),
         });
     }
+    if state.is_draining() && !matches!(request.method, Method::Status) {
+        return Some(GateRejection {
+            response: Box::new(Response::err(
+                request.id,
+                ErrorCode::NotReady,
+                MSG_NOT_READY,
+            )),
+            was_watch: matches!(request.method, Method::Watch),
+        });
+    }
     if requires_ready(&request.method) && !state.is_ready() {
         return Some(GateRejection {
             response: Box::new(Response::err(
