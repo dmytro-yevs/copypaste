@@ -110,17 +110,6 @@ impl EmbeddedSettings {
         Ok(transition.applied)
     }
 
-    pub(super) fn reconcile_lan_visibility_after_node_publish<F>(&self, apply: F)
-    where
-        F: FnOnce(bool),
-    {
-        let _serialised = self
-            .applying
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        apply(self.snapshot().config.lan_visibility);
-    }
-
     pub(super) fn reconcile_node_after_publish<F>(&self, apply: F)
     where
         F: FnOnce(bool, bool),
@@ -545,7 +534,7 @@ mod tests {
             .unwrap();
         let applied = std::sync::atomic::AtomicBool::new(true);
 
-        settings.reconcile_lan_visibility_after_node_publish(|visible| {
+        settings.reconcile_node_after_publish(|visible, _sync_enabled| {
             applied.store(visible, std::sync::atomic::Ordering::Release);
         });
 
@@ -558,7 +547,7 @@ mod tests {
         let settings = EmbeddedSettings::open(path);
         let applied = std::sync::atomic::AtomicBool::new(false);
 
-        settings.reconcile_lan_visibility_after_node_publish(|visible| {
+        settings.reconcile_node_after_publish(|visible, _sync_enabled| {
             applied.store(visible, std::sync::atomic::Ordering::Release);
         });
         assert!(applied.load(std::sync::atomic::Ordering::Acquire));

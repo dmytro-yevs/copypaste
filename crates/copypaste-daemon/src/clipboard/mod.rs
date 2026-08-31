@@ -120,7 +120,7 @@ mod windows;
 pub use fake::FakeClipboard;
 
 /// Current storage and transport hard bound, in bytes.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(test, all(target_os = "macos", not(feature = "dev-fake-clipboard"))))]
 const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
 /// Credential stores mark a capture sensitive even when its text does not
@@ -269,7 +269,7 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
     #[cfg(feature = "dev-fake-clipboard")]
     {
         let _ = data_dir;
-        return Ok(Box::new(fake::FakeClipboard::new()));
+        Ok(Box::new(fake::FakeClipboard::new()))
     }
     #[cfg(all(target_os = "macos", not(feature = "dev-fake-clipboard")))]
     {
