@@ -34,17 +34,19 @@ export function rowLabel(
   preview: string | undefined,
   translate: (key: RowLabelKey) => string,
 ): string {
-  const body = item.is_sensitive
-    ? translate("history.row.sensitiveName")
-    : item.sensitive_finding !== null
-      ? `${translate("history.row.potentialSensitiveWarning")}. ${item.sensitive_finding.redacted_preview}`
+  let body: string;
+  if (item.is_sensitive) {
+    body = translate("history.row.sensitiveName");
+  } else if (item.sensitive_finding !== null) {
+    body = `${translate("history.row.potentialSensitiveWarning")}. ${item.sensitive_finding.redacted_preview}`;
+  } else {
+    const kind = kindOf(item);
+    body = item.content_class !== "text"
+      ? clipTypeMetadata(kind).label
       : item.content === null
         ? translate("history.row.empty")
-        : kindOf(item) === "image"
-          ? clipTypeMetadata("image").label
-          : kindOf(item) === "unknown"
-            ? clipTypeMetadata("unknown").label
-            : (preview ?? previewOf(item.content));
+        : (preview ?? previewOf(item.content));
+  }
   const named = item.pinned ? `${translate("history.row.pinnedPrefix")} ${body}` : body;
   const marks: string[] = [];
   if (origin !== null) marks.push(`${translate("history.row.fromPrefix")} ${origin}`);
