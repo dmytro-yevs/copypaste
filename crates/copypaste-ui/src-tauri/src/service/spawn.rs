@@ -118,7 +118,7 @@ fn job_error_identity(error: &win32job::JobError) -> (JobStage, Option<i32>) {
 #[cfg(windows)]
 struct JobBoundChild {
     child: Child,
-    job: win32job::Job,
+    _job: win32job::Job,
 }
 
 #[cfg(windows)]
@@ -138,7 +138,7 @@ impl ChildProcess for JobBoundChild {
 #[cfg(windows)]
 impl JobBoundChild {
     fn new(child: Child, job: win32job::Job) -> Self {
-        Self { child, job }
+        Self { child, _job: job }
     }
 }
 
