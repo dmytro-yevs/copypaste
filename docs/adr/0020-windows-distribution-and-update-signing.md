@@ -15,6 +15,23 @@ adopted daemon uses authenticated IPC shutdown and confirmed endpoint stop, or
 the update refuses. The reservation remains held through installer handoff, so
 the app cannot start a second daemon while the update exits it.
 
+## Installer shutdown completion contract
+
+The Windows installer invokes `copypaste shutdown --wait-for-exit` when it
+must drain an adopted daemon. The command takes one five-second deadline across
+connect, named-pipe server PID lookup, process-handle acquisition, shutdown
+write, ACK, and a single process wait. It opens the connected server process
+with only `QUERY_LIMITED_INFORMATION | SYNCHRONIZE` before writing the request,
+then accepts completion only for a correlated `empty` ACK followed by
+`WaitForSingleObject(OBJECT_0)` and `GetExitCodeProcess() == 0`.
+
+An initial pipe `NotFound` result is the sole already-stopped success. Access
+failures, a closed post-connect pipe, a malformed or failed ACK, timeout,
+abandonment, API failure, or nonzero exit make installation refuse without
+trying another connection or guessing a process. The command emits a
+human-readable completion state only; `--json` conflicts with this Windows-only
+flag so it cannot present a fabricated IPC response.
+
 Tauri owns installer generation and updater artifact signing. Its custom
 `signCommand` uses PowerShell 7 and delegates every Authenticode operation to
 `scripts/release/windows-sign.ps1`, using the release PFX directly rather than

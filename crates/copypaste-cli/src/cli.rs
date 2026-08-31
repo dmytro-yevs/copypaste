@@ -111,7 +111,12 @@ pub(crate) enum Command {
     ///
     /// It finishes what it is doing, removes its socket, and exits — the same
     /// unwind a `SIGTERM` produces. History is untouched.
-    Shutdown,
+    Shutdown {
+        /// Wait until the Windows daemon process has exited successfully.
+        #[cfg(windows)]
+        #[arg(long, conflicts_with = "json")]
+        wait_for_exit: bool,
+    },
 
     /// Pair this device with another one.
     Pair {

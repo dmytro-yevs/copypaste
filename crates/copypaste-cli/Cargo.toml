@@ -24,3 +24,6 @@ serde.workspace = true
 serde_json.workspace = true
 clap.workspace = true
 comfy-table.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winsafe = { version = "0.0.28", features = ["kernel"] }

@@ -214,6 +214,16 @@ permanent capture, blocking-task, peer-flush, or listener failure remains a
 failed daemon exit after cleanup. A closed socket is not the only success
 signal.
 
+On Windows, `copypaste shutdown --wait-for-exit` is the installer handoff
+contract. It makes one connection, obtains the connected named-pipe server PID
+and opens that process for query and synchronization before sending shutdown.
+Only an initial `not_found` connect result means the daemon was already
+stopped. After a correlated successful empty acknowledgement, the same
+five-second request deadline permits one process wait; only a signalled process
+with exit code zero completes the command. Pipe closure, a second connection,
+PID lookup/open failure, a non-zero exit, or any wait failure does not prove
+completion. The flag is Windows-only and cannot be combined with `--json`.
+
 ## 7. Error taxonomy
 
 The shared enum distinguishes at least:

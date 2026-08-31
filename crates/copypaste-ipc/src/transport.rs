@@ -134,6 +134,12 @@ pub async fn connect(path: &Path) -> io::Result<Stream> {
 }
 
 impl Stream {
+    /// Returns the connected named-pipe server's process id.
+    #[cfg(windows)]
+    pub fn peer_process_id(&self) -> io::Result<u32> {
+        self.0.server_process_id()
+    }
+
     pub fn into_split(self) -> (OwnedReadHalf, OwnedWriteHalf) {
         #[cfg(unix)]
         {

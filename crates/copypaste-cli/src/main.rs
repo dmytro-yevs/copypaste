@@ -19,6 +19,8 @@ mod cloud;
 mod error;
 mod render;
 mod report;
+#[cfg(any(windows, test))]
+mod shutdown;
 
 use clap::Parser;
 use cli::{config_patch, Cli, CloudAction, Command, ConfigAction, PairAction};
@@ -27,7 +29,8 @@ use error::CliError;
 use std::io::{IsTerminal, Read, Write};
 use std::path::Path;
 
-#[tokio::main(flavor = "current_thread")]
+#[cfg_attr(windows, tokio::main(flavor = "multi_thread", worker_threads = 1))]
+#[cfg_attr(not(windows), tokio::main(flavor = "current_thread"))]
 async fn main() {
     let cli = Cli::parse();
     let code = match run(cli).await {
@@ -47,6 +50,16 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     // before the mapping below rather than bent into it.
     if let Command::Watch = &cli.command {
         return watch(cli.json).await;
+    }
+
+    #[cfg(windows)]
+    if let Command::Shutdown {
+        wait_for_exit: true,
+    } = &cli.command
+    {
+        let completion = client::shutdown_and_wait().await?;
+        report::report_shutdown_completion(completion);
+        return Ok(());
     }
 
     let method = match &cli.command {
@@ -82,7 +95,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         },
         Command::Reorder { ids } => Method::ReorderPinned { ids: ids.clone() },
         Command::Status => Method::Status,
-        Command::Shutdown => Method::Shutdown,
+        Command::Shutdown { .. } => Method::Shutdown,
         Command::Pair { action } => match action {
             PairAction::Create => Method::PairCreateInvite,
             PairAction::Join { code, addr } => Method::PairJoin {
@@ -459,6 +472,20 @@ mod tests {
         assert!(parse(&["copypaste", "--json", "list"]).json);
         assert!(!parse(&["copypaste", "list"]).json);
         assert!(parse(&["copypaste", "status", "--json"]).json);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_shutdown_wait_is_explicit_and_conflicts_with_json() {
+        let Command::Shutdown {
+            wait_for_exit: true,
+        } = parse(&["copypaste", "shutdown", "--wait-for-exit"]).command
+        else {
+            panic!("expected the Windows wait-for-exit command");
+        };
+        assert!(
+            Cli::try_parse_from(["copypaste", "--json", "shutdown", "--wait-for-exit"]).is_err()
+        );
     }
 
     #[test]

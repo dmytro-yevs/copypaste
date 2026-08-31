@@ -325,6 +325,7 @@
       ],
       "backend_tests": [
         "cargo test --workspace",
+        "cargo test -p copypaste-cli -p copypaste-ipc",
         "cargo test -p copypaste-ui service::tests::acknowledged_drain_waits_past_the_old_budget_without_killing",
         "cargo test -p copypaste-ui service::tests::update_drain",
         "cargo test -p copypaste-ui installed_source_apps",
@@ -410,6 +411,7 @@
             "source-exclusion-catalog",
             "owned-daemon-safe-quit",
             "graceful-update-owned-daemon-drain",
+            "installer-shutdown-wait-for-exit",
             "live-settings-runtime-effects",
             "legacy-content-size-refusal"
           ],

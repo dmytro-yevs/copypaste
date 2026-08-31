@@ -26,6 +26,9 @@ use std::time::Duration;
 use tokio::time::{timeout_at, Instant};
 use tokio_util::codec::{Framed, LinesCodec};
 
+#[cfg(any(windows, test))]
+use crate::shutdown::{self, Completion};
+
 /// Port manifest 04 §6.2: `not_ready` is retried with a fixed 500 ms backoff,
 /// at most three times, reconnecting each time. The cap is deliberately tight —
 /// a persistently degraded daemon returns this code forever, and hanging is a
@@ -171,6 +174,70 @@ where
 /// contract.
 pub async fn request(method: Method) -> Result<Response, CliError> {
     request_at(&socket_path(), method).await
+}
+
+/// Ask the Windows daemon to stop and prove that its connected process exited.
+#[cfg(windows)]
+pub async fn shutdown_and_wait() -> Result<Completion, CliError> {
+    shutdown_and_wait_at(&socket_path()).await
+}
+
+#[cfg(windows)]
+async fn shutdown_and_wait_at(path: &Path) -> Result<Completion, CliError> {
+    shutdown_and_wait_with(|| transport::connect(path), shutdown::open_for_stream).await
+}
+
+#[cfg(any(windows, test))]
+async fn shutdown_and_wait_with<C, F, P>(
+    connect: C,
+    open_process: impl FnOnce(&transport::Stream, Instant) -> Result<P, CliError>,
+) -> Result<Completion, CliError>
+where
+    C: FnOnce() -> F,
+    F: Future<Output = io::Result<transport::Stream>>,
+    P: shutdown::ProcessWait,
+{
+    let deadline = Instant::now() + REQUEST_TIMEOUT;
+    let stream = match before(deadline, connect()).await? {
+        Ok(stream) => stream,
+        Err(err) => return initial_shutdown_connect_error(err),
+    };
+    let mut connection = Connection::from_stream(stream);
+    let process = open_process(connection.framed.get_ref(), deadline)?;
+    let response = connection
+        .call(Method::Shutdown, deadline)
+        .await
+        .map_err(completion_error)?;
+
+    validate_shutdown_ack(response)?;
+    shutdown::wait_for_exit_with(process, deadline)
+}
+
+#[cfg(any(windows, test))]
+fn initial_shutdown_connect_error(error: io::Error) -> Result<Completion, CliError> {
+    if error.kind() == io::ErrorKind::NotFound {
+        Ok(Completion::AlreadyStopped)
+    } else if error.kind() == io::ErrorKind::TimedOut {
+        Err(CliError::DaemonTimeout)
+    } else {
+        Err(shutdown::completion_failure())
+    }
+}
+
+#[cfg(any(windows, test))]
+fn validate_shutdown_ack(response: Response) -> Result<(), CliError> {
+    match into_data(response).map_err(completion_error)? {
+        Some(ResponseData::Empty {}) => Ok(()),
+        _ => Err(shutdown::completion_failure()),
+    }
+}
+
+#[cfg(any(windows, test))]
+fn completion_error(error: CliError) -> CliError {
+    match error {
+        CliError::DaemonTimeout => error,
+        _ => shutdown::completion_failure(),
+    }
 }
 
 async fn request_at(path: &Path, method: Method) -> Result<Response, CliError> {
@@ -442,7 +509,21 @@ mod tests {
 
     enum PairAction {
         Reply(String),
+        ReplyThenHold(String, tokio::sync::oneshot::Sender<()>),
         NeverReply,
+    }
+
+    struct ExitedProcess(Arc<Mutex<Vec<&'static str>>>);
+
+    impl shutdown::ProcessWait for ExitedProcess {
+        fn wait(&mut self, _milliseconds: u32) -> Result<shutdown::WaitResult, ()> {
+            self.0.lock().unwrap().push("wait");
+            Ok(shutdown::WaitResult::Object)
+        }
+
+        fn exit_code(&self) -> Result<u32, ()> {
+            Ok(0)
+        }
     }
 
     async fn stream_pair() -> io::Result<(transport::Stream, transport::Stream)> {
@@ -473,6 +554,12 @@ mod tests {
                 PairAction::Reply(reply) => {
                     let reply = reply.replace("{id}", &request.id.to_string());
                     let _ = framed.send(reply).await;
+                }
+                PairAction::ReplyThenHold(reply, acknowledged) => {
+                    let reply = reply.replace("{id}", &request.id.to_string());
+                    let _ = framed.send(reply).await;
+                    let _ = acknowledged.send(());
+                    hold(framed).await;
                 }
                 PairAction::NeverReply => {
                     hold(framed).await;
@@ -934,6 +1021,103 @@ mod tests {
         // timeout — not "unreachable", which would send the user to start a
         // daemon that is plainly already there.
         assert_eq!(err.exit_code(), crate::error::EXIT_TIMEOUT);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ordinary_shutdown_still_returns_after_its_acknowledgement() {
+        let (acknowledged, waiting) = tokio::sync::oneshot::channel();
+        let mut task = tokio::spawn(paired_request(
+            Method::Shutdown,
+            [PairAction::ReplyThenHold(
+                r#"{"id":{id},"ok":true,"data":{"empty":{}}}"#.to_string(),
+                acknowledged,
+            )],
+            REQUEST_TIMEOUT,
+            |_| ready(()),
+        ));
+        waiting.await.expect("the daemon sent its shutdown ACK");
+        let completed = tokio::time::timeout(Duration::from_millis(50), &mut task).await;
+        task.abort();
+        assert!(
+            completed.is_ok(),
+            "ordinary shutdown remains acknowledgement-only"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn installer_shutdown_opens_then_writes_acknowledges_and_waits_once() {
+        let (server, client) = stream_pair().await.expect("stream pair");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let server_events = Arc::clone(&events);
+        tokio::spawn(async move {
+            let mut framed = Framed::new(server, LinesCodec::new());
+            let line = framed.next().await.expect("request").expect("frame");
+            let request: Request = serde_json::from_str(&line).expect("shutdown request");
+            server_events.lock().unwrap().push("write");
+            server_events.lock().unwrap().push("ack");
+            framed
+                .send(format!(
+                    r#"{{"id":{},"ok":true,"data":{{"empty":{{}}}}}}"#,
+                    request.id
+                ))
+                .await
+                .expect("ack");
+        });
+
+        let opened_events = Arc::clone(&events);
+        let completion = shutdown_and_wait_with(
+            || ready(Ok(client)),
+            move |_stream, _deadline| {
+                opened_events.lock().unwrap().push("open");
+                Ok(ExitedProcess(Arc::clone(&opened_events)))
+            },
+        )
+        .await;
+
+        assert!(matches!(completion, Ok(Completion::ExitedZero)));
+        assert_eq!(*events.lock().unwrap(), ["open", "write", "ack", "wait"]);
+    }
+
+    #[test]
+    fn only_an_initial_not_found_is_an_already_stopped_success() {
+        assert!(matches!(
+            initial_shutdown_connect_error(io::Error::from(io::ErrorKind::NotFound)),
+            Ok(Completion::AlreadyStopped)
+        ));
+        for kind in [
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::ConnectionRefused,
+            io::ErrorKind::UnexpectedEof,
+        ] {
+            let err = initial_shutdown_connect_error(io::Error::from(kind)).unwrap_err();
+            assert_eq!(err.exit_code(), crate::error::EXIT_OTHER, "{kind:?}");
+        }
+        let timed_out =
+            initial_shutdown_connect_error(io::Error::from(io::ErrorKind::TimedOut)).unwrap_err();
+        assert_eq!(timed_out.exit_code(), crate::error::EXIT_TIMEOUT);
+    }
+
+    #[test]
+    fn shutdown_requires_the_typed_empty_acknowledgement() {
+        assert!(validate_shutdown_ack(Response::ok(7, ResponseData::Empty {})).is_ok());
+        for response in [
+            Response::ok(7, ResponseData::Count(0)),
+            Response::err(7, ErrorCode::Internal, "shutdown failed"),
+        ] {
+            assert!(validate_shutdown_ack(response).is_err());
+        }
+    }
+
+    #[test]
+    fn completion_preserves_only_the_timeout_exit_code() {
+        assert_eq!(
+            completion_error(CliError::DaemonTimeout).exit_code(),
+            crate::error::EXIT_TIMEOUT
+        );
+        assert_eq!(
+            completion_error(CliError::DaemonUnreachable).exit_code(),
+            crate::error::EXIT_OTHER
+        );
     }
 
     #[cfg(unix)]
