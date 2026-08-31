@@ -43,16 +43,17 @@ function items(): Item[] {
         item(
             "preview-unknown",
             "Unsupported preview",
+            // Deliberate future-class fixture: refusal coverage, not a shipped class.
             "archive" as Item["content_class"],
             { truncated: true },
         ),
     ];
 }
 
-const bodies: Readonly<Record<string, string>> = {
-    "preview-plain": "Preview clipboard content from a fixture.",
-    "preview-source": "Fixture body from Example Editor.",
-};
+const bodies = new Map<string, string>([
+    ["preview-plain", "Preview clipboard content from a fixture."],
+    ["preview-source", "Fixture body from Example Editor."],
+]);
 
 export function previewHistoryPage(empty: boolean): ItemPage {
     const history = empty ? [] : items();
@@ -81,7 +82,7 @@ export function previewHistoryResourceResponse(
     const id = args?.id;
     if (typeof id !== "string") throw new IpcFailure("invalid_request", false);
     if (command === UI_COMMANDS.get_item_body) {
-        const body = bodies[id];
+        const body = bodies.get(id);
         if (body !== undefined) return body;
         if (items().some((item) => item.id === id)) {
             throw new IpcFailure("unsupported_content", false);
