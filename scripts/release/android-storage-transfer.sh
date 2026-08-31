@@ -21,7 +21,7 @@ CANARY="CopyPasteStorageTransferT$(date +%s)-R$RANDOM"
 SEED_FILE="copypaste-seed.json"
 EXPORT_FILE="copypaste-export.json"
 INVALID_FILE="copypaste-invalid.json"
-SETTINGS_PREFERENCE_SECTIONS="Preference sections"
+SETTINGS_SECTIONS="Settings sections"
 STORAGE_SECTION_ACTION="Storage & history Stored items, cleanup, transfer and recovery"
 
 open_downloads() { # <artifact prefix>
@@ -60,7 +60,7 @@ restart_app() { # <stage>
 }
 
 settings_pane_holds() { # <artifact>
-    enabled_node_exists_exact "$1" "$SETTINGS_PREFERENCE_SECTIONS"
+    enabled_node_exists_exact "$1" "$SETTINGS_SECTIONS"
 }
 
 storage_transfer_actions_holds() { # <artifact>
@@ -204,7 +204,7 @@ storage_stage_self_test() { # <temp>
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\"/></node></hierarchy>" > "$temp/stuck-start.xml"
     # Settings is open while the detail pane never renders. The final stage dump
     # must retain whether the card stayed unselected or became current.
-    local sections="<node text=\"Preference sections\" bounds=\"[12,73][308,223]\" enabled=\"true\"/>"
+    local sections="<node text=\"Settings sections\" bounds=\"[12,73][308,223]\" enabled=\"true\"/>"
     local storage_card="Storage &amp; history Stored items, cleanup, transfer and recovery"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"$storage_card\" bounds=\"[13,285][307,351]\" enabled=\"true\" clickable=\"true\" selected=\"true\"/></node></hierarchy>" > "$temp/storage-empty-pane.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open$sections<node text=\"$storage_card\" bounds=\"[13,285][307,351]\" enabled=\"true\" clickable=\"true\" selected=\"false\"/></node></hierarchy>" > "$temp/storage-unselected.xml"
