@@ -36,7 +36,7 @@ export function SettingsCompactNavigation({
             size="compactIcon"
             variant="ghost"
             icon="back"
-            aria-label="Back to Preferences"
+            aria-label="Back to Settings"
             onClick={onBack}
           />}
           title={definition.label}
@@ -48,7 +48,7 @@ export function SettingsCompactNavigation({
   }
 
   return (
-    <nav className={styles.menu} aria-label="Preference sections">
+    <nav className={styles.menu} aria-label="Settings sections">
       {sections.map((section) => (
         <Button
           key={section.value}

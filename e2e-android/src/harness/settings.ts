@@ -1,8 +1,8 @@
 import type { AndroidApp } from "./app.js";
 import { tapButton, waitFor } from "./ui.js";
 
-export const SETTINGS_NAVIGATION = '[aria-label="Preference sections"]';
-export const SETTINGS_BACK = 'button[aria-label="Back to Preferences"]';
+export const SETTINGS_NAVIGATION = '[aria-label="Settings sections"]';
+export const SETTINGS_BACK = 'button[aria-label="Back to Settings"]';
 export const SETTINGS_PANEL = 'section[aria-label], [role="tabpanel"][aria-label]';
 
 export interface SettingsViewSnapshot {
@@ -170,11 +170,11 @@ export async function ensureSettingsNavigation(app: AndroidApp): Promise<void> {
         await restoreSettingsViewport(app);
       } else if (action === "back") {
         backRequested = true;
-        await tapButton(app, "Back to Preferences");
+        await tapButton(app, "Back to Settings");
       }
       return false;
     },
-    "the Preferences navigation never became available",
+    "the Settings navigation never became available",
     60_000,
   );
 }
@@ -293,7 +293,7 @@ export async function settingsSectionGeometry(
       }
       return false;
     },
-    () => `the ${label} Preferences category never became actionable: ${JSON.stringify(observed)}`,
+    () => `the ${label} Settings category never became actionable: ${JSON.stringify(observed)}`,
     15_000,
   );
   return {
@@ -326,13 +326,13 @@ export async function openSettingsSection(
   await settingsSectionGeometry(app, label);
   const point = await settingsTrigger(app, label);
   if (settingsTriggerDecision(point) !== "tap") {
-    throw new Error(`the ${label} Preferences category stopped being actionable`);
+    throw new Error(`the ${label} Settings category stopped being actionable`);
   }
   await app.withPage((page) => page.mouse.click(point.x, point.y));
 
   await waitFor(
     async () => settingsPanelReady(await settingsView(app), label),
-    `the ${label} Preferences section never finished opening`,
+    `the ${label} Settings section never finished opening`,
     30_000,
   );
 }

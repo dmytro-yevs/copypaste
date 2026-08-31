@@ -224,7 +224,7 @@ export function SettingsScreen() {
         <div className={styles.compactHeader}>
           <ScreenHeader
             eyebrow="Personalize CopyPaste"
-            title="Preferences"
+            title="Settings"
             description="Choose a focused page for each part of CopyPaste."
           />
           {search}
@@ -252,7 +252,7 @@ export function SettingsScreen() {
           <Container width="fluid" gutter="screen" className={styles.desktopContent}>
             <ScreenHeader
               eyebrow="Personalize CopyPaste"
-              title="Preferences"
+              title="Settings"
               description="Choose a focused page for each part of CopyPaste."
               actions={search}
             />

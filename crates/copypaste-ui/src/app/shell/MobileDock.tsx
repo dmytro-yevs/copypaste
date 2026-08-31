@@ -1,14 +1,10 @@
 import { useTranslation } from "@/i18n";
-import { type View, useUi } from "@/store/ui";
+import { useUi } from "@/store/ui";
+import { navigationRoutes } from "@/app/routes/routeMetadata";
 import { NavigationItem } from "@/app/shell/NavigationItem";
-import type { IconName } from "@/components/ui";
 import styles from "./MobileDock.module.css";
 
-const ITEMS = [
-  { view: "devices", label: "nav.devices", icon: "devices" },
-  { view: "history", label: "nav.history", icon: "library" },
-  { view: "settings", label: "nav.settings", icon: "settings" },
-] as const satisfies ReadonlyArray<{ view: View; label: string; icon: IconName }>;
+const ITEMS = navigationRoutes("dock");
 
 export function MobileDock({ navigationReady = true }: { navigationReady?: boolean }) {
   const { t } = useTranslation();

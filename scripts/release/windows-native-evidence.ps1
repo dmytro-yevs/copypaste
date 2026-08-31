@@ -419,7 +419,7 @@ try {
         $featureStates = @()
         $captureTrace = Join-Path $failureDirectory "capture-affinity.jsonl"
         Complete-WindowsFirstRun $app
-        Invoke-UiaNamedControl $app "Preferences" "Mode"
+        Invoke-UiaNamedControl $app "Settings" "Mode"
         Invoke-UiaNamedControl $app "Privacy & retention" "Allow screenshots"
         Write-WindowCaptureObservation $app $captureTrace "screenshots/before-toggle"
         Set-UiaScreenshots $app $true $captureTrace
@@ -427,7 +427,7 @@ try {
         Invoke-UiaNamedControl $app "Library" "Clipboard history"
         Write-WindowCaptureObservation $app $captureTrace "history/after-navigation"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "history" "populated" "Clipboard history" "" $captureTrace
-        Invoke-UiaNamedControl $app "Connections" "Connect a device"
+        Invoke-UiaNamedControl $app "Devices" "Connect a device"
         $pairingNames = @("Add a CopyPaste device", "Pairing code", "Pairing address", "Pair", "Cancel")
         $pairingVisibleNames = @("Add a CopyPaste device")
         $pairingEnabledNames = @("Pairing code", "Pairing address", "Pair", "Cancel")
@@ -437,7 +437,7 @@ try {
             $pairingNames $pairingVisibleNames $pairingEnabledNames @("Pairing code", "Pairing address") "" $captureTrace
         $restoredShell = Close-WindowsProtectedPairingEntry $app $pairingNames
         Write-WindowCaptureObservation $app $captureTrace "devices/after-close" $restoredShell
-        Invoke-UiaNamedControl $app "Preferences" "Mode"
+        Invoke-UiaNamedControl $app "Settings" "Mode"
         $featureStates += Save-WindowsFeatureState $app $evidencePath "settings-and-service" "appearance" "Mode" "" $captureTrace
         $updateText = if ($ExpectedSignature -eq "Valid") { "Check for updates" } else { "Updates aren't configured in this build." }
         $updateState = if ($ExpectedSignature -eq "Valid") { "updater-configured" } else { "updater-unconfigured" }
