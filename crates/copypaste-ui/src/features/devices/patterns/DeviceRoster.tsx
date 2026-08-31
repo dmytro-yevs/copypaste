@@ -7,11 +7,11 @@ import { DiscoveryDeviceCard } from "@/features/devices/components/DiscoveryDevi
 import { DeviceCard } from "@/features/devices/components/DeviceCard";
 import { DeviceCardSkeleton } from "@/features/devices/components/DeviceCardSkeleton";
 import {
-    UNKNOWN_DEVICE_IDENTITY,
     discoveredDeviceIdentity,
     discoveredStatus,
     ownDeviceStatus,
     peerStatus,
+    peerIdentity,
     type DevicePresentationIdentity,
 } from "@/features/devices/model/devicePresentation";
 import {
@@ -141,7 +141,7 @@ export function DeviceRoster({
                         <DeviceCard
                             key={peer.pairing_id}
                             name={peer.name}
-                            identity={UNKNOWN_DEVICE_IDENTITY}
+                            identity={peerIdentity(peer)}
                             trustLabel="Unverified device name"
                             status={peerStatus(
                                 peer,
