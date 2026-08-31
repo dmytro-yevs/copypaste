@@ -5,9 +5,11 @@ Status: accepted
 ## Decision
 
 Ship one current-user NSIS installer in the shared product version stream.
-Upgrades stop the user's daemon before files change, refuse downgrades, and
-preserve the launch-at-login choice. Uninstall removes both the Run entry and
-Windows' `StartupApproved` override.
+Upgrades refuse a running current-user GUI, then use the embedded signed CLI
+to stop the user's daemon before files change; they refuse downgrades and
+preserve the launch-at-login choice. Uninstall uses the same handoff after its
+confirmation, removes payloads before associations or state, and removes both
+the Run entry and Windows' `StartupApproved` override.
 
 An app-initiated update verifies its download before requesting the canonical
 service drain. An owned daemon acknowledges and exits before installation; an
@@ -31,6 +33,29 @@ abandonment, API failure, or nonzero exit make installation refuse without
 trying another connection or guessing a process. The command emits a
 human-readable completion state only; `--json` conflicts with this Windows-only
 flag so it cannot present a fabricated IPC response.
+
+The generated NSIS template is a narrow, hash-checked transform of Tauri
+`tauri-cli-v2.11.4`'s installer template. Its signed CLI helper is a single
+Tauri resource, checked by target name and extracted into the installer and
+uninstaller plugin directory; it is never installed as product payload. The
+release build checks template drift before bundling, then verifies the exact
+staged helper bytes with the non-mutating embedded-signature verifier after
+Tauri has signed resource inputs.
+
+The daemon handoff and payload path have no force-kill, reboot cleanup, retry,
+or legacy uninstaller handoff. They fail closed before later payload, registry,
+or shortcut mutation when the GUI is present, the bounded CLI drain fails, or
+an individual payload write/delete fails. An absent or invalid installed
+version also refuses rather than being guessed as older. File-by-file
+replacement is not an atomic executable-set transaction: a concurrent launch
+can leave a partial binary update and a nonzero refusal that requires a new
+user attempt; the installer never retries or deletes automatically to recover
+it.
+
+An app-initiated updater can hand off to NSIS before the old GUI has fully
+exited. The GUI-presence refusal deliberately rejects that race; it does not
+add a guessed wait or retry, and automatic update success remains unqualified
+until an installed Windows flow demonstrates the handoff.
 
 Tauri owns installer generation and updater artifact signing. Its custom
 `signCommand` uses PowerShell 7 and delegates every Authenticode operation to

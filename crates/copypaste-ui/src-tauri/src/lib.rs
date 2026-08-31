@@ -467,6 +467,10 @@ mod tests {
             "windows/hooks.nsh"
         );
         assert_eq!(
+            config["bundle"]["windows"]["nsis"]["template"],
+            "windows/installer.nsi"
+        );
+        assert_eq!(
             config["bundle"]["windows"]["nsis"]["installerIcon"],
             "icons/icon.ico"
         );
@@ -485,11 +489,16 @@ mod tests {
             release["bundle"]["externalBin"],
             serde_json::json!(["binaries/copypaste", "binaries/copypaste-daemon"])
         );
+        let helper = serde_json::json!({
+            "binaries/copypaste-x86_64-pc-windows-msvc.exe": "copypaste-installer-helper.exe"
+        });
+        assert_eq!(release["bundle"]["resources"], helper);
         assert_eq!(signed["bundle"]["createUpdaterArtifacts"], true);
         assert_eq!(
             signed["bundle"]["externalBin"],
             serde_json::json!(["binaries/copypaste", "binaries/copypaste-daemon"])
         );
+        assert_eq!(signed["bundle"]["resources"], helper);
         assert_eq!(
             signed["plugins"]["updater"]["pubkey"],
             "__TAURI_UPDATER_PUBLIC_KEY__"
@@ -502,7 +511,7 @@ mod tests {
             signed["plugins"]["updater"]["windows"]["installMode"],
             "passive"
         );
-        assert!(hooks.matches("copypaste.exe\" shutdown").count() >= 2);
+        assert!(!hooks.contains("shutdown"));
         assert!(hooks.contains("$UpdateMode <> 1"));
         assert!(hooks.contains("StartupApproved\\Run"));
     }

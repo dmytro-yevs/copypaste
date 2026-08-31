@@ -342,7 +342,8 @@
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::transfer::tests::an_authenticated_legacy_text_body_refuses_export_with_the_ipc_code'",
         "cargo test -p copypaste-core transfer::export::tests::legal_items_that_overflow_the_aggregate_refuse_without_changing_ciphertext",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::transfer::tests::aggregate_export_overflow_is_a_typed_non_retryable_refusal'",
-        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::transfer::tests::aggregate_export_overflow_is_a_nonretryable_refusal'"
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::transfer::tests::aggregate_export_overflow_is_a_nonretryable_refusal'",
+        "pwsh -NoProfile -File scripts/release/test-windows-installer-template.ps1"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -423,6 +424,8 @@
             "owned-daemon-safe-quit",
             "graceful-update-owned-daemon-drain",
             "installer-shutdown-wait-for-exit",
+            "installer-lock-refusal",
+            "installer-updater-exit-order",
             "live-settings-runtime-effects",
             "legacy-content-size-refusal",
             "bounded-aggregate-export"
