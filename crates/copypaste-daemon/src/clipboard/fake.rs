@@ -71,12 +71,12 @@ impl FakeClipboard {
         };
         #[cfg(feature = "dev-fake-clipboard")]
         {
-            return Self {
+            Self {
                 acknowledgement: std::env::var_os(FAKE_CLIPBOARD_ACK_ENV)
                     .filter(|path| !path.is_empty())
                     .map(PathBuf::from),
                 ..clipboard
-            };
+            }
         }
         #[cfg(not(feature = "dev-fake-clipboard"))]
         {
