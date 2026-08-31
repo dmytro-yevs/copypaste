@@ -9,19 +9,16 @@ import {
     PreviewSurface,
     TruncatedValue,
 } from "@/components/shared";
+import { ClipImageLoader } from "@/features/clip-content";
 import { Button, Icon, iconComponent } from "@/components/ui";
 import { InspectorPreview } from "@/features/history/components/InspectorPreview";
-import {
-    clipCopyAction,
-    clipSourceMetadata,
-    clipTypeMetadata,
-    resolveClipBodyPresentation,
-} from "@/features/history/model/clipPresentation";
+import { clipCopyAction } from "@/features/history/model/clipPresentation";
 import { originName, type OriginDevice } from "@/features/history/model/origin";
-import { ClipImageLoader } from "@/features/history/patterns/ClipImageLoader";
 import { SourceAppIcon } from "@/features/source-apps";
 import { useTranslation } from "@/i18n";
 import { absoluteTime, kindOf } from "@/lib/format";
+import { clipTypeMetadata, resolveClipBodyPresentation } from "@/lib/clipPresentation";
+import { clipSourceMetadata } from "@/lib/clipSourcePresentation";
 import type { Item } from "@/lib/ipc";
 import styles from "./LibraryInspectorPanel.module.css";
 

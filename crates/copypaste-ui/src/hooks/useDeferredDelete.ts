@@ -24,7 +24,7 @@ import {
   coalesceHistoryInvalidation,
   invalidateHistoryQueries,
 } from "@/hooks/historyRefresh";
-import { IMAGE_PREVIEW_KEY, imagePreviewKey } from "@/features/history/model";
+import { IMAGE_PREVIEW_KEY, imagePreviewKey } from "@/lib/imagePreviewQuery";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
 const UNDO_WINDOW_MS = 5_000;

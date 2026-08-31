@@ -8,22 +8,23 @@ import {
     type ReactNode,
 } from "react";
 
-import { Button, SelectionControl, Surface } from "@/components/ui";
-import { ClipCardBody } from "@/features/history/components/ClipCardBody";
-import { SourceMeta } from "@/features/history/components/SourceMeta";
-import { SourceMetaBadge } from "@/features/history/components/SourceMetaBadge";
 import {
-    clipSourceMetadata,
-    rowLabel,
-} from "@/features/history/model/clipPresentation";
+    ClipBodyPreview,
+    SourceMeta,
+    SourceMetaBadge,
+} from "@/components/shared";
+import { Button, iconComponent, SelectionControl, Surface } from "@/components/ui";
+import { rowLabel } from "@/features/history/model/clipPresentation";
 import {
     originName,
     wontSync,
     type OriginDevice,
 } from "@/features/history/model/origin";
 import { HISTORY_LAYOUT_METRICS } from "@/features/history/model/virtualizationMetrics";
+import { SourceAppIcon } from "@/features/source-apps";
 import { useTranslation } from "@/i18n";
 import { kindOf, previewOf } from "@/lib/format";
+import { clipSourceMetadata } from "@/lib/clipSourcePresentation";
 import type { Item } from "@/lib/ipc";
 import styles from "./ClipCard.module.css";
 
@@ -211,7 +212,7 @@ function ClipCardImpl({
             </span>
             <div className={styles.content}>
                 <div className={styles.body}>
-                    <ClipCardBody
+                    <ClipBodyPreview
                         kind={kind}
                         masked={masked}
                         content={body}
@@ -220,8 +221,16 @@ function ClipCardImpl({
                     />
                 </div>
                 <SourceMeta
-                    item={item}
                     source={source}
+                    createdAt={item.created_at}
+                    sourceIcon={
+                        <SourceAppIcon
+                            bundleId={item.source_app_bundle_id}
+                            Fallback={iconComponent(source.icon)}
+                            fallbackText={source.label.slice(0, 2)}
+                            size="xs"
+                        />
+                    }
                     origin={origin}
                     kind={kind}
                     content={body}

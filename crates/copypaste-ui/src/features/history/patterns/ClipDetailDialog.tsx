@@ -11,23 +11,26 @@ import {
     Icon,
     VisuallyHidden,
 } from "@/components/ui";
-import { InlineNotice, PreviewSurface } from "@/components/shared";
+import {
+    HighlightedCode,
+    InlineNotice,
+    PreviewSurface,
+} from "@/components/shared";
+import { ClipImageLoader } from "@/features/clip-content";
 import {
     originName,
     wontSync,
     type OriginDevice,
 } from "@/features/history/model/origin";
-import { HighlightedCode } from "@/features/history/components/HighlightedCode";
-import {
-    clipCopyAction,
-    clipTypeMetadata,
-    resolveClipBodyPresentation,
-} from "@/features/history/model/clipPresentation";
-import { ClipImageLoader } from "@/features/history/patterns/ClipImageLoader";
+import { clipCopyAction } from "@/features/history/model/clipPresentation";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { useViewportMetrics } from "@/hooks/useViewportMetrics";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
+import {
+    clipTypeMetadata,
+    resolveClipBodyPresentation,
+} from "@/lib/clipPresentation";
 import { MONO_KINDS, absoluteTime, kindOf } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 import { EXPANDED_MIN_PX } from "@/lib/layoutBreakpoints";

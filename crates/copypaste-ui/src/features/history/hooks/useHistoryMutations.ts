@@ -15,7 +15,7 @@ import {
   reorderPinned,
   setPinned,
 } from "@/lib/ipc";
-import { imagePreviewKey } from "@/features/history/model";
+import { imagePreviewKey } from "@/lib/imagePreviewQuery";
 
 export function useCopy() {
   const qc = useQueryClient();

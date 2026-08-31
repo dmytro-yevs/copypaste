@@ -12,7 +12,7 @@ design tokens → reset/globals → ui primitives → layout primitives
 Imports point left or stay within one feature. An app route may import a
 feature's public `index.ts`; a feature may not import another feature's screen
 or pattern internals. Intentionally reusable connected contracts in `capture`,
-`devices`, `diagnostics`, `pairing`, `service` and `source-apps` are published
+`clip-content`, `devices`, `diagnostics`, `pairing`, `service` and `source-apps` are published
 explicitly through their feature-root barrels. Settings consumes
 `CaptureSetupState`, `SourceExclusions` and `DeviceNameField` from those roots,
 never their screens or internal paths.
