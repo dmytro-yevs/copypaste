@@ -12,6 +12,10 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import type {
+  DevicePresence,
+  PeerInfo,
+} from "../../crates/copypaste-ui/src/generated/ipc.js";
 import { startApp, type App } from "../src/harness/app.js";
 import { startDaemon, type Daemon } from "../src/harness/daemon.js";
 import {
@@ -20,6 +24,7 @@ import {
   expectNoRawError,
   outerHtml,
 } from "../src/harness/leaks.js";
+import { peerPresenceSnapshot } from "../src/harness/peer-presence.js";
 import { clickButton, gotoView, visibleText, waitForText } from "../src/harness/ui.js";
 
 interface PairingData {
@@ -34,14 +39,6 @@ interface PairingProgress {
   state: string;
   sas: string | null;
   known_device: PeerInfo | null;
-}
-
-interface PeerInfo {
-  pairing_id: string;
-  name: string;
-  last_addr: string | null;
-  online: boolean;
-  last_seen_ms: number;
 }
 
 interface SyncResult {
@@ -73,22 +70,55 @@ async function waitForPairing(
 async function waitForPeerPresence(
   daemon: Daemon,
   pairingId: string,
-  online: boolean,
+  expected: DevicePresence,
 ): Promise<PeerInfo> {
   const deadline = Date.now() + 45_000;
   for (;;) {
     const peer = (await daemon.json<PeerInfo[]>(["peers"])).find(
       (candidate) => candidate.pairing_id === pairingId,
     );
-    if (peer?.online === online) return peer;
+    const presence = peerPresenceSnapshot(peer);
+    if (peer !== undefined && presence?.state === expected) return peer;
     if (Date.now() >= deadline) {
       throw new Error(
-        `peer ${pairingId} stayed ${peer?.online === true ? "online" : "offline"}; ` +
-          `expected ${online ? "online" : "offline"}`,
+        `peer ${pairingId} stayed ${presence?.state ?? "without presence"} ` +
+          `(fresh until ${presence?.freshUntilMs ?? "none"}); expected ${expected}`,
       );
     }
     await sleep(100);
   }
+}
+
+async function waitForPeerPresenceField(
+  expected: string,
+): Promise<void> {
+  let observed: { term: string | null; value: string | null } | undefined;
+  await app.browser.waitUntil(
+    async () => {
+      observed = (await app.browser.execute(function () {
+        const details = document.querySelector(
+          'section[aria-label$=" details"]',
+        );
+        const term = Array.from(details?.querySelectorAll("dt") ?? []).find(
+          (element) => element.textContent?.trim() === "Network presence",
+        );
+        return {
+          term: term?.textContent?.trim() ?? null,
+          value:
+            term?.parentElement?.querySelector("dd")?.textContent?.trim() ??
+            null,
+        };
+      })) as { term: string | null; value: string | null };
+      return (
+        observed.term === "Network presence" && observed.value === expected
+      );
+    },
+    {
+      timeout: 30_000,
+      interval: 250,
+      timeoutMsg: `Network presence stayed ${JSON.stringify(observed)}`,
+    },
+  );
 }
 
 async function completePairing(
@@ -182,7 +212,7 @@ beforeAll(async () => {
   expect(await app.daemon.json<PeerInfo[]>(["peers"])).toEqual([]);
 
   const confirmed = await completePairing(other, app.daemon, minted);
-  paired = await waitForPeerPresence(app.daemon, minted.pairing_id, true);
+  paired = await waitForPeerPresence(app.daemon, minted.pairing_id, "online");
   expect(paired).toMatchObject({
     pairing_id: confirmed.pairing_id,
     name: confirmed.name,
@@ -456,9 +486,9 @@ describe("native-safe pairing", () => {
 });
 
 describe("a known device", () => {
-  test("reports online and offline network presence", async () => {
+  test("reports online and unavailable network presence", async () => {
     await openPeerDetails(paired);
-    await waitForText(app.browser, "Seen on this network");
+    await waitForPeerPresenceField("Seen on this network");
 
     await app.daemon.json<unknown>([
       "config",
@@ -467,8 +497,13 @@ describe("a known device", () => {
       "false",
     ]);
     try {
-      await waitForPeerPresence(app.daemon, paired.pairing_id, false);
-      await waitForText(app.browser, "Not currently discovered", 30_000);
+      const unknown = await waitForPeerPresence(
+        app.daemon,
+        paired.pairing_id,
+        "unknown",
+      );
+      expect(peerPresenceSnapshot(unknown)?.freshUntilMs).toBeNull();
+      await waitForPeerPresenceField("Not available");
     } finally {
       await app.daemon.json<unknown>([
         "config",
@@ -478,8 +513,12 @@ describe("a known device", () => {
       ]);
     }
 
-    paired = await waitForPeerPresence(app.daemon, paired.pairing_id, true);
-    await waitForText(app.browser, "Seen on this network", 30_000);
+    paired = await waitForPeerPresence(
+      app.daemon,
+      paired.pairing_id,
+      "online",
+    );
+    await waitForPeerPresenceField("Seen on this network");
   }, 90_000);
 
   test("is listed with an explicitly unverified name", async () => {
