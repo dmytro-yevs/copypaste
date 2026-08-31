@@ -41,6 +41,18 @@ describe("quickPastePresentation", () => {
     expect(quickPastePresentation(unsupported).searchLabel).toBe("Unsupported clipboard content");
   });
 
+  it.each(["", "   "])("does not expose raw content when a finding redacts to %j", (redacted_preview) => {
+    const raw = "raw secret fragment";
+    const presentation = quickPastePresentation(item({
+      content: raw,
+      sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview },
+    }));
+
+    expect(presentation.searchLabel).toBe("Empty item");
+    expect(presentation.rowLabel).toBe("Empty item");
+    expect(presentation.searchLabel).not.toContain(raw);
+  });
+
   beforeEach(() => {
     ipc.copyItem.mockReset();
     ipc.listItems.mockReset();
