@@ -15,6 +15,8 @@ export const pairing = {
   },
   presentationUnavailable:
     "The protected pairing view didn't open. Try Show details, or cancel and start again.",
+  previewUnavailable:
+    "This preview shows safe pairing status only. Pairing details stay in the protected native app.",
   scanCancelled: "No pairing code was scanned. You can try again when you're ready.",
   decisionSubmitted:
     "Your decision was sent. Waiting for the other device to finish…",
