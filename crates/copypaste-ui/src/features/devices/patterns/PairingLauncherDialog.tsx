@@ -62,7 +62,7 @@ export function PairingLauncherDialog({
     const clientError = pairingClientErrorPresentation(pairing.error);
     const { semantics } = presentation;
     const lifecycleActive = pairing.isPending || semantics.active;
-    const active = clientError === null && lifecycleActive;
+    const active = pairing.isPending || (clientError === null && semantics.active);
     const failed =
         clientError !== null ||
         (semantics.terminal && semantics.message_id !== "paired");
