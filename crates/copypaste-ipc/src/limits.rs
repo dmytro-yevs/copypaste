@@ -3,6 +3,9 @@
 //! The text response framing and page budget live together so a maximal page
 //! cannot overrun the decoder's line cap and fail every item beside it.
 
+pub mod export;
+pub use export::{ExportFrameBudget, ExportFrameBudgetExceeded};
+
 /// Largest plaintext content one item may carry.
 ///
 /// Shared with Settings and UI payload ceilings in `copypaste_ipc::config`.

@@ -43,6 +43,12 @@ describe("structured IPC failures", () => {
     }
   });
 
+  it("uses the shared bounded-content refusal copy", () => {
+    expect(friendlyError("content_too_large")).toBe(
+      "This content is too large for this operation. Your history is unchanged.",
+    );
+  });
+
   it("keeps paths, usernames and an injected message out of the failure", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const failure = ipcFailure({
