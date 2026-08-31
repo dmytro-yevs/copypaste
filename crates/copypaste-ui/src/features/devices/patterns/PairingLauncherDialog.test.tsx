@@ -5,59 +5,39 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { PairingController } from "@/features/pairing/hooks/usePairing";
 import { TooltipProvider } from "@/components/ui";
-import type { PairingCeremony, PreviewPairingInvite } from "@/lib/ipc";
+import { IpcFailure } from "@/lib/errors";
+import {
+    PAIRING_SEMANTICS_BY_STATE,
+    type PairingCeremony,
+    type PairingState,
+} from "@/lib/ipc";
 import { PairingLauncherDialog } from "./PairingLauncherDialog";
 
-const waiting: PairingCeremony = {
-    ceremony_id: "preview-ceremony",
-    role: "initiator",
-    state: "waiting_for_peer",
-    semantics: {
-        message_id: "waiting_for_peer",
-        icon: "spinner",
-        tone: "info",
-        live: "status",
-        active: true,
-        terminal: false,
-        needs_devices: false,
-        review_secure: false,
-        retry: false,
-    },
-    presentation: "presented",
-    known_device: null,
-    error: null,
-};
-const connecting: PairingCeremony = {
-    ...waiting,
-    state: "handshaking",
-    semantics: {
-        ...waiting.semantics,
-        message_id: "securing_connection",
-        needs_devices: true,
-    },
-};
-const confirmed: PairingCeremony = {
-    ...waiting,
-    state: "confirmed",
-    semantics: {
-        ...waiting.semantics,
-        message_id: "paired",
-        icon: "checkCircle",
-        tone: "success",
-        active: false,
-        terminal: true,
-    },
-    known_device: {
-        name: "Studio Mac",
-        last_seen_ms: Date.now(),
-        online: true,
-    },
-};
-const invite: PreviewPairingInvite = {
-    ceremony: waiting,
+function ceremony(state: PairingState): PairingCeremony {
+    return {
+        ceremony_id: "preview-ceremony",
+        role: "initiator",
+        state,
+        semantics: PAIRING_SEMANTICS_BY_STATE[state],
+        presentation: "unavailable",
+        known_device:
+            state === "confirmed"
+                ? {
+                      name: "Studio Mac",
+                      last_seen_ms: Date.now(),
+                      online: true,
+                  }
+                : null,
+        error: null,
+    };
+}
+
+const waiting = ceremony("waiting_for_peer");
+const connecting = ceremony("handshaking");
+const confirmed = ceremony("confirmed");
+const protectedInvite = {
     code: "482 916",
     listen_addr: "192.168.1.20:49200",
-    expires_in_secs: 120,
     qr_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M0 0h8v8H0z"/></svg>',
 };
 
@@ -74,12 +54,9 @@ function controller(
         pendingAction: undefined,
         lastAttempt: null,
         presentation: null,
-        previewInvite: null,
         decisionSubmitted: null,
         canRetry: false,
-        clearPreviewInvite: vi.fn(),
         startPreviewCreate: vi.fn(),
-        submitPreviewJoin: vi.fn().mockResolvedValue(connecting),
         run: vi.fn(),
         retry: vi.fn(),
         ...overrides,
@@ -179,33 +156,25 @@ describe("PairingLauncherDialog preview flows", () => {
         }
     });
 
-    it("preserves default backdrop dismissal outside Android", async () => {
-        const onOpenChange = vi.fn();
-        const user = userEvent.setup();
-        render(launcher(controller(), onOpenChange));
-
-        const overlay = document.querySelector<HTMLElement>(
-            '[data-slot="dialog-overlay"]',
-        );
-        expect(overlay).toBeTruthy();
-        expect(overlay?.style.pointerEvents).not.toBe("none");
-        await user.click(overlay as HTMLElement);
-
-        expect(onOpenChange).toHaveBeenCalledWith(false);
-    });
-
-    it.each(["Escape", "close button"])(
+    it.each(["Escape", "close button", "backdrop"])(
         "cancels an active ceremony and restores focus after %s dismissal",
         async (dismissal) => {
             const pairing = controller({ ceremony: waiting });
+            const user = userEvent.setup();
             render(<StatefulLauncher pairing={pairing} />);
 
             if (dismissal === "Escape") {
                 fireEvent.keyDown(screen.getByRole("dialog"), {
                     key: "Escape",
                 });
+            } else if (dismissal === "close button") {
+                await user.click(screen.getByRole("button", { name: "Close" }));
             } else {
-                fireEvent.click(screen.getByRole("button", { name: "Close" }));
+                await user.click(
+                    document.querySelector<HTMLElement>(
+                        '[data-slot="dialog-overlay"]',
+                    ) as HTMLElement,
+                );
             }
 
             expect(pairing.run).toHaveBeenCalledWith("cancel");
@@ -217,88 +186,130 @@ describe("PairingLauncherDialog preview flows", () => {
         },
     );
 
-    it("opens a host flow with QR, short code, address, and waiting state", () => {
-        const pairing = controller();
-        const { rerender } = render(launcher(pairing));
+    it("does not repeat a cancellation that is already pending", async () => {
+        const pairing = controller({
+            ceremony: waiting,
+            isPending: true,
+            pendingAction: "cancel",
+        });
+        const onOpenChange = vi.fn();
+        render(launcher(pairing, onOpenChange));
 
         fireEvent.click(
             screen.getByRole("button", { name: /Show pairing code/ }),
         );
-        expect(pairing.startPreviewCreate).toHaveBeenCalledTimes(1);
-        expect(screen.queryByLabelText("Pairing code")).toBeNull();
 
-        rerender(
-            launcher(controller({ ceremony: waiting, previewInvite: invite })),
-        );
         expect(
-            screen.getByRole("img", { name: "Pairing QR code" }),
-        ).toBeTruthy();
-        expect(screen.getByText("482 916")).toBeTruthy();
-        expect(screen.getByText("192.168.1.20:49200")).toBeTruthy();
-        expect(screen.getByText("Waiting for the other device…")).toBeTruthy();
-        expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+            (screen.getByRole("button", {
+                name: "Cancelling…",
+            }) as HTMLButtonElement).disabled,
+        ).toBe(true);
+        await userEvent.setup().click(screen.getByRole("button", { name: "Close" }));
+
+        expect(pairing.run).not.toHaveBeenCalled();
+        expect(onOpenChange).toHaveBeenCalledWith(false);
     });
 
-    it("announces a clipboard failure with shared field feedback", async () => {
-        const originalClipboard = navigator.clipboard;
-        Object.defineProperty(navigator, "clipboard", {
-            configurable: true,
-            value: {
-                writeText: vi.fn().mockRejectedValue(new Error("denied")),
-            },
-        });
-        const pairing = controller();
-        const { rerender } = render(launcher(pairing));
+    it("keeps preview pairing material out of DOM text, values, and attributes", () => {
+        const pairing = {
+            ...controller({ ceremony: waiting }),
+            previewInvite: protectedInvite,
+        } as PairingController;
+        const { baseElement } = render(launcher(pairing));
 
         fireEvent.click(
             screen.getByRole("button", { name: /Show pairing code/ }),
         );
-        rerender(
-            launcher(controller({ ceremony: waiting, previewInvite: invite })),
-        );
-        fireEvent.click(
-            screen.getByRole("button", { name: "Copy code and address" }),
-        );
 
-        await waitFor(() => {
-            expect(screen.getByRole("alert").textContent).toContain(
-                "Couldn’t copy",
-            );
-        });
-        Object.defineProperty(navigator, "clipboard", {
-            configurable: true,
-            value: originalClipboard,
-        });
+        expect(pairing.startPreviewCreate).toHaveBeenCalledTimes(1);
+        expect(baseElement.querySelector("img")).toBeNull();
+        for (const secret of Object.values(protectedInvite)) {
+            expect(baseElement.textContent).not.toContain(secret);
+            for (const element of baseElement.querySelectorAll<HTMLElement>("*")) {
+                expect(element.getAttributeNames().map((name) => element.getAttribute(name)))
+                    .not.toContain(secret);
+                if (element instanceof HTMLInputElement) {
+                    expect(element.value).not.toContain(secret);
+                }
+            }
+        }
     });
 
-    it("validates join input and reaches connecting and success states", () => {
-        const pairing = controller();
-        const { rerender } = render(launcher(pairing));
+    it("renders semantic progress without a web code-entry path", () => {
+        const pairing = controller({ ceremony: connecting });
+        render(launcher(pairing));
 
         fireEvent.click(
             screen.getByRole("button", { name: "Enter pairing code" }),
         );
-        const connect = screen.getByRole("button", { name: "Connect" });
-        expect((connect as HTMLButtonElement).disabled).toBe(true);
-        fireEvent.change(screen.getByLabelText("Pairing code"), {
-            target: { value: "482 916" },
-        });
-        fireEvent.change(screen.getByLabelText("Address"), {
-            target: { value: "192.168.1.20:49200" },
-        });
-        expect((connect as HTMLButtonElement).disabled).toBe(false);
-        fireEvent.click(connect);
-        expect(pairing.submitPreviewJoin).toHaveBeenCalledWith(
-            "482916",
-            "192.168.1.20:49200",
-        );
 
-        rerender(launcher(controller({ ceremony: connecting })));
         expect(
             screen.getByText("Establishing a private connection…"),
         ).toBeTruthy();
+        expect(screen.queryByRole("textbox")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+        expect(pairing.run).not.toHaveBeenCalled();
+    });
 
-        rerender(launcher(controller({ ceremony: confirmed })));
+    it.each([
+        ["confirmed", "Done", false],
+        ["rejected", "Try again", true],
+        ["cancelled", "Try again", true],
+        ["timed_out", "Try again", true],
+        ["failed", "Back", false],
+    ] as const)(
+        "uses generated terminal semantics for %s",
+        (state, action, canRetry) => {
+            const retry = vi.fn();
+            const pairing = controller({
+                ceremony: ceremony(state),
+                canRetry,
+                retry,
+            });
+            render(launcher(pairing));
+
+            fireEvent.click(
+                screen.getByRole("button", { name: /Show pairing code/ }),
+            );
+            fireEvent.click(screen.getByRole("button", { name: action }));
+
+            expect(retry).toHaveBeenCalledTimes(action === "Try again" ? 1 : 0);
+        },
+    );
+
+    it.each([
+        [new IpcFailure("content_too_large", true), "Back"],
+        [new IpcFailure("future_error", true), "Back"],
+        [new IpcFailure("peer_unreachable", true), "Try again"],
+    ] as const)(
+        "uses canonical client-error retry policy",
+        (error, action) => {
+            const retry = vi.fn();
+            const pairing = controller({
+                ceremony: waiting,
+                error,
+                canRetry: true,
+                retry,
+            });
+            render(launcher(pairing));
+
+            fireEvent.click(
+                screen.getByRole("button", { name: /Show pairing code/ }),
+            );
+            fireEvent.click(screen.getByRole("button", { name: action }));
+
+            expect(retry).toHaveBeenCalledTimes(action === "Try again" ? 1 : 0);
+        },
+    );
+
+    it("keeps successful semantic details meaningful in the safe preview", () => {
+        const pairing = controller({ ceremony: confirmed });
+        render(launcher(pairing));
+
+        fireEvent.click(
+            screen.getByRole("button", { name: /Show pairing code/ }),
+        );
+
         expect(screen.getByText("Device paired")).toBeTruthy();
         expect(screen.getByText("Studio Mac is ready to sync.")).toBeTruthy();
     });

@@ -1,4 +1,4 @@
-import type { PairingCeremony, PairingState } from "@/lib/ipc";
+import type { PairingCeremony } from "@/lib/ipc";
 
 export const PAIRING_POLL_MS = 700;
 
@@ -13,16 +13,6 @@ export type PairingAction =
 export interface PairingMutationContext {
   ceremonyId: string | null;
   epoch: number;
-}
-
-const ACTIVE_STATES = new Set<PairingState>([
-  "waiting_for_peer",
-  "handshaking",
-  "awaiting_confirmation",
-]);
-
-export function isPairingActive(state: PairingState | undefined): boolean {
-  return state !== undefined && ACTIVE_STATES.has(state);
 }
 
 export function inferredPairingStart(
