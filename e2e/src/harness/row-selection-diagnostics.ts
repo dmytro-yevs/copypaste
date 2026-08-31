@@ -150,10 +150,13 @@ function readPageRowSelectionClickProbe(): RowSelectionSnapshot {
       (center === probe.checkbox || probe.checkbox.contains(center)),
     checkedIds: Array.from(
       document.querySelectorAll<HTMLElement>(
-        '[role="listitem"][id^="history-row-"][aria-checked="true"]',
+        '[role="listitem"][id^="history-row-"] [role="checkbox"][aria-checked="true"]',
       ),
-      (row) => row.id.replace(/^history-row-/, ""),
-    ),
+      (checkbox) =>
+        checkbox
+          .closest<HTMLElement>('[role="listitem"][id^="history-row-"]')
+          ?.id.replace(/^history-row-/, ""),
+    ).filter((id): id is string => id !== undefined),
     renderedPinnedBadgeIds: Array.from(
       document.querySelectorAll<HTMLElement>(
         '[role="listitem"][id^="history-row-"]',
