@@ -3,7 +3,7 @@ import { clipTypeMetadata } from "@/lib/clipPresentation";
 import { kindOf, type Kind } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 import { previewOf } from "@/lib/format";
-import { wontSync } from "./origin";
+import { wontSync } from "@/lib/itemOrigin";
 
 export interface ClipCopyActionPresentation {
   readonly icon: "copy" | "image";

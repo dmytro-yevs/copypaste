@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui";
-import { quickPasteSearchLabel } from "@/features/quick-paste/screen/QuickPasteScreen";
+import { quickPastePresentation } from "@/features/quick-paste/model/quickPastePresentation";
 import { item, page, testClient } from "@/test/harness";
 import { QuickPasteScreen } from "./QuickPasteScreen";
 
@@ -30,7 +30,7 @@ vi.mock("@/lib/ipc", async (load) => ({
   listItems: ipc.listItems,
 }));
 
-describe("quickPasteSearchLabel", () => {
+describe("quickPastePresentation", () => {
   it("does not expose unsupported payload text to fuzzy search", () => {
     const unsupported = item({
       content: "https://future.example/raw",
@@ -38,7 +38,7 @@ describe("quickPasteSearchLabel", () => {
       content_class: "other",
     });
 
-    expect(quickPasteSearchLabel(unsupported)).toBe("Unsupported clipboard content");
+    expect(quickPastePresentation(unsupported).searchLabel).toBe("Unsupported clipboard content");
   });
 
   beforeEach(() => {
@@ -66,6 +66,28 @@ describe("quickPasteSearchLabel", () => {
     await user.click(await screen.findByRole("button", { name: /copy an ordinary clipboard entry/i }));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn’t copy that item.", undefined));
+    expect(lifecycle.dismiss).not.toHaveBeenCalled();
+  });
+
+  it("keeps the explicit retry for a retryable copy failure", async () => {
+    ipc.copyItem.mockRejectedValue({ code: "offline", retryable: true });
+    const client = testClient();
+    const user = userEvent.setup();
+
+    render(
+      <QueryClientProvider client={client}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /copy an ordinary clipboard entry/i }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn’t copy that item.",
+        expect.objectContaining({ action: expect.objectContaining({ label: "Retry" }) }),
+      ),
+    );
     expect(lifecycle.dismiss).not.toHaveBeenCalled();
   });
 });

@@ -13,7 +13,7 @@ import { ClipImageLoader } from "@/features/clip-content";
 import { Button, Icon, iconComponent } from "@/components/ui";
 import { InspectorPreview } from "@/features/history/components/InspectorPreview";
 import { clipCopyAction } from "@/features/history/model/clipPresentation";
-import { originName, type OriginDevice } from "@/features/history/model/origin";
+import { originName, type OriginDevice } from "@/lib/itemOrigin";
 import { SourceAppIcon } from "@/features/source-apps";
 import { useTranslation } from "@/i18n";
 import { absoluteTime, kindOf } from "@/lib/format";

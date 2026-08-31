@@ -20,22 +20,11 @@ import type { OriginDevice } from "@/lib/itemOrigin";
 import { resolveClipBodyPresentation } from "@/lib/clipPresentation";
 import { clipSourceMetadata } from "@/lib/clipSourcePresentation";
 import { SourceAppIcon } from "@/features/source-apps";
+import { quickPastePresentation } from "@/features/quick-paste/model/quickPastePresentation";
 import { type Item } from "@/lib/ipc";
 import { t } from "@/i18n";
 import { kindOf } from "@/lib/format";
 import styles from "./QuickPasteRow.module.css";
-
-export function quickPasteRowLabel(item: Item) {
-  if (item.is_sensitive) return t("quickPaste.row.sensitive");
-  const kind = kindOf(item);
-  if (kind === "image") return t("quickPaste.row.image");
-  if (kind === "file") return t("quickPaste.row.file");
-  if (kind === "unknown") return t("quickPaste.row.unsupported");
-  if (item.sensitive_finding) {
-    return item.sensitive_finding.redacted_preview.trim() || t("quickPaste.row.empty");
-  }
-  return item.content?.trim() || t("quickPaste.row.empty");
-}
 
 interface QuickPasteRowProps {
   item: Item;
@@ -66,7 +55,7 @@ export function QuickPasteRow({
 }: QuickPasteRowProps) {
   const kind = kindOf(item);
   const image = kind === "image";
-  const text = quickPasteRowLabel(item);
+  const { rowLabel } = quickPastePresentation(item);
   const source = clipSourceMetadata(item);
   const body = resolveClipBodyPresentation({
     item,
@@ -74,15 +63,19 @@ export function QuickPasteRow({
     fullContentFailed,
     revealedContent: null,
   });
-  const potentiallySensitive = body.state === "content" && body.source === "redacted";
+  const hasPotentialFinding = item.sensitive_finding !== null;
   const canPreview =
     body.state === "unavailable" ||
-    (body.state === "content" && body.source !== "redacted" && kind !== "unknown");
-  const cardContent = kind === "unknown"
-    ? text
-    : potentiallySensitive
+    (body.state === "content" && !hasPotentialFinding && kind !== "unknown");
+  const cardContent =
+    body.state === "content" && body.source === "redacted"
       ? body.content
-      : item.content ?? "";
+      : body.state === "unavailable" || body.state === "masked"
+        ? ""
+        : kind === "unknown"
+          ? rowLabel
+          : item.content ?? "";
+  const previewContent = body.state === "content" ? body.content : "";
   const preview = image ? (
     <ClipImageLoader id={item.id} size="detail" />
   ) : body.state === "unavailable" ? (
@@ -90,9 +83,9 @@ export function QuickPasteRow({
   ) : item.truncated && body.state === "content" && body.source === "preview" ? (
     <p role="status">{t("quickPaste.row.fullLoading")}</p>
   ) : kind === "code" || kind === "json" ? (
-    <HighlightedCode content={cardContent} kind={kind} mode="expanded" />
+    <HighlightedCode content={previewContent} kind={kind} mode="expanded" />
   ) : (
-    <pre>{cardContent}</pre>
+    <pre>{previewContent}</pre>
   );
 
   const copyButton = (
@@ -109,7 +102,7 @@ export function QuickPasteRow({
       onClick={(event) => {
         if (event.detail === 0) onCopy();
       }}
-      aria-label={`${t("quickPaste.row.copyPrefix")} ${image ? t("quickPaste.row.image") : text}`}
+      aria-label={`${t("quickPaste.row.copyPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`}
       className={styles.hit}
     />
   );
@@ -156,7 +149,7 @@ export function QuickPasteRow({
           extras={
             <>
               {item.pinned ? <SourceMetaBadge icon="pin" label={t("quickPaste.row.pinned")} /> : null}
-              {potentiallySensitive ? (
+              {hasPotentialFinding ? (
                 <SourceMetaBadge
                   icon="sensitive"
                   tone="warning"

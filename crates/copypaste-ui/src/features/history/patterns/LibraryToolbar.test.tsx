@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui";
-import type { OriginDevice } from "@/features/history/model/origin";
+import type { OriginDevice } from "@/lib/itemOrigin";
 import { DEFAULT_VIEW, type ViewOptions } from "@/lib/view";
 import {
     DEFAULT_PREFS,

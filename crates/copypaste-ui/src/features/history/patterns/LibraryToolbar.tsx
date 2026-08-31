@@ -12,7 +12,7 @@ import {
     historySortOptions,
 } from "@/features/history/model/libraryToolbarOptions";
 import { historyKindFilterLabel } from "@/features/history/model/clipPresentation";
-import type { OriginDevice } from "@/features/history/model/origin";
+import type { OriginDevice } from "@/lib/itemOrigin";
 import { ActiveControlBadge } from "@/features/history/patterns/ActiveControlBadge";
 import { BulkActionBar } from "@/features/history/patterns/BulkActionBar";
 import { LibraryToolbarHeader } from "@/features/history/patterns/LibraryToolbarHeader";
