@@ -37,6 +37,10 @@ history_capture_holds() { # <accessibility artifact> <canary>
         && node_exists_exact "$1" "$2"
 }
 
+history_capture_current_holds() { # <accessibility artifact>
+    history_capture_holds "$1" "$CANARY_SEND"
+}
+
 release_history_self_test() { # <temporary directory>
     local temp="$1" canary="CopyPasteReleaseCanaryFixture"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" enabled=\"true\"/><node text=\"$canary\"/></hierarchy>" \
@@ -57,6 +61,32 @@ release_history_self_test() { # <temporary directory>
         || ok "a release history receipt rejects a canary outside Library"
 }
 
+release_history_navigation_self_test() { # <temporary directory>
+    local temp="$1" canary="CopyPasteReleaseCanaryFixture"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Library" bounds="[20,40][300,90]" enabled="true" clickable="true"/><node content-desc="Search clipboard history, default" enabled="true"/></hierarchy>' \
+        > "$temp/release-history-pending.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node text=\"Library\" bounds=\"[20,40][300,90]\" enabled=\"true\" clickable=\"true\"/><node text=\"$canary\"/></hierarchy>" \
+        > "$temp/release-history-canary-outside-library.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, active\" enabled=\"true\"/><node text=\"$canary\"/></hierarchy>" \
+        > "$temp/release-history-captured.xml"
+
+    if (
+        CANARY_SEND="$canary"
+        ui_fixtures "$temp/release-history-pending.xml" \
+            "$temp/release-history-canary-outside-library.xml" \
+            "$temp/release-history-captured.xml"
+        tap_until_state "Library" "$temp/release-history-observed.xml" \
+            history_capture_current_holds none 3 ui_fixture_dump \
+            navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
+            && [[ $UI_FIXTURE_INDEX -eq 3 && $UI_FIXTURE_TAPS -eq 2 && $UI_FIXTURE_PACES -eq 2 ]] \
+            && cmp -s "$temp/release-history-observed.xml" "$temp/release-history-captured.xml"
+    ); then
+        ok "release history navigation binds its canary predicate to active history"
+    else
+        bad "release history navigation binds its canary predicate to active history"
+    fi
+}
+
 release_history_receipt_self_test() {
     local source artifact="history-ui" feature_state="--feature-state"
     source="$(<"${BASH_SOURCE[0]}")"
@@ -71,6 +101,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     self_test || exit $?
     android_navigation_self_test "$SELF_TEST_TMP"
     release_history_self_test "$SELF_TEST_TMP"
+    release_history_navigation_self_test "$SELF_TEST_TMP"
     release_history_receipt_self_test
     [[ $FAIL -eq 0 ]]
     exit $?
@@ -351,7 +382,7 @@ fi
 
 group "4a. The captured text appears in history"
 if tap_until_state "Library" "$OUT/history-ui.xml" \
-    history_capture_holds none "$CANARY_SEND"; then
+    history_capture_current_holds none; then
     capture_png "$OUT/history-ui.png" \
         && ok "the captured history screenshot is complete" \
         || bad "the captured history screenshot is complete"
