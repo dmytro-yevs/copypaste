@@ -57,10 +57,21 @@ release_history_self_test() { # <temporary directory>
         || ok "a release history receipt rejects a canary outside Library"
 }
 
+release_history_receipt_self_test() {
+    local source artifact="history-ui" feature_state="--feature-state"
+    source="$(<"${BASH_SOURCE[0]}")"
+    [[ "$source" == *"--artifact screenshot=$artifact.png"* \
+        && "$source" == *"--artifact accessibility=$artifact.xml"* \
+        && "$source" != *"$feature_state history=$artifact"* ]] \
+        && ok "pending history artifacts are supplemental, not feature-state evidence" \
+        || bad "pending history artifacts are supplemental, not feature-state evidence"
+}
+
 if [[ "${1:-}" == "--self-test" ]]; then
     self_test || exit $?
     android_navigation_self_test "$SELF_TEST_TMP"
     release_history_self_test "$SELF_TEST_TMP"
+    release_history_receipt_self_test
     [[ $FAIL -eq 0 ]]
     exit $?
 fi
@@ -401,7 +412,6 @@ PY
         --qualified-artifact "$APK" \
         --qualified-artifact-identity "$qualified_artifact_identity" \
         --feature-state devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml \
-        --feature-state history=history-ui,screenshot=history-ui.png,accessibility=history-ui.xml \
         --artifact screenshot=pairing-entry.png \
         --artifact accessibility=pairing-entry.xml \
         --artifact screenshot=history-ui.png \
