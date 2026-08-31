@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { main, validateEvidence } from "./native-parity-gate.mjs";
+import { main, validateEvidence as validateEvidenceImpl } from "./native-parity-gate.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "123456789";
@@ -82,6 +82,9 @@ async function fixture(root, platform, overrides = {}) {
     ? ["test-log", "measurement"]
     : ["screenshot", "accessibility", "measurement"];
   await mkdir(directory, { recursive: true });
+  const qualifiedArtifactName = `${platform}-release.bin`;
+  const qualifiedArtifactBytes = Buffer.from(`${platform}-qualified release artifact\n`);
+  await writeFile(path.join(directory, qualifiedArtifactName), qualifiedArtifactBytes);
 
   if (platform === "windows") {
     const states = [];
@@ -203,7 +206,7 @@ async function fixture(root, platform, overrides = {}) {
   }
 
   const receipt = {
-    schema_version: 1,
+    schema_version: 2,
     platform,
     environment: RECEIPT_VALUES[platform].environment,
     os_version: "fixture-os",
@@ -212,6 +215,11 @@ async function fixture(root, platform, overrides = {}) {
     scenario: RECEIPT_VALUES[platform].scenario,
     assertions: RECEIPT_VALUES[platform].assertions,
     artifacts,
+    qualified_artifact: {
+      name: qualifiedArtifactName,
+      sha256: createHash("sha256").update(qualifiedArtifactBytes).digest("hex"),
+      bytes: qualifiedArtifactBytes.length,
+    },
     ...(featureStates ? { feature_states: featureStates } : {}),
     ...receiptOverrides,
   };
@@ -227,6 +235,23 @@ async function withRoot(run) {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+async function qualifiedArtifactsForEvidence(evidence) {
+  const qualifiedArtifacts = new Map();
+  for (const receiptPath of evidence) {
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    const name = receipt.qualified_artifact?.name ?? "missing-qualified-artifact";
+    qualifiedArtifacts.set(receipt.platform, path.join(path.dirname(receiptPath), name));
+  }
+  return qualifiedArtifacts;
+}
+
+async function validateEvidence(options) {
+  return validateEvidenceImpl({
+    ...options,
+    qualifiedArtifacts: options.qualifiedArtifacts ?? await qualifiedArtifactsForEvidence(options.evidence),
+  });
 }
 
 test("accepts alpha.29 macOS, physical Android, and Windows release evidence", () => withRoot(async (root) => {
@@ -773,6 +798,7 @@ test("the command-line gate consumes artifact-bound feature expectations", () =>
   const common = [
     "--evidence", receiptPath,
     "--require", "android",
+    "--qualified-artifact", `android=${path.join(path.dirname(receiptPath), "android-release.bin")}`,
     "--commit", COMMIT,
     "--run-id", RUN_ID,
   ];
@@ -1183,6 +1209,79 @@ test("rejects artifact kinds that do not belong to the platform contract", () =>
   );
 }));
 
+test("rejects old receipt schemas", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "macos");
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  receipt.schema_version = 1;
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  await assert.rejects(
+    validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["macos"]), runId: RUN_ID }),
+    /violates the schema/,
+  );
+}));
+
+test("rejects qualified artifacts with a wrong name, bytes, or checksum", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "macos");
+  const directory = path.dirname(receiptPath);
+  const qualified = path.join(directory, "macos-release.bin");
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const options = {
+    commit: COMMIT,
+    evidence: [receiptPath],
+    required: new Set(["macos"]),
+    runId: RUN_ID,
+  };
+  const wrongName = path.join(directory, "another-release.bin");
+  await writeFile(wrongName, await readFile(qualified));
+  await assert.rejects(
+    validateEvidence({ ...options, qualifiedArtifacts: new Map([["macos", wrongName]]) }),
+    /qualified artifact name changed/,
+  );
+  await writeFile(qualified, Buffer.alloc(receipt.qualified_artifact.bytes + 1, 1));
+  await assert.rejects(validateEvidence(options), /qualified artifact byte count changed/);
+  await writeFile(qualified, Buffer.alloc(receipt.qualified_artifact.bytes, 1));
+  await assert.rejects(validateEvidence(options), /qualified artifact checksum changed/);
+}));
+
+test("rejects missing, empty, directory, and symbolic-link qualified artifacts", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "android");
+  const directory = path.dirname(receiptPath);
+  const options = {
+    commit: COMMIT,
+    evidence: [receiptPath],
+    required: new Set(["android"]),
+    runId: RUN_ID,
+  };
+  const empty = path.join(directory, "empty.apk");
+  const folder = path.join(directory, "folder.apk");
+  const linked = path.join(directory, "linked.apk");
+  await writeFile(empty, "");
+  await mkdir(folder);
+  await symlink(path.join(directory, "android-release.bin"), linked);
+  for (const candidate of [path.join(directory, "missing.apk"), empty, folder, linked]) {
+    await assert.rejects(
+      validateEvidence({ ...options, qualifiedArtifacts: new Map([["android", candidate]]) }),
+      /qualified artifact is missing|qualified artifact is not a non-empty regular file/,
+    );
+  }
+}));
+
+test("the command-line gate requires one qualified artifact for each required platform", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "android");
+  const qualified = path.join(path.dirname(receiptPath), "android-release.bin");
+  const common = ["--evidence", receiptPath, "--require", "android", "--commit", COMMIT, "--run-id", RUN_ID];
+  await assert.rejects(main(common), /missing qualified artifact for android/);
+  await assert.rejects(
+    main([...common, "--qualified-artifact", `android=${qualified}`, "--qualified-artifact", `android=${qualified}`]),
+    /duplicate qualified artifact/,
+  );
+  await assert.rejects(main([...common, "--qualified-artifact", "android"]), /PLATFORM=PATH/);
+  await assert.rejects(
+    main([...common, "--qualified-artifact", `macos=${qualified}`]),
+    /unrequired qualified artifact/,
+  );
+}));
+
 test("the shared receipt writer emits gate-valid evidence", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "windows");
   const seeded = JSON.parse(await readFile(receiptPath, "utf8"));
@@ -1199,6 +1298,7 @@ test("the shared receipt writer emits gate-valid evidence", () => withRoot(async
     "--commit", COMMIT,
     "--run-id", RUN_ID,
     "--elapsed-ms", "10",
+    "--qualified-artifact", path.join(path.dirname(receiptPath), seeded.qualified_artifact.name),
     "--feature-state", "history=populated",
   ];
   for (const artifact of seeded.artifacts) args.push("--artifact", `${artifact.kind}=${artifact.path}`);

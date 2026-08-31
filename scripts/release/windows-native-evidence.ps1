@@ -502,6 +502,7 @@ try {
             --commit $Commit `
             --run-id $RunId `
             --elapsed-ms $timer.ElapsedMilliseconds `
+            --qualified-artifact $Installer `
             @featureStateArguments `
             --artifact screenshot=history/screenshot.png `
             --artifact accessibility=history/accessibility.json `

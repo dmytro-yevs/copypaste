@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,7 @@ def parser():
     result.add_argument("--budget-ms", type=int)
     result.add_argument("--assertion", action="append", default=[])
     result.add_argument("--artifact", action="append", default=[])
+    result.add_argument("--qualified-artifact", required=True)
     result.add_argument("--feature-state", action="append", default=[])
     return result
 
@@ -68,6 +70,28 @@ def artifact_record(root, value):
         "path": relative_path.as_posix(),
         "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
         "bytes": file.stat().st_size,
+    }
+
+
+def qualified_artifact_record(value):
+    file = pathlib.Path(value)
+    try:
+        metadata = file.lstat()
+    except OSError:
+        raise ValueError("qualified artifact cannot be read") from None
+    if file.is_symlink() or not stat.S_ISREG(metadata.st_mode) or metadata.st_size < 1:
+        raise ValueError("qualified artifact must be a non-empty regular non-symlink file")
+    digest = hashlib.sha256()
+    try:
+        with file.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError:
+        raise ValueError("qualified artifact cannot be read") from None
+    return {
+        "name": file.name,
+        "sha256": digest.hexdigest(),
+        "bytes": metadata.st_size,
     }
 
 
@@ -139,6 +163,7 @@ def main():
         raise SystemExit("write-native-evidence: evidence directory is unavailable") from None
     try:
         artifacts = [artifact_record(output.parent, item) for item in args.artifact]
+        qualified_artifact = qualified_artifact_record(args.qualified_artifact)
     except ValueError as error:
         raise SystemExit(f"write-native-evidence: {error}") from None
     artifact_policy = requirement["artifacts"]
@@ -180,6 +205,7 @@ def main():
         },
         "assertions": requirement["assertions"],
         "artifacts": artifacts,
+        "qualified_artifact": qualified_artifact,
     }
     if feature_states:
         receipt["feature_states"] = feature_states
@@ -204,6 +230,8 @@ def self_test():
         image = Image.new("RGB", (2, 2), (220, 38, 38))
         image.putpixel((1, 1), (255, 255, 255))
         image.save(good)
+        qualified = root / "qualified.apk"
+        qualified.write_bytes(b"qualified release artifact\n")
         black = root / "black.png"
         Image.new("RGB", (8, 8), "black").save(black)
         white = root / "white.png"
@@ -244,6 +272,7 @@ def self_test():
             "--environment", "physical-device", "--os-version", "API 33",
             "--architecture", "x86_64", "--commit", "a" * 40,
             "--run-id", "self-test", "--elapsed-ms", "1",
+            "--qualified-artifact", os.fspath(qualified),
         ]
         for name, content in fixtures.items():
             screenshot = root / name
@@ -329,6 +358,34 @@ def self_test():
         emitted = json.loads(multi_receipt.read_text())
         if len(emitted.get("feature_states", [])) != 2:
             raise SystemExit("multiple feature states were not retained")
+        invalid_qualified = {
+            "missing.apk": root / "missing.apk",
+            "empty.apk": root / "empty.apk",
+            "directory.apk": root / "directory.apk",
+            "linked.apk": root / "linked.apk",
+        }
+        invalid_qualified["empty.apk"].write_bytes(b"")
+        invalid_qualified["directory.apk"].mkdir()
+        invalid_qualified["linked.apk"].symlink_to(qualified)
+        option_index = common.index("--qualified-artifact")
+        for name, artifact in invalid_qualified.items():
+            rejected_common = common[:option_index + 1] + [os.fspath(artifact)]
+            receipt = root / f"invalid-qualified-{name}.json"
+            result = subprocess.run(
+                rejected_common + [
+                    "--output", os.fspath(receipt),
+                    "--artifact", "screenshot=good.png",
+                    "--artifact", "accessibility=accessibility.txt",
+                    "--artifact", "measurement=measurement.json",
+                    "--feature-state",
+                    "devices=scan-pairing-code,screenshot=good.png,accessibility=accessibility.txt",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0 or receipt.exists():
+                raise SystemExit(f"{name} produced a native evidence receipt")
     print("native evidence writer self-test passed")
 
 
