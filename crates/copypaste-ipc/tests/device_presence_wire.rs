@@ -1,33 +1,11 @@
-use copypaste_ipc::{
-    DeviceDetails, DeviceObservationProvenance, DeviceObservationTrust, DevicePresence,
-    DevicePresenceObservation, DiscoveredDevice, PeerInfo,
-};
-use serde_json::json;
+mod support;
 
-fn peer() -> PeerInfo {
-    PeerInfo {
-        pairing_id: "peer-1".into(),
-        name: "Phone".into(),
-        last_addr: Some("192.0.2.1:47654".into()),
-        last_seen_ms: 1,
-        online: false,
-        details: Some(DeviceDetails {
-            presence: Some(DevicePresenceObservation {
-                state: DevicePresence::Online,
-                last_seen_ms: 1,
-                provenance: DeviceObservationProvenance::Observed,
-                trust: DeviceObservationTrust::Local,
-                observed_at_ms: 0,
-                fresh_until_ms: Some(i64::MAX),
-            }),
-            ..DeviceDetails::default()
-        }),
-    }
-}
+use copypaste_ipc::{DiscoveredDevice, PeerInfo};
+use serde_json::json;
 
 #[test]
 fn peer_online_is_a_fail_closed_presence_projection_on_the_wire() {
-    let current = peer();
+    let current = support::populated_peer();
     let encoded = serde_json::to_value(&current).unwrap();
     assert_eq!(encoded["online"], true);
 
