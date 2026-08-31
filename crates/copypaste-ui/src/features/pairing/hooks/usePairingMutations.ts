@@ -1,4 +1,3 @@
-import { useCallback, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
 import {
@@ -6,7 +5,6 @@ import {
   confirmPairing,
   createPairingInvite,
   createPreviewPairingInvite,
-  joinPreviewPairingInvite,
   presentPairing,
   rejectPairing,
   scanPairingInvite,
@@ -44,9 +42,6 @@ export function usePairingMutations({
   commit,
   isCurrent,
 }: PairingMutationOptions) {
-  const [previewInvite, setPreviewInvite] =
-    useState<PreviewPairingInvite | null>(null);
-
   const command = useMutation<
     PairingCeremony,
     unknown,
@@ -65,41 +60,19 @@ export function usePairingMutations({
     PairingMutationContext
   >({
     mutationFn: createPreviewPairingInvite,
-    onMutate: async () => {
-      setPreviewInvite(null);
-      return begin("create");
-    },
+    onMutate: async () => begin("create"),
     onSuccess: (invite, _unused, context) => {
       if (!isCurrent(context)) return;
-      setPreviewInvite(invite);
       commit(invite.ceremony, "create", context);
     },
   });
 
-  const previewJoin = useMutation<
-    PairingCeremony,
-    unknown,
-    { code: string; addr: string },
-    PairingMutationContext
-  >({
-    mutationFn: ({ code, addr }) => joinPreviewPairingInvite(code, addr),
-    onMutate: () => begin("join"),
-    onSuccess: (ceremony, _values, context) => {
-      if (!isCurrent(context)) return;
-      setPreviewInvite(null);
-      commit(ceremony, "join", context);
-    },
-  });
-
-  const isPending =
-    command.isPending || previewCreate.isPending || previewJoin.isPending;
+  const isPending = command.isPending || previewCreate.isPending;
   const pendingAction = command.isPending
     ? command.variables
     : previewCreate.isPending
       ? "create"
-      : previewJoin.isPending
-        ? "join"
-        : undefined;
+      : undefined;
 
   const run = (action: PairingAction) => {
     if (webPreview && action === "create") {
@@ -112,14 +85,9 @@ export function usePairingMutations({
   return {
     commandError: command.error,
     previewCreateError: previewCreate.error,
-    previewJoinError: previewJoin.error,
-    previewInvite,
     isPending,
     pendingAction,
-    clearPreviewInvite: useCallback(() => setPreviewInvite(null), []),
     startPreviewCreate: () => previewCreate.mutate(),
-    submitPreviewJoin: (code: string, addr: string) =>
-      previewJoin.mutateAsync({ code, addr }),
     retryCommand: (action: PairingAction) => command.mutate(action),
     retryPreviewCreate: () => previewCreate.mutate(),
     run,

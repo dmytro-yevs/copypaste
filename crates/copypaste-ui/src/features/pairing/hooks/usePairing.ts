@@ -12,6 +12,10 @@ import {
 import { usePairingMutations } from "@/features/pairing/hooks/usePairingMutations";
 import { usePairingProgress } from "@/features/pairing/hooks/usePairingProgress";
 import {
+  pairingClientErrorPresentation,
+  pairingPresentation,
+} from "@/features/pairing/model/pairingPresentation";
+import {
   inferredPairingStart,
   pairingQueryKey,
   pairingSessionKey,
@@ -114,7 +118,6 @@ export function usePairing() {
     hasBridge() && !webPreview && currentPresentation !== "unavailable";
   useEffect(() => {
     ceremonyRef.current = ceremony;
-    if (ceremony?.state !== "waiting_for_peer") mutations.clearPreviewInvite();
     if (ceremony?.state !== "awaiting_confirmation") {
       setDecisionSubmitted(null);
     }
@@ -126,7 +129,7 @@ export function usePairing() {
       queryClient.invalidateQueries({ queryKey: PEERS_KEY }),
       queryClient.invalidateQueries({ queryKey: DISCOVERED_KEY }),
     ]);
-  }, [ceremony, mutations.clearPreviewInvite, queryClient]);
+  }, [ceremony, queryClient]);
 
   useEffect(() => {
     mounted.current = true;
@@ -140,7 +143,17 @@ export function usePairing() {
     };
   }, [queryClient, sessionId]);
 
+  const error =
+    mutations.previewCreateError ??
+    mutations.commandError ??
+    progress.error;
+  const clientError = pairingClientErrorPresentation(error);
+  const semantics = pairingPresentation(ceremony).semantics;
+  const canRetry =
+    clientError?.retry ?? (semantics.terminal && semantics.retry);
+
   const retry = () => {
+    if (!canRetry) return;
     if (mutations.previewCreateError !== null) {
       mutations.retryPreviewCreate();
       return;
@@ -161,28 +174,15 @@ export function usePairing() {
     webPreview,
     protectedPresentationAvailable,
     ceremony,
-    error:
-      mutations.previewCreateError ??
-      mutations.previewJoinError ??
-      mutations.commandError ??
-      progress.error,
+    error,
     isChecking: progress.isPending,
     isPending: mutations.isPending,
     pendingAction: mutations.pendingAction,
     lastAttempt,
     presentation: currentPresentation,
-    previewInvite: mutations.previewInvite,
     decisionSubmitted,
-    canRetry:
-      mutations.previewCreateError !== null ||
-      mutations.previewJoinError !== null ||
-      mutations.commandError !== null ||
-      progress.error !== null ||
-      lastStart !== null ||
-      inferredPairingStart(ceremony) !== null,
-    clearPreviewInvite: mutations.clearPreviewInvite,
+    canRetry,
     startPreviewCreate: mutations.startPreviewCreate,
-    submitPreviewJoin: mutations.submitPreviewJoin,
     run: mutations.run,
     retry,
   };
