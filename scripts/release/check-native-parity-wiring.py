@@ -166,8 +166,8 @@ def contract_errors(release, nightly, ci):
         private_signing_env & set(windows_env)
         or not private_signing_env <= set(signed_build.get("env") or {})
         or private_signing_env & set(unsigned_build.get("env") or {})
-        or signed_build.get("if") != "needs.version.outputs.publish == 'true'"
-        or unsigned_build.get("if") != "needs.version.outputs.publish != 'true'"
+        or signed_build.get("if") != "needs.version.outputs.qualify == 'true'"
+        or unsigned_build.get("if") != "needs.version.outputs.qualify != 'true'"
     ):
         errors.append("Tauri private signing inputs must be scoped only to the signed Windows build step")
     windows_uploads = {
