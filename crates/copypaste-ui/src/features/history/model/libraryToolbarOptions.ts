@@ -1,8 +1,8 @@
 import {
-    clipTypeMetadata,
     historyKindFilterLabel,
-    type ClipPresentationIcon,
 } from "@/features/history/model/clipPresentation";
+import { clipTypeMetadata } from "@/lib/clipPresentation";
+import type { ClipPresentationIcon } from "@/lib/clipSourcePresentation";
 import { type OriginDevice, originName } from "@/features/history/model/origin";
 import { t } from "@/i18n";
 import { FILTERABLE_KINDS, sortLabel } from "@/lib/view";

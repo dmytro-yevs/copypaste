@@ -36,6 +36,25 @@ export function originsOf(items: readonly Item[]): readonly OriginDevice[] {
   return [...devices.values()].sort((a, b) => originName(a).localeCompare(originName(b)) || a.id.localeCompare(b.id));
 }
 
+const NO_MARKED_ORIGINS: ReadonlySet<string> = new Set();
+
+export function markedOrigins(items: readonly Item[]): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const item of items) {
+    const origin = originOf(item);
+    if (origin) ids.add(origin.id);
+  }
+  return ids.size > 1 ? ids : NO_MARKED_ORIGINS;
+}
+
+export function markedOrigin(
+  item: Item,
+  marked: ReadonlySet<string>,
+): OriginDevice | null {
+  const origin = originOf(item);
+  return origin && marked.has(origin.id) ? origin : null;
+}
+
 export function wontSync(item: Item): boolean {
   return item.too_large_to_sync;
 }

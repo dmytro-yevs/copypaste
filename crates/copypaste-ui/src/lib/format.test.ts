@@ -38,6 +38,12 @@ describe("kindOf", () => {
     expect(kindOf(item({ content_class: "image", is_sensitive: true, content: null }))).toBe("secret");
   });
 
+  it("does not let a contradictory image MIME type override Other", () => {
+    expect(
+      kindOf(item({ content_class: "other", content_type: "image/png", content: "not an image" })),
+    ).toBe("unknown");
+  });
+
   it.each([
     "https://example.test",
     "#f00",
