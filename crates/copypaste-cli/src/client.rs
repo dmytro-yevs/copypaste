@@ -1380,7 +1380,12 @@ mod tests {
     #[test]
     fn a_peer_list_reads_back_as_peers_and_not_as_items() {
         let line = r#"{"id":1,"ok":true,"data":{"peers":[{"pairing_id":"abc","name":"phone",
-            "last_addr":null,"last_seen_ms":0,"online":true}]}}"#;
+            "last_addr":null,"last_seen_ms":0,"online":true,"details":{
+                "profile":null,"endpoint":null,"latency":null,
+                "public_ip":{"availability":"unavailable"},"geo":{"availability":"unavailable"},
+                "presence":{"state":"online","last_seen_ms":0,"provenance":"observed",
+                    "trust":"local","observed_at_ms":0,"fresh_until_ms":9223372036854775807}
+            }}]}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let peers = expect_peers(into_data(response).unwrap()).unwrap();
         assert_eq!(peers.len(), 1);

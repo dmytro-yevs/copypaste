@@ -583,7 +583,12 @@ mod tests {
         let peers = expect_peers(
             into_data(parse(
                 r#"{"id":1,"ok":true,"data":{"peers":[{"pairing_id":"p1","name":"laptop",
-                   "last_addr":"10.0.0.2:47654","last_seen_ms":5,"online":true}]}}"#,
+                   "last_addr":"10.0.0.2:47654","last_seen_ms":5,"online":true,"details":{
+                       "profile":null,"endpoint":null,"latency":null,
+                       "public_ip":{"availability":"unavailable"},"geo":{"availability":"unavailable"},
+                       "presence":{"state":"online","last_seen_ms":5,"provenance":"observed",
+                           "trust":"local","observed_at_ms":0,"fresh_until_ms":9223372036854775807}
+                   }}]}}"#,
             ))
             .unwrap(),
         )
