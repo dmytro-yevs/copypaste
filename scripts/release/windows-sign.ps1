@@ -497,10 +497,31 @@ function Invoke-SelfTest {
         $optionalHeaderMagic = [BitConverter]::ToUInt16($oversizedSignatureBytes, $optionalHeaderOffset)
         $dataDirectoryOffset = $optionalHeaderOffset + $(if ($optionalHeaderMagic -eq 0x20b) { 112 } else { 96 })
         $certificateDirectoryOffset = $dataDirectoryOffset + (4 * 8)
-        [BitConverter]::GetBytes([uint32]64).CopyTo($oversizedSignatureBytes, $certificateDirectoryOffset)
-        [BitConverter]::GetBytes([uint32](16MB + 1)).CopyTo(
+        $certificateDirectoryRva = [uint32]64
+        $certificateDirectorySize = [uint32](16MB + 1)
+        [BitConverter]::GetBytes($certificateDirectoryRva).CopyTo(
+            $oversizedSignatureBytes, $certificateDirectoryOffset)
+        [BitConverter]::GetBytes($certificateDirectorySize).CopyTo(
             $oversizedSignatureBytes, $certificateDirectoryOffset + 4)
         [IO.File]::WriteAllBytes($oversizedSignatureTarget, $oversizedSignatureBytes)
+        $minimumFixtureLength = [int64]$certificateDirectoryRva + [int64]$certificateDirectorySize
+        $fixtureStream = [IO.File]::Open(
+            $oversizedSignatureTarget,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::ReadWrite
+        )
+        try {
+            if ($fixtureStream.Length -lt $minimumFixtureLength) {
+                $fixtureStream.SetLength($minimumFixtureLength)
+            }
+        } finally {
+            $fixtureStream.Dispose()
+        }
+        $fixtureLength = ([IO.FileInfo]::new($oversizedSignatureTarget)).Length
+        if ($certificateDirectorySize -le 16MB -or $fixtureLength -lt $minimumFixtureLength) {
+            throw "embedded signature size-limit fixture is invalid"
+        }
+        Write-Host "embedded signature cap fixture bytes=$fixtureLength cap=$(16MB)"
         $oversizedSignatureRejected = $false
         try {
             Read-EmbeddedSignatureCms $oversizedSignatureTarget
