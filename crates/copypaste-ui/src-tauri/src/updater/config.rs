@@ -45,7 +45,6 @@ pub(super) fn configured_for_app(app: &AppHandle) -> bool {
 pub(super) fn updater(
     app: &AppHandle,
     timeout: Option<std::time::Duration>,
-    installing: Option<tauri::ipc::Channel<super::UpdateProgress>>,
 ) -> Result<Option<Updater>, UiError> {
     if !configured_for_app(app) {
         return Ok(None);
@@ -54,14 +53,6 @@ pub(super) fn updater(
     if let Some(timeout) = timeout {
         builder = builder.timeout(timeout);
     }
-    #[cfg(target_os = "windows")]
-    if let Some(channel) = installing {
-        builder = builder.on_before_exit(move || {
-            let _ = channel.send(super::UpdateProgress::Installing);
-        });
-    }
-    #[cfg(target_os = "android")]
-    let _ = installing;
     builder
         .build()
         .map(Some)

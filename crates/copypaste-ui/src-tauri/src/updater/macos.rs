@@ -1,10 +1,29 @@
 use super::{UiBoundaryErrorCode, UiError, UpdateProgress, UpdateStatus};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::ipc::Channel;
+use tauri::{ipc::Channel, Manager as _};
 
 const CASK: &str = "dmytro-yevs/copypaste/copypaste";
 const BREW_PATHS: &[&str] = &["/opt/homebrew/bin/brew", "/usr/local/bin/brew"];
+
+#[cfg(any(target_os = "macos", test))]
+async fn restart_after_brew_update<T, B, D, P, R>(
+    brew: B,
+    drain: D,
+    installing: P,
+    restart: R,
+) -> Result<(), UiError>
+where
+    B: std::future::Future<Output = Result<(), UiError>>,
+    D: std::future::Future<Output = Result<T, UiError>>,
+    P: FnOnce(),
+    R: FnOnce(T) -> Result<(), UiError>,
+{
+    brew.await?;
+    let permit = drain.await?;
+    installing();
+    restart(permit)
+}
 
 pub(super) fn brew_path() -> Option<PathBuf> {
     BREW_PATHS
@@ -75,18 +94,114 @@ pub(super) async fn install(
     if version != expected {
         return Ok(UpdateStatus::Available { version });
     }
-    tokio::task::spawn_blocking(|| {
-        run(&[
-            "upgrade",
-            "--cask",
-            "--no-ask",
-            "--no-quit",
-            "--require-sha",
-            CASK,
-        ])
-    })
-    .await
-    .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateInstallFailed))??;
-    let _ = progress.send(UpdateProgress::Installing);
-    app.restart()
+    let restart = app.clone();
+    let supervisor = app.state::<crate::service::Supervisor>();
+    let backend = app.state::<crate::backend::SelectedBackend>();
+    restart_after_brew_update(
+        async {
+            tokio::task::spawn_blocking(|| {
+                run(&[
+                    "upgrade",
+                    "--cask",
+                    "--no-ask",
+                    "--no-quit",
+                    "--require-sha",
+                    CASK,
+                ])
+            })
+            .await
+            .map_err(|_| UiError::from_boundary(UiBoundaryErrorCode::UpdateInstallFailed))??;
+            Ok(())
+        },
+        async {
+            supervisor
+                .install_after_update_drain(backend.inner(), |permit| permit)
+                .await
+                .map_err(|error| error.ui_error())
+        },
+        move || {
+            let _ = progress.send(UpdateProgress::Installing);
+        },
+        move |permit| {
+            let _permit = permit;
+            restart.restart()
+        },
+    )
+    .await?;
+    unreachable!("a successful macOS update restarts the app")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn successful_brew_update_drains_before_announcing_and_restarting() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let brew_events = Arc::clone(&events);
+        let drain_events = Arc::clone(&events);
+        let restart_events = Arc::clone(&events);
+        restart_after_brew_update(
+            async move {
+                brew_events.lock().unwrap().push("brew");
+                Ok::<_, UiError>(())
+            },
+            async move {
+                drain_events.lock().unwrap().push("drain");
+                Ok::<_, UiError>(())
+            },
+            || events.lock().unwrap().push("installing"),
+            move |_| {
+                restart_events.lock().unwrap().push("restart");
+                Ok(())
+            },
+        )
+        .await
+        .expect("confirmed drain restarts");
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["brew", "drain", "installing", "restart"]
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_brew_or_refused_drain_never_announces_or_restarts() {
+        let brew_events = Arc::new(Mutex::new(Vec::new()));
+        let brew_result = restart_after_brew_update(
+            async {
+                Err::<(), _>(UiError::from_boundary(
+                    UiBoundaryErrorCode::UpdateInstallFailed,
+                ))
+            },
+            async { Ok::<_, UiError>(()) },
+            || brew_events.lock().unwrap().push("installing"),
+            |_| {
+                brew_events.lock().unwrap().push("restart");
+                Ok(())
+            },
+        )
+        .await;
+        assert!(brew_result.is_err());
+        assert!(brew_events.lock().unwrap().is_empty());
+
+        let drain_events = Arc::new(Mutex::new(Vec::new()));
+        let drain_result = restart_after_brew_update(
+            async { Ok::<_, UiError>(()) },
+            async {
+                Err::<(), _>(UiError::from_boundary(
+                    UiBoundaryErrorCode::UpdateInstallFailed,
+                ))
+            },
+            || drain_events.lock().unwrap().push("installing"),
+            |_| {
+                drain_events.lock().unwrap().push("restart");
+                Ok(())
+            },
+        )
+        .await;
+        assert!(drain_result.is_err());
+        assert!(drain_events.lock().unwrap().is_empty());
+    }
 }

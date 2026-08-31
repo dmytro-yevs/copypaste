@@ -8,23 +8,73 @@ pub(super) const MSG_QUIT_FAILED: &str = "CopyPaste could not safely stop the ba
 
 pub(super) struct ReapCompletion {
     pub(super) result: Option<std::io::Result<ChildExitCode>>,
-    pub(super) ordinary_quit: Option<QuitGate>,
+    pub(super) reservation: Option<ReapReservation>,
 }
 impl ReapCompletion {
-    pub(super) fn finish(mut self) -> (std::io::Result<ChildExitCode>, Option<QuitGate>) {
+    pub(super) fn finish(mut self) -> (std::io::Result<ChildExitCode>, Option<ReapReservation>) {
         (
             self.result.take().expect("completion has one result"),
-            self.ordinary_quit.take(),
+            self.reservation.take(),
         )
     }
 }
 impl Drop for ReapCompletion {
     fn drop(&mut self) {
-        if let Some(gate) = self.ordinary_quit.take() {
+        drop(self.reservation.take());
+    }
+}
+
+pub(super) enum ReapReservation {
+    Ordinary(ShutdownPermit),
+    Update(UpdateDrainPermit),
+}
+
+impl ReapReservation {
+    pub(super) fn ordinary(gate: QuitGate) -> Self {
+        Self::Ordinary(ShutdownPermit(Some(gate)))
+    }
+
+    pub(super) fn into_update(self) -> Option<UpdateDrainPermit> {
+        match self {
+            Self::Update(permit) => Some(permit),
+            Self::Ordinary(_) => None,
+        }
+    }
+
+    pub(super) fn into_ordinary(self) -> Option<ShutdownPermit> {
+        match self {
+            Self::Ordinary(permit) => Some(permit),
+            Self::Update(_) => None,
+        }
+    }
+
+    pub(super) fn retain_ordinary_failure(self) {
+        if let Self::Ordinary(mut permit) = self {
+            let _ = permit.0.take();
+        }
+    }
+}
+
+pub(crate) struct UpdateDrainPermit(Option<QuitGate>);
+
+impl UpdateDrainPermit {
+    pub(super) fn reserve(gate: QuitGate) -> Option<Self> {
+        if gate.reserve() {
+            Some(Self(Some(gate)))
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for UpdateDrainPermit {
+    fn drop(&mut self) {
+        if let Some(gate) = self.0.take() {
             gate.failed();
         }
     }
 }
+
 pub(crate) struct ShutdownPermit(pub(super) Option<QuitGate>);
 impl ShutdownPermit {
     pub(crate) fn allow_exit(mut self) {
@@ -142,9 +192,14 @@ impl QuitGate {
         self.0.load(Ordering::SeqCst) != IDLE
     }
 
+    fn reserve(&self) -> bool {
+        self.0
+            .compare_exchange(IDLE, DRAINING, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
     pub(super) fn reserve_failure(&self) {
-        debug_assert!(!self.is_reserved());
-        self.0.store(DRAINING, Ordering::SeqCst);
+        debug_assert!(self.reserve());
     }
 }
 

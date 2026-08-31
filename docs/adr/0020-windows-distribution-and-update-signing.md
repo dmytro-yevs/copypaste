@@ -9,6 +9,12 @@ Upgrades stop the user's daemon before files change, refuse downgrades, and
 preserve the launch-at-login choice. Uninstall removes both the Run entry and
 Windows' `StartupApproved` override.
 
+An app-initiated update verifies its download before requesting the canonical
+service drain. An owned daemon acknowledges and exits before installation; an
+adopted daemon uses authenticated IPC shutdown and confirmed endpoint stop, or
+the update refuses. The reservation remains held through installer handoff, so
+the app cannot start a second daemon while the update exits it.
+
 Tauri owns installer generation and updater artifact signing. Its custom
 `signCommand` uses PowerShell 7 and delegates every Authenticode operation to
 `scripts/release/windows-sign.ps1`, using the release PFX directly rather than

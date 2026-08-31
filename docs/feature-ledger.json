@@ -326,6 +326,7 @@
       "backend_tests": [
         "cargo test --workspace",
         "cargo test -p copypaste-ui service::tests::acknowledged_drain_waits_past_the_old_budget_without_killing",
+        "cargo test -p copypaste-ui service::tests::update_drain",
         "cargo test -p copypaste-ui installed_source_apps",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key settings::tests'",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::config::tests'",
@@ -392,6 +393,7 @@
           "unverified_states": [
             "settings-ui",
             "owned-daemon-safe-quit",
+            "graceful-update-owned-daemon-drain",
             "source-exclusion-catalog",
             "live-settings-runtime-effects",
             "legacy-content-size-refusal"
@@ -407,6 +409,7 @@
           "unverified_states": [
             "source-exclusion-catalog",
             "owned-daemon-safe-quit",
+            "graceful-update-owned-daemon-drain",
             "live-settings-runtime-effects",
             "legacy-content-size-refusal"
           ],
