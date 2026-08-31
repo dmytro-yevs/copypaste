@@ -55,6 +55,15 @@ export function markedOrigin(
   return origin && marked.has(origin.id) ? origin : null;
 }
 
+export function originLabel(
+  item: Item,
+  marked: ReadonlySet<string>,
+): string | null {
+  const origin = originOf(item);
+  if (!origin || !marked.has(origin.id)) return null;
+  return originName(origin);
+}
+
 export function wontSync(item: Item): boolean {
   return item.too_large_to_sync;
 }
