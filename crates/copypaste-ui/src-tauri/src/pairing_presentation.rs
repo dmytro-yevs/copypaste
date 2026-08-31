@@ -6,6 +6,12 @@ use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 use tauri::{AppHandle, Manager as _};
 use zeroize::Zeroizing;
 
+#[cfg(any(
+    test,
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows"
+))]
 mod native_copy;
 pub(crate) mod semantics;
 pub use semantics::{resolve_pairing_semantics, PairingSemantics};

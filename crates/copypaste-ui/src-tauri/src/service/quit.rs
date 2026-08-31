@@ -26,6 +26,7 @@ impl Drop for ReapCompletion {
 
 pub(super) enum ReapReservation {
     Ordinary(ShutdownPermit),
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
     Update(UpdateDrainPermit),
 }
 
@@ -34,6 +35,7 @@ impl ReapReservation {
         Self::Ordinary(ShutdownPermit(Some(gate)))
     }
 
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
     pub(super) fn into_update(self) -> Option<UpdateDrainPermit> {
         match self {
             Self::Update(permit) => Some(permit),
@@ -44,19 +46,27 @@ impl ReapReservation {
     pub(super) fn into_ordinary(self) -> Option<ShutdownPermit> {
         match self {
             Self::Ordinary(permit) => Some(permit),
+            #[cfg(any(test, target_os = "macos", target_os = "windows"))]
             Self::Update(_) => None,
         }
     }
 
     pub(super) fn retain_ordinary_failure(self) {
-        if let Self::Ordinary(mut permit) = self {
-            let _ = permit.0.take();
-        }
+        #[cfg(any(test, target_os = "macos", target_os = "windows"))]
+        let mut permit = match self {
+            Self::Ordinary(permit) => permit,
+            Self::Update(_) => return,
+        };
+        #[cfg(not(any(test, target_os = "macos", target_os = "windows")))]
+        let Self::Ordinary(mut permit) = self;
+        let _ = permit.0.take();
     }
 }
 
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
 pub(crate) struct UpdateDrainPermit(Option<QuitGate>);
 
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
 impl UpdateDrainPermit {
     pub(super) fn reserve(gate: QuitGate) -> Option<Self> {
         if gate.reserve() {
@@ -67,6 +77,7 @@ impl UpdateDrainPermit {
     }
 }
 
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
 impl Drop for UpdateDrainPermit {
     fn drop(&mut self) {
         if let Some(gate) = self.0.take() {

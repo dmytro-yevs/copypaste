@@ -21,9 +21,10 @@ use child::ChildProcess;
 #[cfg(test)]
 use child::ChildState;
 use owned_child::{BeginReap, OwnedChild, StartReservation};
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
+use quit::UpdateDrainPermit;
 use quit::{
-    ExitRequest, FailurePresentation, QuitGate, ReapReservation, ShutdownPermit, UpdateDrainPermit,
-    MSG_QUIT_FAILED,
+    ExitRequest, FailurePresentation, QuitGate, ReapReservation, ShutdownPermit, MSG_QUIT_FAILED,
 };
 use spawn::spawn_process;
 
@@ -93,6 +94,7 @@ impl Supervisor {
         let _lifecycle = self.lifecycle.lock().await;
         self.shutdown_locked(backend).await.map(|_| ())
     }
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
     async fn install_after_update_drain_injected<B: ServiceBackend, T>(
         &self,
         backend: &B,
@@ -309,6 +311,7 @@ impl Supervisor {
     /// The permit reaches the platform installer only after the owned child
     /// has actually exited, so cancelling its async caller cannot admit a new
     /// service while a synchronous reap or installer still owns the update.
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
     async fn drain_for_update<B: ServiceBackend>(&self, backend: &B) -> Result<UpdateDrainPermit> {
         let permit =
             UpdateDrainPermit::reserve(self.quit_gate.clone()).ok_or(BackendError::NotReady)?;
@@ -316,6 +319,7 @@ impl Supervisor {
         self.drain_for_update_locked(backend, permit).await
     }
 
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
     pub(crate) async fn install_after_update_drain<B: Backend, T>(
         &self,
         backend: &B,
@@ -324,6 +328,7 @@ impl Supervisor {
         self.install_after_update_drain_with(backend, install).await
     }
 
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
     async fn install_after_update_drain_with<B: ServiceBackend, T>(
         &self,
         backend: &B,
@@ -332,6 +337,7 @@ impl Supervisor {
         Ok(install(self.drain_for_update(backend).await?))
     }
 
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
     async fn drain_for_update_locked<B: ServiceBackend>(
         &self,
         backend: &B,
