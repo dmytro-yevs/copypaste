@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 
 from native_evidence_policy import load_policy
 from png_evidence import validate_png
@@ -84,6 +85,26 @@ def file_identity(metadata):
     }
 
 
+def path_and_handle_identity_match(path_metadata, handle_metadata, *, windows=None):
+    path_identity = file_identity(path_metadata)
+    handle_identity = file_identity(handle_metadata)
+    if windows is None:
+        windows = os.name == "nt"
+    # CPython 3.12 aliases Windows path ctime to creation time, while fstat
+    # retains raw ChangeTime. Handle-to-handle comparisons still use ctime.
+    path_birthtime = getattr(path_metadata, "st_birthtime_ns", None)
+    handle_birthtime = getattr(handle_metadata, "st_birthtime_ns", None)
+    if not windows or not isinstance(path_birthtime, int) or not isinstance(handle_birthtime, int):
+        return path_identity == handle_identity
+    return (
+        path_identity["device"] == handle_identity["device"]
+        and path_identity["inode"] == handle_identity["inode"]
+        and path_identity["bytes"] == handle_identity["bytes"]
+        and path_identity["mtime_ns"] == handle_identity["mtime_ns"]
+        and path_birthtime == handle_birthtime
+    )
+
+
 def qualified_artifact_open_flags():
     return os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
 
@@ -101,13 +122,13 @@ def qualified_artifact_snapshot(value):
     try:
         descriptor = os.open(file, qualified_artifact_open_flags())
         opened = os.fstat(descriptor)
-        if file_identity(opened) != file_identity(before):
+        if not path_and_handle_identity_match(before, opened):
             raise ValueError("qualified artifact changed while opening")
         while chunk := os.read(descriptor, 1024 * 1024):
             digest.update(chunk)
         if file_identity(os.fstat(descriptor)) != file_identity(opened):
             raise ValueError("qualified artifact changed while hashing")
-        if file_identity(file.lstat()) != file_identity(opened):
+        if not path_and_handle_identity_match(file.lstat(), opened):
             raise ValueError("qualified artifact changed while hashing")
     except OSError:
         raise ValueError("qualified artifact cannot be read") from None
@@ -291,6 +312,75 @@ def self_test():
         qualified = root / "qualified.apk"
         qualified.write_bytes(b"qualified release artifact\n")
         qualified_identity = json.dumps(qualified_artifact_snapshot(qualified), separators=(",", ":"))
+        path_metadata = SimpleNamespace(
+            st_dev=1,
+            st_ino=2,
+            st_size=3,
+            st_mtime_ns=4,
+            st_ctime_ns=5,
+            st_birthtime_ns=6,
+        )
+        handle_metadata = SimpleNamespace(
+            st_dev=1,
+            st_ino=2,
+            st_size=3,
+            st_mtime_ns=4,
+            st_ctime_ns=7,
+            st_birthtime_ns=6,
+        )
+        if not path_and_handle_identity_match(path_metadata, handle_metadata, windows=True):
+            raise SystemExit("Windows path and handle creation times did not match")
+        for field, value in (
+            ("st_dev", 8),
+            ("st_ino", 8),
+            ("st_size", 8),
+            ("st_mtime_ns", 8),
+            ("st_birthtime_ns", 8),
+        ):
+            mismatch = SimpleNamespace(**vars(handle_metadata))
+            setattr(mismatch, field, value)
+            if path_and_handle_identity_match(path_metadata, mismatch, windows=True):
+                raise SystemExit(f"Windows path and handle mismatch accepted for {field}")
+        legacy_path_metadata = SimpleNamespace(**vars(path_metadata))
+        legacy_handle_metadata = SimpleNamespace(**vars(handle_metadata))
+        del legacy_path_metadata.st_birthtime_ns
+        del legacy_handle_metadata.st_birthtime_ns
+        if path_and_handle_identity_match(legacy_path_metadata, legacy_handle_metadata, windows=True):
+            raise SystemExit("Windows legacy path and handle change-time mismatch accepted")
+        raw_handle_change = SimpleNamespace(**vars(handle_metadata))
+        raw_handle_change.st_ctime_ns = 8
+        if file_identity(handle_metadata) == file_identity(raw_handle_change):
+            raise SystemExit("Windows raw handle change time was not retained")
+        original_fstat = os.fstat
+        fstat_calls = 0
+
+        def change_handle_time_after_hash(descriptor):
+            nonlocal fstat_calls
+            metadata = original_fstat(descriptor)
+            fstat_calls += 1
+            if fstat_calls == 2:
+                return SimpleNamespace(
+                    st_dev=metadata.st_dev,
+                    st_ino=metadata.st_ino,
+                    st_size=metadata.st_size,
+                    st_mtime_ns=metadata.st_mtime_ns,
+                    st_ctime_ns=metadata.st_ctime_ns + 1,
+                )
+            return metadata
+
+        os.fstat = change_handle_time_after_hash
+        try:
+            try:
+                qualified_artifact_snapshot(qualified)
+            except ValueError as error:
+                if str(error) != "qualified artifact changed while hashing":
+                    raise
+            else:
+                raise SystemExit("qualified artifact raw handle change was accepted")
+        finally:
+            os.fstat = original_fstat
+        if fstat_calls != 2:
+            raise SystemExit("qualified artifact raw handle change fixture was not used")
         binary_bytes = b"release\r\nartifact\x1aafter-eof\r\n"
         binary = root / "binary-qualified.apk"
         binary.write_bytes(binary_bytes)
