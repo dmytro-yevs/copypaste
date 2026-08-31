@@ -87,10 +87,19 @@ function Test-WindowsInstalledScenarioHelpers {
         [IO.File]::WriteAllText((Join-Path $root "nested/child.txt"), "child")
         $baseline = Get-InstalledPayloadManifest $root
         Assert-InstalledPayloadUnchanged $baseline (Get-InstalledPayloadManifest $root)
+        foreach ($snapshots in @(
+            @{ before = @($baseline[0], $baseline[0]); after = $baseline },
+            @{ before = $baseline; after = @($baseline[0], $baseline[0]) }
+        )) {
+            $rejected = $false
+            try { Assert-InstalledPayloadUnchanged $snapshots.before $snapshots.after } catch { $rejected = $true }
+            if (-not $rejected) { throw "duplicate installed payload snapshot passed the refusal proof" }
+        }
         foreach ($mutation in @(
             { [IO.File]::WriteAllText((Join-Path $root "payload.txt"), "changed") },
             { [IO.File]::WriteAllText((Join-Path $root "added.txt"), "added") },
-            { Remove-Item -LiteralPath (Join-Path $root "nested/child.txt") -Force }
+            { [IO.Directory]::CreateDirectory((Join-Path $root "added-directory")) | Out-Null },
+            { Remove-Item -LiteralPath (Join-Path $root "nested") -Recurse -Force }
         )) {
             & $mutation
             $rejected = $false
@@ -114,6 +123,17 @@ function Test-WindowsInstalledScenarioHelpers {
             # The manifest still rejects reparse points; this host cannot create one for the fixture.
         } finally {
             Remove-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+        }
+        $rootLink = Join-Path ([IO.Path]::GetDirectoryName($root)) "copypaste-installed-payload-link-$([guid]::NewGuid())"
+        try {
+            New-Item -ItemType SymbolicLink -Path $rootLink -Target $root -ErrorAction Stop | Out-Null
+            $rejected = $false
+            try { Get-InstalledPayloadManifest $rootLink | Out-Null } catch { $rejected = $true }
+            if (-not $rejected) { throw "reparse payload root passed the refusal proof" }
+        } catch [System.PlatformNotSupportedException] {
+            # The manifest still rejects reparse roots; this host cannot create one for the fixture.
+        } finally {
+            Remove-Item -LiteralPath $rootLink -Force -ErrorAction SilentlyContinue
         }
     } finally {
         Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
