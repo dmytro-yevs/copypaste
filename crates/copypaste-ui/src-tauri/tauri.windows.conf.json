@@ -41,6 +41,7 @@
     "windows": {
       "allowDowngrades": false,
       "nsis": {
+        "template": "windows/installer.nsi",
         "installMode": "currentUser",
         "installerHooks": "windows/hooks.nsh",
         "installerIcon": "icons/icon.ico",

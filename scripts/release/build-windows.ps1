@@ -74,6 +74,8 @@ function Invoke-SelfTest {
     $root = Join-Path ([IO.Path]::GetTempPath()) "copypaste-windows-config-self-test-$PID"
     [IO.Directory]::CreateDirectory($root) | Out-Null
     try {
+        & (Join-Path $PSScriptRoot "windows-installer-template.ps1") -SelfTest
+        & (Join-Path $PSScriptRoot "windows-installer-template.ps1") -Check
         $destination = Join-Path $root "signed.json"
         $signScript = Join-Path $root "windows-sign.ps1"
         Write-SignedConfig `
@@ -147,6 +149,7 @@ foreach ($command in @("cargo", "npm.cmd", "perl")) { Require-Command $command }
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
 $uiRoot = Join-Path $repoRoot "crates/copypaste-ui"
 $tauriRoot = Join-Path $uiRoot "src-tauri"
+& (Join-Path $PSScriptRoot "windows-installer-template.ps1") -Check
 $package = Get-Content -Raw -LiteralPath (Join-Path $uiRoot "package.json") | ConvertFrom-Json
 $metadata = Invoke-Checked cargo @("metadata", "--locked", "--no-deps", "--format-version=1")
 $workspaceVersion = ($metadata | ConvertFrom-Json).packages |
@@ -226,6 +229,7 @@ try {
         if (-not (Test-Path -LiteralPath $signaturePath -PathType Leaf)) {
             throw "Tauri did not create the required updater signature"
         }
+        & $signScript -Operation Verify -File (Join-Path $tauriRoot "binaries/copypaste-$targetTriple.exe")
     }
 
     $packageArguments = @{
