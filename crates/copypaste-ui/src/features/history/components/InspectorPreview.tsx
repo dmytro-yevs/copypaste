@@ -1,12 +1,9 @@
 import type { ReactNode } from "react";
 
+import { HighlightedCode } from "@/components/shared";
 import { Icon } from "@/components/ui";
-import { HighlightedCode } from "@/features/history/components/HighlightedCode";
 import { InspectorColorPreview } from "@/features/history/components/InspectorColorPreview";
-import {
-    clipTypeMetadata,
-    fileDisplayName,
-} from "@/features/history/model/clipPresentation";
+import { clipTypeMetadata, fileDisplayName } from "@/lib/clipPresentation";
 import type { Kind } from "@/lib/format";
 import styles from "./InspectorPreview.module.css";
 

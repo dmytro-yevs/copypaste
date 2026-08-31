@@ -6,7 +6,7 @@ import { t } from "@/i18n";
 import { item } from "@/test/harness";
 import { ClipDetailDialog } from "./ClipDetailDialog";
 
-vi.mock("@/features/history/hooks/useImagePreview", () => ({
+vi.mock("@/features/clip-content/hooks/useImagePreview", () => ({
   useImagePreview: () => ({ data: undefined, isPending: true, isError: false }),
 }));
 

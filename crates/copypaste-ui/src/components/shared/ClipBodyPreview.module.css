@@ -1,0 +1,14 @@
+.text { display: -webkit-box; min-inline-size: 0; overflow: hidden; color: var(--text); font-size: var(--fs-sm); line-height: var(--lh-normal); overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; }
+.mail { white-space: pre-wrap; }
+.text[data-preview-lines="1"] { -webkit-line-clamp: 1; }
+.text[data-preview-lines="2"] { -webkit-line-clamp: 2; }
+.text[data-preview-lines="3"] { -webkit-line-clamp: 3; }
+.file, .link { display: grid; min-inline-size: 0; gap: var(--s-1); }
+.file strong, .link strong { display: -webkit-box; overflow: hidden; font-size: var(--fs-sm); line-height: var(--lh-normal); overflow-wrap: anywhere; -webkit-box-orient: vertical; }
+.file strong { -webkit-line-clamp: 2; }
+.link strong { -webkit-line-clamp: 3; }
+.file small { overflow: hidden; color: var(--dim); font-family: var(--f-mono); font-size: var(--fs-xs); line-height: var(--lh-normal); text-overflow: ellipsis; white-space: nowrap; }
+.secret { display: grid; inline-size: 100%; padding-block: var(--s-2); gap: var(--s-2); }
+.secret i { display: block; block-size: var(--s-2); border-radius: var(--r-pill); background: var(--border-strong); }
+.secret i:nth-child(2) { inline-size: 76%; }
+.secret i:last-child { inline-size: 58%; }

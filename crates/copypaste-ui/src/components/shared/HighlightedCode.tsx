@@ -2,9 +2,9 @@ import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { useMemo, type ReactNode } from "react";
 
-import { detectCode } from "@/features/history/model/codeHighlight";
-import type { Kind } from "@/lib/format";
+import { detectCode } from "@/lib/codeHighlight";
 import { cn } from "@/lib/cn";
+import type { Kind } from "@/lib/format";
 import styles from "./HighlightedCode.module.css";
 
 export function HighlightedCode({ content, kind, mode, lineClamp, ariaLabel }: {
