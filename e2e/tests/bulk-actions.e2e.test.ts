@@ -102,9 +102,13 @@ async function selectedRowIds(): Promise<string[]> {
   return (await app.browser.execute(
     (selector: string) =>
       Array.from(document.querySelectorAll(selector))
-        .filter((row) => row.getAttribute("aria-checked") === "true")
-        .map((row) => row.id.replace(/^history-row-/, "")),
-    HISTORY_ROWS,
+        .map((checkbox) =>
+          checkbox
+            .closest<HTMLElement>('[role="listitem"][id^="history-row-"]')
+            ?.id.replace(/^history-row-/, ""),
+        )
+        .filter((id): id is string => id !== undefined),
+    `${HISTORY_ROWS} [role="checkbox"][aria-checked="true"]`,
   )) as string[];
 }
 
@@ -220,12 +224,16 @@ describe("entering selection mode", () => {
       (selector: string) =>
         Array.from(
           document.querySelectorAll(selector),
-          (row) => row.querySelectorAll('[role="checkbox"]').length,
+          (row) => ({
+            rowAriaChecked: row.getAttribute("aria-checked"),
+            selections: row.querySelectorAll('[role="checkbox"]').length,
+          }),
         ),
       HISTORY_ROWS,
-    )) as number[];
+    )) as Array<{ rowAriaChecked: string | null; selections: number }>;
 
-    expect(perRow).toEqual(SEED.map(() => 1));
+    expect(perRow.map((row) => row.selections)).toEqual(SEED.map(() => 1));
+    expect(perRow.every((row) => row.rowAriaChecked === null)).toBe(true);
   });
 
   test("per-row actions are absent from the document, not merely hidden", async () => {
