@@ -26,8 +26,11 @@
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::items::tests::authenticated_legacy_text_refuses_full_paths_but_keeps_a_safe_preview'",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::legacy_text_refuses_full_operations_but_pin_returns_a_preview'",
         "cargo test -p copypaste-core storage::page::tests::bounded_paging",
+        "cargo test -p copypaste-core storage::search::tests::bounded_search_stops_before_mapping_a_later_malformed_match",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::items::tests::an_over_budget_page_resumes_at_the_first_item_it_dropped'",
-        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::list_resumes_after_a_legacy_row_that_exceeds_the_page_budget'"
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::items::tests::search_stops_at_the_ciphertext_budget_before_building_a_page'",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::list_resumes_after_a_legacy_row_that_exceeds_the_page_budget'",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::search_stops_at_the_ciphertext_budget_before_building_a_page'"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -62,7 +65,8 @@
           "unverified_states": [
             "history-ui",
             "legacy-content-size-refusal",
-            "bounded-history-page-allocation"
+            "bounded-history-page-allocation",
+            "bounded-history-search-allocation"
           ]
         },
         "macos": {
@@ -71,7 +75,8 @@
           "unverified_states": [
             "history-ui",
             "legacy-content-size-refusal",
-            "bounded-history-page-allocation"
+            "bounded-history-page-allocation",
+            "bounded-history-search-allocation"
           ]
         },
         "windows": {
@@ -82,7 +87,8 @@
           ],
           "unverified_states": [
             "legacy-content-size-refusal",
-            "bounded-history-page-allocation"
+            "bounded-history-page-allocation",
+            "bounded-history-search-allocation"
           ],
           "release_artifact": "release-windows-native-evidence"
         }

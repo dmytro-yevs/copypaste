@@ -177,6 +177,11 @@ reserved operators, NUL and punctuation cannot produce SQL or FTS syntax
 errors. Empty sanitized input returns no results. Search remains restricted to
 live, non-sensitive content even when the index is stale.
 
+Search allocation belongs to storage. It lazily maps the ranked FTS prefix,
+measures actual ciphertext lengths, retains the first match even when it alone
+exceeds the byte budget, and otherwise stops before the first over-budget
+match. Callers do not trim a materialized search result or map later matches.
+
 ## 4. Database administration
 
 - A valid legacy text row whose authenticated body exceeds the current IPC

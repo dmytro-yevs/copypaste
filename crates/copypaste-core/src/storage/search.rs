@@ -20,6 +20,16 @@ use super::connection::write_tx;
 use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, StoredItem};
 use super::store::Store;
 
+const SEARCH_SQL: &str = concat!(
+    "SELECT ",
+    item_columns_ci!(),
+    " FROM clipboard_fts fts \
+              JOIN clipboard_items ci ON ci.id = fts.id \
+              WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0 \
+                AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
+              ORDER BY rank LIMIT ?2"
+);
+
 /// One row of the search index, as stored. `text` is plaintext: `clipboard_fts`
 /// is the one table not under the item AEAD, which is exactly why anything
 /// sensitive reaching it matters.
@@ -38,24 +48,45 @@ impl Store {
     /// the JOIN filters `is_sensitive = 0` even though the write path already
     /// refuses to index one, so a stale FTS row can never surface.
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<StoredItem>, StoreError> {
+        self.search_with_budget(query, limit, usize::MAX)
+    }
+
+    /// Full-text search that retains a ranked prefix within `max_bytes` of
+    /// ciphertext, except that the first item is always retained for progress.
+    pub fn search_bounded(
+        &self,
+        query: &str,
+        limit: u32,
+        max_bytes: usize,
+    ) -> Result<Vec<StoredItem>, StoreError> {
+        self.search_with_budget(query, limit, max_bytes)
+    }
+
+    fn search_with_budget(
+        &self,
+        query: &str,
+        limit: u32,
+        max_bytes: usize,
+    ) -> Result<Vec<StoredItem>, StoreError> {
         let Some(match_expr) = sanitize_fts5_query(query) else {
             return Ok(Vec::new());
         };
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(concat!(
-            "SELECT ",
-            item_columns_ci!(),
-            " FROM clipboard_fts fts \
-              JOIN clipboard_items ci ON ci.id = fts.id \
-              WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0 \
-                AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
-              ORDER BY rank LIMIT ?2"
-        ))?;
+        let mut stmt = conn.prepare_cached(SEARCH_SQL)?;
         let columns = ItemColumns::resolve(&stmt)?;
-        let rows = stmt.query_map(params![match_expr, i64::from(limit)], |row| {
-            row_to_item(row, &columns)
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut rows = stmt.query(params![match_expr, i64::from(limit)])?;
+        let mut found = Vec::new();
+        let mut bytes = 0usize;
+        while let Some(row) = rows.next()? {
+            let item = row_to_item(row, &columns)?;
+            let item_bytes = item.content_ciphertext.len();
+            if !found.is_empty() && bytes.saturating_add(item_bytes) > max_bytes {
+                break;
+            }
+            bytes = bytes.saturating_add(item_bytes);
+            found.push(item);
+        }
+        Ok(found)
     }
 
     /// A page of the index in `rowid` order, after `after_rowid` exclusive,
@@ -311,6 +342,179 @@ mod tests {
         assert!(s.search("zzzznotpresent", 10).unwrap().is_empty());
         assert!(s.search("   ", 10).unwrap().is_empty());
         assert!(s.search("^:;", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn bounded_search_stops_before_mapping_a_later_malformed_match() {
+        let s = store();
+        for text in [
+            "bounded token token token",
+            "bounded token token",
+            "bounded token",
+        ] {
+            s.insert(item(text, T0)).unwrap();
+        }
+        let ranked = s.search("bounded token", 3).unwrap();
+        let ids: Vec<&str> = ranked.iter().map(|item| item.id.as_str()).collect();
+        let conn = s.conn().unwrap();
+        conn.execute(
+            "UPDATE clipboard_items SET content_ciphertext = ?2 WHERE id = ?1",
+            params![ids[0], vec![0u8; 8]],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE clipboard_items SET content_ciphertext = ?2 WHERE id = ?1",
+            params![ids[1], vec![0u8; 1]],
+        )
+        .unwrap();
+        let bad_app_name = [0xffu8];
+        conn.execute(
+            "UPDATE clipboard_items SET app_name = CAST(?2 AS TEXT) WHERE id = ?1",
+            params![ids[2], &bad_app_name[..]],
+        )
+        .unwrap();
+
+        let bounded = s.search_bounded("bounded token", 3, 8).unwrap();
+        assert_eq!(bounded.len(), 1);
+        assert_eq!(bounded[0].id, ids[0]);
+
+        conn.execute(
+            "UPDATE clipboard_items SET app_name = CAST(?2 AS TEXT) WHERE id = ?1",
+            params![ids[1], &bad_app_name[..]],
+        )
+        .unwrap();
+        assert!(s.search_bounded("bounded token", 3, 8).is_err());
+    }
+
+    #[test]
+    fn bounded_search_keeps_one_oversize_ranked_item() {
+        let s = store();
+        for text in ["oversize token token", "oversize token"] {
+            s.insert(item(text, T0)).unwrap();
+        }
+        let ranked = s.search("oversize token", 2).unwrap();
+        let ids: Vec<&str> = ranked.iter().map(|item| item.id.as_str()).collect();
+        let conn = s.conn().unwrap();
+        conn.execute(
+            "UPDATE clipboard_items SET content_ciphertext = ?2 WHERE id = ?1",
+            params![ids[0], vec![0u8; 9]],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE clipboard_items SET content_ciphertext = ?2 WHERE id = ?1",
+            params![ids[1], vec![0u8; 1]],
+        )
+        .unwrap();
+
+        let bounded = s.search_bounded("oversize token", 2, 8).unwrap();
+        assert_eq!(
+            bounded
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![ids[0]]
+        );
+    }
+
+    #[test]
+    fn bounded_search_returns_the_ranked_prefix_at_and_over_its_budget() {
+        let s = store();
+        for text in [
+            "budget token token token",
+            "budget token token",
+            "budget token",
+        ] {
+            s.insert(item(text, T0)).unwrap();
+        }
+        let ranked = s.search("budget token", 3).unwrap();
+        let ids: Vec<&str> = ranked.iter().map(|item| item.id.as_str()).collect();
+        let conn = s.conn().unwrap();
+        for (id, bytes) in [(ids[0], 4usize), (ids[1], 4), (ids[2], 1)] {
+            conn.execute(
+                "UPDATE clipboard_items SET content_ciphertext = ?2 WHERE id = ?1",
+                params![id, vec![0u8; bytes]],
+            )
+            .unwrap();
+        }
+
+        let exact = s.search_bounded("budget token", 3, 8).unwrap();
+        assert_eq!(
+            exact
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ids[..2]
+        );
+
+        conn.execute(
+            "UPDATE clipboard_items SET content_ciphertext = ?2 WHERE id = ?1",
+            params![ids[1], vec![0u8; 5]],
+        )
+        .unwrap();
+        let over = s.search_bounded("budget token", 3, 8).unwrap();
+        assert_eq!(
+            over.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            ids[..1]
+        );
+    }
+
+    #[test]
+    fn bounded_search_preserves_filters_and_never_mutates_search_state() {
+        let s = store();
+        let visible = s.insert(item("bounded visible token", T0)).unwrap();
+        let sensitive = s
+            .insert(sensitive_item("bounded sensitive token", T0 + 1))
+            .unwrap();
+        let non_text = s
+            .insert(NewItem {
+                content_type: "image/png".to_string(),
+                search_text: None,
+                ..item("bounded non-text token", T0 + 2)
+            })
+            .unwrap();
+        let tombstone = s.insert(item("bounded tombstone token", T0 + 3)).unwrap();
+        s.delete(&tombstone.id).unwrap();
+        plant_fts_row(&s, &sensitive.id, "bounded sensitive token");
+        plant_fts_row(&s, &non_text.id, "bounded non-text token");
+        plant_fts_row(&s, &tombstone.id, "bounded tombstone token");
+        let fts_before = s
+            .conn()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap();
+
+        assert!(s.search_bounded("", 10, 8).unwrap().is_empty());
+        assert!(s.search_bounded("^:;", 10, 8).unwrap().is_empty());
+        assert!(s.search_bounded("bounded", 0, 8).unwrap().is_empty());
+        let found = s.search_bounded("bounded", 10, usize::MAX).unwrap();
+        assert_eq!(
+            found
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![visible.id.as_str()]
+        );
+        let fts_after = s
+            .conn()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap();
+        assert_eq!(fts_after, fts_before);
+    }
+
+    #[test]
+    fn search_rank_order_needs_no_payload_sort() {
+        let s = store();
+        s.insert(item("plan token", T0)).unwrap();
+        let plan = plan_of(&s, SEARCH_SQL);
+        assert!(
+            !plan.iter().any(|detail| detail.contains("TEMP B-TREE")),
+            "rank search must not materialize a payload sort, got {plan:?}"
+        );
     }
 
     #[test]

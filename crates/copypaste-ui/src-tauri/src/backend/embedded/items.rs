@@ -4,7 +4,7 @@
 //! product `Backend` contract. They own publication and version bookkeeping so
 //! every successful item mutation has the same observable side effects.
 
-use copypaste_core::{IngestError, Ingested, ItemCursor, StoredItem};
+use copypaste_core::{IngestError, Ingested, ItemCursor};
 use copypaste_ipc::{ImagePreview, Item, MAX_PAGE_CONTENT_BYTES};
 
 use super::messages::{
@@ -52,14 +52,14 @@ pub(super) async fn search(backend: &EmbeddedBackend, query: &str, limit: u32) -
     let query = query.to_string();
     backend
         .blocking(move |inner| {
-            let rows = inner
+            let mut rows = inner
                 .state
                 .store
-                .search(&query, limit)
+                .search_bounded(&query, limit, MAX_PAGE_CONTENT_BYTES)
                 .map_err(|_| BackendError::internal("history could not be searched"))?;
             // This read-time layer protects databases written before sensitive
             // rows were excluded from FTS at write time (storage invariant I7).
-            let rows: Vec<StoredItem> = rows.into_iter().filter(|row| !row.is_sensitive).collect();
+            rows.retain(|row| !row.is_sensitive);
             let mut page = inner.to_wire_page(rows);
             for item in &mut page.items {
                 bound_item_preview(item);
@@ -425,6 +425,38 @@ mod tests {
         let second = backend.list(1000, Some(&cursor)).await.unwrap();
         assert_eq!(second.items.len(), 1);
         assert_eq!(second.items[0].id, follower.id);
+    }
+
+    #[tokio::test]
+    async fn search_stops_at_the_ciphertext_budget_before_building_a_page() {
+        let (backend, _clipboard, _dir) = backend();
+        seed_legacy_text(
+            &backend,
+            "embedded-search-oversize",
+            &format!(
+                "bounded search bounded search {}",
+                "x".repeat(copypaste_ipc::MAX_PAGE_CONTENT_BYTES)
+            ),
+        );
+        seed_legacy_text(&backend, "embedded-search-follower", "bounded search");
+        let ranked = backend
+            .inner
+            .state
+            .store
+            .search("bounded search", 20)
+            .unwrap();
+
+        let page = backend.search("bounded search", 20).await.unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, ranked[0].id);
+        assert!(page.next_cursor.is_none());
+        assert!(page.items.iter().all(|item| !item.is_sensitive));
+        assert!(
+            serde_json::to_string(&crate::model::UiPage::from(page))
+                .unwrap()
+                .len()
+                <= copypaste_ipc::MAX_FRAME_BYTES
+        );
     }
 
     #[tokio::test]

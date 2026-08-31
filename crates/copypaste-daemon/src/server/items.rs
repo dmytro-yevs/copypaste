@@ -7,7 +7,9 @@
 //! between the two files is the split between the two thread pools.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use copypaste_core::{p2p_contract, ItemCursor, StoredItem};
+#[cfg(test)]
+use copypaste_core::StoredItem;
+use copypaste_core::{p2p_contract, ItemCursor};
 use copypaste_ipc::{
     clamp_page, ErrorCode, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
     DEFAULT_SEARCH_PAGE, MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
@@ -115,17 +117,16 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
 
 pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Response {
     let limit = clamp_page(limit, DEFAULT_SEARCH_PAGE);
-    match state.store.search(query, limit) {
-        Ok(rows) => {
+    match state
+        .store
+        .search_bounded(query, limit, MAX_PAGE_CONTENT_BYTES)
+    {
+        Ok(mut rows) => {
             // Read-time enforcement of "sensitive items are never searchable".
             // The store already keeps them out of the index at write time; this
             // is the second of the three layers the rule demands, and it is
             // what protects a database written before the rule existed.
-            let mut rows: Vec<StoredItem> =
-                rows.into_iter().filter(|row| !row.is_sensitive).collect();
-            // Search carries no cursor, so matches past the budget are dropped
-            // rather than deferred. An undeliverable frame would drop all of them.
-            rows.truncate(within_budget(&rows));
+            rows.retain(|row| !row.is_sensitive);
             let mut page = decrypt_rows(state, rows);
             for item in &mut page.items {
                 bound_item_preview(item);
@@ -323,23 +324,6 @@ pub(super) fn reorder_pinned(state: &AppState, id: u64, ids: &[String]) -> Respo
     }
 }
 
-/// How many of `rows`, in order, fit [`MAX_PAGE_CONTENT_BYTES`].
-///
-/// Never zero while there are rows: an item at the ceiling has to be a page of
-/// its own or the list stops there for good. Ciphertext is the measure because
-/// it is what is in hand before decrypting, and it only ever exceeds the
-/// plaintext it stands for.
-fn within_budget(rows: &[StoredItem]) -> usize {
-    let mut bytes = 0usize;
-    for (n, row) in rows.iter().enumerate() {
-        bytes = bytes.saturating_add(row.content_ciphertext.len());
-        if bytes > MAX_PAGE_CONTENT_BYTES {
-            return n.max(1);
-        }
-    }
-    rows.len()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,26 +355,6 @@ mod tests {
             .expect("a pre-limit row is still a valid stored row");
     }
 
-    fn row_of(bytes: usize) -> StoredItem {
-        StoredItem {
-            id: String::new(),
-            content_ciphertext: vec![0; bytes],
-            nonce: Vec::new(),
-            content_type: TEXT.to_string(),
-            content_hash: String::new(),
-            created_at: 0,
-            pinned: false,
-            pin_order: None,
-            pin_updated_at: 0,
-            is_sensitive: false,
-            deleted: false,
-            origin_device_id: String::new(),
-            app_bundle_id: None,
-            app_name: None,
-            payload_metadata: None,
-        }
-    }
-
     fn binary_item(
         state: &AppState,
         content_type: &str,
@@ -410,25 +374,6 @@ mod tests {
         )
         .unwrap()
         .into_item()
-    }
-
-    /// `MAX_PAGE` bounds a page's count and nothing about its size, so a page
-    /// of large items serialised past the frame cap and reached the client as a
-    /// decode error that took every item beside it down.
-    #[test]
-    fn a_page_stops_at_the_byte_budget_not_only_the_row_count() {
-        let half = MAX_PAGE_CONTENT_BYTES / 2 + 1;
-        let three = [row_of(half), row_of(half), row_of(half)];
-        assert_eq!(within_budget(&three), 1);
-        assert_eq!(within_budget(&[row_of(8), row_of(8)]), 2);
-    }
-
-    /// An item at the ceiling has to be a page of its own: returning zero would
-    /// hand back an empty page with a cursor that never advances, and the list
-    /// would stop there for good.
-    #[test]
-    fn one_item_over_the_budget_is_still_served() {
-        assert_eq!(within_budget(&[row_of(MAX_PAGE_CONTENT_BYTES * 2)]), 1);
     }
 
     #[test]
@@ -751,6 +696,32 @@ mod tests {
         assert!(response.ok);
         assert!(serde_json::to_string(&response).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
         assert_eq!(writes.count(), 0);
+    }
+
+    #[test]
+    fn search_stops_at_the_ciphertext_budget_before_building_a_page() {
+        let (state, _dir) = test_state("search-byte-budget");
+        seed_legacy_text(
+            &state,
+            "search-oversize",
+            &format!(
+                "bounded search bounded search {}",
+                "x".repeat(MAX_PAGE_CONTENT_BYTES)
+            ),
+            TEXT,
+        );
+        seed_legacy_text(&state, "search-follower", "bounded search", TEXT);
+        let ranked = state.store.search("bounded search", 20).unwrap();
+
+        let page = match search(&state, 1, "bounded search", 20).data {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("search must return a page, got {other:?}"),
+        };
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, ranked[0].id);
+        assert!(page.next_cursor.is_none());
+        assert!(page.items.iter().all(|item| !item.is_sensitive));
+        assert!(serde_json::to_string(&page).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
     }
 
     #[test]
