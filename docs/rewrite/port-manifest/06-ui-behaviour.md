@@ -266,6 +266,10 @@ safe recovery actions.
 - Structured feedback, not string comparison, distinguishes success/failure.
 - Controls that require service restart stay busy until the confirmed restart
   result; failure clears success presentation.
+- Ordinary Quit prevents final exit while an owned service acknowledges and
+  drains. It exits only after the owned child is reaped successfully; an IPC,
+  reap, nonzero, or unknown exit failure keeps the app open with a safe native
+  failure. An adopted service is never signalled by Quit.
 - Test connection first saves and aborts if save fails.
 - Credentials are write-only. Presence may be returned; secret values are not.
 - Blank secret inputs preserve stored values by omission, and successful save

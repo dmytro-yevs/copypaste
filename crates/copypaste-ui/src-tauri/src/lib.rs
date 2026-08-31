@@ -252,18 +252,49 @@ pub fn run() {
                 shell::window::show_main(app);
             }
 
-            // ADR-0004: quitting the app stops the service it started. `Exit`
-            // rather than `ExitRequested` because the latter can be cancelled,
-            // and a cancelled quit that had already killed the daemon would
-            // leave a running app with no history.
+            if let tauri::RunEvent::ExitRequested { ref api, .. } = event {
+                if let Some(supervisor) = app.try_state::<Supervisor>() {
+                    match supervisor.request_quit() {
+                        service::quit::ExitRequest::Allow => {}
+                        service::quit::ExitRequest::Failure => {
+                            api.prevent_exit();
+                            service::quit::finish_failure(&supervisor, |presentation| {
+                                service::quit::show_failure(app, presentation);
+                            });
+                        }
+                        service::quit::ExitRequest::AlreadyDraining => api.prevent_exit(),
+                        service::quit::ExitRequest::Drain => {
+                            api.prevent_exit();
+                            let handle = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let backend = handle.state::<SelectedBackend>();
+                                let supervisor = handle.state::<Supervisor>();
+                                match supervisor.shutdown(backend.inner()).await {
+                                    Ok(permit) => {
+                                        permit.allow_exit();
+                                        handle.exit(0);
+                                    }
+                                    Err(_) => {
+                                        service::quit::finish_failure(
+                                            &supervisor,
+                                            |presentation| {
+                                                service::quit::show_failure(&handle, presentation);
+                                            },
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+
+            // The app has reached a confirmed final exit: no owned daemon is
+            // still draining, so global subscriptions can now be cancelled.
             if matches!(event, tauri::RunEvent::Exit) {
                 service::startup_diagnostics::app_stopping();
                 if let Some(push) = app.try_state::<service::push::PushMonitor>() {
                     push.stop();
-                }
-                if let Some(supervisor) = app.try_state::<Supervisor>() {
-                    let backend = app.state::<SelectedBackend>();
-                    tauri::async_runtime::block_on(supervisor.shutdown(backend.inner()));
                 }
             }
         });

@@ -63,9 +63,13 @@ shared shutdown channel. The app uses it for an owned daemon on exit and for an
 adopted, mismatched daemon before restart. It adds no authority: the socket is
 `0600`, so any client that can call it can already delete the entire history.
 
-`Child::kill` remains the bounded fallback when an owned daemon cannot answer
-or does not finish stopping. The app never applies that fallback to an adopted
-process because it has no child handle for one.
+For an ordinary Quit, an acknowledged owned daemon is retained until its child
+handle reports the actual exit. The app does not turn a slow durable drain into
+`Child::kill`: IPC or reap failure keeps the app open and reports a fixed native
+failure instead. The app never signals an adopted process because it has no
+child handle for one: it sends no OS/process signal or kill fallback. An
+explicit authenticated IPC `Shutdown` remains the adopted mismatch Restart
+request, because socket authority already permits destructive history actions.
 
 ## Rejected alternatives
 

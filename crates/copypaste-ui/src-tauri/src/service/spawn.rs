@@ -114,17 +114,11 @@ fn job_error_identity(error: &win32job::JobError) -> (JobStage, Option<i32>) {
     }
 }
 
-/// A child whose job handle lives exactly as long as it does.
-///
-/// The job is dropped with this value, which is what makes `Supervisor::stop`'s
-/// take-and-drop a second, kernel-enforced kill rather than only a
-/// `TerminateProcess` that a wedged child could outlive. `kill` therefore drops
-/// the job *before* waiting: an unreachable `TerminateProcess` must not leave
-/// the blocking wait ahead of the fallback that would end the child.
+/// A child whose job handle is retained through its authoritative reap.
 #[cfg(windows)]
 struct JobBoundChild {
     child: Child,
-    job: Option<win32job::Job>,
+    job: win32job::Job,
 }
 
 #[cfg(windows)]
@@ -136,26 +130,15 @@ impl ChildProcess for JobBoundChild {
         })
     }
 
-    fn kill(&mut self) -> std::io::Result<()> {
-        let killed = self.child.kill();
-        // Closing the job is `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so it ends
-        // the child even when the handle-based terminate did not.
-        self.job.take();
-        killed
-    }
-
-    fn reap(&mut self) -> std::io::Result<()> {
-        self.child.wait().map(|_| ())
+    fn reap(&mut self) -> std::io::Result<ChildExitCode> {
+        self.child.wait().map(ChildExitCode::from_status)
     }
 }
 
 #[cfg(windows)]
 impl JobBoundChild {
     fn new(child: Child, job: win32job::Job) -> Self {
-        Self {
-            child,
-            job: Some(job),
-        }
+        Self { child, job }
     }
 }
 
@@ -284,22 +267,5 @@ mod tests {
 
         assert_eq!(error.to_string(), MSG_START_FAILED);
         opened_exclusively(&held).expect("the unbound child outlived the failed start");
-    }
-
-    /// `kill` releases the job before the blocking wait that follows it. A
-    /// `TerminateProcess` that does not land must not leave `reap` waiting in
-    /// front of the fallback that would have ended the child.
-    #[cfg(windows)]
-    #[test]
-    fn killing_releases_the_job_before_anything_waits() {
-        let mut bound = JobBoundChild::new(
-            sleeping_child(Stdio::null()),
-            win32job::Job::create().expect("a job object"),
-        );
-
-        bound.kill().expect("terminate");
-
-        assert!(bound.job.is_none(), "the job outlived the kill");
-        bound.reap().expect("the child is reapable");
     }
 }
