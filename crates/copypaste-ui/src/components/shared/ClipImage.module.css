@@ -1,0 +1,12 @@
+.image, .fallback { display: block; max-inline-size: 100%; flex: none; overflow: hidden; border-radius: var(--r-sm); }
+.image { object-fit: contain; object-position: center; }
+.fallback { display: flex; align-items: center; justify-content: center; border: var(--stroke-1) solid var(--border); color: var(--dim); background: var(--elevated); }
+.intrinsic { inline-size: auto; block-size: auto; }
+.fallback.intrinsic { inline-size: var(--tap-min); block-size: var(--tap-min); }
+.thumbnail { inline-size: var(--sz-tile); block-size: var(--sz-tile); }
+.fill { inline-size: 100%; block-size: 100%; }
+.detail { max-inline-size: 100%; max-block-size: 100%; }
+.quickPaste { inline-size: auto; block-size: auto; max-inline-size: 100%; max-block-size: calc(var(--s-9) * 3); align-self: flex-start; }
+.fallback.quickPaste { inline-size: 100%; min-block-size: calc(var(--s-9) * 2); }
+.spinner { animation: image-spin var(--dur) linear infinite; }
+@keyframes image-spin { to { transform: rotate(1turn); } }
