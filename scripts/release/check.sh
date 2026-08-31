@@ -519,7 +519,7 @@ assert "android" in smoke["needs"], "android-smoke does not wait for Android art
 qualification_if = "needs.version.outputs.qualify == 'true'"
 for name in (
     "android-upgrade-fixture", "android-cloud-evidence", "android-smoke",
-    "android-smoke-api33", "android-hardware", "native-parity",
+    "android-smoke-api33", "native-parity",
 ):
     assert jobs[name].get("if") == qualification_if, \
         f"{name} is not gated by canonical release qualification"

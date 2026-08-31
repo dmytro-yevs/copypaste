@@ -667,7 +667,7 @@
         {
           "name": "parity-gate-need-not-wait-for-windows",
           "file": "scripts/release/native_evidence_wiring.py",
-          "find": "    if not {\"macos\", \"android-hardware\", \"windows\"} <= set(gate.get(\"needs\") or []):",
+          "find": "    if not {\"macos\", \"android-smoke\", \"windows\"} <= set(gate.get(\"needs\") or []):",
           "replace": "    if False:",
           "expect": "FAIL|missing Windows platform dependency fails|"
         },
