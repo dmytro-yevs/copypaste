@@ -5,7 +5,7 @@
 //! every successful item mutation has the same observable side effects.
 
 use copypaste_core::{IngestError, Ingested, ItemCursor, StoredItem};
-use copypaste_ipc::{ImagePreview, Item};
+use copypaste_ipc::{ImagePreview, Item, MAX_PAGE_CONTENT_BYTES};
 
 use super::messages::{
     MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_TOO_LARGE, MSG_UNSUPPORTED_CONTENT,
@@ -32,7 +32,7 @@ pub(super) async fn list(
             let page = inner
                 .state
                 .store
-                .list_from(after.as_ref(), limit)
+                .list_from_bounded(after.as_ref(), limit, MAX_PAGE_CONTENT_BYTES)
                 .map_err(|_| BackendError::internal("history could not be read"))?;
             let next = page.next.map(|cursor| cursor.token());
             let mut wire = inner.to_wire_page(page.items);
@@ -405,6 +405,26 @@ mod tests {
                 .content_ciphertext,
             before
         );
+    }
+
+    #[tokio::test]
+    async fn list_resumes_after_a_legacy_row_that_exceeds_the_page_budget() {
+        let (backend, _clipboard, _dir) = backend();
+        let follower = backend.add("follower").await.unwrap();
+        seed_legacy_text(
+            &backend,
+            "embedded-over-page-budget",
+            &"x".repeat(copypaste_ipc::MAX_PAGE_CONTENT_BYTES + 1),
+        );
+
+        let first = backend.list(1000, None).await.unwrap();
+        assert_eq!(first.items.len(), 1);
+        assert_eq!(first.items[0].id, "embedded-over-page-budget");
+        let cursor = first.next_cursor.expect("the oversized row must resume");
+
+        let second = backend.list(1000, Some(&cursor)).await.unwrap();
+        assert_eq!(second.items.len(), 1);
+        assert_eq!(second.items[0].id, follower.id);
     }
 
     #[tokio::test]
