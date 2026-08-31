@@ -1,4 +1,4 @@
-import { cloudConnectionPresentation } from "@/features/devices";
+import { cloudConnectionState } from "@/features/devices/model";
 import type { CloudStatusData } from "@/lib/ipc";
 
 export type CloudSettingsIcon =
@@ -17,17 +17,11 @@ export function cloudSettingsPresentation(
   queryFailed: boolean,
   loading: boolean,
 ): CloudSettingsPresentation {
-  const device = () => ({
-    icon: cloudConnectionPresentation(status, queryFailed, loading).icon,
-    iconOwner: "device" as const,
-  });
-  const connected = Boolean(status?.signed_in && status.key_ready);
-  const attention = Boolean(status?.last_error || status?.unreadable_uploads);
-
-  if (loading) return device();
+  if (loading) return { icon: "cloud", iconOwner: "device" };
   if (queryFailed) return { icon: "alert", iconOwner: "settings" };
-  if (connected && !attention) return device();
-  if (connected) return { icon: "shieldCheck", iconOwner: "settings" };
-  if (status?.configured) return device();
+  const state = cloudConnectionState(status, false, false);
+  if (state === "healthy") return { icon: "shieldCheck", iconOwner: "device" };
+  if (state === "attention") return { icon: "shieldCheck", iconOwner: "settings" };
+  if (state === "signed-out") return { icon: "cloudOff", iconOwner: "device" };
   return { icon: "cloud", iconOwner: "settings" };
 }
