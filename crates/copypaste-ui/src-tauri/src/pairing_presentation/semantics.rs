@@ -121,9 +121,21 @@ fn failed_message(error: Option<ErrorCode>) -> PairingMessageId {
 }
 
 fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
+    let semantic = |icon, tone, live, active, terminal, needs_devices, review_secure, retry| {
+        PairingSemantics {
+            message_id,
+            icon,
+            tone,
+            live,
+            active,
+            terminal,
+            needs_devices,
+            review_secure,
+            retry,
+        }
+    };
     match message_id {
         PairingMessageId::Ready => semantic(
-            message_id,
             PairingIcon::ShieldCheck,
             PairingTone::Neutral,
             PairingLive::Status,
@@ -134,7 +146,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             false,
         ),
         PairingMessageId::WaitingForPeer => semantic(
-            message_id,
             PairingIcon::Spinner,
             PairingTone::Info,
             PairingLive::Status,
@@ -145,7 +156,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             false,
         ),
         PairingMessageId::SecuringConnection => semantic(
-            message_id,
             PairingIcon::Spinner,
             PairingTone::Info,
             PairingLive::Status,
@@ -156,7 +166,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             false,
         ),
         PairingMessageId::CompareCodes => semantic(
-            message_id,
             PairingIcon::ShieldCheck,
             PairingTone::Warning,
             PairingLive::Status,
@@ -167,7 +176,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             false,
         ),
         PairingMessageId::Paired => semantic(
-            message_id,
             PairingIcon::CheckCircle,
             PairingTone::Success,
             PairingLive::Status,
@@ -178,7 +186,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             false,
         ),
         PairingMessageId::Rejected => semantic(
-            message_id,
             PairingIcon::Close,
             PairingTone::Warning,
             PairingLive::Alert,
@@ -189,7 +196,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             true,
         ),
         PairingMessageId::Cancelled => semantic(
-            message_id,
             PairingIcon::Close,
             PairingTone::Neutral,
             PairingLive::Status,
@@ -200,7 +206,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             true,
         ),
         PairingMessageId::TimedOut => semantic(
-            message_id,
             PairingIcon::Alert,
             PairingTone::Warning,
             PairingLive::Alert,
@@ -211,7 +216,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             true,
         ),
         PairingMessageId::CodeMismatch => semantic(
-            message_id,
             PairingIcon::Alert,
             PairingTone::Danger,
             PairingLive::Alert,
@@ -222,7 +226,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             true,
         ),
         PairingMessageId::IncompatibleVersion => semantic(
-            message_id,
             PairingIcon::Alert,
             PairingTone::Danger,
             PairingLive::Alert,
@@ -233,7 +236,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             true,
         ),
         PairingMessageId::Unreachable => semantic(
-            message_id,
             PairingIcon::WifiOff,
             PairingTone::Warning,
             PairingLive::Alert,
@@ -244,7 +246,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             true,
         ),
         PairingMessageId::Busy => semantic(
-            message_id,
             PairingIcon::Alert,
             PairingTone::Warning,
             PairingLive::Alert,
@@ -255,7 +256,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             true,
         ),
         PairingMessageId::Limit => semantic(
-            message_id,
             PairingIcon::Alert,
             PairingTone::Warning,
             PairingLive::Alert,
@@ -266,7 +266,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             false,
         ),
         PairingMessageId::Failed => semantic(
-            message_id,
             PairingIcon::Alert,
             PairingTone::Danger,
             PairingLive::Alert,
@@ -276,30 +275,6 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             false,
             true,
         ),
-    }
-}
-
-const fn semantic(
-    message_id: PairingMessageId,
-    icon: PairingIcon,
-    tone: PairingTone,
-    live: PairingLive,
-    active: bool,
-    terminal: bool,
-    needs_devices: bool,
-    review_secure: bool,
-    retry: bool,
-) -> PairingSemantics {
-    PairingSemantics {
-        message_id,
-        icon,
-        tone,
-        live,
-        active,
-        terminal,
-        needs_devices,
-        review_secure,
-        retry,
     }
 }
 

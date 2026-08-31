@@ -165,7 +165,7 @@ impl NativePairingUi for MacOsPairingUi {
             return PairingPresentationState::Presented;
         }
         let copy = progress_copy(progress);
-        show_message(&copy.title, copy.message);
+        show_message(copy.title, copy.message);
         // INV-16: Close must reset the ceremony, matching Windows/Android.
         (self.abort)();
         PairingPresentationState::Unavailable
@@ -185,7 +185,7 @@ impl NativePairingUi for MacOsPairingUi {
         Some(on_main(move |mtm| unsafe {
             let prompt = alert(
                 mtm,
-                &copy.title,
+                copy.title,
                 "Confirm this code matches the one shown on the other device. Choose Doesn't Match if there is any difference.",
                 &["Codes Match", "Doesn't Match", "Cancel"],
             );
