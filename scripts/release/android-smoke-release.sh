@@ -41,6 +41,11 @@ history_capture_current_holds() { # <accessibility artifact>
     history_capture_holds "$1" "$CANARY_SEND"
 }
 
+pairing_dialog_closed_holds() { # <accessibility artifact>
+    ! node_exists_exact "$1" "copypaste-pairing-dialog-open" \
+        && app_navigation_holds "$1"
+}
+
 release_history_self_test() { # <temporary directory>
     local temp="$1" canary="CopyPasteReleaseCanaryFixture"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" enabled=\"true\"/><node text=\"$canary\"/></hierarchy>" \
@@ -63,27 +68,68 @@ release_history_self_test() { # <temporary directory>
 
 release_history_navigation_self_test() { # <temporary directory>
     local temp="$1" canary="CopyPasteReleaseCanaryFixture"
-    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Library" bounds="[20,40][300,90]" enabled="true" clickable="true"/><node content-desc="Search clipboard history, default" enabled="true"/></hierarchy>' \
+    local tab_bar modal shell modal_over_shell
+    tab_bar='<node text="Primary"><node text="Library" bounds="[20,40][100,90]" enabled="true" clickable="true"/><node text="Devices" bounds="[110,40][190,90]" enabled="true" clickable="true"/><node text="Settings" bounds="[200,40][300,90]" enabled="true" clickable="true"/></node>'
+    modal='<node resource-id="copypaste-pairing-dialog-open"><node text="Close" bounds="[220,460][300,510]" enabled="true" clickable="true"/></node>'
+    shell="<node>$tab_bar</node>"
+    modal_over_shell="<node>$tab_bar$modal</node>"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$modal</node></hierarchy>" \
+        > "$temp/release-pairing-modal.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$modal_over_shell</hierarchy>" \
+        > "$temp/release-pairing-modal-over-shell.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$shell</hierarchy>" \
+        > "$temp/release-pairing-closed.xml"
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$shell<node content-desc=\"Search clipboard history, default\" enabled=\"true\"/></hierarchy>" \
         > "$temp/release-history-pending.xml"
-    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node text=\"Library\" bounds=\"[20,40][300,90]\" enabled=\"true\" clickable=\"true\"/><node text=\"$canary\"/></hierarchy>" \
+    printf '%s\n' "<?xml version=\"1.0\"?><hierarchy>$shell<node text=\"$canary\"/></hierarchy>" \
         > "$temp/release-history-canary-outside-library.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, active\" enabled=\"true\"/><node text=\"$canary\"/></hierarchy>" \
         > "$temp/release-history-captured.xml"
 
     if (
         CANARY_SEND="$canary"
-        ui_fixtures "$temp/release-history-pending.xml" \
+        ui_fixtures "$temp/release-pairing-modal-over-shell.xml" \
+            "$temp/release-pairing-closed.xml" \
+            "$temp/release-history-pending.xml" \
             "$temp/release-history-canary-outside-library.xml" \
             "$temp/release-history-captured.xml"
-        tap_until_state "Library" "$temp/release-history-observed.xml" \
+        tap_until_state "Close" "$temp/release-pairing-closed-observed.xml" \
+            pairing_dialog_closed_holds none 3 ui_fixture_dump \
+            navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
+            && cmp -s "$temp/release-pairing-closed-observed.xml" "$temp/release-pairing-closed.xml" \
+            && tap_until_state "Library" "$temp/release-history-observed.xml" \
             history_capture_current_holds none 3 ui_fixture_dump \
             navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
-            && [[ $UI_FIXTURE_INDEX -eq 3 && $UI_FIXTURE_TAPS -eq 2 && $UI_FIXTURE_PACES -eq 2 ]] \
+            && [[ $UI_FIXTURE_INDEX -eq 5 && $UI_FIXTURE_TAPS -eq 3 && $UI_FIXTURE_PACES -eq 3 ]] \
             && cmp -s "$temp/release-history-observed.xml" "$temp/release-history-captured.xml"
     ); then
-        ok "release history navigation binds its canary predicate to active history"
+        ok "release pairing teardown reaches Library before checking its canary"
     else
-        bad "release history navigation binds its canary predicate to active history"
+        bad "release pairing teardown reaches Library before checking its canary"
+    fi
+    if (
+        ui_fixtures "$temp/release-pairing-closed.xml"
+        tap_until_state "Close" "$temp/release-pairing-already-closed.xml" \
+            pairing_dialog_closed_holds none 3 ui_fixture_dump \
+            navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
+            && [[ $UI_FIXTURE_INDEX -eq 1 && $UI_FIXTURE_TAPS -eq 0 ]] \
+            && cmp -s "$temp/release-pairing-already-closed.xml" "$temp/release-pairing-closed.xml"
+    ); then
+        ok "release pairing teardown does not tap after the shell is navigable"
+    else
+        bad "release pairing teardown does not tap after the shell is navigable"
+    fi
+    if (
+        ui_fixtures "$temp/release-pairing-modal.xml"
+        ! tap_until_state "Close" "$temp/release-pairing-never-closed.xml" \
+            pairing_dialog_closed_holds none 1 ui_fixture_dump \
+            navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
+            && [[ $UI_FIXTURE_TAPS -eq 1 ]] \
+            && cmp -s "$temp/release-pairing-never-closed.xml" "$temp/release-pairing-modal.xml"
+    ); then
+        ok "release pairing teardown rejects a modal that never closes"
+    else
+        bad "release pairing teardown rejects a modal that never closes"
     fi
 }
 
@@ -249,6 +295,13 @@ if reach_settings_tab "$OUT/pairing-shell.xml" 30 \
     capture_png "$OUT/pairing-entry.png" \
         && ok "the Android pairing launcher screenshot is complete" \
         || bad "the Android pairing launcher screenshot is complete"
+    if tap_until_state "Close" "$OUT/pairing-closed.xml" \
+        pairing_dialog_closed_holds none 15; then
+        ok "the Android pairing launcher closes to the navigable shell"
+    else
+        bad "the Android pairing launcher closes to the navigable shell" \
+            "Close did not restore an actionable Library, Devices, and Settings tab bar"
+    fi
 else
     bad "the Android pairing scanner entry is reachable" \
         "uiautomator could not open Devices > Connect a device > Scan pairing code"
