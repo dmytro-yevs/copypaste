@@ -1,9 +1,11 @@
+mod support;
+
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, DiagnosticCounters,
     DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind, ExportData, ExportItem,
     ImagePreview, ImportData, Item, ItemPage, Method, PairingInviteData, PairingProgressData,
-    PairingRole, PairingState, PeerInfo, PrivateModeData, Request, Response, ResponseData,
-    SensitiveFinding, SensitiveSpan, StatusData, SyncResult, PROTOCOL_VERSION,
+    PairingRole, PairingState, PrivateModeData, Request, Response, ResponseData, SensitiveFinding,
+    SensitiveSpan, StatusData, SyncResult, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -169,14 +171,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             known_device: None,
             error_code: None,
         }),
-        ResponseData::Peers(vec![PeerInfo {
-            pairing_id: "peer-1".into(),
-            name: "Phone".into(),
-            last_addr: Some("192.0.2.1:47654".into()),
-            last_seen_ms: 1,
-            online: false,
-            details: None,
-        }]),
+        ResponseData::Peers(vec![support::populated_peer()]),
         ResponseData::Sync(vec![sync_result()]),
         ResponseData::CloudStatus(CloudStatusData {
             configured: true,
