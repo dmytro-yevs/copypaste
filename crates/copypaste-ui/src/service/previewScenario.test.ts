@@ -554,6 +554,12 @@ describe("preview scenario service", () => {
       code: "not_found",
       retryable: false,
     });
+    for (const id of ["toString", "constructor", "__proto__"]) {
+      await expect(intercept("get_item_body", { id })).rejects.toMatchObject({
+        code: "not_found",
+        retryable: false,
+      });
+    }
     await expect(intercept("get_image_preview", { id: "not-a-preview-image" })).rejects.toMatchObject({
       code: "not_found",
       retryable: false,
