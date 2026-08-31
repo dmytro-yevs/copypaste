@@ -166,6 +166,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 [features]
 # Named so the cfg in keystore/mod.rs is not an unexpected one. Never enabled.
 android-keystore-typecheck = []
+# Named so the clipboard's test-only backend selection is checked as declared.
+dev-fake-clipboard = []
 EOF
 
     cat > "$dir/src/lib.rs" <<'EOF'
