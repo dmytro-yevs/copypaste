@@ -319,7 +319,7 @@ impl Supervisor {
         self.drain_for_update_locked(backend, permit).await
     }
 
-    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub(crate) async fn install_after_update_drain<B: Backend, T>(
         &self,
         backend: &B,
