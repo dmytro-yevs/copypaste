@@ -492,6 +492,106 @@ describe("preview scenario service", () => {
     });
   });
 
+  it("serves bounded History fixtures without falling through fake resource ids", async () => {
+    const store = createPreviewScenarioStore(null);
+    const intercept = createPreviewInterceptor(store);
+    store.getState().setDaemon("up");
+    store.getState().setResource("history", "success");
+
+    await expect(intercept("list")).resolves.toMatchObject({
+      handled: true,
+      value: {
+        total: 4,
+        items: [
+          {
+            id: "preview-plain",
+            source_app_bundle_id: null,
+            source_app_name: null,
+          },
+          {
+            id: "preview-source",
+            source_app_bundle_id: "com.example.editor",
+            source_app_name: "Example Editor",
+          },
+          {
+            id: "preview-image",
+            content_class: "image",
+            content: null,
+          },
+          {
+            id: "preview-unknown",
+            content_class: "archive",
+            truncated: true,
+          },
+        ],
+      },
+    });
+    await expect(intercept("status")).resolves.toMatchObject({
+      handled: true,
+      value: { item_count: 4 },
+    });
+    await expect(intercept("get_item_body", { id: "preview-plain" })).resolves.toEqual({
+      handled: true,
+      value: "Preview clipboard content from a fixture.",
+    });
+    await expect(intercept("get_item_body", { id: "preview-source" })).resolves.toEqual({
+      handled: true,
+      value: "Fixture body from Example Editor.",
+    });
+    await expect(intercept("get_image_preview", { id: "preview-image" })).resolves.toEqual({
+      handled: true,
+      value: {
+        width: 1,
+        height: 1,
+        png_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      },
+    });
+    await expect(intercept("get_item_body", { id: "preview-unknown" })).rejects.toMatchObject({
+      code: "unsupported_content",
+      retryable: false,
+    });
+    await expect(intercept("get_item_body", { id: "not-a-preview-item" })).rejects.toMatchObject({
+      code: "not_found",
+      retryable: false,
+    });
+    await expect(intercept("get_image_preview", { id: "not-a-preview-image" })).rejects.toMatchObject({
+      code: "not_found",
+      retryable: false,
+    });
+
+    for (const state of ["empty", "loading", "error"] as const) {
+      store.getState().setResource("history", state);
+      if (state === "error") {
+        await expect(intercept("list")).rejects.toMatchObject({ code: "internal", retryable: true });
+      } else if (state === "loading") {
+        const pending = intercept("list");
+        store.getState().setResource("history", "empty");
+        await expect(pending).resolves.toMatchObject({
+          handled: true,
+          value: { total: 0, items: [] },
+        });
+      } else {
+        await expect(intercept("list")).resolves.toMatchObject({
+          handled: true,
+          value: { total: 0, items: [] },
+        });
+      }
+      await expect(intercept("status")).resolves.toMatchObject({
+        handled: true,
+        value: { item_count: 0 },
+      });
+      await expect(intercept("get_item_body", { id: "not-a-preview-item" })).resolves.toEqual({ handled: false });
+    }
+
+    store.getState().setResource("history", "success");
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    await expect(intercept("get_item_body", { id: "preview-plain" })).resolves.toEqual({ handled: false });
+    delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+
+    store.getState().resetToLive();
+    await expect(intercept("get_item_body", { id: "preview-plain" })).resolves.toEqual({ handled: false });
+  });
+
   it("maps every pairing phase and applies lifecycle command transitions", async () => {
     const store = createPreviewScenarioStore(null);
     const intercept = createPreviewInterceptor(store);
