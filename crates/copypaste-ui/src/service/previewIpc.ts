@@ -1,10 +1,4 @@
-import type {
-    CloudStatusData,
-    ItemPage,
-    PairingCeremony,
-    ServiceState,
-    StatusData,
-} from "@/lib/ipc";
+import type { CloudStatusData, PairingCeremony, ServiceState, StatusData } from "@/lib/ipc";
 import { PAIRING_SEMANTICS_BY_STATE } from "@/lib/ipc";
 import type { PreviewPairingInvite } from "@/lib/ipc";
 import { IpcFailure } from "@/lib/errors";
@@ -13,6 +7,11 @@ import {
     previewDeviceDetails,
     previewDiscoveredDevice,
 } from "@/service/previewDeviceDto";
+import {
+    previewHistoryCount,
+    previewHistoryPage,
+    previewHistoryResourceResponse,
+} from "@/service/previewHistory";
 import {
     previewScenarioStore,
     type PreviewDevice,
@@ -137,13 +136,13 @@ function pairingCeremony(scenario: PreviewScenario): PairingCeremony {
     };
 }
 
-function statusFixture(emptyHistory: boolean): StatusData {
+function statusFixture(historyCount: number): StatusData {
     return {
         device_name: "Preview device",
         version: __COPYPASTE_APP_VERSION__,
         protocol_version: 2,
         listen_addr: "192.168.1.20:49200",
-        item_count: emptyHistory ? 0 : 1,
+        item_count: historyCount,
         capture_running: true,
         clipboard_backend: "preview clipboard",
         private_mode: false,
@@ -171,40 +170,6 @@ function serviceState(daemon: PreviewScenario["daemon"]): ServiceState {
     return { state: daemon === "down" ? "stopped" : "unhealthy" };
 }
 
-function historyFixture(empty: boolean): ItemPage {
-    if (empty) {
-        return {
-            items: [],
-            total: 0,
-            skipped_undecryptable: 0,
-            next_cursor: null,
-        };
-    }
-    return {
-        items: [
-            {
-                id: "preview-item",
-                content: "Preview clipboard content",
-                content_type: "text/plain",
-                content_class: "text",
-                created_at: Date.now() - 30_000,
-                pinned: false,
-                is_sensitive: false,
-                sensitive_finding: null,
-                origin_device_id: "preview-device",
-                origin_device_name: "Preview device",
-                source_app_bundle_id: null,
-                source_app_name: null,
-                too_large_to_sync: false,
-                truncated: false,
-            },
-        ],
-        total: 1,
-        skipped_undecryptable: 0,
-        next_cursor: null,
-    };
-}
-
 function cloudFixture(configured: boolean): CloudStatusData {
     return {
         configured,
@@ -227,7 +192,7 @@ function resourceResult(
     if (state === "live" || state === "loading") return { handled: false };
     if (state === "error") throw new IpcFailure("internal", true);
     if (resource === "history") {
-        return { handled: true, value: historyFixture(state === "empty") };
+        return { handled: true, value: previewHistoryPage(state === "empty") };
     }
     if (resource === "discovery") {
         return {
@@ -308,6 +273,11 @@ export function createPreviewInterceptor(
         let scenario = store.getState().scenario;
         if (scenario.mode === "live") return { handled: false };
 
+        if (scenario.resources.history === "success") {
+            const history = previewHistoryResourceResponse(command, args);
+            if (history !== undefined) return { handled: true, value: history };
+        }
+
         if (command === "service_state") {
             if (scenario.daemon === "live") return { handled: false };
             return { handled: true, value: serviceState(scenario.daemon) };
@@ -339,7 +309,7 @@ export function createPreviewInterceptor(
         if (scenario.daemon === "up" && command === "status") {
             return {
                 handled: true,
-                value: statusFixture(scenario.resources.history === "empty"),
+                value: statusFixture(previewHistoryCount(scenario.resources.history)),
             };
         }
 
