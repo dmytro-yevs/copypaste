@@ -37,6 +37,106 @@ async fn finish_handoff(
     ))
 }
 
+#[cfg(target_os = "windows")]
+pub(super) fn status(app: &AppHandle) -> UpdateStatus {
+    if super::config::configured_for_app(app) {
+        UpdateStatus::Ready
+    } else {
+        UpdateStatus::Unconfigured
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub(super) async fn check(app: &AppHandle) -> Result<UpdateStatus, UiError> {
+    let Some(updater) = super::config::updater(app, Some(std::time::Duration::from_secs(300)))?
+    else {
+        return Ok(UpdateStatus::Unconfigured);
+    };
+    Ok(
+        match updater.check().await.map_err(|error| {
+            super::config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed)
+        })? {
+            Some(update) => UpdateStatus::Available {
+                version: update.version.to_string(),
+            },
+            None => UpdateStatus::UpToDate,
+        },
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub(super) async fn install(
+    app: &AppHandle,
+    expected: String,
+    progress: Channel<UpdateProgress>,
+) -> Result<UpdateStatus, UiError> {
+    let Some(updater) = super::config::updater(app, Some(std::time::Duration::from_secs(300)))?
+    else {
+        return Ok(UpdateStatus::Unconfigured);
+    };
+    let Some(update) = updater.check().await.map_err(|error| {
+        super::config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed)
+    })?
+    else {
+        return Ok(UpdateStatus::UpToDate);
+    };
+    let version = update.version.to_string();
+    if version != expected {
+        return Ok(UpdateStatus::Available { version });
+    }
+    let download_progress = progress.clone();
+    let verifying_progress = progress.clone();
+    let installing_progress = progress;
+    let install = {
+        use tauri::Manager as _;
+
+        let supervisor = app.state::<crate::service::Supervisor>();
+        let backend = app.state::<crate::backend::SelectedBackend>();
+        hand_off_verified_update(
+            async move {
+                let mut downloaded = 0_u64;
+                let bytes = update
+                    .download(
+                        move |chunk, total| {
+                            downloaded = downloaded.saturating_add(chunk as u64);
+                            let _ = download_progress
+                                .send(UpdateProgress::Downloading { downloaded, total });
+                        },
+                        move || {
+                            let _ = verifying_progress.send(UpdateProgress::Verifying);
+                        },
+                    )
+                    .await
+                    .map_err(|error| {
+                        super::config::plugin_error(error, UiBoundaryErrorCode::UpdateInstallFailed)
+                    })?;
+                Ok((update, bytes))
+            },
+            || {
+                Box::pin(async {
+                    supervisor
+                        .install_after_update_drain(backend.inner(), |permit| permit)
+                        .await
+                        .map_err(|error| error.ui_error())
+                })
+            },
+            move || {
+                let _ = installing_progress.send(UpdateProgress::Installing);
+            },
+            move |permit, (update, bytes)| {
+                tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    update.install(bytes).map_err(|error| {
+                        super::config::plugin_error(error, UiBoundaryErrorCode::UpdateInstallFailed)
+                    })
+                })
+            },
+        )
+        .await?
+    };
+    finish_handoff(install).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,104 +391,4 @@ mod tests {
         assert!(finish_handoff(handoff).await.is_err());
         assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
     }
-}
-
-#[cfg(target_os = "windows")]
-pub(super) fn status(app: &AppHandle) -> UpdateStatus {
-    if super::config::configured_for_app(app) {
-        UpdateStatus::Ready
-    } else {
-        UpdateStatus::Unconfigured
-    }
-}
-
-#[cfg(target_os = "windows")]
-pub(super) async fn check(app: &AppHandle) -> Result<UpdateStatus, UiError> {
-    let Some(updater) = super::config::updater(app, Some(std::time::Duration::from_secs(300)))?
-    else {
-        return Ok(UpdateStatus::Unconfigured);
-    };
-    Ok(
-        match updater.check().await.map_err(|error| {
-            super::config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed)
-        })? {
-            Some(update) => UpdateStatus::Available {
-                version: update.version.to_string(),
-            },
-            None => UpdateStatus::UpToDate,
-        },
-    )
-}
-
-#[cfg(target_os = "windows")]
-pub(super) async fn install(
-    app: &AppHandle,
-    expected: String,
-    progress: Channel<UpdateProgress>,
-) -> Result<UpdateStatus, UiError> {
-    let Some(updater) = super::config::updater(app, Some(std::time::Duration::from_secs(300)))?
-    else {
-        return Ok(UpdateStatus::Unconfigured);
-    };
-    let Some(update) = updater.check().await.map_err(|error| {
-        super::config::plugin_error(error, UiBoundaryErrorCode::UpdateCheckFailed)
-    })?
-    else {
-        return Ok(UpdateStatus::UpToDate);
-    };
-    let version = update.version.to_string();
-    if version != expected {
-        return Ok(UpdateStatus::Available { version });
-    }
-    let download_progress = progress.clone();
-    let verifying_progress = progress.clone();
-    let installing_progress = progress;
-    let install = {
-        use tauri::Manager as _;
-
-        let supervisor = app.state::<crate::service::Supervisor>();
-        let backend = app.state::<crate::backend::SelectedBackend>();
-        hand_off_verified_update(
-            async move {
-                let mut downloaded = 0_u64;
-                let bytes = update
-                    .download(
-                        move |chunk, total| {
-                            downloaded = downloaded.saturating_add(chunk as u64);
-                            let _ = download_progress
-                                .send(UpdateProgress::Downloading { downloaded, total });
-                        },
-                        move || {
-                            let _ = verifying_progress.send(UpdateProgress::Verifying);
-                        },
-                    )
-                    .await
-                    .map_err(|error| {
-                        super::config::plugin_error(error, UiBoundaryErrorCode::UpdateInstallFailed)
-                    })?;
-                Ok((update, bytes))
-            },
-            || {
-                Box::pin(async {
-                    supervisor
-                        .install_after_update_drain(backend.inner(), |permit| permit)
-                        .await
-                        .map_err(|error| error.ui_error())
-                })
-            },
-            move || {
-                let _ = installing_progress.send(UpdateProgress::Installing);
-            },
-            move |permit, (update, bytes)| {
-                tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    update.install(bytes).map_err(|error| {
-                        super::config::plugin_error(error, UiBoundaryErrorCode::UpdateInstallFailed)
-                    })
-                })
-            },
-        )
-        .await?
-    };
-    finish_handoff(install).await
 }
