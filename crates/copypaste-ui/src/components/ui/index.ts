@@ -52,7 +52,6 @@ export { Surface, surfaceVariants } from "./surface";
 export type { SurfaceVariants } from "./surface";
 export { Switch } from "./switch";
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
-export { ToggleGroup, ToggleGroupItem, toggleVariants } from "./toggle-group";
 export {
     Tooltip,
     TooltipContent,
