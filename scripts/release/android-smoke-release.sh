@@ -357,6 +357,7 @@ PY
         --commit "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
         --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
         --elapsed-ms "$paint_elapsed_ms" \
+        --qualified-artifact "$APK" \
         --feature-state devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml \
         --artifact screenshot=pairing-entry.png \
         --artifact accessibility=pairing-entry.xml \
