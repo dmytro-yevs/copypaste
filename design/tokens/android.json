@@ -1,0 +1,55 @@
+{
+  "android": {
+    "$description": "Native Android resource roles. Colours alias the Midnight palette and scheme roles so the WebView fallback and Material resources share one DTCG source. Android's native shell remains on the Midnight fallback while the WebView applies the selected product theme.",
+    "color": {
+      "$type": "color",
+      "canvas": { "$value": "{themes.midnight.bg}" },
+      "panel": { "$value": "{themes.midnight.panel}" },
+      "surface": { "$value": "{themes.midnight.card}" },
+      "surface-raised": { "$value": "{themes.midnight.elevated}" },
+      "border": { "$value": "{themes.midnight.border}" },
+      "text": { "$value": "{color.text}" },
+      "text-muted": { "$value": "{color.dim}" },
+      "accent": { "$value": "{themes.midnight.accent}" },
+      "accent-pressed": { "$value": "{themes.midnight.accent-2}" },
+      "on-accent": { "$value": "{themes.midnight.on-accent}" },
+      "selected": { "$value": "{recipe.theme.selected}" },
+      "success": { "$value": "{color.ok}" },
+      "warning": { "$value": "{color.warn}" },
+      "error": { "$value": "{color.err}" },
+      "qr-surface": {
+        "$value": "#ffffff",
+        "$description": "QR modules stay true black on a true-white surface; this is the scanner contrast exception, not a themed surface."
+      }
+    },
+    "dimension": {
+      "$type": "dimension",
+      "space-1": { "$value": "{space.s-1}" },
+      "space-2": { "$value": "{space.s-2}" },
+      "space-3": { "$value": "{space.s-3}" },
+      "space-4": { "$value": "{space.s-4}" },
+      "space-5": { "$value": "{space.s-5}" },
+      "space-6": { "$value": "{space.s-6}" },
+      "touch-target": {
+        "$value": "48px",
+        "$description": "Android's native Material target is 48dp. This intentional native variant is stricter than the WebView coarse-pointer 44px floor."
+      },
+      "radius-control": { "$value": "{radius.r-ctl}" },
+      "radius-card": { "$value": "{radius.r-card}" },
+      "pairing-qr-size": { "$value": "240px" },
+      "pairing-sas-digit-width": { "$value": "40px" },
+      "pairing-sas-text": {
+        "$value": "28px",
+        "$extensions": { "com.copypaste": { "androidUnit": "sp" } }
+      },
+      "body-text": {
+        "$value": "{type.fs-sm}",
+        "$extensions": { "com.copypaste": { "androidUnit": "sp" } }
+      },
+      "label-text": {
+        "$value": "{type.fs-xs}",
+        "$extensions": { "com.copypaste": { "androidUnit": "sp" } }
+      }
+    }
+  }
+}
