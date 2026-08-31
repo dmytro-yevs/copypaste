@@ -164,6 +164,13 @@ Pinned and unpinned runs may use separate indexable queries, but their union
 must have the same order and reach every live row exactly once. Deep-page cost
 must be bounded by the seek, not linear in all earlier pages.
 
+History page allocation belongs to storage. It measures actual ciphertext
+lengths while lazily iterating the seek queries, retains the first row even
+when that row alone exceeds the byte budget, and otherwise stops before the
+first over-budget row. The cursor is the last retained row from that read; no
+caller may trim a materialized page or re-query to manufacture one. A byte stop
+in the pinned run does not top up from unpinned rows.
+
 Search sanitizes arbitrary text into an FTS expression without exposing FTS
 operators unintentionally. Unicode alphanumerics survive; malformed quotes,
 reserved operators, NUL and punctuation cannot produce SQL or FTS syntax

@@ -24,7 +24,10 @@
       "backend_tests": [
         "cargo test -p copypaste-ipc -p copypaste-core",
         "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::items::tests::authenticated_legacy_text_refuses_full_paths_but_keeps_a_safe_preview'",
-        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::legacy_text_refuses_full_operations_but_pin_returns_a_preview'"
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::legacy_text_refuses_full_operations_but_pin_returns_a_preview'",
+        "cargo test -p copypaste-core storage::page::tests::bounded_paging",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-daemon --features dev-ephemeral-key server::items::tests::an_over_budget_page_resumes_at_the_first_item_it_dropped'",
+        "bash -c 'COPYPASTE_EPHEMERAL_KEY=1 cargo test -p copypaste-ui --features embedded-backend,copypaste-core/dev-ephemeral-key backend::embedded::items::tests::list_resumes_after_a_legacy_row_that_exceeds_the_page_budget'"
       ],
       "ui_tests": [
         "npm --prefix crates/copypaste-ui test"
@@ -58,7 +61,8 @@
           "evidence_status": "pending",
           "unverified_states": [
             "history-ui",
-            "legacy-content-size-refusal"
+            "legacy-content-size-refusal",
+            "bounded-history-page-allocation"
           ]
         },
         "macos": {
@@ -66,7 +70,8 @@
           "evidence_status": "pending",
           "unverified_states": [
             "history-ui",
-            "legacy-content-size-refusal"
+            "legacy-content-size-refusal",
+            "bounded-history-page-allocation"
           ]
         },
         "windows": {
@@ -76,7 +81,8 @@
             "populated"
           ],
           "unverified_states": [
-            "legacy-content-size-refusal"
+            "legacy-content-size-refusal",
+            "bounded-history-page-allocation"
           ],
           "release_artifact": "release-windows-native-evidence"
         }

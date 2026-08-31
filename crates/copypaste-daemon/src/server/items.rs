@@ -96,22 +96,12 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
         Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR),
     };
 
-    let page = match state.store.list_from(after.as_ref(), limit) {
+    let page = match state
+        .store
+        .list_from_bounded(after.as_ref(), limit, MAX_PAGE_CONTENT_BYTES)
+    {
         Ok(page) => page,
         Err(e) => return storage_error(id, "list", &e),
-    };
-
-    // A page whose bytes overrun the frame arrives as a decode error, taking
-    // every item beside it down. Re-ask for the count that fits so the cursor
-    // comes from the store rather than being invented here.
-    let page = match within_budget(&page.items) {
-        kept if kept < page.items.len() => {
-            match trim_to_budget(state, page, kept, after.as_ref()) {
-                Ok(page) => page,
-                Err(e) => return storage_error(id, "list", &e),
-            }
-        }
-        _ => page,
     };
 
     let next = page.next.map(|cursor| cursor.token());
@@ -350,26 +340,6 @@ fn within_budget(rows: &[StoredItem]) -> usize {
     rows.len()
 }
 
-fn trim_to_budget(
-    state: &AppState,
-    mut page: copypaste_core::Page,
-    kept: usize,
-    after: Option<&ItemCursor>,
-) -> Result<copypaste_core::Page, copypaste_core::StoreError> {
-    page.items.truncate(kept);
-    let Some(last) = page.items.last() else {
-        return state.store.list_from(after, kept as u32);
-    };
-    match state.store.cursor_for(&last.id) {
-        Ok(next) => {
-            page.next = Some(next);
-            Ok(page)
-        }
-        Err(copypaste_core::StoreError::NotFound) => state.store.list_from(after, kept as u32),
-        Err(e) => Err(e),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,30 +471,6 @@ mod tests {
         assert_eq!(sorted.len(), seen.len(), "a row was served twice: {seen:?}");
         added.sort();
         assert_eq!(sorted, added, "paging did not visit every item");
-    }
-
-    #[test]
-    fn a_row_deleted_before_its_cursor_is_taken_falls_back_to_the_re_ask() {
-        let (state, _dir) = test_state("list-trim-anchor-gone");
-        for n in 0..4 {
-            match add(&state, n as u64, &format!("item {n}")).data {
-                Some(ResponseData::Item(_)) => {}
-                other => panic!("{other:?}"),
-            }
-        }
-
-        let page = state.store.list_from(None, 4).unwrap();
-        let anchor = page.items[1].id.clone();
-        assert!(state.store.delete(&anchor).unwrap());
-
-        let trimmed = trim_to_budget(&state, page, 2, None).expect("the fallback must serve");
-        assert_eq!(trimmed.items.len(), 2);
-        let next = trimmed.next.expect("the fallback page must carry a cursor");
-        let after = state.store.list_from(Some(&next), 10).unwrap();
-        assert!(
-            !after.items.iter().any(|i| i.id == anchor),
-            "the deleted anchor came back"
-        );
     }
 
     /// I-39 / §6.5: the two clipboard counters existed and nothing read them,
