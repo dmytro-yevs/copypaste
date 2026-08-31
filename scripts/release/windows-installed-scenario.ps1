@@ -13,6 +13,20 @@ function Get-InstalledPayloadRelativePath([string]$RootPath, [string]$EntryPath)
     return $relative
 }
 
+function Get-InstalledPayloadSha256([string]$Path) {
+    $stream = $null
+    $algorithm = $null
+    try {
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        $hash = $algorithm.ComputeHash($stream)
+        return [BitConverter]::ToString($hash).Replace("-", "").ToLowerInvariant()
+    } finally {
+        if ($null -ne $algorithm) { $algorithm.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 function Get-InstalledPayloadManifest([string]$InstallDirectory) {
     $root = Get-Item -LiteralPath $InstallDirectory -Force -ErrorAction Stop
     if (-not $root.PSIsContainer) { throw "installed payload root is not a directory" }
@@ -32,7 +46,7 @@ function Get-InstalledPayloadManifest([string]$InstallDirectory) {
             $entries += [ordered]@{
                 path = $relative
                 kind = "file"
-                sha256 = (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                sha256 = Get-InstalledPayloadSha256 $entry.FullName
                 bytes = [int64]$entry.Length
             }
         } else {
@@ -122,6 +136,39 @@ function Test-WindowsInstalledScenarioHelpers {
         try { Get-InstalledPayloadRelativePath $root $outside | Out-Null } catch { $rejected = $true }
         Remove-Item -LiteralPath $outside -Force
         if (-not $rejected) { throw "outside installed payload path passed the refusal proof" }
+        $hashFixture = Join-Path $root "sha256-fixture.bin"
+        $emptyFixture = Join-Path $root "empty-fixture.bin"
+        [IO.File]::WriteAllBytes($hashFixture, [byte[]](0x61, 0x62, 0x63))
+        [IO.File]::WriteAllBytes($emptyFixture, [byte[]]@())
+        if ((Get-InstalledPayloadSha256 $hashFixture) -cne "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") {
+            throw "installed payload SHA-256 did not hash the known fixture"
+        }
+        if ((Get-InstalledPayloadSha256 $emptyFixture) -cne "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") {
+            throw "installed payload SHA-256 did not hash an empty file"
+        }
+        $exclusive = $null
+        try {
+            $exclusive = [IO.File]::Open($hashFixture, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        } finally {
+            if ($null -ne $exclusive) { $exclusive.Dispose() }
+        }
+        foreach ($unreadable in @(
+            (Join-Path $root "missing-hash-fixture.bin"),
+            $hashFixture
+        )) {
+            $lock = $null
+            try {
+                if ($unreadable -eq $hashFixture) {
+                    $lock = [IO.File]::Open($hashFixture, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+                }
+                $rejected = $false
+                try { Get-InstalledPayloadSha256 $unreadable | Out-Null } catch { $rejected = $true }
+                if (-not $rejected) { throw "missing or unreadable installed payload passed the hash proof" }
+            } finally {
+                if ($null -ne $lock) { $lock.Dispose() }
+            }
+        }
+        Remove-Item -LiteralPath $hashFixture, $emptyFixture -Force
         $baseline = Get-InstalledPayloadManifest $root
         Assert-InstalledPayloadUnchanged $baseline (Get-InstalledPayloadManifest $root)
         foreach ($snapshots in @(
@@ -132,6 +179,16 @@ function Test-WindowsInstalledScenarioHelpers {
             try { Assert-InstalledPayloadUnchanged $snapshots.before $snapshots.after } catch { $rejected = $true }
             if (-not $rejected) { throw "duplicate installed payload snapshot passed the refusal proof" }
         }
+        $payloadPath = Join-Path $root "payload.txt"
+        $originalLength = (Get-Item -LiteralPath $payloadPath -Force -ErrorAction Stop).Length
+        [IO.File]::WriteAllText($payloadPath, "after!")
+        if ((Get-Item -LiteralPath $payloadPath -Force -ErrorAction Stop).Length -ne $originalLength) {
+            throw "same-length installed payload fixture changed length"
+        }
+        $rejected = $false
+        try { Assert-InstalledPayloadUnchanged $baseline (Get-InstalledPayloadManifest $root) } catch { $rejected = $true }
+        if (-not $rejected) { throw "same-length installed payload change passed the hash proof" }
+        & $restoreFixture
         foreach ($mutation in @(
             { [IO.File]::WriteAllText((Join-Path $root "payload.txt"), "changed") },
             { [IO.File]::WriteAllText((Join-Path $root "added.txt"), "added") },
