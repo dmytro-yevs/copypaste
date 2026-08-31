@@ -497,18 +497,40 @@ fi
 rm -f "$WIRING"
 
 group "All shipped platforms reach one release page"
-check "publish depends on macOS, Android, Windows and packaging" python3 - <<'PY'
-import sys, yaml
+check "publication depends on all shipped-platform qualification" python3 - <<'PY'
+import re, sys, yaml
 jobs = yaml.safe_load(open(".github/workflows/release.yml"))["jobs"]
-missing = [j for j in ("version", "macos", "android", "android-smoke", "windows", "packaging") if j not in jobs]
+missing = [j for j in (
+    "version", "supabase-gate", "secret-scan", "pairing-e2e", "macos", "android",
+    "android-smoke", "android-smoke-api33", "windows", "native-parity", "packaging",
+) if j not in jobs]
 assert not missing, f"release.yml has no {missing} job"
 needs = set(jobs["publish"]["needs"])
-for j in ("macos", "android", "android-smoke", "windows", "packaging"):
+for j in (
+    "supabase-gate", "secret-scan", "pairing-e2e", "macos", "android", "android-smoke",
+    "android-smoke-api33", "windows", "native-parity", "packaging",
+):
     assert j in needs, f"publish does not depend on {j}"
+assert jobs["publish"].get("if") == "needs.version.outputs.publish == 'true'", \
+    "only the publish output may create the release"
 
 smoke = jobs["android-smoke"]
 assert "android" in smoke["needs"], "android-smoke does not wait for Android artifact"
-assert "publish" in str(smoke.get("if", "")), "android-smoke does not run for a publishable release"
+qualification_if = "needs.version.outputs.qualify == 'true'"
+for name in (
+    "android-upgrade-fixture", "android-cloud-evidence", "android-smoke",
+    "android-smoke-api33", "android-hardware", "native-parity",
+):
+    assert jobs[name].get("if") == qualification_if, \
+        f"{name} is not gated by canonical release qualification"
+version = jobs["version"]
+assert version.get("outputs", {}).get("qualify") == "${{ steps.resolve.outputs.qualify }}", \
+    "version does not expose qualification state"
+resolver = next(step for step in version["steps"] if step.get("id") == "resolve")
+assert resolver.get("env", {}).get("INPUT_QUALIFY") == "${{ inputs.qualify }}", \
+    "resolver does not receive the qualification input"
+assert re.search(r'if \[\[ "\$publish" == "true" \]\]; then\s+qualify=true\s+fi', resolver.get("run", "")), \
+    "publish must imply qualification"
 download = [s for s in smoke["steps"] if str(s.get("uses", "")).startswith("actions/download-artifact")]
 download_names = [step.get("with", {}).get("name") for step in download]
 assert download_names.count("android") == 1, \
