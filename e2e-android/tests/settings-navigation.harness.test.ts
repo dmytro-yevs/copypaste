@@ -19,6 +19,11 @@ function item(id: string, content: string | null, contentType = "text"): Item {
     id,
     content,
     content_type: contentType,
+    content_class: contentType === "text"
+      ? "text"
+      : contentType.startsWith("image/")
+        ? "image"
+        : "other",
     created_at: 0,
     pinned: false,
     is_sensitive: content === null,
