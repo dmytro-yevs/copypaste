@@ -1,2 +1,3 @@
-.unit, .badge { display: inline-flex; min-inline-size: 0; max-inline-size: 100%; align-items: center; gap: var(--s-1); }
-.unit { flex: none; }.label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.accent { color: var(--accent-2); }.warning { color: var(--warn-strong); }.separator { color: var(--faint); }.icon { font-size: var(--fs-xs); }
+.unit { display: inline-flex; min-inline-size: 0; max-inline-size: 100%; flex: none; align-items: center; gap: var(--s-1); }
+.badge { display: inline-flex; min-inline-size: 0; max-inline-size: 100%; align-items: center; gap: var(--s-1); }
+.label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.accent { color: var(--accent-2); }.warning { color: var(--warn-strong); }.separator { color: var(--faint); }.icon { font-size: var(--fs-xs); }
