@@ -5,6 +5,8 @@
 //! lines of `#[arg]`. The tests that pin the defaults and the required
 //! arguments move with the definitions they are about.
 
+#[cfg(any(windows, test))]
+use clap::error::ErrorKind;
 use clap::{Parser, Subcommand};
 use copypaste_ipc::{ConfigPatch, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 use std::path::PathBuf;
@@ -114,7 +116,7 @@ pub(crate) enum Command {
     Shutdown {
         /// Wait until the Windows daemon process has exited successfully.
         #[cfg(windows)]
-        #[arg(long, conflicts_with = "json")]
+        #[arg(long)]
         wait_for_exit: bool,
     },
 
@@ -403,9 +405,61 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
     }
 }
 
+pub(crate) fn parse_cli() -> Cli {
+    try_parse_cli_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
+}
+
+pub(crate) fn try_parse_cli_from<I, T>(args: I) -> Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let cli = Cli::try_parse_from(args)?;
+    #[cfg(windows)]
+    validate_windows_shutdown_json(&cli)?;
+    Ok(cli)
+}
+
+// Global flags may appear on either side of a subcommand, so validate their parsed value.
+#[cfg(any(windows, test))]
+fn validate_windows_shutdown_json_args(json: bool, wait_for_exit: bool) -> Result<(), clap::Error> {
+    if json && wait_for_exit {
+        return Err(clap::Error::raw(
+            ErrorKind::ArgumentConflict,
+            "--wait-for-exit cannot be used with --json",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn validate_windows_shutdown_json(cli: &Cli) -> Result<(), clap::Error> {
+    let Command::Shutdown { wait_for_exit } = &cli.command else {
+        return Ok(());
+    };
+    validate_windows_shutdown_json_args(cli.json, *wait_for_exit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Parser)]
+    #[command(name = "copypaste")]
+    struct WindowsCliFixture {
+        #[arg(long, global = true)]
+        json: bool,
+        #[command(subcommand)]
+        command: WindowsFixtureCommand,
+    }
+
+    #[derive(Subcommand)]
+    enum WindowsFixtureCommand {
+        Shutdown {
+            #[arg(long)]
+            wait_for_exit: bool,
+        },
+    }
 
     #[test]
     fn page_defaults_come_from_the_ipc_contract() {
@@ -424,6 +478,37 @@ mod tests {
             panic!("expected search");
         };
         assert_eq!(limit, DEFAULT_SEARCH_PAGE);
+    }
+
+    #[test]
+    fn windows_global_json_conflict_covers_every_flag_order() {
+        for args in [
+            ["copypaste", "--json", "shutdown", "--wait-for-exit"],
+            ["copypaste", "shutdown", "--json", "--wait-for-exit"],
+            ["copypaste", "shutdown", "--wait-for-exit", "--json"],
+        ] {
+            let fixture = WindowsCliFixture::try_parse_from(args)
+                .expect("global JSON parses in either position");
+            let WindowsFixtureCommand::Shutdown { wait_for_exit } = fixture.command;
+            assert!(fixture.json && wait_for_exit);
+            assert_eq!(
+                validate_windows_shutdown_json_args(fixture.json, wait_for_exit)
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::ArgumentConflict,
+            );
+        }
+
+        let fixture = WindowsCliFixture::try_parse_from(["copypaste", "shutdown", "--json"])
+            .expect("ordinary JSON shutdown remains valid");
+        assert!(fixture.json);
+        assert!(matches!(
+            fixture.command,
+            WindowsFixtureCommand::Shutdown {
+                wait_for_exit: false
+            }
+        ));
+        assert!(validate_windows_shutdown_json_args(fixture.json, false).is_ok());
     }
 
     #[test]
