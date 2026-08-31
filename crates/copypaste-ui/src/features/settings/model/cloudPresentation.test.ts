@@ -21,6 +21,7 @@ describe("cloud settings icon presentation", () => {
   it.each([
     ["loading", undefined, false, true, { icon: "cloud", iconOwner: "device" }],
     ["query failure", undefined, true, false, { icon: "alert", iconOwner: "settings" }],
+    ["missing status", undefined, false, false, { icon: "cloud", iconOwner: "settings" }],
     ["not configured", status(), false, false, { icon: "cloud", iconOwner: "settings" }],
     ["signed out", status({ configured: true }), false, false, { icon: "cloudOff", iconOwner: "device" }],
     ["healthy", status({ configured: true, signed_in: true, key_ready: true }), false, false, { icon: "shieldCheck", iconOwner: "device" }],

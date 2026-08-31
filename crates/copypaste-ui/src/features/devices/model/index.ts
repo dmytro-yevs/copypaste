@@ -1,4 +1,5 @@
 export {
+  MAX_PAIRINGS,
   peerIsStalled,
   peerLastSyncAt,
 } from "./peerState";

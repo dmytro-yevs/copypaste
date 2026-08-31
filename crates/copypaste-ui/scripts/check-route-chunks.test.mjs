@@ -11,7 +11,7 @@ import {
   runRouteChunkGate,
 } from "./check-route-chunks.mjs";
 
-function fixture({ android, staticRoutes = false }) {
+function fixture({ android, staticRoutes = false, transitiveStaticRoute = false }) {
   const manifest = {};
   const assets = [];
   for (const route of ROUTE_CHUNK_PREFIXES) {
@@ -40,6 +40,21 @@ function fixture({ android, staticRoutes = false }) {
     imports: staticRoutes ? routeKeys.filter((key) => key.includes("legacy")) : [],
     dynamicImports: staticRoutes ? [] : routeKeys.filter((key) => key.includes("legacy")),
   };
+  if (transitiveStaticRoute) {
+    manifest.shared = {
+      file: "assets/shared-route-edge-a.js",
+      name: "shared-route-edge",
+      imports: ["devices"],
+    };
+    manifest["shared-legacy"] = {
+      file: "assets/shared-route-edge-legacy-a.js",
+      name: "shared-route-edge",
+      imports: ["devices-legacy"],
+    };
+    manifest.app.imports = ["shared"];
+    manifest["app-legacy"].imports = ["shared-legacy"];
+    assets.push("shared-route-edge-a.js", "shared-route-edge-legacy-a.js");
+  }
   assets.push("App-a.js", "App-legacy-a.js");
   if (android) assets.push("style-a.css");
   else assets.push("shared-a.css");
@@ -80,6 +95,11 @@ test("rejects an App graph that statically imports every route", () => {
   const errors = routeChunkErrors(fixture({ android: true, staticRoutes: true }));
   assert.ok(errors.some((error) => error.includes("is not a dynamic import")));
   assert.ok(errors.some((error) => error.includes("is also statically imported")));
+});
+
+test("rejects a route reached through a transitive static App import", () => {
+  const errors = routeChunkErrors(fixture({ android: true, transitiveStaticRoute: true }));
+  assert.ok(errors.some((error) => error.includes("devices is also statically imported")));
 });
 
 test("removes the temporary manifest after a reported topology error", () => {

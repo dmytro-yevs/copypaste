@@ -4,8 +4,17 @@ import { fileURLToPath } from "node:url";
 
 export const ROUTE_CHUNK_PREFIXES = ["capture", "devices", "history", "settings"];
 
-function importedNames(manifest, keys) {
-  return new Set((keys ?? []).map((key) => manifest[key]?.name).filter(Boolean));
+function importedNames(manifest, keys, visited = new Set()) {
+  const names = new Set();
+  for (const key of keys ?? []) {
+    if (visited.has(key)) continue;
+    visited.add(key);
+    const entry = manifest[key];
+    if (!entry) continue;
+    if (entry.name) names.add(entry.name);
+    for (const name of importedNames(manifest, entry.imports, visited)) names.add(name);
+  }
+  return names;
 }
 
 export function routeChunkErrors({ android, assets, indexHtml, manifest }) {

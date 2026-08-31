@@ -3,7 +3,7 @@ import { useState, type ComponentProps, type ReactNode } from "react";
 import { Screen } from "@/components/layout";
 import { BrandMark } from "@/components/shared/BrandMark";
 import { Button } from "@/components/ui";
-import { MAX_PAIRINGS } from "@/features/devices";
+import { MAX_PAIRINGS } from "@/features/devices/model";
 import {
   CaptureArtwork,
   NetworkArtwork,
