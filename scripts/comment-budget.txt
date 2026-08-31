@@ -105,6 +105,5 @@ crates/copypaste-ui/src-tauri/src/commands/transfer.rs
 crates/copypaste-ui/src-tauri/src/lib.rs
 crates/copypaste-ui/src-tauri/src/model.rs
 crates/copypaste-ui/src-tauri/src/service/locate.rs
-crates/copypaste-ui/src-tauri/src/service/mod.rs
 crates/copypaste-ui/src-tauri/src/service/push.rs
 crates/copypaste-ui/src-tauri/src/shell/hotkey.rs
