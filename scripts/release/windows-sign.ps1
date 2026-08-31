@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Prepare", "Validate", "Sign", "Cleanup", "SelfTest")]
+    [ValidateSet("Prepare", "Validate", "Sign", "Verify", "Cleanup", "SelfTest")]
     [string]$Operation = "Sign",
     [string]$File,
     [string]$OutputPfxPath,
@@ -437,6 +437,22 @@ function Get-EmbeddedAuthenticodeSignature(
     return Convert-EmbeddedSignatureCms (& $CmsReader $Target)
 }
 
+function Assert-WindowsSignaturePolicy(
+    [string]$Target,
+    [object]$State,
+    [string]$SignTool,
+    [scriptblock]$ProcessRunner,
+    [scriptblock]$SignatureReader
+) {
+    # /pa proves Windows policy trust only for CA-backed release certificates.
+    $requireTrustedChain = -not (Test-SelfSignedCertificate $State.Certificate)
+    $signature = & $SignatureReader $Target $SignTool $ProcessRunner $requireTrustedChain
+    Assert-AuthenticodeSigner $signature $State.Certificate
+    if ($null -eq $signature.TimeStamperCertificate) {
+        throw "Authenticode signature is missing its RFC 3161 timestamp"
+    }
+}
+
 function Invoke-WindowsSign(
     [string]$Target,
     [scriptblock]$ProcessRunner = { param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
@@ -467,13 +483,36 @@ function Invoke-WindowsSign(
                 "exit $($result.ExitCode)" $result)
         }
 
-        # /pa proves Windows policy trust only for CA-backed release certificates.
-        $requireTrustedChain = -not (Test-SelfSignedCertificate $state.Certificate)
-        $signature = & $SignatureReader $Target $signtool $ProcessRunner $requireTrustedChain
-        Assert-AuthenticodeSigner $signature $state.Certificate
-        if ($null -eq $signature.TimeStamperCertificate) {
-            throw "Authenticode signature is missing its RFC 3161 timestamp"
-        }
+        Assert-WindowsSignaturePolicy $Target $state $signtool $ProcessRunner $SignatureReader
+    } finally {
+        if ($state -and $state.Certificate) { $state.Certificate.Dispose() }
+    }
+}
+
+function Invoke-WindowsVerify(
+    [string]$Target,
+    [scriptblock]$ProcessRunner = { param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
+        Invoke-BoundedProcess $Exe $RunnerArguments $Timeout $Phase $RunnerTarget
+    },
+    [scriptblock]$SigningStateReader = { Get-PreparedSigningState },
+    [scriptblock]$SignToolFinder = { Find-SignTool },
+    [scriptblock]$SignatureReader = {
+        param($Path, $Tool, $Runner, $RequireTrustedChain)
+        Get-EmbeddedAuthenticodeSignature $Path $Tool $Runner `
+            -RequireTrustedChain $RequireTrustedChain
+    }
+) {
+    if ($env:OS -ne "Windows_NT") { throw "Authenticode verification must run on Windows" }
+    if ([string]::IsNullOrWhiteSpace($Target) -or
+        -not (Test-Path -LiteralPath $Target -PathType Leaf)) {
+        throw "File to verify is missing"
+    }
+
+    $state = $null
+    try {
+        $state = & $SigningStateReader
+        $signtool = & $SignToolFinder
+        Assert-WindowsSignaturePolicy $Target $state $signtool $ProcessRunner $SignatureReader
     } finally {
         if ($state -and $state.Certificate) { $state.Certificate.Dispose() }
     }
@@ -602,6 +641,10 @@ function Invoke-SelfTest {
     $sha1Target = "$testPfx.sha1.exe"
     $rsa = [Security.Cryptography.RSA]::Create(2048)
     $certificate = $null
+    $verifyIssuerRsa = $null
+    $verifyLeafRsa = $null
+    $verifyIssuer = $null
+    $verifyLeaf = $null
     try {
         $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
             "CN=CopyPaste signing self-test",
@@ -903,6 +946,132 @@ function Invoke-SelfTest {
                     throw "Invoke-WindowsSign bounded-runner routing self-test failed"
                 }
 
+                $verifyHash = (Get-FileHash -LiteralPath $routingTarget -Algorithm SHA256).Hash
+                $verifyPfxPath = [Environment]::GetEnvironmentVariable(
+                    "WINDOWS_CERTIFICATE_PFX_PATH")
+                $verifyTimestampUrl = [Environment]::GetEnvironmentVariable(
+                    "WINDOWS_SIGNING_TIMESTAMP_URL")
+                $verifyCalls = [Collections.Generic.List[object]]::new()
+                $verifyIssuerRsa = [Security.Cryptography.RSA]::Create(2048)
+                $verifyIssuerRequest = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                    "CN=CopyPaste verification self-test issuer",
+                    $verifyIssuerRsa,
+                    [Security.Cryptography.HashAlgorithmName]::SHA256,
+                    [Security.Cryptography.RSASignaturePadding]::Pkcs1
+                )
+                $verifyIssuerRequest.CertificateExtensions.Add(
+                    [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new(
+                        $true, $false, 0, $true)
+                )
+                $verifyIssuer = $verifyIssuerRequest.CreateSelfSigned(
+                    [DateTimeOffset]::UtcNow.AddMinutes(-1), [DateTimeOffset]::UtcNow.AddMinutes(5))
+                $verifyLeafRsa = [Security.Cryptography.RSA]::Create(2048)
+                $verifyLeafRequest = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                    "CN=CopyPaste verification self-test leaf",
+                    $verifyLeafRsa,
+                    [Security.Cryptography.HashAlgorithmName]::SHA256,
+                    [Security.Cryptography.RSASignaturePadding]::Pkcs1
+                )
+                $verifyLeaf = $verifyLeafRequest.Create(
+                    $verifyIssuer,
+                    [DateTimeOffset]::UtcNow.AddMinutes(-1),
+                    [DateTimeOffset]::UtcNow.AddMinutes(4),
+                    [byte[]](1..16)
+                )
+                Write-Host "PHASE: nonmutating verification routing"
+                $verifyCases = @(
+                    @{ Name = "valid"; Error = $null },
+                    @{ Name = "unsigned"; Error = "Authenticode signature status is not valid" },
+                    @{ Name = "wrong signer"; Error = "Authenticode signer does not match the prepared PFX" },
+                    @{ Name = "missing timestamp"; Error = "Authenticode signature is missing its RFC 3161 timestamp" },
+                    @{ Name = "malformed signature"; Error = "Embedded Authenticode signature contains malformed ASN.1" }
+                )
+                foreach ($case in $verifyCases) {
+                    $verifyCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                        $verifyLeaf.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+                    try {
+                        $verifyState = [pscustomobject]@{
+                            Pfx = "verify-test.pfx"
+                            Password = "verify-password"
+                            TimestampUrl = "http://tsa.invalid.test"
+                            Certificate = $verifyCertificate
+                        }
+                        $verifyStateReader = { $verifyState }.GetNewClosure()
+                        $verifySignatureReader = {
+                            param($Path, $Tool, $Runner, $RequireTrustedChain)
+                            [void](& $Runner $Tool @("verify", "/pa", "/all", "/tw", $Path) `
+                                120000 "SignTool embedded verification" $Path)
+                            if (-not $RequireTrustedChain) {
+                                throw "CA-backed verification unexpectedly skipped trusted-chain policy"
+                            }
+                            if ($case.Name -eq "malformed signature") {
+                                throw "Embedded Authenticode signature contains malformed ASN.1"
+                            }
+                            $signature = [pscustomobject]@{
+                                Status = "Valid"; SignatureType = "Authenticode"
+                                SignerCertificate = $verifyCertificate
+                                TimeStamperCertificate = $certificate
+                            }
+                            if ($case.Name -eq "unsigned") { $signature.Status = "NotSigned" }
+                            if ($case.Name -eq "wrong signer") {
+                                $signature.SignerCertificate = $otherCertificate
+                            }
+                            if ($case.Name -eq "missing timestamp") {
+                                $signature.TimeStamperCertificate = $null
+                            }
+                            return $signature
+                        }.GetNewClosure()
+                        $verifyRunner = {
+                            param($Exe, $RunnerArguments, $Timeout, $Phase, $RunnerTarget)
+                            $verifyCalls.Add([pscustomobject]@{
+                                Executable = $Exe; Arguments = @($RunnerArguments); Timeout = $Timeout
+                                Phase = $Phase; Target = $RunnerTarget
+                            })
+                            [pscustomobject]@{ ExitCode = 0 }
+                        }.GetNewClosure()
+                        $errorMessage = $null
+                        try {
+                            Invoke-WindowsVerify $routingTarget $verifyRunner $verifyStateReader `
+                                { "fake-signtool.exe" } $verifySignatureReader
+                        } catch {
+                            $errorMessage = $_.Exception.Message
+                        }
+                        if ($errorMessage -cne $case.Error) {
+                            throw "Invoke-WindowsVerify $($case.Name) self-test failed: $errorMessage"
+                        }
+                        if ((Get-FileHash -LiteralPath $routingTarget -Algorithm SHA256).Hash -cne $verifyHash) {
+                            throw "Invoke-WindowsVerify $($case.Name) changed its target"
+                        }
+                        $disposed = $false
+                        try {
+                            [void]$verifyCertificate.Export(
+                                [Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+                        } catch {
+                            $disposed = $true
+                        }
+                        if (-not $disposed) {
+                            throw "Invoke-WindowsVerify $($case.Name) did not dispose its certificate"
+                        }
+                    } finally {
+                        $verifyCertificate.Dispose()
+                    }
+                }
+                if ($verifyCalls.Count -ne $verifyCases.Count -or
+                    @($verifyCalls | Where-Object {
+                            $_.Arguments.Count -ne 5 -or $_.Arguments[0] -cne "verify" -or
+                            [string]::Join(" ", $_.Arguments) -cne
+                                "verify /pa /all /tw $routingTarget" -or
+                            $_.Executable -cne "fake-signtool.exe" -or $_.Timeout -ne 120000 -or
+                            $_.Phase -cne "SignTool embedded verification" -or
+                            $_.Target -cne $routingTarget
+                        }).Count -ne 0) {
+                    throw "Invoke-WindowsVerify runner self-test failed"
+                }
+                if ([Environment]::GetEnvironmentVariable("WINDOWS_CERTIFICATE_PFX_PATH") -cne $verifyPfxPath -or
+                    [Environment]::GetEnvironmentVariable("WINDOWS_SIGNING_TIMESTAMP_URL") -cne $verifyTimestampUrl) {
+                    throw "Invoke-WindowsVerify changed prepared signing state"
+                }
+
                 $untimestampedCms = New-SelfTestCms $certificate "2.16.840.1.101.3.4.2.1" `
                     "2.16.840.1.101.3.4.2.1"
                 $untimestampedState = [pscustomobject]@{
@@ -976,6 +1145,10 @@ function Invoke-SelfTest {
         Remove-Item -LiteralPath $testEnvironment -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $catalogTarget -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $sha1Target -Force -ErrorAction SilentlyContinue
+        if ($verifyLeaf) { $verifyLeaf.Dispose() }
+        if ($verifyIssuer) { $verifyIssuer.Dispose() }
+        if ($verifyLeafRsa) { $verifyLeafRsa.Dispose() }
+        if ($verifyIssuerRsa) { $verifyIssuerRsa.Dispose() }
         if ($certificate) { $certificate.Dispose() }
         $rsa.Dispose()
         foreach ($name in $old.Keys) {
@@ -992,6 +1165,7 @@ switch ($Operation) {
         $state.Certificate.Dispose()
     }
     "Sign" { Invoke-WindowsSign $File }
+    "Verify" { Invoke-WindowsVerify $File }
     "Cleanup" {
         $pfx = [Environment]::GetEnvironmentVariable("WINDOWS_CERTIFICATE_PFX_PATH")
         if (-not [string]::IsNullOrWhiteSpace($pfx)) {
