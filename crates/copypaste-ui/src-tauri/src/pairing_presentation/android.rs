@@ -7,6 +7,7 @@ use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{AppHandle, Manager as _, Wry};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
+use super::android_payload::AndroidProgressPayload;
 use super::invite::{decode_native_invite, encode_native_invite};
 use super::{
     NativeAbort, NativePairingUi, NativePresentationOutcome, NativeRefresh, PairingDecision,
@@ -111,7 +112,8 @@ struct InviteArgs<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProgressArgs {
-    state: PairingState,
+    semantics: super::android_payload::AndroidPairingSemantics,
+    copy: super::android_payload::AndroidPairingCopy,
     on_abort: Channel<()>,
 }
 
@@ -185,10 +187,12 @@ impl NativePairingUi for AndroidPairingUi {
             return PairingPresentationState::Presented;
         }
         let on_abort = self.retain_abort_channel();
+        let payload = AndroidProgressPayload::from(progress);
         self.call::<_, PresentationResult>(
             "presentProgress",
             ProgressArgs {
-                state: progress.state,
+                semantics: payload.semantics,
+                copy: payload.copy,
                 on_abort,
             },
         )

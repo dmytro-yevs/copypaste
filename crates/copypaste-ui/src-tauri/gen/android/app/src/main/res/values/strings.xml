@@ -21,16 +21,6 @@
     <string name="pairing_close">Close</string>
     <string name="pairing_dismiss_label">Dismiss pairing dialog</string>
     <string name="pairing_checking_status">Checking pairing status…</string>
-    <string name="pairing_progress_title">Pairing progress</string>
-    <string name="pairing_idle">Pairing is ready.</string>
-    <string name="pairing_waiting">Waiting for the other device…</string>
-    <string name="pairing_handshaking">Connecting securely…</string>
-    <string name="pairing_awaiting_confirmation">Ready to compare security codes.</string>
-    <string name="pairing_confirmed">Paired ✓</string>
-    <string name="pairing_rejected">Pairing was rejected.</string>
-    <string name="pairing_cancelled">Pairing was cancelled.</string>
-    <string name="pairing_timed_out">Pairing timed out.</string>
-    <string name="pairing_failed">Pairing could not be completed.</string>
     <string name="pairing_confirm_instruction">Confirm this code matches the one shown on the other device.</string>
     <string name="pairing_unverified_label">Unverified device details</string>
     <string name="pairing_confirm_responder">A device wants to pair</string>

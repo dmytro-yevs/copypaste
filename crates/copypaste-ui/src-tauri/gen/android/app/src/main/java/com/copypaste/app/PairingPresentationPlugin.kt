@@ -77,10 +77,17 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
     fun presentProgress(invoke: Invoke) {
         val args = invoke.parseArgs(PresentProgressArgs::class.java)
         activity.runOnUiThread {
+            val semantics = args.semantics?.takeIf { it.isKnown() }
+            val copy = args.copy?.takeIf { it.isSafe() }
             invoke.resolve(
                 JSObject().put(
                     "presented",
-                    dialogs.presentProgress(args.state) {
+                    semantics != null && copy != null && dialogs.presentProgress(
+                        semantics.messageId,
+                        copy.title,
+                        copy.detail,
+                        semantics.active,
+                    ) {
                         args.onAbort?.send(JSObject())
                     },
                 ),
@@ -131,14 +138,17 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
         invoke.resolve(result)
     }
 
-    private fun String.withinUtf8Bytes(limit: Int): Boolean =
-        isNotEmpty() && toByteArray(Charsets.UTF_8).size <= limit
-
     private companion object {
         const val MAX_PAYLOAD_BYTES = 512
         const val MAX_CODE_BYTES = 128
     }
 }
+
+private const val MAX_PROGRESS_TITLE_BYTES = 128
+private const val MAX_PROGRESS_DETAIL_BYTES = 512
+
+private fun String.withinUtf8Bytes(limit: Int): Boolean =
+    isNotEmpty() && toByteArray(Charsets.UTF_8).size <= limit
 
 @InvokeArg
 class PresentInviteArgs {
@@ -151,6 +161,40 @@ class PresentInviteArgs {
 
 @InvokeArg
 class PresentProgressArgs {
-    @JvmField var state: String = ""
+    @JvmField var semantics: PairingProgressSemantics? = null
+    @JvmField var copy: PairingProgressCopy? = null
     @JvmField var onAbort: Channel? = null
+}
+
+class PairingProgressSemantics {
+    @JvmField var messageId: String = ""
+    @JvmField var active: Boolean = false
+    @JvmField var terminal: Boolean = false
+    @JvmField var retry: Boolean = false
+
+    fun isKnown(): Boolean = messageId in setOf(
+        "ready",
+        "waiting_for_peer",
+        "securing_connection",
+        "compare_codes",
+        "paired",
+        "rejected",
+        "cancelled",
+        "timed_out",
+        "code_mismatch",
+        "incompatible_version",
+        "unreachable",
+        "busy",
+        "limit",
+        "failed",
+    )
+}
+
+class PairingProgressCopy {
+    @JvmField var title: String = ""
+    @JvmField var detail: String = ""
+
+    fun isSafe(): Boolean =
+        title.withinUtf8Bytes(MAX_PROGRESS_TITLE_BYTES) &&
+            detail.withinUtf8Bytes(MAX_PROGRESS_DETAIL_BYTES)
 }
