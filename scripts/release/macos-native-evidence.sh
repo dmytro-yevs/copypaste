@@ -98,19 +98,29 @@ if [[ "${1:-}" == "--self-test" ]]; then
   }
   mac_capture_state_self_test
   mac_recovery_self_test() {
-    local original_ax mode=delayed library_queries=0 explore_queries=0 presses=0
+    local original_ax mode=delayed library_queries=0 explore_queries=0 presses=0 paced_seconds=0 recovery_trace
     original_ax="$(declare -f mac_ax)"
+    mac_recovery_fixture_clock() {
+      printf '%s\n' "$paced_seconds"
+    }
+    mac_recovery_fixture_pace() {
+      paced_seconds=$((paced_seconds + $1))
+      recovery_trace="${recovery_trace:+$recovery_trace }pace-tick"
+    }
     mac_ax() {
       case "$1" in
         find-safe-role)
           if [[ "$2" == "Library" ]]; then
             library_queries=$((library_queries + 1))
             if [[ "$mode" == delayed && "$library_queries" -gt 1 ]]; then
+              recovery_trace="${recovery_trace:+$recovery_trace }library-success"
               printf 'AXButton\tLibrary\n'
               return 0
             fi
+            recovery_trace="${recovery_trace:+$recovery_trace }library-miss"
           elif [[ "$2" == "Explore first" && "$mode" == delayed ]]; then
             explore_queries=$((explore_queries + 1))
+            recovery_trace="${recovery_trace:+$recovery_trace }explore-find"
             printf 'AXButton\tExplore first\n'
             return 0
           fi
@@ -120,21 +130,24 @@ if [[ "${1:-}" == "--self-test" ]]; then
         press-exact)
           [[ "$2" == "Explore first" && "$mode" == delayed ]] || return 1
           presses=$((presses + 1))
+          recovery_trace="${recovery_trace:+$recovery_trace }explore-press"
           return 0
           ;;
         *) return 97 ;;
       esac
     }
-    mac_recover_onboarding "$out/recovery-delayed.tsv" 2 \
-      && [[ "$presses" == 1 && "$library_queries" -ge 2 && "$explore_queries" == 1 ]] \
+    mac_recover_onboarding "$out/recovery-delayed.tsv" 2 mac_recovery_fixture_pace mac_recovery_fixture_clock \
+      && [[ "$recovery_trace" == "library-miss explore-find explore-press pace-tick library-success" && "$presses" == 1 && "$library_queries" == 2 && "$explore_queries" == 1 && "$paced_seconds" == 1 ]] \
       && ok "delayed onboarding presses Explore first once before Library appears" \
       || bad "delayed onboarding presses Explore first once before Library appears"
     mode=absent
-    if mac_recover_onboarding "$out/recovery-absent.tsv" 1; then
+    paced_seconds=0
+    recovery_trace=""
+    if mac_recover_onboarding "$out/recovery-absent.tsv" 1 mac_recovery_fixture_pace mac_recovery_fixture_clock; then
       bad "absent onboarding controls fail by deadline"
     else
       local recovery_status=$?
-      if [[ "$recovery_status" == 1 ]]; then
+      if [[ "$recovery_status" == 1 && "$paced_seconds" == 1 && "$recovery_trace" == "library-miss pace-tick" ]]; then
         ok "absent onboarding controls fail by deadline"
       else
         bad "absent onboarding controls fail by deadline"
@@ -142,17 +155,18 @@ if [[ "${1:-}" == "--self-test" ]]; then
     fi
     mode=provider-error
     mac_ax() { echo "System Events provider denied request" >&2; return 1; }
-    if mac_recover_onboarding "$out/recovery-error.tsv" 1; then
+    paced_seconds=0
+    if mac_recover_onboarding "$out/recovery-error.tsv" 1 mac_recovery_fixture_pace mac_recovery_fixture_clock; then
       bad "provider errors do not masquerade as absent controls"
     else
       local recovery_status=$?
-      if [[ "$recovery_status" == 2 ]]; then
+      if [[ "$recovery_status" == 2 && "$paced_seconds" == 0 ]]; then
         ok "provider errors do not masquerade as absent controls"
       else
         bad "provider errors do not masquerade as absent controls"
       fi
     fi
-    unset -f mac_ax
+    unset -f mac_ax mac_recovery_fixture_clock mac_recovery_fixture_pace
     eval "$original_ax"
   }
   mac_recovery_self_test
