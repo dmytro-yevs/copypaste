@@ -38,6 +38,10 @@ capture_route_state() { # <state> <navigation label> <heading>
   mac_capture_state "$state_dir"
 }
 
+mac_launch_evidence_app() {
+  open -n -a "$app" --env "COPYPASTE_EVIDENCE_AX=1"
+}
+
 if [[ "${1:-}" == "--self-test" ]]; then
   fixture_dir="$(mktemp -d)"
   trap 'rm -rf "$fixture_dir"' EXIT
@@ -170,6 +174,18 @@ if [[ "${1:-}" == "--self-test" ]]; then
     eval "$original_ax"
   }
   mac_recovery_self_test
+  mac_launcher_self_test() {
+    local observed expected
+    app="$fixture_dir/CopyPaste.app"
+    open() { observed="$(printf '<%s>' "$@")"; }
+    mac_launch_evidence_app
+    expected="<-n><-a><$app><--env><COPYPASTE_EVIDENCE_AX=1>"
+    [[ "$observed" == "$expected" ]] \
+      && ok "installed-app launcher includes the exact AX evidence flag" \
+      || bad "installed-app launcher includes the exact AX evidence flag"
+    unset -f open
+  }
+  mac_launcher_self_test
   mac_press_exact_button() { [[ "$1" == "Library" || "$1" == "Explore first" ]]; }
   mac_wait_safe_role_label() {
     [[ "$1" == "Library" && "$2" == "AXHeading" ]] || return 1
@@ -217,7 +233,7 @@ mac_stop_executable "$app_executable" || {
 "$cli" shutdown >/dev/null 2>&1 || true
 
 start_ms="$(python3 -c 'import time; print(time.time_ns() // 1000000)')"
-open -n -a "$app"
+mac_launch_evidence_app
 app_pid="$(mac_wait_executable_pid "$app_executable" 30)" || {
   echo "CopyPaste did not launch from its bundle executable" >&2
   exit 1
