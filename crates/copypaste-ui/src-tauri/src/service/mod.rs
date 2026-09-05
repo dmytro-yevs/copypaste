@@ -1220,6 +1220,7 @@ mod tests {
             release: Some(wait),
             finished: Some(finished),
         }));
+        let delivery = sup.hold_next_reap_delivery();
 
         let mut drain =
             Box::pin(sup.install_after_update_drain_injected(&backend, |permit| permit));
@@ -1230,9 +1231,10 @@ mod tests {
 
         release.send(()).expect("release owned reap");
         reap_finished.await.expect("owned reap completed");
-        while sup.owned.is_reap_pending_for_test() {
+        while !delivery.finished() {
             tokio::task::yield_now().await;
         }
+        assert!(!delivery.delivered());
         assert_eq!(sup.request_quit(), ExitRequest::Allow);
     }
 
