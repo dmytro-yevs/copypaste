@@ -73,6 +73,10 @@ tap_storage_import() { # <artifact>
     tap_scrolling "Import…" "$1" up
 }
 
+tap_storage_export() { # <artifact>
+    tap_scrolling "Export…" "$1" up
+}
+
 # Four stages open this pane, and every one of them wrote the same three
 # artifacts: run 31634096676 failed at the first stage and published the third
 # stage's screens, so which step had failed was no longer in the evidence.
@@ -285,6 +289,33 @@ storage_import_scroll_fixture_holds() { # <temp>
     )
 }
 
+storage_export_scroll_fixture_holds() { # <temp>
+    (
+        local temp="$1"
+        ui_fixtures "$temp/storage-export-covered.xml" "$temp/storage-export-visible.xml"
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() {
+            [[ "$1" == up ]] || return 1
+            ui_fixture_scroll
+        }
+        sh_() { UI_FIXTURE_TAPS=$((UI_FIXTURE_TAPS + 1)); }
+        tap_storage_export "$temp/storage-export-observed.xml" \
+            && [[ $UI_FIXTURE_SCROLLS -eq 1 && $UI_FIXTURE_TAPS -eq 1 ]]
+    )
+}
+
+storage_export_uncovered_fixture_holds() { # <temp>
+    (
+        local temp="$1"
+        ui_fixtures "$temp/storage-export-visible.xml"
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { ui_fixture_scroll; }
+        sh_() { UI_FIXTURE_TAPS=$((UI_FIXTURE_TAPS + 1)); }
+        tap_storage_export "$temp/storage-export-observed.xml" \
+            && [[ $UI_FIXTURE_SCROLLS -eq 0 && $UI_FIXTURE_TAPS -eq 1 ]]
+    )
+}
+
 storage_clear_scroll_fixture_holds() { # <temp>
     local temp="$1"
     ui_fixtures "$temp/storage-clear-above-fold.xml" \
@@ -348,6 +379,8 @@ self_test_transfer() {
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="false" clickable="true"/></node></hierarchy>' > "$temp/storage-disabled.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" clickable="true"/></node></hierarchy>' > "$temp/storage-missing-enabled.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="CopyPaste" class="android.webkit.WebView" enabled="true" bounds="[0,0][320,640]"/></hierarchy>' > "$temp/blank-webview.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Primary" bounds="[49,548][271,604]" enabled="true"/><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-export-covered.xml"
+    printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Primary" bounds="[49,548][271,604]" enabled="true"/><node text="Export…" bounds="[192,420][291,465]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-export-visible.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Export…" bounds="[192,533][291,578]" enabled="true" clickable="true"/><node text="Import…" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-import-below-fold.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,12][308,640]" enabled="true"><node text="Import…" bounds="[192,420][291,465]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-import-visible.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node text="Storage &amp; history" bounds="[12,0][308,544]" enabled="true"><node text="Clear history" enabled="true" clickable="true"/><node text="Import…" bounds="[191,186][291,231]" enabled="true" clickable="true"/></node></hierarchy>' > "$temp/storage-clear-above-fold.xml"
@@ -392,6 +425,12 @@ self_test_transfer() {
     storage_import_scroll_fixture_holds "$temp" \
         && ok "post-clear import scrolls up and reacquires the below-fold action" \
         || bad "post-clear import scrolls up and reacquires the below-fold action"
+    storage_export_scroll_fixture_holds "$temp" \
+        && ok "export scrolls up once before tapping an action covered by the dock" \
+        || bad "export scrolls up once before tapping an action covered by the dock"
+    storage_export_uncovered_fixture_holds "$temp" \
+        && ok "export taps an already uncovered action without scrolling" \
+        || bad "export taps an already uncovered action without scrolling"
     storage_clear_scroll_fixture_holds "$temp" \
         && ok "clear history scrolls down to its above-viewport action" \
         || bad "clear history scrolls down to its above-viewport action"
@@ -466,7 +505,7 @@ group "Export through DocumentsUI"
 if ! open_storage export; then
     note "the export through the picker" "Storage never opened at export"
     stop_storage_transfer
-elif ! tap_selector "Export…" "$OUT/export-action.xml"; then
+elif ! tap_storage_export "$OUT/export-action.xml"; then
     bad "Storage exposes the export action"
     stop_storage_transfer
 else
