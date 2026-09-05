@@ -554,12 +554,11 @@ jobs:
                    src-tauri/gen/android/gradlew \
                    src-tauri/gen/android/app/build.gradle.kts \
                    src-tauri/gen/android/buildSrc/src/main/java/com/copypaste/app/kotlin/BuildTask.kt \
-                   src-tauri/gen/android/app/src/main/AndroidManifest.xml \
-                   src-tauri/gen/android/app/src/main/aidl/android/content/IOnPrimaryClipChangedListener.aidl; do
+                   src-tauri/gen/android/app/src/main/AndroidManifest.xml; do
             [[ -f "$f" ]] || { echo "::error::$f is missing from the checkout"; exit 1; }
           done
           for k in CapturePlugin IntakeActivity CaptureTileService ShizukuClipboard \
-                   ClipListener CaptureService CaptureNotifications ClipQueue; do
+                   CaptureService CaptureNotifications ClipQueue; do
             f="src-tauri/gen/android/app/src/main/java/com/copypaste/app/${k}.kt"
             [[ -f "$f" ]] || { echo "::error::$f is missing — the Android capture feature would build empty"; exit 1; }
           done
