@@ -23,7 +23,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => ({
 const STOPPED: ServiceState = { state: "stopped" };
 const MATCHING: ServiceState = {
     state: "running",
-    version: "2.0.0-alpha.33",
+    version: "2.0.0-alpha.34",
     matches_app: true,
     ours: true,
 };
