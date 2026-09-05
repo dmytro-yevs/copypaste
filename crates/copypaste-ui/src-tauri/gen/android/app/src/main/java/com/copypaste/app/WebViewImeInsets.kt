@@ -15,12 +15,16 @@ internal object WebViewImeInsets {
         val baseBottomMargin = originalBottomMargin ?: layoutParams.bottomMargin.also {
           originalBottomMargin = it
         }
-        val imeBottomInset = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
+        val systemBarBottomInset = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
+        val visibleImeBottomInset = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
           insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
         } else {
           0
         }
-        val desiredBottomMargin = baseBottomMargin + imeBottomInset
+        val desiredBottomMargin = baseBottomMargin + maxOf(
+          systemBarBottomInset,
+          visibleImeBottomInset,
+        )
 
         if (layoutParams.bottomMargin != desiredBottomMargin) {
           layoutParams.bottomMargin = desiredBottomMargin
