@@ -498,7 +498,7 @@ rm -f "$WIRING"
 
 group "All shipped platforms reach one release page"
 check "publication depends on all shipped-platform qualification" python3 - <<'PY'
-import re, sys, yaml
+import re, shlex, sys, yaml
 jobs = yaml.safe_load(open(".github/workflows/release.yml"))["jobs"]
 missing = [j for j in (
     "version", "supabase-gate", "secret-scan", "pairing-e2e", "macos", "android",
@@ -529,6 +529,26 @@ assert version.get("outputs", {}).get("qualify") == "${{ steps.resolve.outputs.q
 resolver = next(step for step in version["steps"] if step.get("id") == "resolve")
 assert resolver.get("env", {}).get("INPUT_QUALIFY") == "${{ inputs.qualify }}", \
     "resolver does not receive the qualification input"
+ledger_steps = [
+    step for step in jobs["native-parity"]["steps"]
+    if any(
+        tuple(shlex.split(line, comments=True)) == (
+            "python3", "scripts/check-feature-ledger.py", "--require-complete",
+            "--version", "$RELEASE_VERSION",
+        )
+        for line in str(step.get("run", "")).splitlines()
+        if "check-feature-ledger.py" in line
+    )
+]
+assert len(ledger_steps) == 1, "native-parity must run one exact version-bound feature-ledger gate"
+assert "continue-on-error" not in jobs["native-parity"], \
+    "native-parity must not continue after a failed feature-ledger gate"
+assert "if" not in ledger_steps[0], \
+    "native-parity feature-ledger gate must run unconditionally"
+assert "continue-on-error" not in ledger_steps[0], \
+    "native-parity feature-ledger gate must not continue after failure"
+assert ledger_steps[0].get("env", {}).get("RELEASE_VERSION") == "${{ needs.version.outputs.version }}", \
+    "native-parity does not bind feature-ledger completion to the resolved version"
 assert re.search(r'if \[\[ "\$publish" == "true" \]\]; then\s+qualify=true\s+fi', resolver.get("run", "")), \
     "publish must imply qualification"
 download = [s for s in smoke["steps"] if str(s.get("uses", "")).startswith("actions/download-artifact")]
