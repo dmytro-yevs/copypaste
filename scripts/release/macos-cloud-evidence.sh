@@ -120,9 +120,8 @@ launch_app() { # <unconfigured|configured>
 }
 
 open_cloud() {
-    mac_wait_label "Sync" "$OUT/settings.txt" 15 || return 1
-    mac_ax press "Sync" >/dev/null || return 1
-    mac_wait_label "Cloud sync" "$OUT/cloud.txt" 15
+    mac_press_exact_role "Cloud sync" "AXRadioButton" >/dev/null || return 1
+    mac_wait_unique_safe_role_label "Cloud sync" "AXHeading" "$OUT/cloud.txt" 15
 }
 
 expect_label() { # <label> <artifact>
@@ -231,11 +230,59 @@ configured_scenario() {
     capture_state signed-out-again
 }
 
+cloud_panel_selector_self_test() { # <tmp-dir>
+    local selected=no saved_out="$OUT"
+    OUT="$1/cloud-panel"
+    mkdir -p "$OUT"
+
+    osascript() {
+        [[ "$1" == "-" && "$2" == "4242" ]] || return 1
+        case "$3" in
+            press) [[ "$4" == "Sync now" ]] && printf 'ok\n' ;;
+            press-exact-role)
+                [[ "$4" == "Cloud sync" && "${5:-}" == "AXRadioButton" ]] || return 1
+                selected=yes
+                printf 'ok\n'
+                ;;
+            find-unique-safe-role)
+                [[ "$4" == "Cloud sync" && "${5:-}" == "AXHeading" && "$selected" == yes ]] || return 1
+                printf 'AXHeading\tCloud sync\n'
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    mac_set_app_pid 4242
+
+    if mac_press_exact_role "Cloud sync" "AXButton" >/dev/null 2>&1 \
+        || mac_ax press-exact-role "Cloud sync" >/dev/null 2>&1 \
+        || [[ "$selected" != no ]]; then
+        bad "Cloud sync selector rejects wrong or missing roles"
+    else
+        ok "Cloud sync selector rejects wrong or missing roles"
+    fi
+    if mac_ax press "Sync now" >/dev/null \
+        && [[ "$selected" == no ]] \
+        && ! mac_ax find-unique-safe-role "Cloud sync" "AXHeading" > "$OUT/pre-select.txt" 2>&1; then
+        ok "Sync now cannot satisfy Cloud sync selection"
+    else
+        bad "Sync now cannot satisfy Cloud sync selection"
+    fi
+    if open_cloud && [[ "$selected" == yes ]] \
+        && [[ "$(cat "$OUT/cloud.txt")" == $'AXHeading\tCloud sync' ]]; then
+        ok "Cloud sync selector activates and reacquires the Cloud panel"
+    else
+        bad "Cloud sync selector activates and reacquires the Cloud panel"
+    fi
+    unset -f osascript
+    OUT="$saved_out"
+}
+
 if [[ "${1:-}" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
     preference_seed_self_test "$SELF_TEST_TMP"
     mac_ui_self_test "$SELF_TEST_TMP"
+    cloud_panel_selector_self_test "$SELF_TEST_TMP"
     cloud_evidence_self_test "$SELF_TEST_TMP"
     cloud_evidence_summary macOS
     [[ $FAIL -eq 0 ]]
