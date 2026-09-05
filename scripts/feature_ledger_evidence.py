@@ -255,18 +255,29 @@ def release_gate_errors(root):
     except (OSError, yaml.YAMLError) as error:
         return [f"release workflow is not readable YAML: {error}"]
     gate = ((document.get("jobs") or {}).get("native-parity") or {}) if isinstance(document, dict) else {}
+    if "continue-on-error" in gate:
+        return ["release native-parity must not continue after a failed complete-evidence gate"]
     installed = False
-    found = False
+    matches = []
     for step in gate.get("steps") or []:
         for argv in _run_commands(step):
             if _installs_requirements(argv):
                 installed = True
-            if argv == ["python3", "scripts/check-feature-ledger.py", "--require-complete"]:
-                found = True
+            if argv == [
+                "python3", "scripts/check-feature-ledger.py", "--require-complete",
+                "--version", "$RELEASE_VERSION",
+            ]:
+                matches.append(step)
                 if not installed:
                     return ["release feature-ledger gate runs before its declared Python dependencies"]
-    if not found:
-        return ["release native-parity must require complete feature evidence"]
+    if len(matches) != 1:
+        return ["release native-parity must use one exact version-bound complete-evidence gate"]
+    if "if" in matches[0]:
+        return ["release native-parity complete-evidence gate must run unconditionally"]
+    if "continue-on-error" in matches[0]:
+        return ["release native-parity complete-evidence gate must not continue after failure"]
+    if (matches[0].get("env") or {}).get("RELEASE_VERSION") != "${{ needs.version.outputs.version }}":
+        return ["release native-parity must bind the complete-evidence gate to the resolved version"]
     return []
 
 

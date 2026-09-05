@@ -2,6 +2,7 @@ import copy
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import tempfile
 
@@ -55,6 +56,23 @@ def download_destinations(job):
         for step in steps(job)
         if str(step.get("uses") or "").startswith("actions/download-artifact")
     }
+
+
+def exact_ledger_gate_steps(job):
+    expected = (
+        "python3", "scripts/check-feature-ledger.py", "--require-complete",
+        "--version", "$RELEASE_VERSION",
+    )
+    matches = []
+    for step in steps(job):
+        for line in str(step.get("run") or "").splitlines():
+            try:
+                argv = tuple(shlex.split(line, comments=True))
+            except ValueError:
+                continue
+            if argv == expected:
+                matches.append(step)
+    return matches
 
 
 def qualification_contract(release):
@@ -205,6 +223,8 @@ def contract_errors(release, projected_schema=None):
     jobs = release.get("jobs") or {}
     gate = jobs.get("native-parity") or {}
     publish = jobs.get("publish") or {}
+    if "continue-on-error" in gate:
+        errors.append("native parity must not continue after a failed complete-evidence gate")
     if not {"macos", "android-smoke", "windows"} <= set(gate.get("needs") or []):
         errors.append("native parity must wait for all three shipped platforms")
     if not {"native-parity", "windows"} <= set(publish.get("needs") or []):
@@ -221,6 +241,15 @@ def contract_errors(release, projected_schema=None):
         errors.append("native parity must download each qualified product artifact to its own path")
 
     gate_commands = commands(gate)
+    ledger_gate_steps = exact_ledger_gate_steps(gate)
+    if len(ledger_gate_steps) != 1:
+        errors.append("native parity must use one exact version-bound complete-evidence gate")
+    elif "if" in ledger_gate_steps[0]:
+        errors.append("native parity complete-evidence gate must run unconditionally")
+    elif "continue-on-error" in ledger_gate_steps[0]:
+        errors.append("native parity complete-evidence gate must not continue after failure")
+    elif (ledger_gate_steps[0].get("env") or {}).get("RELEASE_VERSION") != "${{ needs.version.outputs.version }}":
+        errors.append("native parity must bind the complete-evidence gate to the resolved version")
     receipt_paths = (
         "artifacts/native-parity/macos/native-evidence.json",
         "artifacts/native-parity/android/native-evidence.json",
@@ -358,6 +387,43 @@ def self_test(release):
             if "--receipt-expectations" in str(step.get("run") or "")
         ).update({"run": "npm run check:native-parity -- --require macos,android,windows"}),
         "native receipts and ledger states",
+    )
+    rejected(
+        "unbound complete-evidence gate fails",
+        lambda value: next(
+            step for step in value["jobs"]["native-parity"]["steps"]
+            if "check-feature-ledger.py" in str(step.get("run") or "")
+        ).update({"run": "python3 scripts/check-feature-ledger.py --require-complete"}),
+        "exact version-bound complete-evidence gate",
+    )
+    rejected(
+        "changed complete-evidence version binding fails",
+        lambda value: next(
+            step for step in value["jobs"]["native-parity"]["steps"]
+            if "check-feature-ledger.py" in str(step.get("run") or "")
+        )["env"].update({"RELEASE_VERSION": "${{ github.ref_name }}"}),
+        "bind the complete-evidence gate to the resolved version",
+    )
+    rejected(
+        "conditional complete-evidence gate fails",
+        lambda value: next(
+            step for step in value["jobs"]["native-parity"]["steps"]
+            if "check-feature-ledger.py" in str(step.get("run") or "")
+        ).update({"if": False}),
+        "must run unconditionally",
+    )
+    rejected(
+        "continuing complete-evidence gate fails",
+        lambda value: next(
+            step for step in value["jobs"]["native-parity"]["steps"]
+            if "check-feature-ledger.py" in str(step.get("run") or "")
+        ).update({"continue-on-error": True}),
+        "must not continue after failure",
+    )
+    rejected(
+        "continuing native-parity job fails",
+        lambda value: value["jobs"]["native-parity"].update({"continue-on-error": True}),
+        "must not continue after a failed complete-evidence gate",
     )
     rejected(
         "missing canonical Android emulator dependency fails",

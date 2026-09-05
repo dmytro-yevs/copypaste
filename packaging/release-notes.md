@@ -9,13 +9,19 @@
 - Makes v2 use only its own database and current contracts, removing retired
   preference, pairing, deep-link, and IPC compatibility paths.
 - Binds native release evidence to the exact commit and artifact, strengthens
-  redaction and Android manifest checks, and requires physical Android evidence.
+  redaction and Android manifest checks, and requires canonical signed-APK
+  emulator evidence.
+- `v2.0.0-alpha.33` carries a one-alpha release-risk acceptance for 58 pinned
+  pending native-evidence states across history, capture, devices,
+  settings/service, and cloud account; those states remain unverified and are
+  not receipt expectations.
 
 ## Not verified on this host
 
 macOS TCC permission prompts, the Android Quick Settings tile add flow, and
 Windows pairing were not exercised on the machine that cut this tag. Treat
-those paths as implemented and CI-covered, not as a live walkthrough.
+those paths as implemented but not verified by the final native evidence, not
+as a live walkthrough or CI-covered behavior.
 
 ## Install
 

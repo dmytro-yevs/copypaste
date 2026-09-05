@@ -60,6 +60,11 @@ receipt producer has not been validated from this Windows recovery environment;
 until a macOS run succeeds, WKWebView remains **NOT VERIFIED IN CI** as recorded
 below.
 
+`v2.0.0-alpha.33` alone has a recorded release-risk acceptance for 58 pending
+ledger states. It does not verify those states, add them to native receipts, or
+change the required macOS, signed-APK emulator, and installed Windows evidence.
+The version-bound exception expires if that exact pending set changes.
+
 ## What an emulator is not
 
 The emulator layer is a Google APIs system image on `ubuntu-24.04`, x86_64,
