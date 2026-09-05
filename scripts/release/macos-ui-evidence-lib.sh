@@ -31,7 +31,7 @@ mac_set_app_pid() { # <pid>
     MAC_APP_PID="$1"
 }
 
-mac_ax() { # <ready|surface|dump|find|press|set|menu-press|enable|find-unique-safe-role|press-exact-role> [label] [role/value]
+mac_ax() { # <ready|surface|dump|find|press|set|menu-press|enable|find-exact-role-candidates|find-unique-safe-role|press-exact-role> [label] [role/value]
     [[ -n "${MAC_APP_PID:-}" ]] || {
         echo "macOS accessibility target PID is unavailable" >&2
         return 1
@@ -99,6 +99,9 @@ on run argv
                 try
                     set roleText to role of elementRef as text
                 end try
+                if actionMode is "find-exact-role-candidates" and nameText is targetLabel then
+                    set end of outputLines to roleText & tab & nameText
+                end if
                 if actionMode is "find-unique-safe-role" or actionMode is "press-exact-role" then
                     if nameText is targetLabel and roleText is inputValue then
                         set end of exactMatches to elementRef
@@ -174,7 +177,7 @@ on run argv
             end if
         end tell
     end tell
-    if actionMode is "dump" or actionMode is "surface" then
+    if actionMode is "dump" or actionMode is "surface" or actionMode is "find-exact-role-candidates" then
         set AppleScript's text item delimiters to linefeed
         return outputLines as text
     end if
@@ -205,10 +208,25 @@ mac_wait_safe_role_label() { # <label> <role> <dump> [timeout]
     return 1
 }
 
+mac_unique_exact_role_label() { # <label> <role>; reads AX role/name rows from stdin
+    local label="$1" role="$2" candidate_role candidate_label extra candidate="" count=0
+    while IFS=$'\t' read -r candidate_role candidate_label extra; do
+        [[ -z "$extra" && "$candidate_role" == "$role" && "$candidate_label" == "$label" ]] || continue
+        candidate="$candidate_role"$'\t'"$candidate_label"
+        ((count += 1))
+    done
+    (( count == 1 )) || return 1
+    printf '%s\n' "$candidate"
+}
+
+mac_find_unique_exact_role_label() { # <label> <role>
+    mac_ax find-exact-role-candidates "$1" "$2" | mac_unique_exact_role_label "$1" "$2"
+}
+
 mac_wait_unique_safe_role_label() { # <label> <role> <dump> [timeout]
     local label="$1" role="$2" dump="$3" timeout="${4:-30}" started="$SECONDS"
     while (( SECONDS - started < timeout )); do
-        mac_ax find-unique-safe-role "$label" "$role" > "$dump" 2>/dev/null && return 0
+        mac_find_unique_exact_role_label "$label" "$role" > "$dump" 2>/dev/null && return 0
         sleep 1
     done
     return 1
@@ -219,7 +237,8 @@ mac_press_exact_button() { # <accessible name>
 }
 
 mac_press_exact_role() { # <accessible name> <AX role>
-    mac_ax press-exact-role "$1" "$2"
+    mac_find_unique_exact_role_label "$1" "$2" >/dev/null \
+        && mac_ax press-exact-role "$1" "$2"
 }
 
 mac_recovery_wall_clock() {
