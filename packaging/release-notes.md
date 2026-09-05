@@ -11,10 +11,10 @@
 - Binds native release evidence to the exact commit and artifact, strengthens
   redaction and Android manifest checks, and requires canonical signed-APK
   emulator evidence.
-- `v2.0.0-alpha.33` carries a one-alpha release-risk acceptance for 58 pinned
-  pending native-evidence states across history, capture, devices,
-  settings/service, and cloud account; those states remain unverified and are
-  not receipt expectations.
+- `v2.0.0-alpha.33` is an immutable failed tag. `v2.0.0-alpha.34` is the same
+  authorized retry, not new product scope: its 58 pinned pending
+  native-evidence states across history, capture, devices, settings/service,
+  and cloud account remain unverified and are not receipt expectations.
 
 ## Not verified on this host
 

@@ -299,7 +299,7 @@ def self_test(release):
             version=version,
             publish=publish,
             qualify=qualify,
-            metadata_version="2.0.0-alpha.33",
+            metadata_version="2.0.0-alpha.34",
         )
         return result.returncode == 0 and values == expected
 
@@ -307,29 +307,29 @@ def self_test(release):
         (
             "tag release publishes and qualifies",
             mode_holds(
-                "push", "v2.0.0-alpha.33", "", "false", "false",
-                {"version": "2.0.0-alpha.33", "publish": "true", "qualify": "true"},
+                "push", "v2.0.0-alpha.34", "", "false", "false",
+                {"version": "2.0.0-alpha.34", "publish": "true", "qualify": "true"},
             ),
         ),
         (
             "publish dispatch implies qualification",
             mode_holds(
-                "workflow_dispatch", "", "v2.0.0-alpha.33", "true", "false",
-                {"version": "2.0.0-alpha.33", "publish": "true", "qualify": "true"},
+                "workflow_dispatch", "", "v2.0.0-alpha.34", "true", "false",
+                {"version": "2.0.0-alpha.34", "publish": "true", "qualify": "true"},
             ),
         ),
         (
             "qualification dispatch remains non-publishing",
             mode_holds(
-                "workflow_dispatch", "", "2.0.0-alpha.33", "false", "true",
-                {"version": "2.0.0-alpha.33", "publish": "false", "qualify": "true"},
+                "workflow_dispatch", "", "2.0.0-alpha.34", "false", "true",
+                {"version": "2.0.0-alpha.34", "publish": "false", "qualify": "true"},
             ),
         ),
         (
             "build-only dispatch skips qualification",
             mode_holds(
-                "workflow_dispatch", "", "2.0.0-alpha.33", "false", "false",
-                {"version": "2.0.0-alpha.33", "publish": "false", "qualify": "false"},
+                "workflow_dispatch", "", "2.0.0-alpha.34", "false", "false",
+                {"version": "2.0.0-alpha.34", "publish": "false", "qualify": "false"},
             ),
         ),
     ))
@@ -341,10 +341,10 @@ def self_test(release):
             release,
             event_name="workflow_dispatch",
             ref_name="",
-            version="2.0.0-alpha.33",
+            version="2.0.0-alpha.34",
             publish=hostile,
             qualify="false",
-            metadata_version="2.0.0-alpha.33",
+            metadata_version="2.0.0-alpha.34",
         )
         fixtures.append((
             "adversarial release mode input fails without execution",
@@ -354,10 +354,10 @@ def self_test(release):
         release,
         event_name="pull_request",
         ref_name="",
-        version="2.0.0-alpha.33",
+        version="2.0.0-alpha.34",
         publish="false",
         qualify="false",
-        metadata_version="2.0.0-alpha.33",
+        metadata_version="2.0.0-alpha.34",
     )
     fixtures.append((
         "unsupported release event fails closed",
