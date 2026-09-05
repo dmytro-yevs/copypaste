@@ -31,7 +31,7 @@ mac_set_app_pid() { # <pid>
     MAC_APP_PID="$1"
 }
 
-mac_ax() { # <ready|surface|dump|find|press|set|menu-press|enable> [label] [value]
+mac_ax() { # <ready|surface|dump|find|press|set|menu-press|enable|find-unique-safe-role|press-exact-role> [label] [role/value]
     [[ -n "${MAC_APP_PID:-}" ]] || {
         echo "macOS accessibility target PID is unavailable" >&2
         return 1
@@ -45,6 +45,7 @@ on run argv
     if (count of argv) > 2 then set targetLabel to item 3 of argv
     if (count of argv) > 3 then set inputValue to item 4 of argv
     set outputLines to {}
+    set exactMatches to {}
     tell application "System Events"
         set processMatches to every process whose unix id is appPid
         if (count of processMatches) is not 1 then error "CopyPaste process is unavailable"
@@ -98,6 +99,11 @@ on run argv
                 try
                     set roleText to role of elementRef as text
                 end try
+                if actionMode is "find-unique-safe-role" or actionMode is "press-exact-role" then
+                    if nameText is targetLabel and roleText is inputValue then
+                        set end of exactMatches to elementRef
+                    end if
+                end if
                 if actionMode is "find-safe-role" and nameText is targetLabel and roleText is inputValue then
                     return roleText & tab & nameText
                 end if
@@ -153,6 +159,19 @@ on run argv
                     end if
                 end if
             end repeat
+            if actionMode is "find-unique-safe-role" or actionMode is "press-exact-role" then
+                if (count of exactMatches) is not 1 then
+                    error "expected one accessible " & inputValue & " named " & targetLabel
+                end if
+                set elementRef to item 1 of exactMatches
+                if actionMode is "find-unique-safe-role" then
+                    return (role of elementRef as text) & tab & (name of elementRef as text)
+                end if
+                try
+                    perform action "AXPress" of elementRef
+                    return "ok"
+                end try
+            end if
         end tell
     end tell
     if actionMode is "dump" or actionMode is "surface" then
@@ -186,8 +205,21 @@ mac_wait_safe_role_label() { # <label> <role> <dump> [timeout]
     return 1
 }
 
+mac_wait_unique_safe_role_label() { # <label> <role> <dump> [timeout]
+    local label="$1" role="$2" dump="$3" timeout="${4:-30}" started="$SECONDS"
+    while (( SECONDS - started < timeout )); do
+        mac_ax find-unique-safe-role "$label" "$role" > "$dump" 2>/dev/null && return 0
+        sleep 1
+    done
+    return 1
+}
+
 mac_press_exact_button() { # <accessible name>
     mac_ax press-exact "$1"
+}
+
+mac_press_exact_role() { # <accessible name> <AX role>
+    mac_ax press-exact-role "$1" "$2"
 }
 
 mac_recovery_wall_clock() {
