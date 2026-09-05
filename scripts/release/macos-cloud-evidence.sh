@@ -231,49 +231,83 @@ configured_scenario() {
 }
 
 cloud_panel_selector_self_test() { # <tmp-dir>
-    local selected=no saved_out="$OUT"
+    local selected=no presses=0 saved_out="$OUT" radio_rows heading_rows
     OUT="$1/cloud-panel"
     mkdir -p "$OUT"
 
-    osascript() {
-        [[ "$1" == "-" && "$2" == "4242" ]] || return 1
-        case "$3" in
-            press) [[ "$4" == "Sync now" ]] && printf 'ok\n' ;;
+    mac_ax() {
+        case "$1" in
+            find-exact-role-candidates)
+                [[ "$2" == "Cloud sync" ]] || return 1
+                case "$3" in
+                    AXRadioButton) printf '%s' "$radio_rows" ;;
+                    AXHeading) printf '%s' "$heading_rows" ;;
+                    *) return 1 ;;
+                esac
+                ;;
             press-exact-role)
-                [[ "$4" == "Cloud sync" && "${5:-}" == "AXRadioButton" ]] || return 1
+                [[ "$2" == "Cloud sync" && "$3" == "AXRadioButton" ]] || return 1
+                ((presses += 1))
                 selected=yes
                 printf 'ok\n'
                 ;;
-            find-unique-safe-role)
-                [[ "$4" == "Cloud sync" && "${5:-}" == "AXHeading" && "$selected" == yes ]] || return 1
-                printf 'AXHeading\tCloud sync\n'
-                ;;
+            press) [[ "$2" == "Sync now" ]] && printf 'ok\n' ;;
             *) return 1 ;;
         esac
     }
-    mac_set_app_pid 4242
 
-    if mac_press_exact_role "Cloud sync" "AXButton" >/dev/null 2>&1 \
-        || mac_ax press-exact-role "Cloud sync" >/dev/null 2>&1 \
-        || [[ "$selected" != no ]]; then
-        bad "Cloud sync selector rejects wrong or missing roles"
+    radio_rows=""
+    if mac_press_exact_role "Cloud sync" "AXRadioButton" >/dev/null 2>&1 || (( presses != 0 )); then
+        bad "Cloud sync selector rejects zero matching radios"
     else
-        ok "Cloud sync selector rejects wrong or missing roles"
+        ok "Cloud sync selector rejects zero matching radios"
     fi
+    radio_rows=$'AXRadioButton\tCloud sync\nAXRadioButton\tCloud sync\n'
+    if mac_press_exact_role "Cloud sync" "AXRadioButton" >/dev/null 2>&1 || (( presses != 0 )); then
+        bad "Cloud sync selector rejects duplicate matching radios"
+    else
+        ok "Cloud sync selector rejects duplicate matching radios"
+    fi
+    radio_rows=$'AXButton\tCloud sync\n'
+    if mac_press_exact_role "Cloud sync" "AXRadioButton" >/dev/null 2>&1 || (( presses != 0 )); then
+        bad "Cloud sync selector rejects wrong-role-only matches without pressing"
+    else
+        ok "Cloud sync selector rejects wrong-role-only matches without pressing"
+    fi
+    radio_rows=$'AXRadioButton\tCloud sync\n'
+    heading_rows=""
+    if mac_press_exact_role "Cloud sync" "AXRadioButton" >/dev/null \
+        && [[ "$selected" == yes && "$presses" == 1 ]] \
+        && ! mac_find_unique_exact_role_label "Cloud sync" "AXHeading" > "$OUT/zero-heading.txt" 2>&1; then
+        ok "Cloud sync selector rejects zero headings after selection"
+    else
+        bad "Cloud sync selector rejects zero headings after selection"
+    fi
+    heading_rows=$'AXHeading\tCloud sync\nAXHeading\tCloud sync\n'
+    if ! mac_find_unique_exact_role_label "Cloud sync" "AXHeading" > "$OUT/duplicate-heading.txt" 2>&1; then
+        ok "Cloud sync selector rejects duplicate headings after selection"
+    else
+        bad "Cloud sync selector rejects duplicate headings after selection"
+    fi
+    selected=no
+    presses=0
+    heading_rows=$'AXHeading\tSync now\n'
     if mac_ax press "Sync now" >/dev/null \
-        && [[ "$selected" == no ]] \
-        && ! mac_ax find-unique-safe-role "Cloud sync" "AXHeading" > "$OUT/pre-select.txt" 2>&1; then
+        && [[ "$selected" == no && "$presses" == 0 ]] \
+        && ! mac_find_unique_exact_role_label "Cloud sync" "AXHeading" > "$OUT/pre-select.txt" 2>&1; then
         ok "Sync now cannot satisfy Cloud sync selection"
     else
         bad "Sync now cannot satisfy Cloud sync selection"
     fi
+    radio_rows=$'AXRadioButton\tCloud sync\n'
+    heading_rows=$'AXHeading\tCloud sync\n'
     if open_cloud && [[ "$selected" == yes ]] \
-        && [[ "$(cat "$OUT/cloud.txt")" == $'AXHeading\tCloud sync' ]]; then
+        && [[ "$presses" == 1 && "$(cat "$OUT/cloud.txt")" == $'AXHeading\tCloud sync' ]]; then
         ok "Cloud sync selector activates and reacquires the Cloud panel"
     else
         bad "Cloud sync selector activates and reacquires the Cloud panel"
     fi
-    unset -f osascript
+    unset -f mac_ax
     OUT="$saved_out"
 }
 
