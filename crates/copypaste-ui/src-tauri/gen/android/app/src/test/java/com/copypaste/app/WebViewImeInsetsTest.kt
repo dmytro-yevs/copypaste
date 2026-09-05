@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class WebViewImeInsetsTest {
   @Test
-  fun imeInsetsResizeAndRestoreTheActualWebViewWithoutChangingSystemBarLayout() {
+  fun bottomInsetsKeepTheActualWebViewAboveTheLargestBottomObstruction() {
     val root = HostLayout(RuntimeEnvironment.getApplication())
     val webView = LayoutWebView(RuntimeEnvironment.getApplication())
     root.addView(
@@ -33,34 +33,86 @@ class WebViewImeInsetsTest {
     layout(root)
     WebViewImeInsets.install(webView)
 
-    dispatchInsets(webView, imeBottom = 0, systemBarBottom = SYSTEM_BAR_BOTTOM)
+    dispatchInsets(
+      webView,
+      imeBottom = 0,
+      imeVisible = false,
+      systemBarBottom = 0,
+      systemBarsVisible = false,
+    )
     layout(root)
     assertEquals(ORIGINAL_BOTTOM_MARGIN, bottomMarginOf(webView))
     assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN, webView.measuredHeight)
 
-    dispatchInsets(webView, imeBottom = IME_BOTTOM, systemBarBottom = SYSTEM_BAR_BOTTOM)
+    dispatchInsets(
+      webView,
+      imeBottom = 0,
+      imeVisible = false,
+      systemBarBottom = SYSTEM_BAR_BOTTOM,
+      systemBarsVisible = true,
+    )
+    layout(root)
+    assertEquals(ORIGINAL_BOTTOM_MARGIN + SYSTEM_BAR_BOTTOM, bottomMarginOf(webView))
+    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - SYSTEM_BAR_BOTTOM, webView.measuredHeight)
+
+    dispatchInsets(
+      webView,
+      imeBottom = 0,
+      imeVisible = false,
+      systemBarBottom = SYSTEM_BAR_BOTTOM,
+      systemBarsVisible = true,
+    )
+    assertFalse(webView.isLayoutRequested)
+    assertEquals(ORIGINAL_BOTTOM_MARGIN + SYSTEM_BAR_BOTTOM, bottomMarginOf(webView))
+
+    dispatchInsets(
+      webView,
+      imeBottom = IME_BOTTOM,
+      imeVisible = true,
+      systemBarBottom = SYSTEM_BAR_BOTTOM,
+      systemBarsVisible = true,
+    )
     layout(root)
     assertEquals(ORIGINAL_BOTTOM_MARGIN + IME_BOTTOM, bottomMarginOf(webView))
     assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - IME_BOTTOM, webView.measuredHeight)
 
-    dispatchInsets(webView, imeBottom = IME_BOTTOM, systemBarBottom = SYSTEM_BAR_BOTTOM)
-    assertFalse(webView.isLayoutRequested)
-    assertEquals(ORIGINAL_BOTTOM_MARGIN + IME_BOTTOM, bottomMarginOf(webView))
+    dispatchInsets(
+      webView,
+      imeBottom = SMALL_IME_BOTTOM,
+      imeVisible = true,
+      systemBarBottom = SYSTEM_BAR_BOTTOM,
+      systemBarsVisible = true,
+    )
+    layout(root)
+    assertEquals(ORIGINAL_BOTTOM_MARGIN + SYSTEM_BAR_BOTTOM, bottomMarginOf(webView))
+    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - SYSTEM_BAR_BOTTOM, webView.measuredHeight)
 
-    dispatchInsets(webView, imeBottom = 0, systemBarBottom = SYSTEM_BAR_BOTTOM)
+    dispatchInsets(
+      webView,
+      imeBottom = 0,
+      imeVisible = false,
+      systemBarBottom = 0,
+      systemBarsVisible = false,
+    )
     layout(root)
     assertEquals(ORIGINAL_BOTTOM_MARGIN, bottomMarginOf(webView))
     assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN, webView.measuredHeight)
   }
 
-  private fun dispatchInsets(webView: WebView, imeBottom: Int, systemBarBottom: Int) {
-    val imeVisible = imeBottom > 0
+  private fun dispatchInsets(
+    webView: WebView,
+    imeBottom: Int,
+    imeVisible: Boolean,
+    systemBarBottom: Int,
+    systemBarsVisible: Boolean,
+  ) {
     val insets = WindowInsetsCompat.Builder()
       .setInsets(
         WindowInsetsCompat.Type.systemBars(),
         Insets.of(0, 0, 0, systemBarBottom),
       )
       .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, imeBottom))
+      .setVisible(WindowInsetsCompat.Type.systemBars(), systemBarsVisible)
       .setVisible(WindowInsetsCompat.Type.ime(), imeVisible)
       .build()
 
@@ -126,6 +178,7 @@ class WebViewImeInsetsTest {
     const val ROOT_HEIGHT = 640
     const val ORIGINAL_BOTTOM_MARGIN = 12
     const val SYSTEM_BAR_BOTTOM = 24
+    const val SMALL_IME_BOTTOM = 16
     const val IME_BOTTOM = 240
   }
 }
