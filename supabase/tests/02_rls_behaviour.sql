@@ -38,10 +38,11 @@ set local role authenticated;
 -- Exactly the column list the client sends: no `user_id`, and `deleted` always
 -- explicit (manifest 05 T-5).
 insert into public.clipboard_items
-    (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+    (item_id, ciphertext, nonce, content_type, source_app_bundle_id,
+     source_app_name, created_at, deleted, origin_device_id, signature)
 values
-    ('alice-1', 'Y2lwaGVy', 'bm9uY2U=', 'text', 1700000000000, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA='),
-    ('alice-2', 'Y2lwaGVy', 'bm9uY2U=', 'text', 1700000000001, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
+    ('alice-1', 'Y2lwaGVy', 'bm9uY2U=', 'text', 'dev.copypaste.capture', 'Capture', 1700000000000, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA='),
+    ('alice-2', 'Y2lwaGVy', 'bm9uY2U=', 'text', null, null, 1700000000001, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
 
 do $$
 begin
@@ -56,13 +57,16 @@ $$;
 -- `?on_conflict=user_id,item_id` + `Prefer: resolution=merge-duplicates` into
 -- this statement. Replaying it must be a no-op, not a conflict.
 insert into public.clipboard_items
-    (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+    (item_id, ciphertext, nonce, content_type, source_app_bundle_id,
+     source_app_name, created_at, deleted, origin_device_id, signature)
 values
-    ('alice-1', 'bmV3ZXI=', 'bm9uY2Uy', 'text', 1700000000002, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=')
+    ('alice-1', 'bmV3ZXI=', 'bm9uY2Uy', 'text', 'com.example.Editor', 'Editor', 1700000000002, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=')
 on conflict (user_id, item_id) do update set
     ciphertext       = excluded.ciphertext,
     nonce            = excluded.nonce,
     content_type     = excluded.content_type,
+    source_app_bundle_id = excluded.source_app_bundle_id,
+    source_app_name   = excluded.source_app_name,
     created_at       = excluded.created_at,
     deleted          = excluded.deleted,
     origin_device_id = excluded.origin_device_id,
@@ -75,6 +79,10 @@ begin
     end if;
     if (select created_at from public.clipboard_items where item_id = 'alice-1') <> 1700000000002 then
         raise exception 'the upsert did not overwrite the merged columns';
+    end if;
+    if (select source_app_bundle_id from public.clipboard_items where item_id = 'alice-1') <> 'com.example.Editor'
+       or (select source_app_name from public.clipboard_items where item_id = 'alice-1') <> 'Editor' then
+        raise exception 'the upsert did not overwrite populated source metadata';
     end if;
 end
 $$;
