@@ -289,22 +289,24 @@ impl OwnedChild {
                     Err(std::io::Error::other("reap panicked"))
                 }
             };
-            pending.store(false, Ordering::SeqCst);
-            reap_finished.notify_one();
-            if sent
+            let delivered = sent
                 .send(ReapCompletion {
                     result: Some(result),
                     reservation,
                 })
-                .is_ok()
-            {
-                #[cfg(test)]
+                .is_ok();
+            pending.store(false, Ordering::SeqCst);
+            reap_finished.notify_one();
+            #[cfg(test)]
+            if delivered {
                 if let Some(barrier) = delivery {
                     barrier.delivered.store(true, Ordering::SeqCst);
                     let _ = barrier.release.recv();
                     barrier.finished.store(true, Ordering::SeqCst);
                 }
             }
+            #[cfg(not(test))]
+            let _ = delivered;
         });
         BeginReap::Started(received)
     }
