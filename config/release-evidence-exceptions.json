@@ -2,7 +2,7 @@
   "schema_version": 1,
   "exceptions": [
     {
-      "version": "2.0.0-alpha.33",
+      "version": "2.0.0-alpha.34",
       "authorized_on": "2026-09-05",
       "decision": "one-alpha release risk acceptance",
       "scope": "completion gate only; pending states remain unverified and excluded from receipt expectations",
