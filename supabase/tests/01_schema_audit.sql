@@ -196,8 +196,33 @@ $$;
 
 do $$
 declare
-    writable text;
+    expected text[] := array[
+        'INSERT(ciphertext)', 'INSERT(content_type)', 'INSERT(created_at)',
+        'INSERT(deleted)', 'INSERT(item_id)', 'INSERT(nonce)',
+        'INSERT(origin_device_id)', 'INSERT(payload_metadata)',
+        'INSERT(signature)', 'INSERT(source_app_bundle_id)',
+        'INSERT(source_app_name)', 'UPDATE(ciphertext)',
+        'UPDATE(content_type)', 'UPDATE(created_at)', 'UPDATE(deleted)',
+        'UPDATE(item_id)', 'UPDATE(nonce)', 'UPDATE(origin_device_id)',
+        'UPDATE(payload_metadata)', 'UPDATE(signature)',
+        'UPDATE(source_app_bundle_id)', 'UPDATE(source_app_name)'
+    ];
+    writable text[];
 begin
+    -- The two source fields are sent even when null. A column-level omission
+    -- therefore turns a PostgREST upsert into a 403 before RLS can run.
+    select array_agg(format('%s(%s)', privilege_type, column_name)
+                     order by privilege_type, column_name)
+      into writable
+      from information_schema.role_column_grants
+     where table_schema = 'public' and table_name = 'clipboard_items'
+       and grantee = 'authenticated'
+       and privilege_type in ('INSERT', 'UPDATE');
+    if writable is distinct from expected then
+        raise exception 'authenticated writable columns drifted: expected %, found %',
+            expected, writable;
+    end if;
+
     -- Server-assigned columns must not be writable by the client, or the
     -- retention order can be forged (manifest 05 §5.1 row 4a).
     select string_agg(distinct format('%s(%s)', privilege_type, column_name), ', ')
