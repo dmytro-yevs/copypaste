@@ -289,6 +289,12 @@ cloud_panel_selector_self_test() { # <tmp-dir>
     else
         bad "Cloud sync selector rejects duplicate headings after selection"
     fi
+    heading_rows=$'AXButton\tCloud sync\n'
+    if ! mac_find_unique_exact_role_label "Cloud sync" "AXHeading" > "$OUT/wrong-role-heading.txt" 2>&1; then
+        ok "Cloud sync selector rejects wrong-role-only headings after selection"
+    else
+        bad "Cloud sync selector rejects wrong-role-only headings after selection"
+    fi
     selected=no
     presses=0
     heading_rows=$'AXHeading\tSync now\n'
