@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import copy
+import hashlib
 import json
 import pathlib
 import re
@@ -25,6 +26,7 @@ from feature_ledger_evidence import (
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "docs/feature-ledger.json"
 LEDGER_SCHEMA = ROOT / "docs/feature-ledger.schema.json"
+EXCEPTION_CONFIG = ROOT / "config/release-evidence-exceptions.json"
 COMMAND_INVENTORY = ROOT / "crates/copypaste-ui/src/generated/ui-command-inventory.json"
 FORBIDDEN = re.compile(r"\b(?:todo|tbd|waiv(?:e|ed|er)|placeholder)\b", re.I)
 CLOUD_STATES = {"unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"}
@@ -47,6 +49,13 @@ REQUIRED_RELEASE = {
     "release-windows-native-evidence",
 }
 TEST_RUNNERS = {"cargo", "npm", "python", "python3", "pwsh", "bash", "./gradlew"}
+ALPHA33_EXCEPTION_VERSION = "2.0.0-alpha.33"
+ALPHA33_EXCEPTION_AUTHORIZED_ON = "2026-09-05"
+ALPHA33_EXCEPTION_DECISION = "one-alpha release risk acceptance"
+ALPHA33_EXCEPTION_SCOPE = "completion gate only; pending states remain unverified and excluded from receipt expectations"
+ALPHA33_PENDING_COUNT = 58
+ALPHA33_PENDING_DIGEST = "e28340bb48185621683f9e0338ff0d081bf9402f936e3452f26a924db472dfda"
+PENDING_STATE_ID = re.compile(r"[a-z0-9][a-z0-9_-]*/(?:android|macos|windows)/[a-z0-9][a-z0-9_-]*\Z")
 
 
 def fail(message):
@@ -322,6 +331,57 @@ def platform_errors(feature, root=ROOT, require_complete=False, uploads=None):
     return errors, pending
 
 
+def release_exception(version, pending, config_file=EXCEPTION_CONFIG):
+    if version != ALPHA33_EXCEPTION_VERSION:
+        return False, []
+    try:
+        config = json.loads(config_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return False, [f"release evidence exception config is unreadable: {error}"]
+    if not isinstance(config, dict) or set(config) != {"schema_version", "exceptions"}:
+        return False, ["release evidence exception config has an invalid envelope"]
+    exceptions = config.get("exceptions")
+    if config.get("schema_version") != 1 or not isinstance(exceptions, list) or len(exceptions) != 1:
+        return False, ["release evidence exception config must contain one current exception"]
+    exception = exceptions[0]
+    required = {
+        "version", "authorized_on", "decision", "scope", "pending_state_count",
+        "pending_state_digest_sha256", "pending_states",
+    }
+    if not isinstance(exception, dict) or set(exception) != required:
+        return False, ["release evidence exception has an invalid contract"]
+    states = exception.get("pending_states")
+    errors = []
+    if exception.get("version") != ALPHA33_EXCEPTION_VERSION:
+        errors.append("release evidence exception must name only 2.0.0-alpha.33")
+    if exception.get("authorized_on") != ALPHA33_EXCEPTION_AUTHORIZED_ON:
+        errors.append("release evidence exception must pin its authorization date")
+    if exception.get("decision") != ALPHA33_EXCEPTION_DECISION:
+        errors.append("release evidence exception must pin its one-alpha decision")
+    if exception.get("scope") != ALPHA33_EXCEPTION_SCOPE:
+        errors.append("release evidence exception must pin its completion-only scope")
+    if exception.get("pending_state_count") != ALPHA33_PENDING_COUNT:
+        errors.append("release evidence exception must pin 58 pending states")
+    if exception.get("pending_state_digest_sha256") != ALPHA33_PENDING_DIGEST:
+        errors.append("release evidence exception must pin the approved pending-state digest")
+    if (
+        not isinstance(states, list)
+        or any(not isinstance(state, str) or not PENDING_STATE_ID.fullmatch(state) for state in states)
+        or states != sorted(states)
+        or len(states) != len(set(states))
+    ):
+        errors.append("release evidence exception states must be unique sorted feature/platform/state IDs")
+        states = []
+    digest = hashlib.sha256(("\n".join(states) + "\n").encode()).hexdigest()
+    if len(states) != ALPHA33_PENDING_COUNT or digest != ALPHA33_PENDING_DIGEST:
+        errors.append("release evidence exception state set is stale")
+    if not pending:
+        errors.append("release evidence exception remains after pending evidence reaches zero")
+    if sorted(pending) != states:
+        errors.append("release evidence exception does not exactly match pending evidence")
+    return not errors, errors
+
+
 def self_test():
     def inventory_fails(document):
         try:
@@ -460,7 +520,9 @@ def self_test():
             + "  native-parity:\n"
             + "    steps:\n"
             + "      - run: python3 -m pip install --requirement requirements-ci.txt\n"
-            + "      - run: python3 scripts/check-feature-ledger.py --require-complete\n",
+            + "      - env:\n"
+            + "          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n"
+            + "        run: python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"\n",
             encoding="utf-8",
         )
         def visual_state(platform, state="ready"):
@@ -602,6 +664,48 @@ def self_test():
         del probe["performance"]["windows"]
         checks.append(("missing Windows performance record fails", platform_rejects(probe, "android, macos, and windows")))
         checks.append(("release requires complete feature evidence", not release_gate_errors(root)))
+        workflow_source = workflow.read_text(encoding="utf-8")
+        workflow.write_text(
+            workflow_source.replace(
+                "        run: python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"\n",
+                "        run: python3 scripts/check-feature-ledger.py --require-complete\n",
+            ),
+            encoding="utf-8",
+        )
+        checks.append(("release evidence gate rejects an unbound version", bool(release_gate_errors(root))))
+        workflow.write_text(
+            workflow_source.replace(
+                "RELEASE_VERSION: ${{ needs.version.outputs.version }}",
+                "RELEASE_VERSION: ${{ github.ref_name }}",
+            ),
+            encoding="utf-8",
+        )
+        checks.append(("release evidence gate rejects a changed version binding", bool(release_gate_errors(root))))
+        workflow.write_text(
+            workflow_source.replace(
+                "      - env:\n          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n",
+                "      - if: false\n        env:\n          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n",
+            ),
+            encoding="utf-8",
+        )
+        checks.append(("release evidence gate rejects a conditional step", bool(release_gate_errors(root))))
+        workflow.write_text(
+            workflow_source.replace(
+                "  native-parity:\n",
+                "  native-parity:\n    continue-on-error: true\n",
+            ),
+            encoding="utf-8",
+        )
+        checks.append(("release evidence gate rejects a continuing job", bool(release_gate_errors(root))))
+        workflow.write_text(
+            workflow_source.replace(
+                "      - env:\n          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n",
+                "      - continue-on-error: true\n        env:\n          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n",
+            ),
+            encoding="utf-8",
+        )
+        checks.append(("release evidence gate rejects a continuing step", bool(release_gate_errors(root))))
+        workflow.write_text(workflow_source, encoding="utf-8")
         nightly = root / ".github/workflows/native-nightly.yml"
         nightly.write_text(
             "jobs:\n  ledger:\n    steps:\n      - run: python3 scripts/check-feature-ledger.py\n",
@@ -620,9 +724,9 @@ def self_test():
         checks.append(("installed workflow ledger dependencies pass", not ledger_dependency_errors(root)))
         workflow.write_text(
             workflow.read_text(encoding="utf-8").replace(
-                "      - run: python3 scripts/check-feature-ledger.py --require-complete\n",
-                "      # run: python3 scripts/check-feature-ledger.py --require-complete\n"
-                "      - run: echo 'python3 scripts/check-feature-ledger.py --require-complete'\n",
+                "        run: python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"\n",
+                "        # run: python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"\n"
+                "        run: echo 'python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"'\n",
             ),
             encoding="utf-8",
         )
@@ -756,6 +860,51 @@ def self_test():
     except ValueError as error:
         duplicate_paths_fail = "reuses an artifact path" in str(error)
     checks.append(("receipt expectations reject reused artifact paths", duplicate_paths_fail))
+    exception_config = json.loads(EXCEPTION_CONFIG.read_text(encoding="utf-8"))
+    exception_states = exception_config["exceptions"][0]["pending_states"]
+    allowed, errors = release_exception(ALPHA33_EXCEPTION_VERSION, exception_states)
+    checks.append(("the exact alpha.33 pending set is the only accepted exception", allowed and not errors))
+    for version, label in ((None, "an absent version"), ("2.0.0-alpha.34", "the next alpha"), ("2.0.0", "a stable version")):
+        allowed, _ = release_exception(version, exception_states)
+        checks.append((f"{label} cannot use the alpha.33 exception", not allowed))
+    allowed, errors = release_exception(
+        ALPHA33_EXCEPTION_VERSION, exception_states + ["history/windows/history-ui"]
+    )
+    checks.append(("an added pending state invalidates the alpha.33 exception", not allowed and bool(errors)))
+    allowed, errors = release_exception(ALPHA33_EXCEPTION_VERSION, exception_states[1:])
+    checks.append(("a missing pending state invalidates the alpha.33 exception", not allowed and bool(errors)))
+    allowed, errors = release_exception(ALPHA33_EXCEPTION_VERSION, [])
+    checks.append(("the alpha.33 exception expires when pending evidence reaches zero", not allowed and bool(errors)))
+    before_exception_tokens = receipt_expectation_tokens(receipt_fixture, {
+        "android-evidence": [{"roots": [pathlib.PurePosixPath("artifacts/android")]}],
+    })
+    release_exception(ALPHA33_EXCEPTION_VERSION, exception_states)
+    after_exception_tokens = receipt_expectation_tokens(receipt_fixture, {
+        "android-evidence": [{"roots": [pathlib.PurePosixPath("artifacts/android")]}],
+    })
+    checks.append(("the alpha.33 exception does not alter receipt expectations", before_exception_tokens == after_exception_tokens))
+    with tempfile.TemporaryDirectory() as directory:
+        missing = pathlib.Path(directory) / "missing-exceptions.json"
+        malformed = pathlib.Path(directory) / "exceptions.json"
+        malformed.write_text("{}", encoding="utf-8")
+        for version, label, config_file in (
+            ("2.0.0-alpha.34", "the next alpha", missing),
+            ("2.0.0", "a stable release", malformed),
+        ):
+            allowed, errors = release_exception(version, [], config_file)
+            checks.append((
+                f"{label} with complete evidence ignores the retired alpha.33 config",
+                not allowed and not errors,
+            ))
+        allowed, errors = release_exception(ALPHA33_EXCEPTION_VERSION, exception_states, missing)
+        checks.append(("a missing alpha.33 exception config fails closed", not allowed and bool(errors)))
+        allowed, errors = release_exception(ALPHA33_EXCEPTION_VERSION, exception_states, malformed)
+        checks.append(("a malformed alpha.33 exception config fails closed", not allowed and bool(errors)))
+        allowed, errors = release_exception("2.0.0-alpha.34", exception_states, missing)
+        checks.append((
+            "the next alpha leaves pending evidence for strict completion failure",
+            not allowed and not errors,
+        ))
     for description, held in checks:
         print(f"{'PASS' if held else 'FAIL'}|self-test: {description}|")
     return 0 if all(held for _, held in checks) else 1
@@ -764,11 +913,23 @@ def self_test():
 def main():
     if "--self-test" in sys.argv:
         return self_test()
-    allowed_arguments = {"--require-complete", "--receipt-expectations"}
-    unknown_arguments = set(sys.argv[1:]) - allowed_arguments
-    if unknown_arguments:
-        return fail("unknown arguments: " + ", ".join(sorted(unknown_arguments)))
-    require_complete = "--require-complete" in sys.argv
+    arguments = sys.argv[1:]
+    require_complete = "--require-complete" in arguments
+    receipt_expectations = "--receipt-expectations" in arguments
+    version = None
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument in {"--require-complete", "--receipt-expectations"}:
+            index += 1
+            continue
+        if argument == "--version" and index + 1 < len(arguments) and version is None:
+            version = arguments[index + 1]
+            index += 2
+            continue
+        return fail(f"unknown or malformed argument: {argument}")
+    if version is not None and not require_complete:
+        return fail("--version requires --require-complete")
     raw = LEDGER.read_text(encoding="utf-8")
     if FORBIDDEN.search(raw):
         return fail("completion records may not contain TODOs, waivers, or placeholders")
@@ -805,7 +966,7 @@ def main():
             errors.extend(feature_shape_errors(feature))
             native, feature_pending = platform_errors(
                 feature,
-                require_complete=require_complete,
+                require_complete=require_complete and version is None,
                 uploads=uploads,
             )
             errors.extend(native)
@@ -816,6 +977,12 @@ def main():
             if feature_id == "cloud-account":
                 errors.extend(cloud_errors(feature))
 
+    if require_complete and version is not None:
+        exception_allowed, exception_errors = release_exception(version, pending)
+        errors.extend(exception_errors)
+        if pending and not exception_allowed:
+            errors.append("release evidence is pending: " + ", ".join(sorted(pending)))
+
     errors.extend(contract_errors(shipped, features))
     receipt_tokens = []
     try:
@@ -824,7 +991,7 @@ def main():
         errors.append(str(error))
     if errors:
         return fail("\nfeature-ledger: ".join(errors))
-    if "--receipt-expectations" in sys.argv:
+    if receipt_expectations:
         for token in receipt_tokens:
             print(token)
         return 0
