@@ -190,10 +190,17 @@ mac_press_exact_button() { # <accessible name>
     mac_ax press-exact "$1"
 }
 
-mac_recover_onboarding() { # <safe probe artifact> [timeout]
-    local probe="$1" timeout="${2:-30}" error="${1}.err" started="$SECONDS" pressed=no
+mac_recovery_wall_clock() {
+    printf '%s\n' "$SECONDS"
+}
+
+mac_recover_onboarding() { # <safe probe artifact> [timeout] [pace] [clock]
+    local probe="$1" timeout="${2:-30}" pace="${3:-sleep}" clock="${4:-mac_recovery_wall_clock}" error="${1}.err" started now pressed=no
     mkdir -p "$(dirname "$probe")"
-    while (( SECONDS - started < timeout )); do
+    started="$("$clock")"
+    while :; do
+        now="$("$clock")"
+        (( now - started < timeout )) || break
         if mac_ax find-safe-role "Library" "AXButton" > "$probe" 2> "$error"; then
             return 0
         elif ! grep -Fq "no accessible element named" "$error"; then
@@ -207,7 +214,7 @@ mac_recover_onboarding() { # <safe probe artifact> [timeout]
                 return 2
             fi
         fi
-        sleep 1
+        "$pace" 1
     done
     return 1
 }
