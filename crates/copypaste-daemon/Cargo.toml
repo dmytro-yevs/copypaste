@@ -99,6 +99,8 @@ dev-ephemeral-key = ["copypaste-core/dev-ephemeral-key"]
 # Compile the watched-file clipboard source for isolated demos. It selects no
 # platform backend and is never enabled by product builds.
 dev-fake-clipboard = []
+# Only the macOS cloud-evidence sidecar may admit loopback plaintext.
+cloud-evidence = ["copypaste-cloud/test-endpoints"]
 
 # The pipe's access list. These maintained wrappers own token/SID querying,
 # SDDL memory and listener instance creation.

@@ -97,6 +97,105 @@ def shell_function_body(source, name):
     return match.group(1) if match else ""
 
 
+CLOUD_EVIDENCE_FEATURE = 'cloud-evidence = ["copypaste-cloud/test-endpoints"]'
+
+
+def default_features_enable_cloud_evidence(cargo_toml):
+    in_features = False
+    for line in cargo_toml.splitlines():
+        stripped = line.split("#", 1)[0].strip()
+        if stripped == "[features]":
+            in_features = True
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_features = False
+            continue
+        if in_features and stripped.startswith("default") and "cloud-evidence" in stripped:
+            return True
+    return False
+
+
+def production_build_omits_cloud_evidence(*sources):
+    tokens = ("--features cloud-evidence", "cloud-evidence-daemon", "COPYPASTE_DAEMON_BIN")
+    return not any(token in source for source in sources for token in tokens)
+
+
+def _if_else_branches(body):
+    parts = re.split(r"^\s*else\s*$", body, maxsplit=1, flags=re.M)
+    if len(parts) != 2:
+        return "", ""
+    return parts[0], parts[1]
+
+
+def evidence_sidecar_override_holds(script):
+    ensure = shell_function_body(script, "ensure_cloud_evidence_daemon")
+    opener = shell_function_body(script, "open_cloud_evidence_app")
+    launch = shell_function_body(script, "launch_app")
+    configured_sc = shell_function_body(script, "configured_scenario")
+    if not all((ensure, opener, launch, configured_sc)):
+        return False
+    if "open_cloud_evidence_app" not in launch:
+        return False
+    if "ensure_cloud_evidence_daemon" not in configured_sc:
+        return False
+    configured, unconfigured = _if_else_branches(opener)
+    return (
+        "--features cloud-evidence" in ensure
+        and "--target-dir" in ensure
+        and "cloud-evidence-daemon" in ensure
+        and "COPYPASTE_CLOUD_EVIDENCE_DAEMON" in ensure
+        and "COPYPASTE_DAEMON_BIN=$DAEMON_SIDECAR" in configured
+        and "http://127.0.0.1:$STUB_PORT" in configured
+        and "COPYPASTE_DAEMON_BIN=$DAEMON_SIDECAR" not in unconfigured
+        and "-u COPYPASTE_DAEMON_BIN" in unconfigured
+    )
+
+
+def _fn_region(source, name, stop):
+    start = source.find(name)
+    if start < 0:
+        return ""
+    region = source[start:]
+    if stop:
+        cut = region.find(stop)
+        if cut > 0:
+            region = region[:cut]
+    return region
+
+
+def daemon_hosted_config_has_no_tls_escape(cli_rs, cargo_toml, cloud_mod):
+    if CLOUD_EVIDENCE_FEATURE not in cargo_toml:
+        return False
+    if default_features_enable_cloud_evidence(cargo_toml):
+        return False
+    if not (
+        'cfg(feature = "cloud-evidence")' in cli_rs
+        and "new_loopback" in cli_rs
+        and 'cfg(not(feature = "cloud-evidence"))' in cli_rs
+        and "CloudConfig::new(" in cli_rs
+    ):
+        return False
+    overlay = _fn_region(cloud_mod, "fn overlay_persisted_endpoint", "fn set_custom_endpoint")
+    custom = _fn_region(cloud_mod, "fn set_custom_endpoint", "/// Tell the cloud")
+    if not overlay or not custom:
+        return False
+    if "new_loopback" in overlay or "new_loopback" in custom:
+        return False
+    return "CloudConfig::new(" in overlay and "CloudConfig::new(" in custom
+
+
+def unconfigured_status_latency_window(script):
+    body = shell_function_body(script, "unconfigured_scenario")
+    start = body.find('started="$(now_ms)"')
+    open_cloud = body.find("open_cloud")
+    expect = body.find('expect_label "Not configured"')
+    return (
+        -1 not in (start, open_cloud, expect)
+        and open_cloud < start < expect
+        and 'unconfigured-status "$elapsed" 30000' in body
+    )
+
+
 def adb_guard_violations(source, allowed_raw_adb=0):
     words = shell_words(source)
     raw = [(line, word) for word, line in words if word == "adb"]
@@ -1259,6 +1358,26 @@ rec('cloud-evidence = ["copypaste-cloud/test-endpoints"]' in ui_cargo
     and 'cfg(feature = "cloud-evidence")' in embedded_cloud
     and "CloudConfig::new_loopback" in embedded_cloud,
     "the UI cloud evidence feature selects the guarded loopback constructor")
+daemon_cargo = pathlib.Path("crates/copypaste-daemon/Cargo.toml").read_text()
+daemon_cli = pathlib.Path("crates/copypaste-daemon/src/cli.rs").read_text()
+daemon_cloud_mod = pathlib.Path("crates/copypaste-daemon/src/cloud/mod.rs").read_text()
+macos_cloud = pathlib.Path("scripts/release/macos-cloud-evidence.sh").read_text()
+macos_app_build = pathlib.Path("scripts/release/build-macos-app.sh").read_text()
+macos_cli_build = pathlib.Path("scripts/release/build-cli-tarball.sh").read_text()
+macos_dmg = pathlib.Path("scripts/release/make-dmg.sh").read_text()
+macos_job_body = "\n".join(step.get("run") or "" for step in steps(release_jobs.get("macos") or {}))
+rec(CLOUD_EVIDENCE_FEATURE in daemon_cargo
+    and not default_features_enable_cloud_evidence(daemon_cargo),
+    "the daemon cloud evidence feature is opt-in and unused by default")
+rec(daemon_hosted_config_has_no_tls_escape(daemon_cli, daemon_cargo, daemon_cloud_mod),
+    "daemon hosted/env cloud config admits loopback only behind cloud-evidence")
+rec(production_build_omits_cloud_evidence(
+        macos_app_build, macos_cli_build, macos_dmg, macos_job_body),
+    "macOS production builds do not enable cloud-evidence or a daemon override")
+rec(evidence_sidecar_override_holds(macos_cloud),
+    "macOS cloud evidence builds a distinct sidecar and overrides only configured launches")
+rec(unconfigured_status_latency_window(macos_cloud),
+    "macOS unconfigured status latency starts after the Cloud panel is open")
 rec('adb reverse "tcp:$STUB_PORT" "tcp:$STUB_PORT"' in android_cloud,
     "Android cloud evidence reverses the host stub onto device loopback")
 rec("capture_android_png" in android_ui_evidence
@@ -1986,6 +2105,52 @@ targeted_adb "$serial" shell dumpsys power
          bool(adb_guard_violations(guarded + "targeted_adb -s shell id\n", 1))),
     ):
         emit(held, "self-test: {}".format(desc), "the adb structure detector did not reject the fixture")
+
+    emit(production_build_omits_cloud_evidence(
+            'cargo build --release --locked --target "$TRIPLE" -p copypaste-daemon\n'),
+         "self-test: a production daemon build without the evidence feature is accepted",
+         "the production cloud-evidence detector rejected a clean build")
+    emit(not production_build_omits_cloud_evidence(
+            "cargo build --release --features cloud-evidence -p copypaste-daemon\n"),
+         "self-test: a production build that enables cloud-evidence is rejected",
+         "the production cloud-evidence detector accepted a featureful build")
+    emit(not production_build_omits_cloud_evidence("export COPYPASTE_DAEMON_BIN=/tmp/x\n"),
+         "self-test: a production build that ships a daemon override is rejected",
+         "the production cloud-evidence detector accepted a daemon override")
+    emit(evidence_sidecar_override_holds(macos_cloud),
+         "self-test: the current macOS cloud evidence sidecar wiring holds",
+         "the sidecar detector rejected the live evidence script")
+    emit(not evidence_sidecar_override_holds(
+            macos_cloud.replace("COPYPASTE_DAEMON_BIN=$DAEMON_SIDECAR",
+                                "COPYPASTE_DAEMON_BIN=")),
+         "self-test: configured evidence without a sidecar override is rejected",
+         "the sidecar detector accepted a configured launch with no daemon override")
+    emit(not evidence_sidecar_override_holds(
+            macos_cloud.replace("-u COPYPASTE_DAEMON_BIN", "")),
+         "self-test: unconfigured evidence that keeps a daemon override is rejected",
+         "the sidecar detector accepted an unconfigured launch that can inherit an override")
+    escaped_cli = (
+        "pub fn cloud_config() {\n"
+        "    copypaste_cloud::CloudConfig::new_loopback(url, anon_key).map(Some)\n"
+        "}\n"
+    )
+    emit(not daemon_hosted_config_has_no_tls_escape(
+            escaped_cli, daemon_cargo, daemon_cloud_mod),
+         "self-test: an unguarded loopback constructor is a production TLS escape",
+         "the TLS-escape detector accepted hosted/env new_loopback without a feature gate")
+    default_on = daemon_cargo.replace(
+        CLOUD_EVIDENCE_FEATURE,
+        'default = ["cloud-evidence"]\n' + CLOUD_EVIDENCE_FEATURE,
+    )
+    emit(not daemon_hosted_config_has_no_tls_escape(daemon_cli, default_on, daemon_cloud_mod),
+         "self-test: default-enabling cloud-evidence is a production TLS escape",
+         "the TLS-escape detector accepted a default feature that weakens production TLS")
+    escaped_persist = daemon_cloud_mod.replace(
+        "CloudConfig::new(url, key)", "CloudConfig::new_loopback(url, key)")
+    emit(not daemon_hosted_config_has_no_tls_escape(
+            daemon_cli, daemon_cargo, escaped_persist),
+         "self-test: persisted endpoints using new_loopback are a production TLS escape",
+         "the TLS-escape detector accepted loopback on a stored custom endpoint")
 
 # The plain run stays exit 0 so check.sh can enumerate every PASS|FAIL line.
 sys.exit(1 if (SELF_TEST or STRICT) and SELF_TEST_FAILURES else 0)

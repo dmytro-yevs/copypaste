@@ -15,6 +15,7 @@ STUB_PORT="${CLOUD_STUB_PORT:-47800}"
 LATENCIES="$OUT/latency.tsv"
 APP_PID=""
 STUB_PID=""
+DAEMON_SIDECAR=""
 
 now_ms() { python3 -c 'import time; print(time.time_ns() // 1000000)'; }
 
@@ -85,6 +86,44 @@ JS
     fi
 }
 
+ensure_cloud_evidence_daemon() {
+    # Evidence-only daemon: never write into the production target/release path.
+    local provided="${COPYPASTE_CLOUD_EVIDENCE_DAEMON:-}"
+    local target_dir="${COPYPASTE_CLOUD_EVIDENCE_TARGET_DIR:-$PWD/target/cloud-evidence-daemon}"
+    local built="$target_dir/release/copypaste-daemon"
+    local candidate=""
+    local log="/dev/null"
+    [[ -n "${OUT:-}" ]] && log="$OUT/sidecar-build.log"
+
+    if [[ -n "$provided" ]]; then
+        candidate="$provided"
+    else
+        if [[ ! -x "$built" ]]; then
+            cargo build --release --locked -p copypaste-daemon --features cloud-evidence \
+                --target-dir "$target_dir" >"$log" 2>&1 || return 1
+        fi
+        candidate="$built"
+    fi
+    [[ -n "$candidate" && -x "$candidate" ]] || return 1
+    DAEMON_SIDECAR="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
+    [[ "$DAEMON_SIDECAR" == /* && -x "$DAEMON_SIDECAR" ]]
+}
+
+open_cloud_evidence_app() { # <unconfigured|configured>
+    if [[ "$1" == configured ]]; then
+        [[ "${DAEMON_SIDECAR:-}" == /* && -x "$DAEMON_SIDECAR" ]] || return 1
+        open -n -a "$APP" \
+            --env "COPYPASTE_EVIDENCE_AX=1" \
+            --env "COPYPASTE_CLOUD_URL=http://127.0.0.1:$STUB_PORT" \
+            --env "COPYPASTE_CLOUD_ANON_KEY=native-evidence" \
+            --env "COPYPASTE_DAEMON_BIN=$DAEMON_SIDECAR"
+    else
+        env -u COPYPASTE_CLOUD_URL -u COPYPASTE_CLOUD_ANON_KEY -u COPYPASTE_DAEMON_BIN \
+            open -n -a "$APP" \
+            --env "COPYPASTE_EVIDENCE_AX=1"
+    fi
+}
+
 launch_app() { # <unconfigured|configured>
     mac_stop_executable "$BINARY" || return 1
     "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
@@ -93,18 +132,7 @@ launch_app() { # <unconfigured|configured>
     # Launch Services registration matches macos-native-evidence; a raw binary
     # background job is not reliably addressable by System Events.
     # COPYPASTE_EVIDENCE_AX asks the app to publish the WKWebView AX tree.
-    if [[ "$1" == configured ]]; then
-        open -n -a "$APP" \
-            --env "COPYPASTE_EVIDENCE_AX=1" \
-            --env "COPYPASTE_CLOUD_URL=http://127.0.0.1:$STUB_PORT" \
-            --env "COPYPASTE_CLOUD_ANON_KEY=native-evidence" \
-            > "$OUT/app-$1-open.log" 2>&1 || return 1
-    else
-        env -u COPYPASTE_CLOUD_URL -u COPYPASTE_CLOUD_ANON_KEY \
-            open -n -a "$APP" \
-            --env "COPYPASTE_EVIDENCE_AX=1" \
-            > "$OUT/app-$1-open.log" 2>&1 || return 1
-    fi
+    open_cloud_evidence_app "$1" > "$OUT/app-$1-open.log" 2>&1 || return 1
     APP_PID="$(mac_wait_executable_pid "$BINARY" 30)" || return 1
     mac_set_app_pid "$APP_PID"
     local ready_started="$SECONDS"
@@ -159,9 +187,9 @@ seed_forged_row() {
 unconfigured_scenario() {
     local started elapsed
     group "Cloud UI: unconfigured macOS app"
-    started="$(now_ms)"
     launch_app unconfigured || { bad "the unconfigured app exposes accessibility state"; return; }
     open_cloud || { bad "the unconfigured cloud row is reachable"; return; }
+    started="$(now_ms)"
     expect_label "Not configured" "$OUT/unconfigured-status.txt"
     expect_label "Cloud server configuration" "$OUT/unconfigured-form.txt"
     expect_label "Server URL" "$OUT/unconfigured-url.txt"
@@ -177,6 +205,7 @@ unconfigured_scenario() {
 configured_scenario() {
     local started elapsed
     group "Cloud UI: configured macOS account lifecycle"
+    ensure_cloud_evidence_daemon || { bad "the cloud-evidence daemon sidecar is present"; return; }
     start_stub || { bad "the cloud evidence backend starts"; return; }
     launch_app configured || { bad "the configured app exposes accessibility state"; return; }
     open_cloud || { bad "the configured cloud row is reachable"; return; }
@@ -317,6 +346,113 @@ cloud_panel_selector_self_test() { # <tmp-dir>
     OUT="$saved_out"
 }
 
+sidecar_launch_self_test() { # <tmp-dir>
+    local sidecar="$1/copypaste-daemon" configured="" unconfigured=""
+    printf '#!/bin/sh\n' > "$sidecar"
+    chmod +x "$sidecar"
+    open() { printf 'OPEN'; printf '\t%s' "$@"; printf '\n'; }
+    env() { printf 'ENV'; printf '\t%s' "$@"; printf '\n'; }
+
+    APP="/Applications/CopyPaste.app"
+    STUB_PORT=47800
+    DAEMON_SIDECAR=""
+    if open_cloud_evidence_app configured >/dev/null 2>&1; then
+        bad "configured launch fails closed without a sidecar"
+    else
+        ok "configured launch fails closed without a sidecar"
+    fi
+    COPYPASTE_CLOUD_EVIDENCE_DAEMON="$1/missing-daemon"
+    if ensure_cloud_evidence_daemon; then
+        bad "a missing required sidecar fails closed"
+    else
+        ok "a missing required sidecar fails closed"
+    fi
+    unset COPYPASTE_CLOUD_EVIDENCE_DAEMON
+    DAEMON_SIDECAR="relative/copypaste-daemon"
+    if open_cloud_evidence_app configured >/dev/null 2>&1; then
+        bad "configured launch rejects a relative daemon override"
+    else
+        ok "configured launch rejects a relative daemon override"
+    fi
+
+    DAEMON_SIDECAR="$sidecar"
+    configured="$(open_cloud_evidence_app configured)"
+    if [[ "$configured" == OPEN$'\t'* \
+        && "$configured" == *$'\t--env\tCOPYPASTE_CLOUD_URL=http://127.0.0.1:47800'* \
+        && "$configured" == *$'\t--env\tCOPYPASTE_CLOUD_ANON_KEY=native-evidence'* \
+        && "$configured" == *$'\t--env\tCOPYPASTE_DAEMON_BIN='"$sidecar"* \
+        && "$configured" != ENV* ]]; then
+        ok "configured launch passes an absolute sidecar and loopback endpoint"
+    else
+        bad "configured launch passes an absolute sidecar and loopback endpoint"
+    fi
+    unconfigured="$(open_cloud_evidence_app unconfigured)"
+    if [[ "$unconfigured" == ENV$'\t-u\tCOPYPASTE_CLOUD_URL\t-u\tCOPYPASTE_CLOUD_ANON_KEY\t-u\tCOPYPASTE_DAEMON_BIN\topen\t'* \
+        && "$unconfigured" == *$'\t--env\tCOPYPASTE_EVIDENCE_AX=1' \
+        && "$unconfigured" != *COPYPASTE_DAEMON_BIN=/* \
+        && "$unconfigured" != *COPYPASTE_CLOUD_URL=http* ]]; then
+        ok "unconfigured launch uses the bundled daemon and no override"
+    else
+        bad "unconfigured launch uses the bundled daemon and no override"
+    fi
+    unset -f open env
+}
+
+unconfigured_latency_self_test() { # <tmp-dir>
+    local saved_pass="$PASS" saved_fail="$FAIL" t=10000
+    local recorded="" recorded_scenario="" recorded_budget="" labels=""
+    PASS=0
+    FAIL=0
+    now_ms() { printf '%s\n' "$t"; }
+    launch_app() { t=$((t + 8000)); return 0; }
+    open_cloud() { t=$((t + 4000)); return 0; }
+    expect_label() { labels+="$1"$'\n'; t=$((t + 10)); return 0; }
+    capture_state() { return 0; }
+    cloud_latency_record() {
+        recorded_scenario="$2"
+        recorded="$3"
+        recorded_budget="$4"
+        (( $3 <= $4 ))
+    }
+    LATENCIES="$1/latency-probe.tsv"
+    : > "$LATENCIES"
+    unconfigured_scenario >/dev/null
+    unset -f now_ms launch_app open_cloud expect_label capture_state cloud_latency_record
+    PASS="$saved_pass"
+    FAIL="$saved_fail"
+    if [[ "$recorded_scenario" == unconfigured-status \
+        && "$recorded_budget" == 30000 \
+        && -n "$recorded" && "$recorded" -lt 1000 \
+        && "$labels" == $'Not configured\nCloud server configuration\nServer URL\nPublishable key\nConfigure\n' ]]; then
+        ok "unconfigured status latency excludes launch delay"
+    else
+        bad "unconfigured status latency excludes launch delay" \
+            "scenario=${recorded_scenario:-unset} budget=${recorded_budget:-unset} ms=${recorded:-unset}"
+    fi
+}
+
+configured_assertions_self_test() {
+    local body
+    body="$(type configured_scenario 2>/dev/null)"
+    if [[ "$body" == *"expect_label \"Signed out\""* \
+        && "$body" == *"expect_label \"Cloud account sign in\""* \
+        && "$body" == *"expect_label \"Email\""* \
+        && "$body" == *"expect_label \"Password\""* \
+        && "$body" == *"expect_label \"Sync passphrase\""* \
+        && "$body" == *"expect_label \"Connected\""* \
+        && "$body" == *"expect_label \"native@example.test\""* \
+        && "$body" == *"expect_label \"skipped\""* \
+        && "$body" == *"expect_label \"The last cloud sync failed\""* \
+        && "$body" == *"expect_label \"Signed out\" \"\$OUT/signed-out-again.txt\""* \
+        && "$body" == *'sign-in "$elapsed" 30000'* \
+        && "$body" == *'sync-with-skips "$elapsed" 30000'* \
+        && "$body" == *'offline-error "$elapsed" 60000'* ]]; then
+        ok "configured scenario keeps exact lifecycle assertions and timeouts"
+    else
+        bad "configured scenario keeps exact lifecycle assertions and timeouts"
+    fi
+}
+
 if [[ "${1:-}" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
@@ -324,6 +460,9 @@ if [[ "${1:-}" == "--self-test" ]]; then
     mac_ui_self_test "$SELF_TEST_TMP"
     cloud_panel_selector_self_test "$SELF_TEST_TMP"
     cloud_evidence_self_test "$SELF_TEST_TMP"
+    sidecar_launch_self_test "$SELF_TEST_TMP"
+    unconfigured_latency_self_test "$SELF_TEST_TMP"
+    configured_assertions_self_test
     cloud_evidence_summary macOS
     [[ $FAIL -eq 0 ]]
     exit

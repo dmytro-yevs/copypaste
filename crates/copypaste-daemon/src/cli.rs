@@ -81,5 +81,41 @@ pub fn cloud_config(
     let Some(anon_key) = resolve(args.cloud_anon_key.as_ref(), "COPYPASTE_CLOUD_ANON_KEY") else {
         return Ok(None);
     };
-    copypaste_cloud::CloudConfig::new(url, anon_key).map(Some)
+    #[cfg(feature = "cloud-evidence")]
+    {
+        copypaste_cloud::CloudConfig::new_loopback(url, anon_key).map(Some)
+    }
+    #[cfg(not(feature = "cloud-evidence"))]
+    {
+        copypaste_cloud::CloudConfig::new(url, anon_key).map(Some)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hosted(url: &str, key: &str) -> Args {
+        Args {
+            data_dir: None,
+            foreground: false,
+            port: 0,
+            device_name: None,
+            cloud_url: Some(url.to_string()),
+            cloud_anon_key: Some(key.to_string()),
+        }
+    }
+
+    #[cfg(not(feature = "cloud-evidence"))]
+    #[test]
+    fn production_configuration_rejects_plaintext_loopback() {
+        assert!(cloud_config(&hosted("http://127.0.0.1:47800", "key")).is_err());
+    }
+
+    #[cfg(feature = "cloud-evidence")]
+    #[test]
+    fn evidence_configuration_accepts_only_plaintext_loopback() {
+        assert!(cloud_config(&hosted("http://127.0.0.1:47800", "key")).is_ok());
+        assert!(cloud_config(&hosted("http://example.com:47800", "key")).is_err());
+    }
 }
