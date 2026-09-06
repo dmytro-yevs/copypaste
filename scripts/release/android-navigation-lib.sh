@@ -10,11 +10,86 @@ set -uo pipefail
 
 NAVIGATION_TABS=(Library Devices Settings)
 
+# action_center stays package-blind for DocumentsUI. App tabs must not accept
+# NexusLauncher Settings (run 34007760276 pairing-shell.xml).
+app_owned_point() { # <xml> <selector> <"x y">
+    python3 - "$1" "$2" "$3" "${PKG:-com.copypaste.app}" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    raise SystemExit(1)
+selectors = [part.casefold() for part in sys.argv[2].split("|")]
+x, y = map(int, sys.argv[3].split())
+owned = sys.argv[4]
+for node in root.iter("node"):
+    values = [(node.get(name) or "").casefold()
+              for name in ("text", "content-desc", "resource-id", "hint")]
+    exact = any(selector == value or value.endswith("/" + selector)
+                for selector in selectors for value in values if value)
+    if not exact:
+        continue
+    bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds") or "")
+    if not bounds:
+        continue
+    left, top, right, bottom = map(int, bounds.groups())
+    if (left + right) // 2 != x or (top + bottom) // 2 != y:
+        continue
+    package = node.get("package") or ""
+    if package and package != owned:
+        raise SystemExit(1)
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+app_owned_action_center() { # <xml> <selector>
+    local point
+    point="$(action_center "$1" "$2")"
+    [[ -n "$point" ]] || return 1
+    app_owned_point "$1" "$2" "$point" || return 1
+    printf '%s\n' "$point"
+}
+
 app_navigation_holds() { # <artifact>
     local tab
     for tab in "${NAVIGATION_TABS[@]}"; do
-        [[ -n "$(action_center "$1" "$tab")" ]] || return 1
+        [[ -n "$(app_owned_action_center "$1" "$tab")" ]] || return 1
     done
+}
+
+settings_tab_holds() { # <artifact>
+    [[ -n "$(app_owned_action_center "$1" "Settings")" ]]
+}
+
+hierarchy_package() { # <artifact>
+    python3 - "$1" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    raise SystemExit(0)
+for node in root.iter("node"):
+    package = node.get("package") or ""
+    if package:
+        print(package)
+        break
+PY
+}
+
+hierarchy_is_foreign() { # <artifact>
+    local package
+    package="$(hierarchy_package "$1")"
+    [[ -n "$package" && "$package" != "${PKG:-com.copypaste.app}" ]]
+}
+
+hierarchy_is_app() { # <artifact>
+    [[ "$(hierarchy_package "$1")" == "${PKG:-com.copypaste.app}" ]]
 }
 
 # Per tab: disabled is an app that is still starting, absent is one whose shell
@@ -67,11 +142,85 @@ wait_app_navigable() { # <artifact> [timeout] [dump] [scroll] [tap] [pace]
         "${4:-scroll_content}" "${5:-tap_transition_point}" "${6:-settle_pace}"
 }
 
+# Mid-content upward swipe inside the dump window, above Primary / the reserved
+# nav band. Not scroll_content: that uses wm size and can leave the app.
+onboarding_content_swipe() { # <artifact> -> "x y1 y2"
+    python3 - "$1" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    raise SystemExit(1)
+window = None
+nav_top = None
+for node in root.iter("node"):
+    bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds") or "")
+    if not bounds:
+        continue
+    left, top, right, bottom = map(int, bounds.groups())
+    if window is None and right > left and bottom > top:
+        window = (left, top, right, bottom)
+    if node.get("text") == "Primary":
+        nav_top = top
+if window is None:
+    raise SystemExit(1)
+left, top, right, bottom = window
+width, height = right - left, bottom - top
+if width < 32 or height < 32:
+    raise SystemExit(1)
+if nav_top is None:
+    nav_top = bottom - max(80, height // 8)
+content_top = top + 16
+content_bottom = min(nav_top, bottom) - 16
+if content_bottom - content_top < 32:
+    raise SystemExit(1)
+span = content_bottom - content_top
+print((left + right) // 2, content_top + span * 2 // 3, content_top + span // 3)
+PY
+}
+
+swipe_onboarding_content() { # <artifact>
+    local x y1 y2
+    read -r x y1 y2 <<<"$(onboarding_content_swipe "$1")"
+    [[ "$x" =~ ^[0-9]+$ && "$y1" =~ ^[0-9]+$ && "$y2" =~ ^[0-9]+$ ]] || return 1
+    sh_ input swipe "$x" "$y1" "$x" "$y2" 250 >/dev/null
+}
+
+# Run 34007760276: API 33 Welcome kept Explore first at [0,0][0,0];
+# tap_until_state then called scroll_content and landed on NexusLauncher.
+android_recover_onboarding() { # <artifact> [timeout] [dump] [swipe] [tap] [pace]
+    local artifact="$1" timeout="${2:-${WAIT_SECS:-30}}"
+    local dump="${3:-dump_hierarchy}" swipe="${4:-swipe_onboarding_content}"
+    local tap="${5:-tap_transition_point}" pace="${6:-settle_pace}"
+    local point started="$SECONDS"
+    while (( SECONDS - started < timeout )); do
+        if "$dump" "$artifact"; then
+            (( SECONDS - started < timeout )) || return 1
+            if hierarchy_is_app "$artifact" && app_navigation_holds "$artifact"; then
+                return 0
+            fi
+            hierarchy_is_foreign "$artifact" && return 1
+            point="$(action_center "$artifact" "Explore first")"
+            if [[ -n "$point" ]]; then
+                "$tap" "$point" || return 1
+            elif enabled_action_exists_exact "$artifact" "Explore first"; then
+                "$swipe" "$artifact" || return 1
+            fi
+        fi
+        "$pace"
+    done
+    return 1
+}
+
 navigation_fixture_destination_holds() { # <artifact>
     enabled_node_exists_exact "$1" "Destination ready"
 }
 
 NAVIGATION_FIXTURE_DIRECTION=""
+ONBOARDING_FIXTURE_SWIPES=0
 
 navigation_fixture_scroll() {
     NAVIGATION_FIXTURE_DIRECTION="$1"
@@ -79,6 +228,8 @@ navigation_fixture_scroll() {
 }
 
 navigation_fixture_tap() { UI_FIXTURE_TAPS=$((UI_FIXTURE_TAPS + 1)); }
+
+onboarding_fixture_swipe() { ONBOARDING_FIXTURE_SWIPES=$((ONBOARDING_FIXTURE_SWIPES + 1)); }
 
 navigation_transition_self_test() { # <temp>
     local temp="$1" source target_above target_below destination
@@ -250,6 +401,206 @@ navigation_shell_readiness_self_test() { # <temp>
         || bad "a toast-covered Settings tab fails closed"
 }
 
+android_onboarding_recovery_self_test() { # <temp>
+    local temp="$1" pkg="${PKG:-com.copypaste.app}"
+    local welcome_zero welcome_edge tappable shell settings_only launcher
+    welcome_zero="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"WELCOME\" bounds=\"[24,101][85,115]\" enabled=\"true\"/><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[0,0][0,0]\"/></node></hierarchy>"
+    welcome_edge="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"WELCOME\" bounds=\"[24,101][85,115]\" enabled=\"true\"/><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[24,616][296,616]\"/></node></hierarchy>"
+    tappable="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[20,400][300,450]\"/></node></hierarchy>"
+    shell="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Primary\" bounds=\"[0,570][320,640]\"><node text=\"Library\" package=\"$pkg\" bounds=\"[17,583][113,635]\" enabled=\"true\" clickable=\"true\"/><node text=\"Devices\" package=\"$pkg\" bounds=\"[112,583][208,635]\" enabled=\"true\" clickable=\"true\"/><node text=\"Settings\" package=\"$pkg\" bounds=\"[207,583][303,635]\" enabled=\"true\" clickable=\"true\"/></node></node></hierarchy>"
+    settings_only="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Settings\" package=\"$pkg\" bounds=\"[207,583][303,635]\" enabled=\"true\" clickable=\"true\"/></node></hierarchy>"
+    launcher='<?xml version="1.0"?><hierarchy><node package="com.google.android.apps.nexuslauncher" bounds="[0,0][320,640]"><node text="Settings" package="com.google.android.apps.nexuslauncher" bounds="[247,464][305,579]" enabled="true" clickable="true"/></node></hierarchy>'
+    printf '%s\n' "$welcome_zero" > "$temp/welcome-zero.xml"
+    printf '%s\n' "$welcome_edge" > "$temp/welcome-edge.xml"
+    printf '%s\n' "$tappable" > "$temp/welcome-tappable.xml"
+    printf '%s\n' "$shell" > "$temp/welcome-shell.xml"
+    printf '%s\n' "$settings_only" > "$temp/welcome-settings-only.xml"
+    printf '%s\n' "$launcher" > "$temp/welcome-launcher.xml"
+
+    [[ "$(onboarding_content_swipe "$temp/welcome-zero.xml")" == "160 368 192" ]] \
+        && [[ "$(onboarding_content_swipe "$temp/welcome-edge.xml")" == "160 368 192" ]] \
+        && ok "Welcome dumps use a contained mid-content swipe above the nav band" \
+        || bad "Welcome dumps use a contained mid-content swipe above the nav band" \
+               "$(onboarding_content_swipe "$temp/welcome-zero.xml")"
+    [[ "$(onboarding_content_swipe "$temp/welcome-shell.xml")" == "160 374 195" ]] \
+        && ok "a Primary band keeps the onboarding swipe above it" \
+        || bad "a Primary band keeps the onboarding swipe above it" \
+               "$(onboarding_content_swipe "$temp/welcome-shell.xml")"
+
+    settings_tab_holds "$temp/welcome-launcher.xml" \
+        && bad "NexusLauncher Settings is not an app Settings tab" \
+        || ok "NexusLauncher Settings is not an app Settings tab"
+    app_navigation_holds "$temp/welcome-launcher.xml" \
+        && bad "NexusLauncher is not the app-owned shell" \
+        || ok "NexusLauncher is not the app-owned shell"
+    settings_tab_holds "$temp/welcome-settings-only.xml" \
+        && ! app_navigation_holds "$temp/welcome-settings-only.xml" \
+        && ok "Settings-only is not full app navigation" \
+        || bad "Settings-only is not full app navigation"
+    app_navigation_holds "$temp/welcome-shell.xml" \
+        && hierarchy_is_app "$temp/welcome-shell.xml" \
+        && ok "an app-owned tab bar is the recovery destination" \
+        || bad "an app-owned tab bar is the recovery destination"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/welcome-zero.xml" "$temp/welcome-tappable.xml" \
+            "$temp/welcome-shell.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        android_recover_onboarding "$temp/welcome-zero-observed.xml" 3 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 1 && $UI_FIXTURE_TAPS -eq 1 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 ]] \
+            && cmp -s "$temp/welcome-zero-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "API 33 Welcome zero bounds swipes contained then taps Explore first" \
+        || bad "API 33 Welcome zero bounds swipes contained then taps Explore first"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/welcome-edge.xml" "$temp/welcome-tappable.xml" \
+            "$temp/welcome-shell.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        android_recover_onboarding "$temp/welcome-edge-observed.xml" 3 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 1 && $UI_FIXTURE_TAPS -eq 1 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 ]] \
+            && cmp -s "$temp/welcome-edge-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "API 36 Welcome edge zero height swipes contained then taps Explore first" \
+        || bad "API 36 Welcome edge zero height swipes contained then taps Explore first"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/welcome-tappable.xml" "$temp/welcome-shell.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        android_recover_onboarding "$temp/welcome-tappable-observed.xml" 3 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 1 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 ]] \
+            && cmp -s "$temp/welcome-tappable-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "a tappable Explore first is tapped without a swipe" \
+        || bad "a tappable Explore first is tapped without a swipe"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/welcome-shell.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        android_recover_onboarding "$temp/welcome-ready-observed.xml" 3 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 && $UI_FIXTURE_INDEX -eq 1 ]] \
+            && cmp -s "$temp/welcome-ready-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "an already-navigable app-owned shell returns without a gesture" \
+        || bad "an already-navigable app-owned shell returns without a gesture"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/welcome-launcher.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        ! android_recover_onboarding "$temp/welcome-foreign-observed.xml" 3 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 && $UI_FIXTURE_INDEX -eq 1 ]]
+    ) \
+        && ok "a foreign package fails immediately with zero swipes" \
+        || bad "a foreign package fails immediately with zero swipes"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/welcome-settings-only.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        ! android_recover_onboarding "$temp/welcome-settings-observed.xml" 1 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_SCROLLS -eq 0 ]]
+    ) \
+        && ok "Settings-only never yields the app-owned shell" \
+        || bad "Settings-only never yields the app-owned shell"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/welcome-tappable.xml" "$temp/welcome-tappable.xml" \
+            "$temp/welcome-tappable.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        ! android_recover_onboarding "$temp/welcome-explore-never.xml" 1 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -ge 1 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 ]]
+    ) \
+        && ok "Explore first that never yields the shell fails closed" \
+        || bad "Explore first that never yields the shell fails closed"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+
+        ui_fixtures "$temp/welcome-zero.xml" "$temp/welcome-zero.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        ! android_recover_onboarding "$temp/welcome-never.xml" 1 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -ge 1 && $UI_FIXTURE_SCROLLS -eq 0 ]]
+    ) \
+        && ok "a Welcome dump that never yields the shell fails after contained swipes" \
+        || bad "a Welcome dump that never yields the shell fails after contained swipes"
+
+    (
+        onboarding_late_dump() {
+            ui_fixture_dump "$@"
+            SECONDS=$((SECONDS + 2))
+        }
+
+        ui_fixtures "$temp/welcome-shell.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        ! android_recover_onboarding "$temp/welcome-late.xml" 1 \
+            onboarding_late_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 ]] \
+            && cmp -s "$temp/welcome-late.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "a dump completing after the deadline cannot prove onboarding recovery" \
+        || bad "a dump completing after the deadline cannot prove onboarding recovery"
+}
+
 android_navigation_self_test() { # <temp>
     local temp="$1" nav_open nav_starting nav_onboarding
     nav_open='<node text="Primary" bounds="[0,570][320,640]"><node text="Library" bounds="[17,583][113,635]" enabled="true" clickable="true"/><node text="Devices" bounds="[112,583][208,635]" enabled="true" clickable="true"/><node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/></node>'
@@ -297,4 +648,5 @@ android_navigation_self_test() { # <temp>
         || ok "an app that never settles is never navigable"
     navigation_transition_self_test "$temp"
     navigation_shell_readiness_self_test "$temp"
+    android_onboarding_recovery_self_test "$temp"
 }
