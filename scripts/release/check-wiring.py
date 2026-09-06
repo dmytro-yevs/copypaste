@@ -145,9 +145,13 @@ def evidence_sidecar_override_holds(script):
         and "cloud-evidence-daemon" in ensure
         and "COPYPASTE_CLOUD_EVIDENCE_DAEMON" in ensure
         and "COPYPASTE_DAEMON_BIN=$DAEMON_SIDECAR" in configured
+        and "COPYPASTE_DATA_DIR=$ISOLATION_DATA_DIR" in configured
+        and "COPYPASTE_SOCKET=$ISOLATION_SOCKET" in configured
         and "http://127.0.0.1:$STUB_PORT" in configured
         and "COPYPASTE_DAEMON_BIN=$DAEMON_SIDECAR" not in unconfigured
         and "-u COPYPASTE_DAEMON_BIN" in unconfigured
+        and "-u COPYPASTE_DATA_DIR" in unconfigured
+        and "-u COPYPASTE_SOCKET" in unconfigured
     )
 
 
@@ -163,6 +167,7 @@ PROBE_MUTATIONS = (
     "set-keychain-settings",
     "default-keychain",
     "COPYPASTE_EPHEMERAL_KEY",
+    "COPYPASTE_KEYCHAIN_TEST",
 )
 
 
@@ -240,6 +245,99 @@ def configured_sidecar_probe_is_read_only(script):
         if not re.search(r"(^|[\s\"])-a([\s\"]|$)", line):
             return False
     return found
+
+
+def configured_isolation_holds(script):
+    setup = shell_function_body(script, "configured_isolation_setup")
+    mint = shell_function_body(script, "configured_isolation_mint_keychain")
+    cleanup_iso = shell_function_body(script, "configured_isolation_cleanup")
+    restore = shell_function_body(script, "configured_isolation_restore")
+    delete = shell_function_body(script, "configured_isolation_delete_owned")
+    owned = (
+        shell_function_body(script, "configured_isolation_owned_root")
+        + shell_function_body(script, "configured_isolation_owned_keychain")
+        + shell_function_body(script, "configured_isolation_owned_leaf")
+    )
+    socket = shell_function_body(script, "configured_isolation_socket_fits")
+    opener = shell_function_body(script, "open_cloud_evidence_app")
+    launch = shell_function_body(script, "launch_app")
+    shutdown = shell_function_body(script, "default_cloud_shutdown")
+    top_cleanup = shell_function_body(script, "cleanup")
+    configured = shell_function_body(script, "configured_scenario")
+    keychain = shell_function_body(script, "probe_keychain_item")
+    db = shell_function_body(script, "probe_db_state")
+    live = shell_function_body(script, "probe_live_daemon")
+    cli = shell_function_body(script, "probe_cli_pair")
+    log = shell_function_body(script, "probe_runtime_log")
+    decide = shell_function_body(script, "probe_decide")
+    if not all((
+        setup, mint, cleanup_iso, restore, delete, owned, socket, opener, launch,
+        shutdown, top_cleanup, configured, keychain, db, live, cli, log, decide,
+    )):
+        return False
+    configured_open, unconfigured_open = _if_else_branches(opener)
+    isolation = setup + mint + cleanup_iso + restore + delete
+    if "GITHUB_ACTIONS" not in setup:
+        return False
+    if "COPYPASTE_EPHEMERAL_KEY" in isolation or "COPYPASTE_KEYCHAIN_TEST" in isolation:
+        return False
+    if "com.copypaste.daemon" in setup or "device-secret-key" in setup:
+        return False
+    if "mktemp -d /tmp/cpc." not in setup or "daemon.sock" not in setup:
+        return False
+    if "k.keychain-db" not in mint + setup + owned:
+        return False
+    if "DARWIN_SUN_PATH=104" not in script and "104" not in socket:
+        return False
+    if "openssl rand" not in mint or "set +x" not in mint:
+        return False
+    save_at = setup.find("ISOLATION_SAVED_DEFAULT")
+    mint_at = setup.find("configured_isolation_mint_keychain")
+    if -1 in (save_at, mint_at) or save_at > mint_at:
+        return False
+    if 'list-keychains -d user -s "$ISOLATION_KEYCHAIN"' not in setup:
+        return False
+    if "$existing" in setup or "login.keychain" in setup:
+        return False
+    restore_at = cleanup_iso.find("configured_isolation_restore")
+    delete_at = cleanup_iso.find("configured_isolation_delete_owned")
+    if -1 in (restore_at, delete_at) or restore_at > delete_at:
+        return False
+    if "configured_isolation_owned_keychain" not in delete:
+        return False
+    if "configured_isolation_owned_root" not in delete:
+        return False
+    if not all(token in owned for token in (
+        "..", "login.keychain", "Library/Keychains", "Application Support", "cpc.",
+    )):
+        return False
+    if "COPYPASTE_DATA_DIR=$ISOLATION_DATA_DIR" not in configured_open:
+        return False
+    if "COPYPASTE_SOCKET=$ISOLATION_SOCKET" not in configured_open:
+        return False
+    if "-u COPYPASTE_DATA_DIR" not in unconfigured_open or "-u COPYPASTE_SOCKET" not in unconfigured_open:
+        return False
+    if "-u COPYPASTE_DATA_DIR" not in shutdown or "-u COPYPASTE_SOCKET" not in shutdown:
+        return False
+    if "default_cloud_shutdown" not in launch or "default_cloud_shutdown" not in top_cleanup:
+        return False
+    if "configured_isolation_cleanup" not in top_cleanup:
+        return False
+    if not re.search(r"^trap cleanup EXIT$", script, re.M):
+        return False
+    setup_at = configured.find("configured_isolation_setup")
+    launch_at = configured.find("launch_app configured")
+    if -1 in (setup_at, launch_at) or setup_at > launch_at:
+        return False
+    if "ISOLATION_KEYCHAIN" not in keychain:
+        return False
+    if "ISOLATION_DATA_DIR" not in db or "ISOLATION_DATA_DIR" not in log:
+        return False
+    if "ISOLATION_SOCKET" not in live or "ISOLATION_SOCKET" not in cli:
+        return False
+    if any(token in probe_helper_bodies(script) for token in PROBE_MUTATIONS):
+        return False
+    return "KEY_LOCKED" in decide and "sidecar-key-locked" in decide
 
 
 def _fn_region(source, name, stop):
@@ -1471,6 +1569,8 @@ rec(configured_sidecar_probe_holds(macos_cloud),
     "macOS configured cloud evidence probes the live sidecar path before AX waits")
 rec(configured_sidecar_probe_is_read_only(macos_cloud),
     "macOS sidecar probe inspects Keychain attributes without secrets or mutation")
+rec(configured_isolation_holds(macos_cloud),
+    "macOS configured cloud evidence isolates Keychain and data paths in CI")
 rec(unconfigured_status_latency_window(macos_cloud),
     "macOS unconfigured status latency starts after the Cloud panel is open")
 rec('adb reverse "tcp:$STUB_PORT" "tcp:$STUB_PORT"' in android_cloud,
@@ -2224,6 +2324,22 @@ targeted_adb "$serial" shell dumpsys power
             macos_cloud.replace("-u COPYPASTE_DAEMON_BIN", "")),
          "self-test: unconfigured evidence that keeps a daemon override is rejected",
          "the sidecar detector accepted an unconfigured launch that can inherit an override")
+    emit(not evidence_sidecar_override_holds(
+            macos_cloud.replace("-u COPYPASTE_DATA_DIR", "")),
+         "self-test: unconfigured evidence that keeps a data-dir override is rejected",
+         "the sidecar detector accepted an unconfigured launch that can inherit isolated storage")
+    emit(not evidence_sidecar_override_holds(
+            macos_cloud.replace("-u COPYPASTE_SOCKET", "")),
+         "self-test: unconfigured evidence that keeps a socket override is rejected",
+         "the sidecar detector accepted an unconfigured launch that can inherit an isolated socket")
+    emit(not evidence_sidecar_override_holds(
+            macos_cloud.replace("COPYPASTE_DATA_DIR=$ISOLATION_DATA_DIR", "")),
+         "self-test: configured evidence without an isolated data dir is rejected",
+         "the sidecar detector accepted a configured launch that can write the login database")
+    emit(not evidence_sidecar_override_holds(
+            macos_cloud.replace("COPYPASTE_SOCKET=$ISOLATION_SOCKET", "")),
+         "self-test: configured evidence without an isolated socket is rejected",
+         "the sidecar detector accepted a configured launch that can bind the login socket")
     emit(configured_sidecar_probe_holds(macos_cloud),
          "self-test: the current macOS sidecar path probe wiring holds",
          "the sidecar probe detector rejected the live evidence script")
@@ -2269,6 +2385,59 @@ targeted_adb "$serial" shell dumpsys power
                 'security default-keychain; probe_run_bounded 3 lsof -a -nP -p "$1" -d txt -Fn')),
          "self-test: a sidecar probe that changes the default keychain is rejected",
          "the read-only probe detector accepted default-keychain")
+    emit(configured_isolation_holds(macos_cloud),
+         "self-test: the current macOS configured isolation wiring holds",
+         "the isolation detector rejected the live evidence script")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("GITHUB_ACTIONS", "")),
+         "self-test: isolation setup that can run outside CI is rejected",
+         "the isolation detector accepted a setup with no hosted-CI guard")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace(
+                'list-keychains -d user -s "$ISOLATION_KEYCHAIN"',
+                'list-keychains -d user -s "$ISOLATION_KEYCHAIN" $existing')),
+         "self-test: isolation that keeps login on the search list is rejected",
+         "the isolation detector accepted a search list that still includes login")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace(
+                "configured_isolation_restore\n    configured_isolation_delete_owned || true",
+                "configured_isolation_delete_owned || true\n    configured_isolation_restore")),
+         "self-test: isolation cleanup that deletes before restore is rejected",
+         "the isolation detector accepted a cleanup that can leave the throwaway as default")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("configured_isolation_owned_keychain", "true")),
+         "self-test: isolation delete without owned-keychain validation is rejected",
+         "the isolation detector accepted a delete that can target login")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("Application Support", "")),
+         "self-test: isolation validation that omits Application Support is rejected",
+         "the isolation detector accepted owned-path checks that can delete a production database")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("104", "4096")),
+         "self-test: isolation without a Darwin socket length guard is rejected",
+         "the isolation detector accepted a socket path that can exceed sun_path")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("set +x", "")),
+         "self-test: isolation that traces the keychain password is rejected",
+         "the isolation detector accepted minting without xtrace suppression")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("ISOLATION_KEYCHAIN", "PROBE_KEYCHAIN")),
+         "self-test: a sidecar probe that inspects the login keychain is rejected",
+         "the isolation detector accepted probe helpers that do not retarget the throwaway keychain")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace(
+                'security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"',
+                'security delete-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"')),
+         "self-test: isolation wiring rejects a mutating sidecar probe",
+         "the isolation detector accepted probe helpers that delete a Keychain item")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("configured_isolation_cleanup", "")),
+         "self-test: a cleanup trap that skips isolation restore is rejected",
+         "the isolation detector accepted an EXIT path that leaves the throwaway keychain installed")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("-u COPYPASTE_DATA_DIR -u COPYPASTE_SOCKET", "")),
+         "self-test: default shutdown that keeps isolation overrides is rejected",
+         "the isolation detector accepted a shutdown that can target the throwaway socket")
     escaped_cli = (
         "pub fn cloud_config() {\n"
         "    copypaste_cloud::CloudConfig::new_loopback(url, anon_key).map(Some)\n"

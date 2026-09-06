@@ -16,13 +16,35 @@ LATENCIES="$OUT/latency.tsv"
 APP_PID=""
 STUB_PID=""
 DAEMON_SIDECAR=""
+ISOLATION_ROOT=""
+ISOLATION_DATA_DIR=""
+ISOLATION_SOCKET=""
+ISOLATION_KEYCHAIN=""
+ISOLATION_PASSWORD=""
+ISOLATION_SAVED_DEFAULT=""
+ISOLATION_SAVED_SEARCH=""
+ISOLATION_ACTIVE=0
+DARWIN_SUN_PATH=104
+ISOLATION_PROBE_SERVICE="copypaste-cloud-evidence-probe"
+ISOLATION_PROBE_ACCOUNT="probe"
 
 now_ms() { python3 -c 'import time; print(time.time_ns() // 1000000)'; }
+
+default_cloud_shutdown() {
+    env -u COPYPASTE_DATA_DIR -u COPYPASTE_SOCKET \
+        "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
+}
 
 cleanup() {
     [[ -n "$APP_PID" ]] && kill "$APP_PID" 2>/dev/null || true
     [[ -n "$STUB_PID" ]] && kill "$STUB_PID" 2>/dev/null || true
-    "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
+    if [[ -n "${ISOLATION_SOCKET:-}" ]]; then
+        COPYPASTE_SOCKET="$ISOLATION_SOCKET" \
+            COPYPASTE_DATA_DIR="${ISOLATION_DATA_DIR:-}" \
+            "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
+    fi
+    default_cloud_shutdown
+    configured_isolation_cleanup
 }
 
 seed_onboarding_complete() { # [preferences.json]
@@ -112,13 +134,17 @@ ensure_cloud_evidence_daemon() {
 open_cloud_evidence_app() { # <unconfigured|configured>
     if [[ "$1" == configured ]]; then
         [[ "${DAEMON_SIDECAR:-}" == /* && -x "$DAEMON_SIDECAR" ]] || return 1
+        [[ "${ISOLATION_DATA_DIR:-}" == /* && "${ISOLATION_SOCKET:-}" == /* ]] || return 1
         open -n -a "$APP" \
             --env "COPYPASTE_EVIDENCE_AX=1" \
             --env "COPYPASTE_CLOUD_URL=http://127.0.0.1:$STUB_PORT" \
             --env "COPYPASTE_CLOUD_ANON_KEY=native-evidence" \
-            --env "COPYPASTE_DAEMON_BIN=$DAEMON_SIDECAR"
+            --env "COPYPASTE_DAEMON_BIN=$DAEMON_SIDECAR" \
+            --env "COPYPASTE_DATA_DIR=$ISOLATION_DATA_DIR" \
+            --env "COPYPASTE_SOCKET=$ISOLATION_SOCKET"
     else
         env -u COPYPASTE_CLOUD_URL -u COPYPASTE_CLOUD_ANON_KEY -u COPYPASTE_DAEMON_BIN \
+            -u COPYPASTE_DATA_DIR -u COPYPASTE_SOCKET \
             open -n -a "$APP" \
             --env "COPYPASTE_EVIDENCE_AX=1"
     fi
@@ -126,7 +152,7 @@ open_cloud_evidence_app() { # <unconfigured|configured>
 
 launch_app() { # <unconfigured|configured>
     mac_stop_executable "$BINARY" || return 1
-    "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
+    default_cloud_shutdown
     pkill -f "$APP/Contents/MacOS/copypaste-daemon" 2>/dev/null || true
     seed_onboarding_complete
     # Launch Services registration matches macos-native-evidence; a raw binary
@@ -295,7 +321,9 @@ probe_codesign_identity() { # <path>
 
 probe_keychain_item() {
     local raw
-    raw="$(probe_run_bounded 5 security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT" 2>&1)" || true
+    local -a kc=()
+    [[ -n "${ISOLATION_KEYCHAIN:-}" ]] && kc=("$ISOLATION_KEYCHAIN")
+    raw="$(probe_run_bounded 5 security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT" "${kc[@]}" 2>&1)" || true
     case "$raw" in
         *"could not be found"*) printf 'absent\n' ;;
         *)
@@ -309,7 +337,7 @@ probe_keychain_item() {
 }
 
 probe_db_state() {
-    local db="$HOME/Library/Application Support/com.copypaste.CopyPaste/copypaste-v2.db"
+    local db="${ISOLATION_DATA_DIR:-$HOME/Library/Application Support/com.copypaste.CopyPaste}/copypaste-v2.db"
     if [[ -f "$db" ]]; then
         printf 'present\n'
     else
@@ -331,6 +359,7 @@ for line in sys.stdin:
 probe_live_daemon() { # writes path_class pid ppid exe_class argv socket_owner
     local bundled sidecar cand_pid="" pid="" ppid="" exe="" live_real="" side_real="" bund_real=""
     local path_class=none socket_owner=unknown argv="" cand_class="" cand_ppid="" cand_argv=""
+    local sock="${ISOLATION_SOCKET:-$HOME/Library/Application Support/com.copypaste.CopyPaste/daemon.sock}"
     bundled="$APP/Contents/MacOS/copypaste-daemon"
     sidecar="${DAEMON_SIDECAR:-}"
     [[ -n "$sidecar" ]] && side_real="$(probe_realpath "$sidecar")"
@@ -355,8 +384,8 @@ probe_live_daemon() { # writes path_class pid ppid exe_class argv socket_owner
         fi
         [[ "$path_class" == sidecar ]] && break
     done < <(probe_run_bounded 3 pgrep -x copypaste-daemon 2>/dev/null || true)
-    if [[ -S "$HOME/Library/Application Support/com.copypaste.CopyPaste/daemon.sock" ]]; then
-        if [[ "$(stat -f '%u' "$HOME/Library/Application Support/com.copypaste.CopyPaste/daemon.sock" 2>/dev/null || true)" == "$(id -u)" ]]; then
+    if [[ -S "$sock" ]]; then
+        if [[ "$(stat -f '%u' "$sock" 2>/dev/null || true)" == "$(id -u)" ]]; then
             socket_owner=same-user
         else
             socket_owner=other
@@ -372,14 +401,18 @@ probe_live_daemon() { # writes path_class pid ppid exe_class argv socket_owner
 probe_cli_pair() {
     local cli="$APP/Contents/MacOS/copypaste"
     local status_text cloud_text
-    status_text="$(probe_run_bounded "$PROBE_CLI_SECS" "$cli" status 2>&1 || true)"
-    cloud_text="$(probe_run_bounded "$PROBE_CLI_SECS" "$cli" cloud status 2>&1 || true)"
+    local -a prefix=()
+    if [[ -n "${ISOLATION_SOCKET:-}" && -n "${ISOLATION_DATA_DIR:-}" ]]; then
+        prefix=(env COPYPASTE_SOCKET="$ISOLATION_SOCKET" COPYPASTE_DATA_DIR="$ISOLATION_DATA_DIR")
+    fi
+    status_text="$(probe_run_bounded "$PROBE_CLI_SECS" "${prefix[@]}" "$cli" status 2>&1 || true)"
+    cloud_text="$(probe_run_bounded "$PROBE_CLI_SECS" "${prefix[@]}" "$cli" cloud status 2>&1 || true)"
     printf '%s\n' "$(probe_classify_cli_pair "$status_text" "$cloud_text")"
     printf '%s\n' "$(printf '%s\n%s\n' "$status_text" "$cloud_text" | probe_redact_text)"
 }
 
 probe_runtime_log() {
-    local logdir="$HOME/Library/Application Support/com.copypaste.CopyPaste/logs"
+    local logdir="${ISOLATION_DATA_DIR:-$HOME/Library/Application Support/com.copypaste.CopyPaste}/logs"
     local latest=""
     latest="$(find "$logdir" -maxdepth 1 -name 'daemon*.log' -type f 2>/dev/null | sort | tail -n 1 || true)"
     if [[ -z "$latest" || ! -f "$latest" ]]; then
@@ -392,6 +425,181 @@ probe_write() { # <file> <text>
     printf '%s\n' "$2" | probe_redact_text > "$1"
 }
 
+configured_isolation_owned_root() { # <path>
+    local path="$1"
+    [[ "$path" == /* ]] || return 1
+    [[ "$path" != *..* ]] || return 1
+    [[ "$path" != *login.keychain* ]] || return 1
+    [[ "$path" != *"/Library/Keychains"* ]] || return 1
+    [[ "$path" != *"Application Support"* ]] || return 1
+    [[ "$(basename "$path")" == cpc.* ]]
+}
+
+configured_isolation_owned_leaf() { # <path>
+    local path="$1"
+    [[ "$path" == /* ]] || return 1
+    [[ "$path" != *..* ]] || return 1
+    [[ "$path" != *login.keychain* ]] || return 1
+    [[ "$path" != *"/Library/Keychains"* ]] || return 1
+    [[ "$path" != *"Application Support"* ]] || return 1
+    [[ "$path" == */cpc.*/* ]]
+}
+
+configured_isolation_owned_keychain() { # <path>
+    configured_isolation_owned_leaf "$1" || return 1
+    [[ "$(basename "$1")" == k.keychain-db ]]
+}
+
+configured_isolation_socket_fits() { # <socket>
+    local socket="$1" staged="${1}.new/s"
+    [[ "$socket" == /* ]] || return 1
+    [[ "$socket" != *..* ]] || return 1
+    (( ${#socket} < DARWIN_SUN_PATH && ${#staged} < DARWIN_SUN_PATH ))
+}
+
+configured_isolation_parse_keychain_lines() {
+    sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//'
+}
+
+configured_isolation_current_default() {
+    security default-keychain -d user 2>/dev/null | configured_isolation_parse_keychain_lines | head -n 1
+}
+
+configured_isolation_current_search() {
+    security list-keychains -d user 2>/dev/null | configured_isolation_parse_keychain_lines
+}
+
+configured_isolation_restore() {
+    local default="${ISOLATION_SAVED_DEFAULT:-}" line
+    local -a search=()
+    if [[ -n "$default" ]]; then
+        security default-keychain -d user -s "$default" || true
+    fi
+    if [[ -n "${ISOLATION_SAVED_SEARCH:-}" ]]; then
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && search+=("$line")
+        done <<EOF
+$ISOLATION_SAVED_SEARCH
+EOF
+        if ((${#search[@]} > 0)); then
+            security list-keychains -d user -s "${search[@]}" || true
+        fi
+    fi
+}
+
+configured_isolation_delete_owned() {
+    local keychain="${ISOLATION_KEYCHAIN:-}" root="${ISOLATION_ROOT:-}"
+    if [[ -n "$keychain" ]] && configured_isolation_owned_keychain "$keychain"; then
+        security delete-keychain "$keychain" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "$root" ]] && configured_isolation_owned_root "$root"; then
+        rm -rf "$root" || true
+    fi
+}
+
+configured_isolation_cleanup() {
+    # Restore first so a failed delete cannot leave the throwaway as default.
+    configured_isolation_restore
+    configured_isolation_delete_owned || true
+    ISOLATION_PASSWORD=""
+    ISOLATION_ROOT=""
+    ISOLATION_DATA_DIR=""
+    ISOLATION_SOCKET=""
+    ISOLATION_KEYCHAIN=""
+    ISOLATION_SAVED_DEFAULT=""
+    ISOLATION_SAVED_SEARCH=""
+    ISOLATION_ACTIVE=0
+}
+
+configured_isolation_mint_keychain() {
+    local stem="$ISOLATION_ROOT/k" xtrace_restore=""
+    [[ -o xtrace ]] && xtrace_restore="set -x"
+    { set +x; } 2>/dev/null
+    ISOLATION_PASSWORD="$(openssl rand -base64 24)" || {
+        eval "$xtrace_restore"
+        return 1
+    }
+    if ! security create-keychain -p "$ISOLATION_PASSWORD" "$stem"; then
+        ISOLATION_PASSWORD=""
+        eval "$xtrace_restore"
+        return 1
+    fi
+    if [[ -f "${stem}.keychain-db" ]]; then
+        ISOLATION_KEYCHAIN="${stem}.keychain-db"
+    elif [[ -f "$stem" ]]; then
+        ISOLATION_KEYCHAIN="$stem"
+    else
+        ISOLATION_PASSWORD=""
+        eval "$xtrace_restore"
+        return 1
+    fi
+    if ! security set-keychain-settings -lut 21600 "$ISOLATION_KEYCHAIN" \
+        || ! security unlock-keychain -p "$ISOLATION_PASSWORD" "$ISOLATION_KEYCHAIN"; then
+        ISOLATION_PASSWORD=""
+        eval "$xtrace_restore"
+        return 1
+    fi
+    eval "$xtrace_restore"
+}
+
+configured_isolation_roundtrip() {
+    local found
+    security add-generic-password \
+        -s "$ISOLATION_PROBE_SERVICE" -a "$ISOLATION_PROBE_ACCOUNT" \
+        -w "cloud-evidence-roundtrip" "$ISOLATION_KEYCHAIN" || return 1
+    found="$(security find-generic-password \
+        -s "$ISOLATION_PROBE_SERVICE" -a "$ISOLATION_PROBE_ACCOUNT" \
+        -w "$ISOLATION_KEYCHAIN")" || return 1
+    [[ "$found" == "cloud-evidence-roundtrip" ]] || return 1
+    security delete-generic-password \
+        -s "$ISOLATION_PROBE_SERVICE" -a "$ISOLATION_PROBE_ACCOUNT" \
+        "$ISOLATION_KEYCHAIN" >/dev/null
+}
+
+configured_isolation_setup() {
+    # Isolation mutates the user keychain search list. Refuse outside CI.
+    local root data socket saved_default saved_search
+    [[ -n "${GITHUB_ACTIONS:-}" ]] || return 1
+    root="$(mktemp -d /tmp/cpc.XXXXXX)" || return 1
+    if ! configured_isolation_owned_root "$root"; then
+        rm -rf "$root"
+        return 1
+    fi
+    data="$root/d"
+    mkdir -p "$data" || { rm -rf "$root"; return 1; }
+    socket="$data/daemon.sock"
+    if ! configured_isolation_socket_fits "$socket"; then
+        rm -rf "$root"
+        return 1
+    fi
+    saved_default="$(configured_isolation_current_default)" || { rm -rf "$root"; return 1; }
+    saved_search="$(configured_isolation_current_search)" || { rm -rf "$root"; return 1; }
+    if [[ -z "$saved_default" || -z "$saved_search" ]]; then
+        rm -rf "$root"
+        return 1
+    fi
+    ISOLATION_ROOT="$root"
+    ISOLATION_DATA_DIR="$data"
+    ISOLATION_SOCKET="$socket"
+    ISOLATION_SAVED_DEFAULT="$saved_default"
+    ISOLATION_SAVED_SEARCH="$saved_search"
+    if ! configured_isolation_mint_keychain \
+        || ! configured_isolation_owned_keychain "$ISOLATION_KEYCHAIN"; then
+        configured_isolation_cleanup
+        return 1
+    fi
+    # Run 34007760276: login stayed on the search list, so the sidecar
+    # classified KEY_LOCKED against the I-10 item. Isolation uses the
+    # throwaway keychain alone and never names that item.
+    if ! security list-keychains -d user -s "$ISOLATION_KEYCHAIN" \
+        || ! security default-keychain -d user -s "$ISOLATION_KEYCHAIN" \
+        || ! configured_isolation_roundtrip; then
+        configured_isolation_cleanup
+        return 1
+    fi
+    ISOLATION_ACTIVE=1
+}
+
 # Run 34004833224: configured AX waits burned the job after status could not load.
 probe_configured_sidecar_path() {
     local dir="$OUT/sidecar-probe"
@@ -399,6 +607,14 @@ probe_configured_sidecar_path() {
     local pid="" ppid="" exe_class="" argv="" socket_owner=unknown
     local side_ident="" bund_ident="" verdict reason
     local status_blob=""
+    if [[ "${ISOLATION_ACTIVE:-0}" != 1 ]] \
+        || ! configured_isolation_owned_root "$ISOLATION_ROOT" \
+        || ! configured_isolation_owned_keychain "$ISOLATION_KEYCHAIN" \
+        || ! configured_isolation_owned_leaf "$ISOLATION_DATA_DIR" \
+        || ! configured_isolation_socket_fits "$ISOLATION_SOCKET"; then
+        bad "the configured sidecar path is live and ready" "isolation-inactive"
+        return 1
+    fi
     mkdir -p "$dir"
     {
         read -r path_class
@@ -472,6 +688,7 @@ configured_scenario() {
     group "Cloud UI: configured macOS account lifecycle"
     ensure_cloud_evidence_daemon || { bad "the cloud-evidence daemon sidecar is present"; return; }
     start_stub || { bad "the cloud evidence backend starts"; return; }
+    configured_isolation_setup || { bad "configured evidence isolation is armed"; return; }
     launch_app configured || { bad "the configured app exposes accessibility state"; return; }
     probe_configured_sidecar_path || return
     open_cloud || { bad "the configured cloud row is reachable"; return; }
@@ -642,25 +859,40 @@ sidecar_launch_self_test() { # <tmp-dir>
     fi
 
     DAEMON_SIDECAR="$sidecar"
+    ISOLATION_DATA_DIR=""
+    ISOLATION_SOCKET=""
+    if open_cloud_evidence_app configured >/dev/null 2>&1; then
+        bad "configured launch fails closed without isolated paths"
+    else
+        ok "configured launch fails closed without isolated paths"
+    fi
+    ISOLATION_DATA_DIR="$1/cpc.fixture/d"
+    ISOLATION_SOCKET="$1/cpc.fixture/d/daemon.sock"
     configured="$(open_cloud_evidence_app configured)"
     if [[ "$configured" == OPEN$'\t'* \
         && "$configured" == *$'\t--env\tCOPYPASTE_CLOUD_URL=http://127.0.0.1:47800'* \
         && "$configured" == *$'\t--env\tCOPYPASTE_CLOUD_ANON_KEY=native-evidence'* \
         && "$configured" == *$'\t--env\tCOPYPASTE_DAEMON_BIN='"$sidecar"* \
+        && "$configured" == *$'\t--env\tCOPYPASTE_DATA_DIR='"$ISOLATION_DATA_DIR"* \
+        && "$configured" == *$'\t--env\tCOPYPASTE_SOCKET='"$ISOLATION_SOCKET"* \
         && "$configured" != ENV* ]]; then
         ok "configured launch passes an absolute sidecar and loopback endpoint"
     else
         bad "configured launch passes an absolute sidecar and loopback endpoint"
     fi
     unconfigured="$(open_cloud_evidence_app unconfigured)"
-    if [[ "$unconfigured" == ENV$'\t-u\tCOPYPASTE_CLOUD_URL\t-u\tCOPYPASTE_CLOUD_ANON_KEY\t-u\tCOPYPASTE_DAEMON_BIN\topen\t'* \
+    if [[ "$unconfigured" == ENV$'\t-u\tCOPYPASTE_CLOUD_URL\t-u\tCOPYPASTE_CLOUD_ANON_KEY\t-u\tCOPYPASTE_DAEMON_BIN\t-u\tCOPYPASTE_DATA_DIR\t-u\tCOPYPASTE_SOCKET\topen\t'* \
         && "$unconfigured" == *$'\t--env\tCOPYPASTE_EVIDENCE_AX=1' \
         && "$unconfigured" != *COPYPASTE_DAEMON_BIN=/* \
-        && "$unconfigured" != *COPYPASTE_CLOUD_URL=http* ]]; then
+        && "$unconfigured" != *COPYPASTE_CLOUD_URL=http* \
+        && "$unconfigured" != *COPYPASTE_DATA_DIR=/* \
+        && "$unconfigured" != *COPYPASTE_SOCKET=/* ]]; then
         ok "unconfigured launch uses the bundled daemon and no override"
     else
         bad "unconfigured launch uses the bundled daemon and no override"
     fi
+    ISOLATION_DATA_DIR=""
+    ISOLATION_SOCKET=""
     unset -f open env
 }
 
@@ -713,6 +945,8 @@ configured_assertions_self_test() {
         && "$body" == *'sign-in "$elapsed" 30000'* \
         && "$body" == *'sync-with-skips "$elapsed" 30000'* \
         && "$body" == *'offline-error "$elapsed" 60000'* \
+        && "$body" == *"configured_isolation_setup"* \
+        && "$body" == *"configured_isolation_setup"*"launch_app configured"* \
         && "$body" == *"probe_configured_sidecar_path || return"* \
         && "$body" == *"probe_configured_sidecar_path"*"open_cloud"* \
         && "$body" == *"probe_configured_sidecar_path"*"expect_label \"Signed out\""* ]]; then
@@ -853,10 +1087,15 @@ probe_sanitize_self_test() {
 
 probe_override_self_test() {
     local body
-    body="$(type open_cloud_evidence_app 2>/dev/null)$(type ensure_cloud_evidence_daemon 2>/dev/null)"
+    body="$(type open_cloud_evidence_app 2>/dev/null)$(type ensure_cloud_evidence_daemon 2>/dev/null)$(type default_cloud_shutdown 2>/dev/null)$(type launch_app 2>/dev/null)"
     if [[ "$body" == *"COPYPASTE_DAEMON_BIN=\$DAEMON_SIDECAR"* \
         && "$body" == *"--features cloud-evidence"* \
-        && "$body" == *"-u COPYPASTE_DAEMON_BIN"* ]]; then
+        && "$body" == *"-u COPYPASTE_DAEMON_BIN"* \
+        && "$body" == *"COPYPASTE_DATA_DIR=\$ISOLATION_DATA_DIR"* \
+        && "$body" == *"COPYPASTE_SOCKET=\$ISOLATION_SOCKET"* \
+        && "$body" == *"-u COPYPASTE_DATA_DIR"* \
+        && "$body" == *"-u COPYPASTE_SOCKET"* \
+        && "$body" == *"default_cloud_shutdown"* ]]; then
         ok "configured launch still passes the exact sidecar override"
     else
         bad "configured launch still passes the exact sidecar override"
@@ -876,6 +1115,279 @@ probe_bounded_runtime_self_test() {
     fi
 }
 
+configured_isolation_self_test() { # <tmp-dir>
+    local fx="$1/iso" sec_log="$1/iso-security.log" cli_log="$1/iso-cli.log"
+    local saved_ga="${GITHUB_ACTIONS-}" out="" got="" home_saved="$HOME"
+    local setup_body restore_body cleanup_body delete_body probe_region
+    mkdir -p "$fx/cpc.AAAAAA/d" "$fx/home"
+
+    if configured_isolation_owned_root "$fx/cpc.AAAAAA" \
+        && ! configured_isolation_owned_root "cpc.rel" \
+        && ! configured_isolation_owned_root "$fx/cpc.AAAAAA/../cpc.BBBBBB" \
+        && ! configured_isolation_owned_root "$HOME/Library/Keychains/cpc.x" \
+        && ! configured_isolation_owned_root "$HOME/Library/Application Support/cpc.x" \
+        && ! configured_isolation_owned_root "$fx/other.AAAAAA"; then
+        ok "owned-root validation rejects relative, .., login, Application Support, and non-cpc paths"
+    else
+        bad "owned-root validation rejects relative, .., login, Application Support, and non-cpc paths"
+    fi
+    if configured_isolation_owned_keychain "$fx/cpc.AAAAAA/k.keychain-db" \
+        && ! configured_isolation_owned_keychain "$HOME/Library/Keychains/login.keychain-db" \
+        && ! configured_isolation_owned_keychain "$fx/cpc.AAAAAA/login.keychain-db" \
+        && ! configured_isolation_owned_keychain "$fx/other/k.keychain-db"; then
+        ok "owned-keychain validation rejects login and non-cpc paths"
+    else
+        bad "owned-keychain validation rejects login and non-cpc paths"
+    fi
+    if configured_isolation_socket_fits "$fx/cpc.AAAAAA/d/daemon.sock" \
+        && ! configured_isolation_socket_fits "/$(python3 -c 'print("x" * 120)')"; then
+        ok "Darwin socket length guard accepts short isolated sockets"
+    else
+        bad "Darwin socket length guard accepts short isolated sockets"
+    fi
+
+    unset GITHUB_ACTIONS
+    mktemp() { printf 'MKTEMP\n' >> "$sec_log"; return 1; }
+    openssl() { printf 'OPENSSL\n' >> "$sec_log"; return 1; }
+    security() { printf 'SECURITY\n' >> "$sec_log"; return 1; }
+    : > "$sec_log"
+    if configured_isolation_setup; then
+        bad "configured isolation setup refuses outside CI"
+    else
+        ok "configured isolation setup refuses outside CI"
+    fi
+    if [[ -s "$sec_log" ]]; then
+        bad "configured isolation setup does not mutate outside CI"
+    else
+        ok "configured isolation setup does not mutate outside CI"
+    fi
+    unset -f mktemp openssl security
+    if [[ -n "$saved_ga" ]]; then
+        export GITHUB_ACTIONS="$saved_ga"
+    fi
+
+    export GITHUB_ACTIONS=1
+    : > "$sec_log"
+    mktemp() { mkdir -p "$fx/cpc.AAAAAA"; printf '%s\n' "$fx/cpc.AAAAAA"; }
+    openssl() { printf '%s\n' 'SECRET_PASSWORD_TOKEN'; }
+    security() {
+        printf '%s\n' "$*" >> "$sec_log"
+        case "$1" in
+            default-keychain)
+                if [[ "${4:-}" == -s ]]; then
+                    return 0
+                fi
+                printf '    "/Users/fixture/Library/Keychains/login.keychain-db"\n'
+                ;;
+            list-keychains)
+                if [[ "${4:-}" == -s ]]; then
+                    return 0
+                fi
+                printf '    "/Users/fixture/Library/Keychains/login.keychain-db"\n'
+                ;;
+            create-keychain)
+                touch "${!#}.keychain-db"
+                ;;
+            find-generic-password)
+                if [[ " $* " == *" -w "* ]]; then
+                    printf 'cloud-evidence-roundtrip\n'
+                else
+                    printf 'could not be found\n'
+                fi
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    }
+    got=1
+    { set -x
+      configured_isolation_setup
+      got=$?
+      set +x
+    } >"$fx/setup.out" 2>"$fx/setup.err"
+    out="$(cat "$fx/setup.out" "$fx/setup.err")"
+    if [[ "$got" -eq 0 && "$ISOLATION_ACTIVE" == 1 \
+        && "$ISOLATION_DATA_DIR" == "$fx/cpc.AAAAAA/d" \
+        && "$ISOLATION_SOCKET" == "$fx/cpc.AAAAAA/d/daemon.sock" \
+        && "$ISOLATION_KEYCHAIN" == "$fx/cpc.AAAAAA/k.keychain-db" \
+        && "$out" != *SECRET_PASSWORD_TOKEN* \
+        && "$(cat "$sec_log")" != *com.copypaste.daemon* \
+        && "$(cat "$sec_log")" != *device-secret-key* ]]; then
+        ok "configured isolation setup arms throwaway paths without logging the password"
+    else
+        bad "configured isolation setup arms throwaway paths without logging the password"
+    fi
+    if awk '
+        /create-keychain/ { create = 1 }
+        /list-keychains -d user -s / { listed = 1 }
+        /default-keychain/ && !/-s/ { reads++ }
+        /list-keychains/ && !/-s/ { reads++ }
+        END { exit !(reads >= 2 && create && listed) }
+    ' "$sec_log" \
+        && ! grep -E 'list-keychains -d user -s .*(login\.keychain|existing)' "$sec_log" \
+        && grep -q "list-keychains -d user -s $fx/cpc.AAAAAA/k.keychain-db" "$sec_log" \
+        && [[ "$(awk '/create-keychain/{print NR; exit}' "$sec_log")" -gt "$(awk '/default-keychain/ && !/-s/{print NR; exit}' "$sec_log")" ]]; then
+        ok "setup saves the search list, then switches it to the throwaway only"
+    else
+        bad "setup saves the search list, then switches it to the throwaway only"
+    fi
+
+    : > "$sec_log"
+    ISOLATION_SAVED_DEFAULT="/Users/fixture/Library/Keychains/login.keychain-db"
+    ISOLATION_SAVED_SEARCH="/Users/fixture/Library/Keychains/login.keychain-db"
+    security() {
+        printf '%s\n' "$*" >> "$sec_log"
+        if [[ "$1" == delete-keychain ]]; then
+            return 1
+        fi
+        return 0
+    }
+    rm() {
+        printf 'RM %s\n' "$*" >> "$sec_log"
+        return 1
+    }
+    configured_isolation_cleanup
+    if awk '
+        /default-keychain -d user -s / { restore = NR }
+        /list-keychains -d user -s / { search = NR }
+        /delete-keychain/ { del = NR }
+        /RM / { rm = NR }
+        END { exit !(restore && search && restore < (del ? del : 9999) && search < (rm ? rm : 9999)) }
+    ' "$sec_log" \
+        && [[ "$ISOLATION_ACTIVE" == 0 && -z "$ISOLATION_PASSWORD" ]]; then
+        ok "cleanup restores default and search list before a failing delete"
+    else
+        bad "cleanup restores default and search list before a failing delete"
+    fi
+    unset -f rm
+
+    : > "$sec_log"
+    ISOLATION_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+    ISOLATION_ROOT="$HOME/Library/Application Support/com.copypaste.CopyPaste"
+    ISOLATION_SAVED_DEFAULT=""
+    ISOLATION_SAVED_SEARCH=""
+    security() {
+        printf '%s\n' "$*" >> "$sec_log"
+        return 0
+    }
+    rm() {
+        printf 'RM %s\n' "$*" >> "$sec_log"
+        return 0
+    }
+    configured_isolation_delete_owned
+    if [[ -s "$sec_log" ]]; then
+        bad "owned-only delete refuses login and Application Support paths"
+    else
+        ok "owned-only delete refuses login and Application Support paths"
+    fi
+    unset -f rm security mktemp openssl
+
+    HOME="$fx/home"
+    mkdir -p "$HOME/Library/Application Support/com.copypaste.CopyPaste/logs"
+    touch "$HOME/Library/Application Support/com.copypaste.CopyPaste/copypaste-v2.db"
+    ISOLATION_DATA_DIR="$fx/cpc.AAAAAA/d"
+    ISOLATION_SOCKET="$fx/cpc.AAAAAA/d/daemon.sock"
+    ISOLATION_KEYCHAIN="$fx/cpc.AAAAAA/k.keychain-db"
+    mkdir -p "$ISOLATION_DATA_DIR/logs"
+    if [[ "$(probe_db_state)" == absent ]]; then
+        ok "probe db inspection uses the isolated data dir"
+    else
+        bad "probe db inspection uses the isolated data dir"
+    fi
+    touch "$ISOLATION_DATA_DIR/copypaste-v2.db"
+    if [[ "$(probe_db_state)" == present ]]; then
+        ok "probe db inspection sees only the isolated database"
+    else
+        bad "probe db inspection sees only the isolated database"
+    fi
+    : > "$sec_log"
+    security() {
+        printf '%s\n' "$*" >> "$sec_log"
+        printf 'could not be found\n'
+    }
+    probe_run_bounded() { shift; "$@"; }
+    got="$(probe_keychain_item)"
+    if [[ "$got" == absent && "$(cat "$sec_log")" == *"$ISOLATION_KEYCHAIN"* \
+        && "$(cat "$sec_log")" != *login.keychain* ]]; then
+        ok "probe keychain inspection uses the isolated keychain"
+    else
+        bad "probe keychain inspection uses the isolated keychain"
+    fi
+    : > "$cli_log"
+    probe_run_bounded() {
+        shift
+        printf '%s\n' "$*" >> "$cli_log"
+        printf 'configured    yes\n'
+    }
+    APP="$fx/CopyPaste.app"
+    mkdir -p "$APP/Contents/MacOS"
+    : > "$APP/Contents/MacOS/copypaste"
+    chmod +x "$APP/Contents/MacOS/copypaste"
+    probe_cli_pair >/dev/null
+    if grep -q "COPYPASTE_SOCKET=$ISOLATION_SOCKET" "$cli_log" \
+        && grep -q "COPYPASTE_DATA_DIR=$ISOLATION_DATA_DIR" "$cli_log"; then
+        ok "probe CLI inspection uses isolated socket and data dir"
+    else
+        bad "probe CLI inspection uses isolated socket and data dir"
+    fi
+    HOME="$home_saved"
+    unset -f security probe_run_bounded
+
+    setup_body="$(type configured_isolation_setup 2>/dev/null)$(type configured_isolation_mint_keychain 2>/dev/null)$(type configured_isolation_roundtrip 2>/dev/null)"
+    restore_body="$(type configured_isolation_restore 2>/dev/null)"
+    cleanup_body="$(type configured_isolation_cleanup 2>/dev/null)$(type cleanup 2>/dev/null)"
+    delete_body="$(type configured_isolation_delete_owned 2>/dev/null)"
+    probe_region="$(type probe_keychain_item 2>/dev/null)$(type probe_db_state 2>/dev/null)$(type probe_cli_pair 2>/dev/null)$(type probe_live_daemon 2>/dev/null)$(type probe_runtime_log 2>/dev/null)$(type probe_configured_sidecar_path 2>/dev/null)"
+    if [[ "$setup_body" != *existing* \
+        && "$setup_body" != *login.keychain* \
+        && "$setup_body" != *COPYPASTE_EPHEMERAL_KEY* \
+        && "$setup_body" != *COPYPASTE_KEYCHAIN_TEST* \
+        && "$setup_body" == *"list-keychains -d user -s \"\$ISOLATION_KEYCHAIN\""* ]]; then
+        ok "setup does not keep login on the search list or use product key escapes"
+    else
+        bad "setup does not keep login on the search list or use product key escapes"
+    fi
+    if [[ "$probe_region" != *delete-generic-password* \
+        && "$probe_region" != *add-generic-password* \
+        && "$probe_region" != *create-keychain* \
+        && "$probe_region" != *unlock-keychain* \
+        && "$probe_region" != *delete-keychain* \
+        && "$probe_region" != *COPYPASTE_EPHEMERAL_KEY* \
+        && "$probe_region" == *ISOLATION_KEYCHAIN* \
+        && "$probe_region" == *ISOLATION_DATA_DIR* \
+        && "$probe_region" == *ISOLATION_SOCKET* ]]; then
+        ok "sidecar probe stays attribute-only on isolated paths"
+    else
+        bad "sidecar probe stays attribute-only on isolated paths"
+    fi
+    if [[ "$cleanup_body" == *configured_isolation_restore* \
+        && "$cleanup_body" == *configured_isolation_delete_owned* \
+        && "$cleanup_body" == *configured_isolation_cleanup* \
+        && "$cleanup_body" == *default_cloud_shutdown* \
+        && "$restore_body" == *"default-keychain -d user -s"* \
+        && "$delete_body" == *configured_isolation_owned_keychain* \
+        && "$delete_body" == *configured_isolation_owned_root* ]] \
+        && grep -q '^trap cleanup EXIT$' "${BASH_SOURCE[0]}"; then
+        ok "cleanup restores isolation on EXIT and validates owned deletes"
+    else
+        bad "cleanup restores isolation on EXIT and validates owned deletes"
+    fi
+
+    ISOLATION_ROOT=""
+    ISOLATION_DATA_DIR=""
+    ISOLATION_SOCKET=""
+    ISOLATION_KEYCHAIN=""
+    ISOLATION_PASSWORD=""
+    ISOLATION_SAVED_DEFAULT=""
+    ISOLATION_SAVED_SEARCH=""
+    ISOLATION_ACTIVE=0
+    unset GITHUB_ACTIONS
+    if [[ -n "$saved_ga" ]]; then
+        export GITHUB_ACTIONS="$saved_ga"
+    fi
+}
+
 if [[ "${1:-}" == "--self-test" ]]; then
     SELF_TEST_TMP="$(mktemp -d)"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
@@ -891,6 +1403,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     probe_sanitize_self_test
     probe_override_self_test
     probe_bounded_runtime_self_test
+    configured_isolation_self_test "$SELF_TEST_TMP"
     cloud_evidence_summary macOS
     [[ $FAIL -eq 0 ]]
     exit
