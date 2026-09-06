@@ -752,7 +752,7 @@ configured_scenario() {
     mac_set_exact_role "Password" "AXTextField" "stub-password" >/dev/null || bad "password can be entered"
     mac_set_exact_role "Sync passphrase" "AXTextField" "native-evidence" >/dev/null || bad "passphrase can be entered"
     started="$(now_ms)"
-    mac_ax press "Sign in" >/dev/null || bad "the native sign-in action is reachable"
+    mac_press_exact_role "Sign in" "AXButton" >/dev/null || bad "the native sign-in action is reachable"
     expect_label "Connected" "$OUT/connected.txt"
     elapsed=$(( $(now_ms) - started ))
     cloud_latency_record "$LATENCIES" sign-in "$elapsed" 30000 \
@@ -873,6 +873,121 @@ cloud_panel_selector_self_test() { # <tmp-dir>
     fi
     unset -f mac_ax
     OUT="$saved_out"
+}
+
+sign_in_exact_role_self_test() { # <tmp-dir>
+    local dump="$1/signed-out-signin.tsv" presses=0 selected="" original_ax
+    original_ax="$(declare -f mac_ax)"
+    # Run 34015026432 signed-out/ax.txt: prefix static, group description, unique button.
+    printf '%s\n' \
+        $'AXStaticText\tSign in to an existing account or create a new one.\t\t\tSign in to an existing account or create a new one.' \
+        $'AXGroup\tmissing value\tCloud account sign in\t\t' \
+        $'AXButton\tSign in\t\t\tmissing value' > "$dump"
+    dump_name_candidates() {
+        local role name _rest
+        while IFS=$'\t' read -r role name _rest; do
+            [[ "$name" == "$1" ]] || continue
+            printf '%s\t%s\n' "$role" "$name"
+        done
+    }
+
+    if [[ "$(dump_name_candidates "Sign in" < "$dump" | mac_unique_exact_role_label "Sign in" "AXButton")" == $'AXButton\tSign in' ]]; then
+        ok "unique exact AXButton Sign in wins over prefix static and group description"
+    else
+        bad "unique exact AXButton Sign in wins over prefix static and group description"
+    fi
+    if printf '%s\n' $'AXStaticText\tSign in to an existing account or create a new one.\t\t\tSign in to an existing account or create a new one.' \
+        | dump_name_candidates "Sign in" | mac_unique_exact_role_label "Sign in" "AXButton" >/dev/null; then
+        bad "unique exact Sign in rejects AXStaticText prefix"
+    else
+        ok "unique exact Sign in rejects AXStaticText prefix"
+    fi
+    if printf '%s\n' $'AXGroup\tmissing value\tCloud account sign in\t\t' \
+        | dump_name_candidates "Sign in" | mac_unique_exact_role_label "Sign in" "AXButton" >/dev/null; then
+        bad "unique exact Sign in rejects AXGroup description"
+    else
+        ok "unique exact Sign in rejects AXGroup description"
+    fi
+    if printf '%s\n' $'AXButton\tSign in to an existing account or create a new one.\n' \
+        | dump_name_candidates "Sign in" | mac_unique_exact_role_label "Sign in" "AXButton" >/dev/null; then
+        bad "unique exact Sign in rejects prefix names"
+    else
+        ok "unique exact Sign in rejects prefix names"
+    fi
+    if printf '%s' '' | mac_unique_exact_role_label "Sign in" "AXButton" >/dev/null; then
+        bad "unique exact Sign in rejects zero matches"
+    else
+        ok "unique exact Sign in rejects zero matches"
+    fi
+    if printf '%s\n' $'AXButton\tSign in' $'AXButton\tSign in' \
+        | mac_unique_exact_role_label "Sign in" "AXButton" >/dev/null; then
+        bad "unique exact Sign in rejects duplicate AXButton"
+    else
+        ok "unique exact Sign in rejects duplicate AXButton"
+    fi
+
+    mac_ax() {
+        case "$1" in
+            find-exact-role-candidates)
+                dump_name_candidates "$2" < "$dump"
+                ;;
+            press-exact-role)
+                [[ "$2" == "Sign in" && "$3" == "AXButton" ]] || return 1
+                presses=$((presses + 1))
+                selected="$2 $3"
+                printf 'ok\n'
+                ;;
+            *) return 97 ;;
+        esac
+    }
+    if mac_press_exact_role "Sign in" "AXButton" >/dev/null \
+        && [[ "$presses" == 1 && "$selected" == "Sign in AXButton" ]]; then
+        ok "exact role press selects only the unique AXButton Sign in"
+    else
+        bad "exact role press selects only the unique AXButton Sign in"
+    fi
+
+    presses=0
+    selected=""
+    dump="$1/static-signin.tsv"
+    printf '%s\n' \
+        $'AXStaticText\tSign in to an existing account or create a new one.\t\t\tSign in to an existing account or create a new one.' > "$dump"
+    if mac_press_exact_role "Sign in" "AXButton" >/dev/null 2>&1 || (( presses != 0 )); then
+        bad "exact role press does not act on AXStaticText Sign in to..."
+    else
+        ok "exact role press does not act on AXStaticText Sign in to..."
+    fi
+    dump="$1/group-signin.tsv"
+    printf '%s\n' $'AXGroup\tmissing value\tCloud account sign in\t\t' > "$dump"
+    if mac_press_exact_role "Sign in" "AXButton" >/dev/null 2>&1 || (( presses != 0 )); then
+        bad "exact role press does not act on AXGroup Cloud account sign in"
+    else
+        ok "exact role press does not act on AXGroup Cloud account sign in"
+    fi
+    dump="$1/prefix-signin.tsv"
+    printf '%s\n' $'AXButton\tSign in to an existing account or create a new one.\t\t\t' > "$dump"
+    if mac_press_exact_role "Sign in" "AXButton" >/dev/null 2>&1 || (( presses != 0 )); then
+        bad "exact role press does not act on prefix Sign in names"
+    else
+        ok "exact role press does not act on prefix Sign in names"
+    fi
+    dump="$1/zero-signin.tsv"
+    : > "$dump"
+    if mac_press_exact_role "Sign in" "AXButton" >/dev/null 2>&1 || (( presses != 0 )); then
+        bad "exact role press does not act when Sign in is absent"
+    else
+        ok "exact role press does not act when Sign in is absent"
+    fi
+    dump="$1/duplicate-signin.tsv"
+    printf '%s\n' $'AXButton\tSign in\t\t\tmissing value' $'AXButton\tSign in\t\t\tmissing value' > "$dump"
+    if mac_press_exact_role "Sign in" "AXButton" >/dev/null 2>&1 || (( presses != 0 )); then
+        bad "exact role press does not act on duplicate Sign in buttons"
+    else
+        ok "exact role press does not act on duplicate Sign in buttons"
+    fi
+
+    unset -f mac_ax dump_name_candidates
+    eval "$original_ax"
 }
 
 sidecar_launch_self_test() { # <tmp-dir>
@@ -1005,7 +1120,8 @@ configured_assertions_self_test() {
         && "$body" == *'mac_set_exact_role "Password" "AXTextField" "stub-password"'* \
         && "$body" == *'mac_set_exact_role "Sync passphrase" "AXTextField" "native-evidence"'* \
         && "$body" != *'mac_ax set '* \
-        && "$body" == *'mac_ax press "Sign in"'* \
+        && "$body" == *'mac_press_exact_role "Sign in" "AXButton"'* \
+        && "$body" != *'mac_ax press "Sign in"'* \
         && "$body" == *'mac_ax press "Sync cloud now"'* \
         && "$body" == *'mac_ax press "Sign out"'* ]]; then
         ok "configured scenario fills unique exact AXTextField values only"
@@ -1623,6 +1739,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     preference_seed_self_test "$SELF_TEST_TMP"
     mac_ui_self_test "$SELF_TEST_TMP"
     cloud_panel_selector_self_test "$SELF_TEST_TMP"
+    sign_in_exact_role_self_test "$SELF_TEST_TMP"
     cloud_evidence_self_test "$SELF_TEST_TMP"
     sidecar_launch_self_test "$SELF_TEST_TMP"
     unconfigured_latency_self_test "$SELF_TEST_TMP"
