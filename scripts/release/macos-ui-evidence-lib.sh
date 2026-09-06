@@ -493,13 +493,14 @@ mac_ui_self_test() {
     [[ "$press_result" == "ok" && "$set_result" == "ok" ]] \
         && ok "accessibility actions retain their result shapes" \
         || bad "accessibility actions retain their result shapes"
-    # `declare -f mac_ax`, not this file: grepping BASH_SOURCE matched the
-    # literals in these two lines, so the assertion passed with the production
-    # AppleScript deleted.
+    # `declare -f mac_ax` per actionMode, not this file or the whole
+    # dispatcher: a file grep matched these literals, and a whole-body grep
+    # left field-input-never-focuses / field-input-types-nothing alive on
+    # the other branch after they deleted the first copies.
     local dispatcher="$1/mac-ax-body.txt"
     declare -f mac_ax > "$dispatcher"
-    grep -Fq 'set focused of elementRef to true' "$dispatcher" \
-        && grep -Fq 'keystroke inputValue' "$dispatcher" \
+    mac_ax_field_input_dispatches "$dispatcher" set \
+        && mac_ax_field_input_dispatches "$dispatcher" set-exact-role \
         && ok "field input dispatches keyboard events" \
         || bad "field input dispatches keyboard events"
     grep -Fq 'set-exact-role' "$dispatcher" \
@@ -512,6 +513,7 @@ mac_ui_self_test() {
         && bad "an absent accessibility state is not found" \
         || ok "an absent accessibility state is not found"
     unset -f osascript
+    mac_ax_field_input_scope_self_test "$1"
     mac_exact_role_field_self_test "$1"
 }
 
@@ -635,4 +637,177 @@ mac_exact_role_field_self_test() { # <tmp-dir>
     fi
     unset -f mac_ax dump_name_candidates
     eval "$original_ax"
+}
+
+mac_ax_field_input_py() {
+    python3 - "$@" <<'PY'
+import pathlib
+import sys
+
+
+def code(line):
+    return line.split("--", 1)[0]
+
+
+def kind(line):
+    stripped = code(line).strip()
+    if stripped.startswith("end if"):
+        return "end-if"
+    if stripped.startswith("else if") and stripped.endswith(" then"):
+        return "else-if"
+    if stripped == "else":
+        return "else"
+    if stripped.startswith("if ") and stripped.endswith(" then"):
+        return "if"
+    return None
+
+
+def mode_branches(source, mode):
+    needle = f'actionMode is "{mode}" then'
+    lines = source.splitlines(keepends=True)
+    index = 0
+    while index < len(lines):
+        if needle not in code(lines[index]):
+            index += 1
+            continue
+        start = kind(lines[index])
+        if start not in ("if", "else-if"):
+            index += 1
+            continue
+        block = [lines[index]]
+        depth = 1
+        index += 1
+        while index < len(lines) and depth > 0:
+            token = kind(lines[index])
+            if depth == 1 and token in ("else-if", "else"):
+                break
+            block.append(lines[index])
+            if token == "end-if":
+                depth -= 1
+            elif token == "if":
+                depth += 1
+            index += 1
+        yield "".join(block)
+
+
+def return_ok_bodies(source, mode):
+    return [body for body in mode_branches(source, mode) if 'return "ok"' in body]
+
+
+def sequence_before_ok(body):
+    position = 0
+    for needle in (
+        "set focused of elementRef to true",
+        'keystroke "a" using command down',
+        "key code 51",
+        "keystroke inputValue",
+        'return "ok"',
+    ):
+        found = body.find(needle, position)
+        if found < 0:
+            return False
+        position = found + len(needle)
+    return True
+
+
+def check(path, mode):
+    source = pathlib.Path(path).read_text(encoding="utf-8")
+    bodies = return_ok_bodies(source, mode)
+    return bool(bodies) and all(sequence_before_ok(body) for body in bodies)
+
+
+def delete_line(source_path, dest_path, mode, needle):
+    source = pathlib.Path(source_path).read_text(encoding="utf-8")
+    updated = source
+    bodies = return_ok_bodies(source, mode)
+    if not bodies:
+        raise SystemExit(f"no return-ok body for {mode}")
+    for body in bodies:
+        if needle not in body:
+            raise SystemExit(f"{needle!r} missing from {mode} body")
+        updated = updated.replace(body, body.replace(needle, "", 1), 1)
+    pathlib.Path(dest_path).write_text(updated, encoding="utf-8")
+
+
+command = sys.argv[1]
+if command == "check":
+    sys.exit(0 if check(sys.argv[2], sys.argv[3]) else 1)
+if command == "delete":
+    delete_line(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
+    sys.exit(0)
+raise SystemExit(f"unknown command {command}")
+PY
+}
+
+mac_ax_field_input_dispatches() { # <source> <set|set-exact-role>
+    mac_ax_field_input_py check "$1" "$2"
+}
+
+mac_ax_delete_field_input_line() { # <source> <dest> <mode> <needle>
+    mac_ax_field_input_py delete "$1" "$2" "$3" "$4"
+}
+
+mac_ax_field_input_scope_self_test() { # <tmp-dir>
+    local fixture="$1/field-input-scope.applescript" mutated other needle
+    # 4-space indent: the live mutations delete the 32-space first copies.
+    cat > "$fixture" <<'FIXTURE'
+set focused of elementRef to true
+keystroke "a" using command down
+key code 51
+keystroke inputValue
+return "ok"
+if actionMode is "press" then
+    set focused of elementRef to true
+    keystroke "a" using command down
+    key code 51
+    keystroke inputValue
+    return "ok"
+end if
+if actionMode is "set-exact-role" then
+    set focused of elementRef to true
+    keystroke inputValue
+end if
+if actionMode is "set" then
+    set focused of elementRef to true
+    keystroke "a" using command down
+    key code 51
+    keystroke inputValue
+    return "ok"
+end if
+if actionMode is "set-exact-role" then
+    set focused of elementRef to true
+    keystroke "a" using command down
+    key code 51
+    keystroke inputValue
+    return "ok"
+end if
+FIXTURE
+    mac_ax_field_input_dispatches "$fixture" set \
+        && mac_ax_field_input_dispatches "$fixture" set-exact-role \
+        && ok "scoped field input accepts both typed branches" \
+        || bad "scoped field input accepts both typed branches"
+
+    for mode in set set-exact-role; do
+        if [[ "$mode" == set ]]; then
+            other="set-exact-role"
+        else
+            other="set"
+        fi
+        for kind in focus type; do
+            if [[ "$kind" == focus ]]; then
+                needle="set focused of elementRef to true"
+            else
+                needle="keystroke inputValue"
+            fi
+            mutated="$1/field-input-${mode}-no-${kind}.applescript"
+            if mac_ax_delete_field_input_line "$fixture" "$mutated" "$mode" "$needle" \
+                && grep -Fq "$needle" "$mutated" \
+                && ! mac_ax_field_input_dispatches "$mutated" "$mode" \
+                && mac_ax_field_input_dispatches "$mutated" "$other"; then
+                ok "deleting ${mode} ${kind} is not satisfied by copies elsewhere"
+            else
+                bad "deleting ${mode} ${kind} is not satisfied by copies elsewhere"
+            fi
+        done
+    done
 }
