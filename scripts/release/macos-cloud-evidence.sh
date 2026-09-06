@@ -776,7 +776,7 @@ configured_scenario() {
     STUB_PID=""
     started="$(now_ms)"
     mac_ax press "Sync cloud now" >/dev/null || bad "cloud sync remains actionable offline"
-    expect_label "The last cloud sync failed" "$OUT/offline-error.txt"
+    expect_label "Cloud sync failed. Check the connection and try again." "$OUT/offline-error.txt"
     elapsed=$(( $(now_ms) - started ))
     cloud_latency_record "$LATENCIES" offline-error "$elapsed" 60000 \
         && ok "offline cloud error meets its latency budget" \
@@ -1101,7 +1101,8 @@ configured_assertions_self_test() {
         && "$body" == *"expect_label \"Connected\""* \
         && "$body" == *"expect_label \"native@example.test\""* \
         && "$body" == *"expect_label \"skipped\""* \
-        && "$body" == *"expect_label \"The last cloud sync failed\""* \
+        && "$body" == *"expect_label \"Cloud sync failed. Check the connection and try again.\""* \
+        && "$body" != *"expect_label \"The last cloud sync failed\""* \
         && "$body" == *"expect_label \"Signed out\" \"\$OUT/signed-out-again.txt\""* \
         && "$body" == *'sign-in "$elapsed" 30000'* \
         && "$body" == *'sync-with-skips "$elapsed" 30000'* \
