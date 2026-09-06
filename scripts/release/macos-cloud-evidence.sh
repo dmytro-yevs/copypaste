@@ -201,12 +201,7 @@ probe_redact_text() {
     python3 -c '
 import re, sys
 text = sys.stdin.read()
-held = {}
-def stash(match):
-    key = "<url{}>".format(len(held))
-    held[key] = match.group(0)
-    return key
-text = re.sub(r"https?://\S+", stash, text)
+text = re.sub(r"https?://\S+", "<url>", text)
 for secret in (
     "native-evidence",
     "stub-password",
@@ -221,8 +216,6 @@ text = re.sub(r"(?i)/(?:var/folders|private/var|tmp|Library)[^\n\"]*", "<path>",
 text = re.sub(r"(?i)\S+\.sock", "<socket>", text)
 text = re.sub(r"(?i)[A-Za-z]:\\\S+", "<path>", text)
 text = re.sub(r"(?<![A-Za-z:<])(/\S+)", "<path>", text)
-for key, value in held.items():
-    text = text.replace(key, value)
 sys.stdout.write(text)
 '
 }
@@ -253,6 +246,10 @@ probe_classify_cli_pair() { # <status-text> <cloud-text>
 
 probe_decide() { # <path_class> <cli_class> <keychain_item> <db>
     local path_class="$1" cli_class="$2" item="$3" db="$4"
+    if [[ "$item" == unknown ]]; then
+        printf 'fail\tunknown-keychain\n'
+        return
+    fi
     if [[ "$item" == absent && "$db" == present ]]; then
         printf 'fail\tabsent-item-existing-db\n'
         return
@@ -277,7 +274,9 @@ probe_decide() { # <path_class> <cli_class> <keychain_item> <db>
         printf 'fail\tsidecar-key-unusable\n'
         return
     fi
-    if [[ "$path_class" == sidecar && "$cli_class" == configured ]]; then
+    if [[ "$path_class" == sidecar && "$cli_class" == configured && (
+            "$item" == present || ( "$item" == absent && "$db" == absent )
+        ) ]]; then
         printf 'pass\tsidecar-configured\n'
         return
     fi
@@ -714,6 +713,7 @@ configured_assertions_self_test() {
         && "$body" == *'sign-in "$elapsed" 30000'* \
         && "$body" == *'sync-with-skips "$elapsed" 30000'* \
         && "$body" == *'offline-error "$elapsed" 60000'* \
+        && "$body" == *"probe_configured_sidecar_path || return"* \
         && "$body" == *"probe_configured_sidecar_path"*"open_cloud"* \
         && "$body" == *"probe_configured_sidecar_path"*"expect_label \"Signed out\""* ]]; then
         ok "configured scenario keeps exact lifecycle assertions and timeouts"
@@ -764,6 +764,14 @@ probe_decision_self_test() {
     [[ "$got" == $'pass\tsidecar-configured' ]] \
         && ok "an absent keychain item without a database can still pass" \
         || bad "an absent keychain item without a database can still pass"
+    got="$(probe_decide sidecar configured unknown present)"
+    [[ "$got" == $'fail\tunknown-keychain' ]] \
+        && ok "an unknown keychain item plus an existing database fails closed" \
+        || bad "an unknown keychain item plus an existing database fails closed"
+    got="$(probe_decide sidecar configured unknown absent)"
+    [[ "$got" == $'fail\tunknown-keychain' ]] \
+        && ok "an unknown keychain item without a database fails closed" \
+        || bad "an unknown keychain item without a database fails closed"
 }
 
 probe_classify_self_test() {
@@ -795,7 +803,7 @@ probe_classify_self_test() {
 }
 
 probe_sanitize_self_test() {
-    local out
+    local out url_path url_key
     out="$(printf '%s\n' \
         'keychain: "/Users/dmytro/Library/Keychains/login.keychain-db"' \
         'password: "super-secret-value"' \
@@ -812,13 +820,34 @@ probe_sanitize_self_test() {
         && "$out" != *orphan.sock* \
         && "$out" != *"/Users/"* \
         && "$out" != *"Application Support"* \
+        && "$out" != *'http://'* \
+        && "$out" != *'https://'* \
         && "$out" == *'<path>'* \
         && "$out" == *'<socket>'* \
         && "$out" == *'<redacted>'* \
-        && "$out" == *'http://127.0.0.1:47800 stays'* ]]; then
+        && "$out" == *'<url> stays'* ]]; then
         ok "sidecar probe artifacts redact secrets and filesystem paths"
     else
         bad "sidecar probe artifacts redact secrets and filesystem paths"
+    fi
+    url_path="$(printf '%s\n' 'http://127.0.0.1:47800/Users/dmytro/Library/Keychains/login.keychain-db' | probe_redact_text)"
+    if [[ "$url_path" != *dmytro* \
+        && "$url_path" != *"/Users/"* \
+        && "$url_path" != *login.keychain-db* \
+        && "$url_path" != *'http://'* \
+        && "$url_path" == *'<url>'* ]]; then
+        ok "sidecar probe artifacts redact filesystem paths inside URLs"
+    else
+        bad "sidecar probe artifacts redact filesystem paths inside URLs"
+    fi
+    url_key="$(printf '%s\n' 'https://example.test/callback?apikey=native-evidence' | probe_redact_text)"
+    if [[ "$url_key" != *native-evidence* \
+        && "$url_key" != *apikey* \
+        && "$url_key" != *'https://'* \
+        && "$url_key" == *'<url>'* ]]; then
+        ok "sidecar probe artifacts redact query secrets inside URLs"
+    else
+        bad "sidecar probe artifacts redact query secrets inside URLs"
     fi
 }
 
