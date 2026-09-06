@@ -31,7 +31,7 @@ mac_set_app_pid() { # <pid>
     MAC_APP_PID="$1"
 }
 
-mac_ax() { # <ready|surface|dump|find|press|set|menu-press|enable|find-exact-role-candidates|find-unique-safe-role|press-exact-role> [label] [role/value]
+mac_ax() { # <ready|surface|dump|find|press|set|menu-press|enable|find-exact-role-candidates|find-unique-safe-role|press-exact-role|find-unique-exact-description-role|press-unique-exact-description-role> [label] [role/value]
     [[ -n "${MAC_APP_PID:-}" ]] || {
         echo "macOS accessibility target PID is unavailable" >&2
         return 1
@@ -107,6 +107,15 @@ on run argv
                         set end of exactMatches to elementRef
                     end if
                 end if
+                -- Nav buttons expose Library/Devices/Settings as description with empty name.
+                if actionMode is "find-unique-exact-description-role" or actionMode is "press-unique-exact-description-role" then
+                    try
+                        set descriptionText to description of elementRef as text
+                    end try
+                    if descriptionText is targetLabel and roleText is inputValue then
+                        set end of exactMatches to elementRef
+                    end if
+                end if
                 if actionMode is "find-safe-role" and nameText is targetLabel and roleText is inputValue then
                     return roleText & tab & nameText
                 end if
@@ -175,6 +184,21 @@ on run argv
                     return "ok"
                 end try
             end if
+            if actionMode is "find-unique-exact-description-role" or actionMode is "press-unique-exact-description-role" then
+                if (count of exactMatches) > 1 then
+                    error "expected one accessible " & inputValue & " described " & targetLabel
+                end if
+                if (count of exactMatches) is 1 then
+                    set elementRef to item 1 of exactMatches
+                    if actionMode is "find-unique-exact-description-role" then
+                        return (role of elementRef as text) & tab & targetLabel
+                    end if
+                    try
+                        perform action "AXPress" of elementRef
+                        return "ok"
+                    end try
+                end if
+            end if
         end tell
     end tell
     if actionMode is "dump" or actionMode is "surface" or actionMode is "find-exact-role-candidates" then
@@ -219,6 +243,17 @@ mac_unique_exact_role_label() { # <label> <role>; reads AX role/name rows from s
     printf '%s\n' "$candidate"
 }
 
+mac_unique_exact_description_role_label() { # <label> <role>; reads AX role/name/description rows from stdin
+    local label="$1" role="$2" candidate_role _candidate_name candidate_description extra candidate="" count=0
+    while IFS=$'\t' read -r candidate_role _candidate_name candidate_description extra; do
+        [[ -z "$extra" && "$candidate_role" == "$role" && "$candidate_description" == "$label" ]] || continue
+        candidate="$candidate_role"$'\t'"$label"
+        ((count += 1))
+    done
+    (( count == 1 )) || return 1
+    printf '%s\n' "$candidate"
+}
+
 mac_find_unique_exact_role_label() { # <label> <role>
     mac_ax find-exact-role-candidates "$1" "$2" | mac_unique_exact_role_label "$1" "$2"
 }
@@ -241,6 +276,19 @@ mac_press_exact_role() { # <accessible name> <AX role>
         && mac_ax press-exact-role "$1" "$2"
 }
 
+mac_find_unique_exact_description_role() { # <accessible description> <AX role>
+    mac_ax find-unique-exact-description-role "$1" "$2"
+}
+
+mac_press_unique_exact_description_role() { # <accessible description> <AX role>
+    mac_ax press-unique-exact-description-role "$1" "$2"
+}
+
+mac_prepare_webview_ax() {
+    mac_ax enable >/dev/null 2>&1 || true
+    mac_ax menu-press "Show CopyPaste" >/dev/null 2>&1 || true
+}
+
 mac_recovery_wall_clock() {
     printf '%s\n' "$SECONDS"
 }
@@ -252,7 +300,7 @@ mac_recover_onboarding() { # <safe probe artifact> [timeout] [pace] [clock]
     while :; do
         now="$("$clock")"
         (( now - started < timeout )) || break
-        if mac_ax find-safe-role "Library" "AXButton" > "$probe" 2> "$error"; then
+        if mac_ax find-unique-exact-description-role "Library" "AXButton" > "$probe" 2> "$error"; then
             return 0
         elif ! grep -Fq "no accessible element named" "$error"; then
             return 2
@@ -339,10 +387,15 @@ mac_ui_self_test() {
             find-safe-role)
                 if [[ "$4" == "Library" && "$5" == "AXHeading" ]]; then
                     printf 'AXHeading\tLibrary\n'
-                elif [[ "$4" == "Library" && "$5" == "AXButton" ]]; then
-                    printf 'AXButton\tLibrary\n'
                 elif [[ "$4" == "Explore first" && "$5" == "AXButton" ]]; then
                     printf 'AXButton\tExplore first\n'
+                else
+                    return 1
+                fi
+                ;;
+            find-unique-exact-description-role)
+                if [[ "$4" == "Library" && "$5" == "AXButton" ]]; then
+                    printf 'AXButton\tLibrary\n'
                 else
                     return 1
                 fi
