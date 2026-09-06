@@ -13,6 +13,7 @@ wired end to end, never that this works against Supabase.
 import argparse
 import json
 import re
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,12 +37,28 @@ def dump_rows():
         json.dump(sorted(ROWS.values(), key=lambda r: r["item_id"]), f, indent=2)
 
 
+def _safe_path(raw):
+    path = urlparse(raw or "").path or "/"
+    path = re.sub(r"(?i)/Users/[^/]+", "/Users/<redacted>", path)
+    path = re.sub(r"(?i)/home/[^/]+", "/home/<redacted>", path)
+    return path
+
+
+def _is_realtime(path):
+    return path == "/realtime/v1/websocket" or path.startswith("/realtime/v1/")
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def log_request(self, code="-", size="-"):
+        status = getattr(code, "value", code)
+        self.log_message("%s %s %s", self.command or "-", _safe_path(self.path), status)
+
     def log_message(self, fmt, *args):
-        if ARGS.verbose:
-            super().log_message(fmt, *args)
+        if ARGS is None or not ARGS.verbose:
+            return
+        sys.stderr.write("%s\n" % (fmt % args))
 
     # -- plumbing ----------------------------------------------------------
     def _body(self):
@@ -54,9 +71,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if not body:
+            # Run 34016710899: empty 201/realtime 404 without a flushed
+            # close-delimited length left reqwest waiting for EOF.
+            self.send_header("Connection", "close")
+            self.close_connection = True
         self.end_headers()
-        if body:
-            self.wfile.write(body)
+        self.wfile.write(body)
+        self.wfile.flush()
 
     def _authorized(self):
         # Deliberately shallow: the point of the stub is the request shapes, not
@@ -67,6 +89,9 @@ class Handler(BaseHTTPRequestHandler):
     # -- routes ------------------------------------------------------------
     def do_POST(self):
         url = urlparse(self.path)
+        if _is_realtime(url.path):
+            self._body()
+            return self._reply(404)
         query = parse_qs(url.query)
 
         if url.path == "/auth/v1/token":
@@ -134,6 +159,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        if _is_realtime(url.path):
+            return self._reply(404)
         if url.path != "/rest/v1/clipboard_items":
             return self._reply(404, {"message": "no such stub route"})
         if not self._authorized():
@@ -192,11 +219,154 @@ def main():
     parser.add_argument("--password", default="stub-password")
     parser.add_argument("--dump", help="write every stored row here on each write")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
     ARGS = parser.parse_args()
+    if ARGS.self_test:
+        raise SystemExit(self_test())
 
     server = ThreadingHTTPServer(("127.0.0.1", ARGS.port), Handler)
     print(f"stub backend (NOT Supabase) listening on 127.0.0.1:{ARGS.port}", flush=True)
     server.serve_forever()
+
+
+def _start_stub(verbose=False, password="stub-password"):
+    global ARGS
+    ARGS = argparse.Namespace(port=0, password=password, dump=None, verbose=verbose)
+    with STATE_LOCK:
+        ROWS.clear()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def _http(port):
+    import http.client
+
+    last = None
+    for _ in range(50):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        try:
+            conn.connect()
+            return conn
+        except OSError as err:
+            last = err
+            time.sleep(0.01)
+    raise last
+
+
+def _exchange(conn, method, url, body=None, headers=None):
+    hdrs = {"Connection": "keep-alive"}
+    if headers:
+        hdrs.update(headers)
+    started = time.monotonic()
+    conn.request(method, url, body=body, headers=hdrs)
+    resp = conn.getresponse()
+    payload = resp.read()
+    return resp.status, payload, resp.getheader("Content-Length"), time.monotonic() - started
+
+
+def self_test():
+    import contextlib
+    import io
+
+    passed = 0
+    failed = 0
+
+    def check(name, ok):
+        nonlocal passed, failed
+        if ok:
+            passed += 1
+            print(f"  ok    {name}")
+        else:
+            failed += 1
+            print(f"  FAIL  {name}")
+
+    server = _start_stub(verbose=True)
+    port = server.server_address[1]
+    conn = _http(port)
+    auth = {"Authorization": "Bearer stub-access", "Content-Type": "application/json"}
+    row = {
+        "item_id": "it-1",
+        "ciphertext": "SECRET_CIPHER",
+        "nonce": "AA==",
+        "content_type": "text",
+        "created_at": 1,
+        "deleted": False,
+        "origin_device_id": "stub",
+        "signature": "",
+    }
+    logs = io.StringIO()
+    with contextlib.redirect_stderr(logs):
+        status, body, length, elapsed = _exchange(
+            conn,
+            "POST",
+            "/rest/v1/clipboard_items?apikey=secret-key&password=hunter2",
+            body=json.dumps([row]),
+            headers=auth,
+        )
+        check("POST empty 201 completes promptly",
+              status == 201 and body == b"" and length == "0" and elapsed < 1.0)
+        status, body, length, elapsed = _exchange(
+            conn,
+            "GET",
+            "/rest/v1/clipboard_items?order=created_at.asc,item_id.asc&created_at=gte.0",
+            headers={"Authorization": "Bearer stub-access"},
+        )
+        pulled = json.loads(body) if body else []
+        check("keep-alive GET after empty 201 returns the upsert",
+              status == 200 and elapsed < 1.0 and pulled == [row])
+        status, body, length, elapsed = _exchange(
+            conn,
+            "GET",
+            "/realtime/v1/websocket?apikey=secret-key&vsn=2.0.0",
+        )
+        check("realtime refusal completes promptly",
+              status == 404 and body == b"" and length == "0" and elapsed < 1.0)
+        status, body, _, _ = _exchange(
+            conn,
+            "POST",
+            "/auth/v1/token?grant_type=password",
+            body=json.dumps({"email": "native@example.test", "password": "stub-password"}),
+            headers={"Content-Type": "application/json"},
+        )
+        token = json.loads(body) if body else {}
+        check("password grant still returns JSON tokens",
+              status == 200 and token.get("user", {}).get("id") == USER_ID
+              and token.get("access_token", "").startswith("stub-access-"))
+        status, body, _, _ = _exchange(
+            conn,
+            "POST",
+            "/auth/v1/token?grant_type=password",
+            body=json.dumps({"email": "native@example.test", "password": "wrong"}),
+            headers={"Content-Type": "application/json"},
+        )
+        check("invalid password still returns JSON invalid_grant",
+              status == 400 and json.loads(body) == {"error": "invalid_grant"})
+        status, body, _, _ = _exchange(conn, "GET", "/rest/v1/clipboard_items")
+        check("missing bearer still returns JSON 401",
+              status == 401 and json.loads(body) == {"message": "no bearer"})
+        _exchange(conn, "GET", "/Users/dmytro/Library/secrets?apikey=secret-key")
+    recorded = logs.getvalue()
+    secret_hits = [
+        token for token in (
+            "secret-key", "hunter2", "SECRET_CIPHER", "stub-access",
+            "stub-password", "apikey=", "password=", "ciphertext",
+            "dmytro", "/Users/dmytro",
+        )
+        if token in recorded
+    ]
+    check("verbose logs method, sanitized path, and status",
+          "POST /rest/v1/clipboard_items 201" in recorded
+          and "GET /rest/v1/clipboard_items 200" in recorded
+          and "GET /realtime/v1/websocket 404" in recorded
+          and "POST /auth/v1/token 200" in recorded)
+    check("verbose logs redact secrets, query, body, and user paths",
+          not secret_hits and "GET /Users/<redacted>/Library/secrets 404" in recorded)
+    conn.close()
+    server.shutdown()
+    server.server_close()
+    print(f"{passed} passed, {failed} failed")
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":

@@ -193,7 +193,7 @@ capture_state() { # <state>
 
 start_stub() {
     python3 scripts/cloud-stub.py --port "$STUB_PORT" --password stub-password \
-        --dump "$OUT/stub-rows.json" > "$OUT/stub.log" 2>&1 &
+        --dump "$OUT/stub-rows.json" --verbose > "$OUT/stub.log" 2>&1 &
     STUB_PID=$!
     for _ in $(seq 1 50); do
         curl -fsS -o /dev/null -X POST "http://127.0.0.1:$STUB_PORT/auth/v1/logout" && return 0
@@ -1259,6 +1259,18 @@ probe_sanitize_self_test() {
     fi
 }
 
+start_stub_verbose_self_test() {
+    local body
+    body="$(type start_stub 2>/dev/null)"
+    if [[ "$body" == *"python3 scripts/cloud-stub.py"* \
+        && "$body" == *"--verbose"* \
+        && "$body" == *'"$OUT/stub.log"'* ]]; then
+        ok "cloud evidence stub enables bounded verbose request logging"
+    else
+        bad "cloud evidence stub enables bounded verbose request logging"
+    fi
+}
+
 probe_override_self_test() {
     local body
     body="$(type open_cloud_evidence_app 2>/dev/null)$(type ensure_cloud_evidence_daemon 2>/dev/null)$(type default_cloud_shutdown 2>/dev/null)$(type launch_app 2>/dev/null)"
@@ -1744,6 +1756,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     sidecar_launch_self_test "$SELF_TEST_TMP"
     unconfigured_latency_self_test "$SELF_TEST_TMP"
     configured_assertions_self_test
+    start_stub_verbose_self_test
     probe_decision_self_test
     probe_classify_self_test
     probe_sanitize_self_test
