@@ -171,6 +171,53 @@ def qualified_artifact_identity(value):
     return identity
 
 
+SNAPSHOT_COMPARE_FIELDS = (
+    ("record", "name"),
+    ("record", "sha256"),
+    ("record", "bytes"),
+    ("identity", "device"),
+    ("identity", "inode"),
+    ("identity", "bytes"),
+    ("identity", "mtime_ns"),
+    ("identity", "ctime_ns"),
+)
+# hdiutil(1) attach may store a verified-image attribute; that updates ctime
+# only. Run 34004833224 failed when later receipt equality included that ctime.
+DISKIMAGES_TRANSITION_ALLOWED = frozenset({("identity", "ctime_ns")})
+
+
+def snapshot_mismatch_fields(expected, actual, *, allowed=frozenset()):
+    return [
+        f"{section}.{field}"
+        for section, field in SNAPSHOT_COMPARE_FIELDS
+        if (section, field) not in allowed
+        and expected[section][field] != actual[section][field]
+    ]
+
+
+def snapshot_change_error(prefix, expected, actual, *, allowed=frozenset()):
+    fields = snapshot_mismatch_fields(expected, actual, allowed=allowed)
+    if fields:
+        return ValueError(f"{prefix}: {', '.join(fields)}")
+    return ValueError(prefix)
+
+
+def accept_diskimages_transition(pinned, live):
+    mismatches = snapshot_mismatch_fields(
+        pinned,
+        live,
+        allowed=DISKIMAGES_TRANSITION_ALLOWED,
+    )
+    if mismatches:
+        raise snapshot_change_error(
+            "qualified artifact changed after attach",
+            pinned,
+            live,
+            allowed=DISKIMAGES_TRANSITION_ALLOWED,
+        )
+    return live
+
+
 def feature_state_record(value, requirement, artifacts):
     parts = value.split(",")
     try:
@@ -240,8 +287,13 @@ def main():
     try:
         artifacts = [artifact_record(output.parent, item) for item in args.artifact]
         qualified_snapshot = qualified_artifact_snapshot(args.qualified_artifact)
-        if qualified_snapshot != qualified_artifact_identity(args.qualified_artifact_identity):
-            raise ValueError("qualified artifact changed after capture")
+        captured = qualified_artifact_identity(args.qualified_artifact_identity)
+        if qualified_snapshot != captured:
+            raise snapshot_change_error(
+                "qualified artifact changed after capture",
+                captured,
+                qualified_snapshot,
+            )
         qualified_artifact = qualified_snapshot["record"]
     except ValueError as error:
         raise SystemExit(f"write-native-evidence: {error}") from None
@@ -440,6 +492,103 @@ def self_test():
             "--qualified-artifact", os.fspath(qualified),
             "--qualified-artifact-identity", qualified_identity,
         ]
+        pinned = qualified_artifact_snapshot(qualified)
+        live_ctime = json.loads(json.dumps(pinned))
+        live_ctime["identity"]["ctime_ns"] += 1
+        if accept_diskimages_transition(pinned, live_ctime) != live_ctime:
+            raise SystemExit("ctime-only DiskImages transition was not accepted")
+        if accept_diskimages_transition(pinned, pinned) != pinned:
+            raise SystemExit("unchanged DiskImages identity was not accepted")
+        for path, value in (
+            ("record.name", "other.dmg"),
+            ("record.sha256", "0" * 64),
+            ("record.bytes", pinned["record"]["bytes"] + 1),
+            ("identity.device", pinned["identity"]["device"] + 1),
+            ("identity.inode", pinned["identity"]["inode"] + 1),
+            ("identity.bytes", pinned["identity"]["bytes"] + 1),
+            ("identity.mtime_ns", pinned["identity"]["mtime_ns"] + 1),
+        ):
+            mutated = json.loads(json.dumps(pinned))
+            section, field = path.split(".", 1)
+            mutated[section][field] = value
+            try:
+                accept_diskimages_transition(pinned, mutated)
+            except ValueError as error:
+                message = str(error)
+                if path not in message or "identity.ctime_ns" in message:
+                    raise SystemExit(f"DiskImages mismatch omitted {path}")
+                if str(value) in message:
+                    raise SystemExit(f"DiskImages mismatch leaked {path}")
+            else:
+                raise SystemExit(f"DiskImages transition accepted {path} change")
+        combined = json.loads(json.dumps(live_ctime))
+        combined["record"]["sha256"] = "0" * 64
+        combined["identity"]["mtime_ns"] += 1
+        try:
+            accept_diskimages_transition(pinned, combined)
+        except ValueError as error:
+            message = str(error)
+            if "record.sha256" not in message or "identity.mtime_ns" not in message:
+                raise SystemExit("multi-field DiskImages mismatch was incomplete")
+            if "0" * 64 in message or str(combined["identity"]["mtime_ns"]) in message:
+                raise SystemExit("multi-field DiskImages mismatch leaked values")
+        else:
+            raise SystemExit("multi-field DiskImages transition was accepted")
+        mutated_pin = json.dumps(live_ctime, separators=(",", ":"))
+        result = subprocess.run(
+            [sys.executable, __file__, "--accept-diskimages-transition", mutated_pin, os.fspath(qualified)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise SystemExit(f"ctime-only CLI transition failed: {result.stderr.strip()}")
+        if json.loads(result.stdout) != pinned:
+            raise SystemExit("ctime-only CLI transition did not emit the live snapshot")
+        mtime_pin = json.loads(json.dumps(pinned))
+        mtime_pin["identity"]["mtime_ns"] += 1
+        result = subprocess.run(
+            [
+                sys.executable,
+                __file__,
+                "--accept-diskimages-transition",
+                json.dumps(mtime_pin, separators=(",", ":")),
+                os.fspath(qualified),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            raise SystemExit("mtime CLI transition was accepted")
+        if "identity.mtime_ns" not in result.stderr:
+            raise SystemExit("mtime CLI transition omitted field diagnostic")
+        if str(mtime_pin["identity"]["mtime_ns"]) in result.stderr:
+            raise SystemExit("mtime CLI transition leaked a value")
+        if os.fspath(qualified) in result.stderr or qualified.name in result.stderr:
+            raise SystemExit("mtime CLI transition leaked a path")
+        ctime_receipt = root / "ctime-after-capture.json"
+        result = subprocess.run(
+            common[: common.index("--qualified-artifact-identity") + 1]
+            + [mutated_pin]
+            + [
+                "--output", os.fspath(ctime_receipt),
+                "--artifact", "screenshot=good.png",
+                "--artifact", "accessibility=accessibility.txt",
+                "--artifact", "measurement=measurement.json",
+                "--feature-state",
+                "devices=scan-pairing-code,screenshot=good.png,accessibility=accessibility.txt",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 or ctime_receipt.exists():
+            raise SystemExit("receipt writer ignored ctime after capture")
+        if "identity.ctime_ns" not in result.stderr:
+            raise SystemExit("receipt writer omitted ctime diagnostic")
+        if str(live_ctime["identity"]["ctime_ns"]) in result.stderr:
+            raise SystemExit("receipt writer leaked a ctime value")
         for name, content in fixtures.items():
             screenshot = root / name
             if content is not None:
@@ -609,6 +758,15 @@ if __name__ == "__main__":
     elif len(sys.argv) == 3 and sys.argv[1] == "--capture-qualified-artifact":
         try:
             print(json.dumps(qualified_artifact_snapshot(sys.argv[2]), separators=(",", ":")))
+        except ValueError as error:
+            raise SystemExit(f"write-native-evidence: {error}") from None
+    elif len(sys.argv) == 4 and sys.argv[1] == "--accept-diskimages-transition":
+        try:
+            live = accept_diskimages_transition(
+                qualified_artifact_identity(sys.argv[2]),
+                qualified_artifact_snapshot(sys.argv[3]),
+            )
+            print(json.dumps(live, separators=(",", ":")))
         except ValueError as error:
             raise SystemExit(f"write-native-evidence: {error}") from None
     else:
