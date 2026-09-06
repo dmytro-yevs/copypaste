@@ -189,26 +189,73 @@ swipe_onboarding_content() { # <artifact>
     sh_ input swipe "$x" "$y1" "$x" "$y2" 250 >/dev/null
 }
 
+android_welcome_holds() { # <artifact>
+    hierarchy_is_app "$1" || return 1
+    node_exists_exact "$1" "WELCOME|Explore first"
+}
+
+# Exact component, same bounded `am start -W` the launch path already uses.
+android_relaunch_main_activity() {
+    local pkg="${PKG:-com.copypaste.app}"
+    local ns="${APP_NAMESPACE:-$pkg}"
+    sh_ am start -W -n "${MAIN:-$pkg/$ns.MainActivity}" >/dev/null
+}
+
+android_app_shell_missing() {
+    local pkg="${PKG:-com.copypaste.app}" pid focus
+    pid="$(app_pid)"
+    [[ -z "$pid" ]] && return 0
+    focus="$(sh_ dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | head -n 4)"
+    [[ -n "$focus" && "$focus" != *"$pkg"* ]]
+}
+
+android_shell_not_missing() { return 1; }
+
 # Run 34007760276: API 33 Welcome kept Explore first at [0,0][0,0];
 # tap_until_state then called scroll_content and landed on NexusLauncher.
-android_recover_onboarding() { # <artifact> [timeout] [dump] [swipe] [tap] [pace]
+# Run 34016710899: GMS then dependency-killed the app; the next dump was
+# NexusLauncher All Apps. Relaunch MainActivity once; never gesture foreign.
+android_recover_onboarding() { # <artifact> [timeout] [dump] [swipe] [tap] [pace] [relaunch] [shell_missing]
     local artifact="$1" timeout="${2:-${WAIT_SECS:-30}}"
     local dump="${3:-dump_hierarchy}" swipe="${4:-swipe_onboarding_content}"
     local tap="${5:-tap_transition_point}" pace="${6:-settle_pace}"
-    local point started="$SECONDS"
+    local relaunch="${7:-android_relaunch_main_activity}"
+    local shell_missing="${8:-}"
+    local point started="$SECONDS" saw_welcome=0 relaunched=0
+    if [[ -z "$shell_missing" ]]; then
+        if [[ "$dump" == dump_hierarchy ]]; then
+            shell_missing=android_app_shell_missing
+        else
+            shell_missing=android_shell_not_missing
+        fi
+    fi
     while (( SECONDS - started < timeout )); do
         if "$dump" "$artifact"; then
             (( SECONDS - started < timeout )) || return 1
             if hierarchy_is_app "$artifact" && app_navigation_holds "$artifact"; then
                 return 0
             fi
-            hierarchy_is_foreign "$artifact" && return 1
+            if android_welcome_holds "$artifact"; then
+                saw_welcome=1
+            fi
+            if hierarchy_is_foreign "$artifact" || "$shell_missing" "$artifact"; then
+                if (( saw_welcome && relaunched == 0 )); then
+                    "$relaunch" || return 1
+                    relaunched=1
+                    continue
+                fi
+                return 1
+            fi
             point="$(action_center "$artifact" "Explore first")"
             if [[ -n "$point" ]]; then
                 "$tap" "$point" || return 1
             elif enabled_action_exists_exact "$artifact" "Explore first"; then
                 "$swipe" "$artifact" || return 1
             fi
+        elif (( saw_welcome && relaunched == 0 )) && "$shell_missing" "$artifact"; then
+            "$relaunch" || return 1
+            relaunched=1
+            continue
         fi
         "$pace"
     done
@@ -221,6 +268,8 @@ navigation_fixture_destination_holds() { # <artifact>
 
 NAVIGATION_FIXTURE_DIRECTION=""
 ONBOARDING_FIXTURE_SWIPES=0
+ONBOARDING_FIXTURE_RELAUNCHES=0
+ONBOARDING_FIXTURE_RELAUNCH_ARGV=""
 
 navigation_fixture_scroll() {
     NAVIGATION_FIXTURE_DIRECTION="$1"
@@ -230,6 +279,13 @@ navigation_fixture_scroll() {
 navigation_fixture_tap() { UI_FIXTURE_TAPS=$((UI_FIXTURE_TAPS + 1)); }
 
 onboarding_fixture_swipe() { ONBOARDING_FIXTURE_SWIPES=$((ONBOARDING_FIXTURE_SWIPES + 1)); }
+
+onboarding_fixture_missing_pid() { (( ONBOARDING_FIXTURE_RELAUNCHES == 0 )); }
+
+onboarding_record_relaunch() {
+    ONBOARDING_FIXTURE_RELAUNCHES=$((ONBOARDING_FIXTURE_RELAUNCHES + 1))
+    ONBOARDING_FIXTURE_RELAUNCH_ARGV="$*"
+}
 
 navigation_transition_self_test() { # <temp>
     local temp="$1" source target_above target_below destination
@@ -403,19 +459,22 @@ navigation_shell_readiness_self_test() { # <temp>
 
 android_onboarding_recovery_self_test() { # <temp>
     local temp="$1" pkg="${PKG:-com.copypaste.app}"
-    local welcome_zero welcome_edge tappable shell settings_only launcher
+    local main="${MAIN:-$pkg/${APP_NAMESPACE:-$pkg}.MainActivity}"
+    local welcome_zero welcome_edge tappable shell settings_only launcher all_apps
     welcome_zero="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"WELCOME\" bounds=\"[24,101][85,115]\" enabled=\"true\"/><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[0,0][0,0]\"/></node></hierarchy>"
     welcome_edge="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"WELCOME\" bounds=\"[24,101][85,115]\" enabled=\"true\"/><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[24,616][296,616]\"/></node></hierarchy>"
     tappable="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[20,400][300,450]\"/></node></hierarchy>"
     shell="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Primary\" bounds=\"[0,570][320,640]\"><node text=\"Library\" package=\"$pkg\" bounds=\"[17,583][113,635]\" enabled=\"true\" clickable=\"true\"/><node text=\"Devices\" package=\"$pkg\" bounds=\"[112,583][208,635]\" enabled=\"true\" clickable=\"true\"/><node text=\"Settings\" package=\"$pkg\" bounds=\"[207,583][303,635]\" enabled=\"true\" clickable=\"true\"/></node></node></hierarchy>"
     settings_only="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Settings\" package=\"$pkg\" bounds=\"[207,583][303,635]\" enabled=\"true\" clickable=\"true\"/></node></hierarchy>"
     launcher='<?xml version="1.0"?><hierarchy><node package="com.google.android.apps.nexuslauncher" bounds="[0,0][320,640]"><node text="Settings" package="com.google.android.apps.nexuslauncher" bounds="[247,464][305,579]" enabled="true" clickable="true"/></node></hierarchy>'
+    all_apps='<?xml version="1.0"?><hierarchy><node package="com.google.android.apps.nexuslauncher" bounds="[0,0][320,640]"><node resource-id="com.google.android.apps.nexuslauncher:id/apps_view" package="com.google.android.apps.nexuslauncher" bounds="[0,0][320,640]"><node resource-id="com.google.android.apps.nexuslauncher:id/apps_list_view" package="com.google.android.apps.nexuslauncher" bounds="[0,64][320,640]"><node text="CopyPaste" resource-id="com.google.android.apps.nexuslauncher:id/icon" class="android.widget.TextView" package="com.google.android.apps.nexuslauncher" enabled="true" clickable="true" bounds="[15,349][73,464]"/><node text="Settings" resource-id="com.google.android.apps.nexuslauncher:id/icon" class="android.widget.TextView" package="com.google.android.apps.nexuslauncher" enabled="true" clickable="true" bounds="[247,464][305,579]"/></node><node resource-id="com.google.android.apps.nexuslauncher:id/all_apps_header" package="com.google.android.apps.nexuslauncher" bounds="[0,64][320,248]"/></node></node></hierarchy>'
     printf '%s\n' "$welcome_zero" > "$temp/welcome-zero.xml"
     printf '%s\n' "$welcome_edge" > "$temp/welcome-edge.xml"
     printf '%s\n' "$tappable" > "$temp/welcome-tappable.xml"
     printf '%s\n' "$shell" > "$temp/welcome-shell.xml"
     printf '%s\n' "$settings_only" > "$temp/welcome-settings-only.xml"
     printf '%s\n' "$launcher" > "$temp/welcome-launcher.xml"
+    printf '%s\n' "$all_apps" > "$temp/welcome-all-apps.xml"
 
     [[ "$(onboarding_content_swipe "$temp/welcome-zero.xml")" == "160 368 192" ]] \
         && [[ "$(onboarding_content_swipe "$temp/welcome-edge.xml")" == "160 368 192" ]] \
@@ -433,6 +492,14 @@ android_onboarding_recovery_self_test() { # <temp>
     app_navigation_holds "$temp/welcome-launcher.xml" \
         && bad "NexusLauncher is not the app-owned shell" \
         || ok "NexusLauncher is not the app-owned shell"
+    hierarchy_is_foreign "$temp/welcome-all-apps.xml" \
+        && ! android_welcome_holds "$temp/welcome-all-apps.xml" \
+        && ! app_navigation_holds "$temp/welcome-all-apps.xml" \
+        && ok "NexusLauncher All Apps is a foreign dump, not Welcome" \
+        || bad "NexusLauncher All Apps is a foreign dump, not Welcome"
+    android_welcome_holds "$temp/welcome-zero.xml" \
+        && ok "an app-owned Welcome-zero dump is Welcome" \
+        || bad "an app-owned Welcome-zero dump is Welcome"
     settings_tab_holds "$temp/welcome-settings-only.xml" \
         && ! app_navigation_holds "$temp/welcome-settings-only.xml" \
         && ok "Settings-only is not full app navigation" \
@@ -521,17 +588,71 @@ android_onboarding_recovery_self_test() { # <temp>
         scroll_content() { navigation_fixture_scroll "$@"; }
         tap_transition_point() { navigation_fixture_tap "$@"; }
         settle_pace() { ui_fixture_pace; }
+        sh_() { onboarding_record_relaunch "$@"; }
 
-        ui_fixtures "$temp/welcome-launcher.xml"
+        ui_fixtures "$temp/welcome-zero.xml" "$temp/welcome-all-apps.xml" \
+            "$temp/welcome-shell.xml"
         ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        ONBOARDING_FIXTURE_RELAUNCH_ARGV=""
+        android_recover_onboarding "$temp/welcome-kill-observed.xml" 3 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace android_relaunch_main_activity \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 1 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 1 \
+                  && "$ONBOARDING_FIXTURE_RELAUNCH_ARGV" == "am start -W -n $main" ]] \
+            && cmp -s "$temp/welcome-kill-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "Welcome-zero then All Apps relaunches once onto the app shell" \
+        || bad "Welcome-zero then All Apps relaunches once onto the app shell"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        sh_() { onboarding_record_relaunch "$@"; }
+
+        ui_fixtures "$temp/welcome-zero.xml" "$temp/welcome-all-apps.xml" \
+            "$temp/welcome-all-apps.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        ONBOARDING_FIXTURE_RELAUNCH_ARGV=""
         ! android_recover_onboarding "$temp/welcome-foreign-observed.xml" 3 \
             ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
-            ui_fixture_pace \
-            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
-                  && $UI_FIXTURE_SCROLLS -eq 0 && $UI_FIXTURE_INDEX -eq 1 ]]
+            ui_fixture_pace android_relaunch_main_activity \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 1 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 1 \
+                  && "$ONBOARDING_FIXTURE_RELAUNCH_ARGV" == "am start -W -n $main" ]]
     ) \
-        && ok "a foreign package fails immediately with zero swipes" \
-        || bad "a foreign package fails immediately with zero swipes"
+        && ok "a second foreign dump after one MainActivity relaunch fails closed" \
+        || bad "a second foreign dump after one MainActivity relaunch fails closed"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        sh_() { onboarding_record_relaunch "$@"; }
+
+        ui_fixtures "$temp/welcome-zero.xml" "$temp/welcome-shell.xml"
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        ONBOARDING_FIXTURE_RELAUNCH_ARGV=""
+        android_recover_onboarding "$temp/welcome-missing-pid-observed.xml" 3 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
+            ui_fixture_pace android_relaunch_main_activity \
+            onboarding_fixture_missing_pid \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 1 \
+                  && "$ONBOARDING_FIXTURE_RELAUNCH_ARGV" == "am start -W -n $main" ]] \
+            && cmp -s "$temp/welcome-missing-pid-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "a missing app pid after Welcome relaunches once without a gesture" \
+        || bad "a missing app pid after Welcome relaunches once without a gesture"
 
     (
         dump_hierarchy() { ui_fixture_dump "$@"; }
