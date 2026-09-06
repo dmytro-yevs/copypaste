@@ -31,7 +31,7 @@ mac_set_app_pid() { # <pid>
     MAC_APP_PID="$1"
 }
 
-mac_ax() { # <ready|surface|dump|find|press|set|menu-press|enable|find-exact-role-candidates|find-unique-safe-role|press-exact-role|find-unique-exact-description-role|press-unique-exact-description-role> [label] [role/value]
+mac_ax() { # <ready|surface|dump|find|press|set|set-exact-role|menu-press|enable|find-exact-role-candidates|find-unique-safe-role|press-exact-role|find-unique-exact-description-role|press-unique-exact-description-role> [label] [role/value] [value]
     [[ -n "${MAC_APP_PID:-}" ]] || {
         echo "macOS accessibility target PID is unavailable" >&2
         return 1
@@ -41,9 +41,15 @@ on run argv
     set appPid to item 1 of argv as integer
     set actionMode to item 2 of argv
     set targetLabel to ""
+    set targetRole to ""
     set inputValue to ""
     if (count of argv) > 2 then set targetLabel to item 3 of argv
-    if (count of argv) > 3 then set inputValue to item 4 of argv
+    if actionMode is "set-exact-role" then
+        if (count of argv) > 3 then set targetRole to item 4 of argv
+        if (count of argv) > 4 then set inputValue to item 5 of argv
+    else
+        if (count of argv) > 3 then set inputValue to item 4 of argv
+    end if
     set outputLines to {}
     set exactMatches to {}
     tell application "System Events"
@@ -104,6 +110,12 @@ on run argv
                 end if
                 if actionMode is "find-unique-safe-role" or actionMode is "press-exact-role" then
                     if nameText is targetLabel and roleText is inputValue then
+                        set end of exactMatches to elementRef
+                    end if
+                end if
+                -- Run 34012674726: set matched AXStaticText Email before AXTextField Email.
+                if actionMode is "set-exact-role" then
+                    if nameText is targetLabel and roleText is targetRole then
                         set end of exactMatches to elementRef
                     end if
                 end if
@@ -181,6 +193,19 @@ on run argv
                 end if
                 try
                     perform action "AXPress" of elementRef
+                    return "ok"
+                end try
+            end if
+            if actionMode is "set-exact-role" then
+                if (count of exactMatches) is not 1 then
+                    error "expected one accessible " & targetRole & " named " & targetLabel
+                end if
+                set elementRef to item 1 of exactMatches
+                try
+                    set focused of elementRef to true
+                    keystroke "a" using command down
+                    key code 51
+                    keystroke inputValue
                     return "ok"
                 end try
             end if
@@ -274,6 +299,11 @@ mac_press_exact_button() { # <accessible name>
 mac_press_exact_role() { # <accessible name> <AX role>
     mac_find_unique_exact_role_label "$1" "$2" >/dev/null \
         && mac_ax press-exact-role "$1" "$2"
+}
+
+mac_set_exact_role() { # <accessible name> <AX role> <value>
+    mac_find_unique_exact_role_label "$1" "$2" >/dev/null \
+        && mac_ax set-exact-role "$1" "$2" "$3"
 }
 
 mac_find_unique_exact_description_role() { # <accessible description> <AX role>
@@ -472,8 +502,138 @@ mac_ui_self_test() {
         && grep -Fq 'keystroke inputValue' "$dispatcher" \
         && ok "field input dispatches keyboard events" \
         || bad "field input dispatches keyboard events"
+    grep -Fq 'set-exact-role' "$dispatcher" \
+        && grep -Fq 'nameText is targetLabel and roleText is targetRole' "$dispatcher" \
+        && grep -Fq 'expected one accessible " & targetRole & " named " & targetLabel' "$dispatcher" \
+        && ! grep -Fq 'nameText contains targetLabel and roleText is targetRole' "$dispatcher" \
+        && ok "exact role field input requires one exact name and role" \
+        || bad "exact role field input requires one exact name and role"
     mac_ax_contains "$fixture" "Signed out" \
         && bad "an absent accessibility state is not found" \
         || ok "an absent accessibility state is not found"
     unset -f osascript
+    mac_exact_role_field_self_test "$1"
+}
+
+mac_exact_role_field_self_test() { # <tmp-dir>
+    local dump="$1/signed-out-fields.tsv" sets=0 last_set="" original_ax label
+    original_ax="$(declare -f mac_ax)"
+    # Run 34012674726 signed-out/ax.txt: two AXStaticText plus one AXTextField.
+    cat > "$dump" <<'EOF'
+AXTextField	missing value	Search settings		
+AXStaticText	Search settings			Search settings
+AXStaticText	Email			Email
+AXStaticText	Email			Email
+AXTextField	Email			
+AXStaticText	Password			Password
+AXStaticText	Password			Password
+AXTextField	Password			
+AXStaticText	Sync passphrase			Sync passphrase
+AXStaticText	Sync passphrase			Sync passphrase
+AXTextField	Sync passphrase			
+EOF
+    dump_name_candidates() {
+        local role name _rest
+        while IFS=$'\t' read -r role name _rest; do
+            [[ "$name" == "$1" ]] || continue
+            printf '%s\t%s\n' "$role" "$name"
+        done
+    }
+    for label in Email Password "Sync passphrase"; do
+        if [[ "$(dump_name_candidates "$label" < "$dump" | mac_unique_exact_role_label "$label" "AXTextField")" == $'AXTextField\t'"$label" ]]; then
+            ok "unique exact AXTextField $label wins over two AXStaticText labels"
+        else
+            bad "unique exact AXTextField $label wins over two AXStaticText labels"
+        fi
+    done
+    if printf '%s' $'AXStaticText\tEmail\nAXStaticText\tEmail\n' | mac_unique_exact_role_label Email AXTextField >/dev/null; then
+        bad "unique exact role rejects label-only AXStaticText"
+    else
+        ok "unique exact role rejects label-only AXStaticText"
+    fi
+    if printf '%s' $'AXTextField\tEmail\nAXTextField\tEmail\n' | mac_unique_exact_role_label Email AXTextField >/dev/null; then
+        bad "unique exact role rejects duplicate AXTextField"
+    else
+        ok "unique exact role rejects duplicate AXTextField"
+    fi
+    if printf '%s' $'AXSecureTextField\tPassword\nAXStaticText\tPassword\n' | mac_unique_exact_role_label Password AXTextField >/dev/null \
+        || printf '%s' $'AXHeading\tEmail\n' | mac_unique_exact_role_label Email AXTextField >/dev/null; then
+        bad "unique exact role rejects AXSecureTextField and other wrong roles"
+    else
+        ok "unique exact role rejects AXSecureTextField and other wrong roles"
+    fi
+    if dump_name_candidates "Search settings" < "$dump" | mac_unique_exact_role_label "Search settings" AXTextField >/dev/null \
+        || printf '%s' $'AXTextField\tmissing value\n' | mac_unique_exact_role_label Email AXTextField >/dev/null; then
+        bad "unique exact role rejects the settings search field"
+    else
+        ok "unique exact role rejects the settings search field"
+    fi
+    if printf '%s' $'AXTextField\tEmail address\nAXTextField\tPassword\n' | mac_unique_exact_role_label Email AXTextField >/dev/null \
+        || printf '%s' $'AXTextField\tSync\n' | mac_unique_exact_role_label "Sync passphrase" AXTextField >/dev/null \
+        || dump_name_candidates Email < "$dump" | mac_unique_exact_role_label Password AXTextField >/dev/null; then
+        bad "unique exact role rejects prefix and cross-label names"
+    else
+        ok "unique exact role rejects prefix and cross-label names"
+    fi
+    if printf '%s' $'AXTextField\tEmail\textra\n' | mac_unique_exact_role_label Email AXTextField >/dev/null; then
+        bad "unique exact role rejects extra columns"
+    else
+        ok "unique exact role rejects extra columns"
+    fi
+    if printf '%s\n' $'AXTextField\tmissing value\tEmail\t\tEmail' \
+        | dump_name_candidates Email | mac_unique_exact_role_label Email AXTextField >/dev/null \
+        || printf '%s\n' $'AXTextField\tother\t\t\tEmail' \
+            | dump_name_candidates Email | mac_unique_exact_role_label Email AXTextField >/dev/null; then
+        bad "unique exact role rejects description-only and value-only rows"
+    else
+        ok "unique exact role rejects description-only and value-only rows"
+    fi
+
+    mac_ax() {
+        case "$1" in
+            find-exact-role-candidates)
+                dump_name_candidates "$2" < "$dump"
+                ;;
+            set-exact-role)
+                sets=$((sets + 1))
+                last_set="$2 $3 $4"
+                printf 'ok\n'
+                ;;
+            *) return 97 ;;
+        esac
+    }
+    if mac_set_exact_role Email AXTextField native@example.test >/dev/null \
+        && mac_set_exact_role Password AXTextField stub-password >/dev/null \
+        && mac_set_exact_role "Sync passphrase" AXTextField native-evidence >/dev/null \
+        && [[ "$sets" == 3 && "$last_set" == "Sync passphrase AXTextField native-evidence" ]]; then
+        ok "exact role setter types each unique cloud AXTextField"
+    else
+        bad "exact role setter types each unique cloud AXTextField"
+    fi
+    sets=0
+    last_set=""
+    dump="$1/reject-fields.tsv"
+    printf '%s\n' \
+        $'AXStaticText\tEmail\t\t\tEmail' \
+        $'AXSecureTextField\tPassword\t\t\t' \
+        $'AXTextField\tmissing value\tSearch settings\t\t' \
+        $'AXTextField\tEmail address\t\t\t' > "$dump"
+    if mac_set_exact_role Email AXTextField native@example.test >/dev/null \
+        || mac_set_exact_role Password AXTextField stub-password >/dev/null \
+        || mac_set_exact_role Email AXSecureTextField secret >/dev/null \
+        || mac_set_exact_role "Search settings" AXTextField query >/dev/null \
+        || (( sets != 0 )); then
+        bad "exact role setter does not type on rejected fields"
+    else
+        ok "exact role setter does not type on rejected fields"
+    fi
+    dump="$1/duplicate-fields.tsv"
+    printf '%s\n' $'AXTextField\tEmail\t\t\t' $'AXTextField\tEmail\t\t\t' > "$dump"
+    if mac_set_exact_role Email AXTextField native@example.test >/dev/null || (( sets != 0 )); then
+        bad "exact role setter does not type on duplicate fields"
+    else
+        ok "exact role setter does not type on duplicate fields"
+    fi
+    unset -f mac_ax dump_name_candidates
+    eval "$original_ax"
 }

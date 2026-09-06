@@ -748,9 +748,9 @@ configured_scenario() {
     expect_label "Sync passphrase" "$OUT/signed-out-passphrase.txt"
     capture_state signed-out
 
-    mac_ax set "Email" "native@example.test" >/dev/null || bad "email can be entered"
-    mac_ax set "Password" "stub-password" >/dev/null || bad "password can be entered"
-    mac_ax set "Sync passphrase" "native-evidence" >/dev/null || bad "passphrase can be entered"
+    mac_set_exact_role "Email" "AXTextField" "native@example.test" >/dev/null || bad "email can be entered"
+    mac_set_exact_role "Password" "AXTextField" "stub-password" >/dev/null || bad "password can be entered"
+    mac_set_exact_role "Sync passphrase" "AXTextField" "native-evidence" >/dev/null || bad "passphrase can be entered"
     started="$(now_ms)"
     mac_ax press "Sign in" >/dev/null || bad "the native sign-in action is reachable"
     expect_label "Connected" "$OUT/connected.txt"
@@ -1000,6 +1000,17 @@ configured_assertions_self_test() {
         ok "configured scenario keeps exact lifecycle assertions and timeouts"
     else
         bad "configured scenario keeps exact lifecycle assertions and timeouts"
+    fi
+    if [[ "$body" == *'mac_set_exact_role "Email" "AXTextField" "native@example.test"'* \
+        && "$body" == *'mac_set_exact_role "Password" "AXTextField" "stub-password"'* \
+        && "$body" == *'mac_set_exact_role "Sync passphrase" "AXTextField" "native-evidence"'* \
+        && "$body" != *'mac_ax set '* \
+        && "$body" == *'mac_ax press "Sign in"'* \
+        && "$body" == *'mac_ax press "Sync cloud now"'* \
+        && "$body" == *'mac_ax press "Sign out"'* ]]; then
+        ok "configured scenario fills unique exact AXTextField values only"
+    else
+        bad "configured scenario fills unique exact AXTextField values only"
     fi
 }
 
