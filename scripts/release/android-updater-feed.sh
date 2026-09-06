@@ -9,17 +9,14 @@ sign_apk() {
   [[ -f "$apk" ]] || die "APK is missing: $apk"
   [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]] || die "TAURI_SIGNING_PRIVATE_KEY is required"
   [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]] || die "TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required"
+  [[ -z "${TAURI_SIGNING_PRIVATE_KEY_PATH+x}" ]] || die "TAURI_SIGNING_PRIVATE_KEY_PATH must not be set"
+  [[ -z "${TAURI_PRIVATE_KEY_PATH+x}" ]] || die "TAURI_PRIVATE_KEY_PATH must not be set"
   apk=$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")
-  local keyfile
-  keyfile=$(mktemp)
-  printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" >"$keyfile"
-  if ! npm --prefix crates/copypaste-ui run tauri -- signer sign "$apk" \
-      --private-key-path "$keyfile" \
-      --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"; then
-    rm -f "$keyfile"
+  # Tauri CLI 2.11.4 maps TAURI_SIGNING_PRIVATE_KEY to --private-key and
+  # rejects --private-key-path at the same time (run 34002503547).
+  if ! npm --prefix crates/copypaste-ui run tauri -- signer sign "$apk"; then
     die "Tauri could not sign the Android updater artifact"
   fi
-  rm -f "$keyfile"
   [[ -s "${apk}.sig" ]] || die "Tauri did not create the APK updater signature"
   mkdir -p "$(dirname "$output")"
   local output_path
@@ -103,6 +100,137 @@ output.write_text(source, encoding="utf-8")
 PY
 }
 
+install_npm_stub() {
+  local bin=$1
+  mkdir -p "$bin"
+  cat >"$bin/npm" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+state=${NPM_STUB_DIR:?}
+mkdir -p "$state"
+: >"$state/argv"
+for arg in "$@"; do
+  printf '%s\n' "$arg" >>"$state/argv"
+done
+printf '%s' "${TAURI_SIGNING_PRIVATE_KEY-}" >"$state/key"
+printf '%s' "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD-}" >"$state/password"
+apk=""
+for arg in "$@"; do
+  case "$arg" in
+    *.apk) apk=$arg ;;
+  esac
+done
+case "${NPM_STUB_MODE:-ok}" in
+  fail) exit 1 ;;
+  empty)
+    [[ -n "$apk" ]] || exit 1
+    : >"${apk}.sig"
+    ;;
+  ok)
+    [[ -n "$apk" ]] || exit 1
+    printf 'stub-signature\n' >"${apk}.sig"
+    ;;
+  *) exit 1 ;;
+esac
+STUB
+  chmod +x "$bin/npm"
+}
+
+expect_sign_fail() {
+  local why=$1
+  shift
+  if "$@" 2>/dev/null; then
+    die "self-test accepted $why"
+  fi
+}
+
+self_test_sign() {
+  local root=$1
+  local stub_bin=$root/npm-bin
+  local stub_dir=$root/npm-stub
+  local apk=$root/sign.apk
+  local output=$root/copied.apk.sig
+  install_npm_stub "$stub_bin"
+  printf apk >"$apk"
+
+  if ! env -u TAURI_SIGNING_PRIVATE_KEY_PATH -u TAURI_PRIVATE_KEY_PATH \
+    PATH="$stub_bin:$PATH" \
+    TAURI_SIGNING_PRIVATE_KEY=self-test-key \
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD=self-test-password \
+    NPM_STUB_DIR="$stub_dir" \
+    NPM_STUB_MODE=ok \
+    "$0" --sign-apk "$apk" "$output"; then
+    die "self-test failed to sign with env-only signer"
+  fi
+  if grep -E -q -- '^--(private-key|private-key-path|password)(=|$)' "$stub_dir/argv"; then
+    die "self-test signer argv leaked --private-key, --private-key-path, or --password"
+  fi
+  grep -Fxq signer "$stub_dir/argv" || die "self-test npm stub was not invoked as signer"
+  grep -Fxq sign "$stub_dir/argv" || die "self-test npm stub missed sign"
+  local apk_arg
+  apk_arg=$(grep -E '\.apk$' "$stub_dir/argv" | tail -n 1)
+  [[ "$apk_arg" == /* ]] || die "self-test signer APK was not absolute"
+  [[ "$apk_arg" == "$apk" ]] || die "self-test signer APK path mismatch"
+  [[ "$(cat "$stub_dir/key")" == self-test-key ]] || die "self-test child env missing TAURI_SIGNING_PRIVATE_KEY"
+  [[ "$(cat "$stub_dir/password")" == self-test-password ]] || die "self-test child env missing TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+  [[ -s "$apk.sig" && -s "$output" ]] || die "self-test did not copy a nonempty updater signature"
+  grep -qx stub-signature "$output" || die "self-test copied signature mismatch"
+
+  expect_sign_fail "a missing signing key" \
+    env -u TAURI_SIGNING_PRIVATE_KEY -u TAURI_SIGNING_PRIVATE_KEY_PATH -u TAURI_PRIVATE_KEY_PATH \
+      PATH="$stub_bin:$PATH" \
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD=self-test-password \
+      NPM_STUB_DIR="$stub_dir" \
+      "$0" --sign-apk "$apk" "$output"
+  expect_sign_fail "a missing signing password" \
+    env -u TAURI_SIGNING_PRIVATE_KEY_PASSWORD -u TAURI_SIGNING_PRIVATE_KEY_PATH -u TAURI_PRIVATE_KEY_PATH \
+      PATH="$stub_bin:$PATH" \
+      TAURI_SIGNING_PRIVATE_KEY=self-test-key \
+      NPM_STUB_DIR="$stub_dir" \
+      "$0" --sign-apk "$apk" "$output"
+  expect_sign_fail "TAURI_SIGNING_PRIVATE_KEY_PATH" \
+    env -u TAURI_PRIVATE_KEY_PATH \
+      PATH="$stub_bin:$PATH" \
+      TAURI_SIGNING_PRIVATE_KEY=self-test-key \
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD=self-test-password \
+      TAURI_SIGNING_PRIVATE_KEY_PATH="$root/forbidden.key" \
+      NPM_STUB_DIR="$stub_dir" \
+      "$0" --sign-apk "$apk" "$output"
+  expect_sign_fail "TAURI_PRIVATE_KEY_PATH" \
+    env -u TAURI_SIGNING_PRIVATE_KEY_PATH \
+      PATH="$stub_bin:$PATH" \
+      TAURI_SIGNING_PRIVATE_KEY=self-test-key \
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD=self-test-password \
+      TAURI_PRIVATE_KEY_PATH="$root/legacy.key" \
+      NPM_STUB_DIR="$stub_dir" \
+      "$0" --sign-apk "$apk" "$output"
+  expect_sign_fail "a missing APK" \
+    env -u TAURI_SIGNING_PRIVATE_KEY_PATH -u TAURI_PRIVATE_KEY_PATH \
+      PATH="$stub_bin:$PATH" \
+      TAURI_SIGNING_PRIVATE_KEY=self-test-key \
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD=self-test-password \
+      NPM_STUB_DIR="$stub_dir" \
+      "$0" --sign-apk "$root/missing.apk" "$output"
+  rm -f "$apk.sig" "$output"
+  expect_sign_fail "a signer failure" \
+    env -u TAURI_SIGNING_PRIVATE_KEY_PATH -u TAURI_PRIVATE_KEY_PATH \
+      PATH="$stub_bin:$PATH" \
+      TAURI_SIGNING_PRIVATE_KEY=self-test-key \
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD=self-test-password \
+      NPM_STUB_DIR="$stub_dir" \
+      NPM_STUB_MODE=fail \
+      "$0" --sign-apk "$apk" "$output"
+  rm -f "$apk.sig" "$output"
+  expect_sign_fail "an empty updater signature" \
+    env -u TAURI_SIGNING_PRIVATE_KEY_PATH -u TAURI_PRIVATE_KEY_PATH \
+      PATH="$stub_bin:$PATH" \
+      TAURI_SIGNING_PRIVATE_KEY=self-test-key \
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD=self-test-password \
+      NPM_STUB_DIR="$stub_dir" \
+      NPM_STUB_MODE=empty \
+      "$0" --sign-apk "$apk" "$output"
+}
+
 self_test() {
   local root
   root=$(mktemp -d)
@@ -129,6 +257,7 @@ PY
   if write_feed 2.0.0-alpha.16 bad-date https://example.test/releases/v2 "$root/windows.exe" "$root/windows.exe.sig" "$root/android.apk" "$root/android.apk.sig" "$root/should-not-write.json" 2>/dev/null; then
     die "self-test accepted a malformed pub_date"
   fi
+  self_test_sign "$root"
   echo "PASS: Android updater signature/feed self-test"
 }
 
