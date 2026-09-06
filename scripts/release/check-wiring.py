@@ -151,6 +151,89 @@ def evidence_sidecar_override_holds(script):
     )
 
 
+PROBE_MUTATIONS = (
+    "delete-generic-password",
+    "add-generic-password",
+    "set-generic-password-partition-list",
+    "unlock-keychain",
+    "create-keychain",
+    "delete-keychain",
+    "set-keychain-settings",
+    "default-keychain",
+    "COPYPASTE_EPHEMERAL_KEY",
+)
+
+
+def configured_sidecar_probe_holds(script):
+    probe = shell_function_body(script, "probe_configured_sidecar_path")
+    configured = shell_function_body(script, "configured_scenario")
+    keychain = shell_function_body(script, "probe_keychain_item")
+    cli = shell_function_body(script, "probe_cli_pair")
+    decide = shell_function_body(script, "probe_decide")
+    if not all((probe, configured, keychain, cli, decide)):
+        return False
+    launch = configured.find("launch_app configured")
+    call = configured.find("probe_configured_sidecar_path")
+    open_cloud = configured.find("open_cloud")
+    expect = configured.find('expect_label "Signed out"')
+    if -1 in (launch, call, open_cloud, expect) or not (launch < call < open_cloud < expect):
+        return False
+    if not all(token in probe for token in (
+        "probe_live_daemon",
+        "probe_keychain_item",
+        "probe_db_state",
+        "probe_cli_pair",
+        "probe_runtime_log",
+        "probe_decide",
+        "probe_codesign_identity",
+    )):
+        return False
+    if "find-generic-password" not in keychain or "cloud status" not in cli:
+        return False
+    return all(token in decide for token in (
+        "KEY_LOCKED",
+        "UNUSABLE",
+        "PLAINTEXT",
+        "absent-item-existing-db",
+        "sidecar-key-locked",
+        "bundled-daemon",
+        "plaintext-endpoint",
+        "no-daemon",
+        "sidecar-configured",
+    ))
+
+
+def configured_sidecar_probe_is_read_only(script):
+    names = (
+        "probe_configured_sidecar_path",
+        "probe_keychain_item",
+        "probe_live_daemon",
+        "probe_cli_pair",
+        "probe_runtime_log",
+        "probe_codesign_identity",
+        "probe_redact_text",
+        "probe_run_bounded",
+        "probe_decide",
+    )
+    region = "\n".join(shell_function_body(script, name) for name in names)
+    if "find-generic-password" not in region:
+        return False
+    if any(token in region for token in PROBE_MUTATIONS):
+        return False
+    found = False
+    for line in region.splitlines():
+        if "security find-generic-password" not in line:
+            continue
+        found = True
+        if re.search(r"(^|[\s\"])-[wg]([\s\"]|$)", line):
+            return False
+        if not re.search(r"(^|[\s\"])-s([\s\"]|$)", line):
+            return False
+        if not re.search(r"(^|[\s\"])-a([\s\"]|$)", line):
+            return False
+    return found
+
+
 def _fn_region(source, name, stop):
     start = source.find(name)
     if start < 0:
@@ -1376,6 +1459,10 @@ rec(production_build_omits_cloud_evidence(
     "macOS production builds do not enable cloud-evidence or a daemon override")
 rec(evidence_sidecar_override_holds(macos_cloud),
     "macOS cloud evidence builds a distinct sidecar and overrides only configured launches")
+rec(configured_sidecar_probe_holds(macos_cloud),
+    "macOS configured cloud evidence probes the live sidecar path before AX waits")
+rec(configured_sidecar_probe_is_read_only(macos_cloud),
+    "macOS sidecar probe inspects Keychain attributes without secrets or mutation")
 rec(unconfigured_status_latency_window(macos_cloud),
     "macOS unconfigured status latency starts after the Cloud panel is open")
 rec('adb reverse "tcp:$STUB_PORT" "tcp:$STUB_PORT"' in android_cloud,
@@ -2129,6 +2216,28 @@ targeted_adb "$serial" shell dumpsys power
             macos_cloud.replace("-u COPYPASTE_DAEMON_BIN", "")),
          "self-test: unconfigured evidence that keeps a daemon override is rejected",
          "the sidecar detector accepted an unconfigured launch that can inherit an override")
+    emit(configured_sidecar_probe_holds(macos_cloud),
+         "self-test: the current macOS sidecar path probe wiring holds",
+         "the sidecar probe detector rejected the live evidence script")
+    emit(not configured_sidecar_probe_holds(
+            macos_cloud.replace("probe_configured_sidecar_path || return\n", "")),
+         "self-test: configured evidence without the sidecar path probe is rejected",
+         "the sidecar probe detector accepted a configured scenario that waits on AX first")
+    emit(configured_sidecar_probe_is_read_only(macos_cloud),
+         "self-test: the current macOS sidecar probe stays attribute-only",
+         "the read-only probe detector rejected the live evidence script")
+    emit(not configured_sidecar_probe_is_read_only(
+            macos_cloud.replace(
+                'security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"',
+                'security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT" -w')),
+         "self-test: a sidecar probe that dumps a Keychain secret is rejected",
+         "the read-only probe detector accepted find-generic-password -w")
+    emit(not configured_sidecar_probe_is_read_only(
+            macos_cloud.replace(
+                'security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"',
+                'security delete-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"')),
+         "self-test: a mutating sidecar Keychain probe is rejected",
+         "the read-only probe detector accepted delete-generic-password")
     escaped_cli = (
         "pub fn cloud_config() {\n"
         "    copypaste_cloud::CloudConfig::new_loopback(url, anon_key).map(Some)\n"
