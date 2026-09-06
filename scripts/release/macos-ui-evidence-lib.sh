@@ -519,19 +519,18 @@ mac_exact_role_field_self_test() { # <tmp-dir>
     local dump="$1/signed-out-fields.tsv" sets=0 last_set="" original_ax label
     original_ax="$(declare -f mac_ax)"
     # Run 34012674726 signed-out/ax.txt: two AXStaticText plus one AXTextField.
-    cat > "$dump" <<'EOF'
-AXTextField	missing value	Search settings		
-AXStaticText	Search settings			Search settings
-AXStaticText	Email			Email
-AXStaticText	Email			Email
-AXTextField	Email			
-AXStaticText	Password			Password
-AXStaticText	Password			Password
-AXTextField	Password			
-AXStaticText	Sync passphrase			Sync passphrase
-AXStaticText	Sync passphrase			Sync passphrase
-AXTextField	Sync passphrase			
-EOF
+    printf '%s\n' \
+        $'AXTextField\tmissing value\tSearch settings\t\t' \
+        $'AXStaticText\tSearch settings\t\t\tSearch settings' \
+        $'AXStaticText\tEmail\t\t\tEmail' \
+        $'AXStaticText\tEmail\t\t\tEmail' \
+        $'AXTextField\tEmail\t\t\t' \
+        $'AXStaticText\tPassword\t\t\tPassword' \
+        $'AXStaticText\tPassword\t\t\tPassword' \
+        $'AXTextField\tPassword\t\t\t' \
+        $'AXStaticText\tSync passphrase\t\t\tSync passphrase' \
+        $'AXStaticText\tSync passphrase\t\t\tSync passphrase' \
+        $'AXTextField\tSync passphrase\t\t\t' > "$dump"
     dump_name_candidates() {
         local role name _rest
         while IFS=$'\t' read -r role name _rest; do
