@@ -23,6 +23,7 @@ ISOLATION_KEYCHAIN=""
 ISOLATION_PASSWORD=""
 ISOLATION_SAVED_DEFAULT=""
 ISOLATION_SAVED_SEARCH=""
+ISOLATION_SETUP_REASON=""
 ISOLATION_ACTIVE=0
 DARWIN_SUN_PATH=104
 ISOLATION_PROBE_SERVICE="copypaste-cloud-evidence-probe"
@@ -461,12 +462,48 @@ configured_isolation_parse_keychain_lines() {
     sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//'
 }
 
+# Run 34010217484: default-keychain -d user can return errSecNoDefaultKeychain
+# (-25307) while login remains on the search list. Keep that stderr visible.
 configured_isolation_current_default() {
-    security default-keychain -d user 2>/dev/null | configured_isolation_parse_keychain_lines | head -n 1
+    local raw line
+    raw="$(security default-keychain -d user)" || return $?
+    line="$(printf '%s\n' "$raw" | configured_isolation_parse_keychain_lines)"
+    line="${line%%$'\n'*}"
+    [[ -n "$line" ]] || return 1
+    printf '%s\n' "$line"
 }
 
 configured_isolation_current_search() {
-    security list-keychains -d user 2>/dev/null | configured_isolation_parse_keychain_lines
+    local raw
+    raw="$(security list-keychains -d user)" || return $?
+    printf '%s\n' "$raw" | configured_isolation_parse_keychain_lines
+}
+
+configured_isolation_choose_restore_default() { # <search-lines>
+    local search="$1" login="$HOME/Library/Keychains/login.keychain-db" line found=0
+    while IFS= read -r line; do
+        if [[ "$line" == "$login" ]]; then
+            found=1
+            break
+        fi
+    done <<EOF
+$search
+EOF
+    if ((found)) && [[ -e "$login" ]]; then
+        printf '%s\n' "$login"
+        return 0
+    fi
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        [[ "$line" == /* ]] || continue
+        [[ "$line" != *..* ]] || continue
+        [[ -e "$line" ]] || continue
+        printf '%s\n' "$line"
+        return 0
+    done <<EOF
+$search
+EOF
+    return 1
 }
 
 configured_isolation_restore() {
@@ -512,27 +549,19 @@ configured_isolation_cleanup() {
 }
 
 configured_isolation_mint_keychain() {
-    local stem="$ISOLATION_ROOT/k" xtrace_restore=""
+    local keychain="$ISOLATION_ROOT/k.keychain-db" xtrace_restore=""
     [[ -o xtrace ]] && xtrace_restore="set -x"
     { set +x; } 2>/dev/null
     ISOLATION_PASSWORD="$(openssl rand -base64 24)" || {
         eval "$xtrace_restore"
         return 1
     }
-    if ! security create-keychain -p "$ISOLATION_PASSWORD" "$stem"; then
+    if ! security create-keychain -p "$ISOLATION_PASSWORD" "$keychain"; then
         ISOLATION_PASSWORD=""
         eval "$xtrace_restore"
         return 1
     fi
-    if [[ -f "${stem}.keychain-db" ]]; then
-        ISOLATION_KEYCHAIN="${stem}.keychain-db"
-    elif [[ -f "$stem" ]]; then
-        ISOLATION_KEYCHAIN="$stem"
-    else
-        ISOLATION_PASSWORD=""
-        eval "$xtrace_restore"
-        return 1
-    fi
+    ISOLATION_KEYCHAIN="$keychain"
     if ! security set-keychain-settings -lut 21600 "$ISOLATION_KEYCHAIN" \
         || ! security unlock-keychain -p "$ISOLATION_PASSWORD" "$ISOLATION_KEYCHAIN"; then
         ISOLATION_PASSWORD=""
@@ -559,7 +588,9 @@ configured_isolation_roundtrip() {
 configured_isolation_setup() {
     # Isolation mutates the user keychain search list. Refuse outside CI.
     local root data socket saved_default saved_search
+    ISOLATION_SETUP_REASON="ci"
     [[ -n "${GITHUB_ACTIONS:-}" ]] || return 1
+    ISOLATION_SETUP_REASON="root"
     root="$(mktemp -d /tmp/cpc.XXXXXX)" || return 1
     if ! configured_isolation_owned_root "$root"; then
         rm -rf "$root"
@@ -572,17 +603,26 @@ configured_isolation_setup() {
         rm -rf "$root"
         return 1
     fi
-    saved_default="$(configured_isolation_current_default)" || { rm -rf "$root"; return 1; }
+    ISOLATION_SETUP_REASON="search-list"
     saved_search="$(configured_isolation_current_search)" || { rm -rf "$root"; return 1; }
-    if [[ -z "$saved_default" || -z "$saved_search" ]]; then
+    if [[ -z "$saved_search" ]]; then
         rm -rf "$root"
         return 1
+    fi
+    ISOLATION_SETUP_REASON="default-keychain-read"
+    saved_default="$(configured_isolation_current_default)" || saved_default=""
+    if [[ -z "$saved_default" ]]; then
+        saved_default="$(configured_isolation_choose_restore_default "$saved_search")" || {
+            rm -rf "$root"
+            return 1
+        }
     fi
     ISOLATION_ROOT="$root"
     ISOLATION_DATA_DIR="$data"
     ISOLATION_SOCKET="$socket"
     ISOLATION_SAVED_DEFAULT="$saved_default"
     ISOLATION_SAVED_SEARCH="$saved_search"
+    ISOLATION_SETUP_REASON="mint"
     if ! configured_isolation_mint_keychain \
         || ! configured_isolation_owned_keychain "$ISOLATION_KEYCHAIN"; then
         configured_isolation_cleanup
@@ -591,12 +631,18 @@ configured_isolation_setup() {
     # Run 34007760276: login stayed on the search list, so the sidecar
     # classified KEY_LOCKED against the I-10 item. Isolation uses the
     # throwaway keychain alone and never names that item.
+    ISOLATION_SETUP_REASON="switch"
     if ! security list-keychains -d user -s "$ISOLATION_KEYCHAIN" \
-        || ! security default-keychain -d user -s "$ISOLATION_KEYCHAIN" \
-        || ! configured_isolation_roundtrip; then
+        || ! security default-keychain -d user -s "$ISOLATION_KEYCHAIN"; then
         configured_isolation_cleanup
         return 1
     fi
+    ISOLATION_SETUP_REASON="roundtrip"
+    if ! configured_isolation_roundtrip; then
+        configured_isolation_cleanup
+        return 1
+    fi
+    ISOLATION_SETUP_REASON=""
     ISOLATION_ACTIVE=1
 }
 
@@ -688,7 +734,7 @@ configured_scenario() {
     group "Cloud UI: configured macOS account lifecycle"
     ensure_cloud_evidence_daemon || { bad "the cloud-evidence daemon sidecar is present"; return; }
     start_stub || { bad "the cloud evidence backend starts"; return; }
-    configured_isolation_setup || { bad "configured evidence isolation is armed"; return; }
+    configured_isolation_setup || { bad "configured evidence isolation is armed" "${ISOLATION_SETUP_REASON:-}"; return; }
     launch_app configured || { bad "the configured app exposes accessibility state"; return; }
     probe_configured_sidecar_path || return
     open_cloud || { bad "the configured cloud row is reachable"; return; }
@@ -946,6 +992,7 @@ configured_assertions_self_test() {
         && "$body" == *'sync-with-skips "$elapsed" 30000'* \
         && "$body" == *'offline-error "$elapsed" 60000'* \
         && "$body" == *"configured_isolation_setup"* \
+        && "$body" == *'bad "configured evidence isolation is armed" "${ISOLATION_SETUP_REASON:-}"'* \
         && "$body" == *"configured_isolation_setup"*"launch_app configured"* \
         && "$body" == *"probe_configured_sidecar_path || return"* \
         && "$body" == *"probe_configured_sidecar_path"*"open_cloud"* \
@@ -1186,7 +1233,7 @@ configured_isolation_self_test() { # <tmp-dir>
                 printf '    "/Users/fixture/Library/Keychains/login.keychain-db"\n'
                 ;;
             create-keychain)
-                touch "${!#}.keychain-db"
+                touch "${!#}"
                 ;;
             find-generic-password)
                 if [[ " $* " == *" -w "* ]]; then
@@ -1211,6 +1258,8 @@ configured_isolation_self_test() { # <tmp-dir>
         && "$ISOLATION_DATA_DIR" == "$fx/cpc.AAAAAA/d" \
         && "$ISOLATION_SOCKET" == "$fx/cpc.AAAAAA/d/daemon.sock" \
         && "$ISOLATION_KEYCHAIN" == "$fx/cpc.AAAAAA/k.keychain-db" \
+        && "$ISOLATION_SAVED_DEFAULT" == "/Users/fixture/Library/Keychains/login.keychain-db" \
+        && -z "$ISOLATION_SETUP_REASON" \
         && "$out" != *SECRET_PASSWORD_TOKEN* \
         && "$(cat "$sec_log")" != *com.copypaste.daemon* \
         && "$(cat "$sec_log")" != *device-secret-key* ]]; then
@@ -1218,20 +1267,179 @@ configured_isolation_self_test() { # <tmp-dir>
     else
         bad "configured isolation setup arms throwaway paths without logging the password"
     fi
+    if grep -q "create-keychain -p SECRET_PASSWORD_TOKEN $fx/cpc.AAAAAA/k.keychain-db" "$sec_log" \
+        && ! grep -q "create-keychain -p SECRET_PASSWORD_TOKEN $fx/cpc.AAAAAA/k$" "$sec_log" \
+        && ! grep -q '\.keychain-db\.keychain-db' "$sec_log"; then
+        ok "create-keychain uses the owned k.keychain-db path without suffix guessing"
+    else
+        bad "create-keychain uses the owned k.keychain-db path without suffix guessing"
+    fi
     if awk '
-        /create-keychain/ { create = 1 }
-        /list-keychains -d user -s / { listed = 1 }
-        /default-keychain/ && !/-s/ { reads++ }
-        /list-keychains/ && !/-s/ { reads++ }
-        END { exit !(reads >= 2 && create && listed) }
+        $1 == "create-keychain" { if (!create) create = NR }
+        $1 == "list-keychains" && / -s / { listed = 1 }
+        $1 == "default-keychain" && $0 !~ / -s / { if (!def) def = NR }
+        $1 == "list-keychains" && $0 !~ / -s / { if (!search) search = NR }
+        END { exit !(search && def && create && listed && search < def && def < create) }
     ' "$sec_log" \
         && ! grep -E 'list-keychains -d user -s .*(login\.keychain|existing)' "$sec_log" \
-        && grep -q "list-keychains -d user -s $fx/cpc.AAAAAA/k.keychain-db" "$sec_log" \
-        && [[ "$(awk '/create-keychain/{print NR; exit}' "$sec_log")" -gt "$(awk '/default-keychain/ && !/-s/{print NR; exit}' "$sec_log")" ]]; then
+        && grep -q "list-keychains -d user -s $fx/cpc.AAAAAA/k.keychain-db" "$sec_log"; then
         ok "setup saves the search list, then switches it to the throwaway only"
     else
         bad "setup saves the search list, then switches it to the throwaway only"
     fi
+
+    : > "$sec_log"
+    configured_isolation_restore
+    if grep -qx "default-keychain -d user -s /Users/fixture/Library/Keychains/login.keychain-db" "$sec_log" \
+        && grep -qx "list-keychains -d user -s /Users/fixture/Library/Keychains/login.keychain-db" "$sec_log"; then
+        ok "successful quoted default restores the exact unsuffixed path"
+    else
+        bad "successful quoted default restores the exact unsuffixed path"
+    fi
+
+    configured_isolation_cleanup
+    HOME="$fx/home"
+    mkdir -p "$HOME/Library/Keychains"
+    : > "$HOME/Library/Keychains/login.keychain-db"
+    : > "$sec_log"
+    security() {
+        printf '%s\n' "$*" >> "$sec_log"
+        case "$1" in
+            default-keychain)
+                if [[ "${4:-}" == -s ]]; then
+                    return 0
+                fi
+                printf 'security: SecKeychainCopyDefault: A default keychain could not be found. (-25307)\n' >&2
+                return 1
+                ;;
+            list-keychains)
+                if [[ "${4:-}" == -s ]]; then
+                    return 0
+                fi
+                printf '    "%s"\n' "$HOME/Library/Keychains/login.keychain-db"
+                ;;
+            create-keychain)
+                touch "${!#}"
+                ;;
+            find-generic-password)
+                if [[ " $* " == *" -w "* ]]; then
+                    printf 'cloud-evidence-roundtrip\n'
+                else
+                    printf 'could not be found\n'
+                fi
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    }
+    got=1
+    configured_isolation_setup
+    got=$?
+    if [[ "$got" -eq 0 && "$ISOLATION_ACTIVE" == 1 \
+        && "$ISOLATION_SAVED_DEFAULT" == "$HOME/Library/Keychains/login.keychain-db" \
+        && -z "$ISOLATION_SETUP_REASON" ]]; then
+        ok "errSecNoDefaultKeychain plus on-list login arms and saves login restore"
+    else
+        bad "errSecNoDefaultKeychain plus on-list login arms and saves login restore"
+    fi
+    configured_isolation_cleanup
+    HOME="$home_saved"
+
+    isolation_fail_named() { # <reason> <security-fn>
+        local expect="$1" impl="$2" got=0
+        ISOLATION_SETUP_REASON=""
+        ISOLATION_ACTIVE=0
+        : > "$sec_log"
+        security() { "$impl" "$@"; }
+        configured_isolation_setup || got=$?
+        if [[ "$got" -ne 0 && "$ISOLATION_ACTIVE" == 0 \
+            && "$ISOLATION_SETUP_REASON" == "$expect" \
+            && "$ISOLATION_SETUP_REASON" != /* \
+            && "$ISOLATION_SETUP_REASON" != *SECRET_PASSWORD_TOKEN* ]]; then
+            ok "named isolation failure is $expect"
+        else
+            bad "named isolation failure is $expect"
+        fi
+        unset -f security
+        configured_isolation_cleanup
+    }
+    isolation_base_security() {
+        printf '%s\n' "$*" >> "$sec_log"
+        case "$1" in
+            default-keychain)
+                if [[ "${4:-}" == -s ]]; then
+                    return 0
+                fi
+                printf '    "/Users/fixture/Library/Keychains/login.keychain-db"\n'
+                ;;
+            list-keychains)
+                if [[ "${4:-}" == -s ]]; then
+                    return 0
+                fi
+                printf '    "/Users/fixture/Library/Keychains/login.keychain-db"\n'
+                ;;
+            create-keychain)
+                touch "${!#}"
+                ;;
+            find-generic-password)
+                if [[ " $* " == *" -w "* ]]; then
+                    printf 'cloud-evidence-roundtrip\n'
+                else
+                    printf 'could not be found\n'
+                fi
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    }
+    isolation_missing_default_security() {
+        printf '%s\n' "$*" >> "$sec_log"
+        case "$1" in
+            default-keychain)
+                if [[ "${4:-}" == -s ]]; then
+                    return 0
+                fi
+                printf 'security: SecKeychainCopyDefault: A default keychain could not be found. (-25307)\n' >&2
+                return 1
+                ;;
+            list-keychains)
+                if [[ "${4:-}" == -s ]]; then
+                    return 0
+                fi
+                printf '    "/missing/not-a-keychain"\n'
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    }
+    isolation_mint_fail_security() {
+        isolation_base_security "$@"
+        [[ "$1" == create-keychain ]] && return 1
+        return 0
+    }
+    isolation_switch_fail_security() {
+        isolation_base_security "$@" || true
+        if [[ "$1" == list-keychains && "${4:-}" == -s ]]; then
+            return 1
+        fi
+        return 0
+    }
+    isolation_roundtrip_fail_security() {
+        isolation_base_security "$@" || true
+        if [[ "$1" == add-generic-password ]]; then
+            return 1
+        fi
+        return 0
+    }
+    isolation_fail_named default-keychain-read isolation_missing_default_security
+    isolation_fail_named mint isolation_mint_fail_security
+    isolation_fail_named switch isolation_switch_fail_security
+    isolation_fail_named roundtrip isolation_roundtrip_fail_security
+    unset -f isolation_fail_named isolation_base_security isolation_missing_default_security \
+        isolation_mint_fail_security isolation_switch_fail_security isolation_roundtrip_fail_security
 
     : > "$sec_log"
     ISOLATION_SAVED_DEFAULT="/Users/fixture/Library/Keychains/login.keychain-db"
@@ -1335,6 +1543,7 @@ configured_isolation_self_test() { # <tmp-dir>
     unset -f security probe_run_bounded
 
     setup_body="$(type configured_isolation_setup 2>/dev/null)$(type configured_isolation_mint_keychain 2>/dev/null)$(type configured_isolation_roundtrip 2>/dev/null)"
+    helper_body="$(type configured_isolation_current_default 2>/dev/null)$(type configured_isolation_current_search 2>/dev/null)$(type configured_isolation_choose_restore_default 2>/dev/null)$(type configured_isolation_parse_keychain_lines 2>/dev/null)"
     restore_body="$(type configured_isolation_restore 2>/dev/null)"
     cleanup_body="$(type configured_isolation_cleanup 2>/dev/null)$(type cleanup 2>/dev/null)"
     delete_body="$(type configured_isolation_delete_owned 2>/dev/null)"
@@ -1347,6 +1556,14 @@ configured_isolation_self_test() { # <tmp-dir>
         ok "setup does not keep login on the search list or use product key escapes"
     else
         bad "setup does not keep login on the search list or use product key escapes"
+    fi
+    if [[ "$helper_body" != *'2>/dev/null'* \
+        && "$helper_body" != *'| head'* \
+        && "$helper_body" != *'head -'* \
+        && "$helper_body" == *login.keychain-db* ]]; then
+        ok "isolation keychain helpers avoid 2>/dev/null and head"
+    else
+        bad "isolation keychain helpers avoid 2>/dev/null and head"
     fi
     if [[ "$probe_region" != *delete-generic-password* \
         && "$probe_region" != *add-generic-password* \
@@ -1381,6 +1598,7 @@ configured_isolation_self_test() { # <tmp-dir>
     ISOLATION_PASSWORD=""
     ISOLATION_SAVED_DEFAULT=""
     ISOLATION_SAVED_SEARCH=""
+    ISOLATION_SETUP_REASON=""
     ISOLATION_ACTIVE=0
     unset GITHUB_ACTIONS
     if [[ -n "$saved_ga" ]]; then
