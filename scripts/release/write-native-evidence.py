@@ -218,6 +218,109 @@ def accept_diskimages_transition(pinned, live):
     return live
 
 
+MACOS_DMG_PRODUCTION_START = 'VERSION="${1:-}"'
+MACOS_DMG_MOUNT = 'group "Mount (ENFORCED)"'
+MACOS_DMG_CAPTURE = '--capture-qualified-artifact "$DMG"'
+MACOS_DMG_ATTACH = 'hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"'
+MACOS_DMG_ACCEPT = "--accept-diskimages-transition"
+MACOS_DMG_EVIDENCE = (
+    "macos-native-evidence.sh artifacts/release-macos-native "
+    '"$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"'
+)
+
+
+def macos_dmg_identity_production_region(script_text):
+    start = script_text.index(MACOS_DMG_PRODUCTION_START)
+    return script_text[start:]
+
+
+def macos_dmg_production_attach_command(region):
+    mount_at = region.index(MACOS_DMG_MOUNT)
+    for line in region[mount_at:].splitlines():
+        command = line.lstrip().split("#", 1)[0]
+        if command.startswith(("if hdiutil attach ", "hdiutil attach ")):
+            return command
+    raise ValueError("self-test failed: production Mount attach is missing")
+
+
+def assert_macos_dmg_identity_sequence(script_text):
+    region = macos_dmg_identity_production_region(script_text)
+    capture = region.index(MACOS_DMG_CAPTURE)
+    mount = region.index(MACOS_DMG_MOUNT)
+    attach_command = macos_dmg_production_attach_command(region)
+    attach = region.index(attach_command)
+    accept = region.index(MACOS_DMG_ACCEPT)
+    evidence = region.index(MACOS_DMG_EVIDENCE)
+    if not (capture < mount < attach < accept < evidence):
+        raise ValueError("self-test failed: two-phase DMG identity sequence is out of order")
+    if "-noverify" in attach_command:
+        raise ValueError("self-test failed: attach must keep DiskImages verification")
+
+
+def _swap_lines_containing(text, first, second):
+    lines = text.splitlines(keepends=True)
+    left = next(index for index, line in enumerate(lines) if first in line)
+    right = next(index for index, line in enumerate(lines) if second in line)
+    lines[left], lines[right] = lines[right], lines[left]
+    return "".join(lines)
+
+
+def assert_macos_dmg_identity_mutations_fail(script_text):
+    assert_macos_dmg_identity_sequence(script_text)
+    noverify = script_text.replace(
+        MACOS_DMG_ATTACH,
+        'hdiutil attach "$DMG" -noverify -nobrowse -readonly -mountpoint "$MNT"',
+        1,
+    )
+    try:
+        assert_macos_dmg_identity_sequence(noverify)
+    except ValueError as error:
+        if "DiskImages verification" not in str(error):
+            raise ValueError(f"self-test failed: -noverify mutation missed: {error}") from None
+    else:
+        raise ValueError("self-test failed: -noverify insertion was accepted")
+    start = script_text.index(MACOS_DMG_PRODUCTION_START)
+    reordered = script_text[:start] + _swap_lines_containing(
+        script_text[start:],
+        MACOS_DMG_ATTACH,
+        MACOS_DMG_ACCEPT,
+    )
+    try:
+        assert_macos_dmg_identity_sequence(reordered)
+    except ValueError as error:
+        if "out of order" not in str(error):
+            raise ValueError(f"self-test failed: reorder mutation missed: {error}") from None
+    else:
+        raise ValueError("self-test failed: attach/accept reorder was accepted")
+    decoy = """
+self_test() {
+python3 - <<'PY'
+text = open("x").read()
+text.index('--capture-qualified-artifact "$DMG"')
+text.index('hdiutil attach "$DMG"')
+text.index("--accept-diskimages-transition")
+text.index('macos-native-evidence.sh artifacts/release-macos-native "$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"')
+if "-noverify" in text.split("hdiutil attach", 1)[1].splitlines()[0]:
+    raise SystemExit("helper")
+PY
+}
+VERSION="${1:-}"
+QUALIFIED_ARTIFACT_IDENTITY="$(python3 scripts/release/write-native-evidence.py --capture-qualified-artifact "$DMG")"
+group "Mount (ENFORCED)"
+if hdiutil attach "$DMG" -noverify -nobrowse -readonly -mountpoint "$MNT" >/dev/null; then
+    QUALIFIED_ARTIFACT_IDENTITY="$(python3 scripts/release/write-native-evidence.py --accept-diskimages-transition "$QUALIFIED_ARTIFACT_IDENTITY" "$DMG")"
+fi
+./scripts/release/macos-native-evidence.sh artifacts/release-macos-native "$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"
+"""
+    try:
+        assert_macos_dmg_identity_sequence(decoy)
+    except ValueError as error:
+        if "DiskImages verification" not in str(error):
+            raise ValueError(f"self-test failed: helper-literal fixture missed: {error}") from None
+    else:
+        raise ValueError("self-test failed: helper-literal -noverify fixture was accepted")
+
+
 def feature_state_record(value, requirement, artifacts):
     parts = value.split(",")
     try:
@@ -351,6 +454,11 @@ def main():
 
 
 def self_test():
+    smoke = pathlib.Path(__file__).with_name("smoke-macos-dmg.sh")
+    try:
+        assert_macos_dmg_identity_mutations_fail(smoke.read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise SystemExit(error) from None
     with tempfile.TemporaryDirectory() as directory:
         from PIL import Image, ImageDraw
 

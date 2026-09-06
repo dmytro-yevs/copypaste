@@ -1301,12 +1301,94 @@ test("detects qualified artifact replacement or Windows refusal during hashing",
   }
 }));
 
+const MACOS_DMG_PRODUCTION_START = "VERSION=\"${1:-}\"";
+const MACOS_DMG_MOUNT = "group \"Mount (ENFORCED)\"";
+const MACOS_DMG_CAPTURE = "--capture-qualified-artifact \"$DMG\"";
+const MACOS_DMG_ATTACH = "hdiutil attach \"$DMG\" -nobrowse -readonly -mountpoint \"$MNT\"";
+const MACOS_DMG_ACCEPT = "--accept-diskimages-transition";
+const MACOS_DMG_EVIDENCE = "macos-native-evidence.sh artifacts/release-macos-native \"$DMG\" \"$QUALIFIED_ARTIFACT_IDENTITY\"";
+
+function macosDmgIdentityProductionRegion(script) {
+  const start = script.indexOf(MACOS_DMG_PRODUCTION_START);
+  if (start < 0) {
+    throw new Error("self-test failed: production Mount/receipt region is missing");
+  }
+  return script.slice(start);
+}
+
+function macosDmgProductionAttachCommand(region) {
+  const mount = region.indexOf(MACOS_DMG_MOUNT);
+  if (mount < 0) {
+    throw new Error("self-test failed: production Mount attach is missing");
+  }
+  for (const line of region.slice(mount).split("\n")) {
+    const command = line.trimStart().split("#", 1)[0];
+    if (command.startsWith("if hdiutil attach ") || command.startsWith("hdiutil attach ")) {
+      return command;
+    }
+  }
+  throw new Error("self-test failed: production Mount attach is missing");
+}
+
+function assertMacosDmgIdentitySequence(script) {
+  const region = macosDmgIdentityProductionRegion(script);
+  const capture = region.indexOf(MACOS_DMG_CAPTURE);
+  const mount = region.indexOf(MACOS_DMG_MOUNT);
+  const attachCommand = macosDmgProductionAttachCommand(region);
+  const attach = region.indexOf(attachCommand);
+  const accept = region.indexOf(MACOS_DMG_ACCEPT);
+  const evidence = region.indexOf(MACOS_DMG_EVIDENCE);
+  if (!(capture >= 0 && mount >= 0 && attach >= 0 && accept >= 0 && evidence >= 0
+      && capture < mount && mount < attach && attach < accept && accept < evidence)) {
+    throw new Error("self-test failed: two-phase DMG identity sequence is out of order");
+  }
+  if (attachCommand.includes("-noverify")) {
+    throw new Error("self-test failed: attach must keep DiskImages verification");
+  }
+}
+
+function swapLinesContaining(text, first, second) {
+  const lines = text.split("\n");
+  const left = lines.findIndex((line) => line.includes(first));
+  const right = lines.findIndex((line) => line.includes(second));
+  [lines[left], lines[right]] = [lines[right], lines[left]];
+  return lines.join("\n");
+}
+
 test("native producers capture artifact identity before first artifact use", async () => {
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   const macos = await readFile(path.join(root, "scripts/release/smoke-macos-dmg.sh"), "utf8");
   const android = await readFile(path.join(root, "scripts/release/android-smoke-release.sh"), "utf8");
   const windows = await readFile(path.join(root, "scripts/release/windows-native-evidence.ps1"), "utf8");
-  assert(macos.indexOf("--capture-qualified-artifact \"$DMG\"") < macos.indexOf("hdiutil attach \"$DMG\""));
+  assert.doesNotThrow(() => assertMacosDmgIdentitySequence(macos));
+  const noverify = macos.replace(
+    MACOS_DMG_ATTACH,
+    "hdiutil attach \"$DMG\" -noverify -nobrowse -readonly -mountpoint \"$MNT\"",
+  );
+  assert.throws(() => assertMacosDmgIdentitySequence(noverify), /DiskImages verification/);
+  const start = macos.indexOf(MACOS_DMG_PRODUCTION_START);
+  const reordered = macos.slice(0, start) + swapLinesContaining(
+    macos.slice(start),
+    MACOS_DMG_ATTACH,
+    MACOS_DMG_ACCEPT,
+  );
+  assert.throws(() => assertMacosDmgIdentitySequence(reordered), /out of order/);
+  const decoy = [
+    "self_test() {",
+    "text.index('--capture-qualified-artifact \"$DMG\"')",
+    "text.index('hdiutil attach \"$DMG\"')",
+    "text.index(\"--accept-diskimages-transition\")",
+    "}",
+    "VERSION=\"${1:-}\"",
+    "QUALIFIED_ARTIFACT_IDENTITY=\"$(python3 scripts/release/write-native-evidence.py --capture-qualified-artifact \"$DMG\")\"",
+    "group \"Mount (ENFORCED)\"",
+    "if hdiutil attach \"$DMG\" -noverify -nobrowse -readonly -mountpoint \"$MNT\" >/dev/null; then",
+    "QUALIFIED_ARTIFACT_IDENTITY=\"$(python3 scripts/release/write-native-evidence.py --accept-diskimages-transition \"$QUALIFIED_ARTIFACT_IDENTITY\" \"$DMG\")\"",
+    "fi",
+    "./scripts/release/macos-native-evidence.sh artifacts/release-macos-native \"$DMG\" \"$QUALIFIED_ARTIFACT_IDENTITY\"",
+    "",
+  ].join("\n");
+  assert.throws(() => assertMacosDmgIdentitySequence(decoy), /DiskImages verification/);
   assert(android.indexOf("--capture-qualified-artifact \"$APK\"") < android.indexOf("adb install -r -g \"$APK\""));
   assert(windows.indexOf("--capture-qualified-artifact $installerPath") < windows.indexOf("Get-AuthenticodeSignature -FilePath $installerPath"));
   assert.match(macos, /macos-native-evidence\.sh artifacts\/release-macos-native "\$DMG" "\$QUALIFIED_ARTIFACT_IDENTITY"/);
