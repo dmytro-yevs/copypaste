@@ -253,6 +253,9 @@ def configured_isolation_holds(script):
     cleanup_iso = shell_function_body(script, "configured_isolation_cleanup")
     restore = shell_function_body(script, "configured_isolation_restore")
     delete = shell_function_body(script, "configured_isolation_delete_owned")
+    current_default = shell_function_body(script, "configured_isolation_current_default")
+    current_search = shell_function_body(script, "configured_isolation_current_search")
+    choose = shell_function_body(script, "configured_isolation_choose_restore_default")
     owned = (
         shell_function_body(script, "configured_isolation_owned_root")
         + shell_function_body(script, "configured_isolation_owned_keychain")
@@ -271,12 +274,13 @@ def configured_isolation_holds(script):
     log = shell_function_body(script, "probe_runtime_log")
     decide = shell_function_body(script, "probe_decide")
     if not all((
-        setup, mint, cleanup_iso, restore, delete, owned, socket, opener, launch,
-        shutdown, top_cleanup, configured, keychain, db, live, cli, log, decide,
+        setup, mint, cleanup_iso, restore, delete, current_default, current_search,
+        choose, owned, socket, opener, launch, shutdown, top_cleanup, configured,
+        keychain, db, live, cli, log, decide,
     )):
         return False
     configured_open, unconfigured_open = _if_else_branches(opener)
-    isolation = setup + mint + cleanup_iso + restore + delete
+    isolation = setup + mint + cleanup_iso + restore + delete + current_default + current_search + choose
     if "GITHUB_ACTIONS" not in setup:
         return False
     if "COPYPASTE_EPHEMERAL_KEY" in isolation or "COPYPASTE_KEYCHAIN_TEST" in isolation:
@@ -287,9 +291,39 @@ def configured_isolation_holds(script):
         return False
     if "k.keychain-db" not in mint + setup + owned:
         return False
+    if "$ISOLATION_ROOT/k.keychain-db" not in mint:
+        return False
+    if "${stem}.keychain-db" in mint or 'elif [[ -f "$stem" ]]' in mint:
+        return False
     if "DARWIN_SUN_PATH=104" not in script and "104" not in socket:
         return False
     if "openssl rand" not in mint or "set +x" not in mint:
+        return False
+    if "2>/dev/null" in current_default or "2>/dev/null" in current_search:
+        return False
+    if re.search(r"\bhead\b", current_default) or re.search(r"\bhead\b", current_search):
+        return False
+    if re.search(r"security default-keychain[^|\n]*\|(?!\|)", current_default):
+        return False
+    if re.search(r'configured_isolation_current_default\)"\s*\|\|\s*\{', setup):
+        return False
+    search_at = setup.find("configured_isolation_current_search")
+    default_at = setup.find("configured_isolation_current_default")
+    choose_at = setup.find("configured_isolation_choose_restore_default")
+    if -1 in (search_at, default_at, choose_at) or not (search_at < default_at < choose_at):
+        return False
+    if "login.keychain-db" not in choose:
+        return False
+    if not all(token in setup for token in (
+        'ISOLATION_SETUP_REASON="default-keychain-read"',
+        'ISOLATION_SETUP_REASON="mint"',
+        'ISOLATION_SETUP_REASON="switch"',
+        'ISOLATION_SETUP_REASON="roundtrip"',
+    )):
+        return False
+    if re.search(r"ISOLATION_SETUP_REASON=\$", setup):
+        return False
+    if "${ISOLATION_SETUP_REASON" not in configured:
         return False
     save_at = setup.find("ISOLATION_SAVED_DEFAULT")
     mint_at = setup.find("configured_isolation_mint_keychain")
@@ -2398,6 +2432,40 @@ targeted_adb "$serial" shell dumpsys power
                 'list-keychains -d user -s "$ISOLATION_KEYCHAIN" $existing')),
          "self-test: isolation that keeps login on the search list is rejected",
          "the isolation detector accepted a search list that still includes login")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace(
+                'list-keychains -d user -s "$ISOLATION_KEYCHAIN"',
+                'list-keychains -d user -s "$ISOLATION_KEYCHAIN" "$HOME/Library/Keychains/login.keychain-db"')),
+         "self-test: isolation that names login in the throwaway switch is rejected",
+         "the isolation detector accepted a throwaway switch that still requires login")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace(
+                'saved_default="$(configured_isolation_current_default)" || saved_default=""',
+                'saved_default="$(configured_isolation_current_default)" || { rm -rf "$root"; return 1; }')),
+         "self-test: isolation that requires a displayed default keychain is rejected",
+         "the isolation detector accepted default-display success as a hard prerequisite")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace(
+                'raw="$(security default-keychain -d user)"',
+                'raw="$(security default-keychain -d user 2>/dev/null)"')),
+         "self-test: isolation that hides default-keychain stderr is rejected",
+         "the isolation detector accepted 2>/dev/null on the default-keychain read")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace(
+                'line="$(printf \'%s\\n\' "$raw" | configured_isolation_parse_keychain_lines)"',
+                'line="$(security default-keychain -d user 2>/dev/null | configured_isolation_parse_keychain_lines | head -n 1)"')),
+         "self-test: isolation that pipes default-keychain through head is rejected",
+         "the isolation detector accepted the default-keychain head pipefail landmine")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace(
+                'local keychain="$ISOLATION_ROOT/k.keychain-db"',
+                'local stem="$ISOLATION_ROOT/k"')),
+         "self-test: isolation that suffix-guesses the create-keychain path is rejected",
+         "the isolation detector accepted minting without an explicit k.keychain-db path")
+    emit(not configured_isolation_holds(
+            macos_cloud.replace("ISOLATION_SETUP_REASON", "ISOLATION_FAIL_REASON")),
+         "self-test: isolation without named setup reason tokens is rejected",
+         "the isolation detector accepted setup that cannot report a fixed failure token")
     emit(not configured_isolation_holds(
             macos_cloud.replace(
                 "configured_isolation_restore\n    configured_isolation_delete_owned || true",
