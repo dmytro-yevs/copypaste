@@ -26,6 +26,72 @@
 # and the summary is the deliverable.
 set -uo pipefail
 
+self_test() {
+    local root tmp file pin mutated live script
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    script="$root/scripts/release/smoke-macos-dmg.sh"
+    python3 - "$script" <<'PY'
+import pathlib, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+capture = text.index('--capture-qualified-artifact "$DMG"')
+attach = text.index('hdiutil attach "$DMG"')
+accept = text.index("--accept-diskimages-transition")
+evidence = text.index(
+    'macos-native-evidence.sh artifacts/release-macos-native "$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"'
+)
+if not (capture < attach < accept < evidence):
+    raise SystemExit("self-test failed: two-phase DMG identity sequence is out of order")
+if "-noverify" in text.split("hdiutil attach", 1)[1].splitlines()[0]:
+    raise SystemExit("self-test failed: attach must keep DiskImages verification")
+PY
+    tmp="$(mktemp -d)"
+    file="$tmp/qualified.dmg"
+    printf 'qualified release artifact\n' > "$file"
+    pin="$(python3 "$root/scripts/release/write-native-evidence.py" --capture-qualified-artifact "$file")" || {
+        echo "self-test failed: capture" >&2
+        rm -rf "$tmp"
+        return 1
+    }
+    mutated="$(PIN="$pin" python3 -c 'import json,os; p=json.loads(os.environ["PIN"]); p["identity"]["ctime_ns"]+=1; print(json.dumps(p,separators=(",",":")))')"
+    live="$(python3 "$root/scripts/release/write-native-evidence.py" --accept-diskimages-transition "$mutated" "$file")" || {
+        echo "self-test failed: ctime-only transition rejected" >&2
+        rm -rf "$tmp"
+        return 1
+    }
+    [[ "$live" == "$pin" ]] || {
+        echo "self-test failed: live snapshot was not the current identity" >&2
+        rm -rf "$tmp"
+        return 1
+    }
+    python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_bytes(b"x"*p.stat().st_size)' "$file"
+    if output="$(python3 "$root/scripts/release/write-native-evidence.py" --accept-diskimages-transition "$pin" "$file" 2>&1)"; then
+        echo "self-test failed: same-size replacement was accepted" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+    case "$output" in
+        *record.sha256*) ;;
+        *) echo "self-test failed: replacement omitted sha diagnostic" >&2; rm -rf "$tmp"; return 1 ;;
+    esac
+    case "$output" in
+        *"$file"*|*/qualified.dmg*) echo "self-test failed: replacement leaked a path" >&2; rm -rf "$tmp"; return 1 ;;
+    esac
+    rm -f "$file"
+    ln -s "$tmp/missing.dmg" "$file"
+    if python3 "$root/scripts/release/write-native-evidence.py" --capture-qualified-artifact "$file" >/dev/null 2>&1; then
+        echo "self-test failed: symlink capture was accepted" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+    rm -rf "$tmp"
+    echo "macOS DMG identity self-test passed"
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+    self_test
+    exit $?
+fi
+
 VERSION="${1:-}"
 [[ -n "$VERSION" ]] || { echo "ERROR: version required. Usage: $0 <version> [arch]" >&2; exit 2; }
 VERSION="${VERSION#v}"
@@ -134,6 +200,13 @@ wait_for_daemon() {
 group "Mount (ENFORCED)"
 if hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT" >/dev/null; then
     ok "the image mounts"
+    # hdiutil(1) attach may write a verified-image attribute and change ctime
+    # only (run 34004833224). Hosted rehearsal is the Darwin attach proof.
+    QUALIFIED_ARTIFACT_IDENTITY="$(python3 scripts/release/write-native-evidence.py --accept-diskimages-transition "$QUALIFIED_ARTIFACT_IDENTITY" "$DMG")" || {
+        bad "the mounted image is the pinned artifact"
+        exit 1
+    }
+    ok "the mounted image is the pinned artifact"
 else
     bad "the image mounts" "hdiutil attach failed"
     exit 1
