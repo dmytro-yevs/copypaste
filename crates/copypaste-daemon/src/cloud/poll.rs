@@ -128,27 +128,28 @@ async fn round_with_permit(
 
     match &outcome {
         Ok(stats) => {
-            let committed = state.cloud.while_sync_cycle_active(&sync_cancel, || {
+            let noted = state.cloud.while_sync_cycle_active(&sync_cancel, || {
                 let at_ms = copypaste_core::now_ms();
                 state.cloud.note_driver_success(&state.meta, &driver, at_ms);
-                if let Err(e) = source.commit_upload_floor(started_ms) {
-                    warn!(error = ?e, "could not advance the upload floor");
-                }
-                if stats.applied > 0 {
-                    state.note_remote_change();
-                }
-                if stats.changed() || stats.skipped_sensitive > 0 {
-                    info!(
-                        uploaded = stats.uploaded,
-                        tombstoned = stats.tombstoned,
-                        applied = stats.applied,
-                        withheld = stats.skipped_sensitive,
-                        "cloud sync round"
-                    );
-                }
             });
-            if committed.is_none() {
+            if noted.is_none() {
                 return RoundOutcome::SyncDisabled;
+            }
+            // `commit_upload_floor` re-enters this fence via `with_account`.
+            if let Err(e) = source.commit_upload_floor(started_ms) {
+                warn!(error = ?e, "could not advance the upload floor");
+            }
+            if stats.applied > 0 {
+                state.note_remote_change();
+            }
+            if stats.changed() || stats.skipped_sensitive > 0 {
+                info!(
+                    uploaded = stats.uploaded,
+                    tombstoned = stats.tombstoned,
+                    applied = stats.applied,
+                    withheld = stats.skipped_sensitive,
+                    "cloud sync round"
+                );
             }
         }
         // Abandoned rather than failed: recording it would leave "sync is
@@ -220,6 +221,72 @@ mod tests {
     use super::*;
     use crate::cloud::{KEY_REFRESH, KEY_SYNC_KEY, KEY_UPLOAD_FLOOR};
     use crate::testutil::{test_state, test_state_with_cloud};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Bound for a round that used to self-deadlock on `sync_cancel`.
+    ///
+    /// The round runs on a blocking thread so a `std` mutex re-entry cannot
+    /// starve this timer.
+    const SUCCESS_ROUND_BOUND: Duration = Duration::from_secs(2);
+
+    struct EmptyJsonBackend {
+        config: copypaste_cloud::CloudConfig,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl EmptyJsonBackend {
+        async fn start() -> Self {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind empty cloud backend");
+            let config = copypaste_cloud::CloudConfig::new_loopback(
+                format!("http://{}", listener.local_addr().expect("backend address")),
+                "anon",
+            )
+            .expect("loopback config");
+            let task = tokio::spawn(async move {
+                loop {
+                    let Ok((mut socket, _)) = listener.accept().await else {
+                        return;
+                    };
+                    let mut request = Vec::new();
+                    while let Ok(read) = socket.read_buf(&mut request).await {
+                        if read == 0 || request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let _ = socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]",
+                        )
+                        .await;
+                }
+            });
+            Self { config, task }
+        }
+    }
+
+    impl Drop for EmptyJsonBackend {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn sync_round_within(state: Arc<AppState>, bound: Duration) -> RoundOutcome {
+        tokio::time::timeout(
+            bound,
+            tokio::task::spawn_blocking(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("round runtime");
+                runtime.block_on(sync_round(&state))
+            }),
+        )
+        .await
+        .expect("successful cloud round self-deadlocked on sync_cancel")
+        .expect("round wait panicked")
+    }
 
     /// `cloud sync` used to call [`sync_round`] straight through while the poll
     /// loop was inside one of its own. Two rounds then pushed the same window,
@@ -526,6 +593,73 @@ mod tests {
         );
         assert_eq!(state.cloud.status().last_error, None);
         server.abort();
+    }
+
+    /// A successful `sync_round` used to hold `Cloud::sync_cancel` while
+    /// `StoreSource::commit_upload_floor` re-entered the same `std` mutex.
+    #[tokio::test]
+    async fn a_successful_round_returns_without_self_deadlocking_the_cancel_fence() {
+        use copypaste_cloud::crypto::derive_sync_key;
+
+        let backend = EmptyJsonBackend::start().await;
+        let (state, _dir) = crate::testutil::test_state_with_cloud(
+            "success-round-cancel-fence",
+            crate::cloud::Cloud::new(Some(backend.config.clone())),
+        );
+        state.cloud.install(
+            &state,
+            backend.config.clone(),
+            "a@example.com".into(),
+            "user-1".into(),
+            derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+            copypaste_cloud::auth::Session {
+                access_token: "access-1".into(),
+                refresh_token: "refresh-1".into(),
+                user_id: "user-1".into(),
+                expires_at_ms: i64::MAX,
+            },
+        );
+        let floor_before = state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap();
+        let before_ms = copypaste_core::now_ms();
+
+        let outcome = sync_round_within(Arc::clone(&state), SUCCESS_ROUND_BOUND).await;
+        let after_ms = copypaste_core::now_ms();
+
+        assert!(
+            matches!(outcome, RoundOutcome::Completed(Ok(_))),
+            "{outcome:?}"
+        );
+        let last_sync_ms = state
+            .cloud
+            .status()
+            .last_sync_ms
+            .expect("note_driver_success did not record last_sync_ms");
+        let floor = state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap();
+        assert!(
+            floor >= before_ms && floor <= after_ms,
+            "floor {floor} not in [{before_ms}, {after_ms}]"
+        );
+        assert!(
+            floor >= floor_before,
+            "the successful round lowered the upload floor"
+        );
+        assert!(
+            last_sync_ms >= floor && last_sync_ms <= after_ms,
+            "last_sync_ms {last_sync_ms} floor {floor} after {after_ms}"
+        );
+        assert_eq!(state.cloud.status().last_error, None);
+        assert!(
+            !state.cloud.round_in_flight(),
+            "RoundGuard stayed held after a successful round"
+        );
+        assert!(
+            state.cloud.try_begin_round().is_some(),
+            "a following begin_round could not take the gate"
+        );
+
+        let again = sync_round_within(Arc::clone(&state), SUCCESS_ROUND_BOUND).await;
+        assert!(matches!(again, RoundOutcome::Completed(Ok(_))), "{again:?}");
+        assert!(!state.cloud.round_in_flight());
     }
 
     #[tokio::test]
