@@ -155,6 +155,8 @@ PROBE_MUTATIONS = (
     "delete-generic-password",
     "add-generic-password",
     "set-generic-password-partition-list",
+    "set-internet-password-partition-list",
+    "set-key-partition-list",
     "unlock-keychain",
     "create-keychain",
     "delete-keychain",
@@ -162,6 +164,18 @@ PROBE_MUTATIONS = (
     "default-keychain",
     "COPYPASTE_EPHEMERAL_KEY",
 )
+
+
+def probe_helper_bodies(script):
+    names = re.findall(r"^(probe_[A-Za-z0-9_]+)\(\)", script, re.M)
+    return "\n".join(shell_function_body(script, name) for name in names)
+
+
+def security_dumps_secret(line):
+    for match in re.finditer(r"(?<![\w-])-([A-Za-z]+)", line):
+        if any(flag in match.group(1) for flag in "wg"):
+            return True
+    return False
 
 
 def configured_sidecar_probe_holds(script):
@@ -177,6 +191,8 @@ def configured_sidecar_probe_holds(script):
     open_cloud = configured.find("open_cloud")
     expect = configured.find('expect_label "Signed out"')
     if -1 in (launch, call, open_cloud, expect) or not (launch < call < open_cloud < expect):
+        return False
+    if not re.search(r"probe_configured_sidecar_path\s*\|\|\s*return\b", configured):
         return False
     if not all(token in probe for token in (
         "probe_live_daemon",
@@ -195,6 +211,7 @@ def configured_sidecar_probe_holds(script):
         "UNUSABLE",
         "PLAINTEXT",
         "absent-item-existing-db",
+        "unknown-keychain",
         "sidecar-key-locked",
         "bundled-daemon",
         "plaintext-endpoint",
@@ -204,29 +221,20 @@ def configured_sidecar_probe_holds(script):
 
 
 def configured_sidecar_probe_is_read_only(script):
-    names = (
-        "probe_configured_sidecar_path",
-        "probe_keychain_item",
-        "probe_live_daemon",
-        "probe_cli_pair",
-        "probe_runtime_log",
-        "probe_codesign_identity",
-        "probe_redact_text",
-        "probe_run_bounded",
-        "probe_decide",
-    )
-    region = "\n".join(shell_function_body(script, name) for name in names)
+    region = probe_helper_bodies(script)
     if "find-generic-password" not in region:
         return False
     if any(token in region for token in PROBE_MUTATIONS):
         return False
     found = False
     for line in region.splitlines():
-        if "security find-generic-password" not in line:
+        if "security" not in line:
+            continue
+        if security_dumps_secret(line):
+            return False
+        if "find-generic-password" not in line:
             continue
         found = True
-        if re.search(r"(^|[\s\"])-[wg]([\s\"]|$)", line):
-            return False
         if not re.search(r"(^|[\s\"])-s([\s\"]|$)", line):
             return False
         if not re.search(r"(^|[\s\"])-a([\s\"]|$)", line):
@@ -2223,6 +2231,11 @@ targeted_adb "$serial" shell dumpsys power
             macos_cloud.replace("probe_configured_sidecar_path || return\n", "")),
          "self-test: configured evidence without the sidecar path probe is rejected",
          "the sidecar probe detector accepted a configured scenario that waits on AX first")
+    emit(not configured_sidecar_probe_holds(
+            macos_cloud.replace("probe_configured_sidecar_path || return",
+                                "probe_configured_sidecar_path || true")),
+         "self-test: a sidecar path probe that cannot abort is rejected",
+         "the sidecar probe detector accepted a configured scenario that ignores probe failure")
     emit(configured_sidecar_probe_is_read_only(macos_cloud),
          "self-test: the current macOS sidecar probe stays attribute-only",
          "the read-only probe detector rejected the live evidence script")
@@ -2235,9 +2248,27 @@ targeted_adb "$serial" shell dumpsys power
     emit(not configured_sidecar_probe_is_read_only(
             macos_cloud.replace(
                 'security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"',
+                'security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT" -g')),
+         "self-test: a sidecar probe that prints a Keychain secret is rejected",
+         "the read-only probe detector accepted find-generic-password -g")
+    emit(not configured_sidecar_probe_is_read_only(
+            macos_cloud.replace(
+                'security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"',
+                'security find-generic-password -ws "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"')),
+         "self-test: a sidecar probe that dumps a secret via combined flags is rejected",
+         "the read-only probe detector accepted find-generic-password -ws")
+    emit(not configured_sidecar_probe_is_read_only(
+            macos_cloud.replace(
+                'security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"',
                 'security delete-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT"')),
          "self-test: a mutating sidecar Keychain probe is rejected",
          "the read-only probe detector accepted delete-generic-password")
+    emit(not configured_sidecar_probe_is_read_only(
+            macos_cloud.replace(
+                'probe_run_bounded 3 lsof -a -nP -p "$1" -d txt -Fn',
+                'security default-keychain; probe_run_bounded 3 lsof -a -nP -p "$1" -d txt -Fn')),
+         "self-test: a sidecar probe that changes the default keychain is rejected",
+         "the read-only probe detector accepted default-keychain")
     escaped_cli = (
         "pub fn cloud_config() {\n"
         "    copypaste_cloud::CloudConfig::new_loopback(url, anon_key).map(Some)\n"
