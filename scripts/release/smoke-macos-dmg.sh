@@ -30,19 +30,22 @@ self_test() {
     local root tmp file pin mutated live script
     root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
     script="$root/scripts/release/smoke-macos-dmg.sh"
-    python3 - "$script" <<'PY'
-import pathlib, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-capture = text.index('--capture-qualified-artifact "$DMG"')
-attach = text.index('hdiutil attach "$DMG"')
-accept = text.index("--accept-diskimages-transition")
-evidence = text.index(
-    'macos-native-evidence.sh artifacts/release-macos-native "$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"'
-)
-if not (capture < attach < accept < evidence):
-    raise SystemExit("self-test failed: two-phase DMG identity sequence is out of order")
-if "-noverify" in text.split("hdiutil attach", 1)[1].splitlines()[0]:
-    raise SystemExit("self-test failed: attach must keep DiskImages verification")
+    python3 - "$root/scripts/release/write-native-evidence.py" "$script" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+writer = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(writer.parent))
+spec = importlib.util.spec_from_file_location("write_native_evidence", writer)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+try:
+    module.assert_macos_dmg_identity_mutations_fail(
+        pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+    )
+except ValueError as error:
+    raise SystemExit(error) from None
 PY
     tmp="$(mktemp -d)"
     file="$tmp/qualified.dmg"
