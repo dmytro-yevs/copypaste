@@ -175,6 +175,272 @@ start_stub() {
     return 1
 }
 
+PROBE_CLI_SECS=5
+PROBE_LOG_LINES=40
+PROBE_KEYCHAIN_SERVICE="com.copypaste.daemon"
+PROBE_KEYCHAIN_ACCOUNT="device-secret-key"
+
+probe_run_bounded() { # <seconds> <argv...>
+    local secs="$1"
+    shift
+    python3 -c '
+import subprocess, sys
+try:
+    result = subprocess.run(sys.argv[2:], timeout=float(sys.argv[1]), capture_output=True, text=True)
+except subprocess.TimeoutExpired as error:
+    sys.stdout.write(error.stdout or "")
+    sys.stderr.write(error.stderr or "")
+    raise SystemExit(124)
+sys.stdout.write(result.stdout or "")
+sys.stderr.write(result.stderr or "")
+raise SystemExit(result.returncode)
+' "$secs" "$@"
+}
+
+probe_redact_text() {
+    python3 -c '
+import re, sys
+text = sys.stdin.read()
+held = {}
+def stash(match):
+    key = "<url{}>".format(len(held))
+    held[key] = match.group(0)
+    return key
+text = re.sub(r"https?://\S+", stash, text)
+for secret in (
+    "native-evidence",
+    "stub-password",
+    "native@example.test",
+    "COPYPASTE_CLOUD_ANON_KEY",
+):
+    text = text.replace(secret, "<redacted>")
+text = re.sub(r"(?im)^.*\bpassword:.*$", "password: <redacted>", text)
+text = re.sub(r"(?i)(?:file://)?(?:/Users|/home)/[^\n\"]+", "<path>", text)
+text = re.sub(r"(?i)~(?:/[^\n\"]*)?", "<path>", text)
+text = re.sub(r"(?i)/(?:var/folders|private/var|tmp|Library)[^\n\"]*", "<path>", text)
+text = re.sub(r"(?i)\S+\.sock", "<socket>", text)
+text = re.sub(r"(?i)[A-Za-z]:\\\S+", "<path>", text)
+text = re.sub(r"(?<![A-Za-z:<])(/\S+)", "<path>", text)
+for key, value in held.items():
+    text = text.replace(key, value)
+sys.stdout.write(text)
+'
+}
+
+probe_classify_cli() { # <text>
+    case "$1" in
+        *"the key store could not be read"*) printf 'KEY_LOCKED\n' ;;
+        *"this device's key is present and cannot be used"*) printf 'UNUSABLE\n' ;;
+        *"the cloud endpoint must use HTTPS"*|*"PlaintextEndpoint"*) printf 'PLAINTEXT\n' ;;
+        *"cannot reach the CopyPaste daemon"*) printf 'UNREACHABLE\n' ;;
+        *"configured    yes"*|*"configured   yes"*|*"configured  yes"*) printf 'configured\n' ;;
+        *) printf 'unknown\n' ;;
+    esac
+}
+
+probe_classify_cli_pair() { # <status-text> <cloud-text>
+    local status_class cloud_class class
+    status_class="$(probe_classify_cli "$1")"
+    cloud_class="$(probe_classify_cli "$2")"
+    for class in KEY_LOCKED UNUSABLE PLAINTEXT UNREACHABLE configured; do
+        if [[ "$status_class" == "$class" || "$cloud_class" == "$class" ]]; then
+            printf '%s\n' "$class"
+            return
+        fi
+    done
+    printf 'unknown\n'
+}
+
+probe_decide() { # <path_class> <cli_class> <keychain_item> <db>
+    local path_class="$1" cli_class="$2" item="$3" db="$4"
+    if [[ "$item" == absent && "$db" == present ]]; then
+        printf 'fail\tabsent-item-existing-db\n'
+        return
+    fi
+    if [[ "$cli_class" == PLAINTEXT ]]; then
+        printf 'fail\tplaintext-endpoint\n'
+        return
+    fi
+    if [[ "$path_class" == bundled ]]; then
+        printf 'fail\tbundled-daemon\n'
+        return
+    fi
+    if [[ "$path_class" == none ]]; then
+        printf 'fail\tno-daemon\n'
+        return
+    fi
+    if [[ "$path_class" == sidecar && "$cli_class" == KEY_LOCKED ]]; then
+        printf 'fail\tsidecar-key-locked\n'
+        return
+    fi
+    if [[ "$path_class" == sidecar && "$cli_class" == UNUSABLE ]]; then
+        printf 'fail\tsidecar-key-unusable\n'
+        return
+    fi
+    if [[ "$path_class" == sidecar && "$cli_class" == configured ]]; then
+        printf 'pass\tsidecar-configured\n'
+        return
+    fi
+    printf 'fail\tunclassified\n'
+}
+
+probe_realpath() { # <path>
+    python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1" 2>/dev/null || true
+}
+
+probe_codesign_identity() { # <path>
+    probe_run_bounded 5 codesign -dvvv "$1" 2>&1 \
+        | grep -E '^(Identifier|Format|Signature|Authority|TeamIdentifier|CDHash)=' \
+        | probe_redact_text || true
+}
+
+probe_keychain_item() {
+    local raw
+    raw="$(probe_run_bounded 5 security find-generic-password -s "$PROBE_KEYCHAIN_SERVICE" -a "$PROBE_KEYCHAIN_ACCOUNT" 2>&1)" || true
+    case "$raw" in
+        *"could not be found"*) printf 'absent\n' ;;
+        *)
+            if printf '%s' "$raw" | grep -Eq 'svce|acct|genp|com.copypaste.daemon'; then
+                printf 'present\n'
+            else
+                printf 'unknown\n'
+            fi
+            ;;
+    esac
+}
+
+probe_db_state() {
+    local db="$HOME/Library/Application Support/com.copypaste.CopyPaste/copypaste-v2.db"
+    if [[ -f "$db" ]]; then
+        printf 'present\n'
+    else
+        printf 'absent\n'
+    fi
+}
+
+probe_proc_exe() { # <pid>
+    probe_run_bounded 3 lsof -a -nP -p "$1" -d txt -Fn 2>/dev/null \
+        | python3 -c '
+import sys
+for line in sys.stdin:
+    if line.startswith("n/") or line.startswith("n~"):
+        sys.stdout.write(line[1:])
+        break
+' || true
+}
+
+probe_live_daemon() { # writes path_class pid ppid exe_class argv socket_owner
+    local bundled sidecar cand_pid="" pid="" ppid="" exe="" live_real="" side_real="" bund_real=""
+    local path_class=none socket_owner=unknown argv="" cand_class="" cand_ppid="" cand_argv=""
+    bundled="$APP/Contents/MacOS/copypaste-daemon"
+    sidecar="${DAEMON_SIDECAR:-}"
+    [[ -n "$sidecar" ]] && side_real="$(probe_realpath "$sidecar")"
+    [[ -x "$bundled" ]] && bund_real="$(probe_realpath "$bundled")"
+    while read -r cand_pid; do
+        [[ -n "$cand_pid" ]] || continue
+        exe="$(probe_proc_exe "$cand_pid")"
+        live_real="$(probe_realpath "$exe")"
+        cand_ppid="$(probe_run_bounded 3 ps -p "$cand_pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+        cand_argv="$(probe_run_bounded 3 ps -p "$cand_pid" -www -o command= 2>/dev/null || true)"
+        cand_class=other
+        if [[ -n "$side_real" && -n "$live_real" && "$live_real" == "$side_real" ]]; then
+            cand_class=sidecar
+        elif [[ -n "$bund_real" && -n "$live_real" && "$live_real" == "$bund_real" ]]; then
+            cand_class=bundled
+        fi
+        if [[ "$cand_class" == sidecar || "$path_class" == none || "$path_class" == other ]]; then
+            path_class="$cand_class"
+            pid="$cand_pid"
+            ppid="$cand_ppid"
+            argv="$cand_argv"
+        fi
+        [[ "$path_class" == sidecar ]] && break
+    done < <(probe_run_bounded 3 pgrep -x copypaste-daemon 2>/dev/null || true)
+    if [[ -S "$HOME/Library/Application Support/com.copypaste.CopyPaste/daemon.sock" ]]; then
+        if [[ "$(stat -f '%u' "$HOME/Library/Application Support/com.copypaste.CopyPaste/daemon.sock" 2>/dev/null || true)" == "$(id -u)" ]]; then
+            socket_owner=same-user
+        else
+            socket_owner=other
+        fi
+    elif [[ "$path_class" == none ]]; then
+        socket_owner=absent
+    fi
+    printf '%s\n' "$path_class" "${pid:-}" "${ppid:-}" "$( [[ "$path_class" == none ]] && printf 'none' || printf '%s' "$path_class" )"
+    printf '%s\n' "$(printf '%s' "$argv" | probe_redact_text)"
+    printf '%s\n' "$socket_owner"
+}
+
+probe_cli_pair() {
+    local cli="$APP/Contents/MacOS/copypaste"
+    local status_text cloud_text
+    status_text="$(probe_run_bounded "$PROBE_CLI_SECS" "$cli" status 2>&1 || true)"
+    cloud_text="$(probe_run_bounded "$PROBE_CLI_SECS" "$cli" cloud status 2>&1 || true)"
+    printf '%s\n' "$(probe_classify_cli_pair "$status_text" "$cloud_text")"
+    printf '%s\n' "$(printf '%s\n%s\n' "$status_text" "$cloud_text" | probe_redact_text)"
+}
+
+probe_runtime_log() {
+    local logdir="$HOME/Library/Application Support/com.copypaste.CopyPaste/logs"
+    local latest=""
+    latest="$(find "$logdir" -maxdepth 1 -name 'daemon*.log' -type f 2>/dev/null | sort | tail -n 1 || true)"
+    if [[ -z "$latest" || ! -f "$latest" ]]; then
+        return 0
+    fi
+    tail -n "$PROBE_LOG_LINES" "$latest" 2>/dev/null | probe_redact_text || true
+}
+
+probe_write() { # <file> <text>
+    printf '%s\n' "$2" | probe_redact_text > "$1"
+}
+
+# Run 34004833224: configured AX waits burned the job after status could not load.
+probe_configured_sidecar_path() {
+    local dir="$OUT/sidecar-probe"
+    local path_class=none cli_class=unknown item=unknown db=absent
+    local pid="" ppid="" exe_class="" argv="" socket_owner=unknown
+    local side_ident="" bund_ident="" verdict reason
+    local status_blob=""
+    mkdir -p "$dir"
+    {
+        read -r path_class
+        read -r pid
+        read -r ppid
+        read -r exe_class
+        read -r argv
+        read -r socket_owner
+    } < <(probe_live_daemon)
+    item="$(probe_keychain_item)"
+    db="$(probe_db_state)"
+    {
+        read -r cli_class
+        status_blob="$(cat)"
+    } < <(probe_cli_pair)
+    if [[ "${DAEMON_SIDECAR:-}" == /* ]]; then
+        side_ident="$(probe_codesign_identity "$DAEMON_SIDECAR")"
+    else
+        side_ident=""
+    fi
+    bund_ident="$(probe_codesign_identity "$APP/Contents/MacOS/copypaste-daemon")"
+    read -r verdict reason < <(probe_decide "$path_class" "$cli_class" "$item" "$db")
+    probe_write "$dir/summary.txt" "$(printf 'path_class=%s\ncli_class=%s\nkeychain_item=%s\ndb=%s\npid=%s\nppid=%s\nexe_class=%s\nsocket_owner=%s\nverdict=%s\nreason=%s\n' \
+        "$path_class" "$cli_class" "$item" "$db" "${pid:-none}" "${ppid:-none}" "${exe_class:-none}" "$socket_owner" "$verdict" "$reason")"
+    probe_write "$dir/identity.txt" "$(printf 'sidecar_override=%s\nlive_path_class=%s\n\n# sidecar\n%s\n\n# bundled\n%s\n' \
+        "$( [[ "${DAEMON_SIDECAR:-}" == /* ]] && printf present || printf missing )" \
+        "$path_class" "$side_ident" "$bund_ident")"
+    probe_write "$dir/keychain.txt" "$(printf 'service=%s\naccount=%s\nitem=%s\nmethod=attribute-only\n' \
+        "$PROBE_KEYCHAIN_SERVICE" "$PROBE_KEYCHAIN_ACCOUNT" "$item")"
+    probe_write "$dir/process.txt" "$(printf 'pid=%s\nppid=%s\nexe_class=%s\nsocket_owner=%s\nargv=%s\n' \
+        "${pid:-none}" "${ppid:-none}" "${exe_class:-none}" "$socket_owner" "$argv")"
+    probe_write "$dir/cli-class.txt" "$(printf 'class=%s\n%s\n' "$cli_class" "$status_blob")"
+    probe_runtime_log > "$dir/runtime-log.txt" || true
+    if [[ "$verdict" == pass ]]; then
+        ok "the configured sidecar path is live and ready"
+        return 0
+    fi
+    bad "the configured sidecar path is live and ready" "$reason"
+    return 1
+}
+
 seed_forged_row() {
     local stamp payload
     stamp="$(now_ms)"
@@ -208,6 +474,7 @@ configured_scenario() {
     ensure_cloud_evidence_daemon || { bad "the cloud-evidence daemon sidecar is present"; return; }
     start_stub || { bad "the cloud evidence backend starts"; return; }
     launch_app configured || { bad "the configured app exposes accessibility state"; return; }
+    probe_configured_sidecar_path || return
     open_cloud || { bad "the configured cloud row is reachable"; return; }
     if mac_ax_contains "$OUT/cloud.txt" "Connected"; then
         mac_ax press "Sign out" >/dev/null || true
@@ -446,10 +713,137 @@ configured_assertions_self_test() {
         && "$body" == *"expect_label \"Signed out\" \"\$OUT/signed-out-again.txt\""* \
         && "$body" == *'sign-in "$elapsed" 30000'* \
         && "$body" == *'sync-with-skips "$elapsed" 30000'* \
-        && "$body" == *'offline-error "$elapsed" 60000'* ]]; then
+        && "$body" == *'offline-error "$elapsed" 60000'* \
+        && "$body" == *"probe_configured_sidecar_path"*"open_cloud"* \
+        && "$body" == *"probe_configured_sidecar_path"*"expect_label \"Signed out\""* ]]; then
         ok "configured scenario keeps exact lifecycle assertions and timeouts"
     else
         bad "configured scenario keeps exact lifecycle assertions and timeouts"
+    fi
+}
+
+probe_decision_self_test() {
+    local got
+    got="$(probe_decide sidecar KEY_LOCKED present present)"
+    [[ "$got" == $'fail\tsidecar-key-locked' ]] \
+        && ok "sidecar plus KEY_LOCKED fails closed" \
+        || bad "sidecar plus KEY_LOCKED fails closed"
+    got="$(probe_decide sidecar UNUSABLE present present)"
+    [[ "$got" == $'fail\tsidecar-key-unusable' ]] \
+        && ok "sidecar plus UNUSABLE fails closed" \
+        || bad "sidecar plus UNUSABLE fails closed"
+    got="$(probe_decide sidecar configured present present)"
+    [[ "$got" == $'pass\tsidecar-configured' ]] \
+        && ok "sidecar plus configured lets the probe pass" \
+        || bad "sidecar plus configured lets the probe pass"
+    got="$(probe_decide bundled configured present present)"
+    [[ "$got" == $'fail\tbundled-daemon' ]] \
+        && ok "a bundled live daemon fails closed" \
+        || bad "a bundled live daemon fails closed"
+    got="$(probe_decide none UNREACHABLE present present)"
+    [[ "$got" == $'fail\tno-daemon' ]] \
+        && ok "no live daemon fails closed" \
+        || bad "no live daemon fails closed"
+    got="$(probe_decide sidecar PLAINTEXT present present)"
+    [[ "$got" == $'fail\tplaintext-endpoint' ]] \
+        && ok "PlaintextEndpoint fails closed" \
+        || bad "PlaintextEndpoint fails closed"
+    got="$(probe_decide bundled PLAINTEXT present present)"
+    [[ "$got" == $'fail\tplaintext-endpoint' ]] \
+        && ok "bundled PlaintextEndpoint fails closed" \
+        || bad "bundled PlaintextEndpoint fails closed"
+    got="$(probe_decide sidecar configured absent present)"
+    [[ "$got" == $'fail\tabsent-item-existing-db' ]] \
+        && ok "an absent keychain item plus an existing database fails closed" \
+        || bad "an absent keychain item plus an existing database fails closed"
+    got="$(probe_decide sidecar unknown present present)"
+    [[ "$got" == $'fail\tunclassified' ]] \
+        && ok "an unclassified sidecar path fails closed" \
+        || bad "an unclassified sidecar path fails closed"
+    got="$(probe_decide sidecar configured absent absent)"
+    [[ "$got" == $'pass\tsidecar-configured' ]] \
+        && ok "an absent keychain item without a database can still pass" \
+        || bad "an absent keychain item without a database can still pass"
+}
+
+probe_classify_self_test() {
+    local got
+    got="$(probe_classify_cli "the key store could not be read, so this history could not be unlocked; it is worth trying again once the key store is available")"
+    [[ "$got" == KEY_LOCKED ]] \
+        && ok "CLI KEY_LOCKED maps to a fixed refusal class" \
+        || bad "CLI KEY_LOCKED maps to a fixed refusal class"
+    got="$(probe_classify_cli "this device's key is present and cannot be used, so the history encrypted with it cannot be read by anything; trying again will not change that")"
+    [[ "$got" == UNUSABLE ]] \
+        && ok "CLI UNUSABLE maps to a fixed refusal class" \
+        || bad "CLI UNUSABLE maps to a fixed refusal class"
+    got="$(probe_classify_cli "cannot reach the CopyPaste daemon. Start it with \`copypaste-daemon\`, then run this command again.")"
+    [[ "$got" == UNREACHABLE ]] \
+        && ok "CLI unreachable maps to a fixed class" \
+        || bad "CLI unreachable maps to a fixed class"
+    got="$(probe_classify_cli $'configured    yes\naccount      signed out\n')"
+    [[ "$got" == configured ]] \
+        && ok "CLI configured maps to a fixed class" \
+        || bad "CLI configured maps to a fixed class"
+    got="$(probe_classify_cli "the cloud endpoint must use HTTPS or WSS")"
+    [[ "$got" == PLAINTEXT ]] \
+        && ok "CLI PlaintextEndpoint maps to a fixed class" \
+        || bad "CLI PlaintextEndpoint maps to a fixed class"
+    got="$(probe_classify_cli_pair "daemon       running" $'configured    yes\n')"
+    [[ "$got" == configured ]] \
+        && ok "a running daemon plus configured cloud is configured" \
+        || bad "a running daemon plus configured cloud is configured"
+}
+
+probe_sanitize_self_test() {
+    local out
+    out="$(printf '%s\n' \
+        'keychain: "/Users/dmytro/Library/Keychains/login.keychain-db"' \
+        'password: "super-secret-value"' \
+        'socket /Users/dmytro/Library/Application Support/com.copypaste.CopyPaste/daemon.sock' \
+        'COPYPASTE_CLOUD_ANON_KEY=native-evidence' \
+        'orphan.sock' \
+        'http://127.0.0.1:47800 stays' \
+        | probe_redact_text)"
+    if [[ "$out" != *dmytro* \
+        && "$out" != *super-secret-value* \
+        && "$out" != *native-evidence* \
+        && "$out" != *login.keychain-db* \
+        && "$out" != *daemon.sock* \
+        && "$out" != *orphan.sock* \
+        && "$out" != *"/Users/"* \
+        && "$out" != *"Application Support"* \
+        && "$out" == *'<path>'* \
+        && "$out" == *'<socket>'* \
+        && "$out" == *'<redacted>'* \
+        && "$out" == *'http://127.0.0.1:47800 stays'* ]]; then
+        ok "sidecar probe artifacts redact secrets and filesystem paths"
+    else
+        bad "sidecar probe artifacts redact secrets and filesystem paths"
+    fi
+}
+
+probe_override_self_test() {
+    local body
+    body="$(type open_cloud_evidence_app 2>/dev/null)$(type ensure_cloud_evidence_daemon 2>/dev/null)"
+    if [[ "$body" == *"COPYPASTE_DAEMON_BIN=\$DAEMON_SIDECAR"* \
+        && "$body" == *"--features cloud-evidence"* \
+        && "$body" == *"-u COPYPASTE_DAEMON_BIN"* ]]; then
+        ok "configured launch still passes the exact sidecar override"
+    else
+        bad "configured launch still passes the exact sidecar override"
+    fi
+}
+
+probe_bounded_runtime_self_test() {
+    local started ended elapsed
+    started="$(python3 -c 'import time; print(int(time.time() * 1000))')"
+    probe_run_bounded 1 python3 -c 'import time; time.sleep(30)' >/dev/null 2>&1 || true
+    ended="$(python3 -c 'import time; print(int(time.time() * 1000))')"
+    elapsed=$((ended - started))
+    if (( elapsed < 5000 )); then
+        ok "sidecar probe commands stay bounded"
+    else
+        bad "sidecar probe commands stay bounded" "${elapsed}ms"
     fi
 }
 
@@ -463,6 +857,11 @@ if [[ "${1:-}" == "--self-test" ]]; then
     sidecar_launch_self_test "$SELF_TEST_TMP"
     unconfigured_latency_self_test "$SELF_TEST_TMP"
     configured_assertions_self_test
+    probe_decision_self_test
+    probe_classify_self_test
+    probe_sanitize_self_test
+    probe_override_self_test
+    probe_bounded_runtime_self_test
     cloud_evidence_summary macOS
     [[ $FAIL -eq 0 ]]
     exit
