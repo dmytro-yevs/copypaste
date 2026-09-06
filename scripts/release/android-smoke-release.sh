@@ -143,12 +143,44 @@ release_history_receipt_self_test() {
         || bad "pending history artifacts are supplemental, not feature-state evidence"
 }
 
+release_onboarding_recovery_self_test() {
+    if python3 - "${BASH_SOURCE[0]}" <<'PY'
+import pathlib
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text()
+prod = text[text.rfind('mkdir -p "$OUT"'):]
+idx2a = prod.index("2a. Android pairing entry is a scanner")
+idx4a = prod.index("4a. The captured text appears in history")
+block2a = prod[idx2a:idx4a]
+block4a = prod[idx4a:]
+assert "android_recover_onboarding" in block2a
+assert block2a.index("android_recover_onboarding") < block2a.index("reach_settings_tab")
+assert 'tap_selector "Devices"' in block2a
+assert "Connect a device" in block2a
+assert "Scan pairing code" in block2a
+assert 'node_center "$OUT/pairing-entry.xml" "Show pairing code"' in block2a
+assert 'node_center "$OUT/pairing-entry.xml" "Scan pairing code"' in block2a
+assert 'node_center "$OUT/pairing-entry.xml" "Enter pairing code"' in block2a
+assert block4a.index("android_recover_onboarding") < block4a.index('tap_until_state "Library"')
+assert "history_capture_current_holds" in block4a
+assert "seed_onboarding_complete" not in prod
+assert "onboardingComplete" not in prod
+PY
+    then
+        ok "release recovery runs before pairing and history without seeding onboarding"
+    else
+        bad "release recovery runs before pairing and history without seeding onboarding"
+    fi
+}
+
 if [[ "${1:-}" == "--self-test" ]]; then
     self_test || exit $?
     android_navigation_self_test "$SELF_TEST_TMP"
     release_history_self_test "$SELF_TEST_TMP"
     release_history_navigation_self_test "$SELF_TEST_TMP"
     release_history_receipt_self_test
+    release_onboarding_recovery_self_test
     [[ $FAIL -eq 0 ]]
     exit $?
 fi
@@ -273,7 +305,8 @@ else
 fi
 
 group "2a. Android pairing entry is a scanner"
-if reach_settings_tab "$OUT/pairing-shell.xml" 30 \
+if android_recover_onboarding "$OUT/pairing-onboarding.xml" 30 \
+    && reach_settings_tab "$OUT/pairing-shell.xml" 30 \
     && tap_selector "Devices" "$OUT/pairing-devices-action.xml" 15 \
     && wait_selector "Connect a device" "$OUT/pairing-devices.xml" 15 \
     && tap_selector "Connect a device" "$OUT/pairing-launcher-action.xml" 15 \
@@ -434,7 +467,8 @@ fi
     || bad "the app is still running after both doorways"
 
 group "4a. The captured text appears in history"
-if tap_until_state "Library" "$OUT/history-ui.xml" \
+if android_recover_onboarding "$OUT/history-onboarding.xml" 30 \
+    && tap_until_state "Library" "$OUT/history-ui.xml" \
     history_capture_current_holds none; then
     capture_png "$OUT/history-ui.png" \
         && ok "the captured history screenshot is complete" \
