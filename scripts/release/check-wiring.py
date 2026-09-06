@@ -419,6 +419,26 @@ def unconfigured_status_latency_window(script):
     )
 
 
+MACOS_CLOUD_OFFLINE_LABEL = "Cloud sync failed. Check the connection and try again."
+STALE_CLOUD_OFFLINE_LABEL = "The last cloud sync failed"
+
+
+def macos_configured_cloud_lifecycle_holds(script):
+    # The stale lastError prefix still appears in a negative self-test.
+    body = shell_function_body(script, "configured_scenario")
+    required = {
+        "Sign in",
+        "Connected",
+        "Sync cloud now",
+        "skipped",
+        MACOS_CLOUD_OFFLINE_LABEL,
+        "Sign out",
+    }
+    return bool(body) and all(action in body for action in required) and (
+        STALE_CLOUD_OFFLINE_LABEL not in body
+    )
+
+
 def adb_guard_violations(source, allowed_raw_adb=0):
     words = shell_words(source)
     raw = [(line, word) for word, line in words if word == "adb"]
@@ -1698,9 +1718,14 @@ for name, body in cloud_scenarios.items():
         "{} captures every cloud evidence state".format(name),
         "required states: {}".format(sorted(required_states)))
     required_actions = {"Sign in", "Connected", "Sync cloud now", "skipped", "The last cloud sync failed", "Sign out"}
-    rec(all(action in body for action in required_actions),
-        "{} drives the cloud account lifecycle".format(name),
-        "required actions: {}".format(sorted(required_actions)))
+    if name == "macos-cloud-evidence.sh":
+        rec(macos_configured_cloud_lifecycle_holds(body),
+            "{} drives the cloud account lifecycle".format(name),
+            "required actions include the canonical production offline label")
+    else:
+        rec(all(action in body for action in required_actions),
+            "{} drives the cloud account lifecycle".format(name),
+            "required actions: {}".format(sorted(required_actions)))
     rec("cloud_latency_write" in body and body.count("cloud_latency_record") >= 4,
         "{} writes measured cloud latency evidence".format(name),
         "status, sign-in, sync, and offline error must each be timed")
@@ -2506,6 +2531,15 @@ targeted_adb "$serial" shell dumpsys power
             macos_cloud.replace("-u COPYPASTE_DATA_DIR -u COPYPASTE_SOCKET", "")),
          "self-test: default shutdown that keeps isolation overrides is rejected",
          "the isolation detector accepted a shutdown that can target the throwaway socket")
+    emit(macos_configured_cloud_lifecycle_holds(macos_cloud),
+         "self-test: the current macOS configured cloud lifecycle wiring holds",
+         "the lifecycle detector rejected the live evidence script")
+    emit(not macos_configured_cloud_lifecycle_holds(
+            macos_cloud.replace(
+                'expect_label "Cloud sync failed. Check the connection and try again."',
+                'expect_label "The last cloud sync failed"')),
+         "self-test: restoring the stale macOS offline cloud label is rejected",
+         "the lifecycle detector accepted a configured scenario that expects lastError")
     escaped_cli = (
         "pub fn cloud_config() {\n"
         "    copypaste_cloud::CloudConfig::new_loopback(url, anon_key).map(Some)\n"
