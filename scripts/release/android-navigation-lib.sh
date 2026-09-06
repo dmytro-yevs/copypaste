@@ -211,6 +211,10 @@ android_app_shell_missing() {
 
 android_shell_not_missing() { return 1; }
 
+# Run 34029102311: FontsProvider killed the proven Library pid; settings
+# then dumped NexusLauncher All Apps. One-shot handoff, never a foreign tap.
+ANDROID_OWNED_SHELL_HANDOFF=0
+
 # Run 34007760276: API 33 Welcome kept Explore first at [0,0][0,0];
 # tap_until_state then called scroll_content and landed on NexusLauncher.
 # Run 34016710899: GMS then dependency-killed the app; the next dump was
@@ -222,6 +226,7 @@ android_recover_onboarding() { # <artifact> [timeout] [dump] [swipe] [tap] [pace
     local relaunch="${7:-android_relaunch_main_activity}"
     local shell_missing="${8:-}"
     local point started="$SECONDS" saw_welcome=0 relaunched=0
+    ANDROID_OWNED_SHELL_HANDOFF=0
     if [[ -z "$shell_missing" ]]; then
         if [[ "$dump" == dump_hierarchy ]]; then
             shell_missing=android_app_shell_missing
@@ -233,6 +238,7 @@ android_recover_onboarding() { # <artifact> [timeout] [dump] [swipe] [tap] [pace
         if "$dump" "$artifact"; then
             (( SECONDS - started < timeout )) || return 1
             if hierarchy_is_app "$artifact" && app_navigation_holds "$artifact"; then
+                ANDROID_OWNED_SHELL_HANDOFF=1
                 return 0
             fi
             if android_welcome_holds "$artifact"; then
@@ -258,6 +264,43 @@ android_recover_onboarding() { # <artifact> [timeout] [dump] [swipe] [tap] [pace
             continue
         fi
         "$pace"
+    done
+    return 1
+}
+
+reach_settings_tab() { # <artifact> [timeout]
+    local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}"
+    local started="$SECONDS" relaunched=0 point
+    while (( SECONDS - started < timeout )); do
+        if dump_hierarchy "$artifact"; then
+            (( SECONDS - started < timeout )) || return 1
+            settings_tab_holds "$artifact" && return 0
+            if hierarchy_is_foreign "$artifact" || android_app_shell_missing "$artifact"; then
+                if (( ANDROID_OWNED_SHELL_HANDOFF != 0 && relaunched == 0 )); then
+                    ANDROID_OWNED_SHELL_HANDOFF=0
+                    android_relaunch_main_activity || return 1
+                    relaunched=1
+                    continue
+                fi
+                return 1
+            fi
+            point=""
+            if enabled_action_exists_exact "$artifact" "Explore first"; then
+                point="$(action_center "$artifact" "Explore first")"
+            fi
+            if [[ -n "$point" ]]; then
+                tap_transition_point "$point" || return 1
+            else
+                scroll_content up
+            fi
+        elif (( ANDROID_OWNED_SHELL_HANDOFF != 0 && relaunched == 0 )) \
+            && android_app_shell_missing "$artifact"; then
+            ANDROID_OWNED_SHELL_HANDOFF=0
+            android_relaunch_main_activity || return 1
+            relaunched=1
+            continue
+        fi
+        settle_pace
     done
     return 1
 }
@@ -377,6 +420,7 @@ navigation_shell_readiness_self_test() { # <temp>
         scroll_content() { navigation_fixture_scroll "$@"; }
         tap_transition_point() { navigation_fixture_tap "$@"; }
         settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
 
         ui_fixtures "$temp/onboarding.xml" "$temp/settings-ready.xml"
         reach_settings_tab "$observed" 3 \
@@ -391,6 +435,7 @@ navigation_shell_readiness_self_test() { # <temp>
         scroll_content() { navigation_fixture_scroll "$@"; }
         tap_transition_point() { navigation_fixture_tap "$@"; }
         settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
 
         ui_fixtures "$temp/settings-ready.xml"
         reach_settings_tab "$observed" 3 \
@@ -405,6 +450,7 @@ navigation_shell_readiness_self_test() { # <temp>
         scroll_content() { navigation_fixture_scroll "$@"; }
         tap_transition_point() { navigation_fixture_tap "$@"; }
         settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
 
         ui_fixtures "$temp/settings-disabled.xml"
         ! reach_settings_tab "$observed" 1 \
@@ -419,6 +465,7 @@ navigation_shell_readiness_self_test() { # <temp>
         scroll_content() { navigation_fixture_scroll "$@"; }
         tap_transition_point() { navigation_fixture_tap "$@"; }
         settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
 
         ui_fixtures "$temp/settings-absent.xml"
         ! reach_settings_tab "$observed" 1 \
@@ -433,6 +480,7 @@ navigation_shell_readiness_self_test() { # <temp>
         scroll_content() { navigation_fixture_scroll "$@"; }
         tap_transition_point() { navigation_fixture_tap "$@"; }
         settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
 
         ui_fixtures "$temp/settings-zero.xml"
         ! reach_settings_tab "$observed" 1 \
@@ -447,6 +495,7 @@ navigation_shell_readiness_self_test() { # <temp>
         scroll_content() { navigation_fixture_scroll "$@"; }
         tap_transition_point() { navigation_fixture_tap "$@"; }
         settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
 
         ui_fixtures "$temp/settings-covered.xml"
         ! reach_settings_tab "$observed" 1 \
@@ -577,7 +626,8 @@ android_onboarding_recovery_self_test() { # <temp>
             ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
             ui_fixture_pace \
             && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
-                  && $UI_FIXTURE_SCROLLS -eq 0 && $UI_FIXTURE_INDEX -eq 1 ]] \
+                  && $UI_FIXTURE_SCROLLS -eq 0 && $UI_FIXTURE_INDEX -eq 1 \
+                  && $ANDROID_OWNED_SHELL_HANDOFF -eq 1 ]] \
             && cmp -s "$temp/welcome-ready-observed.xml" "$temp/welcome-shell.xml"
     ) \
         && ok "an already-navigable app-owned shell returns without a gesture" \
@@ -699,7 +749,8 @@ android_onboarding_recovery_self_test() { # <temp>
         ! android_recover_onboarding "$temp/welcome-never.xml" 1 \
             ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap \
             ui_fixture_pace \
-            && [[ $ONBOARDING_FIXTURE_SWIPES -ge 1 && $UI_FIXTURE_SCROLLS -eq 0 ]]
+            && [[ $ONBOARDING_FIXTURE_SWIPES -ge 1 && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ANDROID_OWNED_SHELL_HANDOFF -eq 0 ]]
     ) \
         && ok "a Welcome dump that never yields the shell fails after contained swipes" \
         || bad "a Welcome dump that never yields the shell fails after contained swipes"
@@ -720,6 +771,169 @@ android_onboarding_recovery_self_test() { # <temp>
     ) \
         && ok "a dump completing after the deadline cannot prove onboarding recovery" \
         || bad "a dump completing after the deadline cannot prove onboarding recovery"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
+        sh_() { onboarding_record_relaunch "$@"; }
+
+        ui_fixtures "$temp/welcome-tappable.xml" "$temp/welcome-shell.xml"
+        ANDROID_OWNED_SHELL_HANDOFF=1
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        reach_settings_tab "$temp/handoff-explore-observed.xml" 3 \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 1 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 0 \
+                  && $ANDROID_OWNED_SHELL_HANDOFF -eq 1 ]] \
+            && cmp -s "$temp/handoff-explore-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "an app-owned Explore first dump still taps through to Settings" \
+        || bad "an app-owned Explore first dump still taps through to Settings"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
+        sh_() { onboarding_record_relaunch "$@"; }
+
+        ui_fixtures "$temp/welcome-all-apps.xml" "$temp/welcome-shell.xml"
+        ANDROID_OWNED_SHELL_HANDOFF=1
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        ONBOARDING_FIXTURE_RELAUNCH_ARGV=""
+        reach_settings_tab "$temp/handoff-all-apps-observed.xml" 3 \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 1 \
+                  && "$ONBOARDING_FIXTURE_RELAUNCH_ARGV" == "am start -W -n $main" \
+                  && $ANDROID_OWNED_SHELL_HANDOFF -eq 0 ]] \
+            && cmp -s "$temp/handoff-all-apps-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "a proven-shell handoff relaunches once from All Apps onto Settings" \
+        || bad "a proven-shell handoff relaunches once from All Apps onto Settings"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
+        sh_() { onboarding_record_relaunch "$@"; }
+
+        ui_fixtures "$temp/welcome-all-apps.xml"
+        ANDROID_OWNED_SHELL_HANDOFF=0
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        ! reach_settings_tab "$temp/handoff-token0-observed.xml" 3 \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 0 ]]
+    ) \
+        && ok "a first foreign dump with no handoff token fails without a gesture" \
+        || bad "a first foreign dump with no handoff token fails without a gesture"
+
+    (
+        dump_hierarchy() { cp "$temp/welcome-tappable.xml" "$1"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        sh_() { onboarding_record_relaunch "$@"; }
+        android_app_shell_missing() { return 0; }
+
+        ANDROID_OWNED_SHELL_HANDOFF=0
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        UI_FIXTURE_TAPS=0
+        UI_FIXTURE_SCROLLS=0
+        ! reach_settings_tab "$temp/handoff-token0-missing-observed.xml" 3 \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 0 ]]
+    ) \
+        && ok "a missing shell with no handoff token fails without a gesture" \
+        || bad "a missing shell with no handoff token fails without a gesture"
+
+    (
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        android_app_shell_missing() { return 1; }
+        sh_() { onboarding_record_relaunch "$@"; }
+
+        ui_fixtures "$temp/welcome-all-apps.xml" "$temp/welcome-all-apps.xml"
+        ANDROID_OWNED_SHELL_HANDOFF=1
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        ONBOARDING_FIXTURE_RELAUNCH_ARGV=""
+        ! reach_settings_tab "$temp/handoff-second-foreign-observed.xml" 3 \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 1 \
+                  && "$ONBOARDING_FIXTURE_RELAUNCH_ARGV" == "am start -W -n $main" ]]
+    ) \
+        && ok "a second foreign dump after one settings relaunch fails closed" \
+        || bad "a second foreign dump after one settings relaunch fails closed"
+
+    (
+        dump_hierarchy() {
+            if (( ONBOARDING_FIXTURE_RELAUNCHES == 0 )); then
+                return 1
+            fi
+            cp "$temp/welcome-shell.xml" "$1"
+        }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        sh_() { onboarding_record_relaunch "$@"; }
+        android_app_shell_missing() { onboarding_fixture_missing_pid; }
+
+        ANDROID_OWNED_SHELL_HANDOFF=1
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        ONBOARDING_FIXTURE_RELAUNCH_ARGV=""
+        UI_FIXTURE_TAPS=0
+        UI_FIXTURE_SCROLLS=0
+        reach_settings_tab "$temp/handoff-missing-pid-observed.xml" 3 \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 1 \
+                  && "$ONBOARDING_FIXTURE_RELAUNCH_ARGV" == "am start -W -n $main" ]] \
+            && cmp -s "$temp/handoff-missing-pid-observed.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "a missing app pid after a proven shell relaunches once onto Settings" \
+        || bad "a missing app pid after a proven shell relaunches once onto Settings"
+
+    (
+        settings_handoff_late_dump() {
+            ui_fixture_dump "$@"
+            SECONDS=$((SECONDS + 2))
+        }
+
+        dump_hierarchy() { settings_handoff_late_dump "$@"; }
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        sh_() { onboarding_record_relaunch "$@"; }
+
+        ui_fixtures "$temp/welcome-shell.xml"
+        ANDROID_OWNED_SHELL_HANDOFF=1
+        ONBOARDING_FIXTURE_SWIPES=0
+        ONBOARDING_FIXTURE_RELAUNCHES=0
+        ! reach_settings_tab "$temp/handoff-late.xml" 1 \
+            && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -eq 0 \
+                  && $UI_FIXTURE_SCROLLS -eq 0 \
+                  && $ONBOARDING_FIXTURE_RELAUNCHES -eq 0 ]] \
+            && cmp -s "$temp/handoff-late.xml" "$temp/welcome-shell.xml"
+    ) \
+        && ok "a dump completing after the deadline cannot prove Settings" \
+        || bad "a dump completing after the deadline cannot prove Settings"
 }
 
 android_navigation_self_test() { # <temp>
