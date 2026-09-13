@@ -1,7 +1,6 @@
 package com.copypaste.app
 
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
 import android.webkit.WebView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -14,9 +13,6 @@ internal object WebViewImeInsets {
     webView: WebView,
     afterApply: (WebView, WindowInsetsCompat) -> Unit = { _, _ -> },
   ) {
-    webView.imeOptions = webView.imeOptions or
-      EditorInfo.IME_FLAG_NO_EXTRACT_UI or
-      EditorInfo.IME_FLAG_NO_FULLSCREEN
     ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
       val host = view as? WebView ?: return@setOnApplyWindowInsetsListener insets
       applyBottomMargin(host, insets)
