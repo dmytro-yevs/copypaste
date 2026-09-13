@@ -334,12 +334,14 @@ export function LibraryToolbar({
             </Container>
 
             {displayLimit !== null ? (
-                <InlineNotice live>
-                    {t("history.search.displayLimitHint", {
-                        limit: displayLimit,
-                        count: visible,
-                    })}
-                </InlineNotice>
+                <div className={styles.limitNotice}>
+                    <InlineNotice live>
+                        {t("history.search.displayLimitHint", {
+                            limit: displayLimit,
+                            count: visible,
+                        })}
+                    </InlineNotice>
+                </div>
             ) : null}
         </>
     );
