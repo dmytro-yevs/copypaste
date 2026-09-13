@@ -466,6 +466,7 @@ check "check-file-size-gate.sh --self-test" bash scripts/check-file-size-gate.sh
 # parcel reader that never finds a canary, or a flag reader that says SECURE
 # about everything, would turn the rung assertions into decoration.
 check "android-rungs.sh --self-test" ./scripts/release/android-rungs.sh --self-test
+check "publish-github-release.sh --self-test" ./scripts/release/publish-github-release.sh --self-test
 
 # Comment lines are excluded: the workflow explains at length why it does not
 # do this, and the explanation is not the thing being checked for.
