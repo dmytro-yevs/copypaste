@@ -241,8 +241,10 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                 }
             />
 
-            <CaptureStatus />
-            <SkippedNotice count={history.skipped} />
+            <div className={styles.banners}>
+                <CaptureStatus />
+                <SkippedNotice count={history.skipped} />
+            </div>
 
             <Container width="library" gutter="screen" asChild>
                 <section
