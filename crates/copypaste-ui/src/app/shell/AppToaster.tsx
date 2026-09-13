@@ -53,7 +53,15 @@ export function AppToaster() {
       visibleToasts={4}
       offset={docked ? dockedOffset : paneOffset}
       mobileOffset={docked ? dockedOffset : paneOffset}
-      toastOptions={{ className: "font-sans" }}
+      toastOptions={{
+        className: "font-sans",
+        classNames: {
+          toast: "copypaste-toast",
+          title: "copypaste-toast-title",
+          description: "copypaste-toast-description",
+          actionButton: "copypaste-toast-action",
+        },
+      }}
     />
   );
 }
