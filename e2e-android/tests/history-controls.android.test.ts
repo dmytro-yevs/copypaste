@@ -142,6 +142,16 @@ async function closeKindMenu(): Promise<void> {
   await waitForKindMenu(false);
 }
 
+function itemIdsForMarker(
+  rows: { id: string; text: string }[],
+): string[] {
+  return sortedItemIds(
+    itemRows(rows)
+      .filter((row) => row.text.includes(marker))
+      .map((row) => row.id),
+  );
+}
+
 async function kindMenuDiagnostic() {
   return app.withPage((page) =>
     page.evaluate((selector) => {
@@ -244,10 +254,8 @@ describe("the toolbar", () => {
   });
 
   test("filtering by kind removes the rows that do not match", async () => {
-    const beforeIds = sortedItemIds(
-      itemRows(await rowBoxes(app)).map((row) => row.id),
-    );
-    expect(beforeIds.length).toBeGreaterThanOrEqual(4);
+    const beforeIds = itemIdsForMarker(await rowBoxes(app));
+    expect(sameSortedItemIds(beforeIds, seeded)).toBe(true);
 
     await tapElement(app, KIND_FILTER);
     await waitForKindMenu(true);
@@ -268,7 +276,7 @@ describe("the toolbar", () => {
           null;
         await waitFor(async () => {
           const snapshot = await listSnapshot(app);
-          const restoredIds = itemRows(snapshot.rows).map((row) => row.id);
+          const restoredIds = itemIdsForMarker(snapshot.rows);
           const defaultTriggerCount = await count(
             app,
             'button[aria-label="Filter by kind, default: All kinds"]',
