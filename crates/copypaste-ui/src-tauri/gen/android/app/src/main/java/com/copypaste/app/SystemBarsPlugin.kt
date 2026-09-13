@@ -69,11 +69,17 @@ class SystemBarsPlugin(private val activity: Activity) : Plugin(activity) {
             WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
         )
         val density = view.resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+        val imeBottom = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
+            insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        } else {
+            0
+        }
         val next = InsetsPx(
             top = cssPx(bars.top, density),
             right = cssPx(bars.right, density),
             bottom = cssPx(bars.bottom, density),
             left = cssPx(bars.left, density),
+            ime = cssPx(imeBottom, density),
         )
         lastInsets = next
         val webView = this.webView ?: return
@@ -89,6 +95,8 @@ class SystemBarsPlugin(private val activity: Activity) : Plugin(activity) {
               root.style.setProperty('--inset-right', '${insets.right}px');
               root.style.setProperty('--inset-bottom', '${insets.bottom}px');
               root.style.setProperty('--inset-left', '${insets.left}px');
+              if (${insets.ime} > 0) root.setAttribute('data-ime', '');
+              else root.removeAttribute('data-ime');
             })();
         """.trimIndent()
         webView.evaluateJavascript(script, null)
@@ -102,5 +110,6 @@ class SystemBarsPlugin(private val activity: Activity) : Plugin(activity) {
         val right: Int,
         val bottom: Int,
         val left: Int,
+        val ime: Int = 0,
     )
 }

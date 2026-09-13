@@ -14,10 +14,13 @@ internal object WebViewImeInsets {
     webView: WebView,
     afterApply: (WebView, WindowInsetsCompat) -> Unit = { _, _ -> },
   ) {
-    ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
-      val host = view as? WebView ?: return@setOnApplyWindowInsetsListener insets
+    fun apply(host: WebView, insets: WindowInsetsCompat) {
       applyBottomMargin(host, insets)
       afterApply(host, insets)
+    }
+    ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+      val host = view as? WebView ?: return@setOnApplyWindowInsetsListener insets
+      apply(host, insets)
       insets
     }
     ViewCompat.setWindowInsetsAnimationCallback(
@@ -29,12 +32,12 @@ internal object WebViewImeInsets {
           insets: WindowInsetsCompat,
           runningAnimations: MutableList<WindowInsetsAnimationCompat>,
         ): WindowInsetsCompat {
-          applyBottomMargin(webView, insets)
+          apply(webView, insets)
           return insets
         }
 
         override fun onEnd(animation: WindowInsetsAnimationCompat) {
-          ViewCompat.getRootWindowInsets(webView)?.let { applyBottomMargin(webView, it) }
+          ViewCompat.getRootWindowInsets(webView)?.let { apply(webView, it) }
         }
       },
     )

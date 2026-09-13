@@ -47,4 +47,8 @@
   --scroll-dock-clearance: calc(var(--s-9) + var(--s-7) + var(--s-1) + var(--inset-bottom));
 }
 
+:global(html[data-ime]) .compact > .content {
+  --scroll-dock-clearance: calc(var(--s-1) - var(--s-1));
+}
+
 .desktopContent { background: transparent; }
