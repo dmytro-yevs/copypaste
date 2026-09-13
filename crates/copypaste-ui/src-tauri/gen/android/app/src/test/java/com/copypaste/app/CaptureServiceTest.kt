@@ -2,6 +2,7 @@ package com.copypaste.app
 
 import android.app.Service
 import android.content.Context
+import android.content.Intent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -42,6 +43,27 @@ class CaptureServiceTest {
         assertTrue(CaptureService.userWantsCapture(context))
         controller.destroy()
         assertTrue(CaptureService.userWantsCapture(context))
+    }
+
+    @Test
+    fun anArmedStartStillFailsClosedOnOemKill() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        assertTrue(
+            CaptureService.rememberArm(
+                context,
+                CaptureArmRequest("ongoing", "stopped", "body"),
+            ),
+        )
+        val controller = Robolectric.buildService(CaptureService::class.java)
+        val service = controller.create().get()
+        val result = service.onStartCommand(
+            Intent(context, CaptureService::class.java),
+            0,
+            9,
+        )
+        assertEquals(Service.START_NOT_STICKY, result)
+        assertTrue(CaptureService.userWantsCapture(context))
+        controller.destroy()
     }
 
     @Test
