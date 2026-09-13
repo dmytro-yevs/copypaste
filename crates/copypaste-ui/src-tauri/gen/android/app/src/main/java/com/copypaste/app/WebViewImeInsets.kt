@@ -25,16 +25,14 @@ internal object WebViewImeInsets {
   private fun applyBottomMargin(webView: WebView, insets: WindowInsetsCompat) {
     val layoutParams = webView.layoutParams as? ViewGroup.MarginLayoutParams ?: return
     val baseBottomMargin = baseBottomMargins.getOrPut(webView) { layoutParams.bottomMargin }
-    val systemBarBottomInset = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
+    // System bars stay in CSS inset tokens. Shrinking the WebView for them
+    // double-counts the dock and clips history tap targets.
     val visibleImeBottomInset = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
       insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
     } else {
       0
     }
-    val desiredBottomMargin = baseBottomMargin + maxOf(
-      systemBarBottomInset,
-      visibleImeBottomInset,
-    )
+    val desiredBottomMargin = baseBottomMargin + visibleImeBottomInset
     if (layoutParams.bottomMargin != desiredBottomMargin) {
       layoutParams.bottomMargin = desiredBottomMargin
       webView.layoutParams = layoutParams
