@@ -10,9 +10,12 @@ use serde::{Deserialize, Serialize};
 use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{Manager as _, Wry};
 
+use crate::backend::{BackendError, Result};
+
 const PLUGIN_PACKAGE: &str = "com.copypaste.app";
 const PLUGIN_CLASS: &str = "NetworkDiscoveryPlugin";
 const PORT: u16 = copypaste_p2p::DEFAULT_PORT;
+const MSG_DISCOVERY_UNAVAILABLE: &str = "Network discovery is unavailable.";
 
 static DISCOVERY: OnceLock<AndroidNetworkDiscovery> = OnceLock::new();
 
@@ -81,18 +84,18 @@ impl AndroidNetworkDiscovery {
             .unwrap_or(false)
     }
 
-    pub async fn resolved(&self) -> Vec<DiscoveredDevice> {
+    pub async fn resolved(&self) -> Result<Vec<DiscoveredDevice>> {
         let peers = self
             .0
             .run_mobile_plugin_async::<ResolvedPeers>("resolved", ())
             .await
             .map(|result| result.peers)
-            .unwrap_or_default();
+            .map_err(|_| BackendError::Unsupported(MSG_DISCOVERY_UNAVAILABLE))?;
         let now = copypaste_core::now_ms();
-        peers
+        Ok(peers
             .into_iter()
             .filter_map(|peer| nsd_device(peer, now))
-            .collect()
+            .collect())
     }
 }
 
@@ -149,14 +152,29 @@ pub async fn enrich_discovered(
     name: &str,
     pairing_ids: &[String],
     devices: Vec<DiscoveredDevice>,
-) -> Vec<DiscoveredDevice> {
+) -> Result<Vec<DiscoveredDevice>> {
     let Some(discovery) = DISCOVERY.get() else {
-        return devices;
+        return Err(BackendError::Unsupported(MSG_DISCOVERY_UNAVAILABLE));
     };
-    let _ = discovery.acquire().await;
+    if !discovery.acquire().await {
+        return if devices.is_empty() {
+            Err(BackendError::Unsupported(MSG_DISCOVERY_UNAVAILABLE))
+        } else {
+            Ok(devices)
+        };
+    }
     let advertise_name = if name.is_empty() { "CopyPaste" } else { name };
-    let _ = discovery.advertise(advertise_name, pairing_ids).await;
-    merge_discovered(devices, discovery.resolved().await)
+    if !discovery.advertise(advertise_name, pairing_ids).await {
+        tracing::warn!("NSD advertise did not start");
+    }
+    match discovery.resolved().await {
+        Ok(extra) => Ok(merge_discovered(devices, extra)),
+        Err(error) if devices.is_empty() => Err(error),
+        Err(error) => {
+            tracing::warn!(%error, "NSD resolved peers could not be read");
+            Ok(devices)
+        }
+    }
 }
 
 pub fn merge_discovered(
