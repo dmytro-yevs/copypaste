@@ -71,8 +71,16 @@ pub fn init() -> TauriPlugin<Wry> {
             let handle = api.register_android_plugin(PLUGIN_PACKAGE, PLUGIN_CLASS)?;
             let capture = AndroidCapture::new(handle);
             // Probe once at startup so the first frame shows the real state
-            // rather than a default that resolves a moment later.
+            // rather than a default that resolves a moment later. A stored
+            // (or default-on) preference then re-arms; a missing OS grant
+            // is surfaced and must not persist as off.
             capture.refresh();
+            if !matches!(
+                capture.snapshot().health,
+                super::model::CaptureHealth::Disabled
+            ) {
+                let _ = capture.arm();
+            }
             app.manage(capture);
             Ok(())
         })

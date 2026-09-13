@@ -187,6 +187,7 @@ pub fn run() {
                             "Wi-Fi multicast lock is unavailable; LAN discovery may be limited"
                         );
                     }
+                    let _ = discovery.advertise("CopyPaste", &[]).await;
                 });
             }
 
