@@ -73,8 +73,8 @@ class WebViewImeInsetsTest {
       systemBarsVisible = true,
     )
     layout(root)
-    assertEquals(ORIGINAL_BOTTOM_MARGIN + IME_BOTTOM, bottomMarginOf(webView))
-    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - IME_BOTTOM, webView.measuredHeight)
+    assertEquals(ORIGINAL_BOTTOM_MARGIN + CAPPED_IME_BOTTOM, bottomMarginOf(webView))
+    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - CAPPED_IME_BOTTOM, webView.measuredHeight)
 
     dispatchInsets(
       webView,
@@ -131,8 +131,8 @@ class WebViewImeInsetsTest {
     )
     layout(root)
     assertEquals(1, published)
-    assertEquals(ORIGINAL_BOTTOM_MARGIN + IME_BOTTOM, bottomMarginOf(webView))
-    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - IME_BOTTOM, webView.measuredHeight)
+    assertEquals(ORIGINAL_BOTTOM_MARGIN + CAPPED_IME_BOTTOM, bottomMarginOf(webView))
+    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - CAPPED_IME_BOTTOM, webView.measuredHeight)
   }
 
   private fun dispatchInsets(
@@ -216,5 +216,6 @@ class WebViewImeInsetsTest {
     const val SYSTEM_BAR_BOTTOM = 24
     const val SMALL_IME_BOTTOM = 16
     const val IME_BOTTOM = 240
+    const val CAPPED_IME_BOTTOM = ROOT_HEIGHT - 420
   }
 }
