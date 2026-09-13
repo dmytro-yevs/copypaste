@@ -18,7 +18,3 @@
   transform: translateX(-50%);
   pointer-events: auto;
 }
-
-:global(html[data-ime]) .dock {
-  display: none;
-}
