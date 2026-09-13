@@ -95,7 +95,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     fun probe(invoke: Invoke) {
         invoke.resolve(CaptureBridgeJson.objectOf(
             ProbeResult.serializer(),
-            ProbeResult(probePayload(), captureEnabled(), ClipCascadeCapture.isListening()),
+            ProbeResult(probePayload(), captureWanted(), ClipCascadeCapture.isListening()),
         ))
     }
 
@@ -219,6 +219,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
 
+        CaptureService.rememberArm(activity, copy)
+
         if (!CaptureNotifications.isPermissionGranted(activity)) {
             // The permission result is asynchronous. Keep this exact request
             // pending so a granted dialog continues the user's original arm,
@@ -279,7 +281,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             if (pendingArm.get() == null) active = null
             val listening = prepared &&
                 CaptureService.start(activity, copy)
-            if (!listening) CaptureService.stop(activity)
 
             resolveArm(invoke, listening)
         }
@@ -291,11 +292,11 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             ArmResult.serializer(),
             ArmResult(
                 probePayload(),
-                listening,
+                CaptureService.userWantsCapture(activity),
                 listening,
                 outcome,
                 focused = true,
-                notificationPermission = true,
+                notificationPermission = CaptureNotifications.isPermissionGranted(activity),
             ),
         ))
     }
@@ -308,15 +309,13 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
 
-        // A grant can be revoked in Settings after a successful arm. Do not
-        // leave the persisted foreground-service intent claiming it can
-        // restart without the notification that makes it visible.
-        CaptureService.stop(activity)
+        // A dismissed or denied prompt is not the user turning capture off.
+        // Keep the stored preference and surface the missing grant.
         pending.invoke.resolve(CaptureBridgeJson.objectOf(
             ArmResult.serializer(),
             ArmResult(
                 probePayload(),
-                enabled = false,
+                enabled = CaptureService.userWantsCapture(activity),
                 listening = false,
                 ReadOutcome.REFUSED,
                 focused = true,
@@ -419,7 +418,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         ShizukuClipboard.setToastSuppressed(suppressed) {
             invoke.resolve(CaptureBridgeJson.objectOf(
                 ProbeResult.serializer(),
-                ProbeResult(probePayload(), captureEnabled(), ClipCascadeCapture.isListening()),
+                ProbeResult(probePayload(), captureWanted(), ClipCascadeCapture.isListening()),
             ))
         }
     }
@@ -431,19 +430,17 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             isShizukuInstalled() || setupComplete,
             ShizukuClipboard.isRunning() || setupComplete,
             ShizukuClipboard.hasPermission() || setupComplete,
-            CaptureService.isArmed(activity),
+            CaptureService.userWantsCapture(activity),
             ShizukuClipboard.isToastSuppressed(activity),
             takeRearmRequest(),
         )
     }
 
     /**
-     * `CaptureState` is a request to run, not proof that the reader survived.
-     * The Rust model must only receive `enabled` when the in-process reader
-     * can still hand clips to its drain task.
+     * The stored user preference, default on. Listening is reported separately
+     * so a dead reader or a missing OS grant cannot flip the switch off.
      */
-    private fun captureEnabled(): Boolean =
-        CaptureService.isArmed(activity) && ClipCascadeCapture.isListening()
+    private fun captureWanted(): Boolean = CaptureService.userWantsCapture(activity)
 
     private fun captureSource(value: String): CaptureSource? = when (value) {
         "in_app" -> CaptureSource.IN_APP

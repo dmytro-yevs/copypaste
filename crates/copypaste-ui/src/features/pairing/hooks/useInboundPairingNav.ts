@@ -24,7 +24,7 @@ export function useInboundPairingNav() {
   const progress = useQuery({
     queryKey: INBOUND_PAIRING_KEY,
     queryFn: getPairingProgress,
-    enabled: bridge && view !== "devices",
+    enabled: bridge,
     retry: false,
     refetchInterval: STATUS_POLL_MS,
   });

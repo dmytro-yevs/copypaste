@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager as _, Wry};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use super::android_payload::AndroidProgressPayload;
-use super::invite::{decode_native_invite, encode_native_invite};
+use super::pairing_link::{decode_pairing_payload, encode_pairing_link};
 use super::{
     NativeAbort, NativePairingUi, NativePresentationOutcome, NativeRefresh, PairingDecision,
     PairingPresentationState, PairingPresenter, ScannedPairing,
@@ -152,7 +152,7 @@ struct DecisionResult {
 
 impl NativePairingUi for AndroidPairingUi {
     fn present_invite(&self, invite: &PairingInviteData) -> NativePresentationOutcome {
-        let Some(payload) = encode_native_invite(invite) else {
+        let Some(payload) = encode_pairing_link(invite) else {
             return NativePresentationOutcome::Unavailable;
         };
         let on_abort = self.retain_abort_channel();
@@ -176,7 +176,13 @@ impl NativePairingUi for AndroidPairingUi {
     fn scan_invite(&self) -> Option<ScannedPairing> {
         let mut result: ScanResult = self.call("scanInvite", ())?;
         let payload = Zeroizing::new(result.payload.take()?);
-        decode_native_invite(payload)
+        decode_pairing_payload(payload)
+    }
+
+    fn take_pending_join(&self) -> Option<ScannedPairing> {
+        let mut result: ScanResult = self.call("takePendingLink", ())?;
+        let payload = Zeroizing::new(result.payload.take()?);
+        decode_pairing_payload(payload)
     }
 
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState {

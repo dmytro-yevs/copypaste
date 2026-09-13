@@ -213,3 +213,33 @@ test("Android XML comments cannot register a deep link", () => {
   assert.deepEqual(deepLinkSurfaces(fixture), []);
   assert.doesNotThrow(() => assertNoDeepLinks(fixture));
 });
+
+test("pairing QR association is not a generic deep-link surface", () => {
+  const fixture = structuredClone(noDeepLinkFixtures);
+  fixture.androidManifest = fixture.androidManifest.replace(
+    "</activity>",
+    `<intent-filter>
+      <action android:name="android.intent.action.VIEW" />
+      <category android:name="android.intent.category.DEFAULT" />
+      <category android:name="android.intent.category.BROWSABLE" />
+      <data android:scheme="copypaste" android:host="pair" />
+    </intent-filter></activity>`,
+  );
+
+  assert.deepEqual(deepLinkSurfaces(fixture), []);
+  assert.doesNotThrow(() => assertNoDeepLinks(fixture));
+});
+
+test("HTTPS App Links and other schemes remain forbidden", () => {
+  const fixture = structuredClone(noDeepLinkFixtures);
+  fixture.androidManifest = fixture.androidManifest.replace(
+    "</activity>",
+    `<intent-filter android:autoVerify="true">
+      <action android:name="android.intent.action.VIEW" />
+      <data android:scheme="https" android:host="copypaste.app" android:pathPrefix="/pair" />
+    </intent-filter></activity>`,
+  );
+
+  assert.deepEqual(deepLinkSurfaces(fixture), ["Android deep-link intent filter"]);
+  assert.throws(() => assertNoDeepLinks(fixture), /deep links are not a product surface/);
+});

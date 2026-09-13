@@ -37,13 +37,33 @@ function parseAndroidManifest(source) {
   return document;
 }
 
+function isPairingAssociationFilter(filter) {
+  const actions = childElements(filter, "action").map((action) => androidAttribute(action, "name"));
+  if (!actions.includes("android.intent.action.VIEW")) return false;
+  const data = childElements(filter, "data");
+  if (data.length === 0) return false;
+  return data.every((node) => {
+    const scheme = androidAttribute(node, "scheme");
+    const host = androidAttribute(node, "host");
+    const path = androidAttribute(node, "path");
+    const pathPrefix = androidAttribute(node, "pathPrefix");
+    const pathPattern = androidAttribute(node, "pathPattern");
+    return scheme === "copypaste"
+      && host === "pair"
+      && !path
+      && !pathPrefix
+      && !pathPattern;
+  });
+}
+
 function androidDeepLinkFilters(document) {
   return Array.from(document.getElementsByTagName("intent-filter")).filter((filter) => {
     const actions = childElements(filter, "action").map((action) => androidAttribute(action, "name"));
     const hasScheme = childElements(filter, "data").some((data) => androidAttribute(data, "scheme"));
     return actions.some((action) => action === "android.intent.action.VIEW"
       || action === "org.chromium.arc.intent.action.VIEW")
-      && hasScheme;
+      && hasScheme
+      && !isPairingAssociationFilter(filter);
   });
 }
 
