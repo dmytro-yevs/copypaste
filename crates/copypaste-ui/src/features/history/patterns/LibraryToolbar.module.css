@@ -3,6 +3,22 @@
     flex: none;
     margin-inline: 0 auto;
 }
+
+:global(html[data-ime]) .header {
+    display: none;
+}
+
+:global(html[data-ime]) .toolbar {
+    padding-block: 0;
+}
+
+.limitNotice {
+    flex: none;
+}
+
+:global(html[data-ime]) .limitNotice {
+    display: none;
+}
 .toolbarShell {
     position: relative;
     z-index: var(--z-sticky);
