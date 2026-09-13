@@ -11,11 +11,14 @@
     padding: 0;
     gap: 0;
     /* grid gap */
-    overflow-y: auto;
+    overflow: hidden;
+    min-block-size: 0;
 }
 
 .normal > aside {
     block-size: auto;
+    min-block-size: 0;
+    overflow: hidden;
 }
 .expanded {
     inline-size: min(
@@ -95,7 +98,9 @@
 
 .contentRegion {
     min-block-size: var(--sz-iconbtn);
-    overflow: visible;
+    max-block-size: min(50dvh, calc(var(--s-9) * 10));
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 .codeRegion {
