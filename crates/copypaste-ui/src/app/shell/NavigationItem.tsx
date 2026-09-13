@@ -3,14 +3,30 @@ import type { ComponentProps } from "react";
 import { Button, Icon, Tooltip, type IconName } from "@/components/ui";
 import styles from "./NavigationItem.module.css";
 
-export function NavigationItem({ icon, label, layout, active, ...props }: Omit<ComponentProps<typeof Button>, "children" | "className" | "size" | "variant"> & {
+export function NavigationItem({ icon, label, layout, active, onClick, ...props }: Omit<ComponentProps<typeof Button>, "children" | "className" | "size" | "variant"> & {
   icon: IconName;
   label: string;
   layout: "sidebar" | "dock";
   active: boolean;
 }) {
   const button = (
-    <Button {...props} type="button" variant="ghost" size="md" className={styles.item} data-layout={layout} aria-label={label} aria-current={active ? "page" : undefined}>
+    <Button
+      {...props}
+      type="button"
+      variant="ghost"
+      size="md"
+      className={styles.item}
+      data-layout={layout}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      onClick={(event) => {
+        const focused = document.activeElement;
+        if (focused instanceof HTMLElement && focused !== event.currentTarget) {
+          focused.blur();
+        }
+        onClick?.(event);
+      }}
+    >
       <Icon name={icon} size="sm" weight="regular" />
       <span>{label}</span>
     </Button>

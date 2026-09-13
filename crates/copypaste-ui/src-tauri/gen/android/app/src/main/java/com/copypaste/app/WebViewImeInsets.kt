@@ -3,6 +3,7 @@ package com.copypaste.app
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 import java.util.WeakHashMap
 
@@ -19,6 +20,24 @@ internal object WebViewImeInsets {
       afterApply(host, insets)
       insets
     }
+    ViewCompat.setWindowInsetsAnimationCallback(
+      webView,
+      object : WindowInsetsAnimationCompat.Callback(
+        WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+      ) {
+        override fun onProgress(
+          insets: WindowInsetsCompat,
+          runningAnimations: MutableList<WindowInsetsAnimationCompat>,
+        ): WindowInsetsCompat {
+          applyBottomMargin(webView, insets)
+          return insets
+        }
+
+        override fun onEnd(animation: WindowInsetsAnimationCompat) {
+          ViewCompat.getRootWindowInsets(webView)?.let { applyBottomMargin(webView, it) }
+        }
+      },
+    )
     ViewCompat.requestApplyInsets(webView)
   }
 
