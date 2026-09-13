@@ -1590,20 +1590,10 @@ jobs:
           # a workflow step.
           [[ -f packaging/release-notes.md ]] || { echo "::error::packaging/release-notes.md missing"; exit 1; }
 
-          # --verify-tag: refuse to create a release for a tag that does not
-          # exist, so a typo in a manual dispatch cannot invent one.
-          prerelease=()
-          if [[ "$VERSION" == *-* ]]; then
-            prerelease+=(--prerelease)
-          else
-            prerelease+=(--latest)
-          fi
-          gh release create "v${VERSION}" \
+          bash scripts/release/publish-github-release.sh \
+            --version "$VERSION" \
             --repo "${{ github.repository }}" \
-            --title "v${VERSION}" \
-            --notes-file packaging/release-notes.md \
-            --verify-tag \
-            "${prerelease[@]}" \
+            --notes packaging/release-notes.md \
             dist/*.dmg dist/*.dmg.sha256 \
             dist/*.tar.gz dist/*.tar.gz.sha256 \
             dist/*.apk dist/*.apk.sig dist/*.apk.sha256 \

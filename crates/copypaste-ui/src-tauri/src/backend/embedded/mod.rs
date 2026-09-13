@@ -32,6 +32,34 @@ use copypaste_ipc::{
 use messages::MSG_NO_PEER;
 pub use open::{Clipboard, EmbeddedBackend};
 
+impl EmbeddedBackend {
+    async fn with_android_nsd(
+        &self,
+        devices: Vec<DiscoveredDevice>,
+    ) -> Result<Vec<DiscoveredDevice>> {
+        #[cfg(target_os = "android")]
+        {
+            let name = self.inner.state.device_name();
+            let pairing_ids = self
+                .inner
+                .node
+                .get()
+                .map(|node| {
+                    node.peers()
+                        .into_iter()
+                        .map(|peer| peer.pairing_id)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            return crate::network_discovery::enrich_discovered(&name, &pairing_ids, devices).await;
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(devices)
+        }
+    }
+}
+
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
         items::list(self, limit, cursor).await
@@ -202,18 +230,21 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn discovered(&self) -> Result<Vec<DiscoveredDevice>> {
-        Ok(self.node().await?.discovered())
+        let devices = self.node().await?.discovered();
+        self.with_android_nsd(devices).await
     }
 
     /// Re-advertise and answer as [`Backend::discovered`] does.
     ///
-    /// Best-effort, like every other discovery call: a republish that fails is
-    /// logged and the current table is still returned, because what the user
-    /// asked for was "show me what is out there".
+    /// A republish that fails is logged and the current table is still
+    /// returned, because what the user asked for was "show me what is out
+    /// there". A peer node that will not start is unavailable — the command
+    /// must not answer with an empty list that looks like "no one is here".
     async fn rescan(&self) -> Result<Vec<DiscoveredDevice>> {
         let node = self.node().await?;
         node.republish();
-        Ok(node.discovered())
+        let devices = node.discovered();
+        self.with_android_nsd(devices).await
     }
 
     async fn get_config(&self) -> Result<ConfigApplied> {

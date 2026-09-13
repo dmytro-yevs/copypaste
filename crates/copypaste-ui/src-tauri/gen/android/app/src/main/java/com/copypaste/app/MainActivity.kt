@@ -11,6 +11,7 @@ import android.view.WindowManager
 import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
 
 class MainActivity : TauriActivity() {
   private val notificationWaiters = ArrayList<(NotificationPermissionFacts) -> Unit>()
@@ -38,7 +39,16 @@ class MainActivity : TauriActivity() {
     // a preference that never loads fail in the safe direction.
     window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     enableEdgeToEdge()
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      window.attributes = window.attributes.apply {
+        layoutInDisplayCutoutMode =
+          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+      }
+    }
+    PairingDeepLinks.offer(intent)
     super.onCreate(savedInstanceState)
+    CaptureService.restoreIfArmed(this)
   }
 
   override fun onContentChanged() {
@@ -73,6 +83,7 @@ class MainActivity : TauriActivity() {
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
+    PairingDeepLinks.offer(intent)
   }
 
   fun requestNotificationPermission(onResult: (NotificationPermissionFacts) -> Unit) {

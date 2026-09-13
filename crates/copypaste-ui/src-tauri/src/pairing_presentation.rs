@@ -52,6 +52,9 @@ pub fn native_refresh(app: AppHandle) -> NativeRefresh {
 ))]
 pub(crate) mod invite;
 
+#[cfg(any(test, target_os = "android"))]
+pub(crate) mod pairing_link;
+
 #[cfg(target_os = "android")]
 pub(crate) mod android;
 
@@ -113,6 +116,9 @@ pub trait NativePairingUi: Send + Sync + 'static {
     fn scan_invite(&self) -> Option<ScannedPairing>;
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState;
     fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision>;
+    fn take_pending_join(&self) -> Option<ScannedPairing> {
+        None
+    }
 }
 
 pub struct PairingPresenter {
@@ -175,6 +181,10 @@ impl PairingPresenter {
 
     pub fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision> {
         self.native.confirm(progress)
+    }
+
+    pub fn take_pending_join(&self) -> Option<ScannedPairing> {
+        self.native.take_pending_join()
     }
 }
 
@@ -304,6 +314,7 @@ mod native_pairing_source_contracts {
             production(include_str!("pairing_presentation/windows/confirm.rs")),
             production(include_str!("pairing_presentation/windows/status.rs")),
             production(include_str!("pairing_presentation/android.rs")),
+            production(include_str!("pairing_presentation/pairing_link.rs")),
         ];
         let joined = sources.join("\n");
         for forbidden in ["WebviewWindow", ".eval(", "write_text("] {
@@ -341,7 +352,7 @@ mod native_pairing_source_contracts {
 
         let android = production(include_str!("pairing_presentation/android.rs"));
         assert!(android.contains("\"scanInvite\""));
-        assert!(android.contains("decode_native_invite(payload)"));
+        assert!(android.contains("decode_pairing_payload"));
         let android_plugin = include_str!(
             "../gen/android/app/src/main/java/com/copypaste/app/PairingPresentationPlugin.kt"
         );

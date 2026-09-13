@@ -45,7 +45,8 @@
   min-inline-size: 0;
   min-block-size: 0;
   align-content: start;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .actions {

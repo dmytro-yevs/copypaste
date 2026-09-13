@@ -9,6 +9,14 @@
   background: transparent;
 }
 
+.banners {
+  flex: none;
+}
+
+:global(html[data-ime]) .banners {
+  display: none;
+}
+
 .stream {
   display: flex;
   min-block-size: 0;

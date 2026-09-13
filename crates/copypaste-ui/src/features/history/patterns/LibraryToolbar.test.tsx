@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createRef } from "react";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -345,5 +347,33 @@ describe("Library toolbar active-control badges", () => {
                 '[data-slot="active-control-indicator"]',
             ),
         ).toHaveLength(0);
+    });
+});
+
+describe("Library toolbar compact gutters", () => {
+    it("spaces siblings with flex gap so a hidden search field cannot inset the row", () => {
+        const toolbarCss = readFileSync(
+            resolve(process.cwd(), "src/features/history/patterns/LibraryToolbar.module.css"),
+            "utf8",
+        );
+
+        expect(toolbarCss).toMatch(
+            /\.siblings \{[\s\S]*gap:\s*var\(--toolbar-item-gap\);/,
+        );
+        expect(toolbarCss).not.toMatch(/\.siblings\s*>\s*\*\s*\+\s*\*/);
+    });
+
+    it("yields the page title and toolbar padding while the IME is up", () => {
+        const toolbarCss = readFileSync(
+            resolve(process.cwd(), "src/features/history/patterns/LibraryToolbar.module.css"),
+            "utf8",
+        );
+
+        expect(toolbarCss).toMatch(
+            /html\[data-ime\]\)\s+\.header\s*\{[^}]*display:\s*none;/s,
+        );
+        expect(toolbarCss).toMatch(
+            /html\[data-ime\]\)\s+\.toolbar\s*\{[^}]*padding-block:\s*0;/s,
+        );
     });
 });

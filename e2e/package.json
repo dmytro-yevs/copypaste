@@ -18,7 +18,8 @@
   },
   "overrides": {
     "@puppeteer/browsers": "^3.2.0",
-    "deepmerge-ts": "^8.0.1"
+    "deepmerge-ts": "^8.0.1",
+    "joi": "^18.2.5"
   },
   "devDependencies": {
     "@types/jsdom": "^27.0.0",
@@ -27,7 +28,7 @@
     "execa": "^10.0.0",
     "jsdom": "^30.0.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "wait-on": "^9.1.0",
     "webdriverio": "^9.30.0",
     "yaml": "^2.8.1"

@@ -16,10 +16,11 @@ Qualification verifies the current run's artifact bytes against its native
 receipts. It does not promote those artifacts into a later publication; durable
 artifact digest binding and promotion are separate release work.
 
-## v2.0.0-alpha.33 evidence exception
+## v2.0.0-alpha.35 evidence exception
 
-Only `2.0.0-alpha.33` may qualify with its recorded 58 pending native-evidence
-states. The release gate pins their sorted IDs and SHA-256 digest in
+Only `2.0.0-alpha.35` may qualify with the same recorded 58 pending
+native-evidence states that `2.0.0-alpha.34` already accepted. The release
+gate pins their sorted IDs and SHA-256 digest in
 `config/release-evidence-exceptions.json`; any added, removed, renamed, or
 resolved state fails the exception. This is a one-alpha risk acceptance, not a
 verification claim or precedent. Pending states remain absent from receipt

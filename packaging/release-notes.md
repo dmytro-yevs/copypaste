@@ -1,27 +1,34 @@
 ## Highlights
 
-- Refreshes the app shell, onboarding, settings, history states, and responsive
-  navigation so the same product flow works cleanly on desktop and Android.
-- Unifies clipboard permission, capture, source-app, and unsupported-state
-  handling across macOS, Android, and Windows while preserving native payloads.
-- Tightens device pairing and peer sync with shared deadlines, typed UI
-  contracts, and smaller protocol and session boundaries.
-- Makes v2 use only its own database and current contracts, removing retired
-  preference, pairing, deep-link, and IPC compatibility paths.
-- Binds native release evidence to the exact commit and artifact, strengthens
-  redaction and Android manifest checks, and requires canonical signed-APK
-  emulator evidence.
-- `v2.0.0-alpha.33` is an immutable failed tag. `v2.0.0-alpha.34` is the same
-  authorized retry, not new product scope: its 58 pinned pending
-  native-evidence states across history, capture, devices, settings/service,
-  and cloud account remain unverified and are not receipt expectations.
+- Android background capture and capture from other apps start on by default
+  and keep that choice across app restarts. A failed arm or a dismissed
+  permission prompt no longer persists as the user turning capture off.
+- The capture overlay no longer blocks touches in other apps.
+- LAN discovery on Android uses platform DNS-SD plus a multicast lock, so the
+  Devices radar is no longer stuck on “unavailable” when raw mDNS is dropped.
+- Third-party QR scanners can open `copypaste://pair` and start inbound
+  pairing. This is pairing association only, not HTTPS App Links and not the
+  Tauri deep-link plugin.
+- Edge-to-edge cutouts and system bars publish into the CSS inset tokens.
+- Long clips open a swipeable, scrollable compact sheet, and delete toasts use
+  the shared toaster tokens.
+- Onboarding stacks at the toolbar breakpoint (~748px) and uses larger capture,
+  card, and network artwork glyphs.
+- The compact library toolbar no longer gains an extra left inset from a hidden
+  search field.
+- `v2.0.0-alpha.35` inherits the same one-alpha release-risk acceptance that
+  authorized `v2.0.0-alpha.34`: the same 58 pinned pending native-evidence
+  states across history, capture, devices, settings/service, and cloud
+  account remain unverified and are not receipt expectations.
 
 ## Not verified on this host
 
-macOS TCC permission prompts, the Android Quick Settings tile add flow, and
-Windows pairing were not exercised on the machine that cut this tag. Treat
-those paths as implemented but not verified by the final native evidence, not
-as a live walkthrough or CI-covered behavior.
+Physical Android capture persistence, overlay hit-testing, LAN discovery, QR
+association, cutout insets, OEM process-kill survival, and Shizuku rung 2
+were not walked on a device for this tag. Windows pairing and macOS TCC
+prompts were not exercised. Missing same-commit native evidence remains a
+blocker for claiming this alpha is qualified. This wave reuses the pending
+states `v2.0.0-alpha.34` already accepted and does not claim they are complete.
 
 ## Install
 

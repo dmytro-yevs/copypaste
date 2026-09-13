@@ -3,6 +3,22 @@
     flex: none;
     margin-inline: 0 auto;
 }
+
+:global(html[data-ime]) .header {
+    display: none;
+}
+
+:global(html[data-ime]) .toolbar {
+    padding-block: 0;
+}
+
+.limitNotice {
+    flex: none;
+}
+
+:global(html[data-ime]) .limitNotice {
+    display: none;
+}
 .toolbarShell {
     position: relative;
     z-index: var(--z-sticky);
@@ -32,9 +48,7 @@
     inline-size: 100%;
     align-items: center;
     flex-wrap: nowrap;
-}
-.siblings > * + * {
-    margin-inline-start: var(--toolbar-item-gap);
+    gap: var(--toolbar-item-gap); /* apply fgp */
 }
 .siblings
     :is(

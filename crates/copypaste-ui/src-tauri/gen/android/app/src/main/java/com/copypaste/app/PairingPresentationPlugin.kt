@@ -44,6 +44,13 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
     }
 
     @Command
+    fun takePendingLink(invoke: Invoke) {
+        val result = JSObject()
+        PairingDeepLinks.take()?.let { result.put("payload", it) }
+        invoke.resolve(result)
+    }
+
+    @Command
     fun scanInvite(invoke: Invoke) {
         activity.runOnUiThread {
             val granted = ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) ==
@@ -110,6 +117,10 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
             ) { decision -> invoke.resolve(JSObject().put("decision", decision)) }
             if (!shown) invoke.resolve(JSObject())
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        PairingDeepLinks.offer(intent)
     }
 
     override fun onDestroy(activity: AppCompatActivity) {

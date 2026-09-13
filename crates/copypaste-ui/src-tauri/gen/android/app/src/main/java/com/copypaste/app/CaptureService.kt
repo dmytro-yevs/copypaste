@@ -9,42 +9,30 @@ import android.os.IBinder
 /**
  * Keeps the process alive while rung 2 is armed.
  *
- * The logcat reader is a callback path into *this* process, so if the process
- * is reclaimed the reader goes with it and copies stop being saved. A
- * foreground service is the only thing Android offers that says "keep me".
- * It does no work itself; it exists so the reader and the Rust store are both
- * still there when someone copies in another app.
+ * The logcat reader is a callback into this process, so a reclaimed process
+ * stops saving copies. This service does no work itself; it exists so the
+ * reader and the Rust store stay resident.
  *
- * CopyPaste's ClipCascade path is app-owned after setup: Shizuku only applies
- * the one-shot grants. This service keeps the logcat reader alive and visible.
- *
- * The ongoing notification is not an apology for the service — it is the
- * android doc's §5 rule 1 outside the app: capture state is visible wherever
- * the user is, not only where history is.
+ * The on/off choice is persisted independently. [restoreIfArmed] re-arms from
+ * those prefs only when the runtime grants that make the reader work are still
+ * present. [START_STICKY] would resurrect a reader-less service after OEM
+ * process death; OEM kills fail closed.
  */
 class CaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val copy = state(this)
-        if (intent == null || copy == null) {
-            clearState(this)
+        val copy = notificationCopy(this)
+        if (!userWantsCapture(this) ||
+            copy == null ||
+            !CaptureNotifications.canPost(this) ||
+            !ClipCascadeCapture.hasRuntimePermissions(this)
+        ) {
             ClipCascadeCapture.disarm()
-            if (copy != null) {
-                CaptureNotifications.postLost(this, copy.lostTitle, copy.lostBody)
-            }
             stopSelf(startId)
             return START_NOT_STICKY
         }
 
-        // The FGS notification is the user's visible evidence that a reader
-        // is alive. Never run an invisible service on Android 13+.
-        if (!CaptureNotifications.canPost(this)) {
-            clearState(this)
-            ClipCascadeCapture.disarm()
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
         CaptureNotifications.ensureChannels(this)
         startForeground(
             CaptureNotifications.ONGOING_ID,
@@ -53,87 +41,130 @@ class CaptureService : Service() {
         if (!ClipCascadeCapture.arm(this, {
                 lost(this, copy)
             })) {
-            clearState(this)
+            CaptureNotifications.postLost(this, copy.lostTitle, copy.lostBody)
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        // OEM process death must not resurrect this service with a null intent.
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        // The callback belongs to this process, not the service object. An
-        // unexpected teardown cannot leave a persisted green state behind.
-        val copy = state(this)
-        clearState(this)
         ClipCascadeCapture.disarm()
-        if (copy != null) {
-            CaptureNotifications.postLost(this, copy.lostTitle, copy.lostBody)
-        }
         super.onDestroy()
     }
 
     companion object {
         private const val PREFS = "capture-service"
+        private const val KEY_WANTED = "wanted"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_ONGOING_TEXT = "ongoingText"
         private const val KEY_LOST_TITLE = "lostTitle"
         private const val KEY_LOST_BODY = "lostBody"
 
-        fun start(context: Context, copy: CaptureArmRequest): Boolean {
+        fun rememberWanted(context: Context, wanted: Boolean) {
+            writeWanted(context, wanted)
+        }
+
+        fun rememberArm(context: Context, copy: CaptureArmRequest): Boolean {
             if (copy.ongoingText.isBlank() || copy.lostTitle.isBlank() || copy.lostBody.isBlank()) {
-                clearState(context)
                 return false
             }
-            if (!ClipCascadeCapture.arm(context, {
-                    lost(context, copy)
-                })) {
-                clearState(context)
-                return false
-            }
-            val persisted = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean(KEY_ENABLED, true)
-                .putString(KEY_ONGOING_TEXT, copy.ongoingText)
-                .putString(KEY_LOST_TITLE, copy.lostTitle)
-                .putString(KEY_LOST_BODY, copy.lostBody)
-                .commit()
-            if (!persisted) {
-                ClipCascadeCapture.disarm()
-                clearState(context)
-                return false
-            }
-            val intent = Intent(context, CaptureService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            writeWanted(context, true)
             return true
         }
 
+        fun start(context: Context, copy: CaptureArmRequest): Boolean {
+            if (copy.ongoingText.isBlank() || copy.lostTitle.isBlank() || copy.lostBody.isBlank()) {
+                return false
+            }
+            writeWanted(context, true)
+            if (!ClipCascadeCapture.arm(context, {
+                    lost(context, copy)
+                })) {
+                return false
+            }
+            if (!persistCopy(context, copy)) {
+                ClipCascadeCapture.disarm()
+                return false
+            }
+            return startService(context)
+        }
+
+        fun restoreIfArmed(context: Context): Boolean {
+            if (!userWantsCapture(context)) return false
+            if (notificationCopy(context) == null) return false
+            if (ClipCascadeCapture.isListening()) return true
+            if (!ClipCascadeCapture.hasRuntimePermissions(context)) return false
+            if (!CaptureNotifications.canPost(context)) return false
+            return startService(context)
+        }
+
         fun stop(context: Context) {
-            clearState(context)
+            writeWanted(context, false)
+            clearCopy(context)
             ClipCascadeCapture.disarm()
             context.stopService(Intent(context, CaptureService::class.java))
         }
 
+        fun userWantsCapture(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            if (!prefs.contains(KEY_WANTED)) {
+                prefs.edit().putBoolean(KEY_WANTED, true).commit()
+                return true
+            }
+            return prefs.getBoolean(KEY_WANTED, true)
+        }
+
+        fun isArmed(context: Context): Boolean =
+            userWantsCapture(context) && notificationCopy(context) != null
+
+        private fun startService(context: Context): Boolean {
+            val intent = Intent(context, CaptureService::class.java)
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
         private fun lost(context: Context, copy: CaptureArmRequest) {
-            clearState(context)
             ClipCascadeCapture.disarm()
             CaptureNotifications.postLost(context, copy.lostTitle, copy.lostBody)
             context.stopService(Intent(context, CaptureService::class.java))
         }
 
-        fun isArmed(context: Context): Boolean = state(context) != null
+        private fun persistCopy(context: Context, copy: CaptureArmRequest): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_ONGOING_TEXT, copy.ongoingText)
+                .putString(KEY_LOST_TITLE, copy.lostTitle)
+                .putString(KEY_LOST_BODY, copy.lostBody)
+                .commit()
 
-        private fun clearState(context: Context) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        private fun writeWanted(context: Context, wanted: Boolean) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_WANTED, wanted)
+                .putBoolean(KEY_ENABLED, wanted)
+                .commit()
         }
 
-        private fun state(context: Context): CaptureArmRequest? {
+        private fun clearCopy(context: Context) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .remove(KEY_ONGOING_TEXT)
+                .remove(KEY_LOST_TITLE)
+                .remove(KEY_LOST_BODY)
+                .apply()
+        }
+
+        private fun notificationCopy(context: Context): CaptureArmRequest? {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            if (!prefs.getBoolean(KEY_ENABLED, false)) return null
             val copy = CaptureArmRequest(
                 ongoingText = prefs.getString(KEY_ONGOING_TEXT, null) ?: return null,
                 lostTitle = prefs.getString(KEY_LOST_TITLE, null) ?: return null,

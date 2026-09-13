@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-cli"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "backon",
  "clap",
@@ -965,11 +965,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 
 [[package]]
 name = "copypaste-cloud"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "argon2",
  "backon",
@@ -1001,7 +1001,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "android-native-keyring-store",
  "card-validate",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "anyhow",
  "backon",
@@ -1086,7 +1086,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-feedback"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "tracing",
  "winsafe",
@@ -1094,14 +1094,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-fs"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "copypaste-ipc"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "directories",
  "hex",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "copypaste-clock",
  "copypaste-fs",
@@ -1148,14 +1148,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-retry"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "backon",
 ]
 
 [[package]]
 name = "copypaste-runtime-log"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "anyhow",
  "copypaste-clock",
@@ -1171,7 +1171,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sensitive-rules"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "anyhow",
  "copypaste-fs",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ui"
-version = "2.0.0-alpha.34"
+version = "2.0.0-alpha.35"
 dependencies = [
  "axum",
  "backon",

@@ -1739,6 +1739,7 @@ SELF_TESTED = {
     "macos-cloud-evidence.sh": "its accessibility evidence and latency verdicts must be fixture-tested off macOS",
     "macos-native-evidence.sh": "its accessibility detector must be fixture-tested off macOS",
     "android-rungs.sh": NO_DEVICE,
+    "publish-github-release.sh": "a GitHub 500 that persisted the release must still upload assets",
     "png_evidence.py": "its content threshold and alpha handling must be fixture-tested",
     "check-wiring.py": "the runner-image table is data, and nothing else would notice it going empty",
 }
