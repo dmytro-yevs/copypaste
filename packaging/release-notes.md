@@ -16,15 +16,19 @@
   card, and network artwork glyphs.
 - The compact library toolbar no longer gains an extra left inset from a hidden
   search field.
+- `v2.0.0-alpha.35` inherits the same one-alpha release-risk acceptance that
+  authorized `v2.0.0-alpha.34`: the same 58 pinned pending native-evidence
+  states across history, capture, devices, settings/service, and cloud
+  account remain unverified and are not receipt expectations.
 
 ## Not verified on this host
 
 Physical Android capture persistence, overlay hit-testing, LAN discovery, QR
-association, and cutout insets were not walked on a device or emulator for this
-tag. Windows pairing and macOS TCC prompts were not exercised. Missing
-same-commit native evidence remains a blocker for claiming this alpha is
-qualified. `v2.0.0-alpha.34` was the authorized retry of the failed
-`v2.0.0-alpha.33` tag and is not this product wave.
+association, cutout insets, OEM process-kill survival, and Shizuku rung 2
+were not walked on a device for this tag. Windows pairing and macOS TCC
+prompts were not exercised. Missing same-commit native evidence remains a
+blocker for claiming this alpha is qualified. This wave reuses the pending
+states `v2.0.0-alpha.34` already accepted and does not claim they are complete.
 
 ## Install
 

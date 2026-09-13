@@ -60,10 +60,11 @@ receipt producer has not been validated from this Windows recovery environment;
 until a macOS run succeeds, WKWebView remains **NOT VERIFIED IN CI** as recorded
 below.
 
-`v2.0.0-alpha.33` alone has a recorded release-risk acceptance for 58 pending
-ledger states. It does not verify those states, add them to native receipts, or
-change the required macOS, signed-APK emulator, and installed Windows evidence.
-The version-bound exception expires if that exact pending set changes.
+`v2.0.0-alpha.35` inherits the recorded release-risk acceptance for the same
+58 pending ledger states that `v2.0.0-alpha.34` already accepted. It does not
+verify those states, add them to native receipts, or change the required
+macOS, signed-APK emulator, and installed Windows evidence. The version-bound
+exception expires if that exact pending set changes.
 
 ## What an emulator is not
 
