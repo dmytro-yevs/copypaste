@@ -186,6 +186,8 @@ def contract_errors(release, nightly, ci):
     release_create_commands = str(release_create.get("run") or "")
     if "windows-x86_64" not in downloads(publish):
         errors.append("publication must download the Windows release artifact")
+    if "scripts/release/publish-github-release.sh" not in release_create_commands:
+        errors.append("publication must create the GitHub Release through publish-github-release.sh")
     for asset in ("dist/*.exe", "dist/*.exe.sig", "dist/latest.json", "dist/SHA256SUMS"):
         if asset not in release_create_commands:
             errors.append(f"publication is missing Windows asset {asset}")
@@ -358,6 +360,16 @@ def self_test(release, nightly, ci):
         )
         release_step["run"] = release_step["run"].replace("dist/latest.json", "")
 
+    def inline_release_create(value):
+        release_step = next(
+            step for step in value["jobs"]["publish"]["steps"]
+            if step.get("name") == "Create GitHub Release"
+        )
+        release_step["run"] = release_step["run"].replace(
+            "scripts/release/publish-github-release.sh",
+            "gh release create",
+        )
+
     def remove_prepare_certificate(value):
         windows_signing_prepare(value["jobs"]["windows"])["env"].pop(
             "WINDOWS_SIGNING_CERTIFICATE_BASE64"
@@ -519,6 +531,11 @@ def self_test(release, nightly, ci):
         "missing Windows publish asset fails",
         remove_asset,
         "dist/latest.json",
+    )
+    rejected(
+        "inline gh release create fails",
+        inline_release_create,
+        "publication must create the GitHub Release through publish-github-release.sh",
     )
     rejected(
         "job-wide Tauri private signing input fails",
