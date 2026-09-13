@@ -32,6 +32,40 @@ use copypaste_ipc::{
 use messages::MSG_NO_PEER;
 pub use open::{Clipboard, EmbeddedBackend};
 
+impl EmbeddedBackend {
+    /// LAN peers this process can see. Never an error: an empty list is a
+    /// normal answer when multicast is filtered or the peer node is down.
+    async fn discovered_devices(&self) -> Vec<DiscoveredDevice> {
+        let devices = match self.node().await {
+            Ok(node) => node.discovered(),
+            Err(e) => {
+                tracing::warn!(error = %e, "LAN discovery could not start the peer node");
+                Vec::new()
+            }
+        };
+        #[cfg(target_os = "android")]
+        {
+            let name = self.inner.state.device_name();
+            let pairing_ids = self
+                .inner
+                .node
+                .get()
+                .map(|node| {
+                    node.peers()
+                        .into_iter()
+                        .map(|peer| peer.pairing_id)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            return crate::network_discovery::enrich_discovered(&name, &pairing_ids, devices).await;
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            devices
+        }
+    }
+}
+
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
         items::list(self, limit, cursor).await
@@ -202,18 +236,21 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn discovered(&self) -> Result<Vec<DiscoveredDevice>> {
-        Ok(self.node().await?.discovered())
+        Ok(self.discovered_devices().await)
     }
 
     /// Re-advertise and answer as [`Backend::discovered`] does.
     ///
     /// Best-effort, like every other discovery call: a republish that fails is
     /// logged and the current table is still returned, because what the user
-    /// asked for was "show me what is out there".
+    /// asked for was "show me what is out there". A peer node that will not
+    /// start is not "network discovery is unavailable" — the command still
+    /// answers, including Android NSD extras when they exist.
     async fn rescan(&self) -> Result<Vec<DiscoveredDevice>> {
-        let node = self.node().await?;
-        node.republish();
-        Ok(node.discovered())
+        if let Ok(node) = self.node().await {
+            node.republish();
+        }
+        Ok(self.discovered_devices().await)
     }
 
     async fn get_config(&self) -> Result<ConfigApplied> {
