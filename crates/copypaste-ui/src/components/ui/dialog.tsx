@@ -110,12 +110,11 @@ function DialogContent({
                 ) : null}
                 {children}
                 {sheet ? (
-                    <DialogPrimitive.Close
-                        ref={closeRef}
-                        className={styles.sheetDismiss}
-                    >
-                        <VisuallyHidden>{closeLabel}</VisuallyHidden>
-                    </DialogPrimitive.Close>
+                    <VisuallyHidden asChild>
+                        <DialogPrimitive.Close ref={closeRef}>
+                            {closeLabel}
+                        </DialogPrimitive.Close>
+                    </VisuallyHidden>
                 ) : null}
                 {showCloseButton && (
                     <Tooltip content={closeLabel}>
