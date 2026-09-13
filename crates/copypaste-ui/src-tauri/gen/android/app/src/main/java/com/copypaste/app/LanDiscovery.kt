@@ -90,19 +90,21 @@ internal class LanDiscovery(
         false
     }
 
-    fun startBrowse() {
-        if (browsing) return
-        val manager = nsd ?: return
-        try {
+    fun startBrowse(): Boolean {
+        if (browsing) return true
+        val manager = nsd ?: return false
+        return try {
             manager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+            true
         } catch (e: Throwable) {
             Log.w(TAG, "NSD browse could not start", e)
+            false
         }
     }
 
-    fun advertise(name: String, port: Int, attributes: Map<String, String>) {
-        val manager = nsd ?: return
-        if (name.isBlank() || port !in 1..65535) return
+    fun advertise(name: String, port: Int, attributes: Map<String, String>): Boolean {
+        val manager = nsd ?: return false
+        if (name.isBlank() || port !in 1..65535) return false
         stopAdvertise()
         val info = NsdServiceInfo().apply {
             serviceName = name.take(MAX_SERVICE_NAME)
@@ -114,10 +116,12 @@ internal class LanDiscovery(
                 }
             }
         }
-        try {
+        return try {
             manager.registerService(info, NsdManager.PROTOCOL_DNS_SD, registrationListener)
+            true
         } catch (e: Throwable) {
             Log.w(TAG, "NSD registration could not start", e)
+            false
         }
     }
 

@@ -55,9 +55,8 @@ class NetworkDiscoveryPlugin(private val activity: Activity) : Plugin(activity) 
             }
         }
         activity.runOnUiThread {
-            start()
-            discovery.advertise(name, port, attributes)
-            invoke.resolve(availability(true))
+            val ready = start()
+            invoke.resolve(availability(ready && discovery.advertise(name, port, attributes)))
         }
     }
 
@@ -75,13 +74,12 @@ class NetworkDiscoveryPlugin(private val activity: Activity) : Plugin(activity) 
     }
 
     private fun start(): Boolean {
-        val locked = discovery.acquireMulticastLock()
-        discovery.startBrowse()
-        return locked || hasNearbyPermission() || nsdUsable()
+        if (needsNearbyPermission() && !hasNearbyPermission()) {
+            return false
+        }
+        discovery.acquireMulticastLock()
+        return discovery.startBrowse()
     }
-
-    private fun nsdUsable(): Boolean =
-        activity.getSystemService(android.content.Context.NSD_SERVICE) != null
 
     private fun needsNearbyPermission(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU

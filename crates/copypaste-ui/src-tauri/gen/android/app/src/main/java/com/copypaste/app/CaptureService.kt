@@ -9,17 +9,13 @@ import android.os.IBinder
 /**
  * Keeps the process alive while rung 2 is armed.
  *
- * The logcat reader is a callback path into *this* process, so if the process
- * is reclaimed the reader goes with it and copies stop being saved. A
- * foreground service is the only thing Android offers that says "keep me".
- * It does no work itself; it exists so the reader and the Rust store are both
- * still there when someone copies in another app.
+ * The logcat reader is a callback into this process, so a reclaimed process
+ * stops saving copies. This service does no work itself; it exists so the
+ * reader and the Rust store stay resident.
  *
- * The user's on/off choice is persisted independently of this object and of
- * whether the reader is listening right now. Process death, a dismissed
- * permission prompt, and a failed arm must not write that choice off —
- * [START_STICKY] restarts from the same prefs, and a null intent is a restart,
- * not a disarm.
+ * The on/off choice is persisted independently. [restoreIfArmed] re-arms from
+ * those prefs on the next app start. [START_STICKY] would resurrect a
+ * reader-less service after OEM process death; OEM kills fail closed.
  */
 class CaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -56,7 +52,7 @@ class CaptureService : Service() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {

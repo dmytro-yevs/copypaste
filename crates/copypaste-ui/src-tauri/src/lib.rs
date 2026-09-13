@@ -183,11 +183,11 @@ pub fn run() {
                     .clone();
                 tauri::async_runtime::spawn(async move {
                     if !discovery.acquire().await {
-                        tracing::warn!(
-                            "Wi-Fi multicast lock is unavailable; LAN discovery may be limited"
-                        );
+                        tracing::warn!("Android LAN discovery did not start browsing");
                     }
-                    let _ = discovery.advertise("CopyPaste", &[]).await;
+                    if !discovery.advertise("CopyPaste", &[]).await {
+                        tracing::warn!("Android LAN discovery did not start advertising");
+                    }
                 });
             }
 
