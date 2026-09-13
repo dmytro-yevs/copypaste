@@ -10,11 +10,6 @@ import java.util.WeakHashMap
 internal object WebViewImeInsets {
   private val baseBottomMargins = WeakHashMap<WebView, Int>()
 
-  // Compact Library chrome plus one 77px row. A 640px emulator IME can be
-  // ~390px; applying all of that leaves a 124px list whose row hit target
-  // is no longer tappable.
-  private const val MIN_WEBVIEW_HEIGHT_PX = 420
-
   fun install(
     webView: WebView,
     afterApply: (WebView, WindowInsetsCompat) -> Unit = { _, _ -> },
@@ -59,15 +54,7 @@ internal object WebViewImeInsets {
     } else {
       0
     }
-    val hostHeight = (webView.parent as? ViewGroup)?.height?.takeIf { it > 0 }
-      ?: webView.height
-    val maxImeInset = if (hostHeight > 0) {
-      (hostHeight - MIN_WEBVIEW_HEIGHT_PX).coerceAtLeast(0)
-    } else {
-      visibleImeBottomInset
-    }
-    val desiredBottomMargin = baseBottomMargin +
-      visibleImeBottomInset.coerceAtMost(maxImeInset)
+    val desiredBottomMargin = baseBottomMargin + visibleImeBottomInset
     if (layoutParams.bottomMargin != desiredBottomMargin) {
       layoutParams.bottomMargin = desiredBottomMargin
       webView.layoutParams = layoutParams

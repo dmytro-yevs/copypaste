@@ -362,4 +362,18 @@ describe("Library toolbar compact gutters", () => {
         );
         expect(toolbarCss).not.toMatch(/\.siblings\s*>\s*\*\s*\+\s*\*/);
     });
+
+    it("yields the page title and toolbar padding while the IME is up", () => {
+        const toolbarCss = readFileSync(
+            resolve(process.cwd(), "src/features/history/patterns/LibraryToolbar.module.css"),
+            "utf8",
+        );
+
+        expect(toolbarCss).toMatch(
+            /html\[data-ime\]\)\s+\.header\s*\{[^}]*display:\s*none;/s,
+        );
+        expect(toolbarCss).toMatch(
+            /html\[data-ime\]\)\s+\.toolbar\s*\{[^}]*padding-block:\s*0;/s,
+        );
+    });
 });

@@ -48,7 +48,9 @@
 }
 
 :global(html[data-ime]) .compact > .content {
-  --scroll-dock-clearance: calc(var(--s-1) - var(--s-1));
+  /* The WebView already sat above the IME, so --inset-bottom would
+     reserve the nav bar a second time and push the first row under the dock. */
+  --scroll-dock-clearance: calc(var(--s-9) + var(--s-2) + var(--s-3));
 }
 
 .desktopContent { background: transparent; }
