@@ -79,7 +79,8 @@
     min-block-size: 0;
     max-block-size: 100%;
     flex: 0 1 auto;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     border-radius: var(--r-ctl);
 }
 .previewContent {
