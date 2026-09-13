@@ -69,7 +69,7 @@ export function CaptureArtwork() {
       <CaptureCard className={styles.captureC} icon="code" title="queryClient…" meta="VS Code · 21m" />
 
       <span className={styles.captureCore}>
-        <Icon name="library" weight="duotone" size="lg" />
+        <Icon name="library" weight="duotone" size="lg" className={styles.sceneGlyph} />
         <span className={styles.secureBadge}><Icon name="lock" weight="fill" size="md" /></span>
       </span>
     </div>
@@ -89,7 +89,7 @@ function CaptureCard({
 }) {
   return (
     <span className={`${styles.captureCard} ${className}`}>
-      <span className={styles.captureCardIcon}><Icon name={iconName} weight="duotone" size="md" /></span>
+      <span className={styles.captureCardIcon}><Icon name={iconName} weight="duotone" size="lg" className={styles.cardGlyph} /></span>
       <span className={styles.captureCardCopy}>
         <strong>{title}</strong>
         <small>{meta}</small>
@@ -118,7 +118,7 @@ export function NetworkArtwork({ pairingLimit }: { pairingLimit: number }) {
       </svg>
 
       <span className={styles.networkHub}>
-        <Icon name="devices" weight="duotone" size="lg" />
+        <Icon name="devices" weight="duotone" size="lg" className={styles.sceneGlyph} />
         <span className={styles.networkSecureBadge}>
           <Icon name="lock" weight="fill" size="xs" />
         </span>
@@ -143,7 +143,7 @@ function DeviceNode({
 }) {
   return (
     <span className={`${styles.deviceNode} ${className}`}>
-      <Icon name={iconName} weight="duotone" size="md" />
+      <Icon name={iconName} weight="duotone" size="lg" className={styles.satelliteGlyph} />
     </span>
   );
 }
