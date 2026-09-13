@@ -54,6 +54,7 @@ class CaptureServiceTest {
                 CaptureArmRequest("ongoing", "stopped", "body"),
             ),
         )
+        seedPersistedCopy(context)
         val controller = Robolectric.buildService(CaptureService::class.java)
         val service = controller.create().get()
         val result = service.onStartCommand(
@@ -76,7 +77,7 @@ class CaptureServiceTest {
             ),
         )
         assertTrue(CaptureService.userWantsCapture(context))
-        assertTrue(CaptureService.isArmed(context))
+        assertFalse(CaptureService.isArmed(context))
         CaptureService.stop(context)
         assertFalse(CaptureService.userWantsCapture(context))
         assertFalse(CaptureService.isArmed(context))
@@ -92,6 +93,23 @@ class CaptureServiceTest {
             ) && ClipCascadeCapture.isListening(),
         )
         assertTrue(CaptureService.userWantsCapture(context))
+        assertFalse(CaptureService.isArmed(context))
+    }
+
+    @Test
+    fun restoreIfArmedDoesNotStartWithoutRuntimeGrants() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        assertTrue(
+            CaptureService.rememberArm(
+                context,
+                CaptureArmRequest("ongoing", "stopped", "body"),
+            ),
+        )
+        seedPersistedCopy(context)
+        assertTrue(CaptureService.isArmed(context))
+        assertFalse(ClipCascadeCapture.hasRuntimePermissions(context))
+        assertFalse(CaptureService.restoreIfArmed(context))
+        assertFalse(ClipCascadeCapture.isListening())
     }
 
     @Test
@@ -100,5 +118,14 @@ class CaptureServiceTest {
         assertFalse(CaptureService.start(context, CaptureArmRequest("", "stopped", "body")))
         assertFalse(CaptureService.isArmed(context))
         assertTrue(CaptureService.userWantsCapture(context))
+    }
+
+    private fun seedPersistedCopy(context: Context) {
+        context.getSharedPreferences("capture-service", Context.MODE_PRIVATE)
+            .edit()
+            .putString("ongoingText", "ongoing")
+            .putString("lostTitle", "stopped")
+            .putString("lostBody", "body")
+            .commit()
     }
 }
