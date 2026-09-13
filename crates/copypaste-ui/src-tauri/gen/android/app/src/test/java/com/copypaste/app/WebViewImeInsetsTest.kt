@@ -99,6 +99,42 @@ class WebViewImeInsetsTest {
     assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN, webView.measuredHeight)
   }
 
+  @Test
+  fun aSecondInstallKeepsTheOriginalBaseMargin() {
+    val root = HostLayout(RuntimeEnvironment.getApplication())
+    val webView = LayoutWebView(RuntimeEnvironment.getApplication())
+    root.addView(
+      webView,
+      FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT,
+      ).apply { bottomMargin = ORIGINAL_BOTTOM_MARGIN },
+    )
+    layout(root)
+    WebViewImeInsets.install(webView)
+    dispatchInsets(
+      webView,
+      imeBottom = IME_BOTTOM,
+      imeVisible = true,
+      systemBarBottom = SYSTEM_BAR_BOTTOM,
+      systemBarsVisible = true,
+    )
+    layout(root)
+    var published = 0
+    WebViewImeInsets.install(webView) { _, _ -> published += 1 }
+    dispatchInsets(
+      webView,
+      imeBottom = IME_BOTTOM,
+      imeVisible = true,
+      systemBarBottom = SYSTEM_BAR_BOTTOM,
+      systemBarsVisible = true,
+    )
+    layout(root)
+    assertEquals(1, published)
+    assertEquals(ORIGINAL_BOTTOM_MARGIN + IME_BOTTOM, bottomMarginOf(webView))
+    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - IME_BOTTOM, webView.measuredHeight)
+  }
+
   private fun dispatchInsets(
     webView: WebView,
     imeBottom: Int,

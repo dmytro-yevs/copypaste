@@ -32,11 +32,12 @@ class SystemBarsPlugin(private val activity: Activity) : Plugin(activity) {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
-        ViewCompat.setOnApplyWindowInsetsListener(webView) { _, insets ->
-            publishInsets(webView, insets)
-            insets
+        // One listener per WebView: this plugin used to replace
+        // [WebViewImeInsets], which left the document at full height while
+        // the IME was visible.
+        WebViewImeInsets.install(webView) { host, insets ->
+            publishInsets(host, insets)
         }
-        ViewCompat.requestApplyInsets(webView)
     }
 
     @Command
