@@ -70,16 +70,18 @@ class SystemBarsPlugin(private val activity: Activity) : Plugin(activity) {
         )
         val density = view.resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
         val imeBottom = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
-            insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            cssPx(insets.getInsets(WindowInsetsCompat.Type.ime()).bottom, density)
         } else {
             0
         }
+        // API 36 can report a visible IME window with a tiny inset while the
+        // keyboard is not up. Only treat a real keyboard height as IME-open.
         val next = InsetsPx(
             top = cssPx(bars.top, density),
             right = cssPx(bars.right, density),
             bottom = cssPx(bars.bottom, density),
             left = cssPx(bars.left, density),
-            ime = cssPx(imeBottom, density),
+            ime = if (imeBottom >= 80) imeBottom else 0,
         )
         lastInsets = next
         val webView = this.webView ?: return
