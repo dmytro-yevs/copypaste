@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class WebViewImeInsetsTest {
   @Test
-  fun bottomInsetsKeepTheActualWebViewAboveTheLargestBottomObstruction() {
+  fun imeInsetsShrinkTheWebViewWithoutConsumingSystemBars() {
     val root = HostLayout(RuntimeEnvironment.getApplication())
     val webView = LayoutWebView(RuntimeEnvironment.getApplication())
     root.addView(
@@ -51,9 +51,9 @@ class WebViewImeInsetsTest {
       systemBarBottom = SYSTEM_BAR_BOTTOM,
       systemBarsVisible = true,
     )
-    layout(root)
-    assertEquals(ORIGINAL_BOTTOM_MARGIN + SYSTEM_BAR_BOTTOM, bottomMarginOf(webView))
-    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - SYSTEM_BAR_BOTTOM, webView.measuredHeight)
+    assertFalse(webView.isLayoutRequested)
+    assertEquals(ORIGINAL_BOTTOM_MARGIN, bottomMarginOf(webView))
+    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN, webView.measuredHeight)
 
     dispatchInsets(
       webView,
@@ -63,7 +63,7 @@ class WebViewImeInsetsTest {
       systemBarsVisible = true,
     )
     assertFalse(webView.isLayoutRequested)
-    assertEquals(ORIGINAL_BOTTOM_MARGIN + SYSTEM_BAR_BOTTOM, bottomMarginOf(webView))
+    assertEquals(ORIGINAL_BOTTOM_MARGIN, bottomMarginOf(webView))
 
     dispatchInsets(
       webView,
@@ -84,8 +84,8 @@ class WebViewImeInsetsTest {
       systemBarsVisible = true,
     )
     layout(root)
-    assertEquals(ORIGINAL_BOTTOM_MARGIN + SYSTEM_BAR_BOTTOM, bottomMarginOf(webView))
-    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - SYSTEM_BAR_BOTTOM, webView.measuredHeight)
+    assertEquals(ORIGINAL_BOTTOM_MARGIN + SMALL_IME_BOTTOM, bottomMarginOf(webView))
+    assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - SMALL_IME_BOTTOM, webView.measuredHeight)
 
     dispatchInsets(
       webView,
