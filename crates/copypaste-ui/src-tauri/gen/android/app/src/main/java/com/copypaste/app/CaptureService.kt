@@ -14,32 +14,25 @@ import android.os.IBinder
  * reader and the Rust store stay resident.
  *
  * The on/off choice is persisted independently. [restoreIfArmed] re-arms from
- * those prefs on the next app start. [START_STICKY] would resurrect a
- * reader-less service after OEM process death; OEM kills fail closed.
+ * those prefs only when the runtime grants that make the reader work are still
+ * present. [START_STICKY] would resurrect a reader-less service after OEM
+ * process death; OEM kills fail closed.
  */
 class CaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!userWantsCapture(this)) {
-            ClipCascadeCapture.disarm()
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-
         val copy = notificationCopy(this)
-        if (copy == null) {
+        if (!userWantsCapture(this) ||
+            copy == null ||
+            !CaptureNotifications.canPost(this) ||
+            !ClipCascadeCapture.hasRuntimePermissions(this)
+        ) {
             ClipCascadeCapture.disarm()
             stopSelf(startId)
             return START_NOT_STICKY
         }
 
-        if (!CaptureNotifications.canPost(this)) {
-            ClipCascadeCapture.disarm()
-            CaptureNotifications.postLost(this, copy.lostTitle, copy.lostBody)
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
         CaptureNotifications.ensureChannels(this)
         startForeground(
             CaptureNotifications.ONGOING_ID,
@@ -76,7 +69,7 @@ class CaptureService : Service() {
             if (copy.ongoingText.isBlank() || copy.lostTitle.isBlank() || copy.lostBody.isBlank()) {
                 return false
             }
-            persistWantedAndCopy(context, wanted = true, copy)
+            writeWanted(context, true)
             return true
         }
 
@@ -84,10 +77,16 @@ class CaptureService : Service() {
             if (copy.ongoingText.isBlank() || copy.lostTitle.isBlank() || copy.lostBody.isBlank()) {
                 return false
             }
-            persistWantedAndCopy(context, wanted = true, copy)
-            ClipCascadeCapture.arm(context, {
-                lost(context, copy)
-            })
+            writeWanted(context, true)
+            if (!ClipCascadeCapture.arm(context, {
+                    lost(context, copy)
+                })) {
+                return false
+            }
+            if (!persistCopy(context, copy)) {
+                ClipCascadeCapture.disarm()
+                return false
+            }
             return startService(context)
         }
 
@@ -95,6 +94,8 @@ class CaptureService : Service() {
             if (!userWantsCapture(context)) return false
             if (notificationCopy(context) == null) return false
             if (ClipCascadeCapture.isListening()) return true
+            if (!ClipCascadeCapture.hasRuntimePermissions(context)) return false
+            if (!CaptureNotifications.canPost(context)) return false
             return startService(context)
         }
 
@@ -137,16 +138,13 @@ class CaptureService : Service() {
             context.stopService(Intent(context, CaptureService::class.java))
         }
 
-        private fun persistWantedAndCopy(context: Context, wanted: Boolean, copy: CaptureArmRequest) {
+        private fun persistCopy(context: Context, copy: CaptureArmRequest): Boolean =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
-                .putBoolean(KEY_WANTED, wanted)
-                .putBoolean(KEY_ENABLED, wanted)
                 .putString(KEY_ONGOING_TEXT, copy.ongoingText)
                 .putString(KEY_LOST_TITLE, copy.lostTitle)
                 .putString(KEY_LOST_BODY, copy.lostBody)
                 .commit()
-        }
 
         private fun writeWanted(context: Context, wanted: Boolean) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
