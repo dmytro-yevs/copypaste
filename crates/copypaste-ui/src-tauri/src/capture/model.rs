@@ -228,8 +228,8 @@ impl ToastConsent {
 pub struct CaptureModel {
     /// `Desktop` for the macOS build, and then nothing else here applies.
     platform_rung: Rung,
-    /// The user's switch. Defaults off: rung 2 is an opt-in upgrade, not the
-    /// state a new install starts in.
+    /// The user's switch. Defaults on for Android; only an explicit off
+    /// persists as disabled.
     enabled: bool,
     probe: ShizukuProbe,
     armed: bool,
@@ -260,11 +260,13 @@ impl CaptureModel {
         }
     }
 
-    /// A fresh Android install: rung 0, working, nothing asked of the user.
+    /// A fresh Android install: capture from other apps is on, and missing OS
+    /// grants are surfaced rather than stored as the user turning it off.
     pub fn android() -> Self {
         Self {
             platform_rung: Rung::InApp,
-            enabled: false,
+            enabled: true,
+            armed: false,
             ..Self::desktop()
         }
     }
@@ -515,6 +517,18 @@ mod tests {
         model.set_probe(granted());
         model.record_armed(true);
         model
+    }
+
+    #[test]
+    fn a_fresh_android_install_starts_with_capture_on() {
+        let model = CaptureModel::android();
+        assert_ne!(model.health(), CaptureHealth::Disabled);
+        assert_eq!(
+            model.health(),
+            CaptureHealth::NotGranted {
+                reason: NotGrantedReason::Unsupported
+            }
+        );
     }
 
     /// `CopyPaste-qzhu`: a grant is not evidence. Everything can be in place
