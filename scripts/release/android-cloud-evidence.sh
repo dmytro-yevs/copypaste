@@ -23,6 +23,7 @@ STUB_PID=""
 # The sign-in fields are addressed by their position in the form, because their
 # authored labels are only in the dump from API 36. See [dump_exposes_hint].
 CLOUD_FORM="Cloud account sign in"
+ENDPOINT_FORM="Cloud server configuration"
 FIELD_EMAIL="field:$CLOUD_FORM:0"
 FIELD_PASSWORD="field:$CLOUD_FORM:1"
 FIELD_PASSPHRASE="field:$CLOUD_FORM:2"
@@ -71,6 +72,10 @@ cloud_detail_holds() { # <artifact>
         && enabled_action_exists_exact "$1" "Back to Settings"
 }
 
+cloud_setup_form_holds() { # <artifact>
+    [[ -n "$(selector_center "$1" "Cloud server configuration" any)" ]]
+}
+
 open_cloud() {
     tap_until_state "Settings" "$OUT/settings-nav.xml" \
         cloud_settings_pane_holds none || return 1
@@ -109,6 +114,12 @@ expect_exact_label() { # <selector> <artifact> [timeout] [dump fn] [scroll fn]
         || bad "cloud UI exposes $1" "uiautomator did not find it"
 }
 
+expect_rendered_label() { # <selector> <artifact>
+    wait_selector_scrolling "$1" "$2" up "$WAIT_SECS" rendered \
+        && ok "cloud UI renders $1" \
+        || bad "cloud UI renders $1" "uiautomator did not find it"
+}
+
 # A sync summary is a toast, not a row: it is in the accessibility tree only
 # while it is on screen, and never in the accessibility event stream.
 expect_feedback() { # <selector> <artifact>
@@ -143,6 +154,26 @@ expect_form_fields() { # <artifact> [timeout] [dump fn] [scroll fn]
     else
         note "the authored labels on the cloud sign-in fields" \
              "this image's uiautomator dump emits no hint attribute, which AOSP added in android-16.0.0_r1; Chromium exposes a WebView field's accessible name nowhere else, so the fields are reached by their position in the form instead"
+    fi
+}
+
+expect_endpoint_form_fields() { # <artifact> [timeout] [dump fn] [scroll fn]
+    local shape
+    wait_selector_scrolling "field:$ENDPOINT_FORM:0" "$1" up "${2:-$WAIT_SECS}" any \
+        "${3:-dump_hierarchy}" "${4:-scroll_content}" || true
+    shape="$(form_field_shape "$1" "$ENDPOINT_FORM")"
+    [[ "$shape" == "2 0" ]] \
+        && ok "the cloud server form exposes two non-secret fields" \
+        || bad "the cloud server form exposes two non-secret fields" \
+               "$(evidence_name "$1") holds '$shape'"
+    if dump_exposes_hint "$1"; then
+        expect_label "Server URL" "$OUT/unconfigured-url.xml" "${2:-$WAIT_SECS}" \
+            "${3:-dump_hierarchy}" "${4:-scroll_content}"
+        expect_label "Publishable key" "$OUT/unconfigured-key.xml" "${2:-$WAIT_SECS}" \
+            "${3:-dump_hierarchy}" "${4:-scroll_content}"
+    else
+        note "the authored labels on the cloud server fields" \
+             "this image's uiautomator dump emits no hint attribute; the two fields are asserted by form shape"
     fi
 }
 
@@ -208,12 +239,19 @@ unconfigured_scenario() {
     if install_and_open "$APK_UNCONFIGURED"; then
         if open_cloud; then
             expect_label "Not configured" "$OUT/unconfigured-status.xml"
-            expect_label "Cloud server configuration" "$OUT/unconfigured-form.xml"
-            expect_label "Configure" "$OUT/unconfigured-action.xml"
+            expect_label "Set up cloud sync" "$OUT/unconfigured-setup.xml"
             elapsed=$(( $(now_ms) - started ))
             cloud_latency_record "$LATENCIES" unconfigured-status "$elapsed" 90000 \
                 && ok "unconfigured cloud status meets its latency budget" \
                 || bad "unconfigured cloud status meets its latency budget" "${elapsed}ms"
+            capture_state unconfigured-overview
+            if ! tap_until_state "Set up cloud sync" "$OUT/unconfigured-open.xml" \
+                cloud_setup_form_holds up; then
+                bad "the unconfigured cloud setup action opens its form"
+            fi
+            expect_label "Cloud server configuration" "$OUT/unconfigured-form.xml"
+            expect_endpoint_form_fields "$OUT/unconfigured-form.xml"
+            expect_rendered_label "Configure" "$OUT/unconfigured-action.xml"
             capture_state unconfigured
         else
             bad "the unconfigured cloud row is reachable" \
@@ -221,6 +259,7 @@ unconfigured_scenario() {
         fi
     fi
     require_latency_evidence unconfigured-status
+    require_state_evidence unconfigured-overview
     require_state_evidence unconfigured
 }
 
@@ -575,6 +614,36 @@ cloud_navigation_self_test() { # <temp>
         || bad "Cloud settings retries a swallowed tab tap and verifies its detail pane"
 }
 
+cloud_setup_self_test() { # <temp>
+    (
+        local temp="$1" closed open fields
+        closed='<node text="Set up cloud sync" bounds="[24,410][296,454]" enabled="true" clickable="true"/><node text="Cloud server configuration" bounds="[0,0][0,0]" enabled="true"/>'
+        fields='<node class="android.widget.EditText" password="false" bounds="[24,340][296,384]" enabled="true"/><node class="android.widget.EditText" password="false" bounds="[24,394][296,438]" enabled="true"/>'
+        open="<node text=\"Cloud server configuration\" bounds=\"[24,250][296,510]\" enabled=\"true\">$fields<node text=\"Configure\" bounds=\"[24,466][296,510]\" enabled=\"false\" clickable=\"true\"/></node>"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$closed</node></hierarchy>" > "$temp/setup-closed.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$open</node></hierarchy>" > "$temp/setup-open.xml"
+        ! cloud_setup_form_holds "$temp/setup-closed.xml" \
+            && cloud_setup_form_holds "$temp/setup-open.xml" \
+            && [[ "$(form_field_shape "$temp/setup-open.xml" "$ENDPOINT_FORM")" == "2 0" ]] \
+            || exit 1
+        ui_fixtures "$temp/setup-closed.xml" "$temp/setup-open.xml"
+        dump_hierarchy() { ui_fixture_dump "$@"; }
+        scroll_content() { ui_fixture_scroll "$@"; }
+        tap_transition_point() { navigation_fixture_tap "$@"; }
+        settle_pace() { ui_fixture_pace; }
+        tap_until_state "Set up cloud sync" "$temp/setup-observed.xml" \
+            cloud_setup_form_holds up \
+            && [[ $UI_FIXTURE_INDEX -eq 2 && $UI_FIXTURE_TAPS -eq 1 ]] \
+            && cmp -s "$temp/setup-observed.xml" "$temp/setup-open.xml" \
+            || exit 1
+        ui_fixtures "$temp/setup-open.xml"
+        wait_selector_scrolling "Configure" "$temp/setup-action.xml" up 1 rendered \
+            && [[ -z "$(selector_center "$temp/setup-action.xml" "Configure" action)" ]]
+    ) \
+        && ok "Cloud setup requires opening the disclosure and seeing two fields" \
+        || bad "Cloud setup requires opening the disclosure and seeing two fields"
+}
+
 # Cards taken from run 31671766432's published dumps: the release leg signed in,
 # lost the session to the offline probe, and then asserted a sign-out against
 # the sign-in form that came back.
@@ -736,6 +805,7 @@ if [[ "$MODE" == "--self-test" ]]; then
     android_ui_self_test
     android_navigation_self_test "$SELF_TEST_TMP"
     cloud_navigation_self_test "$SELF_TEST_TMP"
+    cloud_setup_self_test "$SELF_TEST_TMP"
     cloud_form_self_test "$SELF_TEST_TMP"
     sign_out_self_test "$SELF_TEST_TMP"
     cloud_lifecycle_self_test "$SELF_TEST_TMP"
