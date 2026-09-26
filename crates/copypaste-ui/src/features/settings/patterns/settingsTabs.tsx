@@ -80,7 +80,7 @@ export function renderPreferenceSection(
       </>
     );
     case "cloud-sync": return (
-      <CloudSyncSettings />
+      <CloudSyncSettings revealAdvancedKey={controller.revealAdvancedKey} />
     );
     case "storage": return <StorageTab />;
     case "diagnostics": return <DiagnosticsTab view={controller.diagnosticsView} onOpenEvents={controller.onOpenEvents} onBack={controller.onBackFromEvents} />;

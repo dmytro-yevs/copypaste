@@ -43,7 +43,7 @@ export function cloudSettingsPresentation(
         state,
         icon: "cloudOff",
         description: "settings.sync.cloud.notConfigured",
-        badge: { label: "settings.sync.cloud.badgeNotConfigured", variant: "warn" },
+        badge: { label: "settings.sync.cloud.badgeNotConfigured", variant: "secondary" },
       };
     case "signed-out":
       return {
