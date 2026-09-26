@@ -46,6 +46,42 @@ pairing_dialog_closed_holds() { # <accessibility artifact>
         && app_navigation_holds "$1"
 }
 
+RELEASE_FOREIGN_RECOVERIES=0
+RELEASE_FOREIGN_KILL_REASON=""
+
+claim_release_foreign_recovery() { # <log> <original app pid>
+    (( RELEASE_FOREIGN_RECOVERIES == 0 )) || return 1
+    RELEASE_FOREIGN_KILL_REASON="$(foreign_dependency_kill "$1" "$2" 2>/dev/null)" || return 1
+    [[ -n "$RELEASE_FOREIGN_KILL_REASON" ]] || return 1
+    RELEASE_FOREIGN_RECOVERIES=1
+}
+
+release_foreign_recovery_self_test() { # <temporary directory>
+    local temp="$1"
+    printf '%s\n' \
+        'I am_kill : [0,4242,com.copypaste.app,0,empty #17]' \
+        > "$temp/release-unmatched-kill.log"
+    printf '%s\n' \
+        'I am_kill : [0,4242,com.copypaste.app,0,depends on provider com.google.android.gms/.fonts.provider.FontsProvider in dying proc com.google.android.gms.persistent (adj -10000)]' \
+        > "$temp/release-foreign-kill.log"
+    RELEASE_FOREIGN_RECOVERIES=0
+    ! claim_release_foreign_recovery "$temp/release-unmatched-kill.log" 4242 \
+        && (( RELEASE_FOREIGN_RECOVERIES == 0 )) \
+        && ok "an unmatched kill cannot spend release recovery" \
+        || bad "an unmatched kill cannot spend release recovery"
+    claim_release_foreign_recovery "$temp/release-foreign-kill.log" 4242 \
+        && (( RELEASE_FOREIGN_RECOVERIES == 1 )) \
+        && [[ "$RELEASE_FOREIGN_KILL_REASON" == "depends on provider "* ]] \
+        && ok "an exact foreign dependency kill spends one recovery" \
+        || bad "an exact foreign dependency kill spends one recovery"
+    ! claim_release_foreign_recovery "$temp/release-foreign-kill.log" 4242 \
+        && (( RELEASE_FOREIGN_RECOVERIES == 1 )) \
+        && ok "a second foreign kill cannot claim release recovery" \
+        || bad "a second foreign kill cannot claim release recovery"
+    RELEASE_FOREIGN_RECOVERIES=0
+    RELEASE_FOREIGN_KILL_REASON=""
+}
+
 release_history_self_test() { # <temporary directory>
     local temp="$1" canary="CopyPasteReleaseCanaryFixture"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node content-desc=\"Search clipboard history, default\" enabled=\"true\"/><node text=\"$canary\"/></hierarchy>" \
@@ -159,9 +195,15 @@ assert block2a.index("android_recover_onboarding") < block2a.index("reach_settin
 assert 'tap_selector "Devices"' in block2a
 assert "Connect a device" in block2a
 assert "Scan pairing code" in block2a
-assert 'node_center "$OUT/pairing-entry.xml" "Show pairing code"' in block2a
-assert 'node_center "$OUT/pairing-entry.xml" "Scan pairing code"' in block2a
-assert 'node_center "$OUT/pairing-entry.xml" "Enter pairing code"' in block2a
+assert 'node_center "$pairing_entry_artifact" "Show pairing code"' in block2a
+assert 'node_center "$pairing_entry_artifact" "Scan pairing code"' in block2a
+assert 'node_center "$pairing_entry_artifact" "Enter pairing code"' in block2a
+assert 'dump_logcat pairing-first' in block2a
+assert 'dump_logcat pairing-retry' in block2a
+assert '"$(app_pid)" != "$pairing_pid"' in block2a
+assert 'claim_release_foreign_recovery "$OUT/pairing-first.log" "$pairing_pid"' in block2a
+assert 'pairing_entry_artifact="$OUT/pairing-retry-entry.xml"' in block2a
+assert 'accessibility=${pairing_entry_artifact##*/}' in prod
 assert block4a.index("android_recover_onboarding") < block4a.index('tap_until_state "Library"')
 assert "history_capture_current_holds" in block4a
 assert "seed_onboarding_complete" not in prod
@@ -181,6 +223,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     release_history_navigation_self_test "$SELF_TEST_TMP"
     release_history_receipt_self_test
     release_onboarding_recovery_self_test
+    release_foreign_recovery_self_test "$SELF_TEST_TMP"
     [[ $FAIL -eq 0 ]]
     exit $?
 fi
@@ -305,21 +348,53 @@ else
 fi
 
 group "2a. Android pairing entry is a scanner"
+pairing_pid="$pid1"
+pairing_reached=0
+pairing_entry_artifact="$OUT/pairing-entry.xml"
 if android_recover_onboarding "$OUT/pairing-onboarding.xml" 30 \
     && reach_settings_tab "$OUT/pairing-shell.xml" 30 \
     && tap_selector "Devices" "$OUT/pairing-devices-action.xml" 15 \
     && wait_selector "Connect a device" "$OUT/pairing-devices.xml" 15 \
     && tap_selector "Connect a device" "$OUT/pairing-launcher-action.xml" 15 \
     && wait_selector "Scan pairing code" "$OUT/pairing-entry.xml" 15; then
-    if [[ -n "$(node_center "$OUT/pairing-entry.xml" "Show pairing code")" ]] \
-        && [[ -n "$(node_center "$OUT/pairing-entry.xml" "Scan pairing code")" ]] \
-        && [[ -z "$(node_center "$OUT/pairing-entry.xml" "Enter pairing code")" ]]; then
+    pairing_reached=1
+else
+    dump_logcat pairing-first
+    sh_ dumpsys window > "$OUT/pairing-first-focus.txt" 2>&1 || true
+    if [[ -n "$pairing_pid" && "$(app_pid)" != "$pairing_pid" ]] \
+        && claim_release_foreign_recovery "$OUT/pairing-first.log" "$pairing_pid"; then
+        probe "the platform killed the release app during pairing" "$RELEASE_FOREIGN_KILL_REASON"
+        sh_ am force-stop "$PKG" 2>/dev/null || true
+        sleep 2
+        adb logcat -c || true
+        sh_ am start -W -n "$MAIN" > "$OUT/pairing-relaunch.txt" 2>&1
+        if wait_for 30 has_pid; then
+            pid1="$(app_pid)"
+            if android_recover_onboarding "$OUT/pairing-retry-onboarding.xml" 30 \
+                && reach_settings_tab "$OUT/pairing-retry-shell.xml" 30 \
+                && tap_selector "Devices" "$OUT/pairing-retry-devices-action.xml" 15 \
+                && wait_selector "Connect a device" "$OUT/pairing-retry-devices.xml" 15 \
+                && tap_selector "Connect a device" "$OUT/pairing-retry-launcher-action.xml" 15 \
+                && wait_selector "Scan pairing code" "$OUT/pairing-retry-entry.xml" 15; then
+                pairing_reached=1
+                pairing_entry_artifact="$OUT/pairing-retry-entry.xml"
+            else
+                dump_logcat pairing-retry
+                sh_ dumpsys window > "$OUT/pairing-retry-focus.txt" 2>&1 || true
+            fi
+        fi
+    fi
+fi
+if (( pairing_reached )); then
+    if [[ -n "$(node_center "$pairing_entry_artifact" "Show pairing code")" ]] \
+        && [[ -n "$(node_center "$pairing_entry_artifact" "Scan pairing code")" ]] \
+        && [[ -z "$(node_center "$pairing_entry_artifact" "Enter pairing code")" ]]; then
         ok "Android offers Show pairing code and Scan pairing code"
     else
         bad "Android offers Show pairing code and Scan pairing code" \
             "the launcher did not expose the platform-specific pairing actions"
     fi
-    if pairing_ax="$(PKG="$PKG" SMOKE_OUT="$OUT" NATIVE_AX_TREE="$OUT/pairing-entry.xml" \
+    if pairing_ax="$(PKG="$PKG" SMOKE_OUT="$OUT" NATIVE_AX_TREE="$pairing_entry_artifact" \
         "$(dirname "${BASH_SOURCE[0]}")/android-native-accessibility.sh" 2>&1)"; then
         ok "the Android pairing entry is covered by the native accessibility surface: $pairing_ax"
     else
@@ -445,9 +520,9 @@ stripped2="$(r8_report "$OUT/release-capture.log" "$pid1")"
 # and the platform kills every client of the dying provider — including this
 # app. Relaunch and retry once; a second foreign kill is the emulator image's
 # own problem and stays the caller's to note.
-release_doorway_foreign_kill="$(foreign_dependency_kill "$OUT/release-capture.log" "$pid1" 2>/dev/null || true)"
-if [[ -z "$(app_pid)" && -n "$release_doorway_foreign_kill" ]]; then
-    probe "the platform killed the release app during doorways" "$release_doorway_foreign_kill"
+if [[ -z "$(app_pid)" ]] \
+    && claim_release_foreign_recovery "$OUT/release-capture.log" "$pid1"; then
+    probe "the platform killed the release app during doorways" "$RELEASE_FOREIGN_KILL_REASON"
     sh_ am force-stop "$PKG" 2>/dev/null || true
     sleep 2
     adb logcat -c || true
@@ -525,9 +600,9 @@ PY
         --elapsed-ms "$paint_elapsed_ms" \
         --qualified-artifact "$APK" \
         --qualified-artifact-identity "$qualified_artifact_identity" \
-        --feature-state devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml \
+        --feature-state "devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=${pairing_entry_artifact##*/}" \
         --artifact screenshot=pairing-entry.png \
-        --artifact accessibility=pairing-entry.xml \
+        --artifact "accessibility=${pairing_entry_artifact##*/}" \
         --artifact screenshot=history-ui.png \
         --artifact accessibility=history-ui.xml \
         --artifact measurement=latency.json \
