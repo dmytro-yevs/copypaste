@@ -25,7 +25,7 @@ import {
   sortedItemIds,
   withCleanupPreservingPrimary,
 } from "../src/harness/history-controls.js";
-import { itemRows, listSnapshot, rowBoxes } from "../src/harness/list.js";
+import { itemRows, listSnapshot, rowBoxes, type RowBox } from "../src/harness/list.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
   readTouchCapabilityDiagnostic,
@@ -142,9 +142,7 @@ async function closeKindMenu(): Promise<void> {
   await waitForKindMenu(false);
 }
 
-function itemIdsForMarker(
-  rows: { id: string; text: string }[],
-): string[] {
+function itemIdsForMarker(rows: readonly RowBox[]): string[] {
   return sortedItemIds(
     itemRows(rows)
       .filter((row) => row.text.includes(marker))
