@@ -6,6 +6,10 @@ const screenCss = readFileSync(
   resolve(process.cwd(), "src/features/onboarding/screen/OnboardingScreen.module.css"),
   "utf8",
 );
+const screenSource = readFileSync(
+  resolve(process.cwd(), "src/features/onboarding/screen/OnboardingScreen.tsx"),
+  "utf8",
+);
 const artworkCss = readFileSync(
   resolve(process.cwd(), "src/features/onboarding/components/OnboardingArtwork.module.css"),
   "utf8",
@@ -16,6 +20,12 @@ const artworkSource = readFileSync(
 );
 
 describe("Onboarding responsive layout", () => {
+  it("styles the current step represented by the pagination buttons", () => {
+    expect(screenSource).toContain('aria-current={dotIndex === index ? "step" : undefined}');
+    expect(screenCss.match(/\.dot\[aria-current="step"\]::before/g)).toHaveLength(2);
+    expect(screenCss).not.toContain("aria-selected");
+  });
+
   it("collapses the split layout at the maintained narrow toolbar breakpoint", () => {
     expect(screenCss).toMatch(
       /@media \(--cp-toolbar\)[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/,
