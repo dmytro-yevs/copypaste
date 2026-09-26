@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui";
 import {
   ActionButton,
+  FieldFeedback,
   MetadataLabel,
   MetadataList,
   MetadataRow,
@@ -17,6 +18,12 @@ import {
   type DeviceStatusPresentation,
 } from "@/features/devices/model/devicePresentation";
 import type { ManualSyncAttempt } from "@/features/devices/model/peerState";
+import {
+  syncReadinessIsLoading,
+  syncReadinessMessage,
+  syncReadinessRecovery,
+  type SyncReadiness,
+} from "@/features/devices/model";
 import { DeviceNameField } from "@/features/devices/patterns/DeviceNameField";
 import { peerPresence } from "@/features/devices/model/peerState";
 import { DiscoveredDeviceDetails } from "@/features/devices/patterns/DiscoveredDeviceDetails";
@@ -58,11 +65,13 @@ interface DeviceDetailPaneProps {
   target: DeviceDetailTarget | null;
   discoveryPairing?: ReactNode;
   syncing: boolean;
+  syncReadiness: SyncReadiness;
   unpairing: boolean;
   revoking: boolean;
   compact: boolean;
   onClose?: () => void;
   onSync: (peer: PeerInfo) => void;
+  onRecoverSync: () => void;
   onUnpair: (peer: PeerInfo) => void;
   onRevoke: (peer: PeerInfo) => void;
 }
@@ -71,16 +80,20 @@ export function DeviceDetailPane({
   target,
   discoveryPairing,
   syncing,
+  syncReadiness,
   unpairing,
   revoking,
   compact,
   onClose,
   onSync,
+  onRecoverSync,
   onUnpair,
   onRevoke,
 }: DeviceDetailPaneProps) {
   const { t } = useTranslation();
+  const syncReasonId = useId();
   if (target === null) return null;
+  const syncRecovery = syncReadinessRecovery(syncReadiness);
   const peerPresenceState = target.kind === "peer" ? peerPresence(target.peer) : "unknown";
 
   const platform = target.identity.platform === "unknown"
@@ -233,19 +246,38 @@ export function DeviceDetailPane({
 
       {target.kind === "peer" ? (
         <div className={styles.actions} aria-label={t("devices.presentation.detail.actions")}>
+          {syncReadiness !== "ready" && (
+            <FieldFeedback
+              id={syncReasonId}
+              state={syncReadinessIsLoading(syncReadiness) ? "pending"
+                : syncReadiness === "disabled" || syncReadiness === "no-peers" ? "neutral" : "warning"}
+            >
+              {syncReadinessMessage(syncReadiness)}
+            </FieldFeedback>
+          )}
           <Button
             type="button"
             variant="secondary"
             size="sm"
-            disabled={syncing || unpairing || revoking}
+            disabled={syncing || unpairing || revoking || syncReadiness !== "ready"}
+            aria-describedby={syncReadiness !== "ready" ? syncReasonId : undefined}
             state={syncing ? "loading" : "normal"}
-            onClick={() => onSync(target.peer)}
+            onClick={() => {
+              if (syncReadiness === "ready") onSync(target.peer);
+            }}
           >
             {!syncing ? <Icon name="refresh" aria-hidden="true" /> : null}
             {syncing
               ? t("devices.presentation.detail.syncing")
               : t("devices.presentation.detail.syncNow")}
           </Button>
+          {syncRecovery !== null && (
+            <Button type="button" variant="ghost" size="sm" onClick={onRecoverSync}>
+              {syncRecovery === "enable-sync"
+                ? t("devices.syncReadiness.openSettings")
+                : t("common.tryAgain")}
+            </Button>
+          )}
           <Button
             type="button"
             variant="secondary"
