@@ -8,7 +8,7 @@ import { Surface } from "@/components/ui";
 import { QuickPasteLoadingState } from "@/features/quick-paste/components/QuickPasteLoadingState";
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
 import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";
-import { requireClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
+import { clipboardWriteAvailabilityOptions, requireClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { useItemBody } from "@/hooks/useItemBody";
 import {
   QUICK_PASTE_QUERY_KEY,
@@ -161,11 +161,20 @@ export function QuickPasteScreen() {
     [currentCacheGeneration, isCacheGenerationCurrent, refetch],
   );
 
-  const { selectedId, onKeyDown, selectFromPointer, noteScroll } = useQuickPasteSelection({
+  const canCopy = useCallback(
+    (item: Item, plainText: boolean) =>
+      queryClient.getQueryData(
+        clipboardWriteAvailabilityOptions(item.content_type, plainText ? "plain_text" : "original").queryKey,
+      ) === "available",
+    [queryClient],
+  );
+
+  const { selectedId, onKeyDown, selectFromPointer, selectFromKeyboard, noteScroll } = useQuickPasteSelection({
     active: holding,
     items,
     query,
     listRef,
+    canCopy,
     onCopy: copyAndDismiss,
     onDismiss: dismiss,
   });
@@ -271,7 +280,8 @@ export function QuickPasteScreen() {
                 fullContent={selectedId === item.id ? selectedBody.text : null}
                 fullContentFailed={selectedId === item.id && selectedBody.failed}
                 onSelect={() => selectFromPointer(item.id)}
-                onCopy={() => void copyAndDismiss(item)}
+                onSelectFromKeyboard={() => selectFromKeyboard(item.id)}
+                onCopy={(plainText) => void copyAndDismiss(item, plainText)}
                 onTogglePin={() => void changePin(item.id, !item.pinned)}
               />
             ))

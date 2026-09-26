@@ -1,14 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
 import { TooltipProvider } from "@/components/ui";
 import { quickPastePresentation } from "@/features/quick-paste/model/quickPastePresentation";
-import { item } from "@/test/harness";
+import { item, testClient } from "@/test/harness";
+import { QueryClientProvider } from "@tanstack/react-query";
 
+const clipboardAvailability = vi.hoisted(() => ({ value: "available" }));
 vi.mock("@/hooks/useClipboardWriteAvailability", () => ({
-  useClipboardWriteAvailability: () => ({ isPending: false, isError: false, data: "available" }),
+  useClipboardWriteAvailability: () => ({ isPending: false, isError: false, data: clipboardAvailability.value }),
 }));
 
 const unsupported = item({
@@ -18,6 +20,47 @@ const unsupported = item({
 });
 
 describe("QuickPasteRow", () => {
+  beforeEach(() => { clipboardAvailability.value = "available"; });
+
+  it("selects an unavailable row by touch or keyboard without invoking copy", async () => {
+    clipboardAvailability.value = "unsupported_on_platform";
+    const onSelect = vi.fn();
+    const onSelectFromKeyboard = vi.fn();
+    const onCopy = vi.fn();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteRow
+          item={item({ content: null, content_type: "image/png", content_class: "image" })}
+          active
+          previewLines={2}
+          shortcut="⌘1"
+          pinPending={false}
+          origin={null}
+          fullContent={null}
+          fullContentFailed={false}
+          onSelect={onSelect}
+          onSelectFromKeyboard={onSelectFromKeyboard}
+          onCopy={onCopy}
+          onTogglePin={() => {}}
+        /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    const copy = screen.getByRole("button", { name: "Copy Image" });
+    const select = screen.getByRole("button", { name: "Select Image" });
+    expect(copy.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("This clipboard format can’t be copied on this device.")).toBeTruthy();
+    expect(screen.queryByText("⌘1")).toBeNull();
+    fireEvent.pointerDown(select, { pointerType: "touch", button: 0 });
+    fireEvent.pointerUp(select, { pointerType: "touch", button: 0 });
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onCopy).not.toHaveBeenCalled();
+
+    select.focus();
+    await userEvent.setup().keyboard("{Enter}");
+    expect(onSelectFromKeyboard).toHaveBeenCalledOnce();
+    expect(onCopy).not.toHaveBeenCalled();
+  });
   it("keeps unsupported payload text out of its body and copy label", () => {
     render(
       <TooltipProvider>
@@ -31,6 +74,7 @@ describe("QuickPasteRow", () => {
           fullContent={null}
           fullContentFailed={false}
           onSelect={() => {}}
+          onSelectFromKeyboard={() => {}}
           onCopy={() => {}}
           onTogglePin={() => {}}
         />
@@ -50,7 +94,7 @@ describe("QuickPasteRow", () => {
     const raw = "raw secret fragment";
     render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ content: raw, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview } })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ content: raw, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview } })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
@@ -63,7 +107,7 @@ describe("QuickPasteRow", () => {
     const user = userEvent.setup();
     render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ content: "short preview", truncated: true })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent="complete body" fullContentFailed={false} onSelect={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ content: "short preview", truncated: true })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent="complete body" fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
@@ -89,7 +133,7 @@ describe("QuickPasteRow", () => {
     const user = userEvent.setup();
     render(
       <TooltipProvider>
-        <QuickPasteRow item={target} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={failed} onSelect={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={target} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={failed} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
@@ -102,7 +146,7 @@ describe("QuickPasteRow", () => {
     const raw = "raw secret fragment";
     render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ content: raw, truncated: true, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview: "••••• fragment" } })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed onSelect={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ content: raw, truncated: true, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview: "••••• fragment" } })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 

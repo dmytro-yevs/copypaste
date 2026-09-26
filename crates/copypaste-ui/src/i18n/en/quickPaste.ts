@@ -63,6 +63,7 @@ export const quickPaste = {
     pin: "Pin",
     unpin: "Unpin",
     copyPrefix: "Copy",
+    selectPrefix: "Select",
     plainTextPrefix: "Plain text copy",
     fullLoading: "Loading the complete value…",
     fullUnavailable: "The complete value could not be loaded.",
