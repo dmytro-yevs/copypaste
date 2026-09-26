@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Container, Screen, ScrollViewport } from "@/components/layout";
-import { ScreenHeader, StatusCard } from "@/components/shared";
+import { ScreenHeader } from "@/components/shared";
 import {
-    Button,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -20,12 +19,6 @@ import {
     noteSync,
     type PeerHealthMap,
 } from "@/features/devices/model/peerState";
-import {
-    syncReadinessIsLoading,
-    syncReadinessMessage,
-    syncReadinessOf,
-    syncReadinessRecovery,
-} from "@/features/devices/model";
 import { DeviceDetailPane } from "@/features/devices/patterns/DeviceDetailPane";
 import {
     DeviceRoster,
@@ -38,6 +31,10 @@ import {
 import { DevicesDialogs } from "@/features/devices/patterns/DevicesDialogs";
 import { DevicesHeaderActions } from "@/features/devices/patterns/DevicesHeaderActions";
 import { PairingLauncherDialog } from "@/features/devices/patterns/PairingLauncherDialog";
+import {
+    DeviceSyncReadinessNotice,
+    useDeviceSyncReadiness,
+} from "@/features/devices/patterns/DeviceSyncReadiness";
 import {
     selectDeviceStatus,
     useDeviceDetailTarget,
@@ -58,7 +55,6 @@ import {
     useObservedElementSize,
     useViewportMetrics,
 } from "@/hooks/useViewportMetrics";
-import { useTranslation } from "@/i18n";
 import type { DiscoveredDevice, PeerInfo } from "@/lib/ipc";
 import { EXPANDED_MIN_PX } from "@/lib/layoutBreakpoints";
 import { currentPlatform } from "@/lib/platform";
@@ -72,7 +68,6 @@ function layoutFor(width: number): DeviceLayout {
 }
 
 export function DevicesScreen() {
-    const { t } = useTranslation();
     const { width: viewportWidth } = useViewportMetrics();
     const { ref: rootRef, width: rootWidth } =
         useObservedElementSize<HTMLElement>();
@@ -96,8 +91,8 @@ export function DevicesScreen() {
     const config = useServiceConfig();
     const cloud = useCloudStatus();
     const peers = usePeers();
-    const syncReadiness = syncReadinessOf({ service: own, config, peers });
-    const syncRecovery = syncReadinessRecovery(syncReadiness);
+    const { readiness: syncReadiness, recover: recoverSync } =
+        useDeviceSyncReadiness({ service: own, config, peers });
     const discovered = useDiscovered();
     const rescan = useRescan();
     const sync = useSyncNow();
@@ -245,23 +240,6 @@ export function DevicesScreen() {
         setSettingsTab("sync");
         setView("settings");
     };
-    const recoverSync = () => {
-        switch (syncRecovery) {
-            case "retry-service":
-                void own.refetch();
-                break;
-            case "retry-config":
-                void config.refetch();
-                break;
-            case "retry-peers":
-                void peers.refetch();
-                break;
-            case "enable-sync":
-                setSettingsTab("device-sync");
-                setView("settings");
-                break;
-        }
-    };
     const selectDevice = (key: DeviceSelectionKey) => {
         detailReturnKey.current = key;
         setSelectedDiscovered(null);
@@ -350,21 +328,10 @@ export function DevicesScreen() {
                             />
                         }
                     />
-                    {syncReadiness !== "ready" && syncReadiness !== "no-peers" ? (
-                        <StatusCard
-                            status={syncReadinessIsLoading(syncReadiness) ? "info"
-                                : syncReadiness === "disabled" ? "off" : "attention"}
-                            title={syncReadinessMessage(syncReadiness)}
-                            busy={syncReadinessIsLoading(syncReadiness)}
-                            action={syncRecovery === null ? undefined : (
-                                <Button variant="secondary" size="sm" onClick={recoverSync}>
-                                    {syncRecovery === "enable-sync"
-                                        ? t("devices.syncReadiness.openSettings")
-                                        : t("common.tryAgain")}
-                                </Button>
-                            )}
-                        />
-                    ) : null}
+                    <DeviceSyncReadinessNotice
+                        readiness={syncReadiness}
+                        onRecover={recoverSync}
+                    />
                     {visibleSummary ? (
                         <ConnectionSummary
                             summary={visibleSummary}
