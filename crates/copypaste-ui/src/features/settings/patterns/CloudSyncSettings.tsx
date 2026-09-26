@@ -24,24 +24,10 @@ export function CloudSyncSettings() {
     status,
     cloud.isError,
     cloud.isLoading,
+    controller.syncError,
   );
 
-  const badge = t(cloud.isLoading
-    ? "settings.sync.cloud.loading"
-    : cloud.isError
-      ? "settings.sync.cloud.badgeUnavailable"
-      : !configured
-        ? "settings.sync.cloud.badgeNotConfigured"
-        : connected
-          ? "settings.sync.cloud.badgeConnected"
-          : "settings.sync.cloud.badgeSignedOut");
-  const connectionDescription = t(cloud.isLoading
-    ? "settings.sync.cloud.loading"
-    : cloud.isError
-      ? "settings.sync.cloud.statusUnavailable"
-      : configured
-        ? "settings.sync.cloud.description"
-        : "settings.sync.cloud.notConfigured");
+  const connectionDescription = t(cloudPresentation.description);
 
   const connectionMessage = controller.syncError
     ? t("settings.sync.cloud.syncError")
@@ -55,9 +41,9 @@ export function CloudSyncSettings() {
             })
           : null;
 
-  const statusControl = cloud.isLoading ? (
+  const statusControl = cloudPresentation.state === "checking" ? (
     <SkeletonText width="xs" />
-  ) : cloud.isError ? (
+  ) : cloudPresentation.state === "unavailable" ? (
     <Button
       variant="secondary"
       size="sm"
@@ -66,11 +52,11 @@ export function CloudSyncSettings() {
     >
       {t("settings.sync.cloud.retry")}
     </Button>
-  ) : (
-    <Badge variant={!configured ? "warn" : connected ? "ok" : "secondary"}>
-      {badge}
+  ) : cloudPresentation.badge ? (
+    <Badge variant={cloudPresentation.badge.variant}>
+      {t(cloudPresentation.badge.label)}
     </Badge>
-  );
+  ) : null;
   const statusIcon = cloudPresentation.icon;
 
   return (

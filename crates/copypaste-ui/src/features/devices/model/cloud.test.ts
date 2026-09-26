@@ -24,9 +24,16 @@ describe("cloud connection state", () => {
     ["missing status", undefined, false, false, "unavailable"],
     ["not configured", status(), false, false, "not-configured"],
     ["signed out", status({ configured: true }), false, false, "signed-out"],
-    ["attention", status({ configured: true, signed_in: true, key_ready: true, last_error: "failed" }), false, false, "attention"],
+    ["last error attention", status({ configured: true, signed_in: true, key_ready: true, last_error: "failed" }), false, false, "attention"],
+    ["unreadable uploads attention", status({ configured: true, signed_in: true, key_ready: true, unreadable_uploads: 2 }), false, false, "attention"],
     ["healthy", status({ configured: true, signed_in: true, key_ready: true }), false, false, "healthy"],
   ] as const)("classifies %s without a screen dependency", (_case, value, failed, loading, expected) => {
     expect(cloudConnectionState(value, failed, loading)).toBe(expected);
+  });
+
+  it("classifies an immediate sync failure as attention before status refreshes", () => {
+    const healthy = status({ configured: true, signed_in: true, key_ready: true });
+    expect(cloudConnectionState(healthy, false, false, true)).toBe("attention");
+    expect(cloudConnectionState(healthy, false, false, false)).toBe("healthy");
   });
 });
