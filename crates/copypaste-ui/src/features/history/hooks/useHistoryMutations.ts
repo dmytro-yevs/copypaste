@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
+import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";
+import { requireClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { acceleratorLabel } from "@/lib/accelerator";
 import { toFriendly } from "@/lib/errors";
 import {
@@ -21,7 +23,18 @@ import { imagePreviewKey } from "@/lib/imagePreviewQuery";
 export function useCopy() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (item: Item) => copyItem(item.id),
+    mutationFn: async (item: Item) => {
+      let availability;
+      try {
+        availability = await requireClipboardWriteAvailability(qc, item.content_type);
+      } catch {
+        throw new CopyAvailabilityFailure("failed");
+      }
+      if (availability !== "available") {
+        throw new CopyAvailabilityFailure(availability);
+      }
+      return copyItem(item.id);
+    },
     onSuccess: async () => {
       const shortcut = acceleratorLabel("CmdOrCtrl+V");
       toast.success(shortcut
@@ -29,8 +42,24 @@ export function useCopy() {
         : t("history.toast.copiedGeneric"), { duration: 2500 });
       await invalidateHistoryQueries(qc);
     },
-    onError: (raw) => toast.error(toFriendly(raw)),
+    onError: (raw) => {
+      if (raw instanceof CopyAvailabilityFailure) {
+        toast.error(clipboardCopyPresentation(
+          raw.reason === "failed"
+            ? { status: "failed" }
+            : { status: "resolved", availability: raw.reason },
+        ).reason ?? t("history.copyAvailability.failed"));
+      } else {
+        toast.error(toFriendly(raw));
+      }
+    },
   });
+}
+
+class CopyAvailabilityFailure extends Error {
+  constructor(readonly reason: "failed" | "unsupported_content_type" | "unsupported_on_platform") {
+    super("Clipboard write unavailable");
+  }
 }
 
 export function usePin() {
