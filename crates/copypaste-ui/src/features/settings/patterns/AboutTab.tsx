@@ -21,7 +21,9 @@ import {
   Button,
 } from "@/components/ui";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { capturePresentationOf } from "@/features/capture/model";
 import { UpdateRow } from "@/features/settings/components/UpdateRow";
+import { useCaptureState } from "@/hooks/useCapture";
 import { statusService, useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
 import { appVersion as readAppVersion } from "@/lib/appVersion";
@@ -57,6 +59,7 @@ function RuntimeRow({ title, children }: { title: string; children: ReactNode })
 export function AboutTab() {
   const { t } = useTranslation();
   const status = useStatus(statusService);
+  const capture = useCaptureState();
   const resetPrefs = usePrefs((state) => state.reset);
   const openOnboarding = useUi((state) => state.openOnboarding);
   const [version, setVersion] = useState(__COPYPASTE_APP_VERSION__);
@@ -79,13 +82,21 @@ export function AboutTab() {
     : true;
   const mismatch = status.data !== undefined &&
     status.data.protocol_version !== CURRENT_PROTOCOL_VERSION;
-  const captureLabel = status.data
-    ? t(
-        status.data.capture_running
-          ? "settings.about.capture.running"
-          : "settings.about.capture.paused",
-      )
-    : "";
+  const snapshot = capture.data;
+  const desktopCapture = snapshot?.rung === "desktop";
+  const capturePresentation = snapshot === undefined
+    ? undefined
+    : capturePresentationOf(snapshot.health);
+  const captureVariant = desktopCapture
+    ? status.data?.capture_running ? "ok" : "warn"
+    : capturePresentation?.tone === "positive" ? "ok"
+      : capturePresentation?.tone === "danger" ? "error"
+        : capturePresentation?.tone === "attention" ? "warn" : "info";
+  const captureLabel = desktopCapture
+    ? t(status.data?.capture_running
+      ? "settings.about.capture.running"
+      : "settings.about.capture.paused")
+    : snapshot?.headline;
 
   return (
     <div className={styles.root}>
@@ -120,11 +131,20 @@ export function AboutTab() {
           </RuntimeRow>
 
           <RuntimeRow title={t("settings.about.capture.title")}>
-            {status.data ? (
-              <Badge variant={status.data.capture_running ? "ok" : "warn"}>
+            {capture.isError || (desktopCapture && status.isError) ? (
+              <Badge variant="warn">{t("settings.about.capture.unavailable")}</Badge>
+            ) : snapshot && (!desktopCapture || status.data) ? (
+              <Badge variant={captureVariant} className={styles.valueBadge}>
                 {captureLabel}
+                {!desktopCapture && snapshot.health.state !== "working"
+                  ? ` ${t("settings.about.capture.manualAvailable")}`
+                  : ""}
               </Badge>
-            ) : <SkeletonText width="xs" />}
+            ) : (
+              <Badge variant="secondary" role="status" aria-label={t("settings.about.capture.loading")}>
+                {t("settings.about.capture.loading")}
+              </Badge>
+            )}
           </RuntimeRow>
 
           <RuntimeRow title={t("settings.about.backend.title")}>

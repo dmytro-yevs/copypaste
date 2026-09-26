@@ -150,10 +150,11 @@ export const settings = {
   sync: {
     paired: {
       title: "Paired devices",
-      description: "Syncs directly between devices with end-to-end encryption.",
+      description: "Pairings for direct, end-to-end encrypted sync. Pairing doesn't show whether a device is connected.",
       none: "None",
       count: "{{n}} paired",
       manage: "Manage devices",
+      checking: "Checking…",
       /** Said of peer sync, which the service could not answer for. It is not
        *  the cloud row's badge, which is a standing fact about the build. */
       unavailable: "Unavailable",
@@ -163,6 +164,14 @@ export const settings = {
       description: "Syncs every paired device now.",
       action: "Sync now",
       pending: "Syncing…",
+      disabled: "Device sync is off. Turn on Sync with paired devices in Service settings.",
+      openService: "Open Service settings",
+      configLoading: "Checking whether device sync is on…",
+      configUnavailable: "CopyPaste couldn't read the device sync setting. Try again in Service settings.",
+      noPeers: "Pair a device before syncing.",
+      peersUnavailable: "CopyPaste couldn't read paired devices.",
+      failed: "Sync couldn't start.",
+      partial: "Some devices couldn't sync. Review them in Manage devices.",
     },
     cloud: settingsCloud,
   },
@@ -400,6 +409,9 @@ export const settings = {
       description: "Shows whether new copies are being saved.",
       running: "Running",
       paused: "Paused",
+      loading: "Checking…",
+      unavailable: "Unavailable",
+      manualAvailable: "You can still save from CopyPaste, Android Share, or the Quick Settings tile.",
     },
     backend: {
       title: "Clipboard backend",
