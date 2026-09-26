@@ -1,8 +1,9 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { Badge, Button, Icon } from "@/components/ui";
 import { FieldFeedback, SkeletonText } from "@/components/shared";
 import { Section } from "@/features/settings/components/Section";
+import { SettingsDisclosure } from "@/features/settings/components/SettingsDisclosure";
 import { useCloudAccountController } from "@/features/settings/hooks/useCloudAccountController";
 import { cloudSettingsPresentation } from "@/features/settings/model/cloudPresentation";
 import { CloudAccountForm } from "@/features/settings/patterns/cloud/CloudAccountForm";
@@ -11,15 +12,26 @@ import { CloudEndpointForm } from "@/features/settings/patterns/cloud/CloudEndpo
 import { useTranslation } from "@/i18n";
 import styles from "./CloudSyncSettings.module.css";
 
-export function CloudSyncSettings() {
+export function CloudSyncSettings({ revealAdvancedKey }: { revealAdvancedKey?: string }) {
   const { t } = useTranslation();
   const connectionDescriptionId = useId();
+  const setupDescriptionId = useId();
   const serverDescriptionId = useId();
   const accountDescriptionId = useId();
+  const [setupRevealKey, setSetupRevealKey] = useState<number>();
   const controller = useCloudAccountController();
   const { cloud, status } = controller;
   const configured = Boolean(status?.configured);
   const connected = Boolean(status?.signed_in && status.key_ready);
+
+  useEffect(() => {
+    if (revealAdvancedKey === undefined) return;
+    setSetupRevealKey(undefined);
+    if (
+      revealAdvancedKey.startsWith("settings.sync.cloud.endpoint.url:") ||
+      revealAdvancedKey.startsWith("settings.sync.cloud.endpoint.publishableKey:")
+    ) controller.openEndpointEditor();
+  }, [revealAdvancedKey, controller.openEndpointEditor]);
   const cloudPresentation = cloudSettingsPresentation(
     status,
     cloud.isError,
@@ -60,44 +72,101 @@ export function CloudSyncSettings() {
   const statusIcon = cloudPresentation.icon;
 
   return (
-    <Section
-      title={t("settings.sync.cloud.sectionTitle")}
-      description={t("settings.sync.cloud.sectionDescription")}
-    >
-      <div
-        className={styles.setup}
-        data-settings-search-target={`row:${t("settings.sync.cloud.connectionTitle")}`}
+    <div className={styles.root}>
+      <Section
+        title={t("settings.sync.cloud.sectionTitle")}
+        description={t("settings.sync.cloud.sectionDescription")}
       >
-        <header className={styles.setupHeader}>
-          <span className={styles.setupIcon} aria-hidden="true">
-            <Icon name={statusIcon} size="md" />
-          </span>
-          <div className={styles.setupCopy}>
-            <h3>{t("settings.sync.cloud.connectionTitle")}</h3>
-            {cloud.isLoading ? (
-              <SkeletonText width="md" />
-            ) : (
-              <p id={connectionDescriptionId}>{connectionDescription}</p>
-            )}
-            <span
-              className={styles.connectionNote}
-              role="alert"
-              aria-live="assertive"
-              aria-atomic="true"
-            >
-              {connectionMessage ? (
-                <FieldFeedback state="error" announce={false}>
-                  {connectionMessage}
-                </FieldFeedback>
-              ) : null}
+        <div className={styles.setup}>
+          <header
+            className={styles.setupHeader}
+            data-settings-search-target={`row:${t("settings.sync.cloud.connectionTitle")}`}
+          >
+            <span className={styles.setupIcon} aria-hidden="true">
+              <Icon name={statusIcon} size="md" />
             </span>
-          </div>
-          <div className={styles.setupStatus}>{statusControl}</div>
-        </header>
+            <div className={styles.setupCopy}>
+              <h3>{t("settings.sync.cloud.connectionTitle")}</h3>
+              {cloud.isLoading ? (
+                <SkeletonText width="md" />
+              ) : (
+                <p id={connectionDescriptionId}>{connectionDescription}</p>
+              )}
+              <span
+                className={styles.connectionNote}
+                role="alert"
+                aria-live="assertive"
+                aria-atomic="true"
+              >
+                {connectionMessage ? (
+                  <FieldFeedback state="error" announce={false}>
+                    {connectionMessage}
+                  </FieldFeedback>
+                ) : null}
+              </span>
+            </div>
+            <div className={styles.setupStatus}>{statusControl}</div>
+          </header>
 
-        {!cloud.isLoading && !cloud.isError ? (
+          {!cloud.isLoading && !cloud.isError && !configured ? (
+            <section
+              className={styles.setupSection}
+              aria-labelledby="cloud-setup-title"
+            >
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h4 id="cloud-setup-title">{t("settings.sync.cloud.setupTitle")}</h4>
+                  <p id={setupDescriptionId}>{t("settings.sync.cloud.setupDescription")}</p>
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                className={styles.setupAction}
+                aria-describedby={setupDescriptionId}
+                onClick={() => setSetupRevealKey((key) => (key ?? 0) + 1)}
+              >
+                {t("settings.sync.cloud.setupAction")}
+              </Button>
+            </section>
+          ) : null}
+
+          {!cloud.isLoading && !cloud.isError && configured ? (
+            <section
+              className={styles.setupSection}
+              aria-labelledby="cloud-account-title"
+              data-settings-search-target={`row:${t("settings.sync.cloud.accountTitle")}`}
+            >
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h4 id="cloud-account-title">{t("settings.sync.cloud.accountTitle")}</h4>
+                  <p id={accountDescriptionId}>{t(connected
+                    ? "settings.sync.cloud.accountConnectedDescription"
+                    : "settings.sync.cloud.accountSignedOutDescription")}</p>
+                </div>
+              </div>
+              {connected ? (
+                <CloudConnectedControls
+                  controller={controller}
+                  descriptionId={accountDescriptionId}
+                />
+              ) : (
+                <CloudAccountForm controller={controller} />
+              )}
+            </section>
+          ) : null}
+        </div>
+      </Section>
+      {!cloud.isLoading && !cloud.isError ? (
+        <SettingsDisclosure
+          title={t("settings.sync.cloud.endpoint.advancedTitle")}
+          description={controller.endpointDirty
+            ? t("settings.sync.cloud.endpoint.unsaved")
+            : t("settings.sync.cloud.endpoint.advancedDescription")}
+          revealKey={setupRevealKey === undefined ? revealAdvancedKey : `setup:${setupRevealKey}`}
+        >
           <section
-            className={styles.setupSection}
+            className={styles.endpointPanel}
             aria-labelledby="cloud-server-title"
             data-settings-search-target={`row:${t("settings.sync.cloud.endpoint.title")}`}
           >
@@ -125,33 +194,8 @@ export function CloudSyncSettings() {
               <CloudEndpointForm controller={controller} replacing={configured} />
             ) : null}
           </section>
-        ) : null}
-
-        {!cloud.isLoading && !cloud.isError && configured ? (
-          <section
-            className={styles.setupSection}
-            aria-labelledby="cloud-account-title"
-            data-settings-search-target={`row:${t("settings.sync.cloud.accountTitle")}`}
-          >
-            <div className={styles.sectionHeader}>
-              <div>
-                <h4 id="cloud-account-title">{t("settings.sync.cloud.accountTitle")}</h4>
-                <p id={accountDescriptionId}>{t(connected
-                  ? "settings.sync.cloud.accountConnectedDescription"
-                  : "settings.sync.cloud.accountSignedOutDescription")}</p>
-              </div>
-            </div>
-            {connected ? (
-              <CloudConnectedControls
-                controller={controller}
-                descriptionId={accountDescriptionId}
-              />
-            ) : (
-              <CloudAccountForm controller={controller} />
-            )}
-          </section>
-        ) : null}
-      </div>
-    </Section>
+        </SettingsDisclosure>
+      ) : null}
+    </div>
   );
 }
