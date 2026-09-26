@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
@@ -22,7 +23,9 @@ import { imagePreviewKey } from "@/lib/imagePreviewQuery";
 
 export function useCopy() {
   const qc = useQueryClient();
-  return useMutation({
+  const inFlight = useRef(false);
+  const [isPending, setIsPending] = useState(false);
+  const mutation = useMutation({
     mutationFn: async (item: Item) => {
       let availability;
       try {
@@ -54,6 +57,19 @@ export function useCopy() {
       }
     },
   });
+  const mutateAsync = useCallback((item: Item) => {
+    if (inFlight.current) return Promise.reject(new Error("Clipboard write already in progress"));
+    inFlight.current = true;
+    setIsPending(true);
+    return mutation.mutateAsync(item).finally(() => {
+      inFlight.current = false;
+      setIsPending(false);
+    });
+  }, [mutation.mutateAsync]);
+  const mutate = useCallback((item: Item) => {
+    void mutateAsync(item).catch(() => undefined);
+  }, [mutateAsync]);
+  return { mutate, mutateAsync, isPending };
 }
 
 class CopyAvailabilityFailure extends Error {

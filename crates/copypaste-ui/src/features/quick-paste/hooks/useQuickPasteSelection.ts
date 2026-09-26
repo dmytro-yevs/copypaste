@@ -15,6 +15,7 @@ interface QuickPasteSelectionOptions {
   query: string;
   listRef: RefObject<HTMLDivElement | null>;
   canCopy: (item: Item, plainText: boolean) => boolean;
+  copyPending: boolean;
   onCopy: (item: Item, plainText?: boolean) => void;
   onDismiss: () => void;
 }
@@ -29,6 +30,7 @@ export function useQuickPasteSelection({
   query,
   listRef,
   canCopy,
+  copyPending,
   onCopy,
   onDismiss,
 }: QuickPasteSelectionOptions) {
@@ -92,6 +94,7 @@ export function useQuickPasteSelection({
         const selected = items[current];
         if (selected) {
           event.preventDefault();
+          if (copyPending) return;
           if (canCopy(selected, event.altKey)) onCopy(selected, event.altKey);
           else selectFromKeyboard(selected.id);
         }
@@ -102,12 +105,13 @@ export function useQuickPasteSelection({
         const item = Number.isInteger(slot) && slot >= 0 && slot < 9 ? items[slot] : undefined;
         if (item) {
           event.preventDefault();
+          if (copyPending) return;
           if (canCopy(item, false)) onCopy(item);
           else selectFromKeyboard(item.id);
         }
       }
     },
-    [canCopy, items, onCopy, onDismiss, query, selectFromKeyboard, selectedId],
+    [canCopy, copyPending, items, onCopy, onDismiss, query, selectFromKeyboard, selectedId],
   );
 
   const selectFromPointer = useCallback((id: string) => {
