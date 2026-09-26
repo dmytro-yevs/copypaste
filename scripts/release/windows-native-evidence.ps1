@@ -19,36 +19,6 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Test-UiaRenderedCandidate($Candidate) {
-    $bounds = $Candidate["bounds"]
-    return -not $Candidate["offscreen"] -and $bounds.Width -gt 0 -and $bounds.Height -gt 0
-}
-
-function Wait-UiaRenderedName([Diagnostics.Process]$App, [string]$Name) {
-    $scrollState = @{ attempted = $false }
-    Wait-Readiness "rendered UI state '$Name'" {
-        $App.Refresh()
-        if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
-        $candidates = @(Get-UiaNamedCandidateRecords $App $Name $false $true)
-        foreach ($candidate in $candidates) {
-            if (Test-UiaRenderedCandidate $candidate) { return New-ProbeReady $true }
-        }
-        if (-not $scrollState.attempted) {
-            foreach ($candidate in $candidates) {
-                if (-not $candidate["offscreen"] -or $null -eq $candidate["scroll_item"]) { continue }
-                $scrollState.attempted = $true
-                try {
-                    ([Windows.Automation.ScrollItemPattern]$candidate["scroll_item"]).ScrollIntoView()
-                } catch {
-                    return New-ProbeInvariant "the offscreen '$Name' control could not be revealed"
-                }
-                break
-            }
-        }
-        return New-ProbeNotReady "no on-screen element is named '$Name'"
-    } { Get-UiaNamedWaitDiagnostics $App $Name $false } 15000 | Out-Null
-}
-
 function Assert-InstalledLayout([string]$Directory) {
     foreach ($name in @("copypaste-ui.exe", "copypaste.exe", "copypaste-daemon.exe", "uninstall.exe")) {
         Assert-True (Test-Path -LiteralPath (Join-Path $Directory $name) -PathType Leaf) "installed package is missing $name"
@@ -326,13 +296,6 @@ function Invoke-SelfTest {
         Assert-True $rejected "a zero-sidecar candidate set did not remain a bounded failure"
 
         Test-WindowsUiEvidenceHelpers
-        $disabledConfigure = @{ offscreen = $false; bounds = [pscustomobject]@{ Width = 40; Height = 20 }; enabled = $false }
-        Assert-True (Test-UiaRenderedCandidate $disabledConfigure) "a disabled setup submit was not accepted as rendered"
-        $disabledConfigure.offscreen = $true
-        Assert-True (-not (Test-UiaRenderedCandidate $disabledConfigure)) "an offscreen submit was accepted as rendered"
-        $disabledConfigure.offscreen = $false
-        $disabledConfigure.bounds.Width = 0
-        Assert-True (-not (Test-UiaRenderedCandidate $disabledConfigure)) "a zero-width submit was accepted as rendered"
         $scenarioSource = [IO.File]::ReadAllText($PSCommandPath)
         $cloudSteps = @(
             'Invoke-UiaNamedControl $app "Cloud sync" "Set up cloud sync"',
@@ -340,7 +303,7 @@ function Invoke-SelfTest {
             'Invoke-UiaNamedControl $app "Set up cloud sync" "Cloud server configuration"',
             'Wait-UiaName $app "Server URL" $false $true',
             'Wait-UiaName $app "Publishable key" $false $true',
-            'Wait-UiaRenderedName $app "Configure"',
+            'Wait-UiaName $app "Configure" $false $true $true',
             'Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured" "Cloud server configuration"'
         )
         $cloudPosition = $scenarioSource.IndexOf('Invoke-UiaNamedControl $app "Settings" "Mode"', [StringComparison]::Ordinal)
@@ -506,7 +469,7 @@ try {
         Invoke-UiaNamedControl $app "Set up cloud sync" "Cloud server configuration"
         Wait-UiaName $app "Server URL" $false $true | Out-Null
         Wait-UiaName $app "Publishable key" $false $true | Out-Null
-        Wait-UiaRenderedName $app "Configure"
+        Wait-UiaName $app "Configure" $false $true $true | Out-Null
         $featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured" "Cloud server configuration" "" $captureTrace
         Write-WindowsFeatureManifest $evidencePath $featureStates
         Invoke-UiaNamedControl $app "Privacy & retention" "Allow screenshots"
