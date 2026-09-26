@@ -21,6 +21,7 @@ import {
 } from "@/components/ui";
 import { SupportReportActions } from "@/features/diagnostics";
 import { Section } from "@/features/settings/components/Section";
+import { RuntimeEventsTab } from "@/features/settings/patterns/RuntimeEventsTab";
 import {
   useDiagnostics,
   useSweepNotices,
@@ -35,7 +36,50 @@ import type {
 } from "@/service/diagnostics";
 import styles from "./DiagnosticsTab.module.css";
 
-export function DiagnosticsTab() {
+export type DiagnosticsView = "overview" | "runtime-events";
+
+export function DiagnosticsTab({
+  view = "overview",
+  onOpenEvents,
+  onBack,
+}: {
+  view?: DiagnosticsView;
+  onOpenEvents?: () => void;
+  onBack?: () => void;
+}) {
+  const { t } = useTranslation();
+  if (view === "runtime-events") {
+    return (
+      <div className={`${styles.overview} ${styles.events}`} data-settings-search-target={`row:${t("runtimeLog.title")}`}>
+        {onBack ? (
+          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+            {t("runtimeLog.back")}
+          </Button>
+        ) : null}
+        <h2 data-settings-search-target={`section:${t("runtimeLog.title")}`} className={styles.eventsTitle}>
+          {t("runtimeLog.title")}
+        </h2>
+        <RuntimeEventsTab />
+      </div>
+    );
+  }
+  return (
+    <div className={styles.overview}>
+      <DiagnosticsOverview />
+      {onOpenEvents ? (
+        <Section title={t("runtimeLog.title")} description={t("runtimeLog.description")}>
+          <SettingsRow title={t("runtimeLog.title")} description={t("runtimeLog.description")}>
+            <Button type="button" variant="secondary" size="sm" onClick={onOpenEvents}>
+              {t("runtimeLog.open")}
+            </Button>
+          </SettingsRow>
+        </Section>
+      ) : null}
+    </div>
+  );
+}
+
+function DiagnosticsOverview() {
   const { t } = useTranslation();
   const query = useDiagnostics();
   useSweepNotices();
