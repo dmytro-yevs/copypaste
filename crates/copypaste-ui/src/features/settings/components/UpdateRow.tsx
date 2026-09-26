@@ -16,6 +16,7 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import { useTranslation } from "@/i18n";
 import { friendlyError, ipcFailure, type ErrorKind } from "@/lib/errors";
 import { currentPlatform } from "@/lib/platform";
+import { PRODUCT_RELEASES_URL } from "@/lib/productLinks";
 import {
   checkForUpdate,
   getUpdateStatus,
@@ -123,7 +124,9 @@ export function UpdateRow() {
   const description = state.state === "unsupported"
       ? t("settings.about.updates.descriptionUnsupported")
       : platform === "macos"
-        ? t("settings.about.updates.descriptionMacos")
+        ? t(state.state === "unconfigured"
+          ? "settings.about.updates.descriptionMacosManual"
+          : "settings.about.updates.descriptionMacos")
         : platform === "windows"
           ? t("settings.about.updates.descriptionWindows")
           : platform === "android"
@@ -133,7 +136,9 @@ export function UpdateRow() {
   let message: string;
   switch (state.state) {
     case "unsupported": message = t("settings.about.updates.unsupported"); break;
-    case "unconfigured": message = t("settings.about.updates.unconfigured"); break;
+    case "unconfigured": message = t(platform === "macos"
+      ? "settings.about.updates.unconfiguredMacos"
+      : "settings.about.updates.unconfigured"); break;
     case "loading": message = t("settings.about.updates.loading"); break;
     case "ready": message = t("settings.about.updates.ready"); break;
     case "checking": message = t("settings.about.updates.checking"); break;
@@ -211,7 +216,14 @@ export function UpdateRow() {
   } else if (state.state === "unsupported") {
     action = <Badge variant="secondary">{t("settings.about.updates.unavailableLabel")}</Badge>;
   } else if (state.state === "unconfigured") {
-    action = <Badge variant="warn">{t("settings.about.updates.unconfiguredLabel")}</Badge>;
+    action = platform === "macos" ? (
+      <Button asChild variant="secondary" size="sm">
+        <a href={PRODUCT_RELEASES_URL} target="_blank" rel="noreferrer"
+          aria-describedby={`${descriptionId} ${statusId}`}>
+          {t("settings.about.updates.viewReleases")}
+        </a>
+      </Button>
+    ) : <Badge variant="warn">{t("settings.about.updates.unconfiguredLabel")}</Badge>;
   } else {
     action = (
       <span className={styles.activity} aria-hidden="true">
@@ -231,6 +243,7 @@ export function UpdateRow() {
       <section
         className={styles.root}
         data-state={state.state}
+        data-platform={platform}
         data-settings-search-target={`row:${t("settings.about.updates.title")}`}
         aria-labelledby="about-updates-title"
       >
