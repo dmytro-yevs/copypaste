@@ -27,7 +27,7 @@
 
 .content {
   position: relative;
-  z-index: 0;
+  z-index: 2;
   display: flex;
   min-inline-size: 0;
   inline-size: 100%;
@@ -44,6 +44,17 @@
 }
 
 .root[data-kind="image"] .body { padding-inline-end: 0; }
+
+.availability {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  pointer-events: auto;
+}
 
 .hit {
   position: absolute;

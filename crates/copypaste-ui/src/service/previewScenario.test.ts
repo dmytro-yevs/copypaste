@@ -56,6 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.history.replaceState({}, "", "/");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -501,7 +502,7 @@ describe("preview scenario service", () => {
     await expect(intercept("list")).resolves.toMatchObject({
       handled: true,
       value: {
-        total: 4,
+        total: 5,
         items: [
           {
             id: "preview-plain",
@@ -519,8 +520,14 @@ describe("preview scenario service", () => {
             content: null,
           },
           {
+            id: "preview-file",
+            content_class: "file",
+            content_type: "file",
+          },
+          {
             id: "preview-unknown",
             content_class: "archive",
+            content_type: "application/x-future",
             truncated: true,
           },
         ],
@@ -528,7 +535,7 @@ describe("preview scenario service", () => {
     });
     await expect(intercept("status")).resolves.toMatchObject({
       handled: true,
-      value: { item_count: 4 },
+      value: { item_count: 5 },
     });
     await expect(intercept("get_item_body", { id: "preview-plain" })).resolves.toEqual({
       handled: true,
@@ -596,6 +603,29 @@ describe("preview scenario service", () => {
 
     store.getState().resetToLive();
     await expect(intercept("get_item_body", { id: "preview-plain" })).resolves.toEqual({ handled: false });
+  });
+
+  it.each([
+    ["macos", "image/png", "original", "available"],
+    ["windows", "image/bmp", "original", "available"],
+    ["android", "image/png", "original", "unsupported_on_platform"],
+    ["windows", "file", "original", "unsupported_on_platform"],
+    ["macos", "file", "original", "available"],
+    ["windows", "image/webp", "original", "unsupported_content_type"],
+    ["macos", "application/x-future", "original", "unsupported_content_type"],
+    ["macos", "image/png", "plain_text", "unsupported_content_type"],
+    ["android", "text/plain", "plain_text", "available"],
+  ] as const)("serves fixture write availability for %s %s %s", async (platform, contentType, mode, expected) => {
+    window.history.replaceState({}, "", `/?platform=${platform}`);
+    const store = createPreviewScenarioStore(null);
+    store.getState().setDaemon("up");
+    store.getState().setResource("history", "success");
+    const intercept = createPreviewInterceptor(store);
+    await expect(intercept("clipboard_write_availability", { contentType, mode })).resolves.toEqual({
+      handled: true,
+      value: expected,
+    });
+    await expect(intercept("copy_item", { id: "preview-plain" })).resolves.toEqual({ handled: false });
   });
 
   it("maps every pairing phase and applies lifecycle command transitions", async () => {

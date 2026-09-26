@@ -6,6 +6,10 @@ import { TooltipProvider } from "@/components/ui";
 import { item } from "@/test/harness";
 import { ClipDetailDialog } from "./ClipDetailDialog";
 
+vi.mock("@/hooks/useClipboardWriteAvailability", () => ({
+  useClipboardWriteAvailability: () => ({ isPending: false, isError: false, data: "available" }),
+}));
+
 vi.mock(import("@/hooks/useViewportMetrics"), async (importOriginal) => {
   const actual = await importOriginal();
   return {

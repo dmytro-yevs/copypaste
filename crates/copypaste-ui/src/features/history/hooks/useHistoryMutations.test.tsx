@@ -10,6 +10,7 @@ import * as platform from "@/lib/platform";
 const invalidateHistoryQueries = vi.hoisted(() => vi.fn());
 const setPinned = vi.hoisted(() => vi.fn());
 const copyItem = vi.hoisted(() => vi.fn());
+const getClipboardWriteAvailability = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
 
 vi.mock("sonner", () => ({ toast }));
@@ -24,11 +25,13 @@ vi.mock("@/lib/ipc", async (load) => ({
   ...(await load<typeof import("@/lib/ipc")>()),
   setPinned,
   copyItem,
+  getClipboardWriteAvailability,
 }));
 
 describe("useCopy feedback", () => {
   beforeEach(() => {
     copyItem.mockReset().mockResolvedValue(undefined);
+    getClipboardWriteAvailability.mockReset().mockResolvedValue("available");
     invalidateHistoryQueries.mockReset().mockResolvedValue(undefined);
     toast.success.mockReset();
     window.history.replaceState({}, "", "/");
@@ -52,8 +55,26 @@ describe("useCopy feedback", () => {
     });
 
     expect(copyItem).toHaveBeenCalledWith(target.id);
+    expect(getClipboardWriteAvailability).toHaveBeenCalledWith(target.content_type, "original");
     expect(toast.success).toHaveBeenCalledWith(expected, { duration: 2500 });
     expect(toast.success.mock.calls[0]?.[0]).not.toContain(target.content);
+  });
+
+  it("refuses unsupported formats before asking native to copy sensitive content", async () => {
+    getClipboardWriteAvailability.mockResolvedValue("unsupported_on_platform");
+    const client = testClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useCopy(), { wrapper });
+    const target = item({ content_type: "file", is_sensitive: true, content: "secret" });
+
+    await act(async () => {
+      await expect(result.current.mutateAsync(target)).rejects.toThrow("Clipboard write unavailable");
+    });
+    expect(getClipboardWriteAvailability).toHaveBeenCalledWith("file", "original");
+    expect(copyItem).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("This clipboard format can’t be copied on this device.");
   });
 
   it("uses generic feedback when native platform detection failed", async () => {

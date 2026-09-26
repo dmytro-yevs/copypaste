@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -7,6 +7,8 @@ import { ActionButton, EmptyState, SearchField } from "@/components/shared";
 import { Surface } from "@/components/ui";
 import { QuickPasteLoadingState } from "@/features/quick-paste/components/QuickPasteLoadingState";
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
+import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";
+import { requireClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { useItemBody } from "@/hooks/useItemBody";
 import {
   QUICK_PASTE_QUERY_KEY,
@@ -37,6 +39,7 @@ import styles from "./QuickPasteScreen.module.css";
 const LIMIT = 100;
 
 export function QuickPasteScreen() {
+  const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -89,6 +92,26 @@ export function QuickPasteScreen() {
   const copyAndDismiss = useCallback(
     async (item: Item, plainText = false) => {
       const generation = currentCacheGeneration();
+      let availability;
+      try {
+        availability = await requireClipboardWriteAvailability(
+          queryClient,
+          item.content_type,
+          plainText ? "plain_text" : "original",
+        );
+      } catch {
+        if (isCacheGenerationCurrent(generation)) {
+          toast.error(clipboardCopyPresentation({ status: "failed" }).reason);
+        }
+        return;
+      }
+      if (availability !== "available") {
+        if (isCacheGenerationCurrent(generation)) {
+          toast.error(clipboardCopyPresentation({ status: "resolved", availability }).reason);
+        }
+        return;
+      }
+      if (!isCacheGenerationCurrent(generation)) return;
       try {
         await (plainText ? copyItemAsPlainText(item.id) : copyItem(item.id));
         dismiss();
@@ -108,7 +131,7 @@ export function QuickPasteScreen() {
         );
       }
     },
-    [currentCacheGeneration, dismiss, isCacheGenerationCurrent],
+    [currentCacheGeneration, dismiss, isCacheGenerationCurrent, queryClient],
   );
 
   const changePin = useCallback(

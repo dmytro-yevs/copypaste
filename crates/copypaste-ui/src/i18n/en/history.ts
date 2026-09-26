@@ -28,6 +28,14 @@ export const history = {
     tooLarge: "Too large to sync — this item stays on this device",
   },
 
+  copyAvailability: {
+    checking: "Checking whether this format can be copied…",
+    failed: "Couldn’t check whether this format can be copied.",
+    unsupportedType: "This clipboard format can’t be copied.",
+    unsupportedPlatform: "This clipboard format can’t be copied on this device.",
+    retry: "Check again",
+  },
+
   list: {
     label: "Clipboard history",
     loadMore: "Load more",

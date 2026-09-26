@@ -15,7 +15,8 @@ import {
 import { ClipImageLoader } from "@/features/clip-content";
 import { Button, Icon, iconComponent } from "@/components/ui";
 import { InspectorPreview } from "@/features/history/components/InspectorPreview";
-import { clipCopyAction } from "@/features/history/model/clipPresentation";
+import { clipboardCopyPresentation, clipCopyAction } from "@/features/history/model/clipPresentation";
+import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { originName, type OriginDevice } from "@/lib/itemOrigin";
 import { SourceAppIcon } from "@/features/source-apps";
 import { useTranslation } from "@/i18n";
@@ -64,6 +65,14 @@ export function LibraryInspectorPanel({
         finding: NonNullable<Item["sensitive_finding"]>;
     } | null>(null);
     useEffect(() => setShownFinding(null), [item?.id]);
+    const availability = useClipboardWriteAvailability(item?.content_type ?? null);
+    const copyAvailability = clipboardCopyPresentation(
+        availability.isPending
+            ? { status: "loading" }
+            : availability.isError
+              ? { status: "failed" }
+              : { status: "resolved", availability: availability.data },
+    );
     const revealed = revealedContent !== null;
     const close = () => {
         if (copyPending) return;
@@ -147,7 +156,7 @@ export function LibraryInspectorPanel({
                     <ActionButton
                         size="compactIcon"
                         variant="primary"
-                        disabled={copyPending}
+                        disabled={copyPending || !copyAvailability.canCopy}
                         icon={copyAction.icon}
                         aria-label={copyAction.label}
                         title={copyAction.label}
@@ -292,6 +301,20 @@ export function LibraryInspectorPanel({
                 </MetadataList>
             }
         >
+            {copyAvailability.reason !== null ? (
+                <InlineNotice
+                    role="status"
+                    tone={copyAvailability.canRetry ? "warning" : "neutral"}
+                    icon="info"
+                    action={copyAvailability.canRetry ? (
+                        <Button variant="secondary" size="sm" onClick={() => void availability.refetch()}>
+                            {t("history.copyAvailability.retry")}
+                        </Button>
+                    ) : undefined}
+                >
+                    {copyAvailability.reason}
+                </InlineNotice>
+            ) : null}
             {potentialFinding !== null ? (
                 <InlineNotice role="status" tone="warning" icon="sensitive">
                     {t("history.row.potentialSensitiveWarning")}
