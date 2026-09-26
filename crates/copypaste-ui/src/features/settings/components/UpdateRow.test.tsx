@@ -84,6 +84,27 @@ describe("UpdateRow static states", () => {
 });
 
 describe("UpdateRow actions", () => {
+  it("shows a safe readiness error and recovers after retry", async () => {
+    platform.currentPlatform.mockReturnValue("macos");
+    updater.getUpdateStatus.mockRejectedValue({
+      code: "update_check_failed",
+      retryable: true,
+      message: "Could not list /Users/private/Homebrew/Caskroom",
+    });
+    updater.checkForUpdate.mockResolvedValue({ state: "up_to_date" });
+    const { user } = withUser(<UpdateRow />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("CopyPaste couldn't check for updates. Try again in a moment.");
+    expect(document.body.textContent).not.toContain("/Users/private");
+
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(updater.checkForUpdate).toHaveBeenCalledOnce());
+    expect(await screen.findByText("CopyPaste is up to date.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("/Users/private");
+  });
+
   it("retains the check action for a ready updater", async () => {
     updater.checkForUpdate.mockResolvedValue({ state: "up_to_date" });
     const { user } = renderStatus({ state: "ready" });
