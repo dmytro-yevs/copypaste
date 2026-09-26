@@ -6,6 +6,7 @@ import type { ConfigApplied, ConfigData, ConfigPatch } from "@/lib/ipc";
 import { withUser } from "@/test/harness";
 import {
   AdvancedServiceSettings,
+  ClipboardServiceSettings,
   PrivacyServiceSettings,
 } from "./ServiceTab";
 
@@ -82,6 +83,40 @@ beforeEach(() => {
 });
 
 describe("service setting ownership", () => {
+  it("keeps core capture choices visible while advanced limits remain available", async () => {
+    const { user } = withUser(
+      <TooltipProvider><ClipboardServiceSettings /></TooltipProvider>,
+    );
+    await screen.findByRole("combobox", { name: /Treat a repeat as the same item for/ });
+    expect(screen.getByText("Exclude apps from capture")).toBeTruthy();
+    const advanced = screen.getByText("Advanced capture settings").closest("details");
+    expect(advanced?.open).toBe(false);
+    expect(advanced?.querySelector('[data-settings-search-target="row:Check the clipboard every"]')).toBeTruthy();
+
+    await user.click(screen.getByText("Advanced capture settings"));
+    expect(advanced?.open).toBe(true);
+    expect(screen.getByRole("combobox", { name: /Decoded image memory limit/ })).toBeTruthy();
+  });
+
+  it("opens advanced capture controls for a search destination", async () => {
+    const { user, rerender } = withUser(
+      <TooltipProvider>
+        <ClipboardServiceSettings revealAdvancedKey="first result" />
+      </TooltipProvider>,
+    );
+    await screen.findByRole("combobox", { name: /Check the clipboard every/ });
+    const summary = screen.getByText("Advanced capture settings");
+    expect(summary.closest("details")?.open).toBe(true);
+    await user.click(summary);
+    expect(summary.closest("details")?.open).toBe(false);
+    rerender(
+      <TooltipProvider>
+        <ClipboardServiceSettings revealAdvancedKey="second result" />
+      </TooltipProvider>,
+    );
+    await waitFor(() => expect(summary.closest("details")?.open).toBe(true));
+  });
+
   it("does not inject a service error row beneath valid device-sync content", async () => {
     ipc.getConfig.mockRejectedValue({ code: "offline", retryable: true });
 

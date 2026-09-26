@@ -11,6 +11,7 @@ const viewport = vi.hoisted(() => ({
   pointer: "coarse" as const,
   sizeClass: "compact" as const,
 }));
+const mockContent = vi.hoisted(() => ({ showAdvancedField: true }));
 
 vi.mock("@/hooks/useViewportMetrics", () => ({
   useViewportMetrics: () => viewport,
@@ -22,18 +23,43 @@ vi.mock("@/hooks/useViewportMetrics", () => ({
 }));
 
 vi.mock("@/features/settings/patterns/settingsTabs", () => ({
-  renderPreferenceSection: (section: string) => (
+  renderPreferenceSection: (section: string, controller: {
+    diagnosticsView?: string;
+    revealAdvancedKey?: string;
+    onOpenEvents?: () => void;
+    onBackFromEvents?: () => void;
+  }) => (
     <div
       data-testid={`settings-section-${section}`}
       data-settings-search-target={
         section === "clipboard" ? "row:Group by device" : undefined
       }
-    />
+    >
+      {section === "diagnostics" ? controller.diagnosticsView === "runtime-events" ? (
+        <>
+          {controller.onBackFromEvents ? <button onClick={controller.onBackFromEvents}>Back to Diagnostics</button> : null}
+          <div data-settings-search-target="row:Runtime events">
+            <input type="search" aria-label="Search runtime events" />
+          </div>
+        </>
+      ) : <button onClick={controller.onOpenEvents}>Open runtime events</button> : null}
+      {section === "clipboard" ? (
+        <details open={Boolean(controller.revealAdvancedKey)}>
+          <summary>Advanced capture settings</summary>
+          {mockContent.showAdvancedField ? (
+            <div data-settings-search-target="row:Check the clipboard every">
+              <select aria-label="Check the clipboard every"><option>500 ms</option></select>
+            </div>
+          ) : null}
+        </details>
+      ) : null}
+    </div>
   ),
 }));
 
 afterEach(() => {
   vi.restoreAllMocks();
+  mockContent.showAdvancedField = true;
   useUi.setState({ settingsTab: null });
   Object.assign(viewport, {
     width: 390,
@@ -97,6 +123,58 @@ it("opens Storage & history for an old data-transfer selection", async () => {
 
   expect(await screen.findByTestId("settings-section-storage")).toBeTruthy();
   expect(useUi.getState().settingsTab).toBeNull();
+});
+
+it("opens old Runtime events destinations inside Diagnostics and steps back through both levels", async () => {
+  vi.spyOn(window.history, "back").mockImplementation(() => {
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  useUi.setState({ settingsTab: "runtime-events" });
+  render(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+
+  expect(await screen.findByRole("searchbox", { name: "Search runtime events" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Runtime events/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Back to Diagnostics" }));
+  expect(await screen.findByRole("button", { name: "Open runtime events" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
+  expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeTruthy();
+});
+
+it("search opens a collapsed advanced group and focuses its field", async () => {
+  render(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.change(searchbox, { target: { value: "Check the clipboard every" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Check the clipboard every/ }));
+
+  const field = await screen.findByRole("combobox", { name: "Check the clipboard every" });
+  await waitFor(() => {
+    expect(field.closest("details")?.open).toBe(true);
+    expect(document.activeElement).toBe(field);
+  });
+});
+
+it("waits for a service field to load before focusing a search destination", async () => {
+  mockContent.showAdvancedField = false;
+  const { rerender } = render(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.change(searchbox, { target: { value: "Check the clipboard every" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Check the clipboard every/ }));
+  expect(screen.queryByRole("combobox", { name: "Check the clipboard every" })).toBeNull();
+
+  mockContent.showAdvancedField = true;
+  rerender(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const field = await screen.findByRole("combobox", { name: "Check the clipboard every" });
+  await waitFor(() => expect(document.activeElement).toBe(field));
+});
+
+it("search opens Runtime events inside Diagnostics and focuses event search", async () => {
+  render(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.change(searchbox, { target: { value: "Runtime events" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Runtime events/ }));
+
+  const eventSearch = await screen.findByRole("searchbox", { name: "Search runtime events" });
+  await waitFor(() => expect(document.activeElement).toBe(eventSearch));
 });
 
 it("keeps a selected search destination highlighted long enough to find", async () => {

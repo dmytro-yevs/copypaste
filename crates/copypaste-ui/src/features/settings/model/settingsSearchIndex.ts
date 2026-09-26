@@ -3,7 +3,7 @@ import type {
 } from "./settingsNavigation";
 import type { PreferenceSection } from "./preferenceSections";
 
-export type SettingsSearchTab = PreferenceSection;
+export type SettingsSearchTab = PreferenceSection | "runtime-events";
 
 export interface SettingsSearchItem {
   tab: SettingsSearchTab;
@@ -13,6 +13,7 @@ export interface SettingsSearchItem {
   keywords?: readonly string[];
   platforms?: readonly ("desktop" | "android" | "windows")[];
   capability?: Exclude<keyof SettingsCapabilities, "platform">;
+  disclosure?: "clipboard-advanced";
 }
 
 /** Every settings row is listed here so search does not depend on hidden tabs
@@ -32,12 +33,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
 
   { tab: "clipboard", title: "capture.title", description: "capture.loading.body", keywords: ["background", "clipboard", "recording", "paused"] },
   { tab: "privacy", title: "settings.service.privateMode.title", description: "settings.service.privateMode.description" },
-  { tab: "clipboard", section: "settings.service.groups.capture.title", title: "settings.service.poll.title", description: "settings.service.poll.description" },
+  { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.poll.title", description: "settings.service.poll.description", disclosure: "clipboard-advanced" },
   { tab: "clipboard", section: "settings.service.groups.capture.title", title: "settings.service.dedup.title", description: "settings.service.dedup.description" },
-  { tab: "clipboard", section: "settings.service.groups.capture.title", title: "settings.service.maxText.title", description: "settings.service.maxText.description" },
-  { tab: "clipboard", section: "settings.service.groups.capture.title", title: "settings.service.maxImage.title", description: "settings.service.maxImage.description" },
-  { tab: "clipboard", section: "settings.service.groups.capture.title", title: "settings.service.maxFile.title", description: "settings.service.maxFile.description" },
-  { tab: "clipboard", section: "settings.service.groups.capture.title", title: "settings.service.maxDecodedImage.title", description: "settings.service.maxDecodedImage.description" },
+  { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.maxText.title", description: "settings.service.maxText.description", disclosure: "clipboard-advanced" },
+  { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.maxImage.title", description: "settings.service.maxImage.description", disclosure: "clipboard-advanced" },
+  { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.maxFile.title", description: "settings.service.maxFile.description", disclosure: "clipboard-advanced" },
+  { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.maxDecodedImage.title", description: "settings.service.maxDecodedImage.description", disclosure: "clipboard-advanced" },
   { tab: "clipboard", section: "settings.service.groups.capture.title", title: "settings.service.exclusions.title", description: "settings.service.exclusions.description", keywords: ["app", "application", "exclude", "source", "bundle", "package", "privacy", "program", "exe"] },
   { tab: "privacy", section: "settings.service.groups.keeping.title", title: "settings.service.historyLimit.title", description: "settings.service.historyLimit.description" },
   { tab: "privacy", section: "settings.service.groups.keeping.title", title: "settings.service.storageQuota.title", description: "settings.service.storageQuota.description" },

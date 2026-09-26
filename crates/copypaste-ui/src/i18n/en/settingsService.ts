@@ -20,6 +20,11 @@ export const settingsService = {
     },
   },
 
+  advanced: {
+    title: "Advanced capture settings",
+    description: "Polling and size limits",
+  },
+
   /** Never names a file or a value: the setting that would not read is the one
    *  most likely to hold clipboard text (AGENTS.md rule 4). */
   degraded: {
