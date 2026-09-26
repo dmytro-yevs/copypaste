@@ -1,8 +1,7 @@
 # CopyPaste v2 — library-first architecture
 
 Which maintained crate does each job, and the short list of custom code that
-stays. The governing rule is [AGENTS.md](../../AGENTS.md) rule 1 and is not
-restated here.
+stays. Prefer maintained dependencies when they fit the product's requirements.
 
 This document records the current architectural choices. `Cargo.toml` is the
 canonical owner of dependency versions and RustSec reasoning.
