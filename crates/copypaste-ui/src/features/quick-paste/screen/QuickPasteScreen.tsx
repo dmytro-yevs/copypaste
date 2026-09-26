@@ -44,6 +44,8 @@ export function QuickPasteScreen() {
   const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [pinPendingId, setPinPendingId] = useState<string | null>(null);
+  const copyInFlight = useRef(false);
+  const [copyPending, setCopyPending] = useState(false);
   const clearLocalState = useCallback(() => {
     setQuery("");
     setPinPendingId(null);
@@ -91,30 +93,33 @@ export function QuickPasteScreen() {
 
   const copyAndDismiss = useCallback(
     async (item: Item, plainText = false) => {
+      if (copyInFlight.current) return;
+      copyInFlight.current = true;
+      setCopyPending(true);
       const generation = currentCacheGeneration();
-      let availability;
       try {
-        availability = await requireClipboardWriteAvailability(
-          queryClient,
-          item.content_type,
-          plainText ? "plain_text" : "original",
-        );
-      } catch {
-        if (isCacheGenerationCurrent(generation)) {
-          toast.error(clipboardCopyPresentation({ status: "failed" }).reason);
+        let availability;
+        try {
+          availability = await requireClipboardWriteAvailability(
+            queryClient,
+            item.content_type,
+            plainText ? "plain_text" : "original",
+          );
+        } catch {
+          if (isCacheGenerationCurrent(generation)) {
+            toast.error(clipboardCopyPresentation({ status: "failed" }).reason);
+          }
+          return;
         }
-        return;
-      }
-      if (availability !== "available") {
-        if (isCacheGenerationCurrent(generation)) {
-          toast.error(clipboardCopyPresentation({ status: "resolved", availability }).reason);
+        if (availability !== "available") {
+          if (isCacheGenerationCurrent(generation)) {
+            toast.error(clipboardCopyPresentation({ status: "resolved", availability }).reason);
+          }
+          return;
         }
-        return;
-      }
-      if (!isCacheGenerationCurrent(generation)) return;
-      try {
+        if (!isCacheGenerationCurrent(generation)) return;
         await (plainText ? copyItemAsPlainText(item.id) : copyItem(item.id));
-        dismiss();
+        if (isCacheGenerationCurrent(generation)) dismiss();
       } catch (error: unknown) {
         console.error("Quick Paste copy failed", error);
         if (!isCacheGenerationCurrent(generation)) return;
@@ -129,6 +134,9 @@ export function QuickPasteScreen() {
               }
             : undefined,
         );
+      } finally {
+        copyInFlight.current = false;
+        setCopyPending(false);
       }
     },
     [currentCacheGeneration, dismiss, isCacheGenerationCurrent, queryClient],
@@ -175,6 +183,7 @@ export function QuickPasteScreen() {
     query,
     listRef,
     canCopy,
+    copyPending,
     onCopy: copyAndDismiss,
     onDismiss: dismiss,
   });
@@ -276,6 +285,7 @@ export function QuickPasteScreen() {
                   ? acceleratorLabel(`CmdOrCtrl+${index + 1}`)
                   : null}
                 pinPending={pinPendingId === item.id}
+                copyPending={copyPending}
                 origin={markedOrigin(item, originMarks)}
                 fullContent={selectedId === item.id ? selectedBody.text : null}
                 fullContentFailed={selectedId === item.id && selectedBody.failed}
