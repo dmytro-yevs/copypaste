@@ -167,6 +167,25 @@ describe("Devices sync readiness", () => {
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 
+  it("uses the same config recovery from the notice and device detail", () => {
+    mocks.config = undefined;
+    render(<TooltipProvider><DevicesScreen /></TooltipProvider>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Unverified device name/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Recover detail sync" }));
+    expect(mocks.refetchConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("routes detail recovery to Device sync settings when disabled", () => {
+    mocks.config = { config: { sync_enabled: false } };
+    render(<TooltipProvider><DevicesScreen /></TooltipProvider>);
+
+    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Unverified device name/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Recover detail sync" }));
+    expect(useUi.getState()).toMatchObject({ view: "settings", settingsTab: "device-sync" });
+  });
+
   it("does not add a no-peers status card beside the pairing action", () => {
     mocks.peers = [];
     render(<TooltipProvider><DevicesScreen /></TooltipProvider>);
