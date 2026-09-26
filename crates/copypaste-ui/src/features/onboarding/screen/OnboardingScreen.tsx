@@ -25,11 +25,8 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
   const android = isAndroidPlatform();
   const viewportRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const previousIndex = useRef(index);
 
   useLayoutEffect(() => {
-    if (previousIndex.current === index) return;
-    previousIndex.current = index;
     if (viewportRef.current) viewportRef.current.scrollTop = 0;
     headingRef.current?.focus({ preventScroll: true });
   }, [index]);
