@@ -14,6 +14,7 @@ import type { ReadonlyDeep } from "type-fest";
 import type { Item } from "./ipc";
 import { call, hasWebBridge, type IpcCallOptions } from "./ipcCall";
 import { isAndroidPlatform } from "./platform";
+import { previewCaptureSnapshot } from "@/service/previewCapture";
 
 export type CapturedPayload = ReadonlyDeep<GeneratedCapturedPayload>;
 export type CaptureHealth = ReadonlyDeep<GeneratedCaptureHealth>;
@@ -25,56 +26,8 @@ export type NotGrantedReason = GeneratedNotGrantedReason;
 export type NotWorkingReason = GeneratedNotWorkingReason;
 export type ShizukuProbe = ReadonlyDeep<GeneratedShizukuProbe>;
 
-const WEB_BRIDGE_CAPTURE_SNAPSHOT: CaptureSnapshot = {
-  rung: "desktop",
-  health: { state: "working" },
-  shizuku: {
-    supported: false,
-    installed: false,
-    running: false,
-    permission: false,
-    enabled: false,
-    toastSuppressed: false,
-    rearmRequested: false,
-  },
-  nextStep: "none",
-  headline: "Clipboard capture is running.",
-  detail: null,
-  lastReadOkAt: null,
-  lastCaptureAt: null,
-  droppedClips: 0,
-  toastSuppressed: false,
-  toastAcknowledged: true,
-  rearmRequested: false,
-};
-
-const WEB_BRIDGE_ANDROID_CAPTURE_SNAPSHOT: CaptureSnapshot = {
-  rung: "shizuku",
-  health: { state: "working" },
-  shizuku: {
-    supported: true,
-    installed: true,
-    running: true,
-    permission: true,
-    enabled: true,
-    toastSuppressed: false,
-    rearmRequested: false,
-  },
-  nextStep: "none",
-  headline: "Background capture is active.",
-  detail: "Copies from other apps are being saved on this phone.",
-  lastReadOkAt: Date.now(),
-  lastCaptureAt: Date.now() - 90_000,
-  droppedClips: 0,
-  toastSuppressed: false,
-  toastAcknowledged: false,
-  rearmRequested: false,
-};
-
 function webBridgeCaptureSnapshot(): CaptureSnapshot {
-  return isAndroidPlatform()
-    ? WEB_BRIDGE_ANDROID_CAPTURE_SNAPSHOT
-    : WEB_BRIDGE_CAPTURE_SNAPSHOT;
+  return previewCaptureSnapshot(isAndroidPlatform());
 }
 
 export function captureState(options?: IpcCallOptions): Promise<CaptureSnapshot> {

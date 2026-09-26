@@ -3,6 +3,8 @@ import { PAIRING_SEMANTICS_BY_STATE } from "@/lib/ipc";
 import type { PreviewPairingInvite } from "@/lib/ipc";
 import { IpcFailure } from "@/lib/errors";
 import { currentPlatform } from "@/lib/platform";
+import { previewCaptureSnapshot } from "@/service/previewCapture";
+import { previewConfigApplied, previewPrivateMode } from "@/service/previewConfig";
 import {
     previewDeviceAddress,
     previewDeviceDetails,
@@ -22,6 +24,7 @@ import {
     type PreviewScenario,
     type PreviewScenarioState,
 } from "@/service/previewScenario";
+import { previewPermissionSnapshot } from "@/service/previewPermissions";
 import type { StoreApi } from "zustand/vanilla";
 
 export type PreviewCallResult =
@@ -52,6 +55,8 @@ const NETWORK_COMMANDS = new Set([
 
 const DAEMON_COMMANDS = new Set([
     "status",
+    "get_config",
+    "get_private_mode",
     "list",
     "search",
     "peers",
@@ -275,6 +280,13 @@ export function createPreviewInterceptor(
         let scenario = store.getState().scenario;
         if (scenario.mode === "live") return { handled: false };
 
+        if (command === "capture_state") {
+            return { handled: true, value: previewCaptureSnapshot(currentPlatform() === "android") };
+        }
+        if (command === "permission_snapshot" && currentPlatform() === "android") {
+            return { handled: true, value: previewPermissionSnapshot() };
+        }
+
         if (command === "clipboard_write_availability") {
             const contentType = args?.contentType;
             const mode = args?.mode;
@@ -325,6 +337,12 @@ export function createPreviewInterceptor(
                 handled: true,
                 value: statusFixture(previewHistoryCount(scenario.resources.history)),
             };
+        }
+        if (scenario.daemon === "up" && command === "get_config") {
+            return { handled: true, value: previewConfigApplied() };
+        }
+        if (scenario.daemon === "up" && command === "get_private_mode") {
+            return { handled: true, value: previewPrivateMode() };
         }
 
         if (NETWORK_COMMANDS.has(command)) {
