@@ -718,14 +718,18 @@ unconfigured_scenario() {
     open_cloud || { bad "the unconfigured cloud row is reachable"; return; }
     started="$(now_ms)"
     expect_label "Not configured" "$OUT/unconfigured-status.txt"
-    expect_label "Cloud server configuration" "$OUT/unconfigured-form.txt"
-    expect_label "Server URL" "$OUT/unconfigured-url.txt"
-    expect_label "Publishable key" "$OUT/unconfigured-key.txt"
-    expect_label "Configure" "$OUT/unconfigured-action.txt"
+    expect_label "Set up cloud sync" "$OUT/unconfigured-setup.txt"
     elapsed=$(( $(now_ms) - started ))
     cloud_latency_record "$LATENCIES" unconfigured-status "$elapsed" 30000 \
         && ok "unconfigured cloud status meets its latency budget" \
         || bad "unconfigured cloud status meets its latency budget" "${elapsed}ms"
+    capture_state unconfigured-overview
+    mac_press_exact_role "Set up cloud sync" "AXButton" >/dev/null \
+        || { bad "the unconfigured cloud setup action is reachable"; return; }
+    expect_label "Cloud server configuration" "$OUT/unconfigured-form.txt"
+    expect_label "Server URL" "$OUT/unconfigured-url.txt"
+    expect_label "Publishable key" "$OUT/unconfigured-key.txt"
+    expect_label "Configure" "$OUT/unconfigured-action.txt"
     capture_state unconfigured
 }
 
@@ -1059,13 +1063,14 @@ sidecar_launch_self_test() { # <tmp-dir>
 
 unconfigured_latency_self_test() { # <tmp-dir>
     local saved_pass="$PASS" saved_fail="$FAIL" t=10000
-    local recorded="" recorded_scenario="" recorded_budget="" labels=""
+    local recorded="" recorded_scenario="" recorded_budget="" labels="" presses=""
     PASS=0
     FAIL=0
     now_ms() { printf '%s\n' "$t"; }
     launch_app() { t=$((t + 8000)); return 0; }
     open_cloud() { t=$((t + 4000)); return 0; }
     expect_label() { labels+="$1"$'\n'; t=$((t + 10)); return 0; }
+    mac_press_exact_role() { presses+="$1:$2"$'\n'; return 0; }
     capture_state() { return 0; }
     cloud_latency_record() {
         recorded_scenario="$2"
@@ -1076,16 +1081,17 @@ unconfigured_latency_self_test() { # <tmp-dir>
     LATENCIES="$1/latency-probe.tsv"
     : > "$LATENCIES"
     unconfigured_scenario >/dev/null
-    unset -f now_ms launch_app open_cloud expect_label capture_state cloud_latency_record
+    unset -f now_ms launch_app open_cloud expect_label mac_press_exact_role capture_state cloud_latency_record
     PASS="$saved_pass"
     FAIL="$saved_fail"
     if [[ "$recorded_scenario" == unconfigured-status \
         && "$recorded_budget" == 30000 \
         && -n "$recorded" && "$recorded" -lt 1000 \
-        && "$labels" == $'Not configured\nCloud server configuration\nServer URL\nPublishable key\nConfigure\n' ]]; then
-        ok "unconfigured status latency excludes launch delay"
+        && "$presses" == $'Set up cloud sync:AXButton\n' \
+        && "$labels" == $'Not configured\nSet up cloud sync\nCloud server configuration\nServer URL\nPublishable key\nConfigure\n' ]]; then
+        ok "unconfigured status latency excludes launch delay and opens setup"
     else
-        bad "unconfigured status latency excludes launch delay" \
+        bad "unconfigured status latency excludes launch delay and opens setup" \
             "scenario=${recorded_scenario:-unset} budget=${recorded_budget:-unset} ms=${recorded:-unset}"
     fi
 }
