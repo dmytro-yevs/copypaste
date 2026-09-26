@@ -53,7 +53,7 @@ function items(): Item[] {
             source_app_name: "Example Editor",
         }),
         item("preview-image", null, "image"),
-        item("preview-file", null, "file", { content_type: "file" }),
+        item("preview-file", "[file]", "file", { content_type: "file" }),
         item(
             "preview-unknown",
             "Unsupported preview",
