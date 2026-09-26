@@ -198,6 +198,14 @@ function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, 
 function Test-WindowsCloudOverviewReceipt([string]$Root, [string]$Writer) {
     $evidenceRoot = Join-Path $Root "cloud-receipt"
     [IO.Directory]::CreateDirectory($evidenceRoot) | Out-Null
+    $pngScript = Join-Path $Root "fixture-png.py"
+    [IO.File]::WriteAllText($pngScript, ((@(
+        'from PIL import Image',
+        'import sys',
+        'image = Image.new("RGB", (2, 2), tuple(map(int, sys.argv[2].split(","))))',
+        'image.putpixel((1, 1), (255, 255, 255))',
+        'image.save(sys.argv[1])'
+    ) -join "`n") + "`n"))
     $fixture = @{ name = "" }
     function Wait-UiaName { param($App, $Name) $fixture.name = $Name }
     function Get-AppAutomationRoot { return "fixture-root" }
@@ -211,7 +219,7 @@ function Test-WindowsCloudOverviewReceipt([string]$Root, [string]$Writer) {
     function Save-WindowImage {
         param($App, $Path, $CaptureTracePath, $Phase)
         $color = if ($Phase -like "*/unconfigured-overview") { "220,38,38" } else { "38,95,220" }
-        & python -c 'from PIL import Image; import sys; image = Image.new("RGB", (2, 2), tuple(map(int, sys.argv[2].split(",")))); image.putpixel((1, 1), (255, 255, 255)); image.save(sys.argv[1])' $Path $color
+        & python $pngScript $Path $color
         Assert-True ($LASTEXITCODE -eq 0) "fixture PNG could not be written"
         return [ordered]@{ phase = $Phase }
     }
