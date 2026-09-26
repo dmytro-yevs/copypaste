@@ -223,7 +223,7 @@ describe("fail-closed product surfaces", () => {
       { timeout: 15_000, timeoutMsg: "the diagnostics report did not close" },
     );
 
-    await openTab("Runtime events");
+    await clickButton(app.browser, "Open runtime events");
     const log = await app.browser.$(
       '[role="log"][aria-label="Runtime event list"]',
     );

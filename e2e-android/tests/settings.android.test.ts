@@ -43,6 +43,7 @@ import {
   resetHistoryFilters,
   reloadHistoryWith,
   scrollListToTop,
+  tapButton,
   tapElement,
   visibleText,
   waitFor,
@@ -58,7 +59,6 @@ const SECTIONS = [
   "Cloud sync",
   "Storage & history",
   "Diagnostics",
-  "Runtime events",
   "About",
 ] as const;
 
@@ -224,6 +224,26 @@ describe("the section index", () => {
     }
     await ensureSettingsNavigation(app);
   }, 120_000);
+
+  test("opens Runtime events within Diagnostics and returns through the compact ladder", async () => {
+    await openSettingsSection(app, "Diagnostics");
+    await tapButton(app, "Open runtime events");
+    await waitFor(
+      () => app.withPage((page) => page.evaluate(() =>
+        document.querySelector(
+          'section[aria-label="Runtime events"] input[aria-label="Search runtime events"]',
+        ) !== null,
+      )),
+      "the nested Runtime events viewer did not open",
+    );
+    expectNoFilesystemPath(await accessibleSurface(app));
+    await tapButton(app, "Back to Diagnostics");
+    await waitFor(
+      async () => (await visibleText(app)).includes("Open runtime events"),
+      "Diagnostics did not return from Runtime events",
+    );
+    await ensureSettingsNavigation(app);
+  });
 
   /**
    * A11Y-15: the nine-item strip was replaced by this index because overflowing

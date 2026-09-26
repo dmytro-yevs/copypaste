@@ -107,21 +107,26 @@ export function SettingsScreen() {
     setDiagnosticsView("overview");
     resetContentScroll();
   }, [resetContentScroll]);
-  const closeMobileSection = useCallback(() => {
-    setMobileSection(null);
-    setDiagnosticsView("overview");
-    resetContentScroll();
-  }, [resetContentScroll]);
-  const goBack = useCallback(() => {
-    if (diagnosticsView === "runtime-events") closeEvents();
-    else closeMobileSection();
-  }, [closeEvents, closeMobileSection, diagnosticsView]);
-  const compactBack = useSettingsLevel(
-    compact && mobileSection !== null
-      ? (diagnosticsView === "runtime-events" ? 2 : 1)
-      : 0,
-    goBack,
+  const compactPath = useMemo(
+    () => !compact || mobileSection === null
+      ? []
+      : diagnosticsView === "runtime-events" && mobileSection === "diagnostics"
+        ? ["diagnostics", "runtime-events"]
+        : [mobileSection],
+    [compact, diagnosticsView, mobileSection],
   );
+  const restoreCompactPath = useCallback((path: readonly string[]) => {
+    const section = sections.find((item) => item.value === path[0])?.value ?? null;
+    if (section !== null) setDesktopSection(section);
+    setMobileSection(section);
+    setDiagnosticsView(
+      section === "diagnostics" && path[1] === "runtime-events"
+        ? "runtime-events"
+        : "overview",
+    );
+    resetContentScroll();
+  }, [resetContentScroll, sections]);
+  const compactBack = useSettingsLevel(compactPath, restoreCompactPath);
 
   usePrefs((state) => state.theme);
   const prefsReady = import.meta.env.MODE === "test" || usePrefs.persist.hasHydrated();
