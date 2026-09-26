@@ -79,7 +79,7 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
               artworkInteractive={android}
               pagination={pagination}
               primary={{
-                label: t(android ? "onboarding.continue" : "onboarding.capture.action"),
+                label: t("onboarding.continue"),
                 onClick: () => setIndex(2),
               }}
               secondary={{ label: t("onboarding.skip"), onClick: () => setIndex(2) }}

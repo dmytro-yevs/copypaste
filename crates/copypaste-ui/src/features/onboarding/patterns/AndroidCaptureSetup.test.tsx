@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   capture: vi.fn(),
   captureNow: vi.fn(),
+  refetch: vi.fn(),
+  requestPending: false,
+  openSettingsPending: false,
   permissionFetching: false,
   permissionReadFailed: false,
 }));
@@ -31,11 +34,12 @@ vi.mock("@/hooks/useOnboardingPermissions", () => ({
     isPending: false,
     isFetching: mocks.permissionFetching,
     error: mocks.permissionReadFailed ? new Error("permission host unavailable") : null,
+    refetch: mocks.refetch,
   }),
-  usePermissionRequest: () => ({ mutate: mocks.request, isPending: false }),
+  usePermissionRequest: () => ({ mutate: mocks.request, isPending: mocks.requestPending }),
   usePermissionOpenSettings: () => ({
     mutate: mocks.openSettings,
-    isPending: false,
+    isPending: mocks.openSettingsPending,
   }),
 }));
 
@@ -59,6 +63,9 @@ afterEach(() => {
   mocks.save.mockReset();
   mocks.capture.mockReset();
   mocks.captureNow.mockReset();
+  mocks.refetch.mockReset();
+  mocks.requestPending = false;
+  mocks.openSettingsPending = false;
   mocks.permissionFetching = false;
   mocks.permissionReadFailed = false;
 });
@@ -97,17 +104,86 @@ describe("AndroidCaptureSetup", () => {
     ).toBe(true);
   });
 
-  it("fails closed when the permission snapshot cannot be refreshed", () => {
+  it("keeps granted permissions complete and non-actionable", () => {
+    mocks.notificationStatus = "granted";
+    render(<AndroidCaptureSetup />);
+
+    expect(screen.getByRole("button", { name: "Allowed" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Added" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows one check failure with a retry while permission actions stay disabled", async () => {
+    const user = userEvent.setup();
     mocks.permissionReadFailed = true;
     render(<AndroidCaptureSetup />);
 
-    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(2);
-    expect(
-      screen.getAllByText("This helper is not available on this device."),
-    ).toHaveLength(2);
-    for (const button of screen.getAllByRole("button", { name: "Unavailable" })) {
+    expect(screen.getAllByRole("button", { name: "Could not check permissions" })).toHaveLength(2);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByText("This helper is not available on this device.")).toBeNull();
+    for (const button of screen.getAllByRole("button", { name: "Could not check permissions" })) {
       expect(button.hasAttribute("disabled")).toBe(true);
     }
+    await user.click(screen.getByRole("button", { name: "Retry check" }));
+    expect(mocks.refetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an unavailable permission distinct from a failed check", () => {
+    mocks.notificationStatus = "unavailable";
+    render(<AndroidCaptureSetup />);
+
+    expect(screen.getByRole("button", { name: "Unavailable" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("This helper is not available on this device.")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows a safe request error, allows retry, and applies notification setup on success", async () => {
+    const user = userEvent.setup();
+    mocks.notificationStatus = "prompt";
+    const view = render(<AndroidCaptureSetup />);
+
+    await user.click(screen.getByRole("button", { name: "Allow" }));
+    expect(mocks.request).toHaveBeenCalledWith("notifications", expect.objectContaining({ onError: expect.any(Function) }));
+    mocks.requestPending = true;
+    view.rerender(<AndroidCaptureSetup />);
+    expect(screen.getByRole("status").textContent).toContain("Checking permission…");
+    expect(screen.getByRole("button", { name: "Allow" }).hasAttribute("disabled")).toBe(true);
+    mocks.requestPending = false;
+    act(() => mocks.request.mock.calls[0][1].onError({
+      code: "unavailable", retryable: true, message: "/Users/private/secret.sock",
+    }));
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Permission action failed:");
+    expect(alert.textContent).toContain("That action is unavailable.");
+    expect(alert.textContent).not.toContain("/Users/private/");
+    expect(screen.getByRole("button", { name: "Allow" }).hasAttribute("disabled")).toBe(false);
+    expect(mocks.save).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Allow" }));
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    act(() => mocks.request.mock.calls[1][1].onSuccess({ notifications: { status: "granted" } }));
+    expect(mocks.save).toHaveBeenCalledWith({ notify_on_copy: true });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows an open-settings error and retains its recovery action", async () => {
+    const user = userEvent.setup();
+    render(<AndroidCaptureSetup />);
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    act(() => mocks.openSettings.mock.calls[0][1].onError({
+      code: "timeout", retryable: true, message: "C:\\private\\pipe",
+    }));
+
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert").textContent).not.toContain("C:\\private");
+    expect(screen.getByText("This helper is blocked. Open Android settings to allow it.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(mocks.openSettings).toHaveBeenCalledTimes(2);
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("keeps permission actions busy while cached data refreshes", () => {
