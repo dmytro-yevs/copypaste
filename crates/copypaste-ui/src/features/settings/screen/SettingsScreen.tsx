@@ -212,7 +212,7 @@ export function SettingsScreen() {
     const focusSequence = searchFocusSequence.current;
     openSection(preferenceSectionForTab(result.item.tab));
     if (result.item.tab === "runtime-events") openEvents();
-    if (result.item.disclosure === "clipboard-advanced") {
+    if (result.item.disclosure !== undefined) {
       advancedRevealSequence.current += 1;
       setRevealAdvancedKey(
         `${result.item.title}:${advancedRevealSequence.current}`,

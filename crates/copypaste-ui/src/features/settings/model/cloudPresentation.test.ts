@@ -24,7 +24,7 @@ describe("cloud settings connection presentation", () => {
     ["missing status", undefined, false, false, { state: "unavailable", icon: "cloudOff", description: "settings.sync.cloud.statusUnavailable" }],
     ["not configured", status(), false, false, {
       state: "not-configured", icon: "cloudOff", description: "settings.sync.cloud.notConfigured",
-      badge: { label: "settings.sync.cloud.badgeNotConfigured", variant: "warn" },
+      badge: { label: "settings.sync.cloud.badgeNotConfigured", variant: "secondary" },
     }],
     ["signed out", status({ configured: true }), false, false, {
       state: "signed-out", icon: "cloudOff", description: "settings.sync.cloud.signedOutDescription",
