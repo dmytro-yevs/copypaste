@@ -162,6 +162,7 @@ describe("display is separate from the value (A11Y-13)", () => {
     ["macos", "⌘F", "⌘1", "⌘V"],
     ["windows", "Ctrl+F", "Ctrl+1", "Ctrl+V"],
     ["android", null, null, null],
+    ["unknown", null, null, null],
   ] as const)("formats visible action hints on %s", (platform, search, quickPaste, paste) => {
     expect(acceleratorLabel("CmdOrCtrl+F", platform)).toBe(search);
     expect(acceleratorLabel("CmdOrCtrl+1", platform)).toBe(quickPaste);

@@ -26,7 +26,7 @@ export function useCopy() {
       const shortcut = acceleratorLabel("CmdOrCtrl+V");
       toast.success(shortcut
         ? t("history.toast.copied", { shortcut })
-        : t("history.toast.copiedTouch"), { duration: 2500 });
+        : t("history.toast.copiedGeneric"), { duration: 2500 });
       await invalidateHistoryQueries(qc);
     },
     onError: (raw) => toast.error(toFriendly(raw)),
