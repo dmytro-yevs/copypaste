@@ -2,6 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
+import {
+  disclosureRevealKey,
+  type SettingsDisclosureReveal,
+} from "@/features/settings/model/settingsSearchIndex";
 import { CloudSyncSettings } from "@/features/settings/patterns/CloudSyncSettings";
 import type { CloudStatusData } from "@/lib/ipc";
 import { useUi } from "@/store/ui";
@@ -34,7 +38,7 @@ vi.mock("@/hooks/useViewportMetrics", () => ({
 vi.mock("@/features/settings/patterns/settingsTabs", () => ({
   renderPreferenceSection: (section: string, controller: {
     diagnosticsView?: string;
-    revealAdvancedKey?: string;
+    disclosureReveal?: SettingsDisclosureReveal;
     onOpenEvents?: () => void;
     onBackFromEvents?: () => void;
   }) => (
@@ -53,7 +57,7 @@ vi.mock("@/features/settings/patterns/settingsTabs", () => ({
         </>
       ) : <button onClick={controller.onOpenEvents}>Open runtime events</button> : null}
       {section === "clipboard" ? (
-        <details open={Boolean(controller.revealAdvancedKey)}>
+        <details open={Boolean(disclosureRevealKey(controller.disclosureReveal, "clipboard-advanced"))}>
           <summary>Advanced capture settings</summary>
           {mockContent.showAdvancedField ? (
             <div data-settings-search-target="row:Check the clipboard every">
@@ -63,7 +67,7 @@ vi.mock("@/features/settings/patterns/settingsTabs", () => ({
         </details>
       ) : null}
       {section === "cloud-sync" ? (
-        <CloudSyncSettings revealAdvancedKey={controller.revealAdvancedKey} />
+        <CloudSyncSettings revealAdvancedKey={disclosureRevealKey(controller.disclosureReveal, "cloud-server")} />
       ) : null}
     </div>
   ),
@@ -205,6 +209,34 @@ it.each([
     expect(field.closest("details")?.open).toBe(true);
     expect(document.activeElement).toBe(field);
   });
+});
+
+it("does not carry a clipboard search reveal into the cloud server", async () => {
+  cloudIpc.getCloudStatus.mockResolvedValue(cloudStatus(true));
+  withClient(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.change(searchbox, { target: { value: "Check the clipboard every" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Check the clipboard every/ }));
+  const clipboard = await screen.findByText("Advanced capture settings");
+  await waitFor(() => expect(clipboard.closest("details")?.open).toBe(true));
+
+  act(() => useUi.setState({ settingsTab: "cloud-sync" }));
+  const cloud = await screen.findByText("Advanced · Self-hosted cloud server");
+  expect(cloud.closest("details")?.open).toBe(false);
+});
+
+it("does not carry a cloud search reveal into advanced clipboard settings", async () => {
+  cloudIpc.getCloudStatus.mockResolvedValue(cloudStatus(true));
+  withClient(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.change(searchbox, { target: { value: "Server URL" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Server URL/ }));
+  const url = await screen.findByRole("textbox", { name: "Server URL" });
+  await waitFor(() => expect(url.closest("details")?.open).toBe(true));
+
+  act(() => useUi.setState({ settingsTab: "clipboard" }));
+  const clipboard = await screen.findByText("Advanced capture settings");
+  expect(clipboard.closest("details")?.open).toBe(false);
 });
 
 it("waits for a service field to load before focusing a search destination", async () => {
