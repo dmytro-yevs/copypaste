@@ -12,6 +12,13 @@ import type { PreviewResourceState } from "@/service/previewScenario";
 const PREVIEW_PIXEL =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
+const LONG_READER_BODY = Array.from(
+    { length: 144 },
+    (_, index) =>
+        `Section ${index + 1}. This synthetic clipping checks how a full reader handles many paragraphs, wrapped lines, keyboard focus, and internal scrolling while the list keeps a short preview.`,
+).join("\n\n");
+const LONG_READER_PREVIEW = LONG_READER_BODY.slice(0, 180);
+
 function item(
     id: string,
     content: string | null,
@@ -40,7 +47,7 @@ function item(
 function items(): Item[] {
     return [
         item("preview-plain", "Preview text preview", "text", { truncated: true }),
-        item("preview-source", "Draft preview", "text", {
+        item("preview-source", LONG_READER_PREVIEW, "text", {
             truncated: true,
             source_app_bundle_id: "com.example.editor",
             source_app_name: "Example Editor",
@@ -85,7 +92,7 @@ export function previewHistoryWriteAvailability(
 
 const bodies = new Map<string, string>([
     ["preview-plain", "Preview clipboard content from a fixture."],
-    ["preview-source", "Fixture body from Example Editor."],
+    ["preview-source", LONG_READER_BODY],
 ]);
 
 export function previewHistoryPage(empty: boolean): ItemPage {

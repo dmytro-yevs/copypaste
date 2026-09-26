@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PAIRING_SEMANTICS_BY_STATE, type PairingCeremony } from "@/lib/ipc";
 import { DEVICE_PRESENCE_OPTIONS } from "@/devtools/PreviewScenarioControls";
 import { previewObservedPresence } from "@/service/previewDeviceDto";
+import { previewHistoryPage } from "@/service/previewHistory";
 import { createPreviewInterceptor } from "@/service/previewIpc";
 import {
   createPreviewScenarioStore,
@@ -541,10 +542,23 @@ describe("preview scenario service", () => {
       handled: true,
       value: "Preview clipboard content from a fixture.",
     });
-    await expect(intercept("get_item_body", { id: "preview-source" })).resolves.toEqual({
-      handled: true,
-      value: "Fixture body from Example Editor.",
+    const source = previewHistoryPage(false).items.find((item) => item.id === "preview-source");
+    const sourceBody = await intercept("get_item_body", { id: "preview-source" });
+    expect(sourceBody.handled).toBe(true);
+    if (!sourceBody.handled || typeof sourceBody.value !== "string") {
+      throw new Error("the synthetic reader body must be text");
+    }
+    const bodyBytes = new TextEncoder().encode(sourceBody.value).length;
+    expect(bodyBytes).toBeGreaterThanOrEqual(10 * 1024);
+    expect(bodyBytes).toBeLessThanOrEqual(30 * 1024);
+    expect(source).toMatchObject({
+      content_type: "text/plain",
+      content_class: "text",
+      is_sensitive: false,
+      truncated: true,
     });
+    expect(source?.content).toBe(sourceBody.value.slice(0, source?.content?.length ?? 0));
+    expect(sourceBody.value.length).toBeGreaterThan((source?.content?.length ?? 0) * 10);
     await expect(intercept("get_image_preview", { id: "preview-image" })).resolves.toEqual({
       handled: true,
       value: {
@@ -599,10 +613,12 @@ describe("preview scenario service", () => {
     store.getState().setResource("history", "success");
     Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
     await expect(intercept("get_item_body", { id: "preview-plain" })).resolves.toEqual({ handled: false });
+    await expect(intercept("get_item_body", { id: "preview-source" })).resolves.toEqual({ handled: false });
     delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 
     store.getState().resetToLive();
     await expect(intercept("get_item_body", { id: "preview-plain" })).resolves.toEqual({ handled: false });
+    await expect(intercept("get_item_body", { id: "preview-source" })).resolves.toEqual({ handled: false });
   });
 
   it.each([
