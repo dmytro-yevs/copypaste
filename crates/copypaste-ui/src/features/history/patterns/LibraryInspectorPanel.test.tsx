@@ -200,6 +200,23 @@ describe("LibraryInspectorPanel", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Copy" }));
   });
 
+  it("allows a new Copy attempt when the prior callback never became pending", async () => {
+    callbacks.onCopy.mockClear();
+    const target = item({ id: "focus-first" });
+    const { rerender } = render(inspector({ item: target }));
+    const copy = screen.getByRole("button", { name: "Copy" });
+    copy.focus();
+    fireEvent.click(copy);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
+    copy.blur();
+    fireEvent.click(copy);
+    expect(callbacks.onCopy).toHaveBeenCalledTimes(2);
+    rerender(inspector({ item: target, copyPending: true }));
+    rerender(inspector({ item: target, copyPending: false }));
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("does not restore Copy focus to another selected item", async () => {
     const user = userEvent.setup();
     const first = item({ id: "focus-first" });
