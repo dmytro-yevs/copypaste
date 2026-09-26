@@ -3,7 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Screen, ScrollViewport } from "@/components/layout";
-import { ActionButton, EmptyState, SearchField } from "@/components/shared";
+import { ActionButton, EmptyState, FieldFeedback, SearchField } from "@/components/shared";
 import { Surface } from "@/components/ui";
 import { QuickPasteLoadingState } from "@/features/quick-paste/components/QuickPasteLoadingState";
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
@@ -315,6 +315,9 @@ export function QuickPasteScreen() {
                       })
                     : t("quickPaste.count.all", { count: items.length })}
             </p>
+            {copyPending ? (
+              <FieldFeedback state="pending">{t("quickPaste.copying")}</FieldFeedback>
+            ) : null}
             <ActionButton
               size="compactIcon"
               variant="ghost"
