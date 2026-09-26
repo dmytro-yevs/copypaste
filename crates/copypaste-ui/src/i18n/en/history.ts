@@ -242,7 +242,7 @@ export const history = {
 
   toast: {
     copied: "Copied — press {{shortcut}} to paste",
-    copiedTouch: "Copied to clipboard",
+    copiedGeneric: "Copied to clipboard",
     cleared_one: "Cleared {{count}} item — pinned items kept",
     cleared_other: "Cleared {{count}} items — pinned items kept",
     // The count is only known once `delete_all` has run, and this is shown
@@ -268,8 +268,8 @@ export const history = {
     bulkDeletedPartial: "Deleted {{done}} of {{total}} — {{failed}} failed",
     bulkCopied_one: "Copied {{count}} item — press {{shortcut}} to paste",
     bulkCopied_other: "Copied {{count}} items — press {{shortcut}} to paste",
-    bulkCopiedTouch_one: "Copied {{count}} item to clipboard",
-    bulkCopiedTouch_other: "Copied {{count}} items to clipboard",
+    bulkCopiedGeneric_one: "Copied {{count}} item to clipboard",
+    bulkCopiedGeneric_other: "Copied {{count}} items to clipboard",
     // Named rather than counted: the skipped rows are protected content, and
     // "Copied 8 items" over a selection of ten reads as a success.
     bulkCopiedPartial:

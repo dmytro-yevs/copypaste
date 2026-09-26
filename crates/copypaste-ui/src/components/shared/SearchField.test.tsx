@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui";
+import * as platform from "@/lib/platform";
 import { SearchField } from "./SearchField";
 
 const styles = readFileSync(
@@ -60,6 +61,20 @@ describe("SearchField", () => {
     );
     expect(container.querySelector("[data-slot='shortcut-badge']")).toBeNull();
     window.history.replaceState({}, "", "/");
+  });
+
+  it("does not guess a keyboard badge when native platform detection failed", () => {
+    const detected = vi.spyOn(platform, "currentPlatform").mockReturnValue("unknown");
+    try {
+      const { container } = render(
+        <TooltipProvider>
+          <SearchField aria-label="Search" shortcut="CmdOrCtrl+F" value="" onChange={() => {}} />
+        </TooltipProvider>,
+      );
+      expect(container.querySelector("[data-slot='shortcut-badge']")).toBeNull();
+    } finally {
+      detected.mockRestore();
+    }
   });
 
   it("does not invent a shortcut when a caller has none", () => {
