@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforce AGENTS.md rule 10 on a commit message.
+# Enforce the repository commit message contract.
 #
 # One implementation, two callers: .githooks/commit-msg and CI. A rule with no
 # check is how the previous guidance failed — twelve commits averaged 25 body
@@ -91,7 +91,7 @@ fi
 if (( FAILED )); then
     cat >&2 <<'EOF'
 
-AGENTS.md rule 10. Allowed shape:
+Repository commit message contract. Allowed shape:
 
   <imperative subject, <=72 chars, no period>
 
