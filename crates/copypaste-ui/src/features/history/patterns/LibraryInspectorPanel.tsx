@@ -32,6 +32,7 @@ interface LibraryInspectorPanelProps {
     fullContent: string | null;
     fullContentFailed: boolean;
     revealPending: boolean;
+    copyPending?: boolean;
     onReveal: (item: Item) => void;
     onHide: () => void;
     onCopy: (item: Item) => void;
@@ -48,6 +49,7 @@ export function LibraryInspectorPanel({
     fullContent,
     fullContentFailed,
     revealPending,
+    copyPending = false,
     onReveal,
     onHide,
     onCopy,
@@ -64,6 +66,7 @@ export function LibraryInspectorPanel({
     useEffect(() => setShownFinding(null), [item?.id]);
     const revealed = revealedContent !== null;
     const close = () => {
+        if (copyPending) return;
         if (revealed) onHide();
         onClose();
     };
@@ -78,6 +81,7 @@ export function LibraryInspectorPanel({
                     <ActionButton
                         size="compactIcon"
                         icon="close"
+                        disabled={copyPending}
                         aria-label={t("common.close")}
                         onClick={close}
                     />
@@ -121,6 +125,7 @@ export function LibraryInspectorPanel({
                 <ActionButton
                     size="compactIcon"
                     icon="close"
+                    disabled={copyPending}
                     aria-label={t("common.close")}
                     title={t("common.close")}
                     onClick={close}
@@ -131,6 +136,7 @@ export function LibraryInspectorPanel({
                     <ActionButton
                         size="compactIcon"
                         icon="expand"
+                        disabled={copyPending}
                         aria-label={t("history.row.open")}
                         title={t("history.row.open")}
                         onClick={(event) => {
@@ -141,6 +147,7 @@ export function LibraryInspectorPanel({
                     <ActionButton
                         size="compactIcon"
                         variant="primary"
+                        disabled={copyPending}
                         icon={copyAction.icon}
                         aria-label={copyAction.label}
                         title={copyAction.label}
@@ -149,6 +156,7 @@ export function LibraryInspectorPanel({
                     <ActionButton
                         size="compactIcon"
                         icon={item.pinned ? "unpin" : "pin"}
+                        disabled={copyPending}
                         aria-pressed={item.pinned}
                         aria-label={t(
                             item.pinned
@@ -165,6 +173,7 @@ export function LibraryInspectorPanel({
                     <ActionButton
                         size="compactIcon"
                         tone="danger"
+                        disabled={copyPending}
                         icon="trash"
                         aria-label={t("history.row.delete")}
                         title={t("history.row.delete")}
@@ -173,6 +182,7 @@ export function LibraryInspectorPanel({
                     {potentialFinding !== null ? (
                         <Button
                             variant="secondary"
+                            disabled={copyPending}
                             aria-pressed={potentialRevealed}
                             onClick={() =>
                                 setShownFinding(
@@ -191,7 +201,7 @@ export function LibraryInspectorPanel({
                         </Button>
                     ) : null}
                     {revealed ? (
-                        <Button variant="secondary" onClick={onHide}>
+                        <Button variant="secondary" disabled={copyPending} onClick={onHide}>
                             <Icon name="eyeOff" />
                             {t("history.detail.hide")}
                         </Button>
@@ -325,6 +335,7 @@ export function LibraryInspectorPanel({
                                 <Button
                                     type="button"
                                     variant="ghost"
+                                    disabled={copyPending}
                                     className={styles.protected}
                                     aria-label={t(
                                         "history.row.sensitiveReveal",

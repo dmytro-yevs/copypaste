@@ -18,8 +18,16 @@ const ipc = vi.hoisted(() => ({
     listItems: vi.fn(),
     searchItems: vi.fn(),
     getItemBody: vi.fn(),
+    copyItem: vi.fn(),
 }));
 const viewport = vi.hoisted(() => ({ width: 1200 }));
+const toast = vi.hoisted(() => ({
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({ toast }));
 
 vi.mock("@/hooks/useViewportMetrics", async (load) => ({
     ...(await load<typeof import("@/hooks/useViewportMetrics")>()),
@@ -68,6 +76,10 @@ describe("LibraryScreen reader reachability", () => {
         ipc.listItems.mockReset().mockResolvedValue(page([longItem]));
         ipc.searchItems.mockReset().mockResolvedValue(page([]));
         ipc.getItemBody.mockReset().mockResolvedValue(longBody);
+        ipc.copyItem.mockReset().mockResolvedValue(undefined);
+        toast.error.mockReset();
+        toast.success.mockReset();
+        toast.warning.mockReset();
     });
 
     it("opens the full, scrollable reader from desktop selection and returns focus", async () => {
@@ -106,6 +118,38 @@ describe("LibraryScreen reader reachability", () => {
         );
         expect(dialog.querySelector('[data-mode="reader"]')).not.toBeNull();
         expect(dialog.querySelector('[data-slot="dialog-sheet-handle"]')).not.toBeNull();
+    });
+
+    it("keeps compact copy pending, consumes failure and leaves safe recovery", async () => {
+        viewport.width = 390;
+        let failCopy!: (reason: Error) => void;
+        ipc.copyItem.mockImplementation(
+            () => new Promise<void>((_resolve, reject) => { failCopy = reject; }),
+        );
+        const { user } = renderScreen();
+        await user.click(await screen.findByRole("button", { name: "short preview" }));
+        const dialog = await screen.findByRole("dialog", { name: "Clipboard item" });
+
+        await user.click(within(dialog).getByRole("button", { name: "Copy" }));
+        await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
+        expect(within(dialog).getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
+            .toBe(true);
+        expect(within(dialog).getByRole("button", { name: "Show full contents" }).hasAttribute("disabled"))
+            .toBe(true);
+        expect(within(dialog).getByRole("button", { name: "Delete item" }).hasAttribute("disabled"))
+            .toBe(true);
+        await user.keyboard("{Escape}");
+        const backdrop = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]');
+        await user.click(backdrop!);
+        expect(screen.getByRole("dialog", { name: "Clipboard item" })).toBe(dialog);
+
+        failCopy(new Error("/Users/private/secret.sock"));
+        await waitFor(() => expect(toast.error).toHaveBeenCalledOnce());
+        expect(String(toast.error.mock.calls[0]?.[0])).not.toContain("/Users/private");
+        expect(within(dialog).getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
+            .toBe(false);
+        await user.click(within(dialog).getByRole("button", { name: "Show full contents" }));
+        expect(dialog.querySelector('[data-mode="reader"]')).not.toBeNull();
     });
 
     it("opens the reader with the desktop list keyboard action", async () => {

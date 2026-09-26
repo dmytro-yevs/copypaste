@@ -46,7 +46,7 @@ interface ClipDetailDialogProps {
     revealPending: boolean;
     onReveal: (item: Item) => void;
     onHide: () => void;
-    onCopy: (item: Item) => Promise<unknown> | void;
+    onCopy: (item: Item) => Promise<unknown>;
     onTogglePin: (item: Item) => void;
     onDelete: (item: Item) => void;
     onClose: () => void;
@@ -130,6 +130,26 @@ export function ClipDetailDialog({
         onClose();
     };
 
+    const startCopy = (target: Item, closeAfterSuccess: boolean): void => {
+        if (copyingRef.current) return;
+        const generation = copyGenerationRef.current;
+        copyingRef.current = true;
+        setCopying(true);
+        void Promise.resolve()
+            .then(() => onCopy(target))
+            .then(() => {
+                if (generation !== copyGenerationRef.current) return;
+                copyingRef.current = false;
+                setCopying(false);
+                if (closeAfterSuccess) close();
+            })
+            .catch(() => {
+                if (generation !== copyGenerationRef.current) return;
+                copyingRef.current = false;
+                setCopying(false);
+            });
+    };
+
     return (
         <Dialog open={item !== null} onOpenChange={(open) => !open && close()}>
             <DialogContent
@@ -173,9 +193,10 @@ export function ClipDetailDialog({
                             fullContent={fullContent}
                             fullContentFailed={fullContentFailed === true}
                             revealPending={revealPending}
+                            copyPending={copying}
                             onReveal={onReveal}
                             onHide={onHide}
-                            onCopy={onCopy}
+                            onCopy={(target) => startCopy(target, false)}
                             onTogglePin={onTogglePin}
                             onDelete={(target) => {
                                 onDelete(target);
@@ -368,22 +389,7 @@ export function ClipDetailDialog({
                             <Button
                                 disabled={copying}
                                 onClick={() => {
-                                    if (!item || copyingRef.current) return;
-                                    const generation = copyGenerationRef.current;
-                                    copyingRef.current = true;
-                                    setCopying(true);
-                                    void Promise.resolve()
-                                        .then(() => onCopy(item))
-                                        .then(() => {
-                                            if (generation !== copyGenerationRef.current) return;
-                                            copyingRef.current = false;
-                                            close();
-                                        })
-                                        .catch(() => {
-                                            if (generation !== copyGenerationRef.current) return;
-                                            copyingRef.current = false;
-                                            setCopying(false);
-                                        });
+                                    if (item) startCopy(item, true);
                                 }}
                             >
                                 <Icon name={copyAction.icon} />

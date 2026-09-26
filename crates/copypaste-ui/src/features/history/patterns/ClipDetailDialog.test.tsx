@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -139,6 +139,51 @@ describe("ClipDetailDialog notices", () => {
     );
     expect(onClose).not.toHaveBeenCalled();
     await user.keyboard("{Escape}");
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it("ignores an old copy result after another item starts copying", async () => {
+    const user = userEvent.setup();
+    const first = item({ id: "old", content: "old body" });
+    const second = item({ id: "new", content: "new body" });
+    const finishes = new Map<string, () => void>();
+    const onCopy = vi.fn((target: typeof first) =>
+      new Promise<void>((resolve) => finishes.set(target.id, resolve)),
+    );
+    const onClose = vi.fn();
+    const common = {
+      origin: null,
+      initialExpanded: true,
+      fullContent: null,
+      fullContentFailed: false,
+      revealedContent: null,
+      revealPending: false,
+      onReveal: vi.fn(),
+      onHide: vi.fn(),
+      onCopy,
+      onTogglePin: vi.fn(),
+      onDelete: vi.fn(),
+      onClose,
+      onReturnFocus: vi.fn(),
+    };
+    const { rerender } = render(
+      <TooltipProvider><ClipDetailDialog {...common} item={first} /></TooltipProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(finishes.has("old")).toBe(true));
+    rerender(
+      <TooltipProvider><ClipDetailDialog {...common} item={second} /></TooltipProvider>,
+    );
+    expect(screen.getByRole("region", { name: "Item contents" }).textContent)
+      .toBe("new body");
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(finishes.has("new")).toBe(true));
+    await act(async () => { finishes.get("old")!(); });
+    expect(screen.getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
+      .toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    finishes.get("new")!();
     await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
