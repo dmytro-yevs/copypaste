@@ -181,13 +181,13 @@ function Test-UiaFinitePositiveBounds($Bounds) {
     return $Bounds.Width -gt 0 -and $Bounds.Height -gt 0
 }
 
-function Test-UiaNamedCandidateReady([Collections.IDictionary]$Candidate) {
-    return $null -ne $Candidate -and $Candidate["enabled"] -and -not $Candidate["offscreen"] -and
+function Test-UiaNamedCandidateReady([Collections.IDictionary]$Candidate, [bool]$AllowDisabled = $false) {
+    return $null -ne $Candidate -and ($AllowDisabled -or $Candidate["enabled"]) -and -not $Candidate["offscreen"] -and
         $Candidate["actionable"] -and (Test-UiaFinitePositiveBounds $Candidate["bounds"])
 }
 
-function Test-UiaNamedCandidateScrollable([Collections.IDictionary]$Candidate) {
-    return $null -ne $Candidate -and $Candidate["enabled"] -and $Candidate["offscreen"] -and
+function Test-UiaNamedCandidateScrollable([Collections.IDictionary]$Candidate, [bool]$AllowDisabled = $false) {
+    return $null -ne $Candidate -and ($AllowDisabled -or $Candidate["enabled"]) -and $Candidate["offscreen"] -and
         $Candidate["actionable"] -and $null -ne $Candidate["scroll_item"] -and
         (Test-UiaFinitePositiveBounds $Candidate["bounds"])
 }
@@ -209,9 +209,9 @@ function Get-UiaOptionalScrollItemPattern(
     }
 }
 
-function Find-UiaReadyNamedCandidate([object[]]$Candidates) {
+function Find-UiaReadyNamedCandidate([object[]]$Candidates, [bool]$AllowDisabled = $false) {
     foreach ($candidate in @($Candidates)) {
-        if (Test-UiaNamedCandidateReady $candidate) { return $candidate }
+        if (Test-UiaNamedCandidateReady $candidate $AllowDisabled) { return $candidate }
     }
     return $null
 }
@@ -219,10 +219,10 @@ function Find-UiaReadyNamedCandidate([object[]]$Candidates) {
 # ScrollItemPattern is the documented UIA client pattern for bringing an item
 # into its container's viewport. One wait owns at most one such interaction;
 # it must still observe a fresh, normally-ready element afterward.
-function Invoke-UiaSingleOffscreenScroll([object[]]$Candidates, [hashtable]$ScrollState, [scriptblock]$Scroll) {
+function Invoke-UiaSingleOffscreenScroll([object[]]$Candidates, [hashtable]$ScrollState, [scriptblock]$Scroll, [bool]$AllowDisabled = $false) {
     if ($null -eq $ScrollState -or $ScrollState["attempted"]) { return $false }
     foreach ($candidate in @($Candidates)) {
-        if (-not (Test-UiaNamedCandidateScrollable $candidate)) { continue }
+        if (-not (Test-UiaNamedCandidateScrollable $candidate $AllowDisabled)) { continue }
         $ScrollState["attempted"] = $true
         try {
             & $Scroll $candidate["scroll_item"]
@@ -235,12 +235,12 @@ function Invoke-UiaSingleOffscreenScroll([object[]]$Candidates, [hashtable]$Scro
     return $false
 }
 
-function Resolve-UiaNamedCandidate([scriptblock]$ReadCandidates, [hashtable]$ScrollState = $null, [scriptblock]$Scroll = $null) {
+function Resolve-UiaNamedCandidate([scriptblock]$ReadCandidates, [hashtable]$ScrollState = $null, [scriptblock]$Scroll = $null, [bool]$AllowDisabled = $false) {
     $candidates = @(& $ReadCandidates)
-    $ready = Find-UiaReadyNamedCandidate $candidates
+    $ready = Find-UiaReadyNamedCandidate $candidates $AllowDisabled
     if ($null -ne $ready) { return $ready }
-    if ($null -eq $Scroll -or -not (Invoke-UiaSingleOffscreenScroll $candidates $ScrollState $Scroll)) { return $null }
-    return Find-UiaReadyNamedCandidate @(& $ReadCandidates)
+    if ($null -eq $Scroll -or -not (Invoke-UiaSingleOffscreenScroll $candidates $ScrollState $Scroll $AllowDisabled)) { return $null }
+    return Find-UiaReadyNamedCandidate @(& $ReadCandidates) $AllowDisabled
 }
 
 function Get-UiaNamedCandidateRecords(
@@ -300,14 +300,15 @@ function Get-UiaNamedElement(
     [Diagnostics.Process]$App,
     [string]$Name,
     [bool]$Actionable = $false,
-    [hashtable]$ScrollState = $null
+    [hashtable]$ScrollState = $null,
+    [bool]$AllowDisabled = $false
 ) {
     $scrollOptIn = $null -ne $ScrollState
     $recordReader = { Get-UiaNamedCandidateRecords $App $Name $Actionable $scrollOptIn }
     $record = Resolve-UiaNamedCandidate $recordReader $ScrollState {
         param($ScrollItem)
         ([Windows.Automation.ScrollItemPattern]$ScrollItem).ScrollIntoView()
-    }
+    } $AllowDisabled
     if ($null -eq $record) { return $null }
     return $record["element"]
 }
@@ -316,7 +317,8 @@ function Get-UiaNamedWaitProbeOutcome(
     [string]$Name,
     [scriptblock]$Find,
     [scriptblock]$HasRoot,
-    [hashtable]$ScrollState = $null
+    [hashtable]$ScrollState = $null,
+    [bool]$AllowDisabled = $false
 ) {
     $match = & $Find
     if ($null -ne $match) { return New-ProbeReady $match }
@@ -324,23 +326,26 @@ function Get-UiaNamedWaitProbeOutcome(
         return New-ProbeInvariant $ScrollState["failure"]
     }
     if (-not (& $HasRoot)) { return New-ProbeNotReady "the app has published no native window handle" }
-    return New-ProbeNotReady "no enabled, on-screen element is named '$Name'"
+    $qualifier = if ($AllowDisabled) { "on-screen" } else { "enabled, on-screen" }
+    return New-ProbeNotReady "no $qualifier element is named '$Name'"
 }
 
 function Wait-UiaName(
     [Diagnostics.Process]$App,
     [string]$Name,
     [bool]$Actionable = $false,
-    [bool]$ScrollOffscreen = $false
+    [bool]$ScrollOffscreen = $false,
+    [bool]$AllowDisabled = $false
 ) {
+    if ($Actionable -and $AllowDisabled) { throw "disabled UIA mode is read only" }
     $scrollState = if ($ScrollOffscreen) { @{ attempted = $false } } else { $null }
     return Wait-Readiness "UI state '$Name'" {
         $App.Refresh()
         if ($App.HasExited) { return New-ProbeInvariant "the app exited with code $($App.ExitCode)" }
         return Get-UiaNamedWaitProbeOutcome $Name `
-            { Get-UiaNamedElement $App $Name $Actionable $scrollState } `
+            { Get-UiaNamedElement $App $Name $Actionable $scrollState $AllowDisabled } `
             { $null -ne (Get-AppAutomationRoot $App) } `
-            $scrollState
+            $scrollState $AllowDisabled
     } { Get-UiaNamedWaitDiagnostics $App $Name $Actionable } 15000
 }
 
@@ -684,6 +689,93 @@ function Test-UiaOffscreenNamedNavigation {
         "a ScrollItem failure did not stop the named wait before a generic retry"
 }
 
+function Test-UiaRenderedNamedNavigation {
+    $visible = [ordered]@{
+        element = "disabled-visible"; enabled = $false; offscreen = $false
+        bounds = [pscustomobject]@{ X = 4; Y = 5; Width = 20; Height = 21 }
+        actionable = $true; scroll_item = $null
+    }
+    Assert-True (-not (Test-UiaNamedCandidateReady $visible) -and
+        (Test-UiaNamedCandidateReady $visible $true)) `
+        "rendered mode did not isolate disabled acceptance from default readiness"
+    $rejected = @(
+        [ordered]@{ element = "offscreen"; enabled = $false; offscreen = $true
+            bounds = $visible["bounds"]; actionable = $true; scroll_item = "scroll" },
+        [ordered]@{ element = "zero"; enabled = $false; offscreen = $false
+            bounds = [pscustomobject]@{ X = 4; Y = 5; Width = 0; Height = 21 }; actionable = $true; scroll_item = $null },
+        [ordered]@{ element = "non-finite"; enabled = $false; offscreen = $false
+            bounds = [pscustomobject]@{ X = [double]::NaN; Y = 5; Width = 20; Height = 21 }; actionable = $true; scroll_item = $null },
+        [ordered]@{ element = "non-actionable"; enabled = $false; offscreen = $false
+            bounds = $visible["bounds"]; actionable = $false; scroll_item = $null }
+    )
+    foreach ($candidate in $rejected) {
+        Assert-True (-not (Test-UiaNamedCandidateReady $candidate $true)) `
+            "rendered mode accepted an offscreen, zero, non-finite, or non-actionable candidate"
+    }
+    Assert-True (-not (Test-UiaNamedCandidateScrollable $rejected[0]) -and
+        (Test-UiaNamedCandidateScrollable $rejected[0] $true) -and
+        -not (Test-UiaNamedCandidateScrollable $rejected[1] $true) -and
+        -not (Test-UiaNamedCandidateScrollable $rejected[2] $true)) `
+        "rendered scrolling bypassed the disabled-mode or finite-bounds contract"
+
+    $transition = @{ reads = 0; scrolls = 0; phase = 0 }
+    $scrollState = @{ attempted = $false }
+    $result = Resolve-UiaNamedCandidate {
+        $transition["reads"]++
+        if ($transition["phase"] -eq 0) { return @($rejected[0]) }
+        return @($visible)
+    } $scrollState {
+        param($ScrollItem)
+        Assert-True ($ScrollItem -eq "scroll") "rendered mode lost the offscreen ScrollItem"
+        $transition["scrolls"]++
+        $transition["phase"] = 1
+    } $true
+    Assert-True ($result["element"] -eq "disabled-visible" -and
+        $transition["reads"] -eq 2 -and $transition["scrolls"] -eq 1 -and
+        $scrollState["attempted"]) `
+        "rendered mode did not require a fresh on-screen read after one scroll"
+    $unchanged = @{ scrolls = 0 }
+    $unchangedState = @{ attempted = $false }
+    $first = Resolve-UiaNamedCandidate { return @($rejected[0]) } $unchangedState {
+        $unchanged["scrolls"]++
+    } $true
+    $second = Resolve-UiaNamedCandidate { return @($rejected[0]) } $unchangedState {
+        $unchanged["scrolls"]++
+    } $true
+    Assert-True ($null -eq $first -and $null -eq $second -and
+        $unchanged["scrolls"] -eq 1) `
+        "rendered mode accepted offscreen state or repeated its scroll"
+    $failedState = @{ attempted = $false }
+    $failedScrolls = @{ count = 0 }
+    $failed = Resolve-UiaNamedCandidate { return @($rejected[0]) } $failedState {
+        $failedScrolls["count"]++
+        throw "fixture scroll failure"
+    } $true
+    $repeated = Resolve-UiaNamedCandidate { return @($rejected[0]) } $failedState {
+        $failedScrolls["count"]++
+    } $true
+    Assert-True ($null -eq $failed -and $null -eq $repeated -and
+        $failedScrolls["count"] -eq 1 -and
+        $failedState["failure"] -eq $UIA_OFFSCREEN_SCROLL_FAILURE) `
+        "rendered mode repeated or accepted a failed ScrollItem interaction"
+    $failureOutcome = Get-UiaNamedWaitProbeOutcome "fixture" { return $null } {
+        throw "root must not be probed after scroll failure"
+    } $failedState $true
+    Assert-True ($failureOutcome["kind"] -eq "invariant" -and
+        $failureOutcome["why"] -eq $UIA_OFFSCREEN_SCROLL_FAILURE) `
+        "rendered mode hid a ScrollItem failure behind a generic wait"
+    $waitSource = ${function:Wait-UiaName}.ToString()
+    Assert-True ($waitSource -match 'App\.HasExited' -and
+        $waitSource -match 'Get-UiaNamedWaitDiagnostics \$App \$Name \$Actionable' -and
+        $waitSource -match 'Get-UiaNamedElement \$App \$Name \$Actionable \$scrollState \$AllowDisabled') `
+        "rendered mode bypassed process exit, bounded diagnostics, or the named selector"
+    $badAction = $false
+    try { Wait-UiaName $null "fixture" $true $false $true | Out-Null } catch {
+        $badAction = $_.Exception.Message -eq "disabled UIA mode is read only"
+    }
+    Assert-True $badAction "actionable waits can accept disabled controls"
+}
+
 function Test-WindowsUiEvidenceHelpers {
     Test-WindowsUiaClientBootstrapHelpers
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
@@ -705,6 +797,7 @@ function Test-WindowsUiEvidenceHelpers {
         "a control type the client cannot name was given a name anyway"
     Test-UiaNamedCandidateDiagnostics
     Test-UiaOffscreenNamedNavigation
+    Test-UiaRenderedNamedNavigation
     Assert-True ((Get-WindowsPairingEntryState $true $true $false $false) -eq "ready") `
         "both native pairing fields did not identify the entry state"
     Assert-True ((Get-WindowsPairingEntryState $false $false $true $false) -eq "invoke") `
