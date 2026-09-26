@@ -49,6 +49,7 @@ it("starts every changed step at its heading after the user scrolls", () => {
   );
   const viewport = container.querySelector<HTMLElement>("[data-onboarding-scroll]");
   expect(viewport).not.toBeNull();
+  expect(screen.getByRole("heading", { name: "Your clipboard finally remembers." })).toBe(document.activeElement);
 
   for (const [step, title] of [
     [2, "Keep new copies within reach."],
