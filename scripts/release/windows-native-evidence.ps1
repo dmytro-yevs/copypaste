@@ -296,6 +296,58 @@ function Test-WindowsCloudOverviewReceipt([string]$Root, [string]$Writer) {
         "the Windows native receipt accepted a diagnostic Cloud state"
 }
 
+function Get-WindowsProductionScenario([string]$Source) {
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($Source, [ref]$tokens, [ref]$errors)
+    Assert-True ($errors.Count -eq 0) "Windows evidence source did not parse"
+    $runtime = @($ast.EndBlock.Statements | Where-Object {
+        $_ -is [System.Management.Automation.Language.TryStatementAst]
+    })
+    Assert-True ($runtime.Count -eq 1) "Windows evidence lacks one production scenario"
+    return $runtime[0]
+}
+
+function Assert-WindowsCloudScenarioSource([string]$Source) {
+    $scenario = Get-WindowsProductionScenario $Source
+    $body = $scenario.Body.Extent.Text
+    $cloudSteps = @(
+        'Invoke-UiaNamedControl $app "Cloud sync" "Set up cloud sync"',
+        'Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview" "Not configured" "unconfigured-overview" $captureTrace | Out-Null',
+        'Invoke-UiaNamedControl $app "Set up cloud sync" "Cloud server configuration"',
+        'Wait-UiaName $app "Server URL" $false $true',
+        'Wait-UiaName $app "Publishable key" $false $true',
+        'Wait-UiaName $app "Configure" $false $true $true',
+        'Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured" "Cloud server configuration"'
+    )
+    $position = 0
+    foreach ($step in $cloudSteps) {
+        $next = $body.IndexOf($step, $position, [StringComparison]::Ordinal)
+        Assert-True ($next -ge $position) "Windows cloud setup lost the closed-to-open field sequence"
+        $position = $next + $step.Length
+    }
+    $overviewLines = @($body.Split("`n") | Where-Object {
+        $_ -like '*Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview"*'
+    })
+    Assert-True ($overviewLines.Count -eq 1 -and $overviewLines[0].Trim() -eq $cloudSteps[1]) `
+        "the closed Cloud overview became a canonical feature state"
+}
+
+function Assert-WindowsCloudScenarioMutationRejected([string]$Source, [string]$Before, [string]$After) {
+    $scenario = Get-WindowsProductionScenario $Source
+    $body = $scenario.Body.Extent.Text
+    $first = $body.IndexOf($Before, [StringComparison]::Ordinal)
+    Assert-True ($first -ge 0 -and
+        $body.IndexOf($Before, $first + $Before.Length, [StringComparison]::Ordinal) -lt 0) `
+        "Windows Cloud mutation fixture is not unique"
+    $start = $scenario.Body.Extent.StartOffset
+    $end = $scenario.Body.Extent.EndOffset
+    $mutated = $Source.Substring(0, $start) + $body.Replace($Before, $After) + $Source.Substring($end)
+    $rejected = $false
+    try { Assert-WindowsCloudScenarioSource $mutated } catch { $rejected = $true }
+    Assert-True $rejected "a changed production Cloud scenario passed its source guard"
+}
+
 function Invoke-SelfTest {
     $root = Join-Path ([IO.Path]::GetTempPath()) "copypaste-windows-evidence-self-test-$([guid]::NewGuid())"
     [IO.Directory]::CreateDirectory($root) | Out-Null
@@ -399,27 +451,13 @@ function Invoke-SelfTest {
         Test-WindowsUiEvidenceHelpers
         Test-WindowsCloudOverviewReceipt $root (Join-Path $PSScriptRoot "write-native-evidence.py")
         $scenarioSource = [IO.File]::ReadAllText($PSCommandPath)
-        $cloudSteps = @(
-            'Invoke-UiaNamedControl $app "Cloud sync" "Set up cloud sync"',
-            'Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview" "Not configured" "unconfigured-overview" $captureTrace | Out-Null',
-            'Invoke-UiaNamedControl $app "Set up cloud sync" "Cloud server configuration"',
-            'Wait-UiaName $app "Server URL" $false $true',
-            'Wait-UiaName $app "Publishable key" $false $true',
-            'Wait-UiaName $app "Configure" $false $true $true',
-            'Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured" "Cloud server configuration"'
-        )
-        $cloudPosition = $scenarioSource.IndexOf('Invoke-UiaNamedControl $app "Settings" "Mode"', [StringComparison]::Ordinal)
-        Assert-True ($cloudPosition -ge 0) "Windows feature scenario is missing"
-        foreach ($step in $cloudSteps) {
-            $next = $scenarioSource.IndexOf($step, $cloudPosition, [StringComparison]::Ordinal)
-            Assert-True ($next -ge $cloudPosition) "Windows cloud setup lost the closed-to-open field sequence"
-            $cloudPosition = $next + $step.Length
-        }
-        $overviewLine = @($scenarioSource.Substring($scenarioSource.IndexOf('Invoke-UiaNamedControl $app "Settings" "Mode"')).Split("`n") |
-            Where-Object { $_ -like '*Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview"*' })
-        Assert-True ($overviewLine.Count -eq 1 -and
-            $overviewLine[0].Trim() -eq $cloudSteps[1]) `
-            "the closed Cloud overview became a canonical feature state"
+        Assert-WindowsCloudScenarioSource $scenarioSource
+        Assert-WindowsCloudScenarioMutationRejected $scenarioSource `
+            'Invoke-UiaNamedControl $app "Set up cloud sync" "Cloud server configuration"' `
+            'Write-Output "fixture removed setup action"'
+        Assert-WindowsCloudScenarioMutationRejected $scenarioSource `
+            'Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview" "Not configured" "unconfigured-overview" $captureTrace | Out-Null' `
+            '$featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview" "Not configured" "unconfigured-overview" $captureTrace'
         Write-Output "PASS: a broken installed sidecar package fails closed"
         Write-Output "PASS: an orphaned sidecar fails the shutdown assertion"
     } finally {
