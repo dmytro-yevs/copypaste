@@ -5,7 +5,11 @@ export const settingsCloud = {
     "Encrypted cloud history is optional. Direct device sync keeps working without it.",
   connectionTitle: "Cloud connection",
   description: "Syncs encrypted history through your configured account.",
-  notConfigured: "No cloud server is configured. Direct device sync still works.",
+  notConfigured: "Cloud sync is optional and has not been set up.",
+  setupTitle: "Use your own cloud server",
+  setupDescription:
+    "To use cloud sync, connect a compatible server you provide. Direct device sync keeps working without one.",
+  setupAction: "Set up cloud sync",
   signedOutDescription: "Sign in to use encrypted cloud sync.",
   attentionDescription: "Your account is connected, but cloud sync needs attention.",
   badgeNotConfigured: "Not configured",
@@ -48,7 +52,9 @@ export const settingsCloud = {
   syncError: "Cloud sync failed. Check the connection and try again.",
   endpoint: {
     title: "Cloud server",
-    description: "Connect a compatible server before adding a cloud account.",
+    advancedTitle: "Advanced · Self-hosted cloud server",
+    advancedDescription: "Server settings for encrypted cloud sync.",
+    description: "Connect a compatible server you provide before adding a cloud account.",
     configuredDescription:
       "Server credentials are stored on this device and are never shown again.",
     formLabel: "Cloud server configuration",

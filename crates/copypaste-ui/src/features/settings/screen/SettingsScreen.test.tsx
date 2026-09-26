@@ -2,7 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
+import { CloudSyncSettings } from "@/features/settings/patterns/CloudSyncSettings";
+import type { CloudStatusData } from "@/lib/ipc";
 import { useUi } from "@/store/ui";
+import { withClient } from "@/test/harness";
 import { SettingsScreen } from "./SettingsScreen";
 
 const viewport = vi.hoisted(() => ({
@@ -12,6 +15,12 @@ const viewport = vi.hoisted(() => ({
   sizeClass: "compact" as const,
 }));
 const mockContent = vi.hoisted(() => ({ showAdvancedField: true }));
+const cloudIpc = vi.hoisted(() => ({ getCloudStatus: vi.fn() }));
+
+vi.mock("@/lib/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ipc")>()),
+  getCloudStatus: () => cloudIpc.getCloudStatus(),
+}));
 
 vi.mock("@/hooks/useViewportMetrics", () => ({
   useViewportMetrics: () => viewport,
@@ -53,6 +62,9 @@ vi.mock("@/features/settings/patterns/settingsTabs", () => ({
           ) : null}
         </details>
       ) : null}
+      {section === "cloud-sync" ? (
+        <CloudSyncSettings revealAdvancedKey={controller.revealAdvancedKey} />
+      ) : null}
     </div>
   ),
 }));
@@ -60,6 +72,7 @@ vi.mock("@/features/settings/patterns/settingsTabs", () => ({
 afterEach(() => {
   vi.restoreAllMocks();
   mockContent.showAdvancedField = true;
+  cloudIpc.getCloudStatus.mockReset();
   useUi.setState({ settingsTab: null });
   Object.assign(viewport, {
     width: 390,
@@ -68,6 +81,19 @@ afterEach(() => {
     sizeClass: "compact",
   });
 });
+
+function cloudStatus(configured: boolean): CloudStatusData {
+  return {
+    configured,
+    signed_in: false,
+    key_ready: false,
+    email: null,
+    last_sync_ms: null,
+    last_error: null,
+    poll_interval_secs: 60,
+    unreadable_uploads: 0,
+  };
+}
 
 it("resets compact settings scroll when opening and leaving a detail", async () => {
   render(
@@ -152,6 +178,29 @@ it("search opens a collapsed advanced group and focuses its field", async () => 
   fireEvent.click(await screen.findByRole("option", { name: /Check the clipboard every/ }));
 
   const field = await screen.findByRole("combobox", { name: "Check the clipboard every" });
+  await waitFor(() => {
+    expect(field.closest("details")?.open).toBe(true);
+    expect(document.activeElement).toBe(field);
+  });
+});
+
+it.each([
+  ["Server URL", true],
+  ["Publishable key", false],
+] as const)("search opens the cloud server and focuses %s after status loads", async (fieldName, configured) => {
+  let resolveStatus!: (status: CloudStatusData) => void;
+  cloudIpc.getCloudStatus.mockImplementation(() => new Promise<CloudStatusData>((resolve) => {
+    resolveStatus = resolve;
+  }));
+  withClient(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.change(searchbox, { target: { value: fieldName } });
+  fireEvent.click(await screen.findByRole("option", { name: new RegExp(fieldName) }));
+
+  await waitFor(() => expect(cloudIpc.getCloudStatus).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole("textbox", { name: fieldName })?.closest("details")?.open).not.toBe(true);
+  await act(async () => resolveStatus(cloudStatus(configured)));
+  const field = await screen.findByRole("textbox", { name: fieldName });
   await waitFor(() => {
     expect(field.closest("details")?.open).toBe(true);
     expect(document.activeElement).toBe(field);

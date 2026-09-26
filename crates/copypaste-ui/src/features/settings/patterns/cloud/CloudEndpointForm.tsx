@@ -43,7 +43,10 @@ export function CloudEndpointForm({
           </InlineNotice>
         </div>
       ) : null}
-      <div className={styles.field}>
+      <div
+        className={styles.field}
+        data-settings-search-target={`row:${t("settings.sync.cloud.endpoint.url")}`}
+      >
         <Label htmlFor={urlId}>{t("settings.sync.cloud.endpoint.url")}</Label>
         <Input
           id={urlId}
@@ -59,7 +62,10 @@ export function CloudEndpointForm({
           required
         />
       </div>
-      <div className={styles.field}>
+      <div
+        className={styles.field}
+        data-settings-search-target={`row:${t("settings.sync.cloud.endpoint.publishableKey")}`}
+      >
         <Label htmlFor={keyId}>{t("settings.sync.cloud.endpoint.publishableKey")}</Label>
         <Input
           id={keyId}

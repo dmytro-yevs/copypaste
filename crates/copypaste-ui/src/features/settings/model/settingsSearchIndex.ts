@@ -13,7 +13,7 @@ export interface SettingsSearchItem {
   keywords?: readonly string[];
   platforms?: readonly ("desktop" | "android" | "windows")[];
   capability?: Exclude<keyof SettingsCapabilities, "platform">;
-  disclosure?: "clipboard-advanced";
+  disclosure?: "clipboard-advanced" | "cloud-server";
 }
 
 /** Every settings row is listed here so search does not depend on hidden tabs
@@ -58,7 +58,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { tab: "device-sync", title: "devices.own.rename.label", description: "devices.own.rename.description", keywords: ["device name", "rename", "this device"] },
   { tab: "device-sync", title: "settings.sync.paired.title", description: "settings.sync.paired.description", keywords: ["pair", "devices", "encrypted"] },
   { tab: "device-sync", title: "settings.sync.now.title", description: "settings.sync.now.description" },
-  { tab: "cloud-sync", title: "settings.sync.cloud.title", description: "settings.sync.cloud.description", keywords: ["account", "supabase", "internet"] },
+  { tab: "cloud-sync", title: "settings.sync.cloud.connectionTitle", description: "settings.sync.cloud.description", keywords: ["cloud sync", "account", "internet"] },
+  { tab: "cloud-sync", title: "settings.sync.cloud.endpoint.advancedTitle", description: "settings.sync.cloud.endpoint.advancedDescription", keywords: ["self-hosted", "server", "advanced"], disclosure: "cloud-server" },
+  { tab: "cloud-sync", section: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.title", description: "settings.sync.cloud.endpoint.description", keywords: ["server", "change", "restore"], disclosure: "cloud-server" },
+  { tab: "cloud-sync", section: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.url", keywords: ["host", "address", "server"], disclosure: "cloud-server" },
+  { tab: "cloud-sync", section: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.publishableKey", keywords: ["anon key", "server credential"], disclosure: "cloud-server" },
 
   { tab: "storage", title: "settings.storage.stored.title", description: "settings.storage.stored.description" },
   { tab: "storage", title: "settings.transfer.export.title", description: "settings.transfer.export.description" },

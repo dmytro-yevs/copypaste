@@ -71,7 +71,15 @@ describe("cloud account lifecycle", () => {
   it("lets an unconfigured build save a cloud endpoint", async () => {
     const { user } = withUser(<CloudSyncSettings />);
 
-    await user.type(await screen.findByLabelText("Server URL"), "https://cloud.example.test");
+    const setup = await screen.findByRole("button", { name: "Set up cloud sync" });
+    const advanced = screen.getByText("Advanced · Self-hosted cloud server").closest("details");
+    expect(advanced?.open).toBe(false);
+    expect(screen.getByRole("textbox", { name: "Server URL" }).closest("details")?.open).toBe(false);
+    expect(screen.getByText(/Direct device sync keeps working without one/)).toBeTruthy();
+    await user.click(setup);
+    await waitFor(() => expect(advanced?.open).toBe(true));
+
+    await user.type(screen.getByRole("textbox", { name: "Server URL" }), "https://cloud.example.test");
     await user.type(screen.getByLabelText("Publishable key"), "publishable-anon-key");
     await user.click(screen.getByRole("button", { name: "Configure" }));
 
@@ -81,6 +89,67 @@ describe("cloud account lifecycle", () => {
     ));
     expect((await screen.findByRole("button", { name: "Change server" }) as HTMLButtonElement).disabled)
       .toBe(false);
+  });
+
+  it("lets the setup button reopen a disclosure previously opened by search", async () => {
+    const { user, rerender } = withUser(
+      <CloudSyncSettings revealAdvancedKey="settings.sync.cloud.endpoint.url:1" />,
+    );
+    const summary = await screen.findByText("Advanced · Self-hosted cloud server");
+    const advanced = summary.closest("details");
+    await waitFor(() => expect(advanced?.open).toBe(true));
+    await user.click(summary);
+    expect(advanced?.open).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Set up cloud sync" }));
+    await waitFor(() => expect(advanced?.open).toBe(true));
+    await user.click(summary);
+    rerender(<CloudSyncSettings revealAdvancedKey="settings.sync.cloud.endpoint.url:2" />);
+    await waitFor(() => expect(advanced?.open).toBe(true));
+  });
+
+  it("keeps account sign-in primary and preserves advanced server drafts and restore", async () => {
+    ipc.getCloudStatus.mockResolvedValue(status({ configured: true }));
+    ipc.cloudSetEndpoint.mockImplementation((url: string) => Promise.resolve(status({
+      configured: Boolean(url),
+    })));
+    const { user } = withUser(<CloudSyncSettings />);
+
+    expect(await screen.findByLabelText("Email")).toBeTruthy();
+    const summary = screen.getByText("Advanced · Self-hosted cloud server");
+    const advanced = summary.closest("details");
+    expect(advanced?.open).toBe(false);
+    expect(screen.getByRole("button", { name: "Change server" }).closest("details")?.open).toBe(false);
+
+    await user.click(summary);
+    await user.click(screen.getByRole("button", { name: "Change server" }));
+    expect(screen.getByText(/Changing or restoring the cloud server signs this device out/)).toBeTruthy();
+    const url = screen.getByRole("textbox", { name: "Server URL" }) as HTMLInputElement;
+    const key = screen.getByRole("textbox", { name: "Publishable key" }) as HTMLInputElement;
+    expect(url.value).toBe("");
+    expect(key.value).toBe("");
+    await user.type(url, "https://other.example.test");
+    await user.type(key, "other-anon-key");
+    await user.click(summary);
+    expect(advanced?.open).toBe(false);
+    expect(advanced?.querySelector("summary")?.textContent).toContain("Unsaved server credentials");
+    await user.click(summary);
+    expect(url.value).toBe("https://other.example.test");
+    expect(key.value).toBe("other-anon-key");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("textbox", { name: "Server URL" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Change server" }));
+    await user.type(screen.getByRole("textbox", { name: "Server URL" }), "https://replacement.example.test");
+    await user.type(screen.getByRole("textbox", { name: "Publishable key" }), "replacement-anon-key");
+    await user.click(screen.getByRole("button", { name: "Save server" }));
+    await waitFor(() => expect(ipc.cloudSetEndpoint).toHaveBeenCalledWith(
+      "https://replacement.example.test",
+      "replacement-anon-key",
+    ));
+    await user.click(await screen.findByRole("button", { name: "Change server" }));
+    await user.click(screen.getByRole("button", { name: "Restore hosted default" }));
+    await waitFor(() => expect(ipc.cloudSetEndpoint).toHaveBeenCalledWith("", ""));
+    expect(await screen.findByRole("button", { name: "Set up cloud sync" })).toBeTruthy();
   });
 
   it("makes account creation reachable from the configured signed-out state", async () => {
@@ -121,7 +190,7 @@ describe("cloud connection health", () => {
     expect(screen.queryByText("Connected")).toBeNull();
     expect(screen.getByRole("button", { name: "Sync cloud now" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Change server" })).toBeTruthy();
+    expect(screen.getByText("Advanced · Self-hosted cloud server").closest("details")?.open).toBe(false);
     expect(screen.queryByLabelText("Password")).toBeNull();
   });
 

@@ -110,6 +110,8 @@ export function useCloudAccountController() {
     setEndpointEditorOpen(false);
   }, [clearEndpoint]);
 
+  const openEndpointEditor = useCallback(() => setEndpointEditorOpen(true), []);
+
   const busy = setEndpoint.isPending || signIn.isPending || signUp.isPending
     || signOut.isPending || syncNow.isPending;
 
@@ -124,7 +126,7 @@ export function useCloudAccountController() {
     endpointError: setEndpoint.isError,
     updateEndpoint,
     clearEndpoint,
-    openEndpointEditor: () => setEndpointEditorOpen(true),
+    openEndpointEditor,
     cancelEndpointEdit,
     configureEndpoint,
     restoreHostedEndpoint,
