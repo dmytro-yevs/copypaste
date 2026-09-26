@@ -60,6 +60,7 @@ pub(crate) struct IdArgs {
 pub(crate) struct ClipboardWriteAvailabilityArgs {
     #[serde(rename = "contentType")]
     pub(crate) content_type: String,
+    pub(crate) mode: crate::commands::history::ClipboardWriteMode,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -307,6 +308,24 @@ mod tests {
             );
         }
         assert!(UiCommandName::parse("future_command").is_none());
+    }
+
+    #[test]
+    fn availability_bridge_requires_a_valid_mode() {
+        use crate::commands::history::ClipboardWriteMode;
+
+        let valid: ClipboardWriteAvailabilityArgs = serde_json::from_value(
+            serde_json::json!({ "contentType": "image/png", "mode": "plain_text" }),
+        )
+        .unwrap();
+        assert_eq!(valid.mode, ClipboardWriteMode::PlainText);
+        for args in [
+            serde_json::json!({ "contentType": "image/png" }),
+            serde_json::json!({ "contentType": "image/png", "mode": "invalid" }),
+            serde_json::json!({ "contentType": "image/png", "mode": 42 }),
+        ] {
+            assert!(serde_json::from_value::<ClipboardWriteAvailabilityArgs>(args).is_err());
+        }
     }
 
     #[test]
