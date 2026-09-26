@@ -11,9 +11,38 @@ r8_report()    { log_blocks "$1" "$R8_PATTERNS" "${2:-}"; }
 # `ProcessRecord.killLocked` writes `ActivityManager: Killing <pid>:<proc>/<uid>
 # (adj N): <reason>`, so a process that is simply gone and one the system took
 # away are distinguishable and must not be reported as the same failure.
+# API 33 emitted only the structured am_kill event for that same decision;
+# conflicting records for one app pid do not authorise recovery.
 platform_kill_reason() { # <log> <pid>
     [[ -n "${2:-}" ]] || return 0
-    sed -n "s/.*ActivityManager: Killing $2:[^ ]* (adj [^)]*): //p" "$1" | head -n 1
+    awk -v expected_pid="$2" -v app="$PKG" '
+        function record(reason) {
+            if (reason == "") return
+            if (seen && reason != observed) ambiguous = 1
+            observed = reason
+            seen++
+        }
+        /ActivityManager: Killing / {
+            line = $0
+            sub(/^.*ActivityManager: Killing /, "", line)
+            if (index(line, expected_pid ":") != 1) next
+            sub(/^[^:]*:/, "", line)
+            if (index(line, app "/") != 1) next
+            if (sub(/^[^ ]* \(adj [^)]*\): /, "", line) != 1) next
+            record(line)
+        }
+        /am_kill[[:space:]]*:/ {
+            line = $0
+            if (sub(/^.*am_kill[[:space:]]*:[[:space:]]*\[/, "", line) != 1 ||
+                line !~ /\]$/) next
+            split(line, fields, ",")
+            if (fields[2] != expected_pid || fields[3] != app) next
+            sub(/^[^,]*,[^,]*,[^,]*,[^,]*,/, "", line)
+            sub(/\]$/, "", line)
+            record(line)
+        }
+        END { if (seen && !ambiguous) print observed }
+    ' "$1"
 }
 
 # A kill nothing in this artefact caused. `ContentProviderHelper
@@ -198,6 +227,28 @@ android_log_report_self_test() { # <temporary directory>
     [[ -n "$(foreign_dependency_kill "$t/dependency-died.log" 4242)" ]] \
         && ok "a provider host outside the package is a foreign kill" \
         || bad "a provider host outside the package is a foreign kill"
+    printf '%s\n' \
+        '09-26 18:46:54.976   483  2564 I am_kill : [0,3732,com.copypaste.app,0,depends on provider com.google.android.gms/.fonts.provider.FontsProvider in dying proc com.google.android.gms.persistent (adj -10000)]' \
+        > "$t/dependency-event.log"
+    [[ "$(foreign_dependency_kill "$t/dependency-event.log" 3732)" == "depends on provider com.google.android.gms/.fonts.provider.FontsProvider"* ]] \
+        && ok "the API 33 am_kill event identifies the foreign provider death" \
+        || bad "the API 33 am_kill event identifies the foreign provider death"
+    [[ -z "$(platform_kill_reason "$t/dependency-event.log" 9999)" ]] \
+        && ok "another pid's am_kill event is not this app's" \
+        || bad "another pid's am_kill event is not this app's"
+    sed "s/,3732,com.copypaste.app,/,3732,com.example.other,/" \
+        "$t/dependency-event.log" > "$t/dependency-other-app.log"
+    [[ -z "$(platform_kill_reason "$t/dependency-other-app.log" 3732)" ]] \
+        && ok "another package's am_kill event is not this app's" \
+        || bad "another package's am_kill event is not this app's"
+    {
+        cat "$t/dependency-event.log"
+        printf '%s\n' \
+            'I am_kill : [0,3732,com.copypaste.app,0,low memory]'
+    } > "$t/ambiguous-kill.log"
+    [[ -z "$(platform_kill_reason "$t/ambiguous-kill.log" 3732)" ]] \
+        && ok "conflicting kill reasons for one app pid are not attributed away" \
+        || bad "conflicting kill reasons for one app pid are not attributed away"
     [[ -z "$(platform_kill_reason "$t/dependency-died.log" 9999)" ]] \
         && ok "another process's kill is not this pid's" \
         || bad "another process's kill is not this pid's"
