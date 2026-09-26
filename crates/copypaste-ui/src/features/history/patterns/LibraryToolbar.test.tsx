@@ -87,6 +87,37 @@ afterEach(() => {
 });
 
 describe("Library toolbar active-control badges", () => {
+    it.each([
+        ["macos", "⌘F", "Search (⌘F) · ↓ to move into the list · ⌘A select all"],
+        ["windows", "Ctrl+F", "Search (Ctrl+F) · ↓ to move into the list · Ctrl+A select all"],
+        ["android", null, null],
+    ])("presents supported search hints on %s", (platform, badge, hint) => {
+        window.history.replaceState({}, "", `/?platform=${platform}`);
+        const { container, unmount } = render(toolbar());
+        const search = screen.getByRole("searchbox", { name: "Search clipboard history, default" });
+        expect(container.querySelector('[data-slot="shortcut-badge"]')?.textContent ?? null).toBe(badge);
+        expect(search.getAttribute("title")).toBe(hint);
+        if (platform !== "android") {
+            const shortcut = new KeyboardEvent("keydown", {
+                key: "f",
+                metaKey: platform === "macos",
+                ctrlKey: platform === "windows",
+                bubbles: true,
+                cancelable: true,
+            });
+            act(() => window.dispatchEvent(shortcut));
+            expect(shortcut.defaultPrevented).toBe(true);
+            expect(document.activeElement).toBe(search);
+        }
+        unmount();
+        window.history.replaceState({}, "", "/");
+    });
+
+    it("points display-limit guidance to the owning settings page", () => {
+        render(toolbar({ displayLimit: 100, visible: 100, total: 500 }));
+        expect(screen.getByText(/Settings › Clipboard behavior/)).toBeTruthy();
+    });
+
     it("keeps the kind menu state on its trigger", async () => {
         const user = userEvent.setup();
         render(toolbar());

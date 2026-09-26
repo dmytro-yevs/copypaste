@@ -30,6 +30,7 @@ import {
 import { classifyError, isRetryable } from "@/lib/errors";
 import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
+import { acceleratorLabel } from "@/lib/accelerator";
 import { rankFuzzy } from "@/lib/fuzzy";
 import { markedOrigin, markedOrigins } from "@/lib/itemOrigin";
 import styles from "./QuickPasteScreen.module.css";
@@ -239,7 +240,9 @@ export function QuickPasteScreen() {
                 item={item}
                 active={selectedId === item.id}
                 previewLines={previewLinesPopup}
-                shortcut={!searching && index < 9 ? `⌘${index + 1}` : null}
+                shortcut={!searching && index < 9
+                  ? acceleratorLabel(`CmdOrCtrl+${index + 1}`)
+                  : null}
                 pinPending={pinPendingId === item.id}
                 origin={markedOrigin(item, originMarks)}
                 fullContent={selectedId === item.id ? selectedBody.text : null}

@@ -17,6 +17,7 @@ import { ActiveControlBadge } from "@/features/history/patterns/ActiveControlBad
 import { BulkActionBar } from "@/features/history/patterns/BulkActionBar";
 import { LibraryToolbarHeader } from "@/features/history/patterns/LibraryToolbarHeader";
 import { useTranslation } from "@/i18n";
+import { acceleratorLabel } from "@/lib/accelerator";
 import {
     DEFAULT_VIEW,
     type SortOrder,
@@ -69,6 +70,8 @@ export function LibraryToolbar({
     selection,
 }: LibraryToolbarProps) {
     const { t } = useTranslation();
+    const searchShortcut = acceleratorLabel("CmdOrCtrl+F");
+    const selectAllShortcut = acceleratorLabel("CmdOrCtrl+A");
     const kindItems = useMemo(historyKindOptions, []);
     const deviceItems = useMemo(
         () => historyDeviceOptions(origins),
@@ -179,7 +182,13 @@ export function LibraryToolbar({
                                         )}
                                         aria-label={searchLabel}
                                         clearLabel={t("history.search.clear")}
-                                        title={t("history.search.hint")}
+                                        shortcut="CmdOrCtrl+F"
+                                        title={searchShortcut && selectAllShortcut
+                                            ? t("history.search.hint", {
+                                                search: searchShortcut,
+                                                selectAll: selectAllShortcut,
+                                            })
+                                            : undefined}
                                         onChange={(event) =>
                                             onChange(event.target.value)
                                         }

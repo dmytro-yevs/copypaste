@@ -10,6 +10,7 @@ import {
   MEDIA_KEYS,
   WINDOWS_UNBINDABLE_KEYS,
   acceleratorGlyphs,
+  acceleratorLabel,
   captureAccelerator,
 } from "./accelerator";
 
@@ -157,6 +158,16 @@ describe("modifier order is fixed", () => {
 });
 
 describe("display is separate from the value (A11Y-13)", () => {
+  it.each([
+    ["macos", "⌘F", "⌘1", "⌘V"],
+    ["windows", "Ctrl+F", "Ctrl+1", "Ctrl+V"],
+    ["android", null, null, null],
+  ] as const)("formats visible action hints on %s", (platform, search, quickPaste, paste) => {
+    expect(acceleratorLabel("CmdOrCtrl+F", platform)).toBe(search);
+    expect(acceleratorLabel("CmdOrCtrl+1", platform)).toBe(quickPaste);
+    expect(acceleratorLabel("CmdOrCtrl+V", platform)).toBe(paste);
+  });
+
   it("renders one keycap per token, so F1 does not become two", () => {
     expect(acceleratorGlyphs("CmdOrCtrl+Shift+F1", false)).toEqual(["⌘", "⇧", "F1"]);
   });

@@ -5,7 +5,7 @@
  * AZERTY layout records the same physical binding.
  */
 import { t } from "@/i18n";
-import { isWindowsPlatform } from "@/lib/platform";
+import { currentPlatform, isWindowsPlatform, type AppPlatform } from "@/lib/platform";
 
 export const DEFAULT_SHORTCUT = "CmdOrCtrl+Shift+V";
 
@@ -190,4 +190,13 @@ export function acceleratorGlyphs(
 ): string[] {
   const glyphs = windows ? WINDOWS_GLYPHS : MAC_GLYPHS;
   return accelerator.split("+").map((token) => glyphs[token] ?? token);
+}
+
+export function acceleratorLabel(
+  accelerator: string,
+  platform: AppPlatform = currentPlatform(),
+): string | null {
+  if (platform === "android") return null;
+  const mac = platform === "macos" || platform === "browser" || platform === "unknown";
+  return acceleratorGlyphs(accelerator, !mac).join(mac ? "" : "+");
 }
