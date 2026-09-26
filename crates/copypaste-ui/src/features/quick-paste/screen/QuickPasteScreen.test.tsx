@@ -54,11 +54,35 @@ describe("quickPastePresentation", () => {
   });
 
   beforeEach(() => {
+    window.history.replaceState({}, "", "/");
     ipc.copyItem.mockReset();
     ipc.listItems.mockReset();
     lifecycle.dismiss.mockReset();
     toast.error.mockReset();
     ipc.listItems.mockResolvedValue(page([item()]));
+  });
+
+  it.each([
+    ["macos", "⌘1", "{Meta>}1{/Meta}"],
+    ["windows", "Ctrl+1", "{Control>}1{/Control}"],
+    ["android", null, null],
+  ])("keeps the visible %s slot hint aligned with activation", async (platform, badge, keys) => {
+    window.history.replaceState({}, "", `/?platform=${platform}`);
+    ipc.copyItem.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const client = testClient();
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("listitem");
+    expect(container.querySelector('[data-slot="shortcut-badge"]')?.textContent ?? null).toBe(badge);
+    if (keys) {
+      await user.click(screen.getByRole("searchbox"));
+      await user.keyboard(keys);
+      await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledWith("row-1"));
+    }
   });
 
   it.each([

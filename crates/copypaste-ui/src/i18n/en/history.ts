@@ -39,7 +39,7 @@ export const history = {
     toolbar: "Library controls",
     label: "Search clipboard history",
     placeholder: "Search content, apps, devices…",
-    hint: "Search (⌘F) · ↓ to move into the list · ⌘A select all",
+    hint: "Search ({{search}}) · ↓ to move into the list · {{selectAll}} select all",
     open: "Search clipboard history",
     close: "Close search",
     clear: "Clear search",
@@ -54,7 +54,7 @@ export const history = {
     count_one: "{{count}} item",
     count_other: "{{count}} items",
     displayLimitHint:
-      "Showing first {{limit}} of {{count}} results — adjust the display limit in Settings › Storage.",
+      "Showing first {{limit}} of {{count}} results — adjust the display limit in Settings › Clipboard behavior.",
   },
 
   kind: {
@@ -241,7 +241,8 @@ export const history = {
   },
 
   toast: {
-    copied: "Copied — press ⌘V to paste",
+    copied: "Copied — press {{shortcut}} to paste",
+    copiedTouch: "Copied to clipboard",
     cleared_one: "Cleared {{count}} item — pinned items kept",
     cleared_other: "Cleared {{count}} items — pinned items kept",
     // The count is only known once `delete_all` has run, and this is shown
@@ -265,8 +266,10 @@ export const history = {
     pinnedPartial: "Pinned {{done}} of {{total}} — {{failed}} failed",
     unpinnedPartial: "Unpinned {{done}} of {{total}} — {{failed}} failed",
     bulkDeletedPartial: "Deleted {{done}} of {{total}} — {{failed}} failed",
-    bulkCopied_one: "Copied {{count}} item — press ⌘V to paste",
-    bulkCopied_other: "Copied {{count}} items — press ⌘V to paste",
+    bulkCopied_one: "Copied {{count}} item — press {{shortcut}} to paste",
+    bulkCopied_other: "Copied {{count}} items — press {{shortcut}} to paste",
+    bulkCopiedTouch_one: "Copied {{count}} item to clipboard",
+    bulkCopiedTouch_other: "Copied {{count}} items to clipboard",
     // Named rather than counted: the skipped rows are protected content, and
     // "Copied 8 items" over a selection of ten reads as a success.
     bulkCopiedPartial:
