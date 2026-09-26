@@ -7,6 +7,7 @@ if (false) {
 
   const writeAvailability = call(UI_COMMANDS.clipboard_write_availability, {
     contentType: "image/png",
+    mode: "original",
   });
   const availabilityResult: Promise<
     "available" | "unsupported_content_type" | "unsupported_on_platform"
@@ -23,6 +24,13 @@ if (false) {
   void call(UI_COMMANDS.copy_item, { id: 42 });
   // @ts-expect-error The availability command takes a content type, not content.
   void call(UI_COMMANDS.clipboard_write_availability, { content: "secret" });
+  // @ts-expect-error The native command requires an explicit mode.
+  void call(UI_COMMANDS.clipboard_write_availability, { contentType: "text" });
+  void call(UI_COMMANDS.clipboard_write_availability, {
+    contentType: "text",
+    // @ts-expect-error The mode is a closed wire vocabulary.
+    mode: "binary",
+  });
   // @ts-expect-error No-argument commands reject invented arguments.
   void call(UI_COMMANDS.status, {});
   // @ts-expect-error The caller cannot choose a result type.

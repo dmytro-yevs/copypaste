@@ -99,7 +99,7 @@ export interface UiCommandArgs {
   add_item: { content: string };
   copy_item: { id: string };
   copy_item_as_plain_text: { id: string };
-  clipboard_write_availability: { contentType: string };
+  clipboard_write_availability: { contentType: string; mode: "original" | "plain_text" };
   reveal_item: { id: string };
   get_item_body: { id: string };
   copy_items: { ids: readonly string[] };

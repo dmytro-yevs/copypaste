@@ -1,7 +1,7 @@
 import { call, hasBridge, hasWebBridge } from "./ipcCall";
 import { DEFAULT_SHORTCUT } from "./accelerator";
 import { UI_COMMANDS } from "@/generated/ipc";
-import type { CommandResult } from "@/generated/ipc";
+import type { CommandArgs, CommandResult } from "@/generated/ipc";
 import type {
   CloudStatusData,
   CloudSyncData,
@@ -80,6 +80,9 @@ export type ImportReport = ImportData;
 export type ClipboardWriteAvailability = CommandResult<
   typeof UI_COMMANDS.clipboard_write_availability
 >;
+export type ClipboardWriteMode = CommandArgs<
+  typeof UI_COMMANDS.clipboard_write_availability
+>["mode"];
 
 export { hasBridge, hasWebBridge };
 
@@ -122,8 +125,9 @@ export function copyItemAsPlainText(id: string): Promise<Item> {
 /** Format support only. The native write remains the final authority. */
 export function getClipboardWriteAvailability(
   contentType: string,
+  mode: ClipboardWriteMode = "original",
 ): Promise<ClipboardWriteAvailability> {
-  return call(UI_COMMANDS.clipboard_write_availability, { contentType });
+  return call(UI_COMMANDS.clipboard_write_availability, { contentType, mode });
 }
 
 /** One clipboard write for the whole selection, and the count that actually
