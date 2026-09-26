@@ -524,6 +524,7 @@ describe("preview scenario service", () => {
             id: "preview-file",
             content_class: "file",
             content_type: "file",
+            content: "[file]",
           },
           {
             id: "preview-unknown",
