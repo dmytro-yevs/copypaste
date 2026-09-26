@@ -26,7 +26,6 @@ const SHARED_SECTIONS = [
   "Cloud sync",
   "Storage & history",
   "Diagnostics",
-  "Runtime events",
   "About",
 ];
 const TABS =
@@ -222,6 +221,43 @@ describe("the sections", () => {
         app.daemon.dataHome,
       );
     }
+  });
+});
+
+describe("diagnostic detail", () => {
+  test("opens Runtime events and returns to Diagnostics", async () => {
+    await openSection("Diagnostics");
+    await (await app.browser.$('button=Open runtime events')).click();
+    await (await app.browser.$('input[type="search"][aria-label="Search runtime events"]'))
+      .waitForDisplayed({ timeout: 10_000 });
+    expect(await (await app.browser.$('button[aria-label="Refresh runtime events"]'))
+      .isExisting()).toBe(true);
+    const back = await displayed('button[aria-label="Back to Diagnostics"]')
+      ?? await displayed('button=Back to Diagnostics');
+    expect(back).not.toBeNull();
+    await back!.click();
+    await (await app.browser.$('button=Open runtime events'))
+      .waitForDisplayed({ timeout: 10_000 });
+  });
+
+  test("settings search opens the nested runtime event viewer", async () => {
+    await withSettingsNavigation(async () => true, "settings navigation was unavailable");
+    const search = await displayed('input[aria-label="Search settings"]');
+    expect(search).not.toBeNull();
+    await search!.setValue("Runtime events");
+    await (await app.browser.$('[role="option"]'))
+      .waitForDisplayed({ timeout: 10_000 });
+    const results = await app.browser.$$('[role="option"]');
+    const result = await (async () => {
+      for (const option of results) {
+        if ((await option.getText()).includes("Runtime events")) return option;
+      }
+      return null;
+    })();
+    expect(result).not.toBeNull();
+    await result!.click();
+    await (await app.browser.$('input[type="search"][aria-label="Search runtime events"]'))
+      .waitForDisplayed({ timeout: 10_000 });
   });
 });
 

@@ -14,12 +14,14 @@ export function SettingsCompactNavigation({
   active,
   onSelect,
   onBack,
+  backLabel = "Back to Settings",
   renderSection,
   sections,
 }: {
   active: PreferenceSection | null;
   onSelect: (section: PreferenceSection) => void;
   onBack: () => void;
+  backLabel?: string;
   renderSection: (section: PreferenceSection) => ReactNode;
   sections: readonly PreferenceSectionDefinition[];
 }) {
@@ -36,7 +38,7 @@ export function SettingsCompactNavigation({
             size="compactIcon"
             variant="ghost"
             icon="back"
-            aria-label="Back to Settings"
+            aria-label={backLabel}
             onClick={onBack}
           />}
           title={definition.label}

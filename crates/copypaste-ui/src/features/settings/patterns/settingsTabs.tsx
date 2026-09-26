@@ -5,8 +5,7 @@ import { AboutTab } from "@/features/settings/patterns/AboutTab";
 import { AppearanceTab } from "@/features/settings/patterns/AppearanceTab";
 import { CloudSyncSettings } from "@/features/settings/patterns/CloudSyncSettings";
 import { DeviceSyncSettings } from "@/features/settings/patterns/DeviceSyncSettings";
-import { DiagnosticsTab } from "@/features/settings/patterns/DiagnosticsTab";
-import { RuntimeEventsTab } from "@/features/settings/patterns/RuntimeEventsTab";
+import { DiagnosticsTab, type DiagnosticsView } from "@/features/settings/patterns/DiagnosticsTab";
 import {
   ClipboardListSettings,
   ListTab,
@@ -31,6 +30,10 @@ import type { PreferenceSection } from "@/features/settings/model/preferenceSect
 export interface SettingsTabController {
   readonly prefsReady: boolean;
   readonly capabilities: SettingsCapabilities;
+  readonly revealAdvancedKey?: string;
+  readonly diagnosticsView?: DiagnosticsView;
+  readonly onOpenEvents?: () => void;
+  readonly onBackFromEvents?: () => void;
 }
 
 export function renderPreferenceSection(
@@ -46,7 +49,7 @@ export function renderPreferenceSection(
     );
     case "clipboard": return (
       <>
-        <ClipboardServiceSettings />
+        <ClipboardServiceSettings revealAdvancedKey={controller.revealAdvancedKey} />
         {controller.capabilities.androidCapture ? (
           <CaptureSetupState mode="supplemental" />
         ) : null}
@@ -80,8 +83,7 @@ export function renderPreferenceSection(
       <CloudSyncSettings />
     );
     case "storage": return <StorageTab />;
-    case "diagnostics": return <DiagnosticsTab />;
-    case "runtime-events": return <RuntimeEventsTab />;
+    case "diagnostics": return <DiagnosticsTab view={controller.diagnosticsView} onOpenEvents={controller.onOpenEvents} onBack={controller.onBackFromEvents} />;
     case "about": return (
       <AboutTab />
     );

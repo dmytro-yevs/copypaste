@@ -13,7 +13,6 @@ export type PreferenceSection =
   | "cloud-sync"
   | "storage"
   | "diagnostics"
-  | "runtime-events"
   | "about";
 
 export interface PreferenceSectionDefinition {
@@ -75,12 +74,6 @@ export const PREFERENCE_SECTIONS: readonly PreferenceSectionDefinition[] = [
     icon: "diagnostics",
   },
   {
-    value: "runtime-events",
-    label: "Runtime events",
-    description: "Search and inspect service activity",
-    icon: "list",
-  },
-  {
     value: "about",
     label: "About",
     description: "Versions, links and product information",
@@ -122,7 +115,7 @@ export function preferenceSectionForTab(tab: SettingsTabValue | string): Prefere
     case "diagnostics":
       return "diagnostics";
     case "runtime-events":
-      return "runtime-events";
+      return "diagnostics";
     case "about":
       return "about";
     default:

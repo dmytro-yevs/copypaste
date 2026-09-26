@@ -12,7 +12,7 @@ import styles from "./ServiceTab.module.css";
 
 type ServiceScope = "all" | "clipboard" | "privacy" | "advanced";
 
-function ScopedServiceSettings({ scope }: { scope: ServiceScope }) {
+function ScopedServiceSettings({ scope, revealAdvancedKey }: { scope: ServiceScope; revealAdvancedKey?: string }) {
   const showClipboard = scope === "all" || scope === "clipboard";
   const showPrivacy = scope === "all" || scope === "privacy";
   const showAdvanced = scope === "all" || scope === "advanced";
@@ -23,7 +23,7 @@ function ScopedServiceSettings({ scope }: { scope: ServiceScope }) {
         {showClipboard ? <SettingsHealthNotice /> : null}
         <ServiceRestartNotice />
         {showClipboard ? <ServiceCaptureControls /> : null}
-        {showClipboard ? <ClipboardCaptureSection /> : null}
+        {showClipboard ? <ClipboardCaptureSection revealAdvancedKey={revealAdvancedKey} /> : null}
         {showPrivacy ? <PrivacyServiceSections /> : null}
         {showClipboard ? <ClipboardNotificationSection /> : null}
         {showAdvanced ? <AdvancedServiceSection /> : null}
@@ -32,8 +32,8 @@ function ScopedServiceSettings({ scope }: { scope: ServiceScope }) {
   );
 }
 
-export function ClipboardServiceSettings() {
-  return <ScopedServiceSettings scope="clipboard" />;
+export function ClipboardServiceSettings({ revealAdvancedKey }: { revealAdvancedKey?: string }) {
+  return <ScopedServiceSettings scope="clipboard" revealAdvancedKey={revealAdvancedKey} />;
 }
 
 export function PrivacyServiceSettings() {

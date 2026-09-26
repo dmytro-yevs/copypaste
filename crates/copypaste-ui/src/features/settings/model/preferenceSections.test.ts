@@ -48,4 +48,12 @@ describe("visiblePreferenceSections", () => {
     expect(preferenceSectionForTab("data-transfer")).toBe("storage");
     expect(preferenceSectionForTab("transfer")).toBe("storage");
   });
+
+  it("keeps Runtime events nested in Diagnostics while resolving old links and search", () => {
+    const sections = visiblePreferenceSections(settingsCapabilities("macos"));
+    expect(sections.map((section) => section.value)).not.toContain("runtime-events");
+    expect(preferenceSectionForTab("runtime-events")).toBe("diagnostics");
+    expect(SETTINGS_SEARCH_ITEMS.find((item) => item.title === "runtimeLog.title")?.tab)
+      .toBe("runtime-events");
+  });
 });

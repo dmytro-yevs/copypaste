@@ -8,6 +8,9 @@
  */
 export const runtimeLog = {
   title: "Runtime events",
+  description: "Search and inspect service activity.",
+  open: "Open runtime events",
+  back: "Back to Diagnostics",
   list: "Runtime event list",
 
   search: {

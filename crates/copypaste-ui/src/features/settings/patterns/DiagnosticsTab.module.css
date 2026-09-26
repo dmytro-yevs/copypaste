@@ -7,6 +7,10 @@
   gap: var(--s-4);
 }
 
+.events { min-block-size: 0; flex: 1; }
+
+.eventsTitle { margin: 0; font-size: var(--fs-lg); }
+
 .loading { display: grid; gap: var(--s-4); }
 .loadingSection { display: grid; gap: var(--s-2); }
 
