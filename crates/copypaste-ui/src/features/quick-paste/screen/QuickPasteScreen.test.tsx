@@ -334,6 +334,9 @@ describe("quickPastePresentation", () => {
     await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
     expect(document.activeElement).toBe(copy());
     expect(copy().getAttribute("aria-disabled")).toBe("true");
+    const copying = screen.getByText("Copying…").closest('[role="status"]');
+    expect(copying?.getAttribute("data-state")).toBe("pending");
+    expect(copying?.querySelector("svg")).not.toBeNull();
     fireEvent.pointerDown(copy(), { button: 0 });
     fireEvent.keyDown(copy(), { key: "Enter" });
     const search = screen.getByRole("searchbox");
@@ -344,6 +347,8 @@ describe("quickPastePresentation", () => {
 
     rejectWrite({ code: "offline", retryable: true });
     await waitFor(() => expect(copy().getAttribute("aria-disabled")).toBe("false"));
+    expect(screen.queryByText("Copying…")).toBeNull();
+    expect(document.activeElement).toBe(copy());
     await user.click(copy());
     await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledTimes(2));
   });
@@ -373,6 +378,7 @@ describe("quickPastePresentation", () => {
     fireEvent.pointerDown(copy(), { button: 0 });
     fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
     expect(copy().getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("Copying…")).toBeTruthy();
     expect(ipc.copyItem).not.toHaveBeenCalled();
     resolveAvailability("available");
     await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
@@ -398,6 +404,7 @@ describe("quickPastePresentation", () => {
     lifecycle.generation += 2;
     resolveWrite();
     await waitFor(() => expect(copy().getAttribute("aria-disabled")).toBe("false"));
+    expect(screen.queryByText("Copying…")).toBeNull();
     expect(lifecycle.dismiss).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
   });
