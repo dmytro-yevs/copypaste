@@ -82,10 +82,12 @@ describe("device status presentation", () => {
             device,
           }}
           syncing={false}
+          syncReadiness="ready"
           unpairing={false}
           revoking={false}
           compact={false}
           onSync={vi.fn()}
+          onRecoverSync={vi.fn()}
           onUnpair={vi.fn()}
           onRevoke={vi.fn()}
         />
@@ -111,10 +113,12 @@ describe("device status presentation", () => {
             },
           }}
           syncing={false}
+          syncReadiness="ready"
           unpairing={false}
           revoking={false}
           compact={false}
           onSync={vi.fn()}
+          onRecoverSync={vi.fn()}
           onUnpair={vi.fn()}
           onRevoke={vi.fn()}
         />
