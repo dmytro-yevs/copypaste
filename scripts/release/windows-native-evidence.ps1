@@ -195,6 +195,99 @@ function Get-InstalledDiagnostics([Diagnostics.Process]$App, [string]$DataRoot, 
     return $parts
 }
 
+function Test-WindowsCloudOverviewReceipt([string]$Root, [string]$Writer) {
+    $evidenceRoot = Join-Path $Root "cloud-receipt"
+    [IO.Directory]::CreateDirectory($evidenceRoot) | Out-Null
+    $fixture = @{ name = "" }
+    function Wait-UiaName { param($App, $Name) $fixture.name = $Name }
+    function Get-AppAutomationRoot { return "fixture-root" }
+    function Get-UiaSnapshot {
+        return [ordered]@{ retried = @(); nodes = @([ordered]@{
+            name = $fixture.name; enabled = $true; offscreen = $false
+            bounds = [ordered]@{ width = 40; height = 20 }
+        }) }
+    }
+    function Assert-UiaSnapshotComplete { param($Snapshot) }
+    function Save-WindowImage {
+        param($App, $Path, $CaptureTracePath, $Phase)
+        $color = if ($Phase -like "*/unconfigured-overview") { "220,38,38" } else { "38,95,220" }
+        & python -c 'from PIL import Image; import sys; image = Image.new("RGB", (2, 2), tuple(map(int, sys.argv[2].split(",")))); image.putpixel((1, 1), (255, 255, 255)); image.save(sys.argv[1])' $Path $color
+        Assert-True ($LASTEXITCODE -eq 0) "fixture PNG could not be written"
+        return [ordered]@{ phase = $Phase }
+    }
+
+    $overview = Save-WindowsFeatureState $null $evidenceRoot "cloud-account" "unconfigured-overview" "Not configured" "unconfigured-overview"
+    $canonical = Save-WindowsFeatureState $null $evidenceRoot "cloud-account" "unconfigured" "Cloud server configuration"
+    $featureStates = @(
+        [ordered]@{ feature = "history"; state = "populated" }
+        [ordered]@{ feature = "devices"; state = "desktop-pairing-entry" }
+        [ordered]@{ feature = "settings-and-service"; state = "appearance" }
+        [ordered]@{ feature = "settings-and-service"; state = "updater-configured" }
+        [ordered]@{ feature = "capture"; state = "service-capture-status" }
+        [ordered]@{ feature = "capture"; state = "copy-feedback-setting" }
+        $canonical
+    )
+    Write-WindowsFeatureManifest $evidenceRoot $featureStates
+    $overviewImage = Join-Path $evidenceRoot "cloud-account/unconfigured-overview/screenshot.png"
+    $overviewAccessibility = Join-Path $evidenceRoot "cloud-account/unconfigured-overview/accessibility.json"
+    $canonicalImage = Join-Path $evidenceRoot "cloud-account/screenshot.png"
+    $canonicalAccessibility = Join-Path $evidenceRoot "cloud-account/accessibility.json"
+    Assert-True ($overview.screenshot.path -eq "cloud-account/unconfigured-overview/screenshot.png" -and
+        $canonical.screenshot.path -eq "cloud-account/screenshot.png" -and
+        (Test-Path -LiteralPath $overviewImage -PathType Leaf) -and
+        (Test-Path -LiteralPath $overviewAccessibility -PathType Leaf) -and
+        (Test-Path -LiteralPath $canonicalImage -PathType Leaf) -and
+        (Test-Path -LiteralPath $canonicalAccessibility -PathType Leaf)) `
+        "closed and revealed Cloud captures reused an evidence path"
+    Assert-True ($overview.screenshot.sha256 -eq (Get-FileHash $overviewImage -Algorithm SHA256).Hash.ToLowerInvariant() -and
+        $overview.accessibility.sha256 -eq (Get-FileHash $overviewAccessibility -Algorithm SHA256).Hash.ToLowerInvariant() -and
+        $overview.screenshot.sha256 -ne $canonical.screenshot.sha256) `
+        "the canonical Cloud capture overwrote the closed overview"
+    $finalAccessibility = Get-Content -Raw $canonicalAccessibility | ConvertFrom-Json
+    Assert-True ($canonical.expected_name -eq "Cloud server configuration" -and
+        $finalAccessibility.expected_name -eq "Cloud server configuration" -and
+        $finalAccessibility.state -eq "unconfigured") `
+        "the canonical Cloud capture lost its revealed form marker"
+
+    $expectedStates = @(
+        "capture/copy-feedback-setting", "capture/service-capture-status", "cloud-account/unconfigured",
+        "devices/desktop-pairing-entry", "history/populated", "settings-and-service/appearance",
+        "settings-and-service/updater-configured"
+    ) | Sort-Object
+    $manifest = Get-Content -Raw (Join-Path $evidenceRoot "feature-states.json") | ConvertFrom-Json
+    $manifestStates = @($manifest.states | ForEach-Object { "$($_.feature)/$($_.state)" } | Sort-Object)
+    Assert-True ($manifestStates.Count -eq 7 -and
+        ($manifestStates -join "|") -eq ($expectedStates -join "|") -and
+        $manifestStates -notcontains "cloud-account/unconfigured-overview") `
+        "the Windows feature manifest accepted a diagnostic Cloud state"
+
+    $qualified = Join-Path $Root "qualified-installer.exe"
+    [IO.File]::WriteAllText($qualified, "fixture installer")
+    $identity = (& python $Writer --capture-qualified-artifact $qualified) -join "`n"
+    Assert-True ($LASTEXITCODE -eq 0) "fixture artifact identity could not be captured"
+    [IO.File]::WriteAllText((Join-Path $evidenceRoot "installed-product.log"), "fixture installed product")
+    [IO.File]::WriteAllText((Join-Path $evidenceRoot "latency.json"), '{"elapsed_ms":1}')
+    [string[]]$featureStateArguments = @($featureStates | ForEach-Object {
+        "--feature-state"
+        "$($_.feature)=$($_.state)"
+    })
+    $receiptPath = Join-Path $evidenceRoot "native-evidence.json"
+    & python $Writer --output $receiptPath --platform windows --environment hosted-runner `
+        --os-version fixture --architecture x86_64 --commit ("a" * 40) --run-id self-test `
+        --elapsed-ms 1 --qualified-artifact $qualified --qualified-artifact-identity $identity `
+        @featureStateArguments --artifact "screenshot=cloud-account/screenshot.png" `
+        --artifact "accessibility=cloud-account/accessibility.json" `
+        --artifact "test-log=installed-product.log" --artifact "measurement=latency.json" `
+        --artifact "feature-evidence=feature-states.json"
+    Assert-True ($LASTEXITCODE -eq 0) "fixture native receipt could not be written"
+    $receipt = Get-Content -Raw $receiptPath | ConvertFrom-Json
+    $receiptStates = @($receipt.feature_states | ForEach-Object { "$($_.feature_id)/$($_.state)" } | Sort-Object)
+    Assert-True ($receiptStates.Count -eq 7 -and
+        ($receiptStates -join "|") -eq ($expectedStates -join "|") -and
+        $receiptStates -notcontains "cloud-account/unconfigured-overview") `
+        "the Windows native receipt accepted a diagnostic Cloud state"
+}
+
 function Invoke-SelfTest {
     $root = Join-Path ([IO.Path]::GetTempPath()) "copypaste-windows-evidence-self-test-$([guid]::NewGuid())"
     [IO.Directory]::CreateDirectory($root) | Out-Null
@@ -296,10 +389,11 @@ function Invoke-SelfTest {
         Assert-True $rejected "a zero-sidecar candidate set did not remain a bounded failure"
 
         Test-WindowsUiEvidenceHelpers
+        Test-WindowsCloudOverviewReceipt $root (Join-Path $PSScriptRoot "write-native-evidence.py")
         $scenarioSource = [IO.File]::ReadAllText($PSCommandPath)
         $cloudSteps = @(
             'Invoke-UiaNamedControl $app "Cloud sync" "Set up cloud sync"',
-            'Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview" "Not configured"',
+            'Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview" "Not configured" "unconfigured-overview" $captureTrace | Out-Null',
             'Invoke-UiaNamedControl $app "Set up cloud sync" "Cloud server configuration"',
             'Wait-UiaName $app "Server URL" $false $true',
             'Wait-UiaName $app "Publishable key" $false $true',
@@ -313,6 +407,11 @@ function Invoke-SelfTest {
             Assert-True ($next -ge $cloudPosition) "Windows cloud setup lost the closed-to-open field sequence"
             $cloudPosition = $next + $step.Length
         }
+        $overviewLine = @($scenarioSource.Substring($scenarioSource.IndexOf('Invoke-UiaNamedControl $app "Settings" "Mode"')).Split("`n") |
+            Where-Object { $_ -like '*Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview"*' })
+        Assert-True ($overviewLine.Count -eq 1 -and
+            $overviewLine[0].Trim() -eq $cloudSteps[1]) `
+            "the closed Cloud overview became a canonical feature state"
         Write-Output "PASS: a broken installed sidecar package fails closed"
         Write-Output "PASS: an orphaned sidecar fails the shutdown assertion"
     } finally {
@@ -465,7 +564,8 @@ try {
         $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "service-capture-status" "Background capture" "" $captureTrace
         $featureStates += Save-WindowsFeatureState $app $evidencePath "capture" "copy-feedback-setting" "Copy feedback sound" "copy-feedback-setting" $captureTrace
         Invoke-UiaNamedControl $app "Cloud sync" "Set up cloud sync"
-        $featureStates += Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview" "Not configured" "" $captureTrace
+        # The closed overview is diagnostic; the revealed form is the canonical unconfigured state.
+        Save-WindowsFeatureState $app $evidencePath "cloud-account" "unconfigured-overview" "Not configured" "unconfigured-overview" $captureTrace | Out-Null
         Invoke-UiaNamedControl $app "Set up cloud sync" "Cloud server configuration"
         Wait-UiaName $app "Server URL" $false $true | Out-Null
         Wait-UiaName $app "Publishable key" $false $true | Out-Null
