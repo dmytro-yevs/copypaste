@@ -1,11 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
 import { TooltipProvider } from "@/components/ui";
 import { quickPastePresentation } from "@/features/quick-paste/model/quickPastePresentation";
 import { item } from "@/test/harness";
+
+vi.mock("@/hooks/useClipboardWriteAvailability", () => ({
+  useClipboardWriteAvailability: () => ({ isPending: false, isError: false, data: "available" }),
+}));
 
 const unsupported = item({
   content: "https://future.example/raw",

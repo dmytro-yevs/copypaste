@@ -18,7 +18,8 @@ import {
 import { ClipImageLoader } from "@/features/clip-content";
 import { InspectorPreview } from "@/features/history/components/InspectorPreview";
 import { originName, wontSync, type OriginDevice } from "@/lib/itemOrigin";
-import { clipCopyAction } from "@/features/history/model/clipPresentation";
+import { clipboardCopyPresentation, clipCopyAction } from "@/features/history/model/clipPresentation";
+import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { useViewportMetrics } from "@/hooks/useViewportMetrics";
 import { useTranslation } from "@/i18n";
@@ -79,6 +80,14 @@ export function ClipDetailDialog({
     const copyingRef = useRef(false);
     const copyGenerationRef = useRef(0);
     const contentRef = useRef<HTMLDivElement>(null);
+    const availability = useClipboardWriteAvailability(item?.content_type ?? null);
+    const copyAvailability = clipboardCopyPresentation(
+        availability.isPending
+            ? { status: "loading" }
+            : availability.isError
+              ? { status: "failed" }
+              : { status: "resolved", availability: availability.data },
+    );
 
     const revealed = item !== null && revealedContent !== null;
     const potentialFinding =
@@ -131,7 +140,7 @@ export function ClipDetailDialog({
     };
 
     const startCopy = (target: Item, closeAfterSuccess: boolean): void => {
-        if (copyingRef.current) return;
+        if (copyingRef.current || !copyAvailability.canCopy) return;
         const generation = copyGenerationRef.current;
         copyingRef.current = true;
         setCopying(true);
@@ -220,6 +229,21 @@ export function ClipDetailDialog({
                         {item && wontSync(item) && (
                             <InlineNotice tone="warning" icon="cloudOff">
                                 {t("history.row.wontSync")}
+                            </InlineNotice>
+                        )}
+
+                        {copyAvailability.reason !== null && (
+                            <InlineNotice
+                                role="status"
+                                tone={copyAvailability.canRetry ? "warning" : "neutral"}
+                                icon="info"
+                                action={copyAvailability.canRetry ? (
+                                    <Button variant="secondary" size="sm" onClick={() => void availability.refetch()}>
+                                        {t("history.copyAvailability.retry")}
+                                    </Button>
+                                ) : undefined}
+                            >
+                                {copyAvailability.reason}
                             </InlineNotice>
                         )}
 
@@ -387,7 +411,7 @@ export function ClipDetailDialog({
                                 </Button>
                             ) : null}
                             <Button
-                                disabled={copying}
+                                disabled={copying || !copyAvailability.canCopy}
                                 onClick={() => {
                                     if (item) startCopy(item, true);
                                 }}

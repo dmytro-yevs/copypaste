@@ -2,6 +2,7 @@ import type { CloudStatusData, PairingCeremony, ServiceState, StatusData } from 
 import { PAIRING_SEMANTICS_BY_STATE } from "@/lib/ipc";
 import type { PreviewPairingInvite } from "@/lib/ipc";
 import { IpcFailure } from "@/lib/errors";
+import { currentPlatform } from "@/lib/platform";
 import {
     previewDeviceAddress,
     previewDeviceDetails,
@@ -11,6 +12,7 @@ import {
     previewHistoryCount,
     previewHistoryPage,
     previewHistoryResourceResponse,
+    previewHistoryWriteAvailability,
 } from "@/service/previewHistory";
 import {
     previewScenarioStore,
@@ -272,6 +274,18 @@ export function createPreviewInterceptor(
             return { handled: false };
         let scenario = store.getState().scenario;
         if (scenario.mode === "live") return { handled: false };
+
+        if (command === "clipboard_write_availability") {
+            const contentType = args?.contentType;
+            const mode = args?.mode;
+            if (typeof contentType !== "string" || (mode !== "original" && mode !== "plain_text")) {
+                throw new IpcFailure("invalid_request", false);
+            }
+            return {
+                handled: true,
+                value: previewHistoryWriteAvailability(contentType, mode, currentPlatform()),
+            };
+        }
 
         if (scenario.resources.history === "success") {
             const history = previewHistoryResourceResponse(command, args);

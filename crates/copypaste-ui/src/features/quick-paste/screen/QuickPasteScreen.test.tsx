@@ -9,7 +9,12 @@ import { item, page, testClient } from "@/test/harness";
 import * as platform from "@/lib/platform";
 import { QuickPasteScreen } from "./QuickPasteScreen";
 
-const ipc = vi.hoisted(() => ({ copyItem: vi.fn(), listItems: vi.fn() }));
+const ipc = vi.hoisted(() => ({
+  copyItem: vi.fn(),
+  copyItemAsPlainText: vi.fn(),
+  getClipboardWriteAvailability: vi.fn(),
+  listItems: vi.fn(),
+}));
 const lifecycle = vi.hoisted(() => ({ dismiss: vi.fn() }));
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
 
@@ -27,8 +32,7 @@ vi.mock("@/features/quick-paste/hooks/useQuickPasteLifecycle", () => ({
 }));
 vi.mock("@/lib/ipc", async (load) => ({
   ...(await load<typeof import("@/lib/ipc")>()),
-  copyItem: ipc.copyItem,
-  listItems: ipc.listItems,
+  ...ipc,
 }));
 
 describe("quickPastePresentation", () => {
@@ -57,6 +61,8 @@ describe("quickPastePresentation", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     ipc.copyItem.mockReset();
+    ipc.copyItemAsPlainText.mockReset().mockResolvedValue(undefined);
+    ipc.getClipboardWriteAvailability.mockReset().mockResolvedValue("available");
     ipc.listItems.mockReset();
     lifecycle.dismiss.mockReset();
     toast.error.mockReset();
@@ -141,5 +147,134 @@ describe("quickPastePresentation", () => {
       ),
     );
     expect(lifecycle.dismiss).not.toHaveBeenCalled();
+  });
+
+  it("guards pointer, Enter, Alt+Enter and number shortcuts by MIME and mode", async () => {
+    window.history.replaceState({}, "", "/?platform=android");
+    const target = item({ id: "image-1", content: null, content_type: "image/png", content_class: "image" });
+    ipc.listItems.mockResolvedValue(page([target]));
+    ipc.getClipboardWriteAvailability.mockImplementation((_mime: string, mode: string) =>
+      Promise.resolve(mode === "plain_text" ? "unsupported_content_type" : "unsupported_on_platform"));
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    const row = await screen.findByRole("listitem");
+    await screen.findByText("This clipboard format can’t be copied on this device.");
+    await user.click(screen.getByRole("button", { name: "Copy Image" }));
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Alt>}{Enter}{/Alt}");
+    await user.keyboard("{Meta>}1{/Meta}");
+    expect(row.getAttribute("data-state")).toBe("selected");
+    expect(ipc.copyItem).not.toHaveBeenCalled();
+    expect(ipc.copyItemAsPlainText).not.toHaveBeenCalled();
+    expect(lifecycle.dismiss).not.toHaveBeenCalled();
+    expect(ipc.getClipboardWriteAvailability.mock.calls).toEqual([
+      ["image/png", "original"],
+      ["image/png", "plain_text"],
+    ]);
+  });
+
+  it("keeps inferred path and sensitive text copyable using stored MIME and id only", async () => {
+    const target = item({
+      id: "sensitive-path",
+      content: "/private/secret/location",
+      content_type: "text/plain",
+      content_class: "text",
+      is_sensitive: true,
+    });
+    ipc.listItems.mockResolvedValue(page([target]));
+    ipc.copyItem.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("listitem");
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledWith(target.id));
+    expect(ipc.copyItem).toHaveBeenCalledWith(target.id);
+    expect(ipc.copyItem).not.toHaveBeenCalledWith(expect.stringContaining(target.content!));
+    expect(ipc.getClipboardWriteAvailability).toHaveBeenCalledWith("text/plain", "original");
+  });
+
+  it("shows a failed support lookup and recovers through Check again", async () => {
+    let originalChecks = 0;
+    ipc.getClipboardWriteAvailability.mockImplementation((_mime: string, mode: string) => {
+      if (mode === "original" && originalChecks++ === 0) return Promise.reject(new Error("offline"));
+      return Promise.resolve("available");
+    });
+    ipc.copyItem.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Couldn’t check whether this format can be copied.");
+    expect(ipc.copyItem).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(screen.queryByText("Couldn’t check whether this format can be copied.")).toBeNull());
+    await user.click(screen.getByRole("button", { name: /copy an ordinary clipboard entry/i }));
+    await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledWith("row-1"));
+  });
+
+  it("guards Alt+Enter separately when original image copy is available", async () => {
+    const target = item({ id: "image-1", content: null, content_type: "image/png", content_class: "image" });
+    ipc.listItems.mockResolvedValue(page([target]));
+    ipc.getClipboardWriteAvailability.mockImplementation((_mime: string, mode: string) =>
+      Promise.resolve(mode === "original" ? "available" : "unsupported_content_type"));
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Plain text copy: This clipboard format can’t be copied.");
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{Alt>}{Enter}{/Alt}");
+    expect(ipc.copyItemAsPlainText).not.toHaveBeenCalled();
+    expect(lifecycle.dismiss).not.toHaveBeenCalled();
+  });
+
+  it("uses the native plain-text command with only the text item's id", async () => {
+    const target = item({ id: "path-1", content: "/Users/example/report", content_type: "text/plain" });
+    ipc.listItems.mockResolvedValue(page([target]));
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("listitem");
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{Alt>}{Enter}{/Alt}");
+    await waitFor(() => expect(ipc.copyItemAsPlainText).toHaveBeenCalledWith("path-1"));
+    expect(ipc.copyItem).not.toHaveBeenCalled();
+    expect(ipc.getClipboardWriteAvailability).toHaveBeenCalledWith("text/plain", "plain_text");
+    expect(lifecycle.dismiss).toHaveBeenCalledOnce();
+  });
+
+  it("checks one MIME and mode pair once across repeated rows", async () => {
+    ipc.listItems.mockResolvedValue(page([
+      item({ id: "one", content_type: "text/plain" }),
+      item({ id: "two", content_type: "text/plain" }),
+      item({ id: "three", content_type: "text/plain" }),
+    ]));
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
+    await waitFor(() => expect(ipc.getClipboardWriteAvailability).toHaveBeenCalledTimes(2));
+    expect(ipc.getClipboardWriteAvailability.mock.calls).toEqual([
+      ["text/plain", "original"],
+      ["text/plain", "plain_text"],
+    ]);
   });
 });

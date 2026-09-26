@@ -7,6 +7,10 @@ import { t } from "@/i18n";
 import { item } from "@/test/harness";
 import { ClipDetailDialog } from "./ClipDetailDialog";
 
+vi.mock("@/hooks/useClipboardWriteAvailability", () => ({
+  useClipboardWriteAvailability: () => ({ isPending: false, isError: false, data: "available" }),
+}));
+
 vi.mock("@/features/clip-content/hooks/useImagePreview", () => ({
   useImagePreview: () => ({ data: undefined, isPending: true, isError: false }),
 }));

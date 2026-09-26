@@ -1,6 +1,12 @@
 import { UI_COMMANDS } from "@/generated/ipc";
 import { IpcFailure } from "@/lib/errors";
-import type { ImagePreview, Item, ItemPage } from "@/lib/ipc";
+import type {
+    ClipboardWriteAvailability,
+    ClipboardWriteMode,
+    ImagePreview,
+    Item,
+    ItemPage,
+} from "@/lib/ipc";
 import type { PreviewResourceState } from "@/service/previewScenario";
 
 const PREVIEW_PIXEL =
@@ -40,14 +46,41 @@ function items(): Item[] {
             source_app_name: "Example Editor",
         }),
         item("preview-image", null, "image"),
+        item("preview-file", null, "file", { content_type: "file" }),
         item(
             "preview-unknown",
             "Unsupported preview",
             // Deliberate future-class fixture: refusal coverage, not a shipped class.
             "archive" as Item["content_class"],
-            { truncated: true },
+            { content_type: "application/x-future", truncated: true },
         ),
     ];
+}
+
+/** Fixture behavior for browser previews only; production always asks native. */
+export function previewHistoryWriteAvailability(
+    contentType: string,
+    mode: ClipboardWriteMode,
+    platform: string,
+): ClipboardWriteAvailability {
+    if (contentType === "text" || contentType.startsWith("text/")) {
+        return "available";
+    }
+    if (mode === "plain_text") return "unsupported_content_type";
+    if (contentType === "file") {
+        return platform === "macos" ? "available" : "unsupported_on_platform";
+    }
+    if (contentType.startsWith("image/")) {
+        if (!["image/png", "image/tiff", "image/bmp"].includes(contentType)) {
+            return "unsupported_content_type";
+        }
+        if (platform === "windows" ||
+            (platform === "macos" && contentType !== "image/bmp")) {
+            return "available";
+        }
+        return "unsupported_on_platform";
+    }
+    return "unsupported_content_type";
 }
 
 const bodies = new Map<string, string>([

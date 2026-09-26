@@ -4,11 +4,20 @@ import { clipTypeMetadata, fileDisplayName } from "@/lib/clipPresentation";
 import type { Kind } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 import { item } from "@/test/harness";
-import { clipCopyAction, historyKindFilterLabel, rowLabel } from "./clipPresentation";
+import { clipboardCopyPresentation, clipCopyAction, historyKindFilterLabel, rowLabel } from "./clipPresentation";
 
 const translate = (key: string) => key;
 
 describe("History clip presentation", () => {
+  it.each([
+    [{ status: "loading" }, false, "Checking whether this format can be copied…", false],
+    [{ status: "failed" }, false, "Couldn’t check whether this format can be copied.", true],
+    [{ status: "resolved", availability: "available" }, true, null, false],
+    [{ status: "resolved", availability: "unsupported_content_type" }, false, "This clipboard format can’t be copied.", false],
+    [{ status: "resolved", availability: "unsupported_on_platform" }, false, "This clipboard format can’t be copied on this device.", false],
+  ] as const)("presents clipboard availability %j", (state, canCopy, reason, canRetry) => {
+    expect(clipboardCopyPresentation(state)).toEqual({ canCopy, reason, canRetry });
+  });
   it("keeps singular item labels distinct from filter labels", () => {
     expect(clipTypeMetadata("image").label).toBe("Image");
     expect(historyKindFilterLabel("image")).toBe("Images");

@@ -9,6 +9,10 @@ import { item } from "@/test/harness";
 import { LibraryInspectorPanel } from "./LibraryInspectorPanel";
 import styles from "./LibraryInspectorPanel.module.css";
 
+vi.mock("@/hooks/useClipboardWriteAvailability", () => ({
+  useClipboardWriteAvailability: () => ({ isPending: false, isError: false, data: "available" }),
+}));
+
 vi.mock("@/features/source-apps", () => ({
   SourceAppIcon: ({ fallbackText }: { fallbackText?: string }) => (
     <span data-slot="source-app-icon">{fallbackText}</span>

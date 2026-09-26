@@ -10,6 +10,7 @@ import { HISTORY_HEAD_KEY, STATUS_KEY, historyKey } from "@/hooks/historyRefresh
 import { ViewportMetricsProvider } from "@/hooks/useViewportMetrics";
 import { useUi } from "@/store/ui";
 import { captureSnapshot, item, page, status, testClient } from "@/test/harness";
+import type { Item } from "@/lib/ipc";
 import { LibraryScreen } from "./LibraryScreen";
 
 const ipc = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const ipc = vi.hoisted(() => ({
     searchItems: vi.fn(),
     getItemBody: vi.fn(),
     copyItem: vi.fn(),
+    getClipboardWriteAvailability: vi.fn(),
 }));
 const viewport = vi.hoisted(() => ({ width: 1200 }));
 const toast = vi.hoisted(() => ({
@@ -47,10 +49,9 @@ vi.mock("@/lib/ipc", async (load) => ({
 const longBody = "full line\n".repeat(200);
 const longItem = item({ id: "long", content: "short preview", truncated: true });
 
-function renderScreen() {
+function renderScreen(items: Item[] = [longItem]) {
     const client = testClient();
-    const items = [longItem];
-    client.setQueryData(STATUS_KEY, status({ item_count: 1 }));
+    client.setQueryData(STATUS_KEY, status({ item_count: items.length }));
     client.setQueryData(CAPTURE_KEY, captureSnapshot());
     client.setQueryData(HISTORY_HEAD_KEY, page(items));
     client.setQueryData(historyKey(""), {
@@ -77,6 +78,7 @@ describe("LibraryScreen reader reachability", () => {
         ipc.searchItems.mockReset().mockResolvedValue(page([]));
         ipc.getItemBody.mockReset().mockResolvedValue(longBody);
         ipc.copyItem.mockReset().mockResolvedValue(undefined);
+        ipc.getClipboardWriteAvailability.mockReset().mockResolvedValue("available");
         toast.error.mockReset();
         toast.success.mockReset();
         toast.warning.mockReset();
@@ -118,6 +120,25 @@ describe("LibraryScreen reader reachability", () => {
         );
         expect(dialog.querySelector('[data-mode="reader"]')).not.toBeNull();
         expect(dialog.querySelector('[data-slot="dialog-sheet-handle"]')).not.toBeNull();
+    });
+
+    it("shows unsupported copy reason in inspector and reader while preserving selection", async () => {
+        viewport.width = 1200;
+        ipc.getClipboardWriteAvailability.mockResolvedValue("unsupported_on_platform");
+        const file = item({ id: "file-1", content: null, content_type: "file", content_class: "file" });
+        ipc.listItems.mockResolvedValue(page([file]));
+        const { user, container } = renderScreen([file]);
+        await waitFor(() => expect(container.querySelector("#history-row-file-1")).not.toBeNull());
+        await user.click(within(container.querySelector<HTMLElement>("#history-row-file-1")!).getByRole("button", { name: "File" }));
+        const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+        await within(inspector).findByText("This clipboard format can’t be copied on this device.");
+        expect(within(inspector).getByRole("button", { name: "Copy" }).hasAttribute("disabled")).toBe(true);
+        await user.click(within(inspector).getByRole("button", { name: "Show full contents" }));
+        const dialog = await screen.findByRole("dialog", { name: "Clipboard item" });
+        expect(within(dialog).getByText("This clipboard format can’t be copied on this device.")).toBeTruthy();
+        expect(within(dialog).getByRole("button", { name: "Copy" }).hasAttribute("disabled")).toBe(true);
+        expect(ipc.copyItem).not.toHaveBeenCalled();
+        expect(ipc.getClipboardWriteAvailability).toHaveBeenCalledWith("file", "original");
     });
 
     it("keeps compact copy pending, consumes failure and leaves safe recovery", async () => {
