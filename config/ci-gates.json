@@ -33,7 +33,10 @@
     },
     "comment-budget": {
       "label": "comment budget",
-      "commands": [["bash", "scripts/check-comments.sh"]]
+      "commands": [
+        ["bash", "scripts/check-comments.sh", "--self-test"],
+        ["bash", "scripts/check-comments.sh"]
+      ]
     },
     "release-pipeline": {
       "label": "release pipeline",
