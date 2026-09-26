@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
     ActionButton,
@@ -60,11 +60,63 @@ export function LibraryInspectorPanel({
     onClose,
 }: LibraryInspectorPanelProps) {
     const { t } = useTranslation();
+    const copyButtonRef = useRef<HTMLButtonElement>(null);
+    const copyFocusRef = useRef<{
+        itemId: string;
+        ownedFocus: boolean;
+        sawPending: boolean;
+        abandoned: boolean;
+    } | null>(null);
     const [shownFinding, setShownFinding] = useState<{
         id: string;
         finding: NonNullable<Item["sensitive_finding"]>;
     } | null>(null);
     useEffect(() => setShownFinding(null), [item?.id]);
+    useLayoutEffect(() => {
+        const attempt = copyFocusRef.current;
+        if (!attempt) return;
+        if (item?.id !== attempt.itemId) {
+            copyFocusRef.current = null;
+            return;
+        }
+        if (copyPending) {
+            attempt.sawPending = true;
+            const abandonPointer = (event: PointerEvent) => {
+                if (
+                    !(event.target instanceof Node) ||
+                    !copyButtonRef.current?.parentElement?.contains(event.target)
+                ) {
+                    attempt.abandoned = true;
+                }
+            };
+            const abandonFocus = (event: FocusEvent) => {
+                if (event.target !== copyButtonRef.current && event.target !== document.body) {
+                    attempt.abandoned = true;
+                }
+            };
+            const abandonTab = (event: KeyboardEvent) => {
+                if (event.key === "Tab") attempt.abandoned = true;
+            };
+            document.addEventListener("pointerdown", abandonPointer, true);
+            document.addEventListener("focusin", abandonFocus, true);
+            document.addEventListener("keydown", abandonTab, true);
+            return () => {
+                document.removeEventListener("pointerdown", abandonPointer, true);
+                document.removeEventListener("focusin", abandonFocus, true);
+                document.removeEventListener("keydown", abandonTab, true);
+            };
+        }
+        if (!attempt.sawPending) return;
+        copyFocusRef.current = null;
+        const button = copyButtonRef.current;
+        // Native disabling drops a focused Copy button onto body.
+        if (
+            attempt.ownedFocus && !attempt.abandoned && button?.isConnected && !button.disabled &&
+            (document.activeElement === document.body || document.activeElement === button)
+        ) {
+            button.focus();
+        }
+    }, [copyPending, item?.id]);
     const availability = useClipboardWriteAvailability(item?.content_type ?? null);
     const copyAvailability = clipboardCopyPresentation(
         availability.isPending
@@ -154,13 +206,23 @@ export function LibraryInspectorPanel({
                         }}
                     />
                     <ActionButton
+                        ref={copyButtonRef}
                         size="compactIcon"
                         variant="primary"
                         disabled={copyPending || !copyAvailability.canCopy}
                         icon={copyAction.icon}
                         aria-label={copyAction.label}
                         title={copyAction.label}
-                        onClick={() => onCopy(item)}
+                        onClick={(event) => {
+                            if (copyFocusRef.current || copyPending) return;
+                            copyFocusRef.current = {
+                                itemId: item.id,
+                                ownedFocus: document.activeElement === event.currentTarget,
+                                sawPending: false,
+                                abandoned: false,
+                            };
+                            onCopy(item);
+                        }}
                     />
                     <ActionButton
                         size="compactIcon"
