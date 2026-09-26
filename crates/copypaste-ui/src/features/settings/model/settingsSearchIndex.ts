@@ -16,6 +16,18 @@ export interface SettingsSearchItem {
   disclosure?: "clipboard-advanced" | "cloud-server";
 }
 
+export interface SettingsDisclosureReveal {
+  readonly owner: NonNullable<SettingsSearchItem["disclosure"]>;
+  readonly key: string;
+}
+
+export function disclosureRevealKey(
+  reveal: SettingsDisclosureReveal | undefined,
+  owner: SettingsDisclosureReveal["owner"],
+): string | undefined {
+  return reveal?.owner === owner ? reveal.key : undefined;
+}
+
 /** Every settings row is listed here so search does not depend on hidden tabs
  * being mounted. Translation keys keep the index correct when copy changes. */
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
