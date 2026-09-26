@@ -34,6 +34,13 @@ pub enum ClipboardWriteAvailability {
     UnsupportedOnPlatform,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipboardWriteMode {
+    Original,
+    PlainText,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum ClipboardPlatform {
     Android,
@@ -45,22 +52,35 @@ enum ClipboardPlatform {
 /// Report whether the compiled platform's writer accepts this history format.
 /// No item id or content crosses the WebView boundary.
 #[tauri::command]
-pub fn clipboard_write_availability(content_type: String) -> ClipboardWriteAvailability {
+pub fn clipboard_write_availability(
+    content_type: String,
+    mode: ClipboardWriteMode,
+) -> ClipboardWriteAvailability {
     let platform = match std::env::consts::OS {
         "android" => ClipboardPlatform::Android,
         "macos" => ClipboardPlatform::MacOs,
         "windows" => ClipboardPlatform::Windows,
         _ => ClipboardPlatform::Other,
     };
-    write_availability(platform, &content_type)
+    write_availability(platform, &content_type, mode)
 }
 
 fn write_availability(
     platform: ClipboardPlatform,
     content_type: &str,
+    mode: ClipboardWriteMode,
 ) -> ClipboardWriteAvailability {
     use copypaste_ipc::{content_type, ContentClass};
     use ClipboardWriteAvailability::{Available, UnsupportedContentType, UnsupportedOnPlatform};
+
+    if mode == ClipboardWriteMode::PlainText {
+        return match content_type::classify(content_type) {
+            ContentClass::Text => Available,
+            ContentClass::Image | ContentClass::File | ContentClass::Other => {
+                UnsupportedContentType
+            }
+        };
+    }
 
     match content_type::classify(content_type) {
         // The Linux test daemon uses the text-only fake ClipboardSource.
@@ -382,38 +402,65 @@ mod tests {
         use ClipboardWriteAvailability::{
             Available, UnsupportedContentType, UnsupportedOnPlatform,
         };
+        use ClipboardWriteMode::{Original, PlainText};
 
         for content_type in ["text", "text/plain", "text/html"] {
             for platform in [Android, MacOs, Windows] {
-                assert_eq!(write_availability(platform, content_type), Available);
+                assert_eq!(
+                    write_availability(platform, content_type, Original),
+                    Available
+                );
+                assert_eq!(
+                    write_availability(platform, content_type, PlainText),
+                    Available
+                );
             }
-            assert_eq!(write_availability(Other, content_type), Available);
+            assert_eq!(write_availability(Other, content_type, Original), Available);
+            assert_eq!(
+                write_availability(Other, content_type, PlainText),
+                Available
+            );
         }
         for content_type in ["image/png", "image/tiff"] {
             assert_eq!(
-                write_availability(Android, content_type),
+                write_availability(Android, content_type, Original),
                 UnsupportedOnPlatform
             );
-            assert_eq!(write_availability(MacOs, content_type), Available);
-            assert_eq!(write_availability(Windows, content_type), Available);
+            assert_eq!(write_availability(MacOs, content_type, Original), Available);
+            assert_eq!(
+                write_availability(Windows, content_type, Original),
+                Available
+            );
         }
-        assert_eq!(write_availability(Windows, "image/bmp"), Available);
         assert_eq!(
-            write_availability(MacOs, "image/bmp"),
+            write_availability(Windows, "image/bmp", Original),
+            Available
+        );
+        assert_eq!(
+            write_availability(MacOs, "image/bmp", Original),
             UnsupportedOnPlatform
         );
         assert_eq!(
-            write_availability(Android, "image/bmp"),
+            write_availability(Android, "image/bmp", Original),
             UnsupportedOnPlatform
         );
-        assert_eq!(write_availability(Android, "file"), UnsupportedOnPlatform);
-        assert_eq!(write_availability(MacOs, "file"), Available);
-        assert_eq!(write_availability(Windows, "file"), UnsupportedOnPlatform);
         assert_eq!(
-            write_availability(Other, "image/png"),
+            write_availability(Android, "file", Original),
             UnsupportedOnPlatform
         );
-        assert_eq!(write_availability(Other, "file"), UnsupportedOnPlatform);
+        assert_eq!(write_availability(MacOs, "file", Original), Available);
+        assert_eq!(
+            write_availability(Windows, "file", Original),
+            UnsupportedOnPlatform
+        );
+        assert_eq!(
+            write_availability(Other, "image/png", Original),
+            UnsupportedOnPlatform
+        );
+        assert_eq!(
+            write_availability(Other, "file", Original),
+            UnsupportedOnPlatform
+        );
         for platform in [Android, MacOs, Windows, Other] {
             for content_type in [
                 "image/webp",
@@ -422,11 +469,40 @@ mod tests {
                 "application/x-future",
             ] {
                 assert_eq!(
-                    write_availability(platform, content_type),
+                    write_availability(platform, content_type, Original),
                     UnsupportedContentType,
                     "{content_type} on {platform:?}"
                 );
             }
+            for content_type in [
+                "image/png",
+                "image/tiff",
+                "image/bmp",
+                "image/webp",
+                "file",
+                "application/x-future",
+            ] {
+                assert_eq!(
+                    write_availability(platform, content_type, PlainText),
+                    UnsupportedContentType,
+                    "plain text {content_type} on {platform:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn clipboard_write_mode_accepts_only_the_two_wire_values() {
+        assert_eq!(
+            serde_json::from_str::<ClipboardWriteMode>("\"original\"").unwrap(),
+            ClipboardWriteMode::Original
+        );
+        assert_eq!(
+            serde_json::from_str::<ClipboardWriteMode>("\"plain_text\"").unwrap(),
+            ClipboardWriteMode::PlainText
+        );
+        for invalid in ["\"binary\"", "\"plainText\"", "null", "42"] {
+            assert!(serde_json::from_str::<ClipboardWriteMode>(invalid).is_err());
         }
     }
 
