@@ -70,6 +70,8 @@
   cursor: pointer;
 }
 
+.selectHit { z-index: 2; }
+
 .root .hit:hover:not(:disabled),
 .root .hit:focus-visible,
 .root .hit:active:not(:disabled) {
