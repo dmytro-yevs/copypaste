@@ -93,6 +93,37 @@ describe("useCopy feedback", () => {
       detected.mockRestore();
     }
   });
+
+  it("locks before availability resolves and lets a failed write be retried", async () => {
+    let resolveAvailability!: (value: string) => void;
+    const availability = new Promise<string>((resolve) => { resolveAvailability = resolve; });
+    getClipboardWriteAvailability.mockReturnValueOnce(availability);
+    copyItem.mockRejectedValueOnce(new Error("write failed")).mockResolvedValueOnce(undefined);
+    const client = testClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useCopy(), { wrapper });
+    const first = item({ id: "first" });
+    const second = item({ id: "second" });
+    let initial!: Promise<unknown>;
+    let duplicate!: Promise<unknown>;
+
+    act(() => {
+      initial = result.current.mutateAsync(first);
+      duplicate = result.current.mutateAsync(second);
+    });
+    await expect(duplicate).rejects.toThrow("already in progress");
+    expect(result.current.isPending).toBe(true);
+    expect(copyItem).not.toHaveBeenCalled();
+    resolveAvailability("available");
+    await expect(initial).rejects.toThrow("write failed");
+    expect(copyItem).toHaveBeenCalledTimes(1);
+    expect(toast.success).not.toHaveBeenCalled();
+    await act(async () => { await result.current.mutateAsync(second); });
+    expect(copyItem).toHaveBeenNthCalledWith(2, second.id);
+    expect(toast.success).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("useBulkPin", () => {

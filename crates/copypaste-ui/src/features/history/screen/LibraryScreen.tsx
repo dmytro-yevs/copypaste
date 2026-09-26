@@ -358,6 +358,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                 fullContent={detailBody.text}
                 fullContentFailed={detailBody.failed}
                 revealPending={inspected?.id === reveal.pendingId}
+                copyPending={copy.isPending}
                 onReveal={reveal.request}
                 onHide={reveal.hide}
                 onCopy={copy.mutate}
