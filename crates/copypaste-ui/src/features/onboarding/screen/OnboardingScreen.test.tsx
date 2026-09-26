@@ -26,3 +26,17 @@ it("uses step buttons instead of incomplete tab semantics", () => {
   expect(firstStep.getAttribute("aria-current")).toBeNull();
   expect(screen.getByRole("button", { name: "Step 2 of 3" }).getAttribute("aria-current")).toBe("step");
 });
+
+it("labels the desktop capture step by its actual navigation action", () => {
+  render(
+    <TooltipProvider>
+      <OnboardingScreen />
+    </TooltipProvider>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Set up capture" }));
+  expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Enable capture" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.getByRole("heading", { name: "Bring your devices together." })).toBeTruthy();
+});
