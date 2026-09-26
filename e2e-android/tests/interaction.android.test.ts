@@ -66,6 +66,17 @@ test("typing into search filters the list the engine laid out", async () => {
   );
 });
 
+test("filter reset leaves search open only when requested", async () => {
+  const expanded = '[data-slot="history-toolbar"][data-search-expanded]';
+  await resetHistoryFilters(app, { search: "open" });
+  expect(await count(app, expanded)).toBe(1);
+  expect(await count(app, '[role="dialog"]')).toBe(0);
+
+  await resetHistoryFilters(app);
+  expect(await count(app, expanded)).toBe(0);
+  expect(await count(app, '[role="dialog"]')).toBe(0);
+});
+
 test("rows are laid out with a real box, which jsdom cannot show", async () => {
   const boxes = await app.withPage((page) =>
     page.evaluate(
