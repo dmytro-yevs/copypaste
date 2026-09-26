@@ -119,12 +119,8 @@ def portable_gate_contract_holds(registry, profile_name, local_source, ci_jobs):
     selected = [value for kind, value in ci_invocations if kind == "gate"]
     if collections.Counter(selected) != collections.Counter(profile):
         return False
-    file_size = (gates.get("file-size-budget") or {}).get("commands")
     ledger = (gates.get("feature-ledger") or {}).get("commands")
-    return file_size == [
-        ["bash", "scripts/check-file-size-gate.sh", "--self-test"],
-        ["bash", "scripts/check-file-size-gate.sh"],
-    ] and ledger == [
+    return ledger == [
         ["python3", "scripts/check-feature-ledger.py", "--self-test"],
         ["python3", "scripts/check-feature-ledger.py"],
     ]

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforce the AGENTS.md rule 8 budgets.
+# Enforce comment budgets.
 #
 # Three numbers, checked per file:
 #
@@ -7,9 +7,8 @@
 #   * no module header longer than MAX_HEADER lines
 #   * comment lines no more than MAX_RATIO% of a file's source lines
 #
-# Test modules and test files do not count, the same way they do not count
-# toward the file-size budget: a test's prose is the record of which defect
-# each assertion pins, which is the highest-scoring category rule 8 has.
+# Test modules and test files do not count: a test's prose records which
+# defect each assertion pins.
 #
 # The tree violated all three about 160 times when the check was written, so a
 # hard failure everywhere would have been switched off within a day. Instead
@@ -103,7 +102,7 @@ def faults(path):
         return []
     comments, code, longest, header = m
     if code == 0:
-        # A file that is all comment is the shape rule 8 bans outright: a
+        # A file that is all comment has no implementation to explain: a
         # layout table in a mod.rs. The ratio is meaningless, the verdict is not.
         return [f"{comments} comment lines and no code"]
     out = []
@@ -174,7 +173,7 @@ print(f"baseline: {len(baseline)} file(s) recorded, {over_baseline} still over")
 
 if new:
     print()
-    print(f"{len(new)} file(s) over budget and not in the baseline (AGENTS.md rule 8).")
+    print(f"{len(new)} file(s) over budget and not in the baseline.")
     print("Cut the comment to its reason. Do not add it to the baseline.")
     sys.exit(1)
 
