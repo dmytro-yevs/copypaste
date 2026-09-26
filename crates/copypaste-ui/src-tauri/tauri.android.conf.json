@@ -23,7 +23,7 @@
   "bundle": {
     "android": {
       "minSdkVersion": 24,
-      "versionCode": 200000035,
+      "versionCode": 200000036,
       "debugApplicationIdSuffix": ".debug"
     }
   }
