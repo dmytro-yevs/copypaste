@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef } from "react";
+
 import {
   ActionButton,
   ClipBodyPreview,
@@ -38,7 +40,8 @@ interface QuickPasteRowProps {
   fullContent: string | null;
   fullContentFailed: boolean;
   onSelect: () => void;
-  onCopy: () => void;
+  onSelectFromKeyboard: () => void;
+  onCopy: (plainText?: boolean) => void;
   onTogglePin: () => void;
 }
 
@@ -52,9 +55,12 @@ export function QuickPasteRow({
   fullContent,
   fullContentFailed,
   onSelect,
+  onSelectFromKeyboard,
   onCopy,
   onTogglePin,
 }: QuickPasteRowProps) {
+  const copyHitRef = useRef<HTMLButtonElement>(null);
+  const restoreCopyFocusRef = useRef(false);
   const kind = kindOf(item);
   const availability = useClipboardWriteAvailability(item.content_type);
   const plainTextAvailability = useClipboardWriteAvailability(item.content_type, "plain_text");
@@ -72,6 +78,15 @@ export function QuickPasteRow({
         ? { status: "failed" }
         : { status: "resolved", availability: plainTextAvailability.data },
   );
+  useLayoutEffect(() => {
+    if (!active) {
+      restoreCopyFocusRef.current = false;
+      return;
+    }
+    if (!copyAvailability.canCopy || !restoreCopyFocusRef.current) return;
+    restoreCopyFocusRef.current = false;
+    copyHitRef.current?.focus();
+  }, [active, copyAvailability.canCopy]);
   const image = kind === "image";
   const { rowLabel } = quickPastePresentation(item);
   const source = clipSourceMetadata(item);
@@ -108,23 +123,59 @@ export function QuickPasteRow({
 
   const copyButton = (
     <Button
+      ref={copyHitRef}
       type="button"
       variant="ghost"
       size="sm"
       tabIndex={active ? 0 : -1}
+      disabled={!copyAvailability.canCopy}
       onPointerDown={(event) => {
-        if (event.button !== 0) return;
+        if (!copyAvailability.canCopy || event.button !== 0) return;
         event.preventDefault();
-        onCopy();
+        onCopy(false);
+      }}
+      onKeyDown={(event) => {
+        if (!copyAvailability.canCopy || event.key !== "Enter") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCopy(event.altKey);
       }}
       onClick={(event) => {
-        if (event.detail === 0) onCopy();
+        if (copyAvailability.canCopy && event.detail === 0) onCopy(false);
       }}
-      aria-disabled={!copyAvailability.canCopy}
       aria-label={`${t("quickPaste.row.copyPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`}
       className={styles.hit}
     />
   );
+
+  const selectButton = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      tabIndex={active ? 0 : -1}
+      onFocus={() => { restoreCopyFocusRef.current = true; }}
+      onBlur={() => { restoreCopyFocusRef.current = false; }}
+      onPointerUp={(event) => {
+        if (event.button === 0) onSelect();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          onSelectFromKeyboard();
+        } else if (event.key === " ") {
+          event.stopPropagation();
+        }
+      }}
+      onClick={(event) => {
+        if (event.detail === 0) onSelectFromKeyboard();
+      }}
+      aria-label={`${t("quickPaste.row.selectPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`}
+      className={`${styles.hit} ${styles.selectHit}`}
+    />
+  );
+  const activeHit = copyAvailability.canCopy ? copyButton : selectButton;
 
   const row = (
     <Surface
@@ -138,7 +189,8 @@ export function QuickPasteRow({
       onMouseEnter={onSelect}
       className={styles.root}
     >
-      {canPreview ? <TooltipTrigger asChild>{copyButton}</TooltipTrigger> : copyButton}
+      {!copyAvailability.canCopy ? copyButton : null}
+      {canPreview ? <TooltipTrigger asChild>{activeHit}</TooltipTrigger> : activeHit}
       <div className={styles.content}>
         <div className={styles.body}>
           <ClipBodyPreview
@@ -153,7 +205,14 @@ export function QuickPasteRow({
           <div className={styles.availability} role="status">
             <span>{copyAvailability.reason}</span>
             {copyAvailability.canRetry ? (
-              <Button type="button" variant="ghost" size="sm" onClick={() => void availability.refetch()}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onFocus={() => { restoreCopyFocusRef.current = true; }}
+                onBlur={() => { restoreCopyFocusRef.current = false; }}
+                onClick={() => void availability.refetch()}
+              >
                 {t("history.copyAvailability.retry")}
               </Button>
             ) : null}
@@ -199,7 +258,7 @@ export function QuickPasteRow({
           }
         />
       </div>
-      {shortcut !== null ? (
+      {shortcut !== null && copyAvailability.canCopy ? (
         <ShortcutBadge aria-hidden="true" className={styles.shortcut}>
           {shortcut}
         </ShortcutBadge>

@@ -14,6 +14,7 @@ interface QuickPasteSelectionOptions {
   items: readonly Item[];
   query: string;
   listRef: RefObject<HTMLDivElement | null>;
+  canCopy: (item: Item, plainText: boolean) => boolean;
   onCopy: (item: Item, plainText?: boolean) => void;
   onDismiss: () => void;
 }
@@ -27,6 +28,7 @@ export function useQuickPasteSelection({
   items,
   query,
   listRef,
+  canCopy,
   onCopy,
   onDismiss,
 }: QuickPasteSelectionOptions) {
@@ -60,6 +62,12 @@ export function useQuickPasteSelection({
     [],
   );
 
+  const selectFromKeyboard = useCallback((id: string) => {
+    keyboardNavigation.current = true;
+    lastKeyboardMove.current = Date.now();
+    setSelectedId(id);
+  }, []);
+
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.key === "Escape") {
@@ -84,7 +92,8 @@ export function useQuickPasteSelection({
         const selected = items[current];
         if (selected) {
           event.preventDefault();
-          onCopy(selected, event.altKey);
+          if (canCopy(selected, event.altKey)) onCopy(selected, event.altKey);
+          else selectFromKeyboard(selected.id);
         }
         return;
       }
@@ -93,11 +102,12 @@ export function useQuickPasteSelection({
         const item = Number.isInteger(slot) && slot >= 0 && slot < 9 ? items[slot] : undefined;
         if (item) {
           event.preventDefault();
-          onCopy(item);
+          if (canCopy(item, false)) onCopy(item);
+          else selectFromKeyboard(item.id);
         }
       }
     },
-    [items, onCopy, onDismiss, query, selectedId],
+    [canCopy, items, onCopy, onDismiss, query, selectFromKeyboard, selectedId],
   );
 
   const selectFromPointer = useCallback((id: string) => {
@@ -114,5 +124,5 @@ export function useQuickPasteSelection({
     }, 120);
   }, []);
 
-  return { selectedId, onKeyDown, selectFromPointer, noteScroll };
+  return { selectedId, onKeyDown, selectFromPointer, selectFromKeyboard, noteScroll };
 }

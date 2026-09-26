@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -84,7 +84,7 @@ describe("quickPastePresentation", () => {
       </QueryClientProvider>,
     );
     await screen.findByRole("listitem");
-    expect(container.querySelector('[data-slot="shortcut-badge"]')?.textContent ?? null).toBe(badge);
+    await waitFor(() => expect(container.querySelector('[data-slot="shortcut-badge"]')?.textContent ?? null).toBe(badge));
     if (keys) {
       await user.click(screen.getByRole("searchbox"));
       await user.keyboard(keys);
@@ -121,7 +121,8 @@ describe("quickPastePresentation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(await screen.findByRole("button", { name: /copy an ordinary clipboard entry/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /copy an ordinary clipboard entry/i }).hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getByRole("button", { name: /copy an ordinary clipboard entry/i }));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn’t copy that item.", undefined));
     expect(lifecycle.dismiss).not.toHaveBeenCalled();
@@ -138,7 +139,8 @@ describe("quickPastePresentation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(await screen.findByRole("button", { name: /copy an ordinary clipboard entry/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /copy an ordinary clipboard entry/i }).hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getByRole("button", { name: /copy an ordinary clipboard entry/i }));
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
@@ -163,6 +165,7 @@ describe("quickPastePresentation", () => {
     );
     const row = await screen.findByRole("listitem");
     await screen.findByText("This clipboard format can’t be copied on this device.");
+    expect(screen.getByRole("button", { name: "Copy Image" }).hasAttribute("disabled")).toBe(true);
     await user.click(screen.getByRole("button", { name: "Copy Image" }));
     await user.keyboard("{Enter}");
     await user.keyboard("{Alt>}{Enter}{/Alt}");
@@ -171,10 +174,42 @@ describe("quickPastePresentation", () => {
     expect(ipc.copyItem).not.toHaveBeenCalled();
     expect(ipc.copyItemAsPlainText).not.toHaveBeenCalled();
     expect(lifecycle.dismiss).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
     expect(ipc.getClipboardWriteAvailability.mock.calls).toEqual([
       ["image/png", "original"],
       ["image/png", "plain_text"],
     ]);
+  });
+
+  it("selects an unavailable row on touch release and keyboard Enter without a hover", async () => {
+    const image = item({ id: "image-2", content: null, content_type: "image/png", content_class: "image" });
+    ipc.listItems.mockResolvedValue(page([item({ id: "text-1" }), image]));
+    ipc.getClipboardWriteAvailability.mockImplementation((mime: string) =>
+      Promise.resolve(mime === "image/png" ? "unsupported_on_platform" : "available"));
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    const select = await screen.findByRole("button", { name: "Select Image" });
+    const row = select.closest<HTMLElement>('[role="listitem"]')!;
+    expect(row.getAttribute("data-state")).toBe("idle");
+    fireEvent.pointerDown(select, { pointerType: "touch", button: 0 });
+    fireEvent.pointerUp(select, { pointerType: "touch", button: 0 });
+    await waitFor(() => expect(row.getAttribute("data-state")).toBe("selected"));
+    expect(screen.getByText("This clipboard format can’t be copied on this device.")).toBeTruthy();
+    expect(ipc.copyItem).not.toHaveBeenCalled();
+    await user.hover(select);
+    expect(await screen.findByRole("tooltip")).toBeTruthy();
+
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() => expect(row.getAttribute("data-state")).toBe("idle"));
+    select.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(row.getAttribute("data-state")).toBe("selected"));
+    expect(ipc.copyItem).not.toHaveBeenCalled();
   });
 
   it("keeps inferred path and sensitive text copyable using stored MIME and id only", async () => {
@@ -194,6 +229,7 @@ describe("quickPastePresentation", () => {
       </QueryClientProvider>,
     );
     await screen.findByRole("listitem");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copy Sensitive content" }).hasAttribute("disabled")).toBe(false));
     await user.click(screen.getByRole("searchbox"));
     await user.keyboard("{Enter}");
     await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledWith(target.id));
@@ -219,6 +255,7 @@ describe("quickPastePresentation", () => {
     expect(ipc.copyItem).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Check again" }));
     await waitFor(() => expect(screen.queryByText("Couldn’t check whether this format can be copied.")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: /copy an ordinary clipboard entry/i })));
     await user.click(screen.getByRole("button", { name: /copy an ordinary clipboard entry/i }));
     await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledWith("row-1"));
   });
@@ -251,7 +288,8 @@ describe("quickPastePresentation", () => {
       </QueryClientProvider>,
     );
     await screen.findByRole("listitem");
-    await user.click(screen.getByRole("searchbox"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copy /Users/example/report" }).hasAttribute("disabled")).toBe(false));
+    screen.getByRole("button", { name: "Copy /Users/example/report" }).focus();
     await user.keyboard("{Alt>}{Enter}{/Alt}");
     await waitFor(() => expect(ipc.copyItemAsPlainText).toHaveBeenCalledWith("path-1"));
     expect(ipc.copyItem).not.toHaveBeenCalled();
