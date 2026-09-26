@@ -9,17 +9,36 @@ import {
   permissionRequest,
   permissionSnapshot,
 } from "@/lib/ipcPermissions";
+import { initializePlatform } from "@/lib/platform";
+import { previewScenarioStore } from "@/service/previewScenario";
 
 afterEach(() => {
+  previewScenarioStore.getState().resetToLive();
   window.history.replaceState({}, "", "/");
   delete window.__COPYPASTE_WEB_BRIDGE__;
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+  initializePlatform();
   invoke.mockReset();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("Android permission preview", () => {
+  it("reads the synthetic scenario without a web or native bridge", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    window.history.replaceState({}, "", "/?platform=android");
+    initializePlatform();
+    previewScenarioStore.getState().setDaemon("up");
+
+    await expect(permissionSnapshot()).resolves.toMatchObject({
+      platform: "android",
+      notifications: { status: "prompt" },
+      tile: { status: "prompt" },
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("keeps grants made by separate onboarding actions", async () => {
     window.history.replaceState({}, "", "/?platform=android");
     window.__COPYPASTE_WEB_BRIDGE__ = {
