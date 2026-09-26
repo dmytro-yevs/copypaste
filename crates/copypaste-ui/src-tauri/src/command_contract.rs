@@ -10,6 +10,7 @@ macro_rules! command_registry {
                 AddItem => ("add_item", crate::commands::history::add_item, "{ content: string }", "Item"),
                 CopyItem => ("copy_item", crate::commands::history::copy_item, "{ id: string }", "Item"),
                 CopyItemAsPlainText => ("copy_item_as_plain_text", crate::commands::history::copy_item_as_plain_text, "{ id: string }", "Item"),
+                ClipboardWriteAvailability => ("clipboard_write_availability", crate::commands::history::clipboard_write_availability, "{ contentType: string }", "\"available\" | \"unsupported_content_type\" | \"unsupported_on_platform\""),
                 RevealItem => ("reveal_item", crate::commands::history::reveal_item, "{ id: string }", "string"),
                 GetItemBody => ("get_item_body", crate::commands::history::get_item_body, "{ id: string }", "string"),
                 CopyItems => ("copy_items", crate::commands::history::copy_items, "{ ids: readonly string[] }", "number"),
