@@ -45,7 +45,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
 
   { tab: "clipboard", title: "capture.title", description: "capture.loading.body", keywords: ["background", "clipboard", "recording", "paused"] },
   { tab: "privacy", title: "settings.service.privateMode.title", description: "settings.service.privateMode.description" },
-  { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.poll.title", description: "settings.service.poll.description", disclosure: "clipboard-advanced" },
+  { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.poll.title", description: "settings.service.poll.description", keywords: ["polling", "interval", "frequency"], disclosure: "clipboard-advanced" },
   { tab: "clipboard", section: "settings.service.groups.capture.title", title: "settings.service.dedup.title", description: "settings.service.dedup.description" },
   { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.maxText.title", description: "settings.service.maxText.description", disclosure: "clipboard-advanced" },
   { tab: "clipboard", section: "settings.service.advanced.title", title: "settings.service.maxImage.title", description: "settings.service.maxImage.description", disclosure: "clipboard-advanced" },
