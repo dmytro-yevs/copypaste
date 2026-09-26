@@ -107,6 +107,17 @@ describe("failure evidence", () => {
   });
 });
 
+test("tap receipts omit clipboard-bearing DOM fields", () => {
+  const source = readFileSync(new URL("../src/harness/ui.ts", import.meta.url), "utf8");
+  const start = source.indexOf("const describe = (node: EventTarget | null)");
+  const end = source.indexOf("return { x, y };", start);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  const receipt = source.slice(start, end);
+  expect(receipt).not.toMatch(/\.(?:textContent|innerText|outerHTML|innerHTML|value|id)\b/);
+  expect(receipt).not.toMatch(/getAttribute\(["'](?:aria-label|title|placeholder|data-item-id)["']\)/);
+});
+
 /**
  * The directory `android-emulator.yml` uploads whole, assembled from the calls
  * that fill it. Asserting on one file is what let `attachment.json` publish the
