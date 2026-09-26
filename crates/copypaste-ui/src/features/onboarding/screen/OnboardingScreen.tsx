@@ -1,4 +1,4 @@
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 
 import { Screen } from "@/components/layout";
 import { BrandMark } from "@/components/shared/BrandMark";
@@ -23,6 +23,16 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
   const { t } = useTranslation();
   const [index, setIndex] = useState(0);
   const android = isAndroidPlatform();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const previousIndex = useRef(index);
+
+  useLayoutEffect(() => {
+    if (previousIndex.current === index) return;
+    previousIndex.current = index;
+    if (viewportRef.current) viewportRef.current.scrollTop = 0;
+    headingRef.current?.focus({ preventScroll: true });
+  }, [index]);
 
   const finish = (view: View = "history") => {
     usePrefs.getState().set("onboardingComplete", true);
@@ -58,12 +68,13 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
       className={styles.root}
     >
       <div className={styles.stage}>
-        <div className={styles.window}>
+        <div className={styles.window} data-onboarding-scroll="" ref={viewportRef}>
           {index === 0 ? (
             <OnboardingSlide
               eyebrow={t("onboarding.welcome.eyebrow")}
               title={t("onboarding.welcome.title")}
               body={t("onboarding.welcome.body")}
+              headingRef={headingRef}
               artwork={<WelcomeArtwork />}
               pagination={pagination}
               lockup
@@ -75,6 +86,7 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
               eyebrow={t("onboarding.capture.eyebrow")}
               title={t("onboarding.capture.title")}
               body={t(android ? "onboarding.capture.androidBody" : "onboarding.capture.body")}
+              headingRef={headingRef}
               artwork={android ? <AndroidCaptureSetup /> : <CaptureArtwork />}
               artworkInteractive={android}
               pagination={pagination}
@@ -89,6 +101,7 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
               eyebrow={t("onboarding.connections.eyebrow")}
               title={t("onboarding.connections.title")}
               body={t("onboarding.connections.body", { pairingLimit: MAX_PAIRINGS })}
+              headingRef={headingRef}
               artwork={<NetworkArtwork pairingLimit={MAX_PAIRINGS} />}
               pagination={pagination}
               primary={{ label: t("onboarding.connections.action"), onClick: () => finish("devices") }}
@@ -106,6 +119,7 @@ function OnboardingSlide({
   eyebrow,
   title,
   body,
+  headingRef,
   artwork,
   pagination,
   artworkInteractive = false,
@@ -116,6 +130,7 @@ function OnboardingSlide({
   eyebrow: string;
   title: string;
   body: string;
+  headingRef: Ref<HTMLHeadingElement>;
   artwork: ReactNode;
   pagination: ReactNode;
   artworkInteractive?: boolean;
@@ -138,7 +153,7 @@ function OnboardingSlide({
           </div>
         ) : null}
         <span className={styles.eyebrow}>{eyebrow}</span>
-        <h1>{title}</h1>
+        <h1 ref={headingRef} tabIndex={-1}>{title}</h1>
         <p>{body}</p>
         <div className={styles.actions}>
           {pagination}

@@ -189,11 +189,10 @@
   .captureScene,
   .networkScene {
     inline-size: min(calc(var(--s-9) * 8.25), 92vw);
-    block-size: calc(var(--s-9) * 7.5);
+    block-size: clamp(calc(var(--s-9) * 3.5), 30vh, calc(var(--s-9) * 6.25));
     transform: translateY(calc(var(--s-1) * -1)) scale(.92);
   }
 
-  .networkScene { block-size: calc(var(--s-9) * 7.75); }
   .networkNote { display: none; }
 
   .welcome::before {
@@ -220,12 +219,6 @@
   }
 
   .networkNote { display: none; }
-}
-
-@media (--cp-sm-short-mobile) {
-  .welcome,
-  .captureScene { block-size: calc(var(--s-9) * 6.25); }
-  .networkScene { block-size: calc(var(--s-9) * 6.75); }
 }
 
 @media (prefers-reduced-motion: reduce) {

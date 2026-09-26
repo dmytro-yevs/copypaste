@@ -40,3 +40,24 @@ it("labels the desktop capture step by its actual navigation action", () => {
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(screen.getByRole("heading", { name: "Bring your devices together." })).toBeTruthy();
 });
+
+it("starts every changed step at its heading after the user scrolls", () => {
+  const { container } = render(
+    <TooltipProvider>
+      <OnboardingScreen />
+    </TooltipProvider>,
+  );
+  const viewport = container.querySelector<HTMLElement>("[data-onboarding-scroll]");
+  expect(viewport).not.toBeNull();
+
+  for (const [step, title] of [
+    [2, "Keep new copies within reach."],
+    [3, "Bring your devices together."],
+    [1, "Your clipboard finally remembers."],
+  ] as const) {
+    viewport!.scrollTop = 302;
+    fireEvent.click(screen.getByRole("button", { name: `Step ${step} of 3` }));
+    expect(viewport!.scrollTop).toBe(0);
+    expect(screen.getByRole("heading", { name: title })).toBe(document.activeElement);
+  }
+});
