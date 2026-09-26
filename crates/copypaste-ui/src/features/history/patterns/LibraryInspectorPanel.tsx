@@ -214,13 +214,21 @@ export function LibraryInspectorPanel({
                         aria-label={copyAction.label}
                         title={copyAction.label}
                         onClick={(event) => {
-                            if (copyFocusRef.current || copyPending) return;
-                            copyFocusRef.current = {
-                                itemId: item.id,
-                                ownedFocus: document.activeElement === event.currentTarget,
-                                sawPending: false,
-                                abandoned: false,
-                            };
+                            if (!copyFocusRef.current) {
+                                const attempt = {
+                                    itemId: item.id,
+                                    ownedFocus: document.activeElement === event.currentTarget,
+                                    sawPending: false,
+                                    abandoned: false,
+                                };
+                                copyFocusRef.current = attempt;
+                                // A declined copy has no pending render to clear its focus attempt.
+                                window.setTimeout(() => {
+                                    if (copyFocusRef.current === attempt && !attempt.sawPending) {
+                                        copyFocusRef.current = null;
+                                    }
+                                }, 0);
+                            }
                             onCopy(item);
                         }}
                     />
