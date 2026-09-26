@@ -74,6 +74,7 @@ pub(crate) async fn call(
             let args: ClipboardWriteAvailabilityArgs = parse(request.args)?;
             value(crate::commands::history::clipboard_write_availability(
                 args.content_type,
+                args.mode,
             ))
         }
         BridgeCommand::GetItemBody => {
