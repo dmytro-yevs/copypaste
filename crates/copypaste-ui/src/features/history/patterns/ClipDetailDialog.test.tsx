@@ -51,11 +51,13 @@ describe("ClipDetailDialog notices", () => {
     expect(contents.textContent).toBe("redacted value");
   });
 
-  it("keeps the reader open until copy succeeds", async () => {
+  it("blocks Escape, close, backdrop and mutations until copy succeeds", async () => {
     const user = userEvent.setup();
     let finish!: () => void;
     const onCopy = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     const onClose = vi.fn();
+    const onTogglePin = vi.fn();
+    const onDelete = vi.fn();
     render(
       <TooltipProvider>
         <ClipDetailDialog
@@ -69,8 +71,8 @@ describe("ClipDetailDialog notices", () => {
           onReveal={vi.fn()}
           onHide={vi.fn()}
           onCopy={onCopy}
-          onTogglePin={vi.fn()}
-          onDelete={vi.fn()}
+          onTogglePin={onTogglePin}
+          onDelete={onDelete}
           onClose={onClose}
           onReturnFocus={vi.fn()}
         />
@@ -78,8 +80,25 @@ describe("ClipDetailDialog notices", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(onCopy).toHaveBeenCalledOnce());
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Copy" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Pin item" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Delete item" }).hasAttribute("disabled")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Pin item" }));
+    await user.click(screen.getByRole("button", { name: "Delete item" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    const backdrop = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]');
+    expect(backdrop).not.toBeNull();
+    await user.click(backdrop!);
+    expect(onClose).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Clipboard item" });
+    await vi.waitFor(() =>
+      expect(dialog.contains(document.activeElement)).toBe(true),
+    );
+    expect(onTogglePin).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
     finish();
     await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
@@ -87,6 +106,7 @@ describe("ClipDetailDialog notices", () => {
   it("keeps the reader actionable after a failed copy", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
+    let fail!: (reason: Error) => void;
     render(
       <TooltipProvider>
         <ClipDetailDialog
@@ -99,7 +119,7 @@ describe("ClipDetailDialog notices", () => {
           revealPending={false}
           onReveal={vi.fn()}
           onHide={vi.fn()}
-          onCopy={vi.fn().mockRejectedValue(new Error("copy failed"))}
+          onCopy={() => new Promise<void>((_resolve, reject) => { fail = reject; })}
           onTogglePin={vi.fn()}
           onDelete={vi.fn()}
           onClose={onClose}
@@ -109,11 +129,17 @@ describe("ClipDetailDialog notices", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(fail).toBeTypeOf("function"));
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    fail(new Error("copy failed"));
     await vi.waitFor(() =>
       expect(screen.getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
         .toBe(false),
     );
     expect(onClose).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
   it("uses shared status notices for sync and sensitive-content warnings", () => {
