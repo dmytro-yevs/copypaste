@@ -172,6 +172,32 @@ async function restoreAfterTest(
   }
 }
 
+async function scrollSettingsControlIntoView(selector: string): Promise<void> {
+  await waitFor(
+    () => app.withPage((page) => page.evaluate((query) => {
+      const control = document.querySelector<HTMLElement>(query);
+      if (!control) return false;
+      let viewport = control.parentElement;
+      while (viewport && !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY)) {
+        viewport = viewport.parentElement;
+      }
+      if (!viewport) return false;
+      const rect = control.getBoundingClientRect();
+      const view = viewport.getBoundingClientRect();
+      viewport.scrollTop += rect.top + rect.height / 2 - (view.top + view.height / 2);
+      viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+      const visible = control.getBoundingClientRect();
+      const x = visible.left + visible.width / 2;
+      const y = visible.top + visible.height / 2;
+      return visible.width > 0 && visible.height > 0 &&
+        x >= view.left && x <= view.right &&
+        y >= view.top && y <= view.bottom &&
+        control.contains(document.elementFromPoint(x, y));
+    }, selector)),
+    () => `the Settings control ${selector} never became reachable`,
+  );
+}
+
 beforeAllWithEvidence("settings", async () => {
   app = await attachToApp();
   await gotoView(app, "Library");
@@ -227,6 +253,9 @@ describe("the section index", () => {
 
   test("opens Runtime events within Diagnostics and returns through the compact ladder", async () => {
     await openSettingsSection(app, "Diagnostics");
+    await scrollSettingsControlIntoView(
+      '[data-settings-search-target="row:Runtime events"] button',
+    );
     await tapButton(app, "Open runtime events");
     await waitFor(
       () => app.withPage((page) => page.evaluate(() =>
@@ -282,6 +311,21 @@ describe("the section index", () => {
       };
       let imeAfter: ImePageObservation | null = null;
       try {
+        await scrollSettingsControlIntoView(
+          '[aria-labelledby="cloud-setup-title"] button',
+        );
+        await tapButton(app, "Set up cloud sync");
+        await waitFor(
+          () => app.withPage((page) => page.evaluate(() =>
+            document.querySelector(
+              'details[data-settings-search-target="section:Advanced · Self-hosted cloud server"]',
+            )?.hasAttribute("open") ?? false,
+          )),
+          "the cloud server setup did not open",
+        );
+        await scrollSettingsControlIntoView(
+          'form[aria-label="Cloud server configuration"] input[type="url"]',
+        );
         const imeBefore = await app.withPage((page) =>
           page.evaluate(() => {
             const panel = Array.from(

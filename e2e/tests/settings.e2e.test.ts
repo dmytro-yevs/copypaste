@@ -92,7 +92,8 @@ async function withSettingsNavigation(
     acquire: async () => {
       const navigation = await displayed('[aria-label="Settings sections"]');
       if (navigation) return { kind: "navigation", element: navigation };
-      const back = await displayed('button[aria-label="Back to Settings"]');
+      const back = await displayed('button[aria-label="Back to Diagnostics"]')
+        ?? await displayed('button[aria-label="Back to Settings"]');
       return back ? { kind: "back", element: back } : null;
     },
     interact: async (current) => {
@@ -258,6 +259,8 @@ describe("diagnostic detail", () => {
     await result!.click();
     await (await app.browser.$('input[type="search"][aria-label="Search runtime events"]'))
       .waitForDisplayed({ timeout: 10_000 });
+    await openSection("Privacy & retention");
+    expect(await panel("Privacy & retention")).not.toBeNull();
   });
 });
 
