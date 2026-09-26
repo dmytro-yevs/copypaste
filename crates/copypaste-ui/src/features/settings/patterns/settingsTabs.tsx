@@ -26,11 +26,15 @@ import type {
   SettingsTab,
 } from "@/features/settings/model/settingsNavigation";
 import type { PreferenceSection } from "@/features/settings/model/preferenceSections";
+import {
+  disclosureRevealKey,
+  type SettingsDisclosureReveal,
+} from "@/features/settings/model/settingsSearchIndex";
 
 export interface SettingsTabController {
   readonly prefsReady: boolean;
   readonly capabilities: SettingsCapabilities;
-  readonly revealAdvancedKey?: string;
+  readonly disclosureReveal?: SettingsDisclosureReveal;
   readonly diagnosticsView?: DiagnosticsView;
   readonly onOpenEvents?: () => void;
   readonly onBackFromEvents?: () => void;
@@ -49,7 +53,7 @@ export function renderPreferenceSection(
     );
     case "clipboard": return (
       <>
-        <ClipboardServiceSettings revealAdvancedKey={controller.revealAdvancedKey} />
+        <ClipboardServiceSettings revealAdvancedKey={disclosureRevealKey(controller.disclosureReveal, "clipboard-advanced")} />
         {controller.capabilities.androidCapture ? (
           <CaptureSetupState mode="supplemental" />
         ) : null}
@@ -80,7 +84,7 @@ export function renderPreferenceSection(
       </>
     );
     case "cloud-sync": return (
-      <CloudSyncSettings revealAdvancedKey={controller.revealAdvancedKey} />
+      <CloudSyncSettings revealAdvancedKey={disclosureRevealKey(controller.disclosureReveal, "cloud-server")} />
     );
     case "storage": return <StorageTab />;
     case "diagnostics": return <DiagnosticsTab view={controller.diagnosticsView} onOpenEvents={controller.onOpenEvents} onBack={controller.onBackFromEvents} />;

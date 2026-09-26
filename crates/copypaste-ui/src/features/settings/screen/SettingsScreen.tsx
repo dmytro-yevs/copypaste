@@ -29,6 +29,7 @@ import {
 } from "@/features/settings/model/preferenceSections";
 import {
   SETTINGS_SEARCH_ITEMS,
+  type SettingsDisclosureReveal,
   type SettingsSearchTab,
 } from "@/features/settings/model/settingsSearchIndex";
 import { settingsCapabilities } from "@/features/settings/model/settingsNavigation";
@@ -74,7 +75,7 @@ export function SettingsScreen() {
   const [mobileSection, setMobileSection] =
     useState<PreferenceSection | null>(null);
   const [diagnosticsView, setDiagnosticsView] = useState<DiagnosticsView>("overview");
-  const [revealAdvancedKey, setRevealAdvancedKey] = useState<string>();
+  const [disclosureReveal, setDisclosureReveal] = useState<SettingsDisclosureReveal>();
   const advancedRevealSequence = useRef(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchExpanded, setSearchExpanded] = useState(true);
@@ -96,7 +97,7 @@ export function SettingsScreen() {
     setDesktopSection(section);
     setMobileSection(section);
     setDiagnosticsView("overview");
-    setRevealAdvancedKey(undefined);
+    setDisclosureReveal(undefined);
     resetContentScroll();
   }, [resetContentScroll]);
   const openEvents = useCallback(() => {
@@ -146,11 +147,11 @@ export function SettingsScreen() {
       prefsReady,
       capabilities,
       diagnosticsView,
-      revealAdvancedKey,
+      disclosureReveal,
       onOpenEvents: openEvents,
       onBackFromEvents: compact ? undefined : closeEvents,
     }),
-    [capabilities, closeEvents, compact, diagnosticsView, openEvents, prefsReady, revealAdvancedKey],
+    [capabilities, closeEvents, compact, diagnosticsView, disclosureReveal, openEvents, prefsReady],
   );
   const activeDefinition = sections.find(
     (section) => section.value === desktopSection,
@@ -214,9 +215,10 @@ export function SettingsScreen() {
     if (result.item.tab === "runtime-events") openEvents();
     if (result.item.disclosure !== undefined) {
       advancedRevealSequence.current += 1;
-      setRevealAdvancedKey(
-        `${result.item.title}:${advancedRevealSequence.current}`,
-      );
+      setDisclosureReveal({
+        owner: result.item.disclosure,
+        key: `${result.item.title}:${advancedRevealSequence.current}`,
+      });
     }
     setSearchQuery("");
     setSearchAnnouncement(t("settings.search.opened", { title: result.title }));
