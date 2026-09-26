@@ -26,7 +26,7 @@ describe("Onboarding responsive layout", () => {
 
   it("reserves the last mobile row for actions while allowing artwork and setup to scroll", () => {
     expect(screenCss).toMatch(
-      /@media \(--cp-toolbar\)[\s\S]*--onboarding-art-size:\s*clamp\([^;]*vh[^;]*\)[\s\S]*grid-template-rows:\s*auto auto auto auto minmax\(var\(--onboarding-art-size\), 1fr\) auto/,
+      /@media \(--cp-toolbar\)[\s\S]*--onboarding-art-size:\s*clamp\([^;]*vh[^;]*\)[\s\S]*block-size:\s*100%;[\s\S]*grid-template-rows:\s*auto auto auto auto minmax\(var\(--onboarding-art-size\), 1fr\) auto/,
     );
     expect(screenCss).toMatch(/\.window\s*\{[\s\S]*overflow-y:\s*auto/);
     expect(screenCss).toMatch(/\.art\[data-interactive\]\s*\{[\s\S]*align-items:\s*start/);

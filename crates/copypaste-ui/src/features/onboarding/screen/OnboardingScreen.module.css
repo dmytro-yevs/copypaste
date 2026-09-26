@@ -238,6 +238,7 @@
     display: grid;
     inline-size: 100%;
     min-inline-size: 0;
+    block-size: 100%;
     min-block-size: 100%;
     padding:
       max(var(--s-5), env(safe-area-inset-top))
