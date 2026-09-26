@@ -14,6 +14,7 @@ const MSG_EXPORT_FAILED: &str = "Your history couldn't be read.";
 const MSG_IMPORT_EMPTY: &str = "That file has nothing in it to import.";
 const MSG_IMPORT_TOO_MANY: &str =
     "That file holds too many items to import at once. Split it into smaller files.";
+const MSG_IMPORT_NON_TEXT: &str = "That export contains an item that isn't text.";
 const MSG_IMPORT_FAILED: &str = "That file couldn't be imported.";
 
 /// The withheld count comes back with the items and is not recomputed here: a
@@ -52,16 +53,23 @@ pub(super) fn import(inner: &Inner, items: Vec<ExportItem>) -> Result<ImportData
         || inner.settings(),
         items,
     )
-    .map_err(|e| match e {
+    .map_err(map_import_error)
+}
+
+fn map_import_error(e: copypaste_core::ImportError) -> BackendError {
+    match e {
         // Both bounds are the file answering, not a fault: neither is retryable
         // with the same file, so neither is reported as one.
         copypaste_core::ImportError::Empty => BackendError::Invalid(MSG_IMPORT_EMPTY),
         copypaste_core::ImportError::TooMany => BackendError::Invalid(MSG_IMPORT_TOO_MANY),
+        copypaste_core::ImportError::UnsupportedContentType => {
+            BackendError::Invalid(MSG_IMPORT_NON_TEXT)
+        }
         e => {
             tracing::warn!(error = ?e, "an import could not be stored");
             BackendError::internal(MSG_IMPORT_FAILED)
         }
-    })
+    }
 }
 
 #[cfg(test)]
@@ -69,6 +77,12 @@ mod tests {
     use super::super::tests::backend;
     use super::*;
     use crate::backend::Backend;
+
+    #[test]
+    fn a_non_text_import_is_a_safe_invalid_input_error() {
+        let error = map_import_error(copypaste_core::ImportError::UnsupportedContentType);
+        assert!(matches!(error, BackendError::Invalid(MSG_IMPORT_NON_TEXT)));
+    }
 
     fn seed_legacy_text(backend: &super::super::EmbeddedBackend, id: &str, content: &str) {
         let key = backend.inner.state.keyring.item_key();
