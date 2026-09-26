@@ -21,6 +21,8 @@ import { resolveClipBodyPresentation } from "@/lib/clipPresentation";
 import { clipSourceMetadata } from "@/lib/clipSourcePresentation";
 import { SourceAppIcon } from "@/features/source-apps";
 import { quickPastePresentation } from "@/features/quick-paste/model/quickPastePresentation";
+import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";
+import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { type Item } from "@/lib/ipc";
 import { t } from "@/i18n";
 import { kindOf } from "@/lib/format";
@@ -54,6 +56,22 @@ export function QuickPasteRow({
   onTogglePin,
 }: QuickPasteRowProps) {
   const kind = kindOf(item);
+  const availability = useClipboardWriteAvailability(item.content_type);
+  const plainTextAvailability = useClipboardWriteAvailability(item.content_type, "plain_text");
+  const copyAvailability = clipboardCopyPresentation(
+    availability.isPending
+      ? { status: "loading" }
+      : availability.isError
+        ? { status: "failed" }
+        : { status: "resolved", availability: availability.data },
+  );
+  const plainTextCopyAvailability = clipboardCopyPresentation(
+    plainTextAvailability.isPending
+      ? { status: "loading" }
+      : plainTextAvailability.isError
+        ? { status: "failed" }
+        : { status: "resolved", availability: plainTextAvailability.data },
+  );
   const image = kind === "image";
   const { rowLabel } = quickPastePresentation(item);
   const source = clipSourceMetadata(item);
@@ -102,6 +120,7 @@ export function QuickPasteRow({
       onClick={(event) => {
         if (event.detail === 0) onCopy();
       }}
+      aria-disabled={!copyAvailability.canCopy}
       aria-label={`${t("quickPaste.row.copyPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`}
       className={styles.hit}
     />
@@ -130,6 +149,26 @@ export function QuickPasteRow({
             imagePreview={image ? <ClipImageLoader id={item.id} size="fill" /> : undefined}
           />
         </div>
+        {active && copyAvailability.reason !== null ? (
+          <div className={styles.availability} role="status">
+            <span>{copyAvailability.reason}</span>
+            {copyAvailability.canRetry ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => void availability.refetch()}>
+                {t("history.copyAvailability.retry")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {active && copyAvailability.canCopy && plainTextCopyAvailability.reason !== null ? (
+          <div className={styles.availability} role="status">
+            <span>{t("quickPaste.row.plainTextPrefix")}: {plainTextCopyAvailability.reason}</span>
+            {plainTextCopyAvailability.canRetry ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => void plainTextAvailability.refetch()}>
+                {t("history.copyAvailability.retry")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <SourceMeta
           source={source}
           createdAt={item.created_at}
