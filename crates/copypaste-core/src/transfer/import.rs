@@ -28,6 +28,8 @@ pub enum ImportError {
     Empty,
     #[error("too many items in one import")]
     TooMany,
+    #[error("an import contains an unsupported content type")]
+    UnsupportedContentType,
     #[error("an item could not be encrypted")]
     Crypto(#[from] CryptoError),
     #[error("the items could not be stored")]
@@ -77,6 +79,12 @@ pub fn import_with_current_retention(
     }
     if items.len() > MAX_IMPORT_ITEMS {
         return Err(ImportError::TooMany);
+    }
+    if items
+        .iter()
+        .any(|item| !copypaste_ipc::content_type::is_text(&item.content_type))
+    {
+        return Err(ImportError::UnsupportedContentType);
     }
 
     let mut result = ImportData {
@@ -346,6 +354,82 @@ mod tests {
         let batch = vec![item("x"); MAX_IMPORT_ITEMS + 1];
         assert!(matches!(import_into(&f, batch), Err(ImportError::TooMany)));
         assert_eq!(f.store.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_non_text_item_refuses_the_whole_batch_before_pins_or_retention() {
+        for content_type in [
+            copypaste_ipc::content_type::IMAGE_PNG,
+            copypaste_ipc::content_type::FILE,
+            "application/x-future",
+            "",
+        ] {
+            let mut f = fixture();
+            let existing = f.add("keep first");
+            f.add("keep second");
+            f.settings.history_limit = 1;
+
+            let mut invalid = item("not binary bytes");
+            invalid.content_type = content_type.to_string();
+            let error = import_into(
+                &f,
+                vec![
+                    ExportItem {
+                        pinned: true,
+                        ..item("keep first")
+                    },
+                    item("new text"),
+                    invalid,
+                ],
+            )
+            .unwrap_err();
+
+            assert!(
+                matches!(error, ImportError::UnsupportedContentType),
+                "{content_type:?}: {error:?}"
+            );
+            assert_eq!(f.store.count().unwrap(), 2, "{content_type:?}");
+            assert_eq!(f.contents(), ["keep first", "keep second"]);
+            assert!(!f.store.get(&existing).unwrap().unwrap().pinned);
+            assert!(f.store.search("new text", 10).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn text_subtypes_round_trip_with_pins_and_sensitive_classification() {
+        let source = fixture_named("text-subtypes-source");
+        let pinned = source.add_typed("pinned text", copypaste_ipc::content_type::TEXT);
+        source.store.set_pinned(&pinned, true).unwrap();
+        for (content, content_type) in [
+            ("plain subtype", "text/plain"),
+            ("rich subtype", copypaste_ipc::content_type::RICH_TEXT),
+            ("HTML subtype", copypaste_ipc::content_type::HTML),
+            ("future subtype", "text/x-future"),
+            ("AKIAIOSFODNN7EXAMPLE", "text/plain"),
+        ] {
+            source.add_typed(content, content_type);
+        }
+
+        let exported = export(&source.store, &source.keyring, 0, true).unwrap();
+        assert_eq!(exported.items.len(), 6);
+        let target = fixture_named("text-subtypes-target");
+        assert_eq!(import_into(&target, exported.items).unwrap().inserted, 6);
+
+        let rows = target.store.list(10, 0).unwrap();
+        assert_eq!(rows.len(), 6);
+        for row in &rows {
+            let payload = crate::ClipboardPayload::open(row, &target.keyring.item_key()).unwrap();
+            assert!(payload.plain_text().is_some(), "{}", row.content_type);
+        }
+        assert!(rows
+            .iter()
+            .any(|row| row.pinned && row.content_type == "text"));
+        assert!(rows.iter().any(|row| row.is_sensitive));
+        assert!(target
+            .store
+            .search("AKIAIOSFODNN7EXAMPLE", 10)
+            .unwrap()
+            .is_empty());
     }
 
     /// An entry that cannot be stored at all is counted, not fatal: losing the
@@ -753,6 +837,7 @@ mod tests {
         for message in [
             ImportError::Empty.to_string(),
             ImportError::TooMany.to_string(),
+            ImportError::UnsupportedContentType.to_string(),
             ImportError::Storage(StoreError::InvalidKey).to_string(),
             ImportError::Crypto(CryptoError::AuthFailed).to_string(),
         ] {
