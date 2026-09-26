@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useBulkPin, useCopy } from "./useHistoryMutations";
 import { item, testClient } from "@/test/harness";
+import * as platform from "@/lib/platform";
 
 const invalidateHistoryQueries = vi.hoisted(() => vi.fn());
 const setPinned = vi.hoisted(() => vi.fn());
@@ -53,6 +54,23 @@ describe("useCopy feedback", () => {
     expect(copyItem).toHaveBeenCalledWith(target.id);
     expect(toast.success).toHaveBeenCalledWith(expected, { duration: 2500 });
     expect(toast.success.mock.calls[0]?.[0]).not.toContain(target.content);
+  });
+
+  it("uses generic feedback when native platform detection failed", async () => {
+    const detected = vi.spyOn(platform, "currentPlatform").mockReturnValue("unknown");
+    try {
+      const client = testClient();
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      );
+      const { result } = renderHook(() => useCopy(), { wrapper });
+      await act(async () => {
+        await result.current.mutateAsync(item({ content: "private clipboard text" }));
+      });
+      expect(toast.success).toHaveBeenCalledWith("Copied to clipboard", { duration: 2500 });
+    } finally {
+      detected.mockRestore();
+    }
   });
 });
 

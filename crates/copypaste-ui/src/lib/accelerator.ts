@@ -196,7 +196,7 @@ export function acceleratorLabel(
   accelerator: string,
   platform: AppPlatform = currentPlatform(),
 ): string | null {
-  if (platform === "android") return null;
-  const mac = platform === "macos" || platform === "browser" || platform === "unknown";
+  if (platform === "android" || platform === "unknown") return null;
+  const mac = platform === "macos" || platform === "browser";
   return acceleratorGlyphs(accelerator, !mac).join(mac ? "" : "+");
 }

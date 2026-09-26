@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui";
 import { quickPastePresentation } from "@/features/quick-paste/model/quickPastePresentation";
 import { item, page, testClient } from "@/test/harness";
+import * as platform from "@/lib/platform";
 import { QuickPasteScreen } from "./QuickPasteScreen";
 
 const ipc = vi.hoisted(() => ({ copyItem: vi.fn(), listItems: vi.fn() }));
@@ -82,6 +83,21 @@ describe("quickPastePresentation", () => {
       await user.click(screen.getByRole("searchbox"));
       await user.keyboard(keys);
       await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledWith("row-1"));
+    }
+  });
+
+  it("does not guess a slot key when native platform detection failed", async () => {
+    const detected = vi.spyOn(platform, "currentPlatform").mockReturnValue("unknown");
+    try {
+      const { container } = render(
+        <QueryClientProvider client={testClient()}>
+          <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+        </QueryClientProvider>,
+      );
+      await screen.findByRole("listitem");
+      expect(container.querySelector('[data-slot="shortcut-badge"]')).toBeNull();
+    } finally {
+      detected.mockRestore();
     }
   });
 

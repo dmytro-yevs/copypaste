@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui";
 import type { OriginDevice } from "@/lib/itemOrigin";
+import * as platform from "@/lib/platform";
 import { DEFAULT_VIEW, type ViewOptions } from "@/lib/view";
 import {
     DEFAULT_PREFS,
@@ -87,6 +88,17 @@ afterEach(() => {
 });
 
 describe("Library toolbar active-control badges", () => {
+    it("does not guess desktop search keys before native platform detection succeeds", () => {
+        const detected = vi.spyOn(platform, "currentPlatform").mockReturnValue("unknown");
+        try {
+            const { container } = render(toolbar());
+            expect(container.querySelector('[data-slot="shortcut-badge"]')).toBeNull();
+            expect(screen.getByRole("searchbox").hasAttribute("title")).toBe(false);
+        } finally {
+            detected.mockRestore();
+        }
+    });
+
     it.each([
         ["macos", "⌘F", "Search (⌘F) · ↓ to move into the list · ⌘A select all"],
         ["windows", "Ctrl+F", "Search (Ctrl+F) · ↓ to move into the list · Ctrl+A select all"],
