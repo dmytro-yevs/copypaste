@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
 import { useUi } from "@/store/ui";
@@ -70,9 +70,6 @@ afterEach(() => {
 });
 
 it("resets compact settings scroll when opening and leaving a detail", async () => {
-  vi.spyOn(window.history, "back").mockImplementation(() => {
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  });
   render(
     <TooltipProvider>
       <SettingsScreen />
@@ -126,18 +123,26 @@ it("opens Storage & history for an old data-transfer selection", async () => {
 });
 
 it("opens old Runtime events destinations inside Diagnostics and steps back through both levels", async () => {
-  vi.spyOn(window.history, "back").mockImplementation(() => {
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  });
   useUi.setState({ settingsTab: "runtime-events" });
   render(<TooltipProvider><SettingsScreen /></TooltipProvider>);
 
   expect(await screen.findByRole("searchbox", { name: "Search runtime events" })).toBeTruthy();
+  await waitFor(() => expect(window.history.state?.copypasteSettingsLevel?.path)
+    .toEqual(["diagnostics", "runtime-events"]));
   expect(screen.queryByRole("button", { name: /^Runtime events/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Back to Diagnostics" }));
   expect(await screen.findByRole("button", { name: "Open runtime events" })).toBeTruthy();
+  await waitFor(() => expect(window.history.state?.copypasteSettingsLevel?.path)
+    .toEqual(["diagnostics"]));
   fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
   expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeTruthy();
+  await waitFor(() => expect(window.history.state?.copypasteSettingsLevel?.path).toEqual([]));
+  act(() => window.history.forward());
+  expect(await screen.findByRole("button", { name: "Open runtime events" })).toBeTruthy();
+  await waitFor(() => expect(window.history.state?.copypasteSettingsLevel?.path)
+    .toEqual(["diagnostics"]));
+  act(() => window.history.forward());
+  expect(await screen.findByRole("searchbox", { name: "Search runtime events" })).toBeTruthy();
 });
 
 it("search opens a collapsed advanced group and focuses its field", async () => {
