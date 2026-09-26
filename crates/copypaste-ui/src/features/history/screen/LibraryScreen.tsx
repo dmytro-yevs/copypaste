@@ -95,6 +95,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
 
     const searchRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
+    const detailTriggerRef = useRef<HTMLElement | null>(null);
     const desktopInspector =
         useViewportMetrics().width >=
         HISTORY_LAYOUT_METRICS.inspector.visibleAtPx;
@@ -171,7 +172,11 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
     );
 
     const openDetail = useCallback(
-        (item: Item) => {
+        (item: Item, trigger?: HTMLElement) => {
+            detailTriggerRef.current =
+                trigger ?? (document.activeElement instanceof HTMLElement
+                    ? document.activeElement
+                    : null);
             setActiveId(item.id);
             setDetailId(item.id);
         },
@@ -294,7 +299,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
             <ClipDetailDialog
                 item={detail?.item ?? null}
                 origin={detail?.origin ?? null}
-                initialExpanded={false}
+                initialExpanded={desktopInspector}
                 fullContent={detailBody.text}
                 fullContentFailed={detailBody.failed}
                 revealedContent={
@@ -305,11 +310,21 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                 revealPending={reveal.pendingId === detailId}
                 onReveal={reveal.request}
                 onHide={reveal.hide}
-                onCopy={copy.mutate}
+                onCopy={copy.mutateAsync}
                 onTogglePin={pin.mutate}
                 onDelete={history.remove}
-                onClose={() => setDetailId(null)}
-                onReturnFocus={() => listRef.current?.focus()}
+                onClose={() => {
+                    if (reveal.revealedId === detailId) reveal.hide();
+                    setDetailId(null);
+                }}
+                onReturnFocus={() => {
+                    if (detailTriggerRef.current?.isConnected) {
+                        detailTriggerRef.current.focus();
+                    } else {
+                        listRef.current?.focus();
+                    }
+                    detailTriggerRef.current = null;
+                }}
             />
 
             <HistoryDialogs
@@ -348,6 +363,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                 onCopy={copy.mutate}
                 onTogglePin={pin.mutate}
                 onDelete={history.remove}
+                onOpenReader={openDetail}
                 onClose={closeInspector}
             />
         ) : undefined;

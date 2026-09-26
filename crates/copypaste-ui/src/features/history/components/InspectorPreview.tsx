@@ -4,7 +4,7 @@ import { HighlightedCode } from "@/components/shared";
 import { Icon } from "@/components/ui";
 import { InspectorColorPreview } from "@/features/history/components/InspectorColorPreview";
 import { clipTypeMetadata, fileDisplayName } from "@/lib/clipPresentation";
-import type { Kind } from "@/lib/format";
+import { MONO_KINDS, type Kind } from "@/lib/format";
 import styles from "./InspectorPreview.module.css";
 
 function urlName(content: string) {
@@ -20,11 +20,13 @@ export function InspectorPreview({
     ariaLabel,
     content,
     imagePreview,
+    mode = "inspector",
 }: {
     kind: Kind;
     ariaLabel: string;
     content: string;
     imagePreview?: ReactNode;
+    mode?: "inspector" | "reader";
 }) {
     let preview: ReactNode;
     if (kind === "image") {
@@ -42,7 +44,11 @@ export function InspectorPreview({
         );
     } else if (kind === "code" || kind === "json") {
         preview = (
-            <HighlightedCode content={content} kind={kind} mode="inspector" />
+            <HighlightedCode
+                content={content}
+                kind={kind}
+                mode={mode === "reader" ? "expanded" : "inspector"}
+            />
         );
     } else if (kind === "color") {
         const type = clipTypeMetadata(kind);
@@ -55,13 +61,18 @@ export function InspectorPreview({
             </div>
         );
     } else {
-        preview = <p className={styles.text}>{content}</p>;
+        preview = (
+            <p className={MONO_KINDS.has(kind) ? styles.mono : styles.text}>
+                {content}
+            </p>
+        );
     }
 
     return (
         <div
             className={styles.root}
             data-kind={kind}
+            data-mode={mode}
             role="region"
             aria-label={ariaLabel}
             tabIndex={0}

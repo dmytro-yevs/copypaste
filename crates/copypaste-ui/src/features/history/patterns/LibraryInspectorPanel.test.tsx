@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui";
@@ -25,6 +26,7 @@ const callbacks = {
   onCopy: vi.fn(),
   onTogglePin: vi.fn(),
   onDelete: vi.fn(),
+  onOpenReader: vi.fn(),
   onClose: vi.fn(),
 };
 
@@ -48,6 +50,31 @@ function inspector(
 }
 
 describe("LibraryInspectorPanel", () => {
+  it("opens the reader and reveals a potential original only after a gesture", async () => {
+    const user = userEvent.setup();
+    const target = item({
+      content: "original token",
+      sensitive_finding: {
+        label: "possible token",
+        spans: [{ start: 9, end: 14 }],
+        spans_truncated: false,
+        redacted_preview: "redacted token",
+      },
+    });
+    callbacks.onOpenReader.mockClear();
+    render(inspector({ item: target }));
+
+    expect(screen.getByText("Potentially sensitive content")).toBeTruthy();
+    expect(screen.getByText("redacted token")).toBeTruthy();
+    expect(screen.queryByText("original token")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show original content" }));
+    expect(screen.getByText("original token")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Hide original content" }));
+    expect(screen.queryByText("original token")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show full contents" }));
+    expect(callbacks.onOpenReader).toHaveBeenCalledWith(target, expect.any(HTMLElement));
+  });
+
   it("never presents a truncated preview after the full-body read fails", () => {
     render(
       inspector({

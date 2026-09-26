@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import {
     ActionButton,
     DeviceMeta,
@@ -6,6 +8,7 @@ import {
     MetadataList,
     MetadataRow,
     MetadataValue,
+    InlineNotice,
     PreviewSurface,
     TruncatedValue,
 } from "@/components/shared";
@@ -34,6 +37,7 @@ interface LibraryInspectorPanelProps {
     onCopy: (item: Item) => void;
     onTogglePin: (item: Item) => void;
     onDelete: (item: Item) => void;
+    onOpenReader: (item: Item, trigger: HTMLElement) => void;
     onClose: () => void;
 }
 
@@ -49,9 +53,15 @@ export function LibraryInspectorPanel({
     onCopy,
     onTogglePin,
     onDelete,
+    onOpenReader,
     onClose,
 }: LibraryInspectorPanelProps) {
     const { t } = useTranslation();
+    const [shownFinding, setShownFinding] = useState<{
+        id: string;
+        finding: NonNullable<Item["sensitive_finding"]>;
+    } | null>(null);
+    useEffect(() => setShownFinding(null), [item?.id]);
     const revealed = revealedContent !== null;
     const close = () => {
         if (revealed) onHide();
@@ -82,11 +92,17 @@ export function LibraryInspectorPanel({
     }
 
     const kind = kindOf(item);
+    const potentialFinding = !item.is_sensitive ? item.sensitive_finding : null;
+    const potentialRevealed =
+        potentialFinding !== null &&
+        shownFinding?.id === item.id &&
+        shownFinding.finding === potentialFinding;
     const body = resolveClipBodyPresentation({
         item,
         fullContent,
         fullContentFailed,
         revealedContent,
+        showPotentialSensitiveOriginal: potentialRevealed,
     });
     const source = clipSourceMetadata(item);
     const content = body.state === "content" ? body.content : "";
@@ -112,6 +128,16 @@ export function LibraryInspectorPanel({
             }
             actions={
                 <>
+                    <ActionButton
+                        size="compactIcon"
+                        icon="expand"
+                        aria-label={t("history.row.open")}
+                        title={t("history.row.open")}
+                        onClick={(event) => {
+                            setShownFinding(null);
+                            onOpenReader(item, event.currentTarget);
+                        }}
+                    />
                     <ActionButton
                         size="compactIcon"
                         variant="primary"
@@ -144,6 +170,32 @@ export function LibraryInspectorPanel({
                         title={t("history.row.delete")}
                         onClick={() => onDelete(item)}
                     />
+                    {potentialFinding !== null ? (
+                        <Button
+                            variant="secondary"
+                            aria-pressed={potentialRevealed}
+                            onClick={() =>
+                                setShownFinding(
+                                    potentialRevealed
+                                        ? null
+                                        : { id: item.id, finding: potentialFinding },
+                                )
+                            }
+                        >
+                            <Icon name={potentialRevealed ? "eyeOff" : "eye"} />
+                            {t(
+                                potentialRevealed
+                                    ? "history.row.hideOriginal"
+                                    : "history.row.showOriginal",
+                            )}
+                        </Button>
+                    ) : null}
+                    {revealed ? (
+                        <Button variant="secondary" onClick={onHide}>
+                            <Icon name="eyeOff" />
+                            {t("history.detail.hide")}
+                        </Button>
+                    ) : null}
                 </>
             }
             metadata={
@@ -230,6 +282,11 @@ export function LibraryInspectorPanel({
                 </MetadataList>
             }
         >
+            {potentialFinding !== null ? (
+                <InlineNotice role="status" tone="warning" icon="sensitive">
+                    {t("history.row.potentialSensitiveWarning")}
+                </InlineNotice>
+            ) : null}
             <PreviewSurface
                 className={styles.preview}
                 elevation="flat"
@@ -295,6 +352,10 @@ export function LibraryInspectorPanel({
                             ) : body.state === "unavailable" ? (
                                 <div role="status" className={styles.unavailable}>
                                     {t("history.detail.fullBodyUnavailable")}
+                                </div>
+                            ) : body.source === "preview" ? (
+                                <div role="status" className={styles.unavailable}>
+                                    {t("history.empty.loading.title")}
                                 </div>
                             ) : (
                                 <InspectorPreview
