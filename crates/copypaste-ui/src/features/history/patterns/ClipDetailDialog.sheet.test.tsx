@@ -24,6 +24,40 @@ vi.mock("@/features/history/hooks/useImagePreview", () => ({
 }));
 
 describe("ClipDetailDialog compact sheet", () => {
+  it("keeps the compact inspector open after a successful copy", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onCopy = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TooltipProvider>
+        <ClipDetailDialog
+          item={item({ content: "sheet copy" })}
+          origin={null}
+          fullContent="sheet copy"
+          fullContentFailed={false}
+          revealedContent={null}
+          revealPending={false}
+          onReveal={vi.fn()}
+          onHide={vi.fn()}
+          onCopy={onCopy}
+          onTogglePin={vi.fn()}
+          onDelete={vi.fn()}
+          onClose={onClose}
+          onReturnFocus={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(onCopy).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
+        .toBe(false),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Clipboard item" })).toBeTruthy();
+  });
+
   it("dismisses a sheet drag when no copy is pending", () => {
     const onClose = vi.fn();
     render(
