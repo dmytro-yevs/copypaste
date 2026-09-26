@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { TooltipProvider } from "@/components/ui";
+import { SettingsScreen } from "@/features/settings/screen/SettingsScreen";
 import { peer } from "@/test/harness";
 import { useUi } from "@/store/ui";
 import { DeviceSyncSettings } from "./DeviceSyncSettings";
@@ -18,6 +20,12 @@ const mocks = vi.hoisted(() => ({
   syncError: false,
   syncData: undefined as unknown,
   mutate: vi.fn(),
+  refetch: vi.fn(),
+}));
+
+vi.mock("@/hooks/useViewportMetrics", () => ({
+  useViewportMetrics: () => ({ sizeClass: "expanded" }),
+  useObservedElementSize: () => ({ ref: () => {}, width: 1_024, height: 800 }),
 }));
 
 vi.mock("@/features/devices", () => ({
@@ -35,7 +43,11 @@ vi.mock("@/hooks/useDevices", () => ({
 }));
 
 vi.mock("@/hooks/useServiceConfig", () => ({
-  useServiceConfig: () => ({ data: mocks.config, isPending: mocks.configPending, isError: mocks.configError }),
+  useServiceConfig: () => ({ data: mocks.config, isPending: mocks.configPending, isError: mocks.configError, refetch: mocks.refetch }),
+  useSetServiceConfig: () => ({ mutateAsync: vi.fn(), isPending: false, isError: false }),
+  usePrivateMode: () => ({ data: undefined, isPending: false, isError: false }),
+  useSetPrivateMode: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useRestartService: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/hooks/useStatus", () => ({
@@ -56,7 +68,12 @@ beforeEach(() => {
   mocks.syncError = false;
   mocks.syncData = undefined;
   mocks.mutate.mockReset();
+  mocks.refetch.mockReset();
   useUi.setState({ view: "settings", settingsTab: null });
+});
+
+afterEach(() => {
+  delete (Element.prototype as Partial<Element>).scrollIntoView;
 });
 
 describe("Device sync settings", () => {
@@ -77,14 +94,14 @@ describe("Device sync settings", () => {
     expect(screen.getByRole("button", { name: "Syncing…" }).hasAttribute("disabled")).toBe(true);
   });
 
-  it("blocks manual sync when the service setting is off and opens its control", () => {
+  it("blocks manual sync when the service setting is off and requests the correct section", () => {
     mocks.config = { config: { sync_enabled: false } };
     render(<DeviceSyncSettings />);
 
     expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByText(/Device sync is off/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open Service settings" }));
-    expect(useUi.getState().settingsTab).toBe("service");
+    fireEvent.click(screen.getByRole("button", { name: "Show sync setting" }));
+    expect(useUi.getState().settingsTab).toBe("device-sync");
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 
@@ -99,8 +116,32 @@ describe("Device sync settings", () => {
     mocks.configError = true;
     rerender(<DeviceSyncSettings />);
     expect(screen.getByText(/couldn't read the device sync setting/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open Service settings" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(mocks.refetch).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("focuses the actual sync switch inside SettingsScreen", async () => {
+    mocks.config = { config: { sync_enabled: false, lan_visibility: true }, restart_required: [] };
+    const scroll = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: scroll });
+    useUi.setState({ settingsTab: "device-sync" });
+    render(
+      <TooltipProvider>
+        <SettingsScreen />
+      </TooltipProvider>,
+    );
+
+    const action = await screen.findByRole("button", { name: "Show sync setting" });
+    await waitFor(() => expect(useUi.getState().settingsTab).toBeNull());
+    const target = screen.getByRole("switch", { name: "Sync with paired devices" });
+    expect(document.activeElement).not.toBe(target);
+    fireEvent.click(action);
+
+    expect(document.activeElement).toBe(target);
+    expect(scroll).toHaveBeenCalled();
+    expect(target.closest("[data-settings-search-target]")?.getAttribute("data-settings-search-target"))
+      .toBe("row:Sync with paired devices");
   });
 
   it("handles no pairings and a failed peer read without reporting connection health", () => {
