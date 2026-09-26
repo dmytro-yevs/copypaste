@@ -144,8 +144,8 @@
   transition: inline-size var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
 }
 .dot:hover:not(:disabled) { background: transparent; }
-.dot[aria-selected="true"] { background: transparent; }
-.dot[aria-selected="true"]::before { inline-size: var(--fs-lg); background: var(--accent); }
+.dot[aria-current="step"] { background: transparent; }
+.dot[aria-current="step"]::before { inline-size: var(--fs-lg); background: var(--accent); }
 .dot:focus-visible { outline: 0; box-shadow: var(--sh-focus); }
 
 @keyframes onboarding-slide-enter {
@@ -349,8 +349,8 @@
     transition: inline-size var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
   }
 
-  .dot[aria-selected="true"] { inline-size: var(--tap-min); background: transparent; }
-  .dot[aria-selected="true"]::before { inline-size: var(--s-6); background: var(--accent); }
+  .dot[aria-current="step"] { inline-size: var(--tap-min); background: transparent; }
+  .dot[aria-current="step"]::before { inline-size: var(--s-6); background: var(--accent); }
 }
 
 @media (prefers-reduced-motion: reduce) {
