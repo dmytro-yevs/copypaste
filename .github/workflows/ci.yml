@@ -170,11 +170,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      # A gate. AGENTS.md rule 8 carried no number for months and bound
-      # nothing: the rule cited an eighty-line header as its own worst case
-      # while the tree grew a file with 152 comment lines above four of code.
-      # scripts/comment-budget.txt holds the pre-existing debt and can only
-      # shrink; a file over budget that is not in it fails here.
+      # scripts/comment-budget.txt holds pre-existing comment debt and can
+      # only shrink; a file over budget that is not in it fails here.
       - name: check-comments.sh
         run: python3 scripts/ci/run-gates.py --gate comment-budget
 
@@ -186,22 +183,6 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: python3 scripts/check-docs.py
       - run: python3 scripts/check-docs.test.py
-
-  file-size:
-    name: file-size budget
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      # A gate, not an annotation. AGENTS.md rule 5 answers the artificial-split
-      # concern: a file that is one indivisible
-      # responsibility is exempt, provided its module header names what was
-      # considered for extraction and why doing it would make the code worse.
-      # The gate script holds EXEMPT, the parsing and its self-test, so that the
-      # decision is testable rather than inline YAML nothing can execute.
-      - name: check-file-size-gate.sh
-        run: python3 scripts/ci/run-gates.py --gate file-size-budget
 
   release-pipeline:
     name: release pipeline

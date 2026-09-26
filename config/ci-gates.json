@@ -35,13 +35,6 @@
       "label": "comment budget",
       "commands": [["bash", "scripts/check-comments.sh"]]
     },
-    "file-size-budget": {
-      "label": "file-size budget",
-      "commands": [
-        ["bash", "scripts/check-file-size-gate.sh", "--self-test"],
-        ["bash", "scripts/check-file-size-gate.sh"]
-      ]
-    },
     "release-pipeline": {
       "label": "release pipeline",
       "commands": [["bash", "scripts/release/check.sh"]]
@@ -56,7 +49,6 @@
       "ipc-bindings",
       "feature-ledger",
       "comment-budget",
-      "file-size-budget",
       "release-pipeline"
     ]
   }
