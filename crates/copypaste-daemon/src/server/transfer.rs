@@ -13,6 +13,8 @@ use tracing::warn;
 use super::messages::{storage_error, MSG_ENCRYPT, MSG_IMPORT_EMPTY, MSG_IMPORT_TOO_MANY};
 use crate::AppState;
 
+const MSG_IMPORT_NON_TEXT: &str = "this export contains an item that is not text";
+
 pub(super) fn export(state: &AppState, id: u64, limit: u32, include_sensitive: bool) -> Response {
     match copypaste_core::transfer::export(&state.store, &state.keyring, limit, include_sensitive) {
         Ok(data) => Response::ok(id, ResponseData::Export(data)),
@@ -58,6 +60,9 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
         }
         Err(copypaste_core::ImportError::TooMany) => {
             Response::err(id, ErrorCode::InvalidRequest, MSG_IMPORT_TOO_MANY)
+        }
+        Err(copypaste_core::ImportError::UnsupportedContentType) => {
+            Response::err(id, ErrorCode::InvalidRequest, MSG_IMPORT_NON_TEXT)
         }
         Err(e @ copypaste_core::ImportError::Crypto(_)) => {
             warn!(error = ?e, "import failed to encrypt an item");
@@ -258,6 +263,24 @@ mod tests {
         };
         let response = import_of(&state, vec![item; MAX_IMPORT_ITEMS + 1]);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(state.store.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_non_text_import_is_an_invalid_request_and_writes_nothing() {
+        let (state, _dir) = test_state("non-text-import");
+        let response = import_of(
+            &state,
+            vec![ExportItem {
+                content: "plain content".into(),
+                content_type: copypaste_ipc::content_type::IMAGE_PNG.into(),
+                created_at: 1,
+                pinned: false,
+                is_sensitive: false,
+            }],
+        );
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(response.error.as_deref(), Some(MSG_IMPORT_NON_TEXT));
         assert_eq!(state.store.count().unwrap(), 0);
     }
 
