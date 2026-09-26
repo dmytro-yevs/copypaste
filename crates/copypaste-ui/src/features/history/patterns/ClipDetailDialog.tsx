@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
     Button,
@@ -76,6 +76,9 @@ export function ClipDetailDialog({
     const sheet = useViewportMetrics().width < EXPANDED_MIN_PX;
     const [expanded, setExpanded] = useState(initialExpanded);
     const [copying, setCopying] = useState(false);
+    const copyingRef = useRef(false);
+    const copyGenerationRef = useRef(0);
+    const contentRef = useRef<HTMLDivElement>(null);
 
     const revealed = item !== null && revealedContent !== null;
     const potentialFinding =
@@ -86,9 +89,13 @@ export function ClipDetailDialog({
     } | null>(null);
     useEffect(() => {
         setExpanded(initialExpanded);
-        setCopying(false);
         setShownFinding(null);
     }, [initialExpanded, item?.id]);
+    useEffect(() => {
+        copyGenerationRef.current += 1;
+        copyingRef.current = false;
+        setCopying(false);
+    }, [item?.id]);
     const potentialRevealed =
         potentialFinding !== null &&
         shownFinding !== null &&
@@ -117,6 +124,7 @@ export function ClipDetailDialog({
     }
 
     const close = () => {
+        if (copyingRef.current) return;
         setExpanded(initialExpanded);
         setShownFinding(null);
         onClose();
@@ -125,8 +133,10 @@ export function ClipDetailDialog({
     return (
         <Dialog open={item !== null} onOpenChange={(open) => !open && close()}>
             <DialogContent
+                ref={contentRef}
                 presentation={sheet ? "sheet" : "modal"}
                 showCloseButton={expanded}
+                aria-busy={copying || undefined}
                 className={cn(
                     styles.dialog,
                     expanded ? styles.expanded : styles.normal,
@@ -134,6 +144,19 @@ export function ClipDetailDialog({
                 onCloseAutoFocus={(event) => {
                     event.preventDefault();
                     onReturnFocus();
+                }}
+                onEscapeKeyDown={(event) => {
+                    if (copyingRef.current) event.preventDefault();
+                }}
+                onPointerDownOutside={(event) => {
+                    if (!copyingRef.current) return;
+                    event.preventDefault();
+                    requestAnimationFrame(() => {
+                        if (copyingRef.current) contentRef.current?.focus();
+                    });
+                }}
+                onInteractOutside={(event) => {
+                    if (copyingRef.current) event.preventDefault();
                 }}
             >
                 {!expanded && item ? (
@@ -193,6 +216,7 @@ export function ClipDetailDialog({
                             <Button
                                 type="button"
                                 variant="ghost"
+                                disabled={copying}
                                 aria-label={t("history.row.sensitiveReveal")}
                                 aria-busy={revealPending || undefined}
                                 className={styles.masked}
@@ -285,6 +309,7 @@ export function ClipDetailDialog({
                             {potentialFinding !== null && (
                                 <Button
                                     variant="secondary"
+                                    disabled={copying}
                                     aria-pressed={potentialRevealed}
                                     onClick={() =>
                                         setShownFinding(
@@ -307,7 +332,7 @@ export function ClipDetailDialog({
                                 </Button>
                             )}
                             {revealed && (
-                                <Button variant="secondary" onClick={onHide}>
+                                <Button variant="secondary" disabled={copying} onClick={onHide}>
                                     <Icon name="eyeOff" />
                                     {t("history.detail.hide")}
                                 </Button>
@@ -315,6 +340,7 @@ export function ClipDetailDialog({
                             {item ? (
                                 <Button
                                     variant="secondary"
+                                    disabled={copying}
                                     aria-pressed={item.pinned}
                                     onClick={() => onTogglePin(item)}
                                 >
@@ -329,6 +355,7 @@ export function ClipDetailDialog({
                             {item ? (
                                 <Button
                                     variant="secondary"
+                                    disabled={copying}
                                     onClick={() => {
                                         onDelete(item);
                                         close();
@@ -341,11 +368,22 @@ export function ClipDetailDialog({
                             <Button
                                 disabled={copying}
                                 onClick={() => {
-                                    if (!item || copying) return;
+                                    if (!item || copyingRef.current) return;
+                                    const generation = copyGenerationRef.current;
+                                    copyingRef.current = true;
                                     setCopying(true);
-                                    void Promise.resolve(onCopy(item))
-                                        .then(close)
-                                        .catch(() => setCopying(false));
+                                    void Promise.resolve()
+                                        .then(() => onCopy(item))
+                                        .then(() => {
+                                            if (generation !== copyGenerationRef.current) return;
+                                            copyingRef.current = false;
+                                            close();
+                                        })
+                                        .catch(() => {
+                                            if (generation !== copyGenerationRef.current) return;
+                                            copyingRef.current = false;
+                                            setCopying(false);
+                                        });
                                 }}
                             >
                                 <Icon name={copyAction.icon} />
