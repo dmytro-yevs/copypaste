@@ -36,32 +36,28 @@ pub enum UpdateProgress {
 }
 
 #[tauri::command]
-pub fn update_status(app: AppHandle) -> UpdateStatus {
+pub async fn update_status(app: AppHandle) -> Result<UpdateStatus, UiError> {
     let _ = &app;
     #[cfg(target_os = "windows")]
     {
-        windows::status(&app)
+        Ok(windows::status(&app))
     }
     #[cfg(target_os = "macos")]
     {
-        if macos::brew_path().is_some() {
-            UpdateStatus::Ready
-        } else {
-            UpdateStatus::Unconfigured
-        }
+        macos::status().await
     }
     #[cfg(target_os = "android")]
     {
-        if config::configured_for_app(&app) {
+        Ok(if config::configured_for_app(&app) {
             UpdateStatus::Ready
         } else {
             UpdateStatus::Unconfigured
-        }
+        })
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
     {
         let _ = app;
-        UpdateStatus::Unsupported
+        Ok(UpdateStatus::Unsupported)
     }
 }
 

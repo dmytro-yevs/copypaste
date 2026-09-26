@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UpdateStatus } from "@/lib/updater";
+import { PRODUCT_RELEASES_URL } from "@/lib/productLinks";
 import { withUser } from "@/test/harness";
 import { UpdateRow } from "./UpdateRow";
 
@@ -41,6 +42,20 @@ function renderStatus(status: UpdateStatus) {
 }
 
 describe("UpdateRow static states", () => {
+  it("offers official releases when macOS is not managed by Homebrew", async () => {
+    platform.currentPlatform.mockReturnValue("macos");
+    renderStatus({ state: "unconfigured" });
+
+    expect(await screen.findByText("Automatic updates require the CopyPaste Homebrew cask.")).toBeTruthy();
+    expect(screen.getByText("For this installation, get updates from the official releases page.")).toBeTruthy();
+    const releases = screen.getByRole("link", { name: "View releases" });
+    expect(releases.getAttribute("href")).toBe(PRODUCT_RELEASES_URL);
+    expect(releases.getAttribute("target")).toBe("_blank");
+    expect(releases.getAttribute("rel")).toContain("noreferrer");
+    expect(updater.checkForUpdate).not.toHaveBeenCalled();
+    expect(updater.installUpdate).not.toHaveBeenCalled();
+  });
+
   it("keeps unsupported update support visible and non-actionable", async () => {
     renderStatus({ state: "unsupported" });
 
