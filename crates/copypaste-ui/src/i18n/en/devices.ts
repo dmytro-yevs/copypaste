@@ -3,6 +3,19 @@ import { pairing } from "./devicesPairing";
 export const devices = {
   title: "Devices",
 
+  syncReadiness: {
+    serviceLoading: "Checking the clipboard service before syncing…",
+    serviceUnavailable: "The clipboard service is unavailable.",
+    configLoading: "Checking whether device sync is on…",
+    configUnavailable: "The device sync setting is unavailable.",
+    disabled: "Sync with paired devices is off.",
+    peersLoading: "Checking paired devices…",
+    peersUnavailable: "Paired devices are unavailable.",
+    noPeers: "Pair a device before syncing.",
+    openSettings: "Open Device sync settings",
+    lastKnownCount: "{{n}} paired last known",
+  },
+
   presentation: {
     platform: {
       macos: "macOS",
