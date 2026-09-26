@@ -8,19 +8,16 @@ import type {
 import { UI_COMMANDS } from "@/generated/ipc";
 import type { ReadonlyDeep } from "type-fest";
 import { call, hasWebBridge, type IpcCallOptions } from "./ipcCall";
+import {
+  grantPreviewPermission,
+  previewPermissionSnapshot,
+} from "@/service/previewPermissions";
 
 export type PermissionHost = GeneratedPermissionHost;
 export type OnboardingPermissionId = GeneratedPermissionId;
 export type OnboardingPermissionStatus = GeneratedPermissionStatus;
 export type OnboardingPermissionItem = ReadonlyDeep<GeneratedPermissionItem>;
 export type OnboardingPermissions = ReadonlyDeep<GeneratedOnboardingPermissions>;
-
-let androidPreviewPermissions: OnboardingPermissions = {
-  platform: "android",
-  notifications: { id: "notifications", status: "prompt", required: false },
-  tile: { id: "tile", status: "prompt", required: false },
-  clipboardStatus: "not_required",
-};
 
 /** Permission reads are local platform probes, not user-driven operations.
  * Match the native short-read boundary so a stopped Android host cannot keep
@@ -47,7 +44,7 @@ function isAndroidWebPreview(): boolean {
 export function permissionSnapshot(
   options: Pick<IpcCallOptions, "signal"> = {},
 ): Promise<OnboardingPermissions> {
-  if (isAndroidWebPreview()) return Promise.resolve(androidPreviewPermissions);
+  if (isAndroidWebPreview()) return Promise.resolve(previewPermissionSnapshot());
   const startedAt = Date.now();
   reportPermissionSnapshot("started", startedAt);
   return call(UI_COMMANDS.permission_snapshot, undefined, {
@@ -69,11 +66,7 @@ export function permissionRequest(
   id: OnboardingPermissionId,
 ): Promise<OnboardingPermissions> {
   if (isAndroidWebPreview()) {
-    androidPreviewPermissions = {
-      ...androidPreviewPermissions,
-      [id]: { ...androidPreviewPermissions[id], status: "granted" },
-    };
-    return Promise.resolve(androidPreviewPermissions);
+    return Promise.resolve(grantPreviewPermission(id));
   }
   return call(UI_COMMANDS.permission_request, { id });
 }

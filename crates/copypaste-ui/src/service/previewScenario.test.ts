@@ -628,6 +628,70 @@ describe("preview scenario service", () => {
     await expect(intercept("copy_item", { id: "preview-plain" })).resolves.toEqual({ handled: false });
   });
 
+  it("serves settings reads only for a running synthetic service", async () => {
+    const store = createPreviewScenarioStore(null);
+    const intercept = createPreviewInterceptor(store);
+    store.getState().setDaemon("up");
+
+    await expect(intercept("get_config")).resolves.toMatchObject({
+      handled: true,
+      value: {
+        config: { private_mode: false, sync_enabled: true },
+        restart_required: [],
+      },
+    });
+    await expect(intercept("get_private_mode")).resolves.toEqual({
+      handled: true,
+      value: { private_mode: false, private_mode_epoch: 0 },
+    });
+    await expect(intercept("set_config", { patch: { sync_enabled: false } })).resolves.toEqual({ handled: false });
+    await expect(intercept("set_private_mode", { enabled: true })).resolves.toEqual({ handled: false });
+
+    store.getState().setDaemon("down");
+    await expect(intercept("get_config")).rejects.toMatchObject({ code: "offline", retryable: true });
+    await expect(intercept("get_private_mode")).rejects.toMatchObject({ code: "offline", retryable: true });
+
+    store.getState().setDaemon("starting");
+    await expect(intercept("get_config")).rejects.toMatchObject({ code: "not_ready", retryable: true });
+    await expect(intercept("get_private_mode")).rejects.toMatchObject({ code: "not_ready", retryable: true });
+
+    store.getState().setDaemon("live");
+    await expect(intercept("get_config")).resolves.toEqual({ handled: false });
+    await expect(intercept("get_private_mode")).resolves.toEqual({ handled: false });
+  });
+
+  it("serves capture and Android permission reads only in a synthetic browser", async () => {
+    const store = createPreviewScenarioStore(null);
+    const intercept = createPreviewInterceptor(store);
+    store.getState().setDaemon("up");
+
+    window.history.replaceState({}, "", "/?platform=macos");
+    await expect(intercept("capture_state")).resolves.toMatchObject({
+      handled: true,
+      value: { rung: "desktop", health: { state: "working" } },
+    });
+    await expect(intercept("permission_snapshot")).resolves.toEqual({ handled: false });
+
+    window.history.replaceState({}, "", "/?platform=android");
+    await expect(intercept("capture_state")).resolves.toMatchObject({
+      handled: true,
+      value: { rung: "shizuku", health: { state: "working" } },
+    });
+    await expect(intercept("permission_snapshot")).resolves.toMatchObject({
+      handled: true,
+      value: { platform: "android", tile: { status: "prompt" } },
+    });
+
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    await expect(intercept("capture_state")).resolves.toEqual({ handled: false });
+    await expect(intercept("permission_snapshot")).resolves.toEqual({ handled: false });
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+
+    store.getState().resetToLive();
+    await expect(intercept("capture_state")).resolves.toEqual({ handled: false });
+    await expect(intercept("permission_snapshot")).resolves.toEqual({ handled: false });
+  });
+
   it("maps every pairing phase and applies lifecycle command transitions", async () => {
     const store = createPreviewScenarioStore(null);
     const intercept = createPreviewInterceptor(store);
