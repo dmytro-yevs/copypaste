@@ -12,11 +12,11 @@ import {
     VisuallyHidden,
 } from "@/components/ui";
 import {
-    HighlightedCode,
     InlineNotice,
     PreviewSurface,
 } from "@/components/shared";
 import { ClipImageLoader } from "@/features/clip-content";
+import { InspectorPreview } from "@/features/history/components/InspectorPreview";
 import { originName, wontSync, type OriginDevice } from "@/lib/itemOrigin";
 import { clipCopyAction } from "@/features/history/model/clipPresentation";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
@@ -27,7 +27,7 @@ import {
     clipTypeMetadata,
     resolveClipBodyPresentation,
 } from "@/lib/clipPresentation";
-import { MONO_KINDS, absoluteTime, kindOf } from "@/lib/format";
+import { absoluteTime, kindOf } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 import { EXPANDED_MIN_PX } from "@/lib/layoutBreakpoints";
 import styles from "./ClipDetailDialog.module.css";
@@ -46,7 +46,7 @@ interface ClipDetailDialogProps {
     revealPending: boolean;
     onReveal: (item: Item) => void;
     onHide: () => void;
-    onCopy: (item: Item) => void;
+    onCopy: (item: Item) => Promise<unknown> | void;
     onTogglePin: (item: Item) => void;
     onDelete: (item: Item) => void;
     onClose: () => void;
@@ -75,18 +75,25 @@ export function ClipDetailDialog({
     const { t } = useTranslation();
     const sheet = useViewportMetrics().width < EXPANDED_MIN_PX;
     const [expanded, setExpanded] = useState(initialExpanded);
+    const [copying, setCopying] = useState(false);
 
     const revealed = item !== null && revealedContent !== null;
     const potentialFinding =
         item !== null && !item.is_sensitive ? item.sensitive_finding : null;
-    const [shownFinding, setShownFinding] =
-        useState<Item["sensitive_finding"]>(null);
+    const [shownFinding, setShownFinding] = useState<{
+        id: string;
+        finding: NonNullable<Item["sensitive_finding"]>;
+    } | null>(null);
     useEffect(() => {
         setExpanded(initialExpanded);
+        setCopying(false);
         setShownFinding(null);
     }, [initialExpanded, item?.id]);
     const potentialRevealed =
-        potentialFinding !== null && shownFinding === potentialFinding;
+        potentialFinding !== null &&
+        shownFinding !== null &&
+        shownFinding.id === item?.id &&
+        shownFinding.finding === potentialFinding;
     const kind = item ? kindOf(item) : "text";
     // Revealed plaintext remains an ephemeral argument from useReveal; this
     // pure resolver retains no copy outside the current render.
@@ -151,6 +158,7 @@ export function ClipDetailDialog({
                                 onDelete(target);
                                 close();
                             }}
+                            onOpenReader={() => setExpanded(true)}
                             onClose={close}
                         />
                     </>
@@ -218,71 +226,58 @@ export function ClipDetailDialog({
                             >
                                 {t("history.detail.fullBodyUnavailable")}
                             </PreviewSurface>
-                        ) : kind === "image" && item ? (
+                        ) : body?.state === "content" && body.source === "preview" ? (
                             <PreviewSurface
-                                role="region"
-                                aria-label={t("history.detail.image")}
-                                tabIndex={0}
-                                className={styles.imageRegion}
+                                role="status"
+                                className={styles.unavailable}
                                 elevation="flat"
-                                border="strong"
+                                border="subtle"
                                 radius="md"
-                                padding="compact"
+                                padding="roomy"
                             >
-                                <ClipImageLoader
-                                    id={item.id}
-                                    size="detail"
-                                    loadingLabel={t(
-                                        "history.detail.imageLoading",
-                                    )}
-                                    failureLabel={t(
-                                        "history.detail.imageUnavailable",
-                                    )}
-                                    title={t("history.detail.image")}
-                                />
-                            </PreviewSurface>
-                        ) : kind === "code" || kind === "json" ? (
-                            <PreviewSurface
-                                role="region"
-                                aria-label={t("history.detail.contents")}
-                                tabIndex={0}
-                                className={cn(
-                                    styles.contentRegion,
-                                    styles.codeRegion,
-                                )}
-                                elevation="flat"
-                                border="none"
-                                radius="md"
-                                padding="none"
-                            >
-                                <HighlightedCode
-                                    content={content}
-                                    kind={kind}
-                                    mode="expanded"
-                                    ariaLabel={t("history.detail.contents")}
-                                />
+                                {t("history.empty.loading.title")}
                             </PreviewSurface>
                         ) : (
                             <PreviewSurface
-                                role="region"
-                                aria-label={t("history.detail.contents")}
-                                tabIndex={0}
                                 className={styles.contentRegion}
                                 elevation="flat"
-                                border="strong"
+                                border={
+                                    kind === "code" || kind === "json"
+                                        ? "none"
+                                        : "strong"
+                                }
                                 radius="md"
                                 padding="compact"
                             >
-                                <p
-                                    className={cn(
-                                        styles.body,
-                                        MONO_KINDS.has(kind) && styles.mono,
+                                <InspectorPreview
+                                    mode="reader"
+                                    kind={kind}
+                                    ariaLabel={t(
+                                        kind === "image"
+                                            ? "history.detail.image"
+                                            : "history.detail.contents",
                                     )}
-                                >
-                                    {content === ""
-                                        ? t("history.detail.empty")
-                                        : content}
-                                </p>
+                                    content={
+                                        content === ""
+                                            ? t("history.detail.empty")
+                                            : content
+                                    }
+                                    imagePreview={
+                                        kind === "image" && item ? (
+                                            <ClipImageLoader
+                                                id={item.id}
+                                                size="detail"
+                                                loadingLabel={t(
+                                                    "history.detail.imageLoading",
+                                                )}
+                                                failureLabel={t(
+                                                    "history.detail.imageUnavailable",
+                                                )}
+                                                title={t("history.detail.image")}
+                                            />
+                                        ) : undefined
+                                    }
+                                />
                             </PreviewSurface>
                         )}
 
@@ -295,7 +290,7 @@ export function ClipDetailDialog({
                                         setShownFinding(
                                             potentialRevealed
                                                 ? null
-                                                : potentialFinding,
+                                                : { id: item!.id, finding: potentialFinding },
                                         )
                                     }
                                 >
@@ -317,10 +312,40 @@ export function ClipDetailDialog({
                                     {t("history.detail.hide")}
                                 </Button>
                             )}
+                            {item ? (
+                                <Button
+                                    variant="secondary"
+                                    aria-pressed={item.pinned}
+                                    onClick={() => onTogglePin(item)}
+                                >
+                                    <Icon name={item.pinned ? "unpin" : "pin"} />
+                                    {t(
+                                        item.pinned
+                                            ? "history.row.unpin"
+                                            : "history.row.pin",
+                                    )}
+                                </Button>
+                            ) : null}
+                            {item ? (
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => {
+                                        onDelete(item);
+                                        close();
+                                    }}
+                                >
+                                    <Icon name="trash" />
+                                    {t("history.row.delete")}
+                                </Button>
+                            ) : null}
                             <Button
+                                disabled={copying}
                                 onClick={() => {
-                                    if (item) onCopy(item);
-                                    close();
+                                    if (!item || copying) return;
+                                    setCopying(true);
+                                    void Promise.resolve(onCopy(item))
+                                        .then(close)
+                                        .catch(() => setCopying(false));
                                 }}
                             >
                                 <Icon name={copyAction.icon} />

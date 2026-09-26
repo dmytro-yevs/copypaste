@@ -14,7 +14,8 @@
     outline: 0;
     box-shadow: inset var(--sh-focus);
 }
-.text {
+.text,
+.mono {
     display: block;
     overflow: visible;
     color: var(--text);
@@ -22,6 +23,10 @@
     line-height: var(--lh-normal);
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+}
+.mono {
+    font-family: var(--f-mono);
+    font-size: var(--fs-xs);
 }
 .file {
     display: grid;
@@ -96,4 +101,15 @@
 .root[data-kind="code"] > *,
 .root[data-kind="json"] > * {
     block-size: 100%;
+}
+.root[data-mode="reader"] {
+    max-block-size: min(50dvh, calc(var(--s-9) * 10));
+}
+.root[data-mode="reader"][data-kind="image"] {
+    min-block-size: calc(var(--s-9) * 4);
+    max-block-size: calc(var(--s-9) * 8);
+}
+.root[data-mode="reader"][data-kind="code"] > *,
+.root[data-mode="reader"][data-kind="json"] > * {
+    block-size: auto;
 }
