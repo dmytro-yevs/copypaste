@@ -23,8 +23,8 @@ name: Release
 # resulting bundle launches — requires the native runner below.
 #
 # Why this is not cargo-dist
-# AGENTS.md rule 1 makes a maintained tool the default, so cargo-dist (now
-# "dist") was evaluated first. It does not package macOS .app bundles or DMGs.
+# A maintained release tool was evaluated first: cargo-dist (now "dist").
+# It does not package macOS .app bundles or DMGs.
 # axodotdev/cargo-dist#24, "macos .dmg/.app installer support?", has been open
 # since October 2022 and the maintainers' position on it is that it is "more
 # gui app specific ... out of scope for MVP". Its supported artefacts are
