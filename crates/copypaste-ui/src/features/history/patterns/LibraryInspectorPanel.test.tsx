@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -163,5 +163,54 @@ describe("LibraryInspectorPanel", () => {
 
     rerender(inspector({ item: secret, revealedContent: null }));
     expect(screen.queryByText("revealed once")).toBeNull();
+  });
+
+  it("does not restore Copy focus after the user focuses elsewhere", async () => {
+    const user = userEvent.setup();
+    const target = item({ id: "focus-first" });
+    const view = (copyPending: boolean) => (
+      <>
+        {inspector({ item: target, copyPending })}
+        <button type="button">Elsewhere</button>
+      </>
+    );
+    const { rerender } = render(view(false));
+    const copy = screen.getByRole("button", { name: "Copy" });
+    copy.focus();
+    await user.keyboard("{Enter}");
+    rerender(view(true));
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    await user.click(elsewhere);
+    rerender(view(false));
+
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it("does not refocus Copy after a background pointer gesture", async () => {
+    const user = userEvent.setup();
+    const target = item({ id: "focus-first" });
+    const { rerender } = render(inspector({ item: target }));
+    const copy = screen.getByRole("button", { name: "Copy" });
+    copy.focus();
+    await user.keyboard("{Enter}");
+    rerender(inspector({ item: target, copyPending: true }));
+    fireEvent.pointerDown(document.body, { button: 0 });
+    rerender(inspector({ item: target, copyPending: false }));
+
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Copy" }));
+  });
+
+  it("does not restore Copy focus to another selected item", async () => {
+    const user = userEvent.setup();
+    const first = item({ id: "focus-first" });
+    const second = item({ id: "focus-second" });
+    const { rerender } = render(inspector({ item: first }));
+    const copy = screen.getByRole("button", { name: "Copy" });
+    copy.focus();
+    await user.keyboard("{Enter}");
+    rerender(inspector({ item: second, copyPending: true }));
+    rerender(inspector({ item: second, copyPending: false }));
+
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Copy" }));
   });
 });

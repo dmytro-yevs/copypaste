@@ -185,19 +185,46 @@ describe("LibraryScreen reader reachability", () => {
         const copy = within(inspector).getByRole("button", { name: "Copy" });
         await waitFor(() => expect(copy.hasAttribute("disabled")).toBe(false));
 
-        await user.click(copy);
+        copy.focus();
+        await user.keyboard("{Enter}");
         await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
         await waitFor(() => expect(within(inspector).getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
             .toBe(true));
+        expect(document.activeElement).toBe(document.body);
         expect(within(inspector).getByRole("button", { name: "Show full contents" }).hasAttribute("disabled"))
             .toBe(true);
-        await user.click(within(inspector).getByRole("button", { name: "Copy" }));
         expect(ipc.copyItem).toHaveBeenCalledOnce();
 
         finishCopy();
         await waitFor(() => expect(within(inspector).getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
             .toBe(false));
+        expect(document.activeElement).toBe(within(inspector).getByRole("button", { name: "Copy" }));
         expect(toast.success).toHaveBeenCalledOnce();
+    });
+
+    it("returns desktop Copy focus after a failed write", async () => {
+        viewport.width = 1200;
+        let failCopy!: (reason: Error) => void;
+        ipc.copyItem.mockImplementationOnce(
+            () => new Promise<void>((_resolve, reject) => { failCopy = reject; }),
+        );
+        const { user } = renderScreen();
+        await user.click(await screen.findByRole("button", { name: "short preview" }));
+        const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+        const copy = within(inspector).getByRole("button", { name: "Copy" });
+        await waitFor(() => expect(copy.hasAttribute("disabled")).toBe(false));
+        copy.focus();
+        await user.keyboard("{Enter}");
+        await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
+        await waitFor(() => expect(within(inspector).getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
+            .toBe(true));
+        expect(document.activeElement).toBe(document.body);
+
+        failCopy(new Error("offline"));
+        await waitFor(() => expect(within(inspector).getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
+            .toBe(false));
+        expect(document.activeElement).toBe(within(inspector).getByRole("button", { name: "Copy" }));
+        expect(toast.error).toHaveBeenCalledOnce();
     });
 
     it("opens the reader with the desktop list keyboard action", async () => {
