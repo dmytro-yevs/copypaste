@@ -355,6 +355,8 @@ export async function byLabel(
   );
 }
 
+let lastTapReceipt: unknown = null;
+
 /**
  * Tap a live-page point only after `elementFromPoint` proves the target owns
  * it. This caught an overflowing settings label covering a neighbouring tab.
@@ -406,7 +408,78 @@ async function tapWhere(
           if (rect.width === 0 || rect.height === 0) continue;
           const x = rect.x + rect.width / 2;
           const y = rect.y + rect.height / 2;
-          if (target.contains(document.elementFromPoint(x, y))) return { x, y };
+          if (!target.contains(document.elementFromPoint(x, y))) continue;
+          const describe = (node: EventTarget | null) => {
+            const element = node instanceof Element ? node : null;
+            const role = element?.getAttribute("role");
+            const tag = element?.tagName.toLowerCase();
+            return {
+              tag: tag && ["button", "div", "span", "input", "svg", "path", "section", "aside", "body"].includes(tag)
+                ? tag : null,
+              role: role && ["button", "checkbox", "dialog", "listitem", "searchbox"].includes(role)
+                ? role : null,
+              inRow: Boolean(element?.closest('[role="listitem"]')),
+              inDialog: Boolean(element?.closest('[role="dialog"]')),
+              control: element?.closest('button[aria-label="Close search"]')
+                ? "close-search"
+                : element?.closest('button[aria-label^="Search clipboard history,"]')
+                  ? "open-search"
+                  : element?.closest('[role="listitem"]')
+                    ? "history-row"
+                    : "other",
+            };
+          };
+          const box = (element: Element | null) => {
+            if (!element) return null;
+            const rect = element.getBoundingClientRect();
+            return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+          };
+          const snapshot = () => {
+            const dialog = document.querySelector('[role="dialog"]');
+            const state = dialog?.getAttribute("data-state");
+            return {
+              intended: describe(target),
+              hit: describe(document.elementFromPoint(x, y)),
+              active: describe(document.activeElement),
+              targetBox: box(target),
+              toolbarBox: box(document.querySelector('[data-slot="history-toolbar"]')),
+              firstRowBox: box(document.querySelector(
+                '[role="list"][aria-label="Clipboard history"] [role="listitem"]',
+              )),
+              dialogState: state === "open" || state === "closed" ? state : null,
+              inspectorPresent: Boolean(dialog?.querySelector("aside")),
+              viewport: {
+                innerWidth,
+                innerHeight,
+                visualWidth: window.visualViewport?.width ?? null,
+                visualHeight: window.visualViewport?.height ?? null,
+                visualOffsetLeft: window.visualViewport?.offsetLeft ?? null,
+                visualOffsetTop: window.visualViewport?.offsetTop ?? null,
+                documentScrollTop: document.documentElement.scrollTop,
+              },
+            };
+          };
+          const events: Array<{ phase: string; target: ReturnType<typeof describe>; intended: boolean }> = [];
+          const listener = (event: Event) => {
+            if (events.length < 8) {
+              events.push({
+                phase: event.type,
+                target: describe(event.target),
+                intended: event.target instanceof Node && target.contains(event.target),
+              });
+            }
+          };
+          for (const phase of ["pointerdown", "mousedown", "mouseup", "click"]) {
+            document.addEventListener(phase, listener, true);
+          }
+          (document as Document & { __copypasteTapTrace?: unknown }).__copypasteTapTrace = {
+            target,
+            events,
+            listener,
+            snapshot,
+            before: snapshot(),
+          };
+          return { x, y };
         }
         return null;
       },
@@ -416,7 +489,32 @@ async function tapWhere(
       index,
     );
     if (!point) return false;
-    await page.mouse.click(point.x, point.y);
+    try {
+      await page.mouse.click(point.x, point.y);
+    } finally {
+      lastTapReceipt = await page.evaluate((x, y) => {
+        type TapTrace = {
+          target: Element;
+          events: unknown[];
+          listener: EventListener;
+          snapshot: () => unknown;
+          before: unknown;
+        };
+        const holder = document as Document & { __copypasteTapTrace?: TapTrace };
+        const trace = holder.__copypasteTapTrace;
+        if (!trace) return { unavailable: true };
+        for (const phase of ["pointerdown", "mousedown", "mouseup", "click"]) {
+          document.removeEventListener(phase, trace.listener, true);
+        }
+        delete holder.__copypasteTapTrace;
+        return {
+          point: { x, y },
+          before: trace.before,
+          events: trace.events,
+          after: trace.snapshot(),
+        };
+      }, point.x, point.y).catch(() => ({ unavailable: true }));
+    }
     return true;
   });
 }
@@ -429,7 +527,7 @@ export async function tapButton(
   const { within, timeout = 15_000 } = options;
   await waitFor(
     () => tapWhere(app, within ?? null, "button", label, -1),
-    `no tappable button labelled ${JSON.stringify(label)}${within ? ` inside ${within}` : ""}`,
+    () => `no tappable button labelled ${JSON.stringify(label)}${within ? ` inside ${within}` : ""}; last tap=${JSON.stringify(lastTapReceipt)}`,
     timeout,
   );
 }
@@ -444,7 +542,7 @@ export async function tapElement(
 ): Promise<void> {
   await waitFor(
     () => tapWhere(app, null, selector, label, -1),
-    `no tappable ${selector}${label ? ` labelled ${JSON.stringify(label)}` : ""}`,
+    () => `no tappable ${selector}${label ? ` labelled ${JSON.stringify(label)}` : ""}; last tap=${JSON.stringify(lastTapReceipt)}`,
     timeout,
   );
 }
@@ -500,7 +598,10 @@ export async function clearField(
 }
 
 /** Restore the toolbar state a shared device may retain between files or runs. */
-export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
+export async function resetHistoryFilters(
+  app: AndroidApp,
+  { search = "closed" }: { search?: "open" | "closed" } = {},
+): Promise<void> {
   const kind = 'button[aria-label^="Filter by kind,"]';
   if ((await count(app, `${kind}[data-active-filter]`)) > 0) {
     await tapElement(app, kind);
@@ -513,9 +614,7 @@ export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
   }
   await openHistorySearch(app);
   await clearField(app, SEARCH);
-  if ((await byLabel(app, "Close search")).length > 0) {
-    await tapButton(app, "Close search");
-  }
+  if (search === "closed") await closeHistorySearch(app);
 }
 
 export async function closeHistorySearch(app: AndroidApp): Promise<void> {
@@ -527,6 +626,9 @@ export async function closeHistorySearch(app: AndroidApp): Promise<void> {
     async () => (await count(app, expanded)) === 0,
     "the expanded history search never closed",
   );
+  if ((await count(app, '[role="dialog"]')) > 0) {
+    throw new Error(`closing history search opened a dialog; last tap=${JSON.stringify(lastTapReceipt)}`);
+  }
 }
 
 export async function openHistorySearch(app: AndroidApp): Promise<void> {
@@ -547,8 +649,7 @@ export async function filterHistoryTo(
   query: string,
   expectedText: string,
 ): Promise<void> {
-  await resetHistoryFilters(app);
-  await openHistorySearch(app);
+  await resetHistoryFilters(app, { search: "open" });
   await typeInto(app, SEARCH, query);
   await waitFor(
     async () =>
