@@ -72,15 +72,22 @@ cloud_detail_holds() { # <artifact>
         && enabled_action_exists_exact "$1" "Back to Settings"
 }
 
-cloud_setup_form_holds() { # <artifact>
-    [[ -n "$(selector_center "$1" "Cloud server configuration" any)" ]]
-}
-
 open_cloud() {
     tap_until_state "Settings" "$OUT/settings-nav.xml" \
         cloud_settings_pane_holds none || return 1
     tap_until_state "$CLOUD_SECTION_ACTION" "$OUT/settings-sync.xml" \
         cloud_detail_holds up
+}
+
+# API 36 opens the form under the bottom dock; a combined tap/predicate keeps
+# re-tapping the visible setup button instead of scrolling the form into view.
+reveal_cloud_setup() { # <artifact>
+    local started="$SECONDS" remaining
+    tap_selector_scrolling "Set up cloud sync" "$1" up "$WAIT_SECS" || return 1
+    remaining=$(( WAIT_SECS - (SECONDS - started) ))
+    (( remaining > 0 )) || return 1
+    wait_selector_scrolling "$ENDPOINT_FORM" "$1" up "$remaining" exact || return 1
+    (( SECONDS - started < WAIT_SECS ))
 }
 
 capture_state() { # <state>
@@ -245,8 +252,10 @@ unconfigured_scenario() {
                 && ok "unconfigured cloud status meets its latency budget" \
                 || bad "unconfigured cloud status meets its latency budget" "${elapsed}ms"
             capture_state unconfigured-overview
-            if ! tap_until_state "Set up cloud sync" "$OUT/unconfigured-open.xml" \
-                cloud_setup_form_holds up; then
+            node_exists_exact "$OUT/unconfigured-setup.xml" "$ENDPOINT_FORM" \
+                && bad "the unconfigured cloud server form starts closed" \
+                || ok "the unconfigured cloud server form starts closed"
+            if ! reveal_cloud_setup "$OUT/unconfigured-open.xml"; then
                 bad "the unconfigured cloud setup action opens its form"
             fi
             expect_label "Cloud server configuration" "$OUT/unconfigured-form.xml"
@@ -616,32 +625,54 @@ cloud_navigation_self_test() { # <temp>
 
 cloud_setup_self_test() { # <temp>
     (
-        local temp="$1" closed open fields
-        closed='<node text="Set up cloud sync" bounds="[24,410][296,454]" enabled="true" clickable="true"/><node text="Cloud server configuration" bounds="[0,0][0,0]" enabled="true"/>'
-        fields='<node class="android.widget.EditText" password="false" bounds="[24,340][296,384]" enabled="true"/><node class="android.widget.EditText" password="false" bounds="[24,394][296,438]" enabled="true"/>'
-        open="<node text=\"Cloud server configuration\" bounds=\"[24,250][296,510]\" enabled=\"true\">$fields<node text=\"Configure\" bounds=\"[24,466][296,510]\" enabled=\"false\" clickable=\"true\"/></node>"
-        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$closed</node></hierarchy>" > "$temp/setup-closed.xml"
-        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$open</node></hierarchy>" > "$temp/setup-open.xml"
-        ! cloud_setup_form_holds "$temp/setup-closed.xml" \
-            && cloud_setup_form_holds "$temp/setup-open.xml" \
-            && [[ "$(form_field_shape "$temp/setup-open.xml" "$ENDPOINT_FORM")" == "2 0" ]] \
+        local temp="$1" primary action fields obscured_fields obscured visible
+        local WAIT_SECS=5
+        primary='<node text="Primary" bounds="[49,572][271,628]" enabled="true"/>'
+        action='<node text="Set up cloud sync" bounds="[25,376][162,421]" enabled="true" clickable="true"/>'
+        fields='<node class="android.widget.EditText" password="false" bounds="[25,204][295,249]" enabled="true"/><node class="android.widget.EditText" password="false" bounds="[25,278][295,323]" enabled="true"/>'
+        obscured_fields='<node class="android.widget.EditText" password="false" bounds="[25,619][295,640]" enabled="true"/><node class="android.widget.EditText" password="false" bounds="[0,0][0,0]" enabled="true"/>'
+        obscured="<node text=\"$ENDPOINT_FORM\" bounds=\"[25,601][295,640]\" enabled=\"true\">$obscured_fields<node text=\"Configure\" bounds=\"[0,0][0,0]\" enabled=\"false\" clickable=\"true\"/></node>"
+        visible="<node text=\"$ENDPOINT_FORM\" bounds=\"[25,186][295,527]\" enabled=\"true\">$fields<node text=\"Configure\" bounds=\"[25,482][295,527]\" enabled=\"false\" clickable=\"true\"/></node>"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$action</node></hierarchy>" > "$temp/setup-closed.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$action$obscured</node></hierarchy>" > "$temp/setup-obscured.xml"
+        printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$primary$visible</node></hierarchy>" > "$temp/setup-visible.xml"
+        ! node_exists_exact "$temp/setup-closed.xml" "$ENDPOINT_FORM" \
+            && [[ "$(form_field_shape "$temp/setup-obscured.xml" "$ENDPOINT_FORM")" == "2 0" ]] \
+            && [[ -z "$(selector_center "$temp/setup-obscured.xml" "$ENDPOINT_FORM" exact)" ]] \
+            && [[ -n "$(selector_center "$temp/setup-visible.xml" "$ENDPOINT_FORM" exact)" ]] \
             || exit 1
-        ui_fixtures "$temp/setup-closed.xml" "$temp/setup-open.xml"
         dump_hierarchy() { ui_fixture_dump "$@"; }
-        scroll_content() { ui_fixture_scroll "$@"; }
-        tap_transition_point() { navigation_fixture_tap "$@"; }
-        settle_pace() { ui_fixture_pace; }
-        tap_until_state "Set up cloud sync" "$temp/setup-observed.xml" \
-            cloud_setup_form_holds up \
-            && [[ $UI_FIXTURE_INDEX -eq 2 && $UI_FIXTURE_TAPS -eq 1 ]] \
-            && cmp -s "$temp/setup-observed.xml" "$temp/setup-open.xml" \
+        scroll_content() { navigation_fixture_scroll "$@"; }
+        sh_() { ((UI_FIXTURE_TAPS += 1)); }
+        ui_fixtures "$temp/setup-closed.xml" "$temp/setup-obscured.xml" "$temp/setup-visible.xml"
+        reveal_cloud_setup "$temp/setup-observed.xml" \
+            && [[ $UI_FIXTURE_INDEX -eq 3 && $UI_FIXTURE_TAPS -eq 1 \
+                  && $UI_FIXTURE_SCROLLS -eq 1 \
+                  && "$NAVIGATION_FIXTURE_DIRECTION" == up ]] \
+            && cmp -s "$temp/setup-observed.xml" "$temp/setup-visible.xml" \
             || exit 1
-        ui_fixtures "$temp/setup-open.xml"
+        ui_fixtures "$temp/setup-visible.xml"
         wait_selector_scrolling "Configure" "$temp/setup-action.xml" up 1 rendered \
-            && [[ -z "$(selector_center "$temp/setup-action.xml" "Configure" action)" ]]
+            && [[ -z "$(selector_center "$temp/setup-action.xml" "Configure" action)" ]] \
+            || exit 1
+        WAIT_SECS=2
+        ui_fixtures "$temp/setup-closed.xml" "$temp/setup-closed.xml"
+        ! reveal_cloud_setup "$temp/setup-never-opened.xml" \
+            && [[ $UI_FIXTURE_TAPS -eq 1 ]] \
+            || exit 1
+        ui_fixtures "$temp/setup-closed.xml" "$temp/setup-obscured.xml"
+        scroll_content() { ui_fixture_scroll; return 1; }
+        ! reveal_cloud_setup "$temp/setup-scroll-failed.xml" \
+            && [[ $UI_FIXTURE_TAPS -eq 1 && $UI_FIXTURE_SCROLLS -gt 0 ]] \
+            && cmp -s "$temp/setup-scroll-failed.xml" "$temp/setup-obscured.xml" \
+            || exit 1
+        ui_fixtures "$temp/setup-closed.xml"
+        sh_() { return 1; }
+        ! reveal_cloud_setup "$temp/setup-tap-failed.xml" \
+            && [[ $UI_FIXTURE_INDEX -eq 1 && $UI_FIXTURE_SCROLLS -eq 0 ]]
     ) \
-        && ok "Cloud setup requires opening the disclosure and seeing two fields" \
-        || bad "Cloud setup requires opening the disclosure and seeing two fields"
+        && ok "Cloud setup opens once, scrolls clear of the dock, and rejects stalled forms" \
+        || bad "Cloud setup opens once, scrolls clear of the dock, and rejects stalled forms"
 }
 
 # Cards taken from run 31671766432's published dumps: the release leg signed in,
