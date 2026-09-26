@@ -797,9 +797,9 @@
     {
       "id": "windows-native-evidence",
       "verifies": "bounded Windows readiness, real process tracing, failure preservation, and complete UIA snapshots",
-      "command": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/release/windows-native-evidence.ps1", "-SelfTest"],
+      "command": ["pwsh", "-NoProfile", "-File", "scripts/release/windows-native-evidence.ps1", "-SelfTest"],
       "platforms": ["windows"],
-      "requires": ["powershell"],
+      "requires": ["pwsh", "python"],
       "mutations": [
         {
           "name": "narration-on-the-return-channel",
