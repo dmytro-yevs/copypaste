@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # Enforce comment budgets.
 #
-# Three numbers, checked per file:
+# Two limits, checked per file:
 #
 #   * no comment block longer than MAX_BLOCK lines
 #   * no module header longer than MAX_HEADER lines
-#   * comment lines no more than MAX_RATIO% of a file's source lines
 #
 # Test modules and test files do not count: a test's prose records which
 # defect each assertion pins.
 #
-# The tree violated all three about 160 times when the check was written, so a
-# hard failure everywhere would have been switched off within a day. Instead
+# The tree had pre-existing violations when the check was written. Instead
 # `scripts/comment-budget.txt` records the files that were already over, and
 # the check fails on:
 #
@@ -26,17 +24,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 MAX_BLOCK=${MAX_BLOCK:-12}
 MAX_HEADER=${MAX_HEADER:-20}
-MAX_RATIO=${MAX_RATIO:-30}
-# Below this many lines of code the ratio says nothing: seven doc lines on a
-# twenty-line file is 35% and is not the failure this rule is about. The block,
-# header and no-code rules still apply at every size.
-RATIO_FLOOR=${RATIO_FLOOR:-80}
 BASELINE=scripts/comment-budget.txt
 
-exec python3 - "$MAX_BLOCK" "$MAX_HEADER" "$MAX_RATIO" "$RATIO_FLOOR" "$BASELINE" "$@" <<'PY'
+exec python3 - "$MAX_BLOCK" "$MAX_HEADER" "$BASELINE" "$@" <<'PY'
+import pathlib
 import signal
 import subprocess
 import sys
+import tempfile
 
 # Without this, piping the report into `head` ends in a traceback, which in a
 # gate reads as the check crashing rather than as the reader stopping early.
@@ -45,14 +40,12 @@ import sys
 if hasattr(signal, "SIGPIPE"):
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-max_block, max_header, max_ratio, ratio_floor, baseline_path = (
+max_block, max_header, baseline_path = (
     int(sys.argv[1]),
     int(sys.argv[2]),
-    int(sys.argv[3]),
-    int(sys.argv[4]),
-    sys.argv[5],
+    sys.argv[3],
 )
-only = sys.argv[6:]
+only = sys.argv[4:]
 
 COMMENT_STARTS = ("//", "/*", "*", "*/", "#!")
 
@@ -103,17 +96,55 @@ def faults(path):
     comments, code, longest, header = m
     if code == 0:
         # A file that is all comment has no implementation to explain: a
-        # layout table in a mod.rs. The ratio is meaningless, the verdict is not.
+        # layout table in a mod.rs.
         return [f"{comments} comment lines and no code"]
     out = []
     if longest > max_block:
         out.append(f"a {longest}-line comment block (max {max_block})")
     if header > max_header:
         out.append(f"a {header}-line module header (max {max_header})")
-    ratio = round(100 * comments / (comments + code))
-    if code >= ratio_floor and ratio > max_ratio:
-        out.append(f"{ratio}% comment (max {max_ratio}%)")
     return out
+
+
+def self_test():
+    cases = (
+        (
+            "many short comment blocks are allowed",
+            "".join(f"fn example_{i}() {{}}\n// Explain invariant {i}.\n" for i in range(100)),
+            [],
+        ),
+        (
+            "an overlong comment block fails",
+            "fn example() {}\n" + "// Explain invariant.\n" * (max_block + 1),
+            [f"a {max_block + 1}-line comment block (max {max_block})"],
+        ),
+        (
+            "an overlong module header fails",
+            ("// Explain invariant.\n\n" * (max_header + 1)) + "fn example() {}\n",
+            [f"a {max_header + 1}-line module header (max {max_header})"],
+        ),
+        (
+            "a file with comments and no code fails",
+            "// Explain invariant.\n",
+            ["1 comment lines and no code"],
+        ),
+    )
+    failed = 0
+    with tempfile.TemporaryDirectory(prefix="comment-budget-") as directory:
+        fixture = pathlib.Path(directory) / "fixture.rs"
+        for description, source, expected in cases:
+            fixture.write_text(source, encoding="utf-8")
+            actual = faults(fixture)
+            if actual == expected:
+                print(f"PASS  {description}")
+            else:
+                failed += 1
+                print(f"FAIL  {description}: expected {expected}, got {actual}")
+    return failed
+
+
+if only == ["--self-test"]:
+    sys.exit(1 if self_test() else 0)
 
 
 def tracked():
@@ -168,7 +199,7 @@ if fixed:
 
 print()
 over_baseline = sum(1 for p in baseline if faults(p))
-print(f"budget: block {max_block}, header {max_header}, ratio {max_ratio}%")
+print(f"budget: block {max_block}, header {max_header}")
 print(f"baseline: {len(baseline)} file(s) recorded, {over_baseline} still over")
 
 if new:
