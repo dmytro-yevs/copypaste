@@ -4,7 +4,13 @@ import { useId, useState } from "react";
 import { FieldFeedback, SettingsRow } from "@/components/shared";
 import { Badge, Button } from "@/components/ui";
 import { DeviceNameField } from "@/features/devices";
-import { connectionSummary } from "@/features/devices/model";
+import {
+  connectionSummary,
+  syncReadinessIsLoading,
+  syncReadinessMessage,
+  syncReadinessOf,
+  syncReadinessRecovery,
+} from "@/features/devices/model";
 import { noteSync, type PeerHealthMap } from "@/features/devices/model/peerState";
 import { Section } from "@/features/settings/components/Section";
 import { usePeers, useSyncNow } from "@/hooks/useDevices";
@@ -28,6 +34,7 @@ export function DeviceSyncSettings() {
   const deviceDescriptionId = useId();
   const peersDescriptionId = useId();
   const syncDescriptionId = useId();
+  const syncNoteId = useId();
   const peers = usePeers();
   const sync = useSyncNow();
   const config = useServiceConfig();
@@ -35,12 +42,9 @@ export function DeviceSyncSettings() {
   const [health, setHealth] = useState<PeerHealthMap>({});
   const setView = useUi((state) => state.setView);
   const setSettingsTab = useUi((state) => state.setSettingsTab);
-  const peersUnknown = peers.isError || service.isError;
   const count = peers.data?.length;
-  const syncEnabled = config.data?.config.sync_enabled === true;
-  const configUnknown = config.isError || (config.data === undefined && !config.isPending);
-  const canSync = syncEnabled && !configUnknown && !peersUnknown &&
-    !peers.isPending && !service.isPending && count !== undefined && count > 0;
+  const readiness = syncReadinessOf({ service, config, peers });
+  const recovery = syncReadinessRecovery(readiness);
   const summary = connectionSummary({
     serviceOffline: service.isError,
     serviceStarting: service.isPending,
@@ -52,25 +56,20 @@ export function DeviceSyncSettings() {
   });
   const partialFailure = sync.data?.some((result) => result.error !== null) ?? false;
 
-  const syncNote = config.isPending
-    ? <FieldFeedback state="pending">{t("settings.sync.now.configLoading")}</FieldFeedback>
-    : configUnknown
-      ? <FieldFeedback state="warning">{t("settings.sync.now.configUnavailable")}</FieldFeedback>
-      : !syncEnabled
-        ? <FieldFeedback state="neutral">{t("settings.sync.now.disabled")}</FieldFeedback>
-        : peersUnknown
-          ? <FieldFeedback state="warning">{t("settings.sync.now.peersUnavailable")}</FieldFeedback>
-          : count === 0
-            ? <FieldFeedback state="neutral">{t("settings.sync.now.noPeers")}</FieldFeedback>
-            : sync.isError
-              ? <FieldFeedback state="error">{t("settings.sync.now.failed")}</FieldFeedback>
-              : summary
-                ? <FieldFeedback state={summary.status === "attention" ? "warning" : "pending"}>
-                      {summary.title}{summary.supportingLine ? ` ${summary.supportingLine}` : ""}
-                    </FieldFeedback>
-                : partialFailure
-                  ? <FieldFeedback state="warning">{t("settings.sync.now.partial")}</FieldFeedback>
-                  : undefined;
+  const syncNote = readiness !== "ready" ? (
+    <FieldFeedback state={syncReadinessIsLoading(readiness) ? "pending"
+      : readiness === "disabled" || readiness === "no-peers" ? "neutral" : "warning"}>
+      {syncReadinessMessage(readiness)}
+    </FieldFeedback>
+  ) : sync.isError ? (
+    <FieldFeedback state="error">{t("settings.sync.now.failed")}</FieldFeedback>
+  ) : summary ? (
+    <FieldFeedback state={summary.status === "attention" ? "warning" : "pending"}>
+      {summary.title}{summary.supportingLine ? ` ${summary.supportingLine}` : ""}
+    </FieldFeedback>
+  ) : partialFailure ? (
+    <FieldFeedback state="warning">{t("settings.sync.now.partial")}</FieldFeedback>
+  ) : undefined;
 
   return (
     <>
@@ -91,13 +90,15 @@ export function DeviceSyncSettings() {
           description={t("settings.sync.paired.description")}
         >
           <div className={styles.pairedActions}>
-            <Badge variant={peersUnknown ? "warn" : "secondary"}>
-              {peersUnknown
+            <Badge variant={peers.isError ? "warn" : "secondary"}>
+              {peers.isError
+                ? count === undefined
                   ? t("settings.sync.paired.unavailable")
+                  : t("devices.syncReadiness.lastKnownCount", { n: count })
                 : peers.isPending
                   ? t("settings.sync.paired.checking")
                   : count === undefined
-                    ? t("settings.sync.paired.checking")
+                    ? t("settings.sync.paired.unavailable")
                   : count === 0
                     ? t("settings.sync.paired.none")
                     : t("settings.sync.paired.count", { n: count })}
@@ -118,23 +119,30 @@ export function DeviceSyncSettings() {
           title={t("settings.sync.now.title")}
           descriptionId={syncDescriptionId}
           description={t("settings.sync.now.description")}
-          note={syncNote}
+          note={syncNote ? <span id={syncNoteId}>{syncNote}</span> : undefined}
         >
           <div className={styles.pairedActions}>
             <Button
               variant="secondary"
               size="sm"
-              disabled={sync.isPending || !canSync}
+              disabled={sync.isPending || readiness !== "ready"}
               aria-busy={sync.isPending || undefined}
-              aria-describedby={syncDescriptionId}
-              onClick={() => sync.mutate(undefined, {
-                onSuccess: (results) => setHealth((previous) => noteSync(previous, results)),
-              })}
+              aria-describedby={syncNote ? `${syncDescriptionId} ${syncNoteId}` : syncDescriptionId}
+              onClick={() => {
+                if (readiness !== "ready" || sync.isPending) return;
+                sync.mutate(undefined, {
+                  onSuccess: (results) => setHealth((previous) => noteSync(previous, results)),
+                });
+              }}
             >
               <Icon name="refresh" aria-hidden="true" className={sync.isPending ? styles.spinner : undefined} />
               {t(sync.isPending ? "settings.sync.now.pending" : "settings.sync.now.action")}
             </Button>
-            {configUnknown ? (
+            {recovery === "retry-service" ? (
+              <Button variant="ghost" size="sm" onClick={() => void service.refetch()}>
+                {t("common.tryAgain")}
+              </Button>
+            ) : recovery === "retry-config" ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -142,7 +150,11 @@ export function DeviceSyncSettings() {
               >
                 {t("common.tryAgain")}
               </Button>
-            ) : !config.isPending && !syncEnabled && (
+            ) : recovery === "retry-peers" ? (
+              <Button variant="ghost" size="sm" onClick={() => void peers.refetch()}>
+                {t("common.tryAgain")}
+              </Button>
+            ) : recovery === "enable-sync" && (
               <Button
                 variant="ghost"
                 size="sm"

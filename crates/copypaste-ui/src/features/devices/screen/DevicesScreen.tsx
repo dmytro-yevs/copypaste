@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Container, Screen, ScrollViewport } from "@/components/layout";
-import { ScreenHeader } from "@/components/shared";
+import { ScreenHeader, StatusCard } from "@/components/shared";
 import {
+    Button,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -19,6 +20,12 @@ import {
     noteSync,
     type PeerHealthMap,
 } from "@/features/devices/model/peerState";
+import {
+    syncReadinessIsLoading,
+    syncReadinessMessage,
+    syncReadinessOf,
+    syncReadinessRecovery,
+} from "@/features/devices/model";
 import { DeviceDetailPane } from "@/features/devices/patterns/DeviceDetailPane";
 import {
     DeviceRoster,
@@ -45,11 +52,13 @@ import {
     useSyncNow,
     useUnpair,
 } from "@/hooks/useDevices";
+import { useServiceConfig } from "@/hooks/useServiceConfig";
 import { useStatus } from "@/hooks/useStatus";
 import {
     useObservedElementSize,
     useViewportMetrics,
 } from "@/hooks/useViewportMetrics";
+import { useTranslation } from "@/i18n";
 import type { DiscoveredDevice, PeerInfo } from "@/lib/ipc";
 import { EXPANDED_MIN_PX } from "@/lib/layoutBreakpoints";
 import { currentPlatform } from "@/lib/platform";
@@ -63,6 +72,7 @@ function layoutFor(width: number): DeviceLayout {
 }
 
 export function DevicesScreen() {
+    const { t } = useTranslation();
     const { width: viewportWidth } = useViewportMetrics();
     const { ref: rootRef, width: rootWidth } =
         useObservedElementSize<HTMLElement>();
@@ -83,8 +93,11 @@ export function DevicesScreen() {
     const setSettingsTab = useUi((state) => state.setSettingsTab);
 
     const own = useStatus(selectDeviceStatus);
+    const config = useServiceConfig();
     const cloud = useCloudStatus();
     const peers = usePeers();
+    const syncReadiness = syncReadinessOf({ service: own, config, peers });
+    const syncRecovery = syncReadinessRecovery(syncReadiness);
     const discovered = useDiscovered();
     const rescan = useRescan();
     const sync = useSyncNow();
@@ -161,6 +174,9 @@ export function DevicesScreen() {
         peers: peerList,
         health,
     });
+    const visibleSummary = summary?.action?.kind === "retry-peer" && syncReadiness !== "ready"
+        ? { ...summary, action: undefined }
+        : summary;
 
     const detailTarget = useDeviceDetailTarget({
         selected,
@@ -178,6 +194,7 @@ export function DevicesScreen() {
     }, [detailTarget, selected]);
 
     const runSync = (pairingId: string | undefined) => {
+        if (syncReadiness !== "ready" || sync.isPending) return;
         sync.mutate(pairingId, {
             onSuccess: (results) =>
                 setHealth((previous) => noteSync(previous, results)),
@@ -228,6 +245,23 @@ export function DevicesScreen() {
         setSettingsTab("sync");
         setView("settings");
     };
+    const recoverSync = () => {
+        switch (syncRecovery) {
+            case "retry-service":
+                void own.refetch();
+                break;
+            case "retry-config":
+                void config.refetch();
+                break;
+            case "retry-peers":
+                void peers.refetch();
+                break;
+            case "enable-sync":
+                setSettingsTab("device-sync");
+                setView("settings");
+                break;
+        }
+    };
     const selectDevice = (key: DeviceSelectionKey) => {
         detailReturnKey.current = key;
         setSelectedDiscovered(null);
@@ -273,6 +307,7 @@ export function DevicesScreen() {
                 (detailTarget?.kind === "peer" &&
                     syncingPeerId === detailTarget.peer.pairing_id),
             )}
+            syncReadiness={syncReadiness}
             unpairing={Boolean(
                 detailTarget?.kind === "peer" &&
                 unpair.isPending &&
@@ -286,6 +321,7 @@ export function DevicesScreen() {
             compact={layout === "narrow"}
             onClose={closeDetail}
             onSync={(peer) => runSync(peer.pairing_id)}
+            onRecoverSync={recoverSync}
             onUnpair={setConfirmUnpair}
             onRevoke={setConfirmRevoke}
         />
@@ -314,24 +350,39 @@ export function DevicesScreen() {
                             />
                         }
                     />
-                    {summary ? (
+                    {syncReadiness !== "ready" && syncReadiness !== "no-peers" ? (
+                        <StatusCard
+                            status={syncReadinessIsLoading(syncReadiness) ? "info"
+                                : syncReadiness === "disabled" ? "off" : "attention"}
+                            title={syncReadinessMessage(syncReadiness)}
+                            busy={syncReadinessIsLoading(syncReadiness)}
+                            action={syncRecovery === null ? undefined : (
+                                <Button variant="secondary" size="sm" onClick={recoverSync}>
+                                    {syncRecovery === "enable-sync"
+                                        ? t("devices.syncReadiness.openSettings")
+                                        : t("common.tryAgain")}
+                                </Button>
+                            )}
+                        />
+                    ) : null}
+                    {visibleSummary ? (
                         <ConnectionSummary
-                            summary={summary}
+                            summary={visibleSummary}
                             actionDisabled={
-                                summary.action?.kind === "retry-peer" &&
+                                visibleSummary.action?.kind === "retry-peer" &&
                                 sync.isPending
                             }
                             actionBusy={
-                                summary.action?.kind === "retry-peer" &&
+                                visibleSummary.action?.kind === "retry-peer" &&
                                 sync.isPending &&
-                                sync.variables === summary.action.pairingId
+                                sync.variables === visibleSummary.action.pairingId
                             }
                             onAction={() => {
-                                if (summary.action?.kind === "retry-peer") {
-                                    runSync(summary.action.pairingId);
-                                } else if (summary.action) {
+                                if (visibleSummary.action?.kind === "retry-peer") {
+                                    runSync(visibleSummary.action.pairingId);
+                                } else if (visibleSummary.action) {
                                     selectDevice(
-                                        `peer:${summary.action.pairingId}`,
+                                        `peer:${visibleSummary.action.pairingId}`,
                                     );
                                 }
                             }}

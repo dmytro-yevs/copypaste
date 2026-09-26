@@ -11,11 +11,14 @@ const mocks = vi.hoisted(() => ({
   peers: undefined as unknown,
   peersPending: false,
   peersError: false,
+  peersRefetch: vi.fn(),
   config: undefined as unknown,
   configPending: false,
   configError: false,
   servicePending: false,
   serviceError: false,
+  serviceData: true as unknown,
+  serviceRefetch: vi.fn(),
   syncPending: false,
   syncError: false,
   syncData: undefined as unknown,
@@ -33,7 +36,7 @@ vi.mock("@/features/devices", () => ({
 }));
 
 vi.mock("@/hooks/useDevices", () => ({
-  usePeers: () => ({ data: mocks.peers, isPending: mocks.peersPending, isError: mocks.peersError }),
+  usePeers: () => ({ data: mocks.peers, isPending: mocks.peersPending, isError: mocks.peersError, refetch: mocks.peersRefetch }),
   useSyncNow: () => ({
     mutate: mocks.mutate,
     isPending: mocks.syncPending,
@@ -52,18 +55,21 @@ vi.mock("@/hooks/useServiceConfig", () => ({
 
 vi.mock("@/hooks/useStatus", () => ({
   statusReachable: () => true,
-  useStatus: () => ({ isPending: mocks.servicePending, isError: mocks.serviceError }),
+  useStatus: () => ({ data: mocks.serviceData, isPending: mocks.servicePending, isError: mocks.serviceError, refetch: mocks.serviceRefetch }),
 }));
 
 beforeEach(() => {
   mocks.peers = [peer({ last_seen_ms: 1_700_000_000_000 })];
   mocks.peersPending = false;
   mocks.peersError = false;
+  mocks.peersRefetch.mockReset();
   mocks.config = { config: { sync_enabled: true } };
   mocks.configPending = false;
   mocks.configError = false;
   mocks.servicePending = false;
   mocks.serviceError = false;
+  mocks.serviceData = true;
+  mocks.serviceRefetch.mockReset();
   mocks.syncPending = false;
   mocks.syncError = false;
   mocks.syncData = undefined;
@@ -75,6 +81,13 @@ beforeEach(() => {
 afterEach(() => {
   delete (Element.prototype as Partial<Element>).scrollIntoView;
 });
+
+function expectDisabledSyncDescribes(reason: string) {
+  const button = screen.getByRole("button", { name: "Sync now" });
+  expect(button.hasAttribute("disabled")).toBe(true);
+  const ids = button.getAttribute("aria-describedby")?.split(" ") ?? [];
+  expect(ids.some((id) => document.getElementById(id)?.textContent?.includes(reason))).toBe(true);
+}
 
 describe("Device sync settings", () => {
   it("shows a pairing count without implying a current connection", () => {
@@ -91,7 +104,10 @@ describe("Device sync settings", () => {
     render(<DeviceSyncSettings />);
 
     expect(screen.getByText(/Syncing your devices/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Syncing…" }).hasAttribute("disabled")).toBe(true);
+    const button = screen.getByRole("button", { name: "Syncing…" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    const ids = button.getAttribute("aria-describedby")?.split(" ") ?? [];
+    expect(ids.some((id) => document.getElementById(id)?.textContent?.includes("Syncing your devices"))).toBe(true);
   });
 
   it("blocks manual sync when the service setting is off and requests the correct section", () => {
@@ -99,7 +115,8 @@ describe("Device sync settings", () => {
     render(<DeviceSyncSettings />);
 
     expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText(/Device sync is off/)).toBeTruthy();
+    expect(screen.getByText(/Sync with paired devices is off/)).toBeTruthy();
+    expectDisabledSyncDescribes("Sync with paired devices is off");
     fireEvent.click(screen.getByRole("button", { name: "Show sync setting" }));
     expect(useUi.getState().settingsTab).toBe("device-sync");
     expect(mocks.mutate).not.toHaveBeenCalled();
@@ -110,15 +127,54 @@ describe("Device sync settings", () => {
     mocks.configPending = true;
     const { rerender } = render(<DeviceSyncSettings />);
     expect(screen.getByText(/Checking whether device sync is on/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(true);
+    expectDisabledSyncDescribes("Checking whether device sync is on");
 
     mocks.configPending = false;
     mocks.configError = true;
     rerender(<DeviceSyncSettings />);
-    expect(screen.getByText(/couldn't read the device sync setting/)).toBeTruthy();
+    expect(screen.getByText(/device sync setting is unavailable/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(mocks.refetch).toHaveBeenCalledOnce();
-    expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(true);
+    expectDisabledSyncDescribes("The device sync setting is unavailable");
+  });
+
+  it("shows service loading and service failure without hiding a known pairing count", () => {
+    mocks.serviceData = undefined;
+    mocks.servicePending = true;
+    const { rerender } = render(<DeviceSyncSettings />);
+    expect(screen.getByText("1 paired")).toBeTruthy();
+    expectDisabledSyncDescribes("Checking the clipboard service before syncing");
+
+    mocks.serviceData = true;
+    mocks.servicePending = false;
+    mocks.serviceError = true;
+    rerender(<DeviceSyncSettings />);
+    expect(screen.getByText("1 paired")).toBeTruthy();
+    expectDisabledSyncDescribes("The clipboard service is unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(mocks.serviceRefetch).toHaveBeenCalledOnce();
+    expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+
+  it("names peer loading and peer failure separately from service health", () => {
+    mocks.peers = undefined;
+    mocks.peersPending = true;
+    const { rerender } = render(<DeviceSyncSettings />);
+    expect(screen.getByText("Checking…")).toBeTruthy();
+    expectDisabledSyncDescribes("Checking paired devices");
+
+    mocks.peersPending = false;
+    mocks.peersError = true;
+    rerender(<DeviceSyncSettings />);
+    expect(screen.getByText("Unavailable")).toBeTruthy();
+    expectDisabledSyncDescribes("Paired devices are unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(mocks.peersRefetch).toHaveBeenCalledOnce();
+
+    mocks.peers = [peer()];
+    rerender(<DeviceSyncSettings />);
+    expect(screen.getByText("1 paired last known")).toBeTruthy();
+    expectDisabledSyncDescribes("Paired devices are unavailable");
   });
 
   it("focuses the actual sync switch inside SettingsScreen", async () => {
@@ -149,13 +205,13 @@ describe("Device sync settings", () => {
     const { rerender } = render(<DeviceSyncSettings />);
     expect(screen.getByText("None")).toBeTruthy();
     expect(screen.getByText("Pair a device before syncing.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(true);
+    expectDisabledSyncDescribes("Pair a device before syncing");
 
     mocks.peers = undefined;
     mocks.peersError = true;
     rerender(<DeviceSyncSettings />);
     expect(screen.getByText("Unavailable")).toBeTruthy();
-    expect(screen.getByText("CopyPaste couldn't read paired devices.")).toBeTruthy();
+    expect(screen.getByText(/Paired devices are unavailable/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Manage devices" })).toBeTruthy();
   });
 
