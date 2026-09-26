@@ -10,6 +10,7 @@ import {
   type ControlSurfaceVariants,
 } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { acceleratorLabel } from "@/lib/accelerator";
 import styles from "./SearchField.module.css";
 
 interface SearchFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "className" | "size" | "width"> {
@@ -30,7 +31,7 @@ export function SearchField({
   mode = "inline",
   size = "library",
   expanded = mode === "inline",
-  shortcut = "⌘K",
+  shortcut,
   clearable = true,
   clearLabel = "Clear search",
   closeLabel = "Close search",
@@ -42,6 +43,7 @@ export function SearchField({
   ...props
 }: SearchFieldProps) {
   const hasValue = typeof value === "string" && value.length > 0;
+  const shortcutLabel = shortcut ? acceleratorLabel(shortcut) : null;
   const adornmentSize = size === "compact" ? "compact" : "regular";
   return (
     <ControlSurface
@@ -79,8 +81,8 @@ export function SearchField({
           }}
           icon="close"
         />
-      ) : shortcut && mode === "inline" ? (
-        <ShortcutBadge size={adornmentSize}>{shortcut}</ShortcutBadge>
+      ) : shortcutLabel && mode === "inline" ? (
+        <ShortcutBadge size={adornmentSize} aria-label={shortcut}>{shortcutLabel}</ShortcutBadge>
       ) : null}
       {mode === "overlay" && !hasValue ? (
         <IconButton

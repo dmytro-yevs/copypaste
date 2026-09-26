@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
+import { acceleratorLabel } from "@/lib/accelerator";
 import { toFriendly } from "@/lib/errors";
 import {
   coalesceHistoryInvalidation,
@@ -22,7 +23,10 @@ export function useCopy() {
   return useMutation({
     mutationFn: (item: Item) => copyItem(item.id),
     onSuccess: async () => {
-      toast.success(t("history.toast.copied"), { duration: 2500 });
+      const shortcut = acceleratorLabel("CmdOrCtrl+V");
+      toast.success(shortcut
+        ? t("history.toast.copied", { shortcut })
+        : t("history.toast.copiedTouch"), { duration: 2500 });
       await invalidateHistoryQueries(qc);
     },
     onError: (raw) => toast.error(toFriendly(raw)),

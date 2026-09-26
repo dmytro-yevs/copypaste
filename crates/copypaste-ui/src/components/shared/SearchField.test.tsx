@@ -34,6 +34,43 @@ function pixelToken(source: string, name: string): number {
 }
 
 describe("SearchField", () => {
+  it.each([
+    ["macos", "⌘F"],
+    ["windows", "Ctrl+F"],
+  ])("shows the %s shortcut while retaining its raw accessible name", (platform, label) => {
+    window.history.replaceState({}, "", `/?platform=${platform}`);
+    const { container, unmount } = render(
+      <TooltipProvider>
+        <SearchField aria-label="Search" shortcut="CmdOrCtrl+F" value="" onChange={() => {}} />
+      </TooltipProvider>,
+    );
+    const badge = container.querySelector("[data-slot='shortcut-badge']");
+    expect(badge?.textContent).toBe(label);
+    expect(badge?.getAttribute("aria-label")).toBe("CmdOrCtrl+F");
+    unmount();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("does not show a keyboard badge for touch Android", () => {
+    window.history.replaceState({}, "", "/?platform=android");
+    const { container } = render(
+      <TooltipProvider>
+        <SearchField aria-label="Search" shortcut="CmdOrCtrl+F" value="" onChange={() => {}} />
+      </TooltipProvider>,
+    );
+    expect(container.querySelector("[data-slot='shortcut-badge']")).toBeNull();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("does not invent a shortcut when a caller has none", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <SearchField aria-label="Search" value="" onChange={() => {}} />
+      </TooltipProvider>,
+    );
+    expect(container.querySelector("[data-slot='shortcut-badge']")).toBeNull();
+  });
+
   it("keeps its searchbox vocabulary and renders one clear control", () => {
     render(
       <TooltipProvider>
