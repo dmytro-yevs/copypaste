@@ -102,6 +102,42 @@ describe("cloud account lifecycle", () => {
   });
 });
 
+describe("cloud connection health", () => {
+  it.each([
+    ["last sync error", { last_error: "safe persisted error" }],
+    ["unreadable uploads", { unreadable_uploads: 2 }],
+  ] as const)("shows attention for %s while keeping account actions", async (_case, issue) => {
+    ipc.getCloudStatus.mockResolvedValue(status({
+      configured: true,
+      signed_in: true,
+      key_ready: true,
+      email: "person@example.com",
+      ...issue,
+    }));
+    withUser(<CloudSyncSettings />);
+
+    expect(await screen.findByText("Needs attention")).toBeTruthy();
+    expect(screen.getByText("Your account is connected, but cloud sync needs attention.")).toBeTruthy();
+    expect(screen.queryByText("Connected")).toBeNull();
+    expect(screen.getByRole("button", { name: "Sync cloud now" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change server" })).toBeTruthy();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+  });
+
+  it("shows healthy only when the signed-in account has no sync issue", async () => {
+    ipc.getCloudStatus.mockResolvedValue(status({
+      configured: true,
+      signed_in: true,
+      key_ready: true,
+    }));
+    withUser(<CloudSyncSettings />);
+
+    expect(await screen.findByText("Connected")).toBeTruthy();
+    expect(screen.queryByText("Needs attention")).toBeNull();
+  });
+});
+
 describe("connection error announcements", () => {
   function expectSingleConnectionAlert(message: string | null) {
     const alerts = screen.getAllByRole("alert");
@@ -162,11 +198,14 @@ describe("connection error announcements", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(
       "Cloud sync failed. Check the connection and try again.",
     ));
+    expect(screen.getByText("Needs attention")).toBeTruthy();
+    expect(screen.queryByText("Connected")).toBeNull();
     expect(screen.getByRole("alert")).toBe(initialOwner);
     expectSingleConnectionAlert("Cloud sync failed. Check the connection and try again.");
 
     await user.click(screen.getByRole("button", { name: "Sync cloud now" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(""));
+    expect(screen.getByText("Connected")).toBeTruthy();
     expect(screen.getByRole("alert")).toBe(initialOwner);
     expectSingleConnectionAlert(null);
 

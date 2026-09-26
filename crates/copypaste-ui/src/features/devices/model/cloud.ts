@@ -24,12 +24,13 @@ export function cloudConnectionState(
     status: CloudStatusData | undefined,
     failed: boolean,
     loading: boolean,
+    syncFailed = false,
 ): CloudConnectionState {
     if (loading) return "checking";
     if (failed || status === undefined) return "unavailable";
     if (!status.configured) return "not-configured";
     if (!status.signed_in || !status.key_ready) return "signed-out";
-    if (status.last_error || status.unreadable_uploads > 0) return "attention";
+    if (syncFailed || status.last_error || status.unreadable_uploads > 0) return "attention";
     return "healthy";
 }
 
