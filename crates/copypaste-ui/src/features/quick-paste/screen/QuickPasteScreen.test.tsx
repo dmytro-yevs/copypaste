@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,7 +15,7 @@ const ipc = vi.hoisted(() => ({
   getClipboardWriteAvailability: vi.fn(),
   listItems: vi.fn(),
 }));
-const lifecycle = vi.hoisted(() => ({ dismiss: vi.fn() }));
+const lifecycle = vi.hoisted(() => ({ dismiss: vi.fn(), generation: 0 }));
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
 
 vi.mock("sonner", () => ({ toast }));
@@ -26,8 +26,8 @@ vi.mock("@/features/quick-paste/hooks/useQuickPasteLifecycle", () => ({
     previewLinesPopup: 2,
     dismiss: lifecycle.dismiss,
     dismissOnRootBlur: () => undefined,
-    currentCacheGeneration: () => 0,
-    isCacheGenerationCurrent: () => true,
+    currentCacheGeneration: () => lifecycle.generation,
+    isCacheGenerationCurrent: (generation: number) => generation === lifecycle.generation,
   }),
 }));
 vi.mock("@/lib/ipc", async (load) => ({
@@ -65,6 +65,7 @@ describe("quickPastePresentation", () => {
     ipc.getClipboardWriteAvailability.mockReset().mockResolvedValue("available");
     ipc.listItems.mockReset();
     lifecycle.dismiss.mockReset();
+    lifecycle.generation = 0;
     toast.error.mockReset();
     ipc.listItems.mockResolvedValue(page([item()]));
   });
@@ -314,5 +315,90 @@ describe("quickPastePresentation", () => {
       ["text/plain", "original"],
       ["text/plain", "plain_text"],
     ]);
+  });
+
+  it("accepts one copy across pointer, row Enter, root Enter and slot keys while writing", async () => {
+    let rejectWrite!: (reason: unknown) => void;
+    ipc.copyItem.mockImplementationOnce(() => new Promise((_, reject) => { rejectWrite = reject; }));
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("listitem");
+    const copy = () => screen.getByRole("button", { name: /copy an ordinary clipboard entry/i });
+    await waitFor(() => expect(copy().hasAttribute("disabled")).toBe(false));
+    copy().focus();
+    fireEvent.keyDown(copy(), { key: "Enter" });
+    await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
+    expect(document.activeElement).toBe(copy());
+    expect(copy().getAttribute("aria-disabled")).toBe("true");
+    fireEvent.pointerDown(copy(), { button: 0 });
+    fireEvent.keyDown(copy(), { key: "Enter" });
+    const search = screen.getByRole("searchbox");
+    fireEvent.keyDown(search, { key: "Enter" });
+    fireEvent.keyDown(search, { key: "1", metaKey: true });
+    expect(ipc.copyItem).toHaveBeenCalledOnce();
+    expect(lifecycle.dismiss).not.toHaveBeenCalled();
+
+    rejectWrite({ code: "offline", retryable: true });
+    await waitFor(() => expect(copy().getAttribute("aria-disabled")).toBe("false"));
+    await user.click(copy());
+    await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledTimes(2));
+  });
+
+  it("locks duplicate input before a refreshed availability check resolves", async () => {
+    const client = testClient();
+    let resolveAvailability!: (value: string) => void;
+    ipc.copyItem.mockResolvedValue(undefined);
+    render(
+      <QueryClientProvider client={client}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("listitem");
+    const copy = () => screen.getByRole("button", { name: /copy an ordinary clipboard entry/i });
+    await waitFor(() => expect(copy().getAttribute("aria-disabled")).toBe("false"));
+    ipc.getClipboardWriteAvailability.mockImplementationOnce(
+      () => new Promise<string>((resolve) => { resolveAvailability = resolve; }),
+    );
+    act(() => {
+      void client.invalidateQueries({
+        queryKey: ["clipboard-write-availability", "text/plain", "original"],
+      });
+    });
+    await waitFor(() => expect(ipc.getClipboardWriteAvailability).toHaveBeenCalledTimes(3));
+    fireEvent.pointerDown(copy(), { button: 0 });
+    fireEvent.pointerDown(copy(), { button: 0 });
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
+    expect(copy().getAttribute("aria-disabled")).toBe("true");
+    expect(ipc.copyItem).not.toHaveBeenCalled();
+    resolveAvailability("available");
+    await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
+    expect(lifecycle.dismiss).toHaveBeenCalledOnce();
+  });
+
+  it("keeps original and plain-text input in one flight and ignores stale success after reopen", async () => {
+    let resolveWrite!: () => void;
+    ipc.copyItem.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveWrite = resolve; }));
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("listitem");
+    const copy = () => screen.getByRole("button", { name: /copy an ordinary clipboard entry/i });
+    await waitFor(() => expect(copy().hasAttribute("disabled")).toBe(false));
+    fireEvent.pointerDown(copy(), { button: 0 });
+    await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter", altKey: true });
+    expect(ipc.copyItemAsPlainText).not.toHaveBeenCalled();
+
+    lifecycle.generation += 2;
+    resolveWrite();
+    await waitFor(() => expect(copy().getAttribute("aria-disabled")).toBe("false"));
+    expect(lifecycle.dismiss).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

@@ -36,6 +36,7 @@ interface QuickPasteRowProps {
   previewLines: number;
   shortcut: string | null;
   pinPending: boolean;
+  copyPending?: boolean;
   origin: OriginDevice | null;
   fullContent: string | null;
   fullContentFailed: boolean;
@@ -51,6 +52,7 @@ export function QuickPasteRow({
   previewLines,
   shortcut,
   pinPending,
+  copyPending = false,
   origin,
   fullContent,
   fullContentFailed,
@@ -129,19 +131,21 @@ export function QuickPasteRow({
       size="sm"
       tabIndex={active ? 0 : -1}
       disabled={!copyAvailability.canCopy}
+      aria-disabled={copyPending || !copyAvailability.canCopy}
+      aria-busy={copyPending || undefined}
       onPointerDown={(event) => {
-        if (!copyAvailability.canCopy || event.button !== 0) return;
+        if (copyPending || !copyAvailability.canCopy || event.button !== 0) return;
         event.preventDefault();
         onCopy(false);
       }}
       onKeyDown={(event) => {
-        if (!copyAvailability.canCopy || event.key !== "Enter") return;
+        if (copyPending || !copyAvailability.canCopy || event.key !== "Enter") return;
         event.preventDefault();
         event.stopPropagation();
         onCopy(event.altKey);
       }}
       onClick={(event) => {
-        if (copyAvailability.canCopy && event.detail === 0) onCopy(false);
+        if (!copyPending && copyAvailability.canCopy && event.detail === 0) onCopy(false);
       }}
       aria-label={`${t("quickPaste.row.copyPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`}
       className={styles.hit}

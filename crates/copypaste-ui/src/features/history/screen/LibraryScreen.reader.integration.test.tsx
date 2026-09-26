@@ -173,6 +173,33 @@ describe("LibraryScreen reader reachability", () => {
         expect(dialog.querySelector('[data-mode="reader"]')).not.toBeNull();
     });
 
+    it("disables desktop inspector actions while its copy write is pending", async () => {
+        viewport.width = 1200;
+        let finishCopy!: () => void;
+        ipc.copyItem.mockImplementationOnce(
+            () => new Promise<void>((resolve) => { finishCopy = resolve; }),
+        );
+        const { user } = renderScreen();
+        await user.click(await screen.findByRole("button", { name: "short preview" }));
+        const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+        const copy = within(inspector).getByRole("button", { name: "Copy" });
+        await waitFor(() => expect(copy.hasAttribute("disabled")).toBe(false));
+
+        await user.click(copy);
+        await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledOnce());
+        await waitFor(() => expect(within(inspector).getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
+            .toBe(true));
+        expect(within(inspector).getByRole("button", { name: "Show full contents" }).hasAttribute("disabled"))
+            .toBe(true);
+        await user.click(within(inspector).getByRole("button", { name: "Copy" }));
+        expect(ipc.copyItem).toHaveBeenCalledOnce();
+
+        finishCopy();
+        await waitFor(() => expect(within(inspector).getByRole("button", { name: "Copy" }).hasAttribute("disabled"))
+            .toBe(false));
+        expect(toast.success).toHaveBeenCalledOnce();
+    });
+
     it("opens the reader with the desktop list keyboard action", async () => {
         viewport.width = 1200;
         const { user } = renderScreen();
