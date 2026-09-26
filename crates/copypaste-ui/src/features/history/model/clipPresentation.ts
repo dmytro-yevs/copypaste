@@ -1,13 +1,41 @@
 import { t } from "@/i18n";
 import { clipTypeMetadata } from "@/lib/clipPresentation";
 import { kindOf, type Kind } from "@/lib/format";
-import type { Item } from "@/lib/ipc";
+import type { ClipboardWriteAvailability, Item } from "@/lib/ipc";
 import { previewOf } from "@/lib/format";
 import { wontSync } from "@/lib/itemOrigin";
 
 export interface ClipCopyActionPresentation {
   readonly icon: "copy" | "image";
   readonly label: string;
+}
+
+export type ClipboardCopyState =
+  | { readonly status: "loading" }
+  | { readonly status: "failed" }
+  | { readonly status: "resolved"; readonly availability: ClipboardWriteAvailability };
+
+export interface ClipboardCopyPresentation {
+  readonly canCopy: boolean;
+  readonly reason: string | null;
+  readonly canRetry: boolean;
+}
+
+export function clipboardCopyPresentation(state: ClipboardCopyState): ClipboardCopyPresentation {
+  if (state.status === "loading") {
+    return { canCopy: false, reason: t("history.copyAvailability.checking"), canRetry: false };
+  }
+  if (state.status === "failed") {
+    return { canCopy: false, reason: t("history.copyAvailability.failed"), canRetry: true };
+  }
+  switch (state.availability) {
+    case "available":
+      return { canCopy: true, reason: null, canRetry: false };
+    case "unsupported_content_type":
+      return { canCopy: false, reason: t("history.copyAvailability.unsupportedType"), canRetry: false };
+    case "unsupported_on_platform":
+      return { canCopy: false, reason: t("history.copyAvailability.unsupportedPlatform"), canRetry: false };
+  }
 }
 
 type RowLabelKey =
