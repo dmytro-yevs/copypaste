@@ -56,6 +56,12 @@ pub(crate) struct IdArgs {
     pub(crate) id: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct ClipboardWriteAvailabilityArgs {
+    #[serde(rename = "contentType")]
+    pub(crate) content_type: String,
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct ClearArgs {
     pub(crate) through: Option<i64>,
@@ -100,6 +106,7 @@ pub(crate) enum BridgeCommand {
     Search,
     CopyItem,
     CopyItemAsPlainText,
+    ClipboardWriteAvailability,
     GetItemBody,
     ImagePreview,
     SourceAppIcon,
@@ -132,6 +139,7 @@ impl BridgeCommand {
             UiCommandName::Search => Some(Self::Search),
             UiCommandName::CopyItem => Some(Self::CopyItem),
             UiCommandName::CopyItemAsPlainText => Some(Self::CopyItemAsPlainText),
+            UiCommandName::ClipboardWriteAvailability => Some(Self::ClipboardWriteAvailability),
             UiCommandName::GetItemBody => Some(Self::GetItemBody),
             UiCommandName::GetImagePreview => Some(Self::ImagePreview),
             UiCommandName::GetSourceAppIcon => Some(Self::SourceAppIcon),
@@ -266,6 +274,7 @@ mod tests {
             "search",
             "copy_item",
             "copy_item_as_plain_text",
+            "clipboard_write_availability",
             "get_item_body",
             "get_image_preview",
             "get_source_app_icon",

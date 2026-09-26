@@ -10,6 +10,7 @@
         "add_item",
         "copy_item",
         "copy_item_as_plain_text",
+        "clipboard_write_availability",
         "reveal_item",
         "get_item_body",
         "copy_items",

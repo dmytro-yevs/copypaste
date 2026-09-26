@@ -24,6 +24,74 @@ type Result<T> = std::result::Result<T, BackendError>;
 
 const MSG_BULK_COPY_FAILED: &str = "Those items couldn't be copied to the clipboard.";
 
+/// Format availability for a native clipboard write. An actual write can still
+/// fail, for example when image bytes cannot be decoded or file metadata is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipboardWriteAvailability {
+    Available,
+    UnsupportedContentType,
+    UnsupportedOnPlatform,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ClipboardPlatform {
+    Android,
+    MacOs,
+    Windows,
+    Other,
+}
+
+/// Report whether the compiled platform's writer accepts this history format.
+/// No item id or content crosses the WebView boundary.
+#[tauri::command]
+pub fn clipboard_write_availability(content_type: String) -> ClipboardWriteAvailability {
+    let platform = match std::env::consts::OS {
+        "android" => ClipboardPlatform::Android,
+        "macos" => ClipboardPlatform::MacOs,
+        "windows" => ClipboardPlatform::Windows,
+        _ => ClipboardPlatform::Other,
+    };
+    write_availability(platform, &content_type)
+}
+
+fn write_availability(
+    platform: ClipboardPlatform,
+    content_type: &str,
+) -> ClipboardWriteAvailability {
+    use copypaste_ipc::{content_type, ContentClass};
+    use ClipboardWriteAvailability::{Available, UnsupportedContentType, UnsupportedOnPlatform};
+
+    match content_type::classify(content_type) {
+        // The Linux test daemon uses the text-only fake ClipboardSource.
+        ContentClass::Text => Available,
+        ContentClass::Image => match platform {
+            ClipboardPlatform::Windows
+                if matches!(
+                    content_type,
+                    content_type::IMAGE_PNG | content_type::IMAGE_TIFF | "image/bmp"
+                ) =>
+            {
+                Available
+            }
+            ClipboardPlatform::MacOs
+                if matches!(
+                    content_type,
+                    content_type::IMAGE_PNG | content_type::IMAGE_TIFF
+                ) =>
+            {
+                Available
+            }
+            _ => UnsupportedOnPlatform,
+        },
+        ContentClass::File => match platform {
+            ClipboardPlatform::MacOs => Available,
+            _ => UnsupportedOnPlatform,
+        },
+        ContentClass::Other => UnsupportedContentType,
+    }
+}
+
 /// Most recent items, newest first; pinned ahead of unpinned.
 ///
 /// Returns a page rather than a bare array so the count of rows that would not
@@ -306,6 +374,72 @@ pub async fn reorder_pinned(backend: State<'_, SelectedBackend>, ids: Vec<String
 mod tests {
     use super::*;
     use crate::backend::{testing::FakeBackend, Page};
+
+    #[test]
+    fn clipboard_write_availability_matches_native_writers() {
+        use ClipboardPlatform::{Android, MacOs, Other, Windows};
+        use ClipboardWriteAvailability::{
+            Available, UnsupportedContentType, UnsupportedOnPlatform,
+        };
+
+        for content_type in ["text", "text/plain", "text/html"] {
+            for platform in [Android, MacOs, Windows] {
+                assert_eq!(write_availability(platform, content_type), Available);
+            }
+            assert_eq!(write_availability(Other, content_type), Available);
+        }
+        for content_type in ["image/png", "image/tiff"] {
+            assert_eq!(
+                write_availability(Android, content_type),
+                UnsupportedOnPlatform
+            );
+            assert_eq!(write_availability(MacOs, content_type), Available);
+            assert_eq!(write_availability(Windows, content_type), Available);
+        }
+        assert_eq!(
+            write_availability(MacOs, "image/webp"),
+            UnsupportedOnPlatform
+        );
+        assert_eq!(write_availability(Windows, "image/bmp"), Available);
+        assert_eq!(
+            write_availability(Windows, "image/webp"),
+            UnsupportedOnPlatform
+        );
+        assert_eq!(write_availability(Android, "file"), UnsupportedOnPlatform);
+        assert_eq!(write_availability(MacOs, "file"), Available);
+        assert_eq!(write_availability(Windows, "file"), UnsupportedOnPlatform);
+        assert_eq!(
+            write_availability(Other, "image/png"),
+            UnsupportedOnPlatform
+        );
+        assert_eq!(write_availability(Other, "file"), UnsupportedOnPlatform);
+        for platform in [Android, MacOs, Windows, Other] {
+            assert_eq!(
+                write_availability(platform, "application/x-future"),
+                UnsupportedContentType
+            );
+        }
+    }
+
+    #[test]
+    fn clipboard_write_availability_has_stable_wire_values() {
+        for (availability, expected) in [
+            (ClipboardWriteAvailability::Available, "available"),
+            (
+                ClipboardWriteAvailability::UnsupportedContentType,
+                "unsupported_content_type",
+            ),
+            (
+                ClipboardWriteAvailability::UnsupportedOnPlatform,
+                "unsupported_on_platform",
+            ),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&availability).unwrap(),
+                format!("\"{expected}\"")
+            );
+        }
+    }
 
     /// `add_item` rejects blank content before spending a round trip, and the
     /// message it uses is one a user can act on.

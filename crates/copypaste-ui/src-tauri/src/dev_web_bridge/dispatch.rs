@@ -70,6 +70,12 @@ pub(crate) async fn call(
                 .map_err(failure)
                 .and_then(value)
         }
+        BridgeCommand::ClipboardWriteAvailability => {
+            let args: ClipboardWriteAvailabilityArgs = parse(request.args)?;
+            value(crate::commands::history::clipboard_write_availability(
+                args.content_type,
+            ))
+        }
         BridgeCommand::GetItemBody => {
             let args: IdArgs = parse(request.args)?;
             backend

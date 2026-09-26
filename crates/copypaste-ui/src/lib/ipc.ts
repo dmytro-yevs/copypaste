@@ -1,6 +1,7 @@
 import { call, hasBridge, hasWebBridge } from "./ipcCall";
 import { DEFAULT_SHORTCUT } from "./accelerator";
 import { UI_COMMANDS } from "@/generated/ipc";
+import type { CommandResult } from "@/generated/ipc";
 import type {
   CloudStatusData,
   CloudSyncData,
@@ -76,6 +77,10 @@ export { PAIRING_SEMANTICS_BY_STATE } from "@/generated/ipc";
 /** Stable UI name retained for the Rust `ImportData` response DTO. */
 export type ImportReport = ImportData;
 
+export type ClipboardWriteAvailability = CommandResult<
+  typeof UI_COMMANDS.clipboard_write_availability
+>;
+
 export { hasBridge, hasWebBridge };
 
 export interface PreviewPairingInvite {
@@ -112,6 +117,13 @@ export function copyItem(id: string): Promise<Item> {
  * boundary; only its id crosses the WebView bridge. */
 export function copyItemAsPlainText(id: string): Promise<Item> {
   return call(UI_COMMANDS.copy_item_as_plain_text, { id });
+}
+
+/** Format support only. The native write remains the final authority. */
+export function getClipboardWriteAvailability(
+  contentType: string,
+): Promise<ClipboardWriteAvailability> {
+  return call(UI_COMMANDS.clipboard_write_availability, { contentType });
 }
 
 /** One clipboard write for the whole selection, and the count that actually

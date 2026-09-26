@@ -5,6 +5,14 @@ if (false) {
   const status = call(UI_COMMANDS.status);
   void status;
 
+  const writeAvailability = call(UI_COMMANDS.clipboard_write_availability, {
+    contentType: "image/png",
+  });
+  const availabilityResult: Promise<
+    "available" | "unsupported_content_type" | "unsupported_on_platform"
+  > = writeAvailability;
+  void availabilityResult;
+
   // @ts-expect-error Unknown commands are rejected before reaching a bridge.
   void call("future_command");
   // @ts-expect-error List commands require their argument object.
@@ -13,6 +21,8 @@ if (false) {
   void call(UI_COMMANDS.list, { limit: 20 });
   // @ts-expect-error Argument types come from the command contract.
   void call(UI_COMMANDS.copy_item, { id: 42 });
+  // @ts-expect-error The availability command takes a content type, not content.
+  void call(UI_COMMANDS.clipboard_write_availability, { content: "secret" });
   // @ts-expect-error No-argument commands reject invented arguments.
   void call(UI_COMMANDS.status, {});
   // @ts-expect-error The caller cannot choose a result type.
