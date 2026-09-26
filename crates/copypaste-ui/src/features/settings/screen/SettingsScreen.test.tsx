@@ -215,10 +215,13 @@ it("does not carry a clipboard search reveal into the cloud server", async () =>
   cloudIpc.getCloudStatus.mockResolvedValue(cloudStatus(true));
   withClient(<TooltipProvider><SettingsScreen /></TooltipProvider>);
   const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
-  fireEvent.change(searchbox, { target: { value: "Check the clipboard every" } });
+  fireEvent.change(searchbox, { target: { value: "polling" } });
   fireEvent.click(await screen.findByRole("option", { name: /Check the clipboard every/ }));
-  const clipboard = await screen.findByText("Advanced capture settings");
-  await waitFor(() => expect(clipboard.closest("details")?.open).toBe(true));
+  const polling = await screen.findByRole("combobox", { name: "Check the clipboard every" });
+  await waitFor(() => {
+    expect(polling.closest("details")?.open).toBe(true);
+    expect(document.activeElement).toBe(polling);
+  });
 
   act(() => useUi.setState({ settingsTab: "cloud-sync" }));
   const cloud = await screen.findByText("Advanced · Self-hosted cloud server");
