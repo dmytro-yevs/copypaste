@@ -170,7 +170,7 @@
   .slide {
     block-size: 100%;
     min-block-size: 0;
-    grid-template-columns: minmax(0, 1.08fr) minmax(calc(var(--s-9) * 17.5), .92fr);
+    grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr);
   }
 
   .copy {
