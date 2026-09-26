@@ -76,35 +76,14 @@
     animation: detail-spin var(--dur) linear infinite;
 }
 
-.imageRegion,
 .contentRegion {
     inline-size: 100%;
+    min-block-size: 0;
     overflow: hidden;
-    outline: 0;
-}
-
-.imageRegion:focus-visible,
-.contentRegion:focus-visible {
-    box-shadow: var(--sh-focus);
-}
-
-.imageRegion {
-    display: flex;
-    min-block-size: calc(var(--s-9) * 4);
-    max-block-size: calc(var(--s-9) * 8);
-    align-items: center;
-    justify-content: center;
 }
 
 .contentRegion {
-    min-block-size: var(--sz-iconbtn);
     max-block-size: min(50dvh, calc(var(--s-9) * 10));
-    overflow-x: hidden;
-    overflow-y: auto;
-}
-
-.codeRegion {
-    background: transparent;
 }
 
 .unavailable {
@@ -114,19 +93,6 @@
     color: var(--dim);
     font-size: var(--fs-sm);
     text-align: center;
-}
-
-.body {
-    color: var(--text);
-    font-size: var(--fs-sm);
-    line-height: var(--lh-normal);
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-}
-
-.mono {
-    font-family: var(--f-mono);
-    font-size: var(--fs-xs);
 }
 
 @keyframes detail-spin {
