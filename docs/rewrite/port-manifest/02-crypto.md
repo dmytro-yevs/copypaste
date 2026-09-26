@@ -217,8 +217,8 @@ not be forwarded to a user.
 ## 5. Module and dependency rules
 
 Use maintained crypto crates for HKDF, AEAD, STREAM framing, password hashing,
-constant-time comparison and zeroization. A custom primitive or format requires
-an ADR under the dependency exemptions in `AGENTS.md`.
+constant-time comparison and zeroization. A custom primitive or format needs
+a separate architecture decision and security review.
 
 One module owns each stable boundary: derivation, envelope, stream and platform
 keystore. The facade exposes typed keys and closed errors, not raw internals.

@@ -111,8 +111,8 @@ metadata from a different clipboard silo.
   (`capture_state`, `capture_arm`, `capture_now`,
   `capture_set_toast_suppressed`, `copypaste://capture-state`,
   `copypaste://captured`); the rung 2 setup screen, the status indicator beside
-  history and the toast-consent dialog are not written. AGENTS.md rule 6 is
-  therefore **not** satisfied yet, and this is the gap to close first.
+  history and the toast-consent dialog are not written. The shipped UI for
+  this capability is incomplete, and this is the gap to close first.
 
 ## Unverified
 

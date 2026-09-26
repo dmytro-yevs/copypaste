@@ -379,7 +379,7 @@ Three consequences that must be carried:
   variation selectors, …). A spliced secret such as `AKIA\u{200D}IOS…` must
   still match. Spans index the stripped string. Auto-wipe stays on the
   high-confidence band: inert PII with ignorables stripped must not become
-  deletable (`AGENTS.md` rule 4).
+  deletable.
 
 ### 5.2 Structural anchoring (the primary defence)
 
@@ -760,7 +760,7 @@ exemption, the cheap existence probe and the startup purge remain binding.
 candidate row at wipe time and requires `Severity::HighConfidence`, so a row is deleted only if it was
 flagged at capture *and* is still above the floor. Deleting on a flag written by
 a ruleset that has since changed is a decision nobody can review before it
-fires, and `AGENTS.md` rule 4 ranks that above the cost of one AEAD per expired
+fires. Preventing that data loss outweighs the cost of one AEAD per expired
 candidate.
 
 **Consequence, stated rather than hidden:** changing the TTL re-dates every

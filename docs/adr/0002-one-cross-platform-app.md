@@ -26,9 +26,8 @@ Xcode nor the Android SDK, so the cost was being paid in code that nobody could
 run.
 
 That is the failure this rewrite exists to end, arriving in a new costume.
-AGENTS.md rule 1 is about not writing what a library already provides; the same
-logic applies to writing the same screen twice because two platforms are in
-scope. Three implementations of one history list is the UI-layer version of six
+The same reuse principle applies to writing the same screen twice because two
+platforms are in scope. Three implementations of one history list mirror six
 retry implementations.
 
 The honest accounting of what was lost by reversing: native scroll physics,

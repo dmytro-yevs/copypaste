@@ -1,14 +1,14 @@
 # ADR-0013 — Windows as a third platform
 
-**Status:** accepted · 2026-08-07 · **codified in AGENTS.md rule 7**
+**Status:** accepted · 2026-08-07
 **Scope:** that Windows is a shipped target, and the platform boundaries that
 must be maintained and qualified.
 
 ## Decision
 
-Windows ships, on the same footing as macOS and Android. AGENTS.md rule 7
-requires a dependency to work on all three, or sit
-behind a platform cfg with **every** other side implemented.
+Windows ships, on the same footing as macOS and Android. Dependencies must
+work on all three or sit behind a platform cfg with **every** other side
+implemented.
 
 **Linux desktop is still not a shipped target.** It stays a test surface —
 `browser-webkitgtk.yml` drives the app through WebKitGTK, and that is the whole
