@@ -14,6 +14,15 @@ import { useTranslation } from "@/i18n";
 import { useUi } from "@/store/ui";
 import styles from "./SyncTab.module.css";
 
+function focusSyncEnabledControl(): boolean {
+  const control = document.getElementById("sync-enabled");
+  if (control === null) return false;
+  control.closest<HTMLElement>("[data-settings-search-target]")
+    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  control.focus({ preventScroll: true });
+  return true;
+}
+
 export function DeviceSyncSettings() {
   const { t } = useTranslation();
   const deviceDescriptionId = useId();
@@ -42,6 +51,7 @@ export function DeviceSyncSettings() {
     health,
   });
   const partialFailure = sync.data?.some((result) => result.error !== null) ?? false;
+
   const syncNote = config.isPending
     ? <FieldFeedback state="pending">{t("settings.sync.now.configLoading")}</FieldFeedback>
     : configUnknown
@@ -124,16 +134,25 @@ export function DeviceSyncSettings() {
               <Icon name="refresh" aria-hidden="true" className={sync.isPending ? styles.spinner : undefined} />
               {t(sync.isPending ? "settings.sync.now.pending" : "settings.sync.now.action")}
             </Button>
-            {(configUnknown || (!config.isPending && !syncEnabled)) && (
+            {configUnknown ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void config.refetch()}
+              >
+                {t("common.tryAgain")}
+              </Button>
+            ) : !config.isPending && !syncEnabled && (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setSettingsTab("service");
+                  if (focusSyncEnabledControl()) return;
+                  setSettingsTab("device-sync");
                   setView("settings");
                 }}
               >
-                {t("settings.sync.now.openService")}
+                {t("settings.sync.now.showSetting")}
               </Button>
             )}
           </div>
