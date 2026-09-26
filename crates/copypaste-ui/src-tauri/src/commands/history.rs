@@ -65,25 +65,26 @@ fn write_availability(
     match content_type::classify(content_type) {
         // The Linux test daemon uses the text-only fake ClipboardSource.
         ContentClass::Text => Available,
-        ContentClass::Image => match platform {
-            ClipboardPlatform::Windows
-                if matches!(
-                    content_type,
-                    content_type::IMAGE_PNG | content_type::IMAGE_TIFF | "image/bmp"
-                ) =>
-            {
-                Available
+        ContentClass::Image => {
+            if !matches!(
+                content_type,
+                content_type::IMAGE_PNG | content_type::IMAGE_TIFF | "image/bmp"
+            ) {
+                return UnsupportedContentType;
             }
-            ClipboardPlatform::MacOs
-                if matches!(
-                    content_type,
-                    content_type::IMAGE_PNG | content_type::IMAGE_TIFF
-                ) =>
-            {
-                Available
+            match platform {
+                ClipboardPlatform::Windows => Available,
+                ClipboardPlatform::MacOs
+                    if matches!(
+                        content_type,
+                        content_type::IMAGE_PNG | content_type::IMAGE_TIFF
+                    ) =>
+                {
+                    Available
+                }
+                _ => UnsupportedOnPlatform,
             }
-            _ => UnsupportedOnPlatform,
-        },
+        }
         ContentClass::File => match platform {
             ClipboardPlatform::MacOs => Available,
             _ => UnsupportedOnPlatform,
@@ -396,13 +397,13 @@ mod tests {
             assert_eq!(write_availability(MacOs, content_type), Available);
             assert_eq!(write_availability(Windows, content_type), Available);
         }
-        assert_eq!(
-            write_availability(MacOs, "image/webp"),
-            UnsupportedOnPlatform
-        );
         assert_eq!(write_availability(Windows, "image/bmp"), Available);
         assert_eq!(
-            write_availability(Windows, "image/webp"),
+            write_availability(MacOs, "image/bmp"),
+            UnsupportedOnPlatform
+        );
+        assert_eq!(
+            write_availability(Android, "image/bmp"),
             UnsupportedOnPlatform
         );
         assert_eq!(write_availability(Android, "file"), UnsupportedOnPlatform);
@@ -414,10 +415,18 @@ mod tests {
         );
         assert_eq!(write_availability(Other, "file"), UnsupportedOnPlatform);
         for platform in [Android, MacOs, Windows, Other] {
-            assert_eq!(
-                write_availability(platform, "application/x-future"),
-                UnsupportedContentType
-            );
+            for content_type in [
+                "image/webp",
+                "image/jpeg",
+                "image/x-future",
+                "application/x-future",
+            ] {
+                assert_eq!(
+                    write_availability(platform, content_type),
+                    UnsupportedContentType,
+                    "{content_type} on {platform:?}"
+                );
+            }
         }
     }
 
