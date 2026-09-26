@@ -845,7 +845,7 @@ rec(not CI_GATES_ERROR and portable_gate_contract_holds(
         ci_jobs,
     ),
     "CI and the WSL mirror select the same enforcing portable gate registry",
-    CI_GATES_ERROR or "a gate is missing, duplicated, or replaced by an advisory command")
+    CI_GATES_ERROR or "a gate is missing, duplicated, or the feature-ledger check is incomplete")
 documentation = ci_jobs.get("documentation") or {}
 documentation_body = "\n".join(step.get("run") or "" for step in steps(documentation))
 rec("check-docs.py" in documentation_body,
@@ -2045,7 +2045,7 @@ if SELF_TEST:
         for gate_id in CI_GATES["profiles"]["linux-ci-mirror"]
     }
     missing_gate_fixture = copy.deepcopy(ci_gate_fixture)
-    missing_gate_fixture.pop("file-size-budget")
+    missing_gate_fixture.pop("feature-ledger")
     duplicate_gate_fixture = copy.deepcopy(ci_gate_fixture)
     duplicate_gate_fixture["duplicate"] = {
         "steps": [{"run": "python3 scripts/ci/run-gates.py --gate feature-ledger"}]
@@ -2053,12 +2053,12 @@ if SELF_TEST:
     inert_gate_fixture = copy.deepcopy(ci_gate_fixture)
     inert_gate_fixture["feature-ledger"]["steps"][0]["run"] = \
         "echo python3 scripts/ci/run-gates.py --gate feature-ledger"
-    advisory_registry = copy.deepcopy(CI_GATES)
-    advisory_registry["gates"]["file-size-budget"]["commands"] = [
-        ["bash", "scripts/check-file-size.sh", "500"]
+    incomplete_registry = copy.deepcopy(CI_GATES)
+    incomplete_registry["gates"]["feature-ledger"]["commands"] = [
+        ["python3", "scripts/check-feature-ledger.py", "--self-test"]
     ]
     for desc, held in (
-        ("the oversized-file fixture and enforcing gate reach both entry points",
+        ("the enforcing portable gates reach both entry points",
          portable_gate_contract_holds(
              CI_GATES, "linux-ci-mirror", local_gate_source, ci_gate_fixture)),
         ("a CI gate missing from the local profile is rejected",
@@ -2070,9 +2070,9 @@ if SELF_TEST:
         ("an inert mention of a CI gate is rejected",
          not portable_gate_contract_holds(
              CI_GATES, "linux-ci-mirror", local_gate_source, inert_gate_fixture)),
-        ("the advisory file-size checker cannot replace the enforcing gate",
+        ("the feature-ledger self-test cannot replace validation",
          not portable_gate_contract_holds(
-             advisory_registry, "linux-ci-mirror", local_gate_source, ci_gate_fixture)),
+             incomplete_registry, "linux-ci-mirror", local_gate_source, ci_gate_fixture)),
     ):
         emit(held, "self-test: {}".format(desc),
              "the portable gate registry detector did not behave as stated")

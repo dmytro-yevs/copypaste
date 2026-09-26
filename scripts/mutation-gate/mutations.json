@@ -206,43 +206,6 @@
       ]
     },
     {
-      "id": "check-file-size-gate",
-      "verifies": "the file-size gate's porcelain parse: a dead, truncated or inconsistent report must fail",
-      "command": ["bash", "scripts/check-file-size-gate.sh", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["bash", "awk"],
-      "mutations": [
-        {
-          "name": "dead-checker-passes",
-          "file": "scripts/check-file-size-gate.sh",
-          "find": "    if [[ \"$status\" -ne 0 ]]; then",
-          "replace": "    if false; then",
-          "expect": "FAIL  a checker that exits 37 fails the gate"
-        },
-        {
-          "name": "truncated-report-passes",
-          "file": "scripts/check-file-size-gate.sh",
-          "find": "    [[ \"$state\" == \"ended\" ]] ||",
-          "replace": "    [[ -n \"$state\" ]] ||",
-          "expect": "FAIL  a report that stops after its header fails the gate"
-        },
-        {
-          "name": "count-mismatch-passes",
-          "file": "scripts/check-file-size-gate.sh",
-          "find": "    [[ \"$declared\" -eq \"$seen\" ]] ||",
-          "replace": "    [[ -n \"$declared\" ]] ||",
-          "expect": "FAIL  a declared overage with no row fails the gate"
-        },
-        {
-          "name": "annotation-property-not-escaped",
-          "file": "scripts/check-file-size-gate.sh",
-          "find": "    v=\"${v//,/%2C}\"",
-          "replace": "    v=\"${v//,/,}\"",
-          "expect": "FAIL  a comma in a path is escaped in annotations"
-        }
-      ]
-    },
-    {
       "id": "png-evidence",
       "verifies": "the release screenshot validator: a blank or contentless PNG is not evidence",
       "command": ["python3", "scripts/release/png_evidence.py", "--self-test"],
