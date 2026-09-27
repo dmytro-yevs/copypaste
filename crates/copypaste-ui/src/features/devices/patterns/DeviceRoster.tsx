@@ -160,7 +160,6 @@ export function DeviceRoster({
                 {!peersLoading && !peersFailed ? (
                     <p className={styles.capacityNote}>
                         <span className={styles.capacityLayout}>
-                            <strong>{pairingsRemaining}</strong>
                             <span>
                                 {pairingsRemaining === 0
                                     ? t("devices.roster.pairingLimit")
