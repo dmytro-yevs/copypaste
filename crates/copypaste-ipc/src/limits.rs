@@ -16,9 +16,13 @@ pub const MAX_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 /// A normalized source-app PNG is identity metadata, never clipboard content.
 pub const MAX_SOURCE_APP_ICON_BYTES: usize = 32 * 1024;
 pub const SOURCE_APP_ICON_EDGE: u32 = 128;
-/// Metadata limits differ by transport framing; all must exceed a valid icon.
-pub const MAX_P2P_METADATA_BYTES: usize = 512;
-pub const MAX_CLOUD_METADATA_BYTES: usize = 1024;
+/// One envelope budget for every sync transport. It covers a 32 KiB PNG after
+/// base64 and JSON expansion, while keeping page and message retention bounded.
+pub const MAX_SYNC_METADATA_BYTES: usize = 48 * 1024;
+/// Compatibility names for transport callers; neither transport gets a larger
+/// metadata capacity than the other.
+pub const MAX_P2P_METADATA_BYTES: usize = MAX_SYNC_METADATA_BYTES;
+pub const MAX_CLOUD_METADATA_BYTES: usize = MAX_SYNC_METADATA_BYTES;
 
 /// Worst-case JSON expansion of one content byte: a control character below
 /// U+0020 with no short escape encodes as `\u00XX`.

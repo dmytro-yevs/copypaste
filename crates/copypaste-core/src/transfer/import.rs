@@ -133,6 +133,9 @@ pub fn import_with_current_retention(
                 result.skipped += 1;
                 result.skipped_too_large += 1;
             }
+            Err(IngestError::InvalidMetadata) => {
+                result.skipped += 1;
+            }
             Err(IngestError::Crypto(e)) => {
                 fatal = Some(ImportError::Crypto(e));
                 break;
