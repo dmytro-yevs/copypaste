@@ -535,6 +535,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_inbound_pairing_publishes_peers_before_trust_is_committed() {
+        let (responder, _responder_clipboard, _responder_dir) = backend();
+        let (initiator, _initiator_clipboard, _initiator_dir) = backend();
+        let mut events = responder.watch().await.unwrap();
+        let invite = responder.pair_create_invite().await.unwrap();
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+            .await
+            .expect("invite change was not published")
+            .expect("embedded event stream closed");
+        assert_eq!(first.event, copypaste_ipc::EventKind::Peers);
+
+        let addr = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if let Some(addr) = responder.node().await.unwrap().listen_addr() {
+                    return addr;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("embedded responder did not bind a peer listener");
+        initiator.pair_join(&invite.code, &addr).await.unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                assert_eq!(
+                    events
+                        .recv()
+                        .await
+                        .expect("embedded event stream closed")
+                        .event,
+                    copypaste_ipc::EventKind::Peers,
+                );
+                if responder.pair_progress().await.unwrap().state
+                    == copypaste_ipc::PairingState::AwaitingConfirmation
+                {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("inbound AwaitingConfirmation event was not published");
+        assert!(responder.peers().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn revoking_an_unknown_pairing_bars_later_enrolment() {
         let (backend, _clip, _dir) = backend();
         let token = copypaste_p2p::transport::PairingToken::generate();
