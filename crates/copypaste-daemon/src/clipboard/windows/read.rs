@@ -325,10 +325,11 @@ fn file() -> Reading {
 }
 
 fn is_local_disk_path(path: &std::path::Path) -> bool {
-    let Some(path) = path.to_str() else {
+    let Some(raw_path) = path.to_str() else {
         return false;
     };
-    let prefix = Utf8WindowsPath::new(path)
+    let windows_path = Utf8WindowsPath::new(raw_path);
+    let prefix = windows_path
         .components()
         .next()
         .and_then(|component| component.prefix_kind());
