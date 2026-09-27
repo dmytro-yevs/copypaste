@@ -47,7 +47,6 @@ export function PrivacyServiceSections() {
       <Section title={t("settings.service.groups.keeping.title")}>
         <ChoiceRow
           title={t("settings.service.historyLimit.title")}
-          help={t("settings.service.historyLimit.description")}
           icon="library"
           choices={HISTORY_LIMIT}
           value={data.history_limit}
@@ -59,7 +58,6 @@ export function PrivacyServiceSections() {
 
         <ChoiceRow
           title={t("settings.service.storageQuota.title")}
-          help={t("settings.service.storageQuota.description")}
           icon="folder"
           choices={STORAGE_QUOTA_BYTES}
           value={data.storage_quota_bytes}
@@ -73,7 +71,6 @@ export function PrivacyServiceSections() {
 
         <ChoiceRow
           title={t("settings.service.retention.title")}
-          help={t("settings.service.retention.description")}
           icon="refresh"
           choices={RETENTION_DAYS}
           value={data.retention_days}
@@ -85,13 +82,12 @@ export function PrivacyServiceSections() {
 
         <ChoiceRow
           title={t("settings.service.sensitive.title")}
-          help={t("settings.service.sensitive.description")}
           icon="alert"
           note={
             <ServiceFieldNote field="sensitive_ttl_secs">
               {sweeping ? (
                 <span className={styles.sensitiveWarning}>
-                  {`${t("settings.service.sensitive.warning")} ${t("settings.service.sensitive.announced")}`}
+                  {t("settings.service.sensitive.warning")}
                 </span>
               ) : null}
             </ServiceFieldNote>
