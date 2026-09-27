@@ -105,6 +105,12 @@ mac_launch_evidence_app() {
 if [[ "${1:-}" == "--self-test" ]]; then
   fixture_dir="$(mktemp -d)"
   trap 'rm -rf "$fixture_dir"' EXIT
+  mkdir -p "$fixture_dir/native-command-blockers"
+  for native_command in osascript open pgrep pkill screencapture security swift; do
+    printf '#!/bin/sh\necho "self-test attempted %s" >&2\nexit 97\n' "$native_command" > "$fixture_dir/native-command-blockers/$native_command"
+    chmod +x "$fixture_dir/native-command-blockers/$native_command"
+  done
+  PATH="$fixture_dir/native-command-blockers:$PATH"
   PASS=0
   FAIL=0
   ok() { PASS=$((PASS + 1)); }
@@ -151,7 +157,17 @@ image.save(history / "screenshot.png")
 (root / "ax.log").write_text("AXMenuBar\tCopyPaste\n", encoding="utf-8")
 (history / "ax.txt").write_text("AXHeading\tLibrary\n", encoding="utf-8")
 (history / "heading.tsv").write_text("AXHeading\tLibrary\n", encoding="utf-8")
-(root / "latency.json").write_text('{"latency_ms":1}\n', encoding="utf-8")
+latency = {
+    "latency_ms": 1,
+    "daemon": {
+        "pid": 4321,
+        "executable_basename": "copypaste-daemon",
+        "executable_matched": True,
+        "running": True,
+        "activation_policy": "prohibited",
+    },
+}
+(root / "latency.json").write_text(json.dumps(latency) + "\n", encoding="utf-8")
 identity = subprocess.check_output(
     [sys.executable, str(writer), "--capture-qualified-artifact", str(qualified)],
     text=True,
@@ -178,6 +194,7 @@ expected = {
     ("screenshot", "ui-history/screenshot.png"),
     ("accessibility", "ui-history/ax.txt"),
     ("accessibility", "ui-history/heading.tsv"),
+    ("measurement", "latency.json"),
 }
 if not expected <= records.keys():
     raise SystemExit("Library artifacts were not registered in the receipt")
@@ -202,6 +219,12 @@ def writer_rejects_current_library_proof(name):
 
 if not matches_receipt():
     raise SystemExit("original Library artifacts did not match their receipt")
+latency["daemon"]["activation_policy"] = "regular"
+(root / "latency.json").write_text(json.dumps(latency) + "\n", encoding="utf-8")
+if matches_receipt():
+    raise SystemExit("altered daemon policy matched the original receipt")
+latency["daemon"]["activation_policy"] = "prohibited"
+(root / "latency.json").write_text(json.dumps(latency) + "\n", encoding="utf-8")
 (history / "screenshot.png").write_bytes(b"altered")
 if matches_receipt():
     raise SystemExit("altered Library screenshot matched the original receipt")
@@ -220,7 +243,6 @@ PY
   fi
   mac_ui_self_test "$fixture_dir"
   out="$fixture_dir/ui"
-  osascript() { echo "self-test attempted a native accessibility command" >&2; return 97; }
   mac_capture_state_self_test() {
     local original_ax
     original_ax="$(declare -f mac_ax)"
@@ -511,6 +533,146 @@ JS
     eval "$original_ax"
   }
   mac_description_role_self_test
+  daemon_jxa_provider_self_test() {
+    if node --input-type=module - "$REPO_ROOT/scripts/release/macos-ui-evidence-lib.sh" <<'JS'
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+
+const source = readFileSync(process.argv[2], "utf8");
+const matched = source.match(/<<'JXA'\n([\s\S]*?)\nJXA/);
+assert.ok(matched, "JXA provider source is unavailable");
+let requestedPid;
+const app = {
+  isNil: () => false,
+  isTerminated: 0,
+  executableURL: { isNil: () => false, path: "/fixture/copypaste-daemon" },
+  processIdentifier: 4321,
+  activationPolicy: 2,
+};
+const context = {
+  ObjC: { import: () => {}, unwrap: (value) => value },
+  $: {
+    NSRunningApplication: {
+      runningApplicationWithProcessIdentifier: (pid) => {
+        requestedPid = pid;
+        return app;
+      },
+    },
+  },
+};
+vm.runInNewContext(matched[1], context);
+assert.equal(requestedPid, undefined);
+assert.deepEqual(JSON.parse(context.run(["4321"])), {
+  pid: 4321,
+  executable: "/fixture/copypaste-daemon",
+  running: true,
+  activation_policy: "prohibited",
+});
+assert.equal(requestedPid, 4321);
+app.isTerminated = 1;
+assert.throws(() => context.run(["4321"]), /terminated daemon/);
+app.isTerminated = null;
+assert.throws(() => context.run(["4321"]), /termination state/);
+app.isTerminated = undefined;
+assert.throws(() => context.run(["4321"]), /termination state/);
+context.$.NSRunningApplication.runningApplicationWithProcessIdentifier = () => null;
+assert.throws(() => context.run(["4321"]), /did not resolve the daemon PID/);
+JS
+    then
+      ok "JXA provider records a live prohibited daemon and rejects missing termination state"
+    else
+      bad "JXA provider records a live prohibited daemon and rejects missing termination state"
+    fi
+  }
+  daemon_jxa_provider_self_test
+  daemon_activation_policy_self_test() {
+    local original_wait original_osascript daemon="$fixture_dir/CopyPaste.app/Contents/MacOS/copypaste-daemon" fixture probe_trace="$fixture_dir/daemon-probe.log" observed
+    original_wait="$(declare -f mac_wait_executable_pid)"
+    original_osascript="$(declare -f osascript 2>/dev/null || true)"
+    mac_wait_executable_pid() { printf '4321\n'; }
+    : > "$probe_trace"
+    osascript() { printf 'probe\n' >> "$probe_trace"; printf '%s\n' "$fixture"; }
+    fixture='{"pid":4321,"executable":"'"$daemon"'","running":true,"activation_policy":"prohibited"}'
+    if observed="$(mac_verify_daemon_activation_policy "$daemon" 1)" \
+      && [[ "$(grep -c '^probe$' "$probe_trace")" == 1 ]] \
+      && python3 - "$observed" <<'PY'
+import json
+import sys
+
+assert json.loads(sys.argv[1]) == {
+    "pid": 4321,
+    "executable_basename": "copypaste-daemon",
+    "executable_matched": True,
+    "running": True,
+    "activation_policy": "prohibited",
+}
+PY
+    then
+      ok "prohibited bundled daemon activation policy is accepted"
+    else
+      bad "prohibited bundled daemon activation policy is accepted"
+    fi
+    for policy in regular accessory; do
+      fixture='{"pid":4321,"executable":"'"$daemon"'","running":true,"activation_policy":"'"$policy"'"}'
+      if mac_verify_daemon_activation_policy "$daemon" 1 >/dev/null 2>&1; then
+        bad "$policy daemon activation policy is rejected"
+      else
+        ok "$policy daemon activation policy is rejected"
+      fi
+    done
+    fixture='{"pid":4322,"executable":"'"$daemon"'","running":true,"activation_policy":"prohibited"}'
+    if mac_verify_daemon_activation_policy "$daemon" 1 >/dev/null 2>&1; then
+      bad "wrong daemon PID identity is rejected"
+    else
+      ok "wrong daemon PID identity is rejected"
+    fi
+    fixture='{"pid":4321,"executable":"'"$daemon"'.wrong","running":true,"activation_policy":"prohibited"}'
+    if mac_verify_daemon_activation_policy "$daemon" 1 >/dev/null 2>&1; then
+      bad "wrong daemon executable identity is rejected"
+    else
+      ok "wrong daemon executable identity is rejected"
+    fi
+    fixture='{"pid":4321,"executable":"'"$daemon"'","running":false,"activation_policy":"prohibited"}'
+    if mac_verify_daemon_activation_policy "$daemon" 1 >/dev/null 2>&1; then
+      bad "non-running daemon observation is rejected"
+    else
+      ok "non-running daemon observation is rejected"
+    fi
+    fixture='{"pid":4321,"executable":"'"$daemon"'","activation_policy":"prohibited"}'
+    if mac_verify_daemon_activation_policy "$daemon" 1 >/dev/null 2>&1; then
+      bad "missing daemon running state is rejected"
+    else
+      ok "missing daemon running state is rejected"
+    fi
+    fixture='not JSON'
+    if mac_verify_daemon_activation_policy "$daemon" 1 >/dev/null 2>&1; then
+      bad "invalid activation-policy provider output is rejected"
+    else
+      ok "invalid activation-policy provider output is rejected"
+    fi
+    osascript() { printf 'probe\n' >> "$probe_trace"; return 97; }
+    if mac_verify_daemon_activation_policy "$daemon" 1 >/dev/null 2>&1; then
+      bad "unavailable NSRunningApplication observation is rejected"
+    else
+      ok "unavailable NSRunningApplication observation is rejected"
+    fi
+    mac_wait_executable_pid() { return 1; }
+    if mac_verify_daemon_activation_policy "$daemon" 1 >/dev/null 2>&1; then
+      bad "missing bundled daemon is rejected"
+    else
+      ok "missing bundled daemon is rejected"
+    fi
+    if mac_observe_daemon_activation_policy "$daemon" "" >/dev/null 2>&1; then
+      bad "missing daemon PID is rejected"
+    else
+      ok "missing daemon PID is rejected"
+    fi
+    unset -f mac_wait_executable_pid osascript
+    eval "$original_wait"
+    [[ -z "$original_osascript" ]] || eval "$original_osascript"
+  }
+  daemon_activation_policy_self_test
   profile_self_test() {
     local saved_profile="$SMOKE_PROFILE"
     SMOKE_PROFILE=full
@@ -548,6 +710,7 @@ names = [
     "seed_native_preferences",
     "mac_launch_evidence_app",
     "mac_ax ready",
+    "mac_verify_daemon_activation_policy",
     "mac_prepare_webview_ax",
     "mac_ax surface",
     "capture_required_routes",
@@ -614,7 +777,7 @@ PY
     SMOKE_PROFILE="$saved_profile"
   }
   route_profile_self_test
-  unset -f osascript mac_press_unique_exact_description_role mac_wait_safe_role_label mac_capture_state mac_recover_onboarding mac_capture_state_self_test
+  unset -f mac_press_unique_exact_description_role mac_wait_safe_role_label mac_capture_state mac_recover_onboarding mac_capture_state_self_test
   [[ "$FAIL" -eq 0 ]] || exit 1
   echo "macOS native accessibility self-test passed"
   exit 0
@@ -629,6 +792,7 @@ app="${COPYPASTE_APP:-/Applications/CopyPaste.app}"
 [[ -d "$app" ]] || { echo "CopyPaste.app is not installed" >&2; exit 1; }
 app_executable="$(mac_evidence_executable "$app")"
 cli="$app/Contents/MacOS/copypaste"
+daemon_executable="$app/Contents/MacOS/copypaste-daemon"
 app_pid=""
 
 cleanup() {
@@ -666,15 +830,25 @@ if [[ "$surface_ready" != "yes" ]]; then
   exit 1
 fi
 ready_ms="$(python3 -c 'import time; print(time.time_ns() // 1000000)')"
+daemon_activation_observation="$(mac_verify_daemon_activation_policy "$daemon_executable" 30)" || {
+  echo "the bundled CopyPaste daemon did not prove prohibited activation policy" >&2
+  exit 1
+}
 mac_prepare_webview_ax
 scenario="$(python3 scripts/release/native_evidence_policy.py value --platform macos --field scenario)"
 budget_ms="$(python3 scripts/release/native_evidence_policy.py value --platform macos --field budget_ms)"
 mac_ax surface > "$out/ax.log" 2> "$out/ax.err"
 check_accessibility_surface "$out/ax.log"
 screencapture -x "$out/screenshot.png"
-python3 - "$out/latency.json" "$scenario" "$((ready_ms - start_ms))" "$budget_ms" <<'PY'
+python3 - "$out/latency.json" "$scenario" "$((ready_ms - start_ms))" "$budget_ms" "$daemon_activation_observation" <<'PY'
 import json, pathlib, sys
-pathlib.Path(sys.argv[1]).write_text(json.dumps({"scenario": sys.argv[2], "latency_ms": int(sys.argv[3]), "budget_ms": int(sys.argv[4])}) + "\n")
+try:
+    daemon = json.loads(sys.argv[5])
+except json.JSONDecodeError:
+    raise SystemExit("daemon activation-policy observation could not be recorded")
+if daemon.get("activation_policy") != "prohibited" or daemon.get("executable_matched") is not True or daemon.get("running") is not True:
+    raise SystemExit("daemon activation-policy observation could not be recorded")
+pathlib.Path(sys.argv[1]).write_text(json.dumps({"scenario": sys.argv[2], "latency_ms": int(sys.argv[3]), "budget_ms": int(sys.argv[4]), "daemon": daemon}) + "\n")
 if int(sys.argv[3]) > int(sys.argv[4]):
     raise SystemExit("native launch exceeded its policy budget")
 PY
