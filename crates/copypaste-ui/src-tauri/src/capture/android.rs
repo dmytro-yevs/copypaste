@@ -65,7 +65,8 @@ const PLUGIN_CLASS: &str = "CapturePlugin";
 /// underlying message may be a Java stack trace, which is neither a sentence
 /// nor free of paths, so it is logged and never shown.
 const MSG_BRIDGE: &str = "CopyPaste couldn't reach the Android side of capture.";
-const MSG_ARM: &str = "Background capture couldn't be started. Check that Shizuku is running.";
+const MSG_ARM: &str =
+    "Background capture couldn't be started. Check log access and overlay permission.";
 const MSG_TOAST: &str = "Android's clipboard notice couldn't be changed.";
 const MSG_OPEN: &str = "CopyPaste couldn't open that Android screen.";
 
@@ -81,17 +82,9 @@ pub fn init() -> TauriPlugin<Wry> {
             } else {
                 queue_wake.enable_event_driven();
             }
-            // Probe once at startup so the first frame shows the real state
-            // rather than a default that resolves a moment later. A stored
-            // (or default-on) preference then re-arms; a missing OS grant
-            // is surfaced and must not persist as off.
+            // Probe only. MainActivity restores an already-granted reader;
+            // startup must never turn a missing grant into a permission prompt.
             capture.refresh();
-            if !matches!(
-                capture.snapshot().health,
-                super::model::CaptureHealth::Disabled
-            ) {
-                let _ = capture.arm();
-            }
             app.manage(queue_wake);
             app.manage(capture);
             Ok(())

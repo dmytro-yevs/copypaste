@@ -1,166 +1,153 @@
 package com.copypaste.app
 
-import android.content.ComponentName
+import android.Manifest
 import android.content.Context
-import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
-import rikka.shizuku.Shizuku
+import androidx.core.content.ContextCompat
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object ClipCascadeCapture {
     private const val TAG = "CopyPasteClipCascade"
-    private const val CONNECT_TIMEOUT_MS = 3_000L
+    private const val PREFS = "clipcascade-capture"
+    private const val KEY_SETUP_COMPLETE = "setupComplete"
+    private const val ACTIVITY_DEBOUNCE_MS = 1_000L
     private val main = Handler(Looper.getMainLooper())
 
-    @Volatile
-    private var session: Session? = null
+    private class Run(val onStarted: (Boolean) -> Unit, val onLost: () -> Unit) {
+        var generation = 0L
+        @Volatile var stopped = false
+        @Volatile var started = false
+        var process: Process? = null
+        var reader: Thread? = null
+        var lastActivityAt = 0L
+    }
 
-    @Volatile
-    private var appContext: Context? = null
+    private val runs = ClipCascadeRunGate<Run>()
+    private var generation = 0L
 
-    fun markSetupComplete(context: Context) = Unit
+    fun markSetupComplete(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_SETUP_COMPLETE, true).apply()
+    }
 
-    fun isSetupComplete(context: Context): Boolean =
-        hasRuntimePermissions(context) && ShizukuClipboard.isRunning() && ShizukuClipboard.hasPermission()
+    fun isSetupComplete(context: Context): Boolean = hasRuntimePermissions(context)
 
     fun hasRuntimePermissions(context: Context): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context)
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context))
 
-    fun isListening(): Boolean = session?.listening == true
+    fun isListening(): Boolean = runs.active()?.reader?.isAlive == true
 
     @Synchronized
     fun arm(context: Context, onStarted: (Boolean) -> Unit, onLost: () -> Unit): Boolean {
+        generation++
         if (!isSetupComplete(context)) return false
-        appContext = context.applicationContext
-        session?.let {
-            if (it.listening || it.connecting) {
-                if (it.listening) onStarted(true)
-                return true
-            }
+        if (isListening()) {
+            runs.active()?.generation = generation
+            onStarted(true)
+            return true
         }
-
-        val next = Session(onStarted, onLost)
-        session = next
-        if (!main.postDelayed(next.timeout, CONNECT_TIMEOUT_MS)) {
-            next.finish(false)
-            return false
-        }
-        try {
-            Shizuku.bindUserService(serviceArgs(), next)
-        } catch (_: RuntimeException) {
-            next.finish(false)
-            return false
-        }
+        val run = runs.begin(Run(onStarted, onLost)) ?: return false
+        run.generation = generation
+        val app = context.applicationContext
+        val reader = Thread({ readLogcat(run, app) }, "copypaste-clipcascade-logcat")
+        reader.isDaemon = true
+        run.reader = reader
+        reader.start()
         return true
     }
 
     @Synchronized
     fun disarm() {
-        session?.stop(expected = true)
+        generation++
+        val run = runs.stop() ?: return
+        run.stopped = true
+        run.reader?.interrupt()
+        run.process?.destroy()
     }
 
-    private fun serviceArgs() = Shizuku.UserServiceArgs(
-        ComponentName(BuildConfig.APPLICATION_ID, ShizukuCaptureService::class.java.name),
-    )
-        .daemon(false)
-        .tag("copypaste-clipboard-capture")
-        .processNameSuffix("clipboard-capture")
-        .debuggable(BuildConfig.DEBUG)
-        .version(BuildConfig.VERSION_CODE)
-
-    private class Session(
-        private val onStarted: (Boolean) -> Unit,
-        private val onLost: () -> Unit,
-    ) : ServiceConnection {
-        @Volatile var connecting = true
-        @Volatile var listening = false
-        @Volatile private var expectedStop = false
-        private var service: IShizukuCaptureService? = null
-        private val callback = object : IClipCascadeCaptureListener.Stub() {
-            override fun onClipboardAccess() {
-                if (!listening) return
-                val app = ClipCascadeCapture.appContext ?: return
-                ClipCascadeCapture.main.post {
-                    try {
-                        app.startActivity(ClipboardFloatingActivity.intent(app))
-                    } catch (error: Exception) {
-                        Log.w(ClipCascadeCapture.TAG, "floating capture activity launch failed", error)
+    private fun readLogcat(run: Run, app: Context) {
+        try {
+            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
+                .format(Date())
+            val process = Runtime.getRuntime().exec(
+                arrayOf("logcat", "-T", timestamp, "ClipboardService:E", "*:S"),
+            )
+            synchronized(this) {
+                if (!runs.owns(run) || run.stopped) {
+                    process.destroy()
+                    return
+                }
+                run.process = process
+            }
+            main.post {
+                synchronized(this) {
+                    if (!runs.owns(run) || run.stopped) return@post
+                    run.started = true
+                }
+                run.onStarted(true)
+            }
+            BufferedReader(InputStreamReader(process.inputStream)).use { input ->
+                while (!run.stopped) {
+                    val line = input.readLine() ?: break
+                    if (!line.contains(BuildConfig.APPLICATION_ID)) continue
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - run.lastActivityAt < ACTIVITY_DEBOUNCE_MS) continue
+                    run.lastActivityAt = now
+                    main.post {
+                        synchronized(this) {
+                            if (!runs.owns(run) || run.stopped) return@post
+                        }
+                        try {
+                            app.startActivity(ClipboardFloatingActivity.intent(app))
+                        } catch (error: Exception) {
+                            Log.w(TAG, "floating capture activity launch failed", error)
+                        }
                     }
                 }
             }
-
-            override fun onCaptureStopped() = finish(false)
-        }
-
-        val timeout = Runnable { finish(false) }
-
-        @Synchronized
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            if (!connecting) return
-            val capture = binder?.let(IShizukuCaptureService.Stub::asInterface)
-            val started = try {
-                binder?.pingBinder() == true && capture?.start(callback) == true
-            } catch (_: Exception) {
-                false
+        } catch (_: Exception) {
+        } finally {
+            val lost = synchronized(this) {
+                run.process?.destroy()
+                run.process = null
+                run.reader = null
+                runs.finish(run) && !run.stopped
             }
-            if (!started) {
-                finish(false)
-                return
-            }
-            service = capture
-            connecting = false
-            listening = true
-            ClipCascadeCapture.main.removeCallbacks(timeout)
-            ClipCascadeCapture.main.post { onStarted(true) }
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) = finish(false)
-        override fun onNullBinding(name: ComponentName?) = finish(false)
-        override fun onBindingDied(name: ComponentName?) = finish(false)
-
-        fun stop(expected: Boolean) {
-            expectedStop = expected
-            try {
-                service?.stop()
-            } catch (_: Exception) {
-            }
-            finish(false)
-        }
-
-        @Synchronized
-        fun finish(started: Boolean) {
-            if (!connecting && !listening) return
-            val wasListening = listening
-            connecting = false
-            listening = false
-            ClipCascadeCapture.main.removeCallbacks(timeout)
-            if (ClipCascadeCapture.session === this) {
-                ClipCascadeCapture.session = null
-            } else {
-                return
-            }
-            try {
-                Shizuku.unbindUserService(ClipCascadeCapture.serviceArgs(), this, true)
-            } catch (_: RuntimeException) {
-            } finally {
-                try {
-                    Shizuku.unbindUserService(ClipCascadeCapture.serviceArgs(), this, false)
-                } catch (_: RuntimeException) {
+            if (lost) main.post {
+                synchronized(this) {
+                    if (runs.active() != null || generation != run.generation) return@post
                 }
-            }
-            if (wasListening && !expectedStop) {
-                ClipCascadeCapture.main.post(onLost)
-            } else if (!wasListening) {
-                ClipCascadeCapture.main.post { onStarted(started) }
+                if (run.started) run.onLost() else run.onStarted(false)
             }
         }
     }
+}
 
-    init {
-        Shizuku.addBinderDeadListener { session?.finish(false) }
+internal class ClipCascadeRunGate<T> {
+    private var active: T? = null
+
+    @Synchronized fun begin(run: T): T? {
+        if (active != null) return null
+        active = run
+        return run
+    }
+
+    @Synchronized fun active(): T? = active
+    @Synchronized fun owns(run: T): Boolean = active === run
+    @Synchronized fun stop(): T? = active.also { active = null }
+    @Synchronized fun finish(run: T): Boolean {
+        if (active !== run) return false
+        active = null
+        return true
     }
 }
