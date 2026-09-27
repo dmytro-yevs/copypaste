@@ -14,13 +14,15 @@ export type StatusCardStatus =
 export interface StatusCardProps {
   status: StatusCardStatus;
   title: string;
-  detail?: string | null;
+  detail?: ReactNode;
   meta?: string | null;
   icon?: IconName;
   action?: ReactNode;
   density?: "regular" | "compact";
+  variant?: "standard" | "prominent";
   role?: "status" | "alert";
   live?: "polite" | "assertive";
+  atomic?: boolean;
   busy?: boolean;
   "aria-label"?: string;
 }
@@ -33,8 +35,10 @@ export function StatusCard({
   icon,
   action,
   density = "regular",
+  variant = "standard",
   role = "status",
   live = "polite",
+  atomic,
   busy = false,
   "aria-label": ariaLabel,
 }: StatusCardProps) {
@@ -44,9 +48,11 @@ export function StatusCard({
         data-slot="status-card"
         data-status={status}
         data-density={density}
+        data-variant={variant}
         className={styles.root}
         role={role}
         aria-live={live}
+        aria-atomic={atomic}
         aria-busy={busy || undefined}
         aria-label={ariaLabel}
       >
@@ -60,7 +66,7 @@ export function StatusCard({
           </span>
           <span className={styles.copy}>
             <strong>{title}</strong>
-            {detail ? <small>{detail}</small> : null}
+            {detail ? <span className={styles.detail}>{detail}</span> : null}
             {meta ? <small className={styles.meta}>{meta}</small> : null}
           </span>
           {action ? <span className={styles.action}>{action}</span> : null}
