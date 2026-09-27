@@ -186,6 +186,7 @@ jni = "0.21"
 ndk-context = "0.1"
 
 [dev-dependencies]
+image.workspace = true
 # `start_paused` drives the client budgets without a test that actually waits
 # ten seconds. Tokio's own clock control, not a second one (AGENTS.md rule 1).
 tokio = { workspace = true, features = ["test-util"] }
