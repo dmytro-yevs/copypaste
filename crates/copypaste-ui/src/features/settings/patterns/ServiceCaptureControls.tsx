@@ -42,7 +42,7 @@ export function ServiceCaptureControls() {
 
   const primary = primaryOf(snapshot.nextStep);
   const canToggle = snapshot.rung !== "desktop" && snapshot.shizuku.supported;
-  const enabled = snapshot.health.state !== "disabled";
+  const enabled = snapshot.shizuku.enabled;
   const action =
     primary === "none"
       ? undefined

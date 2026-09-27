@@ -12,31 +12,12 @@
   gap: var(--s-4);
 }
 
-.alwaysBody {
-  font-size: var(--fs-xs);
-  overflow-wrap: anywhere;
-}
-
-.alwaysBody {
-  color: var(--dim);
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2);
-}
-
-.alwaysOn {
+.help {
   display: flex;
   min-inline-size: 0;
+  padding: var(--s-3);
   flex-direction: column;
-  gap: var(--s-2);
-}
-
-.alwaysTitle {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
+  gap: var(--s-4);
 }
 
 .spinner {

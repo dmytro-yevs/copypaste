@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/ui/icon";
 import { toast } from "sonner";
 
-import { Button, Surface } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import {
   type CaptureSnapshot,
@@ -33,9 +33,7 @@ export function CapturePhoneOnlyHelp({
   const busy = disabled || run.isPending;
 
   return (
-    <Surface asChild elevation="raised" border="subtle" radius="md">
-      <section className={styles.root}>
-      <h2 className={styles.heading}>{t("capture.help.title")}</h2>
+    <div className={styles.root}>
       <p className={styles.body}>{t("capture.help.body")}</p>
       <div className={styles.actions}>
         {snapshot.shizuku.installed ? (
@@ -68,7 +66,6 @@ export function CapturePhoneOnlyHelp({
           {t("capture.help.requestBattery")}
         </Button>
       </div>
-      </section>
-    </Surface>
+    </div>
   );
 }

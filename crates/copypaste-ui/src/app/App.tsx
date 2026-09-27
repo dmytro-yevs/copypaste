@@ -3,11 +3,11 @@
  * main pane get sibling boundaries, so a crash in a screen cannot take
  * navigation with it (CopyPaste-8ebg.12).
  */
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { ApplicationShell } from "@/app/shell";
 import { OnboardingScreen } from "@/features/onboarding";
-import { useCaptureState, useCaptureSync } from "@/hooks/useCapture";
+import { useCaptureSync } from "@/hooks/useCapture";
 import { useInboundPairingNav } from "@/features/pairing";
 import { statusReachable, useStatus } from "@/hooks/useStatus";
 import { usePush } from "@/hooks/usePush";
@@ -24,7 +24,6 @@ import { useUi } from "@/store/ui";
 import { useShallow } from "zustand/react/shallow";
 
 export default function App() {
-  const setView = useUi((s) => s.setView);
   // `useShallow` is load-bearing: without it this is a render loop that
   // unmounts the app — 55 renders in 2.5s, measured.
   const appearance = usePrefs(useShallow(selectAppearance));
@@ -37,8 +36,6 @@ export default function App() {
   const pushLive = usePush();
   useCaptureSync();
   useInboundPairingNav();
-  const capture = useCaptureState();
-  const [androidStartupSettled, setAndroidStartupSettled] = useState(false);
   const prefsHydrated = usePrefsHydrated();
   const onboardingComplete = usePrefs((s) => s.onboardingComplete);
   const onboardingOpen = useUi((s) => s.onboardingOpen);
@@ -89,32 +86,11 @@ export default function App() {
   }, [allowScreenshots]);
 
   const statusKind = status.error ? classifyError(status.error) : null;
-  const android = isAndroidPlatform();
   const sizeClass = useSizeClass();
-  const navigationReady = !android || androidStartupSettled;
-
-  useEffect(() => {
-    if (
-      showOnboarding ||
-      !android ||
-      androidStartupSettled ||
-      (capture.data === undefined && !capture.isError)
-    ) {
-      return;
-    }
-    if (
-      capture.data !== undefined &&
-      capture.data.health.state !== "working" &&
-      useUi.getState().view === "history"
-    ) {
-      setView("capture");
-    }
-    setAndroidStartupSettled(true);
-  }, [android, androidStartupSettled, capture.data, capture.isError, setView, showOnboarding]);
 
   if (showOnboarding) {
     return <OnboardingScreen data-size-class={sizeClass} />;
   }
 
-  return <ApplicationShell navigationReady={navigationReady} pushLive={pushLive} statusKind={statusKind} />;
+  return <ApplicationShell navigationReady pushLive={pushLive} statusKind={statusKind} />;
 }
