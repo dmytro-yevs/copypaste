@@ -27,7 +27,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/useViewportMetrics", () => ({
-  useViewportMetrics: () => ({ sizeClass: "expanded" }),
+  useViewportMetrics: () => ({ width: 1_024, height: 800 }),
+  useViewportSizeClass: () => "expanded",
   useObservedElementSize: () => ({ ref: () => {}, width: 1_024, height: 800 }),
 }));
 
