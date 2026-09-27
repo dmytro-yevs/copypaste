@@ -133,6 +133,10 @@ impl PrivateGate {
     fn fail_closed(&self) -> bool {
         self.desired || self.applied != Some(false)
     }
+
+    fn is_synchronized(&self) -> bool {
+        self.applied == Some(self.desired)
+    }
 }
 
 impl Buffer {
@@ -318,7 +322,7 @@ async fn run_event_driven<R: Runtime>(
     wake: &QueueWake,
 ) {
     loop {
-        if buffer.is_empty() {
+        if buffer.is_empty() && private_gate.is_synchronized() {
             tokio::select! {
                 biased;
                 Some(enabled) = private_mode_rx.recv() => apply_private_mode(app, buffer, private_gate, enabled),
@@ -708,6 +712,14 @@ mod tests {
         assert!(!wake.event_driven());
         wake.enable_event_driven();
         assert!(wake.event_driven());
+    }
+
+    #[test]
+    fn unsynchronized_private_gate_keeps_the_bounded_recovery_cadence() {
+        let mut gate = PrivateGate::starting(false);
+        assert!(!gate.is_synchronized());
+        gate.applied = Some(false);
+        assert!(gate.is_synchronized());
     }
 
     #[test]

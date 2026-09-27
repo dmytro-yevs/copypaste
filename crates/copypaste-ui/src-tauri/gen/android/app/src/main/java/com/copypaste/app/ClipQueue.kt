@@ -52,7 +52,7 @@ object ClipQueue {
             if (privateMode || text.isBlank()) return
             if (text.toByteArray(Charsets.UTF_8).size > MAX_TEXT_BYTES) {
                 dropped++
-                return
+                return@synchronized nextWakeLocked()
             }
             queue.addLast(
                 CapturedClip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName),
@@ -61,11 +61,7 @@ object ClipQueue {
                 queue.removeFirst()
                 dropped++
             }
-            if (!wakePending) {
-                queueReady?.also { wakePending = true }
-            } else {
-                null
-            }
+            nextWakeLocked()
         }
         wake?.invoke()
     }
@@ -110,13 +106,15 @@ object ClipQueue {
         val wake = synchronized(this) {
             queueReady = callback
             if (callback == null) return@synchronized null
-            if (queue.isNotEmpty() && !wakePending) {
-                wakePending = true
-                callback
+            if (queue.isNotEmpty() || dropped > 0) {
+                nextWakeLocked()
             } else {
                 null
             }
         }
         wake?.invoke()
     }
+
+    private fun nextWakeLocked(): (() -> Unit)? =
+        if (!wakePending) queueReady?.also { wakePending = true } else null
 }
