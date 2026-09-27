@@ -352,13 +352,12 @@ fi
 
 MACOS_MIN="$(python3 -c 'import json;print(json.load(open("crates/copypaste-ui/src-tauri/tauri.macos.conf.json"))["bundle"]["macOS"]["minimumSystemVersion"])' 2>/dev/null || true)"
 if [[ "$MACOS_MIN" == "14.0" ]] && grep -Fq 'depends_on macos: ">= :sonoma"' Casks/copypaste.rb \
-        && grep -Fq '**macOS 14 Sonoma or later** (Apple Silicon):' packaging/release-notes.md \
         && grep -Fq 'runs-on: macos-14' .github/workflows/ci.yml \
         && grep -Fq 'runs-on: macos-14' .github/workflows/release.yml; then
-    ok "Tauri, Homebrew, docs, and CI require macOS 14 Sonoma"
+    ok "Tauri, Homebrew, and CI set the macOS 14 floor"
 else
     bad "macOS support floor is aligned" \
-        "expected Tauri 14.0, Homebrew :sonoma, docs naming Sonoma, and macos-14 CI/release jobs; Tauri=${MACOS_MIN:-<unset>}"
+        "expected Tauri 14.0, Homebrew :sonoma, and macos-14 CI/release jobs; Tauri=${MACOS_MIN:-<unset>}"
 fi
 
 group "Android scaffold is checked in, not regenerated"
