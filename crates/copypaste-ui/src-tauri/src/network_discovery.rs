@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use copypaste_core::p2p_contract;
 use copypaste_ipc::DiscoveredDevice;
@@ -8,6 +8,9 @@ use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{Manager as _, Wry};
 
 use crate::backend::{BackendError, Result};
+use crate::network_discovery_lifecycle::{
+    Desired, LifecycleCoordinator, LifecycleFuture, LifecycleOperation,
+};
 
 const PLUGIN_PACKAGE: &str = "com.copypaste.app";
 const PLUGIN_CLASS: &str = "NetworkDiscoveryPlugin";
@@ -15,7 +18,7 @@ const PORT: u16 = copypaste_p2p::DEFAULT_PORT;
 const MSG_DISCOVERY_UNAVAILABLE: &str = "Network discovery is unavailable.";
 
 static DISCOVERY: OnceLock<AndroidNetworkDiscovery> = OnceLock::new();
-static LIFECYCLE: OnceLock<Mutex<Lifecycle>> = OnceLock::new();
+static LIFECYCLE: OnceLock<LifecycleCoordinator> = OnceLock::new();
 
 #[derive(Deserialize)]
 struct Availability {
@@ -99,100 +102,53 @@ impl AndroidNetworkDiscovery {
     }
 }
 
+struct AndroidLifecycleOperation(AndroidNetworkDiscovery);
+
+impl LifecycleOperation for AndroidLifecycleOperation {
+    fn acquire(&self) -> LifecycleFuture<'_, bool> {
+        Box::pin(self.0.acquire())
+    }
+
+    fn advertise<'a>(
+        &'a self,
+        name: &'a str,
+        pairing_ids: &'a [String],
+    ) -> LifecycleFuture<'a, bool> {
+        Box::pin(self.0.advertise(name, pairing_ids))
+    }
+
+    fn release(&self) -> LifecycleFuture<'_, ()> {
+        Box::pin(async move {
+            let _ = self
+                .0
+                 .0
+                .run_mobile_plugin_async::<serde_json::Value>("release", ())
+                .await;
+        })
+    }
+}
+
 pub fn reconcile(name: String, pairing_ids: Vec<String>, visible: bool) {
-    let lifecycle = LIFECYCLE.get_or_init(|| Mutex::new(Lifecycle::default()));
-    let mut lifecycle = lifecycle
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    lifecycle.generation = lifecycle.generation.saturating_add(1);
-    lifecycle.desired = Desired {
+    let lifecycle = LIFECYCLE.get_or_init(LifecycleCoordinator::default);
+    if !lifecycle.reconcile(Desired {
         name,
         pairing_ids,
         visible,
-    };
-    if lifecycle.running {
+    }) {
         return;
     }
-    lifecycle.running = true;
-    drop(lifecycle);
     tauri::async_runtime::spawn(drain_lifecycle());
 }
 
 async fn drain_lifecycle() {
-    loop {
-        let (generation, desired) = {
-            let lifecycle = LIFECYCLE
-                .get()
-                .unwrap()
-                .lock()
-                .unwrap_or_else(|p| p.into_inner());
-            (lifecycle.generation, lifecycle.desired.clone())
-        };
-        let Some(discovery) = DISCOVERY.get().cloned() else {
-            return finish_lifecycle(generation);
-        };
-        if !desired.visible {
-            let _ = discovery
-                .0
-                .run_mobile_plugin_async::<serde_json::Value>("release", ())
-                .await;
-        } else if discovery.acquire().await && lifecycle_current(generation) {
-            if !discovery
-                .advertise(&desired.name, &desired.pairing_ids)
-                .await
-            {
-                tracing::warn!("Android LAN discovery did not start advertising");
-            }
-        }
-        if finish_lifecycle(generation) {
-            return;
-        }
-    }
-}
-
-fn lifecycle_current(generation: u64) -> bool {
-    LIFECYCLE
+    let lifecycle = LIFECYCLE
         .get()
-        .unwrap()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .generation
-        == generation
-}
-
-fn finish_lifecycle(generation: u64) -> bool {
-    let mut lifecycle = LIFECYCLE
-        .get()
-        .unwrap()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    if lifecycle.generation != generation {
-        return false;
-    }
-    lifecycle.running = false;
-    true
-}
-
-#[derive(Clone)]
-struct Desired {
-    name: String,
-    pairing_ids: Vec<String>,
-    visible: bool,
-}
-impl Default for Desired {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            pairing_ids: Vec::new(),
-            visible: false,
-        }
-    }
-}
-#[derive(Default)]
-struct Lifecycle {
-    generation: u64,
-    desired: Desired,
-    running: bool,
+        .expect("reconcile starts the lifecycle before draining it");
+    let Some(discovery) = DISCOVERY.get().cloned() else {
+        lifecycle.stop();
+        return;
+    };
+    lifecycle.drain(&AndroidLifecycleOperation(discovery)).await;
 }
 
 fn nsd_device(
