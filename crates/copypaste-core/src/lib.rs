@@ -23,14 +23,16 @@ pub mod transfer;
 
 pub use binary::{
     item_id as binary_item_id, metadata as binary_metadata, open as open_binary,
-    seal as seal_binary, BinaryMetadata, FileMetadata, CHUNK_BYTES,
+    seal as seal_binary, BinaryMetadata, FileMetadata, PayloadMetadata, SourceAppIconMetadata,
+    CHUNK_BYTES,
 };
 pub use clipboard_payload::{ClipboardPayload, ClipboardWriteError};
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
 pub use image_preview::{thumbnail_png, ImagePreviewError, ImageThumbnail, MAX_THUMBNAIL_EDGE};
 pub use ingest::{
     ingest, ingest_binary_into_with_capture_context, ingest_binary_into_with_capture_source,
-    ingest_into, ingest_into_with_capture_context, ingest_into_with_capture_source, IngestError,
+    ingest_binary_into_with_capture_source_metadata, ingest_into, ingest_into_with_capture_context,
+    ingest_into_with_capture_source, ingest_into_with_capture_source_metadata, IngestError,
     Ingested,
 };
 pub use sensitive::{

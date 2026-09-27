@@ -2,7 +2,9 @@
 
 use zeroize::Zeroizing;
 
-use crate::{decrypt, open_binary, CryptoError, FileMetadata, ItemKey, StoredItem};
+use crate::{
+    decrypt, open_binary, CryptoError, FileMetadata, ItemKey, PayloadMetadata, StoredItem,
+};
 
 /// An authenticated history payload ready for presentation or a native write.
 ///
@@ -53,7 +55,8 @@ impl ClipboardPayload {
                 metadata: row
                     .payload_metadata
                     .as_deref()
-                    .and_then(FileMetadata::from_json),
+                    .and_then(|metadata| PayloadMetadata::from_json(metadata, &row.content_type))
+                    .and_then(|metadata| metadata.file),
             }),
             ContentClass::Other => Ok(Self::Unsupported { bytes: binary()? }),
         }

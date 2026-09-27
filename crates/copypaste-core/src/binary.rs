@@ -1,7 +1,10 @@
 //! Encrypted, content-addressed binary clipboard payloads.
 
+use std::io::Cursor;
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chacha20poly1305::aead::Buffer;
+use image::{GenericImageView, ImageFormat, ImageReader, Limits};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -35,6 +38,7 @@ pub struct BinaryMetadata {
 /// User-facing attributes of an opaque payload.  It never contains a source
 /// path: retaining a path would leak a username through IPC, sync and logs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileMetadata {
     pub filename: String,
     pub mime_type: String,
@@ -73,7 +77,16 @@ impl FileMetadata {
 }
 
 /// Strict, optional application-identity icon carried in signed metadata.
+/// The largest padded standard-base64 spelling of a bounded PNG. This is
+/// checked before decoding so an authenticated peer still cannot make us
+/// allocate an arbitrary icon buffer.
+const MAX_SOURCE_APP_ICON_BASE64_BYTES: usize =
+    copypaste_ipc::MAX_SOURCE_APP_ICON_BYTES.div_ceil(3) * 4;
+const MAX_SOURCE_APP_ICON_DECODED_BYTES: u64 =
+    (copypaste_ipc::SOURCE_APP_ICON_EDGE as u64) * (copypaste_ipc::SOURCE_APP_ICON_EDGE as u64) * 4;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SourceAppIconMetadata {
     pub png_base64: String,
     pub width: u32,
@@ -82,12 +95,7 @@ pub struct SourceAppIconMetadata {
 
 impl SourceAppIconMetadata {
     pub fn new(png: &[u8], width: u32, height: u32) -> Option<Self> {
-        (png.starts_with(b"\x89PNG\r\n\x1a\n")
-            && !png.is_empty()
-            && png.len() <= copypaste_ipc::MAX_SOURCE_APP_ICON_BYTES
-            && matches!(width, 64 | copypaste_ipc::SOURCE_APP_ICON_EDGE)
-            && matches!(height, 64 | copypaste_ipc::SOURCE_APP_ICON_EDGE))
-        .then(|| Self {
+        valid_icon_dimensions(png, width, height).then(|| Self {
             png_base64: STANDARD.encode(png),
             width,
             height,
@@ -95,12 +103,37 @@ impl SourceAppIconMetadata {
     }
 
     pub fn png(&self) -> Option<Vec<u8>> {
+        if self.png_base64.len() > MAX_SOURCE_APP_ICON_BASE64_BYTES {
+            return None;
+        }
         let png = STANDARD.decode(&self.png_base64).ok()?;
-        Self::new(&png, self.width, self.height).map(|_| png)
+        valid_icon_dimensions(&png, self.width, self.height).then_some(png)
     }
 }
 
+fn valid_icon_dimensions(png: &[u8], width: u32, height: u32) -> bool {
+    if png.is_empty()
+        || png.len() > copypaste_ipc::MAX_SOURCE_APP_ICON_BYTES
+        || !matches!(width, 64 | copypaste_ipc::SOURCE_APP_ICON_EDGE)
+        || !matches!(height, 64 | copypaste_ipc::SOURCE_APP_ICON_EDGE)
+    {
+        return false;
+    }
+
+    let mut reader = ImageReader::with_format(Cursor::new(png), ImageFormat::Png);
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(copypaste_ipc::SOURCE_APP_ICON_EDGE);
+    limits.max_image_height = Some(copypaste_ipc::SOURCE_APP_ICON_EDGE);
+    limits.max_alloc = Some(MAX_SOURCE_APP_ICON_DECODED_BYTES);
+    reader.limits(limits);
+    reader
+        .decode()
+        .ok()
+        .is_some_and(|image| image.dimensions() == (width, height))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct PayloadMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<FileMetadata>,
@@ -109,7 +142,45 @@ pub struct PayloadMetadata {
 }
 
 impl PayloadMetadata {
+    #[must_use]
+    pub fn new(
+        file: Option<FileMetadata>,
+        source_app_icon: Option<SourceAppIconMetadata>,
+    ) -> Option<Self> {
+        let metadata = Self {
+            file,
+            source_app_icon,
+        };
+        metadata
+            .is_valid_for(copypaste_ipc::content_type::FILE)
+            .then_some(metadata)
+    }
+
+    #[must_use]
+    pub fn is_valid_for(&self, content_type: &str) -> bool {
+        let file_is_valid = self.file.as_ref().is_none_or(FileMetadata::is_valid);
+        let icon_is_valid = self
+            .source_app_icon
+            .as_ref()
+            .is_none_or(|icon| icon.png().is_some());
+        (self.file.is_some() || self.source_app_icon.is_some())
+            && (self.file.is_none() || content_type == copypaste_ipc::content_type::FILE)
+            && file_is_valid
+            && icon_is_valid
+    }
+
+    #[must_use]
+    pub fn to_json(&self, content_type: &str) -> Option<String> {
+        self.is_valid_for(content_type)
+            .then(|| serde_json::to_string(self).ok())
+            .flatten()
+            .filter(|json| json.len() <= copypaste_ipc::MAX_SYNC_METADATA_BYTES)
+    }
+
     pub fn from_json(value: &str, content_type: &str) -> Option<Self> {
+        if value.len() > copypaste_ipc::MAX_SYNC_METADATA_BYTES {
+            return None;
+        }
         if let Some(file) = FileMetadata::from_json(value) {
             return (content_type == copypaste_ipc::content_type::FILE).then_some(Self {
                 file: Some(file),
@@ -117,13 +188,7 @@ impl PayloadMetadata {
             });
         }
         let metadata: Self = serde_json::from_str(value).ok()?;
-        (metadata.file.is_none()
-            && metadata
-                .source_app_icon
-                .as_ref()
-                .is_some_and(|icon| icon.png().is_some())
-            && value.len() <= copypaste_ipc::MAX_CLOUD_METADATA_BYTES)
-            .then_some(metadata)
+        metadata.is_valid_for(content_type).then_some(metadata)
     }
 }
 
@@ -408,6 +473,14 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{DynamicImage, ImageBuffer, Rgba};
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let image = DynamicImage::ImageRgba8(ImageBuffer::<Rgba<u8>, Vec<u8>>::new(width, height));
+        let mut bytes = Cursor::new(Vec::new());
+        image.write_to(&mut bytes, ImageFormat::Png).unwrap();
+        bytes.into_inner()
+    }
     use crate::Keyring;
     use std::ops::Range;
 
@@ -675,6 +748,52 @@ mod tests {
             r#"{"filename":"../private.txt","mime_type":"text/plain"}"#
         )
         .is_none());
+    }
+
+    #[test]
+    fn source_icon_envelope_is_strict_and_preserves_legacy_file_metadata() {
+        let icon = SourceAppIconMetadata::new(&png(64, 128), 64, 128).expect("valid icon");
+        let file = FileMetadata::new("report.pdf", "application/pdf").unwrap();
+        let metadata = PayloadMetadata {
+            file: Some(file.clone()),
+            source_app_icon: Some(icon.clone()),
+        };
+        let json = metadata.to_json(copypaste_ipc::content_type::FILE).unwrap();
+        assert_eq!(
+            PayloadMetadata::from_json(&json, copypaste_ipc::content_type::FILE),
+            Some(metadata)
+        );
+
+        let icon_only = PayloadMetadata {
+            file: None,
+            source_app_icon: Some(icon),
+        };
+        assert!(icon_only.to_json("text").is_some());
+        assert_eq!(
+            PayloadMetadata::from_json(
+                r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#,
+                copypaste_ipc::content_type::FILE,
+            )
+            .and_then(|metadata| metadata.file),
+            Some(file)
+        );
+        assert!(PayloadMetadata::from_json(
+            r#"{"source_app_icon":null,"unexpected":true}"#,
+            "text",
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn source_icon_uses_decoder_dimensions_and_bounded_base64() {
+        let actual_oversize = png(129, 64);
+        assert!(SourceAppIconMetadata::new(&actual_oversize, 64, 64).is_none());
+
+        let oversized = format!(
+            r#"{{"source_app_icon":{{"png_base64":"{}","width":64,"height":64}}}}"#,
+            "A".repeat(MAX_SOURCE_APP_ICON_BASE64_BYTES + 1),
+        );
+        assert!(PayloadMetadata::from_json(&oversized, "text").is_none());
     }
 
     #[test]
