@@ -36,7 +36,9 @@ fn expected(method: &Method) -> Expected {
         Method::PairProgress | Method::PairCancel => {
             Expected::Data(|data| matches!(data, ResponseData::PairingProgress(_)))
         }
-        Method::Revoke { .. } => Expected::Data(|data| matches!(data, ResponseData::Empty { .. })),
+        Method::Revoke { .. } | Method::SourceAppIcon { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
+        }
         Method::Peers => Expected::Data(|data| matches!(data, ResponseData::Peers(_))),
         Method::SyncNow { .. } => Expected::Data(|data| matches!(data, ResponseData::Sync(_))),
         Method::Discovered | Method::Rescan => {
@@ -60,7 +62,6 @@ fn expected(method: &Method) -> Expected {
         | Method::CopyPlainText { .. }
         | Method::Get { .. }
         | Method::ImagePreview { .. }
-        | Method::SourceAppIcon { .. }
         | Method::Delete { .. }
         | Method::Pin { .. } => Expected::Error(ErrorCode::NotFound),
         Method::PairConfirm { .. } => Expected::Error(ErrorCode::NotReady),
@@ -98,6 +99,7 @@ fn cases(root: &Path) -> Vec<Method> {
             id: "missing".into(),
         },
         Method::ImagePreview {
+            max_edge: None,
             id: "missing".into(),
         },
         Method::SourceAppIcon {
@@ -241,7 +243,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        41,
+        42,
         "a Method has no contract case, or this count was not bumped with it"
     );
 
