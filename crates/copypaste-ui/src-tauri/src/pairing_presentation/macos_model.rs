@@ -48,7 +48,7 @@ mod tests {
         assert_eq!(copy.title, "Compare security codes");
         assert_eq!(
             copy.message,
-            "Confirm the code in the native security prompt."
+            "Compare the code on both devices before confirming."
         );
         let visible = format!("{} {}", copy.title, copy.message);
         for forbidden in ["ceremony-secret", "device-secret", "/Users/alice", "123456"] {

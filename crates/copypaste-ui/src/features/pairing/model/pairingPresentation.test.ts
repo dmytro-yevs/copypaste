@@ -34,14 +34,14 @@ describe("pairingPresentation", () => {
       retry: false,
       copy: {
         title: "Compare security codes",
-        detail: "Confirm the code in the native security prompt.",
+        detail: "Compare the code on both devices before confirming.",
       },
     };
 
     expect(pairingPresentation(ceremony(semantics))).toMatchObject({
       semantics,
       title: "Compare security codes",
-      detail: "Confirm the code in the native security prompt.",
+      detail: "Compare the code on both devices before confirming.",
     });
     expect(pairingIsActive(ceremony(semantics))).toBe(true);
   });
