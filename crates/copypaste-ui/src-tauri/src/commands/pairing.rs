@@ -9,6 +9,34 @@ use crate::pairing_presentation::{
 };
 use crate::SelectedBackend;
 
+pub(crate) async fn reconcile_progress<B: PairingBackend + ?Sized>(
+    backend: &B,
+    presenter: &PairingPresenter,
+    progress: PairingProgressData,
+) -> Result<PairingCeremony> {
+    let presentation = presenter.present_progress(&progress);
+    let Some(confirmation) = presentation.confirmation else {
+        return Ok(PairingCeremony::from_progress(progress, presentation.state));
+    };
+
+    // A native decision can outlive a polling response. Check the backend still
+    // names this exact ceremony before allowing a decision to reach it.
+    let current = backend.pair_progress().await?;
+    if !presenter.confirmation_is_current(&confirmation, &current) {
+        let presentation = presenter.state_for_progress(current.state);
+        return Ok(PairingCeremony::from_progress(current, presentation));
+    }
+
+    let next = match confirmation.decision {
+        PairingDecision::Accept => backend.pair_confirm(true).await?,
+        PairingDecision::Reject => backend.pair_confirm(false).await?,
+        PairingDecision::Cancel => backend.pair_cancel().await?,
+        PairingDecision::Refresh => current,
+    };
+    let presentation = presenter.present_progress(&next);
+    Ok(PairingCeremony::from_progress(next, presentation.state))
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
@@ -82,17 +110,17 @@ pub async fn pair_create_invite(
         NativePresentationOutcome::Unavailable => backend.pair_cancel().await.map(|progress| {
             PairingCeremony::from_progress(progress, PairingPresentationState::Unavailable)
         }),
-        NativePresentationOutcome::Cancelled => backend.pair_cancel().await.map(|progress| {
-            let presentation = presenter.state_for_progress(progress.state);
-            PairingCeremony::from_progress(progress, presentation)
-        }),
-        NativePresentationOutcome::Presented => backend.pair_progress().await.map(|progress| {
-            PairingCeremony::from_progress(progress, PairingPresentationState::Presented)
-        }),
+        NativePresentationOutcome::Cancelled => {
+            let progress = backend.pair_cancel().await?;
+            reconcile_progress(&*backend, &presenter, progress).await
+        }
+        NativePresentationOutcome::Presented => {
+            let progress = backend.pair_progress().await?;
+            reconcile_progress(&*backend, &presenter, progress).await
+        }
         NativePresentationOutcome::Refresh => {
             let progress = backend.pair_progress().await?;
-            let presentation = presenter.present_progress(&progress);
-            Ok(PairingCeremony::from_progress(progress, presentation))
+            reconcile_progress(&*backend, &presenter, progress).await
         }
     }
 }
@@ -106,16 +134,14 @@ pub async fn pair_scan_invite(
         NativeScanOutcome::Scanned(scanned) => scanned,
         NativeScanOutcome::Cancelled | NativeScanOutcome::Failed => {
             let progress = backend.pair_progress().await?;
-            let presentation = presenter.state_for_progress(progress.state);
-            return Ok(PairingCeremony::from_progress(progress, presentation));
+            return reconcile_progress(&*backend, &presenter, progress).await;
         }
         NativeScanOutcome::Unavailable => return Ok(PairingCeremony::unavailable()),
     };
     let progress = backend
         .pair_join(scanned.code.as_str(), scanned.addr.as_str())
         .await?;
-    let presentation = presenter.present_progress(&progress);
-    Ok(PairingCeremony::from_progress(progress, presentation))
+    reconcile_progress(&*backend, &presenter, progress).await
 }
 
 #[tauri::command]
@@ -129,12 +155,10 @@ pub async fn pair_progress(
             let progress = backend
                 .pair_join(scanned.code.as_str(), scanned.addr.as_str())
                 .await?;
-            let presentation = presenter.state_for_progress(progress.state);
-            return Ok(PairingCeremony::from_progress(progress, presentation));
+            return reconcile_progress(&*backend, &presenter, progress).await;
         }
     }
-    let presentation = presenter.state_for_progress(progress.state);
-    Ok(PairingCeremony::from_progress(progress, presentation))
+    reconcile_progress(&*backend, &presenter, progress).await
 }
 
 #[tauri::command]
@@ -143,8 +167,7 @@ pub async fn pair_present(
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
     let progress = backend.pair_progress().await?;
-    let presentation = presenter.present_progress(&progress);
-    Ok(PairingCeremony::from_progress(progress, presentation))
+    reconcile_progress(&*backend, &presenter, progress).await
 }
 
 #[tauri::command]
@@ -153,33 +176,16 @@ pub async fn pair_confirm(
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
     let progress = backend.pair_progress().await?;
-    let Some(decision) = presenter.confirm(&progress) else {
-        return Ok(PairingCeremony::from_progress(
-            progress,
-            PairingPresentationState::Unavailable,
-        ));
-    };
-    let progress = match decision {
-        PairingDecision::Accept => backend.pair_confirm(true).await?,
-        PairingDecision::Reject => backend.pair_confirm(false).await?,
-        PairingDecision::Cancel => backend.pair_cancel().await?,
-        PairingDecision::Refresh => {
-            let progress = backend.pair_progress().await?;
-            let presentation = presenter.present_progress(&progress);
-            return Ok(PairingCeremony::from_progress(progress, presentation));
-        }
-    };
-    Ok(PairingCeremony::from_progress(
-        progress,
-        PairingPresentationState::Presented,
-    ))
+    reconcile_progress(&*backend, &presenter, progress).await
 }
 
 #[tauri::command]
-pub async fn pair_reject(backend: State<'_, SelectedBackend>) -> Result<PairingCeremony> {
-    backend.pair_confirm(false).await.map(|progress| {
-        PairingCeremony::from_progress(progress, PairingPresentationState::Presented)
-    })
+pub async fn pair_reject(
+    backend: State<'_, SelectedBackend>,
+    presenter: State<'_, PairingPresenter>,
+) -> Result<PairingCeremony> {
+    let progress = backend.pair_confirm(false).await?;
+    reconcile_progress(&*backend, &presenter, progress).await
 }
 
 #[tauri::command]
@@ -187,16 +193,203 @@ pub async fn pair_cancel(
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
-    backend.pair_cancel().await.map(|progress| {
-        let presentation = presenter.state_for_progress(progress.state);
-        PairingCeremony::from_progress(progress, presentation)
-    })
+    let progress = backend.pair_cancel().await?;
+    reconcile_progress(&*backend, &presenter, progress).await
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use copypaste_ipc::{ErrorCode, PeerInfo};
+    struct FakeBackend {
+        progress: Mutex<VecDeque<PairingProgressData>>,
+        confirm_result: PairingProgressData,
+        cancel_result: PairingProgressData,
+        confirmations: Mutex<Vec<bool>>,
+        cancellations: AtomicUsize,
+    }
+
+    impl FakeBackend {
+        fn new(
+            progress: impl IntoIterator<Item = PairingProgressData>,
+            confirm_result: PairingProgressData,
+            cancel_result: PairingProgressData,
+        ) -> Self {
+            Self {
+                progress: Mutex::new(progress.into_iter().collect()),
+                confirm_result,
+                cancel_result,
+                confirmations: Mutex::new(Vec::new()),
+                cancellations: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl PairingBackend for FakeBackend {
+        async fn pair_create_invite(&self) -> Result<copypaste_ipc::PairingInviteData> {
+            unreachable!("not used by coordinator tests")
+        }
+
+        async fn pair_join(&self, _code: &str, _addr: &str) -> Result<PairingProgressData> {
+            unreachable!("not used by coordinator tests")
+        }
+
+        async fn pair_progress(&self) -> Result<PairingProgressData> {
+            Ok(self
+                .progress
+                .lock()
+                .expect("progress queue")
+                .pop_front()
+                .expect("expected progress read"))
+        }
+
+        async fn pair_confirm(&self, accept: bool) -> Result<PairingProgressData> {
+            self.confirmations
+                .lock()
+                .expect("confirmations")
+                .push(accept);
+            Ok(self.confirm_result.clone())
+        }
+
+        async fn pair_cancel(&self) -> Result<PairingProgressData> {
+            self.cancellations.fetch_add(1, Ordering::Relaxed);
+            Ok(self.cancel_result.clone())
+        }
+    }
+
+    struct RecordingPairingUi {
+        decision: PairingDecision,
+        confirmation_calls: Arc<AtomicUsize>,
+    }
+
+    impl crate::pairing_presentation::NativePairingUi for RecordingPairingUi {
+        fn present_invite(
+            &self,
+            _invite: &copypaste_ipc::PairingInviteData,
+        ) -> NativePresentationOutcome {
+            NativePresentationOutcome::Presented
+        }
+
+        fn scan_invite(&self) -> NativeScanOutcome {
+            NativeScanOutcome::Cancelled
+        }
+
+        fn present_progress(&self, _progress: &PairingProgressData) -> PairingPresentationState {
+            PairingPresentationState::Presented
+        }
+
+        fn confirm(&self, _progress: &PairingProgressData) -> Option<PairingDecision> {
+            self.confirmation_calls.fetch_add(1, Ordering::Relaxed);
+            Some(self.decision)
+        }
+    }
+
+    fn progress(pairing_id: &str, state: PairingState) -> PairingProgressData {
+        PairingProgressData {
+            pairing_id: Some(pairing_id.into()),
+            role: Some(PairingRole::Initiator),
+            state,
+            expires_in_ms: Some(60_000),
+            sas: Some("123456".into()),
+            peer_device_id: Some("device-secret".into()),
+            peer_name: Some("Unverified device".into()),
+            peer_addr: Some("192.0.2.1:47654".into()),
+            known_device: None,
+            error_code: None,
+        }
+    }
+
+    fn presenter(decision: PairingDecision) -> (PairingPresenter, Arc<AtomicUsize>) {
+        let confirmation_calls = Arc::new(AtomicUsize::new(0));
+        (
+            PairingPresenter::new(RecordingPairingUi {
+                decision,
+                confirmation_calls: Arc::clone(&confirmation_calls),
+            }),
+            confirmation_calls,
+        )
+    }
+
+    #[tokio::test]
+    async fn native_accepts_once_then_waits_for_the_remote_decision() {
+        let awaiting = progress("ceremony-1", PairingState::AwaitingConfirmation);
+        let waiting = progress("ceremony-1", PairingState::WaitingForPeer);
+        let backend = FakeBackend::new([awaiting.clone()], waiting.clone(), waiting.clone());
+        let (presenter, confirmation_calls) = presenter(PairingDecision::Accept);
+
+        let result = reconcile_progress(&backend, &presenter, awaiting)
+            .await
+            .unwrap();
+        assert_eq!(result.state, PairingState::WaitingForPeer);
+        assert_eq!(
+            backend
+                .confirmations
+                .lock()
+                .expect("confirmations")
+                .as_slice(),
+            &[true]
+        );
+        reconcile_progress(&backend, &presenter, waiting)
+            .await
+            .unwrap();
+        assert_eq!(confirmation_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn stale_native_outcome_cannot_confirm_a_replacement_ceremony() {
+        let awaiting = progress("ceremony-1", PairingState::AwaitingConfirmation);
+        let replacement = progress("ceremony-2", PairingState::AwaitingConfirmation);
+        let backend = FakeBackend::new(
+            [replacement.clone()],
+            progress("ceremony-1", PairingState::Confirmed),
+            progress("ceremony-1", PairingState::Cancelled),
+        );
+        let (presenter, _) = presenter(PairingDecision::Accept);
+
+        let result = reconcile_progress(&backend, &presenter, awaiting)
+            .await
+            .unwrap();
+        assert_eq!(result.ceremony_id.as_deref(), Some("ceremony-2"));
+        assert!(backend
+            .confirmations
+            .lock()
+            .expect("confirmations")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn native_cancel_and_expiry_fail_closed_without_confirmation() {
+        for decision in [PairingDecision::Cancel, PairingDecision::Refresh] {
+            let awaiting = progress("ceremony-1", PairingState::AwaitingConfirmation);
+            let cancelled = progress("ceremony-1", PairingState::Cancelled);
+            let backend = FakeBackend::new([awaiting.clone()], cancelled.clone(), cancelled);
+            let (presenter, _) = presenter(decision);
+
+            let result = reconcile_progress(&backend, &presenter, awaiting)
+                .await
+                .unwrap();
+            assert!(backend
+                .confirmations
+                .lock()
+                .expect("confirmations")
+                .is_empty());
+            match decision {
+                PairingDecision::Cancel => {
+                    assert_eq!(result.state, PairingState::Cancelled);
+                    assert_eq!(backend.cancellations.load(Ordering::Relaxed), 1);
+                }
+                PairingDecision::Refresh => {
+                    assert_eq!(result.state, PairingState::AwaitingConfirmation);
+                    assert_eq!(backend.cancellations.load(Ordering::Relaxed), 0);
+                }
+                PairingDecision::Accept | PairingDecision::Reject => unreachable!(),
+            }
+        }
+    }
 
     #[test]
     fn inv_13_webview_contract_has_no_raw_pairing_material() {
