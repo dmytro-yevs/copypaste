@@ -50,6 +50,7 @@ macro_rules! command_registry {
                 StartService => ("start_service", crate::commands::service::start_service, "undefined", "ServiceState"),
                 RestartService => ("restart_service", crate::commands::service::restart_service, "undefined", "ServiceState"),
                 HideWindow => ("hide_window", crate::commands::service::hide_window, "undefined", "void"),
+                SetQuickPastePreview => ("set_quick_paste_preview", crate::commands::service::set_quick_paste_preview, "{ open: boolean }", "QuickPastePreviewLayout"),
                 ShowMainWindow => ("show_main_window", crate::commands::service::show_main_window, "undefined", "void"),
                 SetAllowScreenshots => ("set_allow_screenshots", crate::commands::protection::set_allow_screenshots, "{ allow: boolean }", "void"),
                 GetDefaultShortcut => ("get_default_shortcut", crate::commands::shortcut::get_default_shortcut, "undefined", "string"),
