@@ -291,14 +291,27 @@ pub async fn get_source_app_icon(
     cache: State<'_, SourceAppIconCache>,
     backend: State<'_, SelectedBackend>,
 ) -> Result<Option<UiSourceAppIcon>> {
+    Ok(
+        source_app_icon_with_fallback(&*backend, item_id.as_deref(), || {
+            cache.resolve_desktop(&bundle_id)
+        })
+        .await,
+    )
+}
+
+async fn source_app_icon_with_fallback(
+    backend: &impl Backend,
+    item_id: Option<&str>,
+    fallback: impl FnOnce() -> Option<UiSourceAppIcon>,
+) -> Option<UiSourceAppIcon> {
     if let Some(item_id) = item_id {
-        if let Ok(Some(icon)) = backend.source_app_icon(&item_id).await {
+        if let Ok(Some(icon)) = backend.source_app_icon(item_id).await {
             if let Some(icon) = AppIcon::from_base64(icon.png_base64, icon.width, icon.height) {
-                return Ok(Some(UiSourceAppIcon::from_app_icon(icon)));
+                return Some(UiSourceAppIcon::from_app_icon(icon));
             }
         }
     }
-    Ok(cache.resolve_desktop(&bundle_id))
+    fallback()
 }
 
 /// Installed application catalogue used by Settings → Service.
@@ -340,18 +353,16 @@ pub async fn get_source_app_icon(
     capture: State<'_, crate::capture::SelectedCapture>,
     backend: State<'_, SelectedBackend>,
 ) -> Result<Option<UiSourceAppIcon>> {
-    if let Some(item_id) = item_id {
-        if let Ok(Some(icon)) = backend.source_app_icon(&item_id).await {
-            if let Some(icon) = AppIcon::from_base64(icon.png_base64, icon.width, icon.height) {
-                return Ok(Some(UiSourceAppIcon::from_app_icon(icon)));
-            }
-        }
-    }
-    Ok(cache.resolve_with(&bundle_id, |package_id| {
-        capture
-            .source_app_icon(package_id)
-            .and_then(|icon| UiSourceAppIcon::from_base64(icon.png_base64, icon.width, icon.height))
-    }))
+    Ok(
+        source_app_icon_with_fallback(&*backend, item_id.as_deref(), || {
+            cache.resolve_with(&bundle_id, |package_id| {
+                capture.source_app_icon(package_id).and_then(|icon| {
+                    UiSourceAppIcon::from_base64(icon.png_base64, icon.width, icon.height)
+                })
+            })
+        })
+        .await,
+    )
 }
 
 /// `true` once the backend has confirmed the row is gone. An unknown id is a
@@ -415,8 +426,62 @@ pub async fn reorder_pinned(backend: State<'_, SelectedBackend>, ids: Vec<String
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+
     use super::*;
     use crate::backend::{testing::FakeBackend, Page};
+
+    fn test_icon() -> AppIcon {
+        let image = ImageBuffer::from_pixel(64, 64, Rgba([0x24u8, 0x65, 0xa8, 0xff]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut png, ImageFormat::Png)
+            .unwrap();
+        AppIcon::from_png(png.into_inner(), 64, 64).unwrap()
+    }
+
+    fn persisted_icon() -> copypaste_ipc::ImagePreview {
+        let icon = test_icon();
+        copypaste_ipc::ImagePreview {
+            png_base64: icon.png_base64,
+            width: icon.width,
+            height: icon.height,
+        }
+    }
+
+    #[tokio::test]
+    async fn persisted_source_icon_precedes_the_local_resolver() {
+        let backend = FakeBackend::failing().with_source_app_icon(persisted_icon());
+        let fallback_called = AtomicBool::new(false);
+
+        let icon = source_app_icon_with_fallback(&backend, Some("item-1"), || {
+            fallback_called.store(true, Ordering::Relaxed);
+            None
+        })
+        .await;
+
+        assert!(icon.is_some());
+        assert_eq!(backend.source_app_icon_calls(), 1);
+        assert!(!fallback_called.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn missing_persisted_source_icon_uses_the_local_resolver() {
+        let backend = FakeBackend::failing();
+        let fallback_called = AtomicBool::new(false);
+
+        let icon = source_app_icon_with_fallback(&backend, Some("item-1"), || {
+            fallback_called.store(true, Ordering::Relaxed);
+            Some(UiSourceAppIcon::from_app_icon(test_icon()))
+        })
+        .await;
+
+        assert!(icon.is_some());
+        assert_eq!(backend.source_app_icon_calls(), 1);
+        assert!(fallback_called.load(Ordering::Relaxed));
+    }
 
     #[test]
     fn clipboard_write_availability_matches_native_writers() {
