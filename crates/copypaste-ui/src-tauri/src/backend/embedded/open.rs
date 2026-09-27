@@ -146,6 +146,7 @@ impl EmbeddedBackend {
         });
         super::retention::sweep(&inner);
         super::retention::start(&inner);
+        super::device_name::start(&inner);
         let backend = Self { inner };
         backend.inner.cloud.ensure_poller(&backend.inner);
         Ok(backend)
