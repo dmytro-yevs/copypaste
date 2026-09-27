@@ -11,8 +11,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { hideWindow, setAllowScreenshots } from "@/lib/ipc";
 import { applyAppearance } from "@/lib/theme";
 import { readPrefs } from "@/store/prefs";
+import { HISTORY_KEY } from "@/hooks/historyRefresh";
 
-export const QUICK_PASTE_QUERY_KEY = ["quick-paste", "items"] as const;
+export const QUICK_PASTE_QUERY_KEY = HISTORY_KEY;
 
 declare global {
   interface Window {
