@@ -23,8 +23,8 @@
     position: relative;
     z-index: var(--z-sticky);
 }
-.headerCount {
-    display: grid;
+.compactCount {
+    display: none;
     inline-size: max(var(--ctl-h-sm), var(--tap-min));
     block-size: max(var(--ctl-h-sm), var(--tap-min));
     place-items: center;
@@ -119,4 +119,7 @@
 }
 .toolbar[data-compact-search] .count {
     display: none;
+}
+.toolbar[data-compact-search] .compactCount {
+    display: grid;
 }

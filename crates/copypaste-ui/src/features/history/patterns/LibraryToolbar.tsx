@@ -5,6 +5,7 @@ import { ActionButton, InlineNotice, SearchField } from "@/components/shared";
 import { MultiSelect, Select, VisuallyHidden } from "@/components/ui";
 import { useLibraryToolbarSearch } from "@/features/history/hooks/useLibraryToolbarSearch";
 import {
+    historyCompactCount,
     historyCount,
     historyCountNumber,
     historyDeviceOptions,
@@ -128,12 +129,7 @@ export function LibraryToolbar({
 
     return (
         <>
-            <LibraryToolbarHeader
-                compact={compactSearch}
-                filtered={filtered}
-                visible={visible}
-                total={total}
-            />
+            <LibraryToolbarHeader />
 
             <Container
                 width="library"
@@ -288,6 +284,15 @@ export function LibraryToolbar({
                                         </ActiveControlBadge>
                                     ) : null}
                                 </div>
+                                <output
+                                    className={styles.compactCount}
+                                    data-slot="history-count"
+                                    aria-label={historyCount(filtered, visible, total)}
+                                >
+                                    <span aria-hidden="true">
+                                        {historyCompactCount(filtered, visible, total)}
+                                    </span>
+                                </output>
                                 <strong
                                     aria-hidden="true"
                                     className={styles.count}
