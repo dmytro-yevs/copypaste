@@ -5,18 +5,15 @@ use std::path::Path;
 use winsafe::guard::{DeleteObjectGuard, DestroyIconShfiGuard};
 use winsafe::{co, prelude::*, BITMAPINFO, HDC, HICON};
 
-use super::{gdi, registry};
-use crate::model::UiSourceAppIcon;
+use crate::AppIcon;
 
-pub(super) fn resolve(image_name: &str) -> Option<UiSourceAppIcon> {
+use super::{gdi, registry};
+
+pub(super) fn resolve(image_name: &str) -> Option<AppIcon> {
     let path = registry::executable(image_name)?;
     let icon = shell_icon(&path)?;
     let pixels = icon_pixels(&icon.hIcon)?;
-    Some(UiSourceAppIcon::from_png(
-        pixels.png,
-        pixels.width,
-        pixels.height,
-    ))
+    AppIcon::from_png(pixels.png, pixels.width, pixels.height)
 }
 
 fn shell_icon(path: &Path) -> Option<DestroyIconShfiGuard> {
@@ -32,20 +29,15 @@ fn shell_icon(path: &Path) -> Option<DestroyIconShfiGuard> {
 
 fn icon_pixels(icon: &HICON) -> Option<gdi::IconPng> {
     let info = icon.GetIconInfo().ok()?;
-    // SAFETY: GetIconInfo transfers both bitmap handles to its caller; these
-    // guards delete each exactly once on every return path.
     let color = unsafe { DeleteObjectGuard::new(info.hbmColor) };
     let _mask = unsafe { DeleteObjectGuard::new(info.hbmMask) };
-    // A monochrome icon carries no colour bitmap and a double-height mask.
     color.as_opt()?;
-
     let bitmap = color.GetObject().ok()?;
     if bitmap.bmWidth <= 0 || bitmap.bmHeight <= 0 {
         return None;
     }
     let width = bitmap.bmWidth as u32;
     let height = bitmap.bmHeight as u32;
-
     let dc = HDC::NULL.CreateCompatibleDC().ok()?;
     let mut description = top_down_bgra(width, height);
     gdi::png_from_dib(width, height, |pixels| unsafe {
@@ -61,8 +53,6 @@ fn icon_pixels(icon: &HICON) -> Option<gdi::IconPng> {
     })
 }
 
-/// A negative height is what asks GDI for top-down rows, which is the order
-/// `image` expects; a positive one would deliver the icon upside down.
 fn top_down_bgra(width: u32, height: u32) -> BITMAPINFO {
     let mut description = BITMAPINFO::default();
     description.bmiHeader.biWidth = width as i32;
@@ -92,12 +82,6 @@ mod tests {
         assert!(resolve("copypaste-no-such-app.exe").is_none());
     }
 
-    /// `#[ignore]` for the reason every real-shell test here carries one, and
-    /// it is not hypothetical: under concurrent load `SHGetFileInfoW` returns
-    /// *success* with a null `hIcon`, so a parallel `cargo test` fails on the
-    /// shell's own transient answer. Everything that is ours — the App Paths
-    /// search, the value decoding, the DIB bounds and the PNG cap — is covered
-    /// deterministically in `registry` and `gdi`.
     #[test]
     #[ignore = "drives the real Windows shell"]
     fn a_real_shell_icon_becomes_a_bounded_png() {
@@ -106,6 +90,8 @@ mod tests {
         let pixels = icon_pixels(&icon.hIcon).expect("the icon converts to PNG");
         assert!(pixels.width > 0 && pixels.height > 0);
         assert!(pixels.png.starts_with(b"\x89PNG"));
-        assert!(pixels.png.len() <= super::super::MAX_ICON_BYTES);
+        assert!(pixels.png.len() <= crate::MAX_ICON_BYTES);
+        assert!(pixels.width <= crate::MAX_ICON_EDGE);
+        assert!(pixels.height <= crate::MAX_ICON_EDGE);
     }
 }
