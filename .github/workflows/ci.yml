@@ -75,6 +75,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
+          components: rustfmt
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: linux-1.96-dev
@@ -111,6 +112,14 @@ jobs:
       - run: npm ci
       - run: npm audit
       - run: npm run build
+      - name: Install native evidence Python dependencies
+        working-directory: .
+        run: |
+          set -euo pipefail
+          venv="$RUNNER_TEMP/ci-python"
+          python3 -m venv "$venv"
+          "$venv/bin/python" -m pip install --requirement requirements-ci.txt
+          echo "$venv/bin" >> "$GITHUB_PATH"
       - run: npm test
 
   macos-native:
@@ -127,6 +136,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: macos-14-1.96
+          cache-on-failure: true
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
@@ -159,8 +169,8 @@ jobs:
       - name: The app links WebKit
         run: |
           set -euo pipefail
-          bin="dist/CopyPaste.app/Contents/MacOS/CopyPaste"
-          [[ -x "$bin" ]] || { echo "::error::no app executable after the build"; exit 1; }
+          source scripts/release/macos-bundle-lib.sh
+          bin="$(macos_bundle_executable_path dist/CopyPaste.app)"
           otool -L "$bin" | grep -q '/System/Library/Frameworks/WebKit.framework' || { echo "::error::$bin does not link WebKit.framework"; otool -L "$bin"; exit 1; }
       - name: macOS critical UI smoke
         run: |
@@ -171,7 +181,8 @@ jobs:
           export PATH="$venv/bin:$PATH"
           echo "$venv/bin" >> "$GITHUB_PATH"
           app="$PWD/dist/CopyPaste.app"
-          qualified="$app/Contents/MacOS/CopyPaste"
+          source scripts/release/macos-bundle-lib.sh
+          qualified="$(macos_bundle_executable_path "$app")"
           identity="$(python3 scripts/release/write-native-evidence.py --capture-qualified-artifact "$qualified")"
           COPYPASTE_APP="$app" COPYPASTE_SMOKE_PROFILE=critical \
             ./scripts/release/macos-native-evidence.sh artifacts/ci-macos-native "$qualified" "$identity"
@@ -270,6 +281,7 @@ jobs:
           Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$($versions[0])/edgedriver_win64.zip" -OutFile $archive
           Expand-Archive -LiteralPath $archive -DestinationPath $directory -Force
           "EDGEWEBDRIVER=$directory" >> $env:GITHUB_ENV
+          "COPYPASTE_WEBVIEW2_RUNTIME_VERSION=$($versions[0])" >> $env:GITHUB_ENV
       - name: Windows WebView2 critical UI smoke
         shell: bash
         working-directory: e2e
@@ -280,6 +292,14 @@ jobs:
             tests/history-render.e2e.test.ts \
             tests/sensitive.e2e.test.ts \
             tests/windows-surfaces.windows.e2e.test.ts
+      - name: Upload Windows UI smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-ci-native-e2e-diagnostics
+          path: ${{ env.COPYPASTE_E2E_RUN_ROOT }}/logs/**
+          if-no-files-found: error
+          retention-days: 7
       - name: DPAPI smoke
         shell: bash
         run: |
