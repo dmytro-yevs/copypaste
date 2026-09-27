@@ -250,6 +250,12 @@ fn apply_runtime_effects(inner: &Inner, transition: &SettingsTransition) {
     if transition.lan_visibility_changed() {
         if let Some(node) = inner.node.get() {
             node.set_lan_visibility(transition.config().lan_visibility);
+            #[cfg(target_os = "android")]
+            crate::network_discovery::reconcile(
+                inner.state.device_name(),
+                node.pairing_ids(),
+                transition.config().lan_visibility,
+            );
         }
     }
     if let Some(enabled) = transition.sync_enabled_changed() {
