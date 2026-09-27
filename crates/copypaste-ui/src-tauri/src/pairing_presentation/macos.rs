@@ -94,7 +94,7 @@ impl NativePairingUi for MacOsPairingUi {
                 invite_view(mtm, &png, &code, &address)
             else {
                 watchdog.finish();
-                return NativePresentationOutcome::Cancelled;
+                return NativePresentationOutcome::Unavailable;
             };
             let shown = alert(
                 mtm,

@@ -131,10 +131,21 @@ struct PresentationResult {
     presented: bool,
 }
 
-#[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Default, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[serde(transparent)]
+struct ScanPayload(Option<String>);
+
+#[derive(Deserialize)]
 struct ScanResult {
-    payload: Option<String>,
+    #[serde(default)]
+    payload: ScanPayload,
     outcome: ScanOutcome,
+}
+
+#[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
+struct PendingLinkResult {
+    #[serde(default)]
+    payload: ScanPayload,
 }
 
 #[derive(Deserialize)]
@@ -189,6 +200,7 @@ impl NativePairingUi for AndroidPairingUi {
         match result.outcome {
             ScanOutcome::Scanned => result
                 .payload
+                .0
                 .take()
                 .map(Zeroizing::new)
                 .and_then(decode_pairing_payload)
@@ -199,8 +211,8 @@ impl NativePairingUi for AndroidPairingUi {
     }
 
     fn take_pending_join(&self) -> Option<ScannedPairing> {
-        let mut result: ScanResult = self.call("takePendingLink", ())?;
-        let payload = Zeroizing::new(result.payload.take()?);
+        let mut result: PendingLinkResult = self.call("takePendingLink", ())?;
+        let payload = Zeroizing::new(result.payload.0.take()?);
         decode_pairing_payload(payload)
     }
 

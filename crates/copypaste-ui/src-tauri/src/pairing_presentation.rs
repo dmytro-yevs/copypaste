@@ -457,6 +457,20 @@ mod native_pairing_source_contracts {
     }
 
     #[test]
+    fn android_external_links_keep_the_payload_only_wire_shape() {
+        let android = production(include_str!("pairing_presentation/android.rs"));
+        let plugin = include_str!(
+            "../gen/android/app/src/main/java/com/copypaste/app/PairingPresentationPlugin.kt"
+        );
+
+        assert!(android.contains("struct PendingLinkResult"));
+        assert!(android.contains("self.call(\"takePendingLink\", ())?"));
+        assert!(android.contains("result.payload.0.take()?"));
+        assert!(plugin.contains("PairingDeepLinks.take()?.let { result.put(\"payload\", it) }"));
+        assert!(!plugin.contains("result.put(\"outcome\", it)"));
+    }
+
+    #[test]
     fn native_deadlines_remove_secrets_then_refresh_rust_progress() {
         let macos = production(include_str!("pairing_presentation/macos.rs"));
         assert!(macos.contains("ModalDeadline::arm"));
