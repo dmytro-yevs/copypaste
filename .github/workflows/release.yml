@@ -290,6 +290,30 @@ jobs:
             echo "ANDROID_SDK_ROOT=$ANDROID_HOME"
           } >> "$GITHUB_ENV"
       - run: ./scripts/release/android-ndk-env.sh "$NDK_HOME" >> "$GITHUB_ENV"
+      - name: Configure the NDK compiler for the direct Rust metadata check
+        run: |
+          set -euo pipefail
+          api="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const config = JSON.parse(readFileSync("crates/copypaste-ui/src-tauri/tauri.android.conf.json", "utf8"));
+            const value = config.bundle?.android?.minSdkVersion;
+            if (!Number.isInteger(value) || value < 24) throw new Error("invalid Android minSdkVersion");
+            process.stdout.write(String(value));
+          ')"
+          shopt -s nullglob
+          bins=("$NDK_HOME"/toolchains/llvm/prebuilt/*/bin)
+          shopt -u nullglob
+          [[ ${#bins[@]} -eq 1 ]] || { echo "::error::expected one NDK toolchain"; exit 1; }
+          cc="${bins[0]}/x86_64-linux-android${api}-clang"
+          cxx="${cc}++"
+          [[ -x "$cc" && -x "$cxx" ]] || { echo "::error::x86_64 Android compiler for minSdk $api is missing"; exit 1; }
+          {
+            echo "CC_x86_64_linux_android=$cc"
+            echo "CXX_x86_64_linux_android=$cxx"
+            echo "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$cc"
+            echo "TARGET_CC=$cc"
+            echo "TARGET_CXX=$cxx"
+          } >> "$GITHUB_ENV"
       - run: bash scripts/release/android-updater-feed.sh --render-config crates/copypaste-ui/src-tauri/tauri.android.signed.conf.template.json crates/copypaste-ui/src-tauri/tauri.android.signed.generated.conf.json "$TAURI_UPDATER_PUBLIC_KEY" "$TAURI_UPDATER_ENDPOINT"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -302,7 +326,11 @@ jobs:
           npm ci
           # tauri-build writes settings with absolute cargo-registry paths. A
           # check executes that generator on this runner without linking JNI.
-          TAURI_ANDROID_PROJECT_PATH="$PWD/src-tauri/gen/android" cargo check --locked --target x86_64-linux-android -p copypaste-ui
+          # The release profile reuses the completed x86_64 shard's cache and
+          # the signed overlay keeps its updater configuration identical.
+          TAURI_ANDROID_PROJECT_PATH="$PWD/src-tauri/gen/android" \
+          TAURI_CONFIG="$(<src-tauri/tauri.android.signed.generated.conf.json)" \
+            cargo check --release --locked --target x86_64-linux-android -p copypaste-ui
           test -f src-tauri/gen/android/tauri.settings.gradle
           test -f src-tauri/gen/android/app/tauri.build.gradle.kts
           test -f src-tauri/gen/android/app/tauri.properties
