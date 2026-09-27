@@ -85,7 +85,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         // Before the requests go: a pending failsafe keeps this plugin, and the
         // request it closes over, reachable for the rest of its timeout.
         main.removeCallbacksAndMessages(null)
-        ClipboardStaging.stop(main)
+        ClipboardStaging.handoff(activity, main)
         abandon(pendingArm.getAndSet(null))
         abandon(pendingShizukuArm.getAndSet(null))
     }
