@@ -64,7 +64,7 @@ fn run(
     let qr_bitmap = qr_bitmap(payload.as_bytes()).ok_or("QR generation failed")?;
     drop(payload);
     let qr_size = qr_bitmap.size;
-    let wnd = common::window("Pair a new device", (620, 600));
+    let wnd = common::window("CopyPaste — Pair a new device", (620, 600));
     let _heading = common::label(&wnd, "Pair a new device", (24, 18), (560, 32));
     let _instructions = common::label(
         &wnd,
@@ -72,8 +72,12 @@ fn run(
         (24, 52),
         (560, 48),
     );
-    let qr_description = common::label(&wnd, "Pairing QR code is hidden", (24, 104), (150, 48));
-    let reveal = common::button(&wnd, "&Reveal pairing QR code", (190, 200), (240, 46), 1001);
+    let qr_description = common::label(
+        &wnd,
+        "Scan this QR code with CopyPaste on the other device.",
+        (24, 104),
+        (560, 32),
+    );
     let code_label = common::label(&wnd, "Pairing code", (24, 360), (130, 24));
     let code_value = common::label(&wnd, "", (164, 360), (420, 24));
     let address_label = common::label(&wnd, "Pairing address", (24, 402), (130, 24));
@@ -86,7 +90,7 @@ fn run(
     );
     let close = common::button(
         &wnd,
-        "&Close",
+        "&Cancel pairing",
         (474, 520),
         (110, 34),
         co::DLGID::CANCEL.raw(),
@@ -94,31 +98,7 @@ fn run(
     let close_handle = CloseHandle::new(wnd.clone());
     let programmatic = close_handle.programmatic_flag();
     let handle = Arc::new(Mutex::new(Some(close_handle)));
-    let revealed = Arc::new(AtomicBool::new(false));
-    reveal.on().bn_clicked({
-        let wnd = wnd.clone();
-        let qr_description = qr_description.clone();
-        let reveal = reveal.clone();
-        let code_label = code_label.clone();
-        let code_value = code_value.clone();
-        let address_label = address_label.clone();
-        let address_value = address_value.clone();
-        let revealed = revealed.clone();
-        move || {
-            revealed.store(true, Ordering::Release);
-            qr_description
-                .hwnd()
-                .SetWindowText("Pairing QR code is visible")?;
-            code_value.hwnd().SetWindowText(&code)?;
-            address_value.hwnd().SetWindowText(&address)?;
-            for label in [&code_label, &code_value, &address_label, &address_value] {
-                common::show(label.hwnd());
-            }
-            common::hide(reveal.hwnd());
-            wnd.hwnd().InvalidateRect(None, true)?;
-            Ok(())
-        }
-    });
+    let available = Arc::new(AtomicBool::new(true));
     close.on().bn_clicked({
         let wnd = wnd.clone();
         move || {
@@ -140,7 +120,7 @@ fn run(
     let started = Instant::now();
     wnd.on().wm_create({
         let wnd = wnd.clone();
-        let reveal = reveal.clone();
+        let close = close.clone();
         let ready = ready.clone();
         let qr_description = qr_description.clone();
         let code_label = code_label.clone();
@@ -159,20 +139,18 @@ fn run(
                 wnd.close();
                 return Ok(0);
             }
-            for label in [&code_label, &code_value, &address_label, &address_value] {
-                common::hide(label.hwnd());
-            }
+            code_value.hwnd().SetWindowText(&code)?;
+            address_value.hwnd().SetWindowText(&address)?;
             wnd.hwnd().SetTimer(TIMER_ID, 1_000, None)?;
-            reveal.focus()?;
+            close.focus()?;
             let _ = ready.send(handle.lock().ok().and_then(|mut slot| slot.take()));
             Ok(0)
         }
     });
     wnd.on().wm_timer(TIMER_ID, {
         let wnd = wnd.clone();
-        let revealed = revealed.clone();
+        let available = available.clone();
         let qr_description = qr_description.clone();
-        let reveal = reveal.clone();
         let expires = expires.clone();
         let close = close.clone();
         let code_label = code_label.clone();
@@ -183,16 +161,16 @@ fn run(
             let remaining = expires_in_secs.saturating_sub(started.elapsed().as_secs());
             if remaining == 0 {
                 wnd.hwnd().KillTimer(TIMER_ID)?;
-                revealed.store(false, Ordering::Release);
-                common::hide(reveal.hwnd());
+                available.store(false, Ordering::Release);
                 qr_description
                     .hwnd()
                     .SetWindowText("Pairing QR code is no longer available")?;
                 code_value.hwnd().SetWindowText("")?;
                 address_value.hwnd().SetWindowText("")?;
-                for label in [&code_label, &code_value, &address_label, &address_value] {
-                    common::hide(label.hwnd());
-                }
+                common::hide(code_label.hwnd());
+                common::hide(code_value.hwnd());
+                common::hide(address_label.hwnd());
+                common::hide(address_value.hwnd());
                 expires.hwnd().SetWindowText("Checking pairing status…")?;
                 wnd.hwnd().InvalidateRect(None, true)?;
                 close.focus()?;
@@ -207,10 +185,10 @@ fn run(
     });
     wnd.on().wm_paint({
         let wnd = wnd.clone();
-        let revealed = revealed.clone();
+        let available = available.clone();
         move || {
             let target = wnd.hwnd().BeginPaint()?;
-            if revealed.load(Ordering::Acquire) {
+            if available.load(Ordering::Acquire) {
                 let source = target.CreateCompatibleDC()?;
                 let _selected = source.SelectObject(&*qr_bitmap.bitmap)?;
                 target.BitBlt(
@@ -271,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn invite_reveals_native_display_only_fields_after_capture_protection() {
+    fn invite_displays_native_fields_after_capture_protection_without_a_reveal_step() {
         let source = include_str!("invite.rs")
             .split_once("#[cfg(test)]")
             .unwrap()
@@ -281,7 +259,10 @@ mod tests {
         assert!(source.contains("SetWindowText(&code)"));
         assert!(source.contains("SetWindowText(&address)"));
         assert!(source.contains("protect_from_capture"));
-        assert!(source.contains("common::hide(label.hwnd())"));
+        assert!(source.contains("AtomicBool::new(true)"));
+        assert!(!source.contains("Reveal pairing QR code"));
+        assert!(!source.contains("&Reveal"));
+        assert!(source.contains("&Cancel pairing"));
         assert!(!source.contains("gui::Edit"));
         assert!(source.contains("abort_if_user_dismissed"));
     }

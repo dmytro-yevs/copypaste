@@ -31,6 +31,10 @@ impl CloseHandle {
         }
     }
 
+    pub(super) fn is_open(&self) -> bool {
+        self.window.hwnd().IsWindow()
+    }
+
     #[cfg(test)]
     pub(super) fn close_from_user_for_test(&self) {
         if self.window.hwnd().IsWindow() {

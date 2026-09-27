@@ -43,7 +43,7 @@ pub(super) fn prompt(
 
 fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult<PairingDecision> {
     let deadline = Duration::from_millis(copy.expires_in_ms);
-    let wnd = common::window("Confirm device pairing", (620, 430));
+    let wnd = common::window("CopyPaste — Confirm device pairing", (620, 454));
     let _heading = common::label(&wnd, &copy.heading, (24, 18), (560, 36));
     let instructions = common::label(
         &wnd,
@@ -66,12 +66,18 @@ fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult
         })
         .collect();
     let details = common::label(&wnd, &copy.details, (24, 200), (560, 94));
-    let reject = common::button(&wnd, "&Doesn't match", (164, 326), (130, 36), 1001);
-    let accept = common::button(&wnd, "&Match", (314, 326), (130, 36), co::DLGID::OK.raw());
+    let expires = common::label(
+        &wnd,
+        &format!("Expires in {} seconds", deadline.as_secs()),
+        (24, 298),
+        (560, 24),
+    );
+    let reject = common::button(&wnd, "&Doesn't match", (164, 334), (130, 36), 1001);
+    let accept = common::button(&wnd, "&Match", (314, 334), (130, 36), co::DLGID::OK.raw());
     let cancel = common::button(
         &wnd,
-        "&Cancel",
-        (454, 326),
+        "&Cancel pairing",
+        (454, 334),
         (130, 36),
         co::DLGID::CANCEL.raw(),
     );
@@ -125,15 +131,21 @@ fn run(copy: ConfirmationCopy, affinity: common::Affinity) -> winsafe::AnyResult
         let accept = accept.clone();
         let cancel = cancel.clone();
         let details = details.clone();
+        let expires = expires.clone();
         let result = result.clone();
         move || {
-            if started.elapsed() < deadline {
+            let remaining = deadline.saturating_sub(started.elapsed());
+            if !remaining.is_zero() {
+                expires
+                    .hwnd()
+                    .SetWindowText(&format!("Expires in {} seconds", remaining.as_secs()))?;
                 return Ok(());
             }
             wnd.hwnd().KillTimer(TIMER_ID)?;
             instructions
                 .hwnd()
                 .SetWindowText("Checking pairing status…")?;
+            expires.hwnd().SetWindowText("")?;
             for digit in &sas_digits {
                 digit.hwnd().SetWindowText("")?;
                 common::hide(digit.hwnd());
@@ -230,6 +242,18 @@ mod tests {
         assert!(source.contains("sas_digits"));
         assert!(!source.contains("join(\"  \")"));
         assert!(source.contains("Security code:"));
+    }
+
+    #[test]
+    fn confirmation_keeps_the_sas_deadline_and_cancel_action_visible() {
+        let source = include_str!("confirm.rs")
+            .split_once("#[cfg(test)]")
+            .unwrap()
+            .0;
+        assert!(source.contains("Expires in {} seconds"));
+        assert!(source.contains("&Cancel pairing"));
+        assert!(source.contains("deadline.saturating_sub"));
+        assert!(source.contains("Checking pairing status…"));
     }
 
     #[test]
