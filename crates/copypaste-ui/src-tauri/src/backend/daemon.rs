@@ -211,10 +211,13 @@ impl Backend for DaemonBackend {
         expect_item(self.call(Method::Get { id: id.to_string() }).await?)
     }
 
-    async fn image_preview(&self, id: &str) -> Result<ImagePreview> {
+    async fn image_preview(&self, id: &str, max_edge: Option<u32>) -> Result<ImagePreview> {
         expect_image_preview(
-            self.call(Method::ImagePreview { id: id.to_string() })
-                .await?,
+            self.call(Method::ImagePreview {
+                id: id.to_string(),
+                max_edge,
+            })
+            .await?,
         )
     }
 

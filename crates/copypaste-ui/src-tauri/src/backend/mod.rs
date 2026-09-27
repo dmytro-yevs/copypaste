@@ -180,7 +180,7 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
     async fn get(&self, id: &str) -> Result<Item>;
 
     /// Decode one non-sensitive history image into a bounded preview on demand.
-    async fn image_preview(&self, id: &str) -> Result<ImagePreview>;
+    async fn image_preview(&self, id: &str, max_edge: Option<u32>) -> Result<ImagePreview>;
 
     /// Put an item's content on the system clipboard.
     ///

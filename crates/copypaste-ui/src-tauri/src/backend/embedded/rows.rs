@@ -158,7 +158,7 @@ impl Inner {
         }
     }
 
-    pub(super) fn image_preview(&self, id: &str) -> Result<ImagePreview> {
+    pub(super) fn image_preview(&self, id: &str, max_edge: Option<u32>) -> Result<ImagePreview> {
         let row = match self.state.store.get(id) {
             Ok(Some(row)) => row,
             Ok(None) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
@@ -173,7 +173,7 @@ impl Inner {
             &row.id,
         )
         .map_err(|_| BackendError::internal("that item could not be decrypted"))?;
-        let thumbnail = thumbnail_png(&bytes, self.settings().max_decoded_image_mb)
+        let thumbnail = thumbnail_png(&bytes, self.settings().max_decoded_image_mb, max_edge)
             .map_err(|_| BackendError::Invalid("That image preview is unavailable."))?;
         Ok(ImagePreview {
             png_base64: STANDARD.encode(thumbnail.png),
