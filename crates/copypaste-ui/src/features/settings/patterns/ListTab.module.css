@@ -15,7 +15,8 @@
 }
 
 .sliderValue {
-  inline-size: calc(var(--s-8) * 2);
+  inline-size: auto;
+  max-inline-size: 50%;
   min-inline-size: 0;
   flex: 0 0 auto;
   overflow: hidden;
