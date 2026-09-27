@@ -14,7 +14,7 @@ macro_rules! command_registry {
                 RevealItem => ("reveal_item", crate::commands::history::reveal_item, "{ id: string }", "string"),
                 GetItemBody => ("get_item_body", crate::commands::history::get_item_body, "{ id: string }", "string"),
                 CopyItems => ("copy_items", crate::commands::history::copy_items, "{ ids: readonly string[] }", "number"),
-                GetImagePreview => ("get_image_preview", crate::commands::history::get_image_preview, "{ id: string }", "ImagePreview"),
+                GetImagePreview => ("get_image_preview", crate::commands::history::get_image_preview, "{ id: string; maxEdge?: number }", "ImagePreview"),
                 GetSourceAppIcon => ("get_source_app_icon", crate::commands::history::get_source_app_icon, "{ bundleId: string }", "SourceAppIcon | null"),
                 ListInstalledSourceApps => ("list_installed_source_apps", crate::commands::history::list_installed_source_apps, "undefined", "InstalledSourceApp[]"),
                 DeleteItem => ("delete_item", crate::commands::history::delete_item, "{ id: string }", "boolean"),
