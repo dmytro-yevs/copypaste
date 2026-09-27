@@ -59,14 +59,10 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
                 item.content.clear();
                 item.binary_content.clear();
             }
-            let payload_bytes = item
-                .content
-                .len()
-                .saturating_add(item.binary_content.len())
-                .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
-            if payload_bytes > MAX_CONTENT_BYTES {
+            let content_bytes = item.content.len().saturating_add(item.binary_content.len());
+            if content_bytes > MAX_CONTENT_BYTES {
                 tracing::warn!(
-                    bytes = payload_bytes,
+                    bytes = content_bytes,
                     max = MAX_CONTENT_BYTES,
                     "item is too large to send; skipping it"
                 );
@@ -74,10 +70,12 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
                 stats.skipped_too_large += 1;
                 continue;
             }
+            let message_bytes =
+                content_bytes.saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
 
             if !batch.is_empty()
                 && (batch.len() == MAX_ITEMS_PER_MESSAGE
-                    || batch_bytes.saturating_add(payload_bytes) > MAX_ITEM_BYTES_PER_MESSAGE)
+                    || batch_bytes.saturating_add(message_bytes) > MAX_ITEM_BYTES_PER_MESSAGE)
             {
                 stats.sent += batch.len();
                 chan.send(SyncMessage::Items {
@@ -87,7 +85,7 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
                 batch_bytes = 0;
             }
 
-            batch_bytes += payload_bytes;
+            batch_bytes += message_bytes;
             batch.push(item);
         }
     }
@@ -187,6 +185,31 @@ mod tests {
             [SyncMessage::Items { items }, SyncMessage::Done]
                 if items.len() == 1 && items[0].item_id == "valid"
         ));
+    }
+
+    #[tokio::test]
+    async fn metadata_does_not_reduce_the_raw_content_cap() {
+        let mut at_content_cap = item("at-content-cap", 100, "", "dev-a");
+        at_content_cap.content = "x".repeat(MAX_CONTENT_BYTES);
+        at_content_cap.payload_metadata =
+            Some(r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64}}"#.into());
+        let advertised =
+            HashMap::from([(at_content_cap.item_id.clone(), at_content_cap.summary())]);
+        let source = TestSource::new("dev-a", vec![at_content_cap]);
+        let mut channel = ScriptChannel::new(vec![]);
+        let mut stats = SyncStats::default();
+
+        serve_items(
+            &mut channel,
+            &source,
+            &advertised,
+            vec!["at-content-cap".into()],
+            &mut stats,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!((stats.sent, stats.skipped_too_large), (1, 0));
     }
 
     #[tokio::test]
