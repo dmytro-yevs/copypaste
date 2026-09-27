@@ -12,8 +12,7 @@
     <string name="pairing_qr_label">Pairing QR code</string>
     <string name="pairing_code_label">Pairing code</string>
     <string name="pairing_code_value">Code: %1$s</string>
-    <string name="pairing_reveal">Click to reveal</string>
-    <string name="pairing_reveal_label">Click to reveal QR code</string>
+    <string name="pairing_ready_status">Ready for another device to scan</string>
     <string name="pairing_expires">Expires in %1$d seconds</string>
     <string name="pairing_cancel">Cancel</string>
     <string name="pairing_close">Close</string>

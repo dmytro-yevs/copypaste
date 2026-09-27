@@ -2,6 +2,5 @@
 <resources>
     <item name="pairing_qr" type="id" />
     <item name="pairing_code" type="id" />
-    <item name="pairing_reveal" type="id" />
     <item name="pairing_sas" type="id" />
 </resources>
