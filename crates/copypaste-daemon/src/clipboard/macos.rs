@@ -76,12 +76,18 @@ const UTI_MARKERS: [&str; 3] = [
 struct Utis {
     text: Retained<NSString>,
     text_probe: Retained<NSArray<NSString>>,
+    png: Retained<NSString>,
+    png_probe: Retained<NSArray<NSString>>,
+    tiff: Retained<NSString>,
+    tiff_probe: Retained<NSArray<NSString>>,
     markers: Retained<NSArray<NSString>>,
 }
 
 impl Utis {
     fn new() -> Self {
         let text = NSString::from_str(UTI_TEXT);
+        let png = NSString::from_str(UTI_PNG);
+        let tiff = NSString::from_str(UTI_TIFF);
         let markers: Vec<Retained<NSString>> =
             UTI_MARKERS.iter().map(|s| NSString::from_str(s)).collect();
         // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
@@ -89,8 +95,12 @@ impl Utis {
         // is not. Taking owned `Retained`s is the supported path for it.
         Self {
             text_probe: NSArray::from_vec(vec![text.clone()]),
+            png_probe: NSArray::from_vec(vec![png.clone()]),
+            tiff_probe: NSArray::from_vec(vec![tiff.clone()]),
             markers: NSArray::from_vec(markers),
             text,
+            png,
+            tiff,
         }
     }
 }
@@ -203,11 +213,20 @@ impl ClipboardSource for MacOsClipboard {
                 return None;
             }
 
-            let data = UTIS.with(|utis| unsafe {
-                pb.availableTypeFromArray(&utis.text_probe)
-                    .and_then(|_| pb.dataForType(&utis.text))
+            let (data, content_type) = UTIS.with(|utis| unsafe {
+                if pb.availableTypeFromArray(&utis.text_probe).is_some() {
+                    pb.dataForType(&utis.text)
+                        .map(|data| (data, copypaste_ipc::content_type::TEXT))
+                } else if pb.availableTypeFromArray(&utis.png_probe).is_some() {
+                    pb.dataForType(&utis.png)
+                        .map(|data| (data, copypaste_ipc::content_type::IMAGE_PNG))
+                } else if pb.availableTypeFromArray(&utis.tiff_probe).is_some() {
+                    pb.dataForType(&utis.tiff)
+                        .map(|data| (data, copypaste_ipc::content_type::IMAGE_TIFF))
+                } else {
+                    None
+                }
             })?;
-            let content_type = copypaste_ipc::content_type::TEXT;
 
             // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
             // multi-GiB item is a multi-GiB allocation. Check first.
@@ -225,17 +244,28 @@ impl ClipboardSource for MacOsClipboard {
             }
 
             let bytes = unsafe { data.bytes() }.to_vec();
-            // public.utf8-plain-text is UTF-8 by definition; malformed input
-            // is a third-party app's bug. §3.6's precedent is lossy
-            // conversion rather than dropping the user's copy, and I-37
-            // forbids panicking on a malformed payload.
-            let content = String::from_utf8_lossy(&bytes).into_owned();
-            if content.is_empty() {
-                return None;
+            if content_type == copypaste_ipc::content_type::TEXT {
+                // public.utf8-plain-text is UTF-8 by definition; malformed input
+                // is a third-party app's bug. §3.6's precedent is lossy
+                // conversion rather than dropping the user's copy, and I-37
+                // forbids panicking on a malformed payload.
+                let content = String::from_utf8_lossy(&bytes).into_owned();
+                if content.is_empty() {
+                    return None;
+                }
+                return Some(Capture {
+                    content,
+                    binary_content: None,
+                    file_path: None,
+                    file_metadata: None,
+                    content_type: content_type.to_string(),
+                    app_bundle_id,
+                    app_name,
+                });
             }
             Some(Capture {
-                content,
-                binary_content: None,
+                content: String::new(),
+                binary_content: Some(bytes),
                 file_path: None,
                 file_metadata: None,
                 content_type: content_type.to_string(),
@@ -683,7 +713,7 @@ mod tests {
 
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn image_only_changes_are_acknowledged_without_reading_or_rejection() {
+    fn image_only_changes_are_captured_and_use_the_image_limit() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
         let settings = copypaste_ipc::ConfigData {
@@ -691,18 +721,31 @@ mod tests {
             ..Default::default()
         };
 
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let image = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        write_types(&[(UTI_PNG, &image)]);
+        assert!(offers(UTI_PNG), "the image-only write never landed");
+        let capture = clipboard
+            .poll_with_policy(CapturePolicy::new(&settings))
+            .expect("a native PNG must be captured");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::IMAGE_PNG);
+        assert_eq!(capture.content, "");
+        assert_eq!(capture.binary_content.as_deref(), Some(image.as_slice()));
+
         let oversized = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize + 1];
         write_types(&[(UTI_PNG, &oversized)]);
         assert!(offers(UTI_PNG), "the image-only write never landed");
         assert!(clipboard
             .poll_with_policy(CapturePolicy::new(&settings))
             .is_none());
-        assert_eq!(clipboard.rejected_too_large_count(), 0);
+        assert_eq!(clipboard.rejected_too_large_count(), 1);
         assert!(
             clipboard
                 .poll_with_policy(CapturePolicy::new(&settings))
                 .is_none(),
-            "the cursor must advance for an image-only change"
+            "the cursor must advance for a rejected image"
         );
     }
 

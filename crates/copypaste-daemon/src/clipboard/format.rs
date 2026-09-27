@@ -1,13 +1,25 @@
 use copypaste_ipc::content_type;
 
-/// Return the one representation a pasteboard change is allowed to produce.
-/// Keeping the product boundary platform-free makes every backend agree that
-/// plain text is the only captured representation.
+/// Return the highest-priority representation offered by a clipboard change.
+/// The daemon prefers text, then the two native image formats it can store and
+/// paste back without conversion.
 #[cfg_attr(not(test), allow(dead_code))]
-pub fn preferred<'a>(available: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
-    available
-        .into_iter()
-        .find(|candidate| *candidate == content_type::TEXT)
+pub fn preferred<'a>(available: impl IntoIterator<Item = &'a str>) -> Option<&'static str> {
+    let available: Vec<_> = available.into_iter().collect();
+    [
+        content_type::TEXT,
+        content_type::IMAGE_PNG,
+        content_type::IMAGE_TIFF,
+    ]
+    .into_iter()
+    .find(|candidate| available.contains(candidate))
+}
+
+pub fn supports(content_type: &str) -> bool {
+    matches!(
+        content_type,
+        content_type::TEXT | content_type::IMAGE_PNG | content_type::IMAGE_TIFF
+    )
 }
 
 #[cfg(test)]
@@ -15,7 +27,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plain_text_is_the_only_capture_representation() {
+    fn text_and_native_images_are_capture_representations() {
         assert_eq!(
             preferred([
                 content_type::FILE,
@@ -32,8 +44,9 @@ mod tests {
                 content_type::RICH_TEXT,
                 content_type::HTML,
             ]),
-            None,
-            "non-text-only clipboard changes are acknowledged but not captured"
+            Some(content_type::IMAGE_PNG)
         );
+        assert!(!supports(content_type::FILE));
+        assert!(!supports(content_type::RICH_TEXT));
     }
 }
