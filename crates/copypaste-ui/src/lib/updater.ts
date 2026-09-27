@@ -5,6 +5,11 @@ import { call, hasNativeBridge } from "@/lib/ipcCall";
 
 export type { UpdateProgress, UpdateStatus };
 
+// The native feed request has a shorter 20 s timeout. Leave enough room to
+// return its structured failure through the WebView instead of showing a busy
+// control until the generic five-minute IPC deadline.
+export const UPDATE_CHECK_TIMEOUT_MS = 25_000;
+
 export function getUpdateStatus(): Promise<UpdateStatus> {
   if (!hasNativeBridge()) return Promise.resolve({ state: "unsupported" });
   return call(UI_COMMANDS.update_status);
@@ -12,7 +17,9 @@ export function getUpdateStatus(): Promise<UpdateStatus> {
 
 export function checkForUpdate(): Promise<UpdateStatus> {
   if (!hasNativeBridge()) return Promise.resolve({ state: "unsupported" });
-  return call(UI_COMMANDS.check_for_update);
+  return call(UI_COMMANDS.check_for_update, undefined, {
+    timeoutMs: UPDATE_CHECK_TIMEOUT_MS,
+  });
 }
 
 export function installUpdate(

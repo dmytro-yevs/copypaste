@@ -159,15 +159,16 @@ export function UpdateRow() {
   }
 
   let action: ReactNode;
-  if (state.state === "ready" || state.state === "up_to_date") {
+  if (state.state === "ready" || state.state === "checking" || state.state === "up_to_date") {
     action = (
       <Button
         variant="secondary"
         size="sm"
+        state={state.state === "checking" ? "loading" : undefined}
         aria-describedby={`${descriptionId} ${statusId}`}
         onClick={() => void check()}
       >
-        {t(state.state === "ready" ? "settings.about.updates.check" : "settings.about.updates.checkAgain")}
+        {t(state.state === "up_to_date" ? "settings.about.updates.checkAgain" : "settings.about.updates.check")}
       </Button>
     );
   } else if (availableVersion !== undefined) {
