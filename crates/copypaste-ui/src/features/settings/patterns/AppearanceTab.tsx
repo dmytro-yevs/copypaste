@@ -1,5 +1,3 @@
-import { useId } from "react";
-
 import { SettingsRow } from "@/components/shared";
 import { Button, Switch } from "@/components/ui";
 import { SettingsGroupSurface } from "@/features/settings/components/SettingsGroupSurface";
@@ -60,9 +58,6 @@ export function AppearanceTab({
   const colorTheme = usePrefs((state) => state.colorTheme);
   const translucency = usePrefs((state) => state.translucency);
   const set = usePrefs((state) => state.set);
-  const themeDescriptionId = useId();
-  const translucencyDescriptionId = useId();
-
   if (!ready) {
     return null;
   }
@@ -70,15 +65,13 @@ export function AppearanceTab({
   return (
     <div className={styles.root}>
       <SettingsGroupSurface>
-        <div className={styles.settingLabel}>
-          <div>
-            <strong id={themeDescriptionId}>{t("settings.appearance.theme.title")}</strong>
-            <span>{t("settings.appearance.theme.override")}</span>
-          </div>
+        <SettingsRow
+          title={t("settings.appearance.theme.title")}
+          help={t("settings.appearance.theme.override")}
+        >
           <div
             role="group"
             aria-label={t("settings.appearance.theme.title")}
-            aria-describedby={themeDescriptionId}
             className={styles.modeControl}
           >
             {MODE_OPTIONS.map((option) => (
@@ -108,7 +101,7 @@ export function AppearanceTab({
               </Button>
             ))}
           </div>
-        </div>
+        </SettingsRow>
       </SettingsGroupSurface>
 
       <div className={styles.themeTitle}>
@@ -167,12 +160,10 @@ export function AppearanceTab({
         <SettingsGroupSurface>
           <SettingsRow
             title={t("settings.appearance.translucency.title")}
-            descriptionId={translucencyDescriptionId}
-            description={t("settings.appearance.translucency.description")}
+            help={t("settings.appearance.translucency.description")}
           >
             <Switch
               aria-label={t("settings.appearance.translucency.title")}
-              aria-describedby={translucencyDescriptionId}
               checked={translucency}
               onCheckedChange={(checked) => set("translucency", checked)}
             />

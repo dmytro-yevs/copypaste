@@ -14,7 +14,7 @@ function row(value: number) {
     <TooltipProvider>
       <ChoiceRow
         title="History limit"
-        description="Maximum stored items."
+        help="Maximum stored items."
         icon="storage"
         choices={choices}
         value={value}

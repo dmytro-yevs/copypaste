@@ -244,7 +244,7 @@ function StartupSection() {
     <Section title={t("settings.startup.title")}>
       <SwitchRow
         title={t("settings.startup.openAtLogin.title")}
-        description={t("settings.startup.openAtLogin.description")}
+        help={t("settings.startup.openAtLogin.description")}
         id="open-at-login"
         checked={enabled}
         disabled={openAtLogin.isPending || unknown || save.isPending}

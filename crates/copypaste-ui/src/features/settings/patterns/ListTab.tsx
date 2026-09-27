@@ -1,4 +1,3 @@
-import { useId } from "react";
 import { Slider, Switch } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import {
@@ -35,10 +34,6 @@ export function ListTab({
   const warnBeforeReveal = usePrefs((s) => s.warnBeforeReveal);
   const allowScreenshots = usePrefs((s) => s.allowScreenshots);
   const set = usePrefs((s) => s.set);
-  const groupingDescriptionId = useId();
-  const limitDescriptionId = useId();
-  const revealDescriptionId = useId();
-  const screenshotsDescriptionId = useId();
 
   if (!ready) {
     return null;
@@ -49,13 +44,11 @@ export function ListTab({
       {(scope === "all" || scope === "clipboard") && <Section title="History list">
         <SettingsRow
           title={t("settings.list.groupByDevice.title")}
-          descriptionId={groupingDescriptionId}
-          description={t("settings.list.groupByDevice.description")}
+          help={t("settings.list.groupByDevice.description")}
         >
           <Switch
             id="group-by-device"
             aria-label={t("settings.list.groupByDevice.title")}
-            aria-describedby={groupingDescriptionId}
             checked={sortByDevice}
             onCheckedChange={(value) => set("sortByDevice", value)}
           />
@@ -63,8 +56,7 @@ export function ListTab({
 
         <SettingsRow
           title={t("settings.list.historyDisplayLimit.title")}
-          descriptionId={limitDescriptionId}
-          description={t("settings.list.historyDisplayLimit.description")}
+          help={t("settings.list.historyDisplayLimit.description")}
         >
           <div className={styles.sliderControl}>
             <output className={styles.wideSliderValue}>
@@ -74,7 +66,6 @@ export function ListTab({
             </output>
             <Slider
               aria-label={t("settings.list.historyDisplayLimit.title")}
-              aria-describedby={limitDescriptionId}
               value={[HISTORY_DISPLAY_LIMITS.indexOf(historyDisplayLimit)]}
               min={0}
               max={HISTORY_DISPLAY_LIMITS.length - 1}
@@ -92,13 +83,11 @@ export function ListTab({
       {(scope === "all" || scope === "privacy") && <Section title="Reveal protection">
         <SettingsRow
           title={t("settings.list.warnBeforeReveal.title")}
-          descriptionId={revealDescriptionId}
-          description={t("settings.list.warnBeforeReveal.description")}
+          help={t("settings.list.warnBeforeReveal.description")}
         >
           <Switch
             id="warn-before-reveal"
             aria-label={t("settings.list.warnBeforeReveal.title")}
-            aria-describedby={revealDescriptionId}
             checked={warnBeforeReveal}
             onCheckedChange={(value) => set("warnBeforeReveal", value)}
           />
@@ -107,8 +96,7 @@ export function ListTab({
         {supportsScreenshots ? (
           <SettingsRow
             title={t("settings.list.allowScreenshots.title")}
-            descriptionId={screenshotsDescriptionId}
-            description={t("settings.list.allowScreenshots.description")}
+            help={t("settings.list.allowScreenshots.description")}
             note={
               allowScreenshots ? (
                 <span className={styles.warning}>
@@ -120,7 +108,6 @@ export function ListTab({
             <Switch
               id="allow-screenshots"
               aria-label={t("settings.list.allowScreenshots.title")}
-              aria-describedby={screenshotsDescriptionId}
               checked={allowScreenshots}
               onCheckedChange={(value) => set("allowScreenshots", value)}
             />
