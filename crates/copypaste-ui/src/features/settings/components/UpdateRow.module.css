@@ -126,7 +126,7 @@
 
 .action {
   display: flex;
-  inline-size: calc(var(--s-9) * 3 + var(--s-4));
+  inline-size: min(calc(var(--s-9) * 3 + var(--s-4)), 50%);
   min-inline-size: 0;
   min-block-size: var(--ctl-h-sm);
   align-items: center;
@@ -198,51 +198,6 @@
 
 @keyframes update-spin {
   to { transform: rotate(1turn); }
-}
-
-@container (max-width: $cpSm) {
-  .root {
-    padding: var(--s-4) var(--s-3);
-    grid-template-columns: var(--s-6) minmax(0, 1fr);
-    border-inline: 0;
-    border-radius: 0;
-  }
-
-  .action {
-    inline-size: 100%;
-    grid-column: 1 / -1;
-    justify-content: stretch;
-  }
-
-  .activity {
-    inline-size: 100%;
-  }
-
-  .root:is(
-    [data-state="loading"],
-    [data-state="ready"],
-    [data-state="checking"],
-    [data-state="up_to_date"],
-    [data-state="error"],
-    [data-state="unsupported"],
-    [data-state="unconfigured"]
-  ) {
-    padding: var(--s-2) var(--s-3);
-    grid-template-columns: var(--s-6) minmax(0, 1fr) auto;
-  }
-
-  .root:is(
-    [data-state="loading"],
-    [data-state="ready"],
-    [data-state="checking"],
-    [data-state="up_to_date"],
-    [data-state="error"],
-    [data-state="unsupported"],
-    [data-state="unconfigured"]
-  ) .action {
-    grid-column: auto;
-    justify-content: flex-end;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
