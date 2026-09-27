@@ -27,6 +27,98 @@ mac_wait_executable_pid() { # <bundle executable> [timeout]
     return 1
 }
 
+mac_observe_daemon_activation_policy() { # <bundle daemon executable> <pid>
+    local executable="$1" pid="$2" observation validated
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || {
+        echo "macOS daemon PID is unavailable" >&2
+        return 1
+    }
+    observation="$(osascript -l JavaScript - "$pid" <<'JXA'
+ObjC.import("AppKit");
+
+function run(argv) {
+    const pid = Number(argv[0]);
+    const application = $.NSRunningApplication.runningApplicationWithProcessIdentifier(pid);
+    if (!application || application.isNil()) {
+        throw new Error("NSRunningApplication did not resolve the daemon PID");
+    }
+    const terminationState = application.isTerminated;
+    if (terminationState === null || typeof terminationState === "undefined") {
+        throw new Error("NSRunningApplication did not expose daemon termination state");
+    }
+    const terminated = Number(terminationState);
+    if (terminated !== 0 && terminated !== 1) {
+        throw new Error("NSRunningApplication did not expose daemon termination state");
+    }
+    if (terminated !== 0) {
+        throw new Error("NSRunningApplication resolved a terminated daemon");
+    }
+    const executableURL = application.executableURL;
+    if (!executableURL || executableURL.isNil()) {
+        throw new Error("NSRunningApplication did not expose the daemon executable");
+    }
+    const policies = {
+        0: "regular",
+        1: "accessory",
+        2: "prohibited",
+    };
+    const policy = Number(application.activationPolicy);
+    if (!(policy in policies)) {
+        throw new Error("NSRunningApplication returned an unknown activation policy");
+    }
+    return JSON.stringify({
+        pid: Number(application.processIdentifier),
+        executable: ObjC.unwrap(executableURL.path),
+        running: true,
+        activation_policy: policies[policy],
+    });
+}
+JXA
+    )" || {
+        echo "macOS daemon activation-policy observation is unavailable" >&2
+        return 1
+    }
+    validated="$(python3 - "$executable" "$pid" "$observation" <<'PY'
+import json
+import os.path
+import sys
+
+expected_executable, expected_pid = sys.argv[1], int(sys.argv[2])
+try:
+    observation = json.loads(sys.argv[3])
+except (json.JSONDecodeError, TypeError):
+    raise SystemExit("macOS daemon activation-policy observation is invalid")
+if not isinstance(observation, dict):
+    raise SystemExit("macOS daemon activation-policy observation is invalid")
+if observation.get("pid") != expected_pid:
+    raise SystemExit("macOS daemon activation-policy PID did not match")
+if observation.get("executable") != expected_executable:
+    raise SystemExit("macOS daemon activation-policy executable did not match")
+if observation.get("running") is not True:
+    raise SystemExit("macOS daemon activation-policy observation did not prove it is running")
+if observation.get("activation_policy") != "prohibited":
+    raise SystemExit("macOS daemon activation policy is not prohibited")
+print(json.dumps({
+    "pid": expected_pid,
+    "executable_basename": os.path.basename(expected_executable),
+    "executable_matched": True,
+    "running": True,
+    "activation_policy": "prohibited",
+}, separators=(",", ":")))
+PY
+    )" || return 1
+    printf '%s\n' "$validated"
+}
+
+mac_verify_daemon_activation_policy() { # <bundle daemon executable> [timeout]
+    local executable="$1" timeout="${2:-30}" pid
+    pid="$(mac_wait_executable_pid "$executable" "$timeout")" || {
+        echo "the bundled CopyPaste daemon did not launch" >&2
+        return 1
+    }
+    mac_observe_daemon_activation_policy "$executable" "$pid"
+}
+
 mac_set_app_pid() { # <pid>
     MAC_APP_PID="$1"
 }
