@@ -105,7 +105,38 @@ impl PeerTable {
 
     pub(super) fn snapshot(&mut self, now_ms: i64) -> Vec<DiscoveredPeer> {
         self.prune(now_ms);
-        let mut peers: Vec<DiscoveredPeer> = self.entries.values().cloned().collect();
+        let mut endpoints: HashMap<SocketAddr, DiscoveredPeer> = HashMap::new();
+        for peer in self.entries.values() {
+            let endpoint = canonical_endpoint(peer.addr);
+            match endpoints.entry(endpoint) {
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    let mut peer = peer.clone();
+                    peer.addr = endpoint;
+                    slot.insert(peer);
+                }
+                std::collections::hash_map::Entry::Occupied(mut slot) => {
+                    let current = slot.get_mut();
+                    let mut pairing_ids = current.pairing_ids.clone();
+                    pairing_ids.extend(peer.pairing_ids.iter().cloned());
+                    pairing_ids.sort_unstable();
+                    pairing_ids.dedup();
+
+                    let replace = peer.last_seen_ms > current.last_seen_ms
+                        || (peer.last_seen_ms == current.last_seen_ms
+                            && peer.discovery_id < current.discovery_id);
+                    if replace {
+                        let mut peer = peer.clone();
+                        peer.addr = endpoint;
+                        peer.pairing_ids = pairing_ids;
+                        *current = peer;
+                    } else {
+                        current.pairing_ids = pairing_ids;
+                    }
+                }
+            }
+        }
+
+        let mut peers: Vec<DiscoveredPeer> = endpoints.into_values().collect();
         peers.sort_by(|a, b| {
             a.discovery_id
                 .cmp(&b.discovery_id)
@@ -132,6 +163,16 @@ impl PeerTable {
     }
 }
 
+fn canonical_endpoint(addr: SocketAddr) -> SocketAddr {
+    let ip = match addr.ip() {
+        std::net::IpAddr::V6(ip) => ip
+            .to_ipv4_mapped()
+            .map_or(std::net::IpAddr::V6(ip), std::net::IpAddr::V4),
+        ip => ip,
+    };
+    SocketAddr::new(ip, addr.port())
+}
+
 /// Whether a transport observation is still inside the common discovery TTL.
 pub fn is_peer_fresh(last_seen_ms: i64, now_ms: i64) -> bool {
     is_peer_fresh_for(last_seen_ms, now_ms, PEER_TTL.as_millis() as i64)
@@ -147,17 +188,37 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     fn peer(pairing_id: &str, last_seen_ms: i64) -> DiscoveredPeer {
+        peer_at(
+            pairing_id,
+            SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
+                crate::DEFAULT_PORT,
+            ),
+            last_seen_ms,
+        )
+    }
+
+    fn peer_at(pairing_id: &str, addr: SocketAddr, last_seen_ms: i64) -> DiscoveredPeer {
         DiscoveredPeer {
             discovery_id: format!("device-{pairing_id}"),
             pairing_ids: vec![pairing_id.to_string()],
             name: "peer".to_string(),
             profile: None,
-            addr: SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
-                crate::DEFAULT_PORT,
-            ),
+            addr,
             last_seen_ms,
         }
+    }
+
+    fn endpoint(index: usize) -> SocketAddr {
+        SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(
+                198,
+                51,
+                u8::try_from(index / 254).unwrap(),
+                u8::try_from(index % 254 + 1).unwrap(),
+            )),
+            crate::DEFAULT_PORT,
+        )
     }
 
     // -- expiry ---------------------------------------------------------------
@@ -234,6 +295,113 @@ mod tests {
         assert_eq!(table.find("dup", now).unwrap().last_seen_ms, now);
     }
 
+    #[test]
+    fn duplicate_fullnames_collapse_to_the_freshest_endpoint() {
+        let mut table = PeerTable::default();
+        let addr = endpoint(1);
+        table.observe("old._copypaste._tcp.local.", peer_at("old", addr, 10), 10);
+        table.observe("new._copypaste._tcp.local.", peer_at("new", addr, 20), 20);
+
+        let peers = table.snapshot(20);
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].discovery_id, "device-new");
+        assert_eq!(peers[0].pairing_ids, ["new", "old"]);
+    }
+
+    #[test]
+    fn equal_age_duplicates_choose_a_stable_discovery_id() {
+        let mut table = PeerTable::default();
+        let addr = endpoint(2);
+        table.observe("z._copypaste._tcp.local.", peer_at("z", addr, 10), 10);
+        table.observe("a._copypaste._tcp.local.", peer_at("a", addr, 10), 10);
+
+        let peers = table.snapshot(10);
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].discovery_id, "device-a");
+        assert_eq!(peers[0].pairing_ids, ["a", "z"]);
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_and_ipv4_share_one_endpoint() {
+        let mut table = PeerTable::default();
+        let v4 = Ipv4Addr::new(192, 0, 2, 4);
+        let mapped = "::ffff:192.0.2.4".parse().unwrap();
+        table.observe(
+            "mapped._copypaste._tcp.local.",
+            peer_at("mapped", SocketAddr::new(mapped, crate::DEFAULT_PORT), 10),
+            10,
+        );
+        table.observe(
+            "v4._copypaste._tcp.local.",
+            peer_at(
+                "v4",
+                SocketAddr::new(IpAddr::V4(v4), crate::DEFAULT_PORT),
+                20,
+            ),
+            20,
+        );
+
+        let peers = table.snapshot(20);
+        assert_eq!(peers.len(), 1);
+        assert_eq!(
+            peers[0].addr,
+            SocketAddr::new(IpAddr::V4(v4), crate::DEFAULT_PORT)
+        );
+    }
+
+    #[test]
+    fn different_ports_and_ipv6_endpoints_remain_distinct() {
+        let mut table = PeerTable::default();
+        table.observe(
+            "v4-a._copypaste._tcp.local.",
+            peer_at("v4-a", endpoint(5), 10),
+            10,
+        );
+        table.observe(
+            "v4-b._copypaste._tcp.local.",
+            peer_at(
+                "v4-b",
+                SocketAddr::new(endpoint(5).ip(), crate::DEFAULT_PORT + 1),
+                10,
+            ),
+            10,
+        );
+        table.observe(
+            "v6-a._copypaste._tcp.local.",
+            peer_at(
+                "v6-a",
+                SocketAddr::new("2001:db8::5".parse().unwrap(), crate::DEFAULT_PORT),
+                10,
+            ),
+            10,
+        );
+        table.observe(
+            "v6-b._copypaste._tcp.local.",
+            peer_at(
+                "v6-b",
+                SocketAddr::new("2001:db8::6".parse().unwrap(), crate::DEFAULT_PORT),
+                10,
+            ),
+            10,
+        );
+
+        assert_eq!(table.snapshot(10).len(), 4);
+    }
+
+    #[test]
+    fn removing_one_duplicate_announcement_keeps_the_other() {
+        let mut table = PeerTable::default();
+        let addr = endpoint(6);
+        table.observe("old._copypaste._tcp.local.", peer_at("old", addr, 10), 10);
+        table.observe("new._copypaste._tcp.local.", peer_at("new", addr, 20), 20);
+
+        table.remove_service("new._copypaste._tcp.local.");
+        let peers = table.snapshot(20);
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].discovery_id, "device-old");
+        assert_eq!(peers[0].pairing_ids, ["old"]);
+    }
+
     // -- cap ------------------------------------------------------------------
 
     #[test]
@@ -242,7 +410,7 @@ mod tests {
         for i in 0..500 {
             table.observe(
                 &format!("flood-{i}._copypaste._tcp.local."),
-                peer(&format!("id-{i}"), 1_000 + i as i64),
+                peer_at(&format!("id-{i}"), endpoint(i), 1_000 + i as i64),
                 1_000 + i as i64,
             );
             assert!(table.entries.len() <= 8);
@@ -263,7 +431,7 @@ mod tests {
             table.observe("real._copypaste._tcp.local.", peer("real", clock), clock);
             table.observe(
                 &format!("flood-{i}._copypaste._tcp.local."),
-                peer(&format!("junk-{i}"), clock),
+                peer_at(&format!("junk-{i}"), endpoint(i + 1), clock),
                 clock,
             );
         }
