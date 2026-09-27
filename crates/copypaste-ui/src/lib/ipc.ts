@@ -358,6 +358,7 @@ export type {
   CaptureHealth,
   CaptureNextStep,
   CaptureRung,
+  CaptureSetupInstructions,
   CaptureSnapshot,
   CaptureSource,
   CapturedPayload,
@@ -375,6 +376,7 @@ export {
   captureRequestBatteryExemption,
   captureSetEnabled,
   captureSetToastSuppressed,
+  captureSetupInstructions,
   captureState,
   captureToastExplanation,
 } from "./ipcCapture";

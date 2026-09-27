@@ -3,6 +3,7 @@ import type {
   CaptureHealth as GeneratedCaptureHealth,
   CaptureNextStep as GeneratedCaptureNextStep,
   CaptureRung as GeneratedCaptureRung,
+  CaptureSetupInstructions as GeneratedCaptureSetupInstructions,
   CaptureSnapshot as GeneratedCaptureSnapshot,
   CaptureSource as GeneratedCaptureSource,
   NotGrantedReason as GeneratedNotGrantedReason,
@@ -20,6 +21,7 @@ export type CapturedPayload = ReadonlyDeep<GeneratedCapturedPayload>;
 export type CaptureHealth = ReadonlyDeep<GeneratedCaptureHealth>;
 export type CaptureNextStep = GeneratedCaptureNextStep;
 export type CaptureRung = GeneratedCaptureRung;
+export type CaptureSetupInstructions = ReadonlyDeep<GeneratedCaptureSetupInstructions>;
 export type CaptureSnapshot = ReadonlyDeep<GeneratedCaptureSnapshot>;
 export type CaptureSource = GeneratedCaptureSource;
 export type NotGrantedReason = GeneratedNotGrantedReason;
@@ -110,6 +112,10 @@ export function captureSetToastSuppressed(
 export function captureOpenShizuku(): Promise<void> {
   if (hasWebBridge()) return Promise.resolve();
   return call(UI_COMMANDS.capture_open_shizuku);
+}
+
+export function captureSetupInstructions(): Promise<CaptureSetupInstructions> {
+  return call(UI_COMMANDS.capture_setup_instructions);
 }
 
 export function captureOpenDeveloperOptions(): Promise<void> {

@@ -16,7 +16,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::backend::BackendError;
 use crate::capture::intake;
 use crate::capture::model::{CaptureSnapshot, CaptureSource, TOAST_EXPLANATION};
-use crate::capture::{CaptureControl, SelectedCapture};
+use crate::capture::{CaptureControl, CaptureSetupInstructions, SelectedCapture};
 use crate::events::TauriEventName;
 use crate::model::UiItem;
 
@@ -121,6 +121,13 @@ pub fn capture_open_developer_options(capture: State<'_, SelectedCapture>) -> Re
 #[tauri::command]
 pub fn capture_request_battery_exemption(capture: State<'_, SelectedCapture>) -> Result<()> {
     capture.request_battery_exemption()
+}
+
+#[tauri::command]
+pub fn capture_setup_instructions(
+    capture: State<'_, SelectedCapture>,
+) -> Result<CaptureSetupInstructions> {
+    capture.setup_instructions()
 }
 
 fn emit(app: &AppHandle, snapshot: CaptureSnapshot) -> CaptureSnapshot {

@@ -82,6 +82,14 @@ data class NotificationPermissionFacts(
 )
 
 @Serializable
+data class SetupInstructions(
+    val packageName: String,
+    val shizukuCommands: List<List<String>>,
+    val adbCommands: List<List<String>>,
+    val requiresRestart: Boolean,
+)
+
+@Serializable
 data class TileAddResultConstants(
     val notAdded: Int,
     val alreadyAdded: Int,

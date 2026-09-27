@@ -27,7 +27,7 @@ use super::contract::{
 };
 use super::intake::QueueWake;
 use super::model::{CaptureModel, CaptureSnapshot, CaptureSource, Clip, ReadOutcome};
-use super::CaptureControl;
+use super::{CaptureControl, CaptureSetupInstructions};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,6 +139,15 @@ struct QueueReadyArgs {
     on_ready: Channel<()>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AndroidSetupInstructions {
+    package_name: String,
+    shizuku_commands: Vec<Vec<String>>,
+    adb_commands: Vec<Vec<String>>,
+    requires_restart: bool,
+}
+
 impl AndroidCapture {
     fn new(handle: PluginHandle<Wry>, wake: QueueWake) -> Self {
         Self {
@@ -203,6 +212,16 @@ impl AndroidCapture {
     fn open(&self, command: &'static str) -> Result<()> {
         self.call::<_, AndroidEmptyResult>(command, (), MSG_OPEN)
             .map(|_| ())
+    }
+
+    fn setup_instructions(&self) -> Result<CaptureSetupInstructions> {
+        let value: AndroidSetupInstructions = self.call("setupInstructions", (), MSG_BRIDGE)?;
+        Ok(CaptureSetupInstructions {
+            package_name: value.package_name,
+            shizuku_commands: value.shizuku_commands,
+            adb_commands: value.adb_commands,
+            requires_restart: value.requires_restart,
+        })
     }
 }
 
@@ -353,6 +372,10 @@ impl CaptureControl for AndroidCapture {
 
     fn request_battery_exemption(&self) -> Result<()> {
         self.open("requestBatteryExemption")
+    }
+
+    fn setup_instructions(&self) -> Result<CaptureSetupInstructions> {
+        self.setup_instructions()
     }
 
     fn note_stored(&self, at_ms: i64) {
