@@ -133,7 +133,7 @@ impl Backend for FakeBackend {
             .ok_or_else(refused)
     }
 
-    async fn image_preview(&self, _id: &str) -> Result<ImagePreview> {
+    async fn image_preview(&self, _id: &str, _max_edge: Option<u32>) -> Result<ImagePreview> {
         Err(refused())
     }
 

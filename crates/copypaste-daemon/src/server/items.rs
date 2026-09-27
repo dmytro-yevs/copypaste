@@ -143,7 +143,12 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
 ///
 /// This is deliberately not part of `list`: decrypting every screenshot in a
 /// long history would spend memory and expose data the user has not viewed.
-pub(super) fn image_preview(state: &AppState, id: u64, item_id: &str) -> Response {
+pub(super) fn image_preview(
+    state: &AppState,
+    id: u64,
+    item_id: &str,
+    max_edge: Option<u32>,
+) -> Response {
     let row = match state.store.get(item_id) {
         Ok(Some(row)) => row,
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
@@ -166,7 +171,7 @@ pub(super) fn image_preview(state: &AppState, id: u64, item_id: &str) -> Respons
         Err(error) => return decrypt_error(id, &error),
     };
     let budget = state.settings.get().max_decoded_image_mb;
-    let thumbnail = match copypaste_core::thumbnail_png(&bytes, budget) {
+    let thumbnail = match copypaste_core::thumbnail_png(&bytes, budget, max_edge) {
         Ok(thumbnail) => thumbnail,
         Err(error) => {
             warn!(id = %row.id, error = ?error, "image preview unavailable");
