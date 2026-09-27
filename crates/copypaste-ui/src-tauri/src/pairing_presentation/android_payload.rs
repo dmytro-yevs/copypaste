@@ -1,4 +1,6 @@
-use copypaste_ipc::{PairingProgressData, PairingState};
+use copypaste_ipc::PairingProgressData;
+#[cfg(test)]
+use copypaste_ipc::PairingState;
 use serde::Serialize;
 
 use super::resolve_pairing_semantics;
