@@ -39,17 +39,13 @@
 //! Everything else — copy, delete, pin — travels by id and does its work in the
 //! backend, so the secret never needs to be in the WebView to be *used*.
 
-#[cfg(any(
-    target_os = "android",
-    target_os = "macos",
-    target_os = "windows",
-    test
-))]
+#[cfg(target_os = "android")]
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_ipc::{
     ContentClass, DiscoveredDevice, ImagePreview, Item, PeerInfo, SensitiveFinding, StatusData,
     SyncResult,
 };
+use copypaste_source_app::AppIcon;
 use serde::Serialize;
 
 use crate::backend::UiError;
@@ -149,27 +145,16 @@ impl UiInstalledSourceApp {
 }
 
 impl UiSourceAppIcon {
-    #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    pub(crate) fn from_png(png: Vec<u8>, width: u32, height: u32) -> Self {
-        #[cfg(not(test))]
-        {
-            const MAX_EDGE: u32 = 512;
-            const MAX_BYTES: usize = 512 * 1024;
-            debug_assert!(
-                width > 0
-                    && height > 0
-                    && width <= MAX_EDGE
-                    && height <= MAX_EDGE
-                    && png.len() <= MAX_BYTES
-                    && png.starts_with(b"\x89PNG"),
-                "icon dimensions or size out of bounds"
-            );
-        }
+    pub(crate) fn from_app_icon(icon: AppIcon) -> Self {
         Self {
-            png_base64: STANDARD.encode(png),
-            width,
-            height,
+            png_base64: icon.png_base64,
+            width: icon.width,
+            height: icon.height,
         }
+    }
+
+    pub(crate) fn into_app_icon(self) -> Option<AppIcon> {
+        AppIcon::from_base64(self.png_base64, self.width, self.height)
     }
 
     #[cfg(target_os = "android")]

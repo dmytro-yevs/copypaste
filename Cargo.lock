@@ -1189,6 +1189,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "copypaste-source-app"
+version = "2.0.0-alpha.37"
+dependencies = [
+ "base64 0.22.1",
+ "image",
+ "objc2 0.5.2",
+ "objc2-app-kit 0.2.2",
+ "objc2-foundation 0.2.2",
+ "winreg 0.55.0",
+ "winsafe",
+]
+
+[[package]]
 name = "copypaste-ui"
 version = "2.0.0-alpha.37"
 dependencies = [
@@ -1205,6 +1218,7 @@ dependencies = [
  "copypaste-p2p",
  "copypaste-retry",
  "copypaste-runtime-log",
+ "copypaste-source-app",
  "directories",
  "dispatch2",
  "futures-util",

@@ -1,0 +1,19 @@
+[package]
+name = "copypaste-source-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+image.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSDictionary"] }
+objc2-app-kit = { workspace = true, features = ["NSBitmapImageRep", "NSColorSpace", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSWorkspace"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winsafe = { version = "0.0.28", features = ["gdi", "shell"] }
+winreg = "0.55"

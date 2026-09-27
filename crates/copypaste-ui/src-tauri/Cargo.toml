@@ -60,6 +60,7 @@ thiserror.workspace = true
 tracing.workspace = true
 copypaste-runtime-log = { path = "../../copypaste-runtime-log" }
 copypaste-fs = { path = "../../copypaste-fs" }
+copypaste-source-app = { path = "../../copypaste-source-app" }
 uuid.workspace = true
 tempfile.workspace = true
 ts-rs = { workspace = true, optional = true }

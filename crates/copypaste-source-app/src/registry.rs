@@ -1,7 +1,4 @@
-//! `App Paths`: the image name an item carries, back to an executable path.
-//!
-//! The path is recovered transiently and dropped after icon extraction. It is
-//! never stored or sent to the WebView because it can disclose a username.
+//! `App Paths`: an executable image name back to its transient path.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -15,7 +12,7 @@ use winreg::{RegKey, RegValue, HKEY};
 
 const APP_PATHS: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths";
 
-pub(crate) fn image_names() -> Option<BTreeSet<String>> {
+pub fn image_names() -> Option<BTreeSet<String>> {
     image_names_at(APP_PATHS)
 }
 
@@ -32,9 +29,7 @@ fn image_names_at(base: &str) -> Option<BTreeSet<String>> {
     readable.then_some(names)
 }
 
-/// App Paths first, then System32: Windows tools such as `cmd.exe` register no
-/// App Path but still have a shell icon.
-pub(crate) fn executable(image_name: &str) -> Option<PathBuf> {
+pub fn executable(image_name: &str) -> Option<PathBuf> {
     if let Some(path) = lookup(APP_PATHS, image_name) {
         return Some(path);
     }
@@ -43,8 +38,6 @@ pub(crate) fn executable(image_name: &str) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Per-user installs win over machine-wide installs; each hive's native view
-/// wins before the two explicit WOW64 views.
 fn search_order() -> [(HKEY, u32); 6] {
     [
         (HKEY_CURRENT_USER, KEY_READ),
@@ -72,8 +65,6 @@ fn read_app_path(root: HKEY, subkey: &str, access: u32) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Expansion follows the registry value kind. Expanding a literal `REG_SZ`
-/// containing percent signs would invent a path the registry did not name.
 fn executable_path(value: &RegValue) -> Option<String> {
     let decoded = String::from_reg_value(value).ok()?;
     let expanded = if value.vtype == REG_EXPAND_SZ {
@@ -112,8 +103,6 @@ mod tests {
         }
     }
 
-    /// Isolated from the real App Paths key so a failed test cannot leave a
-    /// fake application registered with the user's shell.
     struct Hive {
         base: String,
     }
@@ -151,9 +140,9 @@ mod tests {
         fn write(&self, image_name: &str, value: RegValue) {
             let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
                 .create_subkey_with_flags(format!(r"{}\{image_name}", self.base), KEY_WRITE)
-                .expect("the test could not create a registry key");
+                .expect("the test could create a registry key");
             key.set_raw_value("", &value)
-                .expect("the test could not write a registry value");
+                .expect("the test could write a registry value");
         }
 
         fn find(&self, image_name: &str) -> Option<PathBuf> {
@@ -178,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn hkcu_is_searched_before_hklm_and_all_registry_views_are_probed() {
+    fn per_user_registry_views_precede_machine_views() {
         let order = search_order();
         assert!(order[..3]
             .iter()
@@ -207,7 +196,6 @@ mod tests {
         let hive = Hive::new("catalogue");
         hive.set("Writer.exe", REG_SZ, &system32("cmd.exe"));
         hive.set("Reader.exe", REG_SZ, &system32("notepad.exe"));
-
         let names = hive.names().expect("the catalogue is readable");
         assert!(names.contains("Writer.exe"));
         assert!(names.contains("Reader.exe"));
@@ -224,8 +212,7 @@ mod tests {
             executable_path(&string_value(REG_SZ, literal, true)).as_deref(),
             Some(literal)
         );
-        let expanded = executable_path(&string_value(REG_EXPAND_SZ, literal, true))
-            .expect("REG_EXPAND_SZ expands");
+        let expanded = executable_path(&string_value(REG_EXPAND_SZ, literal, true)).unwrap();
         assert!(expanded.to_lowercase().ends_with(r"\system32\cmd.exe"));
         assert!(!expanded.contains('%'));
         assert_eq!(
