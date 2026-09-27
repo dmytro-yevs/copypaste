@@ -14,6 +14,7 @@ use std::sync::{
     Mutex,
 };
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
@@ -128,6 +129,14 @@ struct ExcludedAppsArgs<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ClipboardWriteArgs<'a> {
+    bytes_base64: String,
+    content_type: &'a str,
+    filename: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct QueueReadyArgs {
     on_ready: Channel<()>,
 }
@@ -189,6 +198,24 @@ impl AndroidCapture {
     pub fn installed_source_apps(&self) -> Result<Vec<AndroidInstalledSourceApp>> {
         self.call::<_, AndroidInstalledSourceApps>("installedSourceApps", (), MSG_BRIDGE)
             .map(|response| response.apps)
+    }
+
+    pub fn write_binary_clipboard(
+        &self,
+        bytes: &[u8],
+        content_type: &str,
+        filename: &str,
+    ) -> Result<()> {
+        self.call::<_, AndroidEmptyResult>(
+            "writeClipboard",
+            ClipboardWriteArgs {
+                bytes_base64: STANDARD.encode(bytes),
+                content_type,
+                filename,
+            },
+            MSG_BRIDGE,
+        )
+        .map(|_| ())
     }
 
     fn subscribe_queue_ready(&self) -> Result<()> {
