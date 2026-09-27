@@ -148,6 +148,9 @@ pub(super) fn prepare_remote_version(
         copypaste_ipc::content_type::is_text(incoming.content_type)
             && detector.is_sensitive(incoming.content)
     };
+    if is_sensitive && incoming.payload_metadata.is_some() {
+        return Ok(None);
+    }
 
     let sealed = if incoming.deleted {
         None

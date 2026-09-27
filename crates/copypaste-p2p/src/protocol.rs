@@ -47,7 +47,8 @@ pub const MAX_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 ///
 /// [`MAX_ITEMS_PER_MESSAGE`] alone would allow eight maximal items in one
 /// message; this caps the actual memory a single message can cost.
-pub const MAX_ITEM_BYTES_PER_MESSAGE: usize = 4 * 1024 * 1024;
+pub const MAX_ITEM_BYTES_PER_MESSAGE: usize =
+    MAX_CONTENT_BYTES + copypaste_ipc::MAX_SYNC_METADATA_BYTES;
 
 /// Hard ceiling on one encoded message, checked before any parsing. Well above
 /// [`MAX_ITEM_BYTES_PER_MESSAGE`] because JSON escaping inflates control

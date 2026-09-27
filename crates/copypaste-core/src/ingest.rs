@@ -64,6 +64,8 @@ pub enum IngestError {
     TooLarge,
     #[error("the item could not be encrypted")]
     Crypto(#[from] CryptoError),
+    #[error("the item's source metadata is invalid")]
+    InvalidMetadata,
     #[error("the item could not be stored")]
     Storage(#[from] StoreError),
 }
@@ -176,6 +178,7 @@ pub(crate) fn ingest_into_batched(
         sensitive_floor,
         None,
         None,
+        None,
         batch.settings(),
         Sweep::Deferred,
     )
@@ -227,7 +230,7 @@ pub fn ingest_into_with_capture_source(
     app_name: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
-    ingest_into_with_capture_source_with_current_retention(
+    ingest_into_with_capture_source_metadata(
         store,
         detector,
         keyring,
@@ -237,8 +240,42 @@ pub fn ingest_into_with_capture_source(
         sensitive_floor,
         app_bundle_id,
         app_name,
+        None,
         settings,
-        || settings.clone(),
+    )
+}
+
+/// Atomically ingest a captured item with its already validated source icon.
+/// Metadata is serialized before the row is published, so capture ports never
+/// need a post-insert update that can race an upload or a second capture.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_source_metadata(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    let current_settings = || settings.clone();
+    ingest_text(
+        store,
+        detector,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        sensitive_floor,
+        app_bundle_id,
+        app_name,
+        payload_metadata,
+        settings,
+        Sweep::Now(&current_settings),
     )
 }
 
@@ -268,6 +305,7 @@ pub fn ingest_into_with_capture_source_with_current_retention(
         sensitive_floor,
         app_bundle_id,
         app_name,
+        None,
         settings,
         Sweep::Now(&current_settings),
     )
@@ -290,6 +328,7 @@ fn ingest_text(
     sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
     settings: &copypaste_ipc::ConfigData,
     sweep: Sweep<'_>,
 ) -> Result<Ingested, IngestError> {
@@ -309,6 +348,7 @@ fn ingest_text(
     // sync and the preview, and `sweep_sensitive` re-derives its own verdict
     // from the plaintext before anything is removed (manifest I2, §6.2).
     let is_sensitive = sensitive_floor || detector.is_sensitive(content);
+    let payload_metadata = encode_payload_metadata(payload_metadata, content_type, is_sensitive)?;
     let hash = crate::storage::compute_content_hash(content.as_bytes());
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must
@@ -333,7 +373,7 @@ fn ingest_text(
             created_at,
             app_bundle_id: app_bundle_id.map(str::to_owned),
             app_name: app_name.map(str::to_owned),
-            payload_metadata: None,
+            payload_metadata,
         },
         || -> Result<_, IngestError> {
             let (nonce, ciphertext) =
@@ -392,6 +432,42 @@ pub fn ingest_binary_into_with_capture_source(
     payload_metadata: Option<&crate::FileMetadata>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
+    let payload_metadata = payload_metadata.map(|file| crate::PayloadMetadata {
+        file: Some(file.clone()),
+        source_app_icon: None,
+    });
+    ingest_binary_into_with_capture_source_metadata(
+        store,
+        keyring,
+        bytes,
+        content_type,
+        created_at,
+        sensitive_floor,
+        app_bundle_id,
+        app_name,
+        payload_metadata.as_ref(),
+        settings,
+    )
+}
+
+/// Binary counterpart of [`ingest_into_with_capture_source_metadata`].
+///
+/// A capture port hands this one envelope to the store before the new row is
+/// visible to retention or sync. Existing file-only entry points delegate with
+/// no icon and keep their flat metadata representation.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_binary_into_with_capture_source_metadata(
+    store: &Store,
+    keyring: &Keyring,
+    bytes: &[u8],
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
     if bytes.is_empty() {
         return Err(IngestError::Empty);
     }
@@ -405,6 +481,8 @@ pub fn ingest_binary_into_with_capture_source(
     // One SHA-256 pass, four spellings: the item id, the envelope header the
     // STREAM AAD covers, and the row's `content_hash`. Hashing per spelling
     // cost a 4 MiB screenshot three redundant passes on the capture path.
+    let payload_metadata =
+        encode_payload_metadata(payload_metadata, content_type, sensitive_floor)?;
     let digest = crate::binary::content_digest(bytes);
     let item_id = crate::binary::item_id_from_digest(&digest);
     let ciphertext =
@@ -422,15 +500,37 @@ pub fn ingest_binary_into_with_capture_source(
         created_at,
         app_bundle_id: app_bundle_id.map(str::to_owned),
         app_name: app_name.map(str::to_owned),
-        payload_metadata: payload_metadata
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|_| IngestError::Empty)?,
+        payload_metadata,
     })?;
 
     enforce_retention(store, settings);
 
     Ok(ingested.into())
+}
+
+fn encode_payload_metadata(
+    metadata: Option<&crate::PayloadMetadata>,
+    content_type: &str,
+    is_sensitive: bool,
+) -> Result<Option<String>, IngestError> {
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+    if is_sensitive {
+        return Err(IngestError::InvalidMetadata);
+    }
+    if metadata.source_app_icon.is_none() && metadata.file.is_some() {
+        return serde_json::to_string(metadata.file.as_ref().expect("checked above"))
+            .ok()
+            .filter(|json| json.len() <= copypaste_ipc::MAX_SYNC_METADATA_BYTES)
+            .filter(|json| crate::PayloadMetadata::from_json(json, content_type).is_some())
+            .map(Some)
+            .ok_or(IngestError::InvalidMetadata);
+    }
+    metadata
+        .to_json(content_type)
+        .map(Some)
+        .ok_or(IngestError::InvalidMetadata)
 }
 
 #[cfg(test)]
@@ -440,6 +540,7 @@ mod tests {
     use super::*;
     use crate::storage::test_support::fts_row_count;
     use copypaste_ipc::ConfigData;
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 
     const T0: i64 = 1_700_000_000_000;
 
@@ -493,6 +594,13 @@ mod tests {
                 .expect("the local key must open it");
             String::from_utf8(bytes.to_vec()).unwrap()
         }
+    }
+
+    fn source_icon() -> crate::SourceAppIconMetadata {
+        let image = DynamicImage::ImageRgba8(ImageBuffer::<Rgba<u8>, Vec<u8>>::new(64, 64));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut png, ImageFormat::Png).unwrap();
+        crate::SourceAppIconMetadata::new(&png.into_inner(), 64, 64).unwrap()
     }
 
     #[test]
@@ -854,6 +962,62 @@ mod tests {
             .as_slice(),
             bytes
         );
+    }
+
+    #[test]
+    fn capture_source_metadata_is_stored_atomically_with_a_binary_item() {
+        let f = fixture();
+        let metadata = crate::PayloadMetadata {
+            file: Some(crate::FileMetadata::new("report.pdf", "application/pdf").unwrap()),
+            source_app_icon: Some(source_icon()),
+        };
+        let stored = ingest_binary_into_with_capture_source_metadata(
+            &f.store,
+            &f.keyring,
+            b"pdf bytes",
+            copypaste_ipc::content_type::FILE,
+            T0,
+            false,
+            Some("com.example.writer"),
+            Some("Writer"),
+            Some(&metadata),
+            &f.settings,
+        )
+        .unwrap()
+        .into_item();
+        assert_eq!(
+            stored
+                .payload_metadata
+                .as_deref()
+                .and_then(|json| crate::PayloadMetadata::from_json(json, &stored.content_type)),
+            Some(metadata)
+        );
+    }
+
+    #[test]
+    fn sensitive_capture_refuses_source_metadata_before_insert() {
+        let f = fixture();
+        let metadata = crate::PayloadMetadata {
+            file: None,
+            source_app_icon: Some(source_icon()),
+        };
+        assert!(matches!(
+            ingest_into_with_capture_source_metadata(
+                &f.store,
+                &f.detector,
+                &f.keyring,
+                "AKIAIOSFODNN7EXAMPLE",
+                "text",
+                T0,
+                false,
+                Some("com.example.writer"),
+                Some("Writer"),
+                Some(&metadata),
+                &f.settings,
+            ),
+            Err(IngestError::InvalidMetadata)
+        ));
+        assert_eq!(f.store.count().unwrap(), 0);
     }
 
     #[test]
