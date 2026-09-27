@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 
+import { Icon } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
+import { HelpPopover } from "./HelpPopover";
 import styles from "./IllustratedErrorState.module.css";
 
 interface IllustratedErrorStateProps {
@@ -79,13 +81,12 @@ export function IllustratedErrorState({
             role="alert"
         >
             <div className={styles.layout}>
-                <div className={styles.artworkWell}>
-                    <RepairBotArtwork />
-                </div>
+                <span className={styles.marker} aria-hidden="true"><Icon name="alert" size="md" /></span>
                 <div className={styles.content}>
-                    <p className={styles.kicker}>{t("common.error")}</p>
-                    <h2 className={styles.title}>{title}</h2>
-                    <p className={styles.body}>{body}</p>
+                    <div className={styles.titleRow}>
+                        <h2 className={styles.title}>{title}</h2>
+                        <HelpPopover content={body} label={t("common.errorDetails")} />
+                    </div>
                     <div className={styles.actions}>
                         <div className={styles.actionLayout}>{actions}</div>
                     </div>

@@ -20,30 +20,30 @@ export const shell = {
   service: {
     diagnostics: "Open diagnostics",
     checking: {
-      title: "Checking the clipboard service…",
+      title: "Checking service…",
       body: "CopyPaste is checking whether the background service is available.",
     },
     running: {
-      title: "The clipboard service is running",
+      title: "Service is running",
       refreshing: "CopyPaste is refreshing your clipboard history.",
       retry: "The service is available, but clipboard history still hasn't loaded. Try again or open diagnostics.",
     },
     unhealthy: {
-      title: "The clipboard service isn't responding correctly",
+      title: "Service unavailable",
       body: "CopyPaste found the service, but couldn't read its status. Try again or open diagnostics.",
     },
     outOfDate: {
-      title: "The background service is out of date",
+      title: "Service update needed",
       body: "The clipboard service has a different version. Quit and reopen CopyPaste to update it.",
       restart: "Restart the service",
       restarting: "Restarting…",
     },
     notInstalled: {
-      title: "This build has no background service",
+      title: "Service unavailable",
       body: "CopyPaste records your clipboard from a small background service, and this build doesn't include one. Install CopyPaste from the official package to get it.",
     },
     stopped: {
-      title: "The clipboard service isn't running",
+      title: "Service is off",
       body: "CopyPaste saves new clipboard items through its background service. Start it to resume capture.",
       start: "Start the service",
       starting: "Starting…",
