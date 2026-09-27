@@ -6,12 +6,33 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 
+internal class CaptureStartCompletions {
+    private val pending = mutableListOf<(Boolean) -> Unit>()
+
+    @Synchronized
+    fun add(completion: (Boolean) -> Unit) {
+        pending += completion
+    }
+
+    @Synchronized
+    fun remove(completion: (Boolean) -> Unit) {
+        pending.remove(completion)
+    }
+
+    @Synchronized
+    fun complete(started: Boolean) {
+        val callbacks = pending.toList()
+        pending.clear()
+        callbacks.forEach { it(started) }
+    }
+}
+
 /**
  * Keeps the process alive while rung 2 is armed.
  *
- * The logcat reader is a callback into this process, so a reclaimed process
+ * The Shizuku reader's callback reaches this process, so a reclaimed process
  * stops saving copies. This service does no work itself; it exists so the
- * reader and the Rust store stay resident.
+ * callback endpoint and Rust store stay resident.
  *
  * The on/off choice is persisted independently. [restoreIfArmed] re-arms from
  * those prefs only when the runtime grants that make the reader work are still
@@ -28,6 +49,7 @@ class CaptureService : Service() {
             !CaptureNotifications.canPost(this) ||
             !ClipCascadeCapture.isSetupComplete(this)
         ) {
+            completeStart(false)
             ClipCascadeCapture.disarm()
             stopSelf(startId)
             return START_NOT_STICKY
@@ -41,18 +63,17 @@ class CaptureService : Service() {
         if (!ClipCascadeCapture.arm(
                 this,
                 onStarted = { started ->
-                    completeStart(started)
-                    if (!started) lost(this, copy)
+                    if (started) completeStart(true) else lost(this, copy)
                 },
                 onLost = { lost(this, copy) },
             )) {
-            completeStart(false)
             lost(this, copy)
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        completeStart(false)
         ClipCascadeCapture.disarm()
         super.onDestroy()
     }
@@ -94,7 +115,7 @@ class CaptureService : Service() {
             }
             completion?.let(::rememberStartCompletion)
             if (startService(context)) return true
-            completeStart(false)
+            completion?.let(::forgetStartCompletion)
             return false
         }
 
@@ -108,6 +129,7 @@ class CaptureService : Service() {
         }
 
         fun stop(context: Context) {
+            completeStart(false)
             writeWanted(context, false)
             clearCopy(context)
             ClipCascadeCapture.disarm()
@@ -141,6 +163,7 @@ class CaptureService : Service() {
         }
 
         private fun lost(context: Context, copy: CaptureArmRequest) {
+            completeStart(false)
             ClipCascadeCapture.disarm()
             CaptureNotifications.postLost(context, copy.lostTitle, copy.lostBody)
             context.stopService(Intent(context, CaptureService::class.java))
@@ -148,14 +171,15 @@ class CaptureService : Service() {
 
         @Synchronized
         private fun rememberStartCompletion(completion: (Boolean) -> Unit) {
-            startCompletions += completion
+            startCompletions.add(completion)
         }
 
-        @Synchronized
+        private fun forgetStartCompletion(completion: (Boolean) -> Unit) {
+            startCompletions.remove(completion)
+        }
+
         private fun completeStart(started: Boolean) {
-            val pending = startCompletions.toList()
-            startCompletions.clear()
-            pending.forEach { it(started) }
+            startCompletions.complete(started)
         }
 
         private fun persistCopy(context: Context, copy: CaptureArmRequest): Boolean =
@@ -195,6 +219,6 @@ class CaptureService : Service() {
             }
         }
 
-        private val startCompletions = mutableListOf<(Boolean) -> Unit>()
+        private val startCompletions = CaptureStartCompletions()
     }
 }

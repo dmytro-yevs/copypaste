@@ -78,7 +78,7 @@ object ClipCascadeCapture {
     ) : ServiceConnection {
         @Volatile var connecting = true
         @Volatile var listening = false
-        private var expectedStop = false
+        @Volatile private var expectedStop = false
         private var service: IShizukuCaptureService? = null
         private val callback = object : IClipCascadeCaptureListener.Stub() {
             override fun onClipboardAccess() {
@@ -98,6 +98,7 @@ object ClipCascadeCapture {
 
         val timeout = Runnable { finish(false) }
 
+        @Synchronized
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             if (!connecting) return
             val capture = binder?.let(IShizukuCaptureService.Stub::asInterface)
@@ -137,7 +138,11 @@ object ClipCascadeCapture {
             connecting = false
             listening = false
             ClipCascadeCapture.main.removeCallbacks(timeout)
-            if (ClipCascadeCapture.session === this) ClipCascadeCapture.session = null
+            if (ClipCascadeCapture.session === this) {
+                ClipCascadeCapture.session = null
+            } else {
+                return
+            }
             try {
                 Shizuku.unbindUserService(ClipCascadeCapture.serviceArgs(), this, true)
             } catch (_: RuntimeException) {

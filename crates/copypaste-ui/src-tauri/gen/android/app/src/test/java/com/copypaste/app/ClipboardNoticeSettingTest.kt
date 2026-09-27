@@ -49,5 +49,6 @@ class ClipboardNoticeSettingTest {
         ClipboardNoticeSetting.invalidate()
 
         assertFalse(ClipboardNoticeSetting.suppressed(context))
+        assertTrue(shouldRefreshClipboardNotice(observing = true, resolved = false))
     }
 }
