@@ -378,6 +378,21 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun writeClipboard(invoke: Invoke) {
+        val request = try {
+            CaptureBridgeJson.decode(ClipboardWriteRequest.serializer(), invoke.getArgs())
+        } catch (_: Exception) {
+            invoke.reject("The clipboard item was incomplete.")
+            return
+        }
+        if (!writeBinaryClipboard(activity, request)) {
+            invoke.reject("That item could not be copied to the clipboard.")
+            return
+        }
+        invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
+    }
+
+    @Command
     fun drain(invoke: Invoke) {
         val (clips, dropped, stateDirty) = ClipQueue.drain()
         invoke.resolve(CaptureBridgeJson.objectOf(
