@@ -159,6 +159,28 @@ class PairingDialogControllerTest {
     }
 
     @Test
+    fun readyClosesAnActivePanelWithoutAbortingOrOpeningAPopup() {
+        val dialogs = PairingDialogController(activity)
+        var aborted = 0
+        assertTrue(dialogs.presentInvite("payload", "CODE", 120, onAbort = { aborted += 1 }))
+        val invite = latestDialog()
+
+        assertTrue(
+            dialogs.presentProgress(
+                "ready",
+                "Pairing complete",
+                "This state clears the protected panel.",
+                active = false,
+            ) { aborted += 1 },
+        )
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertFalse(invite.isShowing)
+        assertEquals(0, aborted)
+        assertNull(ShadowDialog.getLatestDialog()?.takeIf { it.isShowing })
+    }
+
+    @Test
     fun waitingRetainsQrAndHandshakingUpdatesTheSameProtectedPanel() {
         var aborted = 0
         val renderer = PairingQrRenderer { _, _ ->
