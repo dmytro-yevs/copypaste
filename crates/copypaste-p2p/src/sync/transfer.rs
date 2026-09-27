@@ -59,7 +59,11 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
                 item.content.clear();
                 item.binary_content.clear();
             }
-            let payload_bytes = item.content.len().saturating_add(item.binary_content.len());
+            let payload_bytes = item
+                .content
+                .len()
+                .saturating_add(item.binary_content.len())
+                .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
             if payload_bytes > MAX_CONTENT_BYTES {
                 tracing::warn!(
                     bytes = payload_bytes,
