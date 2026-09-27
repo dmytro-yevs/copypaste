@@ -16,10 +16,14 @@ Open the downloaded installer, then follow the setup steps in CopyPaste.
   afterward; reopening the app reuses the running reader.
 - One pairing link and state flow across macOS, Android and Windows. QR codes
   open immediately, followed by the protected security-code comparison.
-- Fixed Android QR cleanup crashes and discovery showing the local endpoint.
+- Fixed Android QR cleanup crashes, self-discovery and duplicate network entries.
 - Consistent screen headers, compact settings rows and information panels.
   The mobile clip count sits beside the toolbar actions.
-- Compact Quick Paste rows, keyboard shortcuts and lazy loading of older history.
+- Quick Paste previews sit beside the list. Rows keep clear action buttons,
+  keyboard shortcuts and lazy loading of older history.
+- Local image capture and sharper previews, with image and file copy-back.
+  Source application icons are saved and synced with new captures.
+- A draggable native macOS title bar and a background service hidden from the Dock.
 - Stable update-check layout and bounded checks. Android saved-copy notifications
   are removed; system-bar and screen-cutout insets apply from startup.
 - Fewer duplicate updates and idle background cycles. Test databases no longer
@@ -56,6 +60,9 @@ The macOS build is not Apple-notarized; the Homebrew cask removes quarantine
 from the installed CopyPaste bundle and signs it locally. The Windows alpha
 uses a project-generated signing certificate, so SmartScreen may display a
 warning. Android uses the durable release signing key.
+
+Install this release on every syncing device to receive source application icons.
+Existing history without stored icons keeps its local icon fallback.
 
 Android may require log-access confirmation again after its reader is stopped
 by a reboot, force-stop or the operating system. Source-app exclusions remain
