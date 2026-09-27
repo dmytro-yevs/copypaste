@@ -134,6 +134,7 @@
     ],
     "dropped": 2,
     "stateDirty": false,
+    "listening": true,
     "probe": {
       "supported": true,
       "installed": true,

@@ -265,6 +265,9 @@ impl CaptureControl for AndroidCapture {
         self.with(|model| {
             model.set_probe(result.probe);
             model.record_dropped(result.dropped);
+            if result.state_dirty {
+                model.record_armed(result.listening);
+            }
             self.state_dirty
                 .store(result.state_dirty, Ordering::Release);
             // Something arrived while we were not in front, which is the only
