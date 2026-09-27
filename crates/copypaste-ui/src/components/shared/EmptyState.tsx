@@ -73,6 +73,7 @@ export function EmptyState({
                 </div>
                 {action || secondary ? (
                     <div className={styles.actions}>
+                      <div className={styles.actionLayout}>
                       {action ? (
                         <ActionButton
                             disabled={action.disabled}
@@ -85,6 +86,7 @@ export function EmptyState({
                       {secondary ? (
                         <div className={styles.secondary}>{secondary}</div>
                       ) : null}
+                      </div>
                     </div>
                 ) : null}
             </div>
