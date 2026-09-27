@@ -43,6 +43,7 @@ use crate::shell::appearance::NativeTheme;
 use crate::shell::permissions::{
     OnboardingPermissions, PermissionHost, PermissionId, PermissionItem, PermissionStatus,
 };
+use crate::shell::window::{QuickPastePreviewLayout, QuickPastePreviewSide};
 use crate::updater::{UpdateProgress, UpdateStatus};
 
 /// Export every Rust-owned DTO into one checked-in frontend module.
@@ -69,6 +70,8 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<ShizukuProbe>(&config, &mut output);
     declaration::<CaptureSnapshot>(&config, &mut output);
     declaration::<CaptureSetupInstructions>(&config, &mut output);
+    declaration::<QuickPastePreviewSide>(&config, &mut output);
+    declaration::<QuickPastePreviewLayout>(&config, &mut output);
     declaration::<CapturedPayload>(&config, &mut output);
     declaration::<PermissionHost>(&config, &mut output);
     declaration::<PermissionId>(&config, &mut output);

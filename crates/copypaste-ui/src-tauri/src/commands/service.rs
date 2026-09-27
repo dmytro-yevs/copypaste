@@ -63,6 +63,15 @@ pub fn hide_window(window: WebviewWindow) {
     crate::shell::window::hide_window(&window);
 }
 
+/// Reserve or release inline preview space in the invoking Quick Paste window.
+#[tauri::command]
+pub fn set_quick_paste_preview(
+    window: WebviewWindow,
+    open: bool,
+) -> crate::shell::window::QuickPastePreviewLayout {
+    crate::shell::window::set_quick_paste_preview(&window, open)
+}
+
 /// Open the full application surface from Quick Paste's settings affordance.
 #[tauri::command]
 pub fn show_main_window(app: tauri::AppHandle, window: WebviewWindow) {
