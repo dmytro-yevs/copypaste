@@ -134,6 +134,7 @@ class CaptureBridgeContractTest {
                 dropped = 2,
                 stateDirty = false,
                 probe,
+                listening = true,
             ),
             EmptyResult(),
         )
