@@ -845,15 +845,13 @@ mod tests {
             presenter.state_for_progress(PairingState::Idle),
             PairingPresentationState::Unavailable
         );
-        assert_eq!(
-            presenter.present_progress(&progress(), false).state,
-            PairingPresentationState::Unavailable
-        );
+        let presentation = presenter.present_progress(&progress(), false);
+        assert_eq!(presentation.state, PairingPresentationState::Unavailable);
+        assert!(presentation.confirmation.is_none());
         assert!(matches!(
             presenter.scan_invite(),
             NativeScanOutcome::Unavailable
         ));
-        assert!(presenter.confirm(&progress()).is_none());
     }
 }
 
