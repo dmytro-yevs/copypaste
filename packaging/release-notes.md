@@ -1,35 +1,28 @@
 ## Highlights
 
-- Copy now reflects native clipboard availability, shows progress, and keeps
-  the selected item and reader focus stable. Unsupported file content remains
-  selectable but is not presented as a copy action.
-- Long clips have an explicit full reader. Library and Quick Paste share the
-  same content presentation and copy-availability rules.
-- Import rejects unsupported content types before it writes items, pins, or
-  runs retention cleanup for that batch.
-- Settings presents direct-device readiness and Cloud connection state
-  consistently. Runtime events are under Diagnostics, while self-hosted Cloud
-  fields stay in Advanced and open deliberately from search or setup.
-- Onboarding keeps actions reachable on short screens, explains permission
-  failures, and uses platform-appropriate shortcut hints.
-- macOS update status explains whether automatic updates are available and
-  provides the manual release-page fallback when they are not.
+- Pairing uses one QR link format and shared state messages across macOS,
+  Android and Windows. Cancelling a pairing no longer blocks the next attempt.
+- Android discovery uses the same metadata, validation, pairing identity and
+  expiry rules as desktop, and respects network visibility changes.
+- Android background capture uses Shizuku without starting app-owned device-log
+  requests. Keep Shizuku running while background capture is enabled.
+- Android applies system-bar and cutout insets at startup. Capture setup lives
+  in Clipboard settings, and saved-copy system notifications are removed.
+- Devices and update checks keep a stable layout. Android and Windows update
+  checks have a bounded deadline and recoverable error state.
+- Quick Paste has compact rows, visible shortcuts, virtualized results and
+  on-demand access to older history. Search uses the shared bounded backend.
+- Capture and pairing updates use shared events; idle retention work waits for
+  the next deadline. Test databases use injected keys instead of the macOS
+  login Keychain.
 
-## Evidence note
+## Release verification
 
-`v2.0.0-alpha.36` carries a documented one-alpha release-risk acceptance for
-the same 58 pending native-evidence states across history, capture, devices,
-settings/service, and Cloud account. They remain explicitly unverified and
-excluded from receipt expectations; this release does not claim them complete.
-
-## Remaining device validation
-
-Physical Android capture persistence, overlay hit-testing, LAN discovery, QR
-association, cutout insets, OEM process-kill survival, and Shizuku rung 2
-were not walked on a device for this tag. Windows pairing and macOS TCC
-prompts were not exercised. These limits, including the 58 documented pending
-states above, remain visible release risk and are not presented as completed
-native qualification.
+The release pipeline checks native installation, startup, capture, persistence,
+protection and signed artifacts before publication. The macOS DMG, Android APK
+and Windows installer are published from the exact files used by their native
+qualification jobs. This alpha does not claim comprehensive validation of every
+OEM background-process policy or every historical feature-evidence state.
 
 ## Install
 
