@@ -1,11 +1,11 @@
 .root {
-  --switch-track-size: calc(var(--s-9) + var(--s-1) - var(--stroke-2));
+  --switch-track-size: calc(var(--s-8) - var(--s-2) + var(--stroke-2));
   --switch-thumb-size: calc(var(--s-3) + var(--stroke-1));
   --switch-inset: calc(var(--s-1) - var(--stroke-1));
-  --switch-travel: calc(var(--s-4) - var(--stroke-1));
+  --switch-travel: calc(var(--switch-track-size) - var(--switch-thumb-size) - var(--switch-inset) - var(--switch-inset));
 
   display: inline-flex;
-  inline-size: var(--tap-min);
+  inline-size: max(var(--tap-min), var(--switch-track-size));
   min-inline-size: var(--switch-track-size);
   block-size: var(--tap-min);
   padding: 0;
