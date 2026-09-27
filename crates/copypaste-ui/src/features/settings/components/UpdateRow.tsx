@@ -263,7 +263,6 @@ export function UpdateRow() {
           <h3 id="about-updates-title">{t("settings.about.updates.title")}</h3>
           <p id={descriptionId}>{description}</p>
           <span
-            key={`${state.state}-${message}`}
             id={statusId}
             role={statusRole}
             aria-live={statusRole === "alert" ? "assertive" : "polite"}
