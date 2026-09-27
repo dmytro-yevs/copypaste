@@ -34,6 +34,7 @@ GEMINI.md
 .agents/
 .codex/
 /AGENTS.md
+/CLAUDE.md
 .mcp.json
 .beads/
 docs/superpowers/
