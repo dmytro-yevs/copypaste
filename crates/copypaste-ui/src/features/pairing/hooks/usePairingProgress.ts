@@ -11,6 +11,12 @@ interface PairingProgressOptions {
   currentCeremony: () => PairingCeremony | undefined;
 }
 
+export function pairingProgressInterval(
+  ceremony: PairingCeremony | undefined,
+): number | false {
+  return ceremony?.semantics.active ? PAIRING_POLL_MS : false;
+}
+
 export function usePairingProgress({
   enabled,
   sessionId,
@@ -36,7 +42,6 @@ export function usePairingProgress({
     enabled,
     retry: false,
     staleTime: PAIRING_POLL_MS,
-    refetchInterval: (query) =>
-      query.state.data?.semantics.active ? PAIRING_POLL_MS : false,
+    refetchInterval: (query) => pairingProgressInterval(query.state.data),
   });
 }

@@ -1,12 +1,15 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { STATUS_POLL_MS } from "@/lib/scheduling";
+import type { ChangePayload } from "@/generated/ipc";
+import { POLL_PUSH_BACKSTOP_MS } from "@/lib/scheduling";
 import {
   getPairingProgress,
   hasBridge,
   type PairingCeremony,
 } from "@/lib/ipc";
+import { subscribeNativeEvent } from "@/lib/tauriEventRegistry";
+import { EVENT_CHANGED } from "@/lib/tauriEvents";
 import { useUi } from "@/store/ui";
 
 const INBOUND_PAIRING_KEY = ["pairing", "inbound"] as const;
@@ -26,8 +29,33 @@ export function useInboundPairingNav() {
     queryFn: getPairingProgress,
     enabled: bridge,
     retry: false,
-    refetchInterval: STATUS_POLL_MS,
+    // Pairing changes normally arrive through the shared peer-change stream.
+    // Keep the same slow bounded backstop as other push consumers: an event
+    // subscription can disappear while the app is backgrounded.
+    refetchInterval: POLL_PUSH_BACKSTOP_MS,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   });
+
+  useEffect(() => {
+    if (!bridge) return;
+    return subscribeNativeEvent<ChangePayload>(EVENT_CHANGED, (event) => {
+      if (event.payload.topic === "peers") void progress.refetch();
+    });
+  }, [bridge, progress.refetch]);
+
+  useEffect(() => {
+    if (!bridge) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") void progress.refetch();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [bridge, progress.refetch]);
 
   useEffect(() => {
     if (view === "devices") return;
