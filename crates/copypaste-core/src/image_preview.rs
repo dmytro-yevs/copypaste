@@ -2,7 +2,7 @@
 
 use std::io::Cursor;
 
-use image::{ImageFormat, ImageReader, Limits};
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
 use thiserror::Error;
 
 /// A preview is deliberately much smaller than its source. It is displayed in
@@ -38,29 +38,41 @@ pub fn thumbnail_png(
         .unwrap_or(DEFAULT_THUMBNAIL_EDGE)
         .clamp(1, MAX_THUMBNAIL_EDGE);
     let budget = u64::from(decoded_memory_mb).saturating_mul(1024 * 1024);
-    let dimensions = ImageReader::new(Cursor::new(source))
-        .with_guessed_format()
-        .map_err(|_| ImagePreviewError::Decode)?
-        .into_dimensions()
-        .map_err(|_| ImagePreviewError::Decode)?;
-    let (source_width, source_height) = dimensions;
-    let scale = (edge as f64 / source_width.max(source_height) as f64).min(1.0);
-    let target_width = (source_width as f64 * scale).round() as u64;
-    let target_height = (source_height as f64 * scale).round() as u64;
-    // The decoder's limits enforce the source allocation using its actual
-    // colour depth. This reserves only the RGBA thumbnail we will allocate.
-    let thumbnail_bytes = target_width.saturating_mul(target_height).saturating_mul(4);
-    let source_budget = budget
-        .checked_sub(thumbnail_bytes)
-        .ok_or(ImagePreviewError::TooLarge)?;
-
     let mut limits = Limits::default();
-    limits.max_alloc = Some(source_budget);
+    limits.max_alloc = Some(budget);
     let mut reader = ImageReader::new(Cursor::new(source))
         .with_guessed_format()
         .map_err(|_| ImagePreviewError::Decode)?;
-    reader.limits(limits);
-    let image = reader.decode().map_err(|error| {
+    reader.limits(limits.clone());
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|_| ImagePreviewError::Decode)?;
+    let (source_width, source_height) = decoder.dimensions();
+    if source_width == 0 || source_height == 0 {
+        return Err(ImagePreviewError::Decode);
+    }
+    let longest = source_width.max(source_height);
+    let target_width = u64::from(source_width)
+        .saturating_mul(u64::from(edge))
+        .div_ceil(u64::from(longest))
+        .min(u64::from(source_width));
+    let target_height = u64::from(source_height)
+        .saturating_mul(u64::from(edge))
+        .div_ceil(u64::from(longest))
+        .min(u64::from(source_height));
+    let thumbnail_bytes = target_width
+        .saturating_mul(target_height)
+        .saturating_mul(u64::from(decoder.color_type().bytes_per_pixel()));
+    limits
+        .reserve(thumbnail_bytes)
+        .map_err(|_| ImagePreviewError::TooLarge)?;
+    limits
+        .reserve(decoder.total_bytes())
+        .map_err(|_| ImagePreviewError::TooLarge)?;
+    decoder
+        .set_limits(limits)
+        .map_err(|_| ImagePreviewError::TooLarge)?;
+    let image = DynamicImage::from_decoder(decoder).map_err(|error| {
         if matches!(error, image::ImageError::Limits(_)) {
             ImagePreviewError::TooLarge
         } else {
