@@ -135,15 +135,15 @@ impl Store {
         };
 
         let insert = tx.execute(
-            // `content_bytes` is computed in this statement rather than by a
-            // trigger, which would have to UPDATE the row and write the whole
-            // payload to the WAL a second time.
+            // `content_bytes` includes ciphertext and bounded metadata, and is
+            // computed here rather than by a trigger that would rewrite the
+            // whole payload to the WAL a second time.
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
                   is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata, \
                   fts_rowid, content_bytes) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9, ?10, ?11, \
-                     LENGTH(COALESCE(?2, X'')))",
+                     LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?10, '')))",
             params![
                 &id,
                 &content_ciphertext,

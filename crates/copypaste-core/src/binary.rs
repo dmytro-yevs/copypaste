@@ -82,8 +82,9 @@ impl FileMetadata {
 /// allocate an arbitrary icon buffer.
 const MAX_SOURCE_APP_ICON_BASE64_BYTES: usize =
     copypaste_ipc::MAX_SOURCE_APP_ICON_BYTES.div_ceil(3) * 4;
-const MAX_SOURCE_APP_ICON_DECODED_BYTES: u64 =
-    (copypaste_ipc::SOURCE_APP_ICON_EDGE as u64) * (copypaste_ipc::SOURCE_APP_ICON_EDGE as u64) * 4;
+/// The 128px RGBA output needs 64 KiB. Leave bounded headroom for decoder
+/// state so a valid maximum-sized PNG does not fail solely on scratch space.
+const MAX_SOURCE_APP_ICON_DECODED_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -163,10 +164,13 @@ impl PayloadMetadata {
             .source_app_icon
             .as_ref()
             .is_none_or(|icon| icon.png().is_some());
-        (self.file.is_some() || self.source_app_icon.is_some())
-            && (self.file.is_none() || content_type == copypaste_ipc::content_type::FILE)
-            && file_is_valid
+        file_is_valid
             && icon_is_valid
+            && if content_type == copypaste_ipc::content_type::FILE {
+                self.file.is_some()
+            } else {
+                self.file.is_none() && self.source_app_icon.is_some()
+            }
     }
 
     #[must_use]
@@ -788,12 +792,18 @@ mod tests {
     fn source_icon_uses_decoder_dimensions_and_bounded_base64() {
         let actual_oversize = png(129, 64);
         assert!(SourceAppIconMetadata::new(&actual_oversize, 64, 64).is_none());
+        assert!(SourceAppIconMetadata::new(&png(128, 128), 128, 128).is_some());
 
         let oversized = format!(
             r#"{{"source_app_icon":{{"png_base64":"{}","width":64,"height":64}}}}"#,
             "A".repeat(MAX_SOURCE_APP_ICON_BASE64_BYTES + 1),
         );
         assert!(PayloadMetadata::from_json(&oversized, "text").is_none());
+        assert!(PayloadMetadata::from_json(
+            r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64}}"#,
+            copypaste_ipc::content_type::FILE,
+        )
+        .is_none());
     }
 
     #[test]

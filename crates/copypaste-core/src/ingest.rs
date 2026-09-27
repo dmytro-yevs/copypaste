@@ -262,7 +262,39 @@ pub fn ingest_into_with_capture_source_metadata(
     payload_metadata: Option<&crate::PayloadMetadata>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
-    let current_settings = || settings.clone();
+    ingest_into_with_capture_source_metadata_with_current_retention(
+        store,
+        detector,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        sensitive_floor,
+        app_bundle_id,
+        app_name,
+        payload_metadata,
+        settings,
+        || settings.clone(),
+    )
+}
+
+/// [`ingest_into_with_capture_source_metadata`] with a live policy read for
+/// the terminal destructive retention pass.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_source_metadata_with_current_retention(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+    current_settings: impl Fn() -> copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
     ingest_text(
         store,
         detector,
@@ -295,7 +327,7 @@ pub fn ingest_into_with_capture_source_with_current_retention(
     settings: &copypaste_ipc::ConfigData,
     current_settings: impl Fn() -> copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
-    ingest_text(
+    ingest_into_with_capture_source_metadata_with_current_retention(
         store,
         detector,
         keyring,
@@ -307,7 +339,7 @@ pub fn ingest_into_with_capture_source_with_current_retention(
         app_name,
         None,
         settings,
-        Sweep::Now(&current_settings),
+        current_settings,
     )
 }
 
@@ -517,7 +549,14 @@ fn encode_payload_metadata(
         return Ok(None);
     };
     if is_sensitive {
-        return Err(IngestError::InvalidMetadata);
+        let Some(file) = metadata.file.as_ref() else {
+            return Ok(None);
+        };
+        let file = crate::PayloadMetadata {
+            file: Some(file.clone()),
+            source_app_icon: None,
+        };
+        return encode_payload_metadata(Some(&file), content_type, false);
     }
     if metadata.source_app_icon.is_none() && metadata.file.is_some() {
         return serde_json::to_string(metadata.file.as_ref().expect("checked above"))
@@ -630,7 +669,11 @@ mod tests {
             let current = Arc::clone(&current);
             let ingress = ingress.clone();
             std::thread::spawn(move || {
-                ingest_into_with_capture_source_with_current_retention(
+                let metadata = crate::PayloadMetadata {
+                    file: None,
+                    source_app_icon: Some(source_icon()),
+                };
+                ingest_into_with_capture_source_metadata_with_current_retention(
                     &store,
                     &detector,
                     &keyring,
@@ -640,6 +683,7 @@ mod tests {
                     false,
                     None,
                     None,
+                    Some(&metadata),
                     &ingress,
                     || current.lock().unwrap().clone(),
                 )
@@ -995,29 +1039,34 @@ mod tests {
     }
 
     #[test]
-    fn sensitive_capture_refuses_source_metadata_before_insert() {
+    fn sensitive_capture_drops_source_icon_but_keeps_protected_content() {
         let f = fixture();
         let metadata = crate::PayloadMetadata {
             file: None,
             source_app_icon: Some(source_icon()),
         };
-        assert!(matches!(
-            ingest_into_with_capture_source_metadata(
-                &f.store,
-                &f.detector,
-                &f.keyring,
-                "AKIAIOSFODNN7EXAMPLE",
-                "text",
-                T0,
-                false,
-                Some("com.example.writer"),
-                Some("Writer"),
-                Some(&metadata),
-                &f.settings,
-            ),
-            Err(IngestError::InvalidMetadata)
-        ));
-        assert_eq!(f.store.count().unwrap(), 0);
+        let stored = ingest_into_with_capture_source_metadata(
+            &f.store,
+            &f.detector,
+            &f.keyring,
+            "AKIAIOSFODNN7EXAMPLE",
+            "text",
+            T0,
+            false,
+            Some("com.example.writer"),
+            Some("Writer"),
+            Some(&metadata),
+            &f.settings,
+        )
+        .unwrap()
+        .into_item();
+        assert!(stored.is_sensitive);
+        assert!(stored.payload_metadata.is_none());
+        assert!(f
+            .store
+            .search("AKIAIOSFODNN7EXAMPLE", 10)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

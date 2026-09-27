@@ -202,9 +202,8 @@ impl Store {
     /// Hard-deletes the oldest unpinned live rows until their ciphertext fits
     /// within `max_bytes`, while preserving the newest unpinned live row.
     ///
-    /// The quota covers the bytes SQLite stores for the encrypted payload, not
-    /// FTS plaintext or database pages. Tombstones carry no ciphertext and are
-    /// deliberately retained for sync.
+    /// The quota covers ciphertext and payload metadata, not FTS plaintext or
+    /// database pages. Tombstones retain neither and stay available for sync.
     pub fn evict_over_byte_cap(&self, max_bytes: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
         if !has_byte_victim(&conn)? || unpinned_bytes(&conn)? <= max_bytes {
@@ -477,19 +476,20 @@ mod tests {
         );
     }
 
-    /// `content_bytes` is derived state written by hand, so the thing to hold is
-    /// that no write path can leave it disagreeing with the payload it measures.
-    /// Every writer that touches a ciphertext is exercised here.
+    /// `content_bytes` is derived state written by hand, so no writer may leave
+    /// it disagreeing with the ciphertext and metadata it measures.
     #[test]
     fn no_write_path_leaves_content_bytes_disagreeing_with_its_payload() {
         let s = store();
 
-        let short = s.insert(item(&"a".repeat(10), T0)).unwrap();
+        let mut short_item = item(&"a".repeat(10), T0);
+        short_item.payload_metadata = Some("m".repeat(64));
+        let short = s.insert(short_item).unwrap();
         let long = s.insert(item(&"b".repeat(500), T0 + 60_000)).unwrap();
         assert_no_byte_drift(&s, "insert");
         assert_eq!(
             bytes_of(&s, &short.id),
-            short.content_ciphertext.len() as i64
+            (short.content_ciphertext.len() + 64) as i64
         );
         assert_eq!(bytes_of(&s, &long.id), long.content_ciphertext.len() as i64);
 
@@ -537,6 +537,20 @@ mod tests {
         assert_no_byte_drift(&s, "upsert replace");
     }
 
+    #[test]
+    fn metadata_counts_toward_the_byte_quota() {
+        let s = store();
+        for (index, stamp) in (0..3).zip([T0, T0 + 1, T0 + 2]) {
+            let mut row = item(&format!("row-{index}"), stamp);
+            row.content_ciphertext = vec![0; 1];
+            row.payload_metadata = Some("m".repeat(10));
+            s.insert(row).unwrap();
+        }
+
+        assert_eq!(s.evict_over_byte_cap(15).unwrap(), 2);
+        assert_eq!(s.count().unwrap(), 1);
+    }
+
     fn bytes_of(s: &Store, id: &str) -> i64 {
         s.conn()
             .unwrap()
@@ -555,7 +569,8 @@ mod tests {
             .unwrap()
             .query_row(
                 "SELECT COUNT(*) FROM clipboard_items \
-                  WHERE content_bytes <> LENGTH(COALESCE(content_ciphertext, X''))",
+                  WHERE content_bytes <> LENGTH(COALESCE(content_ciphertext, X'')) \
+                    + LENGTH(COALESCE(payload_metadata, ''))",
                 [],
                 |row| row.get(0),
             )

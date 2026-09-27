@@ -141,16 +141,17 @@ impl super::Store {
             for table in RESTORED_TABLES {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
             }
-            // `content_bytes` is recomputed from the payload that actually
-            // arrives rather than copied, so a source file whose column had
-            // drifted cannot import a byte quota that disagrees with its rows.
+            // `content_bytes` is recomputed from ciphertext and metadata that
+            // actually arrive, so a source file cannot import a byte quota
+            // that disagrees with its rows.
             tx.execute(
                 concat!(
                     "INSERT INTO clipboard_items (",
                     stored_item_columns!(),
                     ", content_bytes) SELECT ",
                     stored_item_columns!(),
-                    ", LENGTH(COALESCE(content_ciphertext, X'')) \
+                    ", LENGTH(COALESCE(content_ciphertext, X'')) + \
+                       LENGTH(COALESCE(payload_metadata, '')) \
                      FROM restore_src.clipboard_items"
                 ),
                 [],
@@ -500,7 +501,8 @@ mod tests {
             .unwrap()
             .query_row(
                 "SELECT COUNT(*) FROM clipboard_items \
-                  WHERE content_bytes <> LENGTH(COALESCE(content_ciphertext, X''))",
+                  WHERE content_bytes <> LENGTH(COALESCE(content_ciphertext, X'')) \
+                    + LENGTH(COALESCE(payload_metadata, ''))",
                 [],
                 |row| row.get(0),
             )
