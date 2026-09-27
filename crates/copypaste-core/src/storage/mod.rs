@@ -116,6 +116,14 @@ pub(crate) mod test_support {
             .unwrap();
     }
 
+    pub(crate) fn allow_writes(store: &Store, name: &str) {
+        store
+            .conn()
+            .unwrap()
+            .execute_batch(&format!("DROP TRIGGER {name}"))
+            .unwrap();
+    }
+
     /// Distinct content gets a distinct hash; that is all the dedup index needs.
     pub(super) fn hash_of(text: &str) -> String {
         hex::encode(text.as_bytes())

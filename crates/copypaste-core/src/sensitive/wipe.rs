@@ -372,6 +372,41 @@ mod tests {
         assert!(f.store.get(&id).unwrap().is_some());
     }
 
+    #[test]
+    fn a_transient_delete_failure_can_be_retried_without_losing_the_candidate() {
+        let f = fixture();
+        let id = capture(&f, SECRET, T0);
+        crate::storage::test_support::reject_writes(
+            &f.store,
+            "fail_sensitive_wipe",
+            "UPDATE OF deleted",
+            "is_sensitive = 1",
+        );
+
+        assert!(sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 60_000,
+        )
+        .is_err());
+        assert!(f.store.get(&id).unwrap().is_some());
+
+        crate::storage::test_support::allow_writes(&f.store, "fail_sensitive_wipe");
+        assert_eq!(
+            sweep_sensitive(
+                &f.store,
+                &f.detector,
+                &f.key,
+                Duration::from_secs(30),
+                T0 + 60_000,
+            )
+            .unwrap(),
+            1
+        );
+    }
+
     /// `CopyPaste-8ebg.2`: re-copying a secret must reset its deadline, not
     /// inherit one that is seconds from firing. The bump does that by moving
     /// `created_at`, which is what the derived deadline reads.
