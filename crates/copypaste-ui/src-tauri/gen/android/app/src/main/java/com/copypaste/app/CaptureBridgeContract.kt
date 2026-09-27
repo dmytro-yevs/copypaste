@@ -1,12 +1,6 @@
 package com.copypaste.app
 
 import android.app.StatusBarManager
-import android.content.ClipData
-import android.content.ClipDescription
-import android.content.ClipboardManager
-import android.content.Context
-import android.util.Base64
-import androidx.core.content.FileProvider
 import app.tauri.plugin.JSObject
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerialName
@@ -129,49 +123,6 @@ data class ReadResult(
 
 @Serializable
 class EmptyResult
-
-@Serializable
-data class ClipboardWriteRequest(
-    val bytesBase64: String,
-    val contentType: String,
-    val filename: String,
-)
-
-internal fun writeBinaryClipboard(context: Context, request: ClipboardWriteRequest): Boolean {
-    val maximumBase64 = ((ClipQueue.MAX_BINARY_BYTES + 2) / 3) * 4
-    if (request.bytesBase64.length > maximumBase64 ||
-        !Regex("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$").matches(request.contentType)
-    ) return false
-    val filename = request.filename
-        .substringAfterLast('/')
-        .substringAfterLast('\\')
-        .takeIf { it.isNotBlank() && it.length <= 255 }
-        ?: return false
-    val bytes = try {
-        Base64.decode(request.bytesBase64, Base64.DEFAULT)
-    } catch (_: IllegalArgumentException) {
-        return false
-    }
-    if (bytes.isEmpty() || bytes.size > ClipQueue.MAX_BINARY_BYTES) return false
-    return try {
-        // Each clipboard URI names immutable bytes for its recipient. Reusing
-        // a display filename could let a later copy replace a URI an app has
-        // not opened yet.
-        val file = java.io.File.createTempFile("clipboard-", ".bin", context.cacheDir)
-        file.outputStream().use { it.write(bytes) }
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val clip = ClipData(
-            ClipDescription(filename, arrayOf(request.contentType)),
-            ClipData.Item(uri),
-        )
-        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
-        true
-    } catch (_: java.io.IOException) {
-        false
-    } catch (_: IllegalArgumentException) {
-        false
-    }
-}
 
 @Serializable
 data class CapturedClip(

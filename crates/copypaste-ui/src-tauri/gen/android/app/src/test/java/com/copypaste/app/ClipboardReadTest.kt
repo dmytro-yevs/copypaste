@@ -10,6 +10,7 @@ import android.database.Cursor
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.util.Base64
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -116,6 +117,19 @@ class ClipboardReadTest {
     @Test
     fun decodedImageBudgetRejectsDimensionsBeforePixelDecode() {
         assertTrue(exceedsDecodedImageBudget(5_000, 5_000))
+    }
+
+    @Test
+    fun binaryWritePublishesReadableUriWithItsDeclaredMime() {
+        val bytes = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47)
+        assertTrue(writeBinaryClipboard(
+            context,
+            ClipboardWriteRequest(Base64.encodeToString(bytes, Base64.NO_WRAP), "image/png", "photo.png"),
+        ))
+
+        val uri = clipboard.primaryClip!!.getItemAt(0).uri
+        assertEquals("image/png", context.contentResolver.getType(uri))
+        assertTrue(context.contentResolver.openInputStream(uri)!!.use { it.readBytes().contentEquals(bytes) })
     }
 
     private fun clip(mimeType: String, item: ClipData.Item): ClipData =
