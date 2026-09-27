@@ -103,7 +103,7 @@ tauri-plugin-autostart = "2"
 # AppKit supplies the frontmost-process hand-off after Quick Paste copies an
 # item. Tauri deliberately keeps this platform detail out of its cross-platform
 # window API.
-objc2-app-kit = { workspace = true, features = ["NSAccessibilityProtocols", "NSAlert", "NSBitmapImageRep", "NSButton", "NSControl", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSImageView", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSTextField", "NSView", "NSWindow", "NSWorkspace", "NSColor", "NSColorSpace", "libc"] }
+objc2-app-kit = { workspace = true, features = ["NSAccessibilityProtocols", "NSAlert", "NSBitmapImageRep", "NSButton", "NSControl", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSImageView", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSTextField", "NSView", "NSWindow", "NSWorkspace", "NSColor", "NSColorSpace", "block2", "libc"] }
 objc2.workspace = true
 # The maintained objc2 sibling marshals modal AppKit work onto the main queue;
 # it is already present through Tauri and avoids raw dispatch FFI.
