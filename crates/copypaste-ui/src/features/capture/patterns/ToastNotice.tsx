@@ -22,7 +22,7 @@ export function ToastNotice({ suppressed }: { suppressed: boolean }) {
     <>
       <SettingsRow
         title={t("capture.toast.row.title")}
-        description={t("capture.toast.row.body")}
+        help={t("capture.toast.row.body")}
       >
         <Switch
           checked={suppressed}

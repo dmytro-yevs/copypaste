@@ -97,10 +97,6 @@ export const settings = {
     allowScreenshots: {
       title: "Allow screenshots",
       description: "Lets the CopyPaste shell and Quick Paste appear in captures and app previews. Pairing prompts stay protected.",
-      /** Shown only while the protection is off, because that is when it is a
-       *  fact about the screen rather than a hypothetical. */
-      warning:
-        "Shell and Quick Paste content can now be recorded, including a secret you reveal. Pairing prompts stay protected.",
     },
   },
 
@@ -154,6 +150,7 @@ export const settings = {
       none: "None",
       count: "{{n}} paired",
       manage: "Manage devices",
+      open: "Open",
       checking: "Checking…",
       /** Said of peer sync, which the service could not answer for. It is not
        *  the cloud row's badge, which is a standing fact about the build. */
@@ -244,7 +241,6 @@ export const settings = {
     dangerSection: "Danger zone",
     stored: {
       title: "Items stored",
-      description: "Saved on this device.",
     },
     clear: {
       title: "Clear history",
