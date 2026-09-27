@@ -138,7 +138,8 @@ class WebViewImeInsetsTest {
   @Test
   fun documentStartBridgeReturnsTheLatestInsetsAtDocumentReady() {
     val latest = AtomicReference(WebViewImeInsets.InsetsCss(top = 12, bottom = 24))
-    val bridge = WebViewImeInsets.InsetBridge(latest)
+    var readyCalls = 0
+    val bridge = WebViewImeInsets.InsetBridge(latest) { readyCalls += 1 }
 
     latest.set(WebViewImeInsets.InsetsCss(top = 48, right = 8, bottom = 32, left = 4, ime = 240))
 
@@ -146,6 +147,8 @@ class WebViewImeInsetsTest {
       "{\"top\":48,\"right\":8,\"bottom\":32,\"left\":4,\"ime\":240}",
       bridge.latest(),
     )
+    bridge.ready()
+    assertEquals(1, readyCalls)
   }
 
   @Test
