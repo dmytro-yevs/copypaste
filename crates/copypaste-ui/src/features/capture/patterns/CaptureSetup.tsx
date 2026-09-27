@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { Icon } from "@/components/ui/icon";
 
@@ -27,6 +27,8 @@ import { longAge } from "@/lib/format";
 import {
   type CaptureSnapshot,
   captureArm,
+  captureOpenDeveloperOptions,
+  captureOpenShizuku,
   captureRefresh,
   captureSetupInstructions,
   copyText,
@@ -163,7 +165,7 @@ function AlwaysOn() {
 function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
   const { t } = useTranslation();
   const progress = usePrefs((state) => state.onboarding);
-  const setOnboarding = usePrefs((state) => state.setOnboarding);
+  const checkpointOnboarding = usePrefs((state) => state.checkpointOnboarding);
   const instructions = useQuery<CaptureSetupInstructions>({
     queryKey: ["capture", "setup-instructions"],
     queryFn: captureSetupInstructions,
@@ -171,7 +173,13 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
   });
   const refresh = useCaptureMutation();
   const arm = useCaptureMutation();
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const shizuku = useMutation({ mutationFn: captureOpenShizuku });
+  const developerOptions = useMutation({ mutationFn: captureOpenDeveloperOptions });
+  const [checkpointing, setCheckpointing] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    state: "success" | "error";
+    message: string;
+  } | null>(null);
   const readyToArm = snapshot.nextStep === "arm";
 
   if (snapshot.health.state === "working") return null;
@@ -182,21 +190,44 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
       ? instructions.data?.adbCommands
       : undefined;
 
-  const choose = (method: "shizuku" | "adb") => {
-    // The platform may terminate the process when pm grant changes its groups.
-    // Save before the user can run either canonical command.
-    setOnboarding({ captureSetupMethod: method, captureSetupStage: "commands" });
-    setCopyFeedback(null);
+  const checkpoint = async (patch: Parameters<typeof checkpointOnboarding>[0]) => {
+    setCheckpointing(true);
+    const saved = await checkpointOnboarding(patch);
+    setCheckpointing(false);
+    if (!saved) {
+      setFeedback({ state: "error", message: t("onboarding.capture.setup.saveFailed") });
+    }
+    return saved;
+  };
+
+  const choose = async (method: "shizuku" | "adb") => {
+    if (await checkpoint({ captureSetupMethod: method, captureSetupStage: "commands" })) {
+      setFeedback(null);
+    }
   };
 
   const copy = async (argv: readonly string[]) => {
-    setOnboarding({ captureSetupStage: "verify" });
+    if (!await checkpoint({ captureSetupStage: "verify" })) return;
     try {
       await copyText(formatCommand(argv));
-      setCopyFeedback(t("onboarding.capture.setup.copied"));
+      setFeedback({ state: "success", message: t("onboarding.capture.setup.copied") });
     } catch {
-      setCopyFeedback(t("onboarding.capture.setup.unavailable"));
+      setFeedback({ state: "error", message: t("onboarding.capture.setup.copyFailed") });
     }
+  };
+
+  const finishFromSnapshot = async (fresh: CaptureSnapshot) => {
+    if (fresh.health.state === "working") {
+      if (!await checkpoint({ captureSetupStage: "complete" })) return;
+      setFeedback({ state: "success", message: t("onboarding.capture.setup.complete") });
+      return;
+    }
+    setFeedback({ state: "error", message: t("onboarding.capture.setup.notReady") });
+  };
+
+  const applyShizuku = async () => {
+    if (!await checkpoint({ captureSetupMethod: "shizuku", captureSetupStage: "verify" })) return;
+    arm.mutate(() => captureArm(), { onSuccess: (fresh) => void finishFromSnapshot(fresh) });
   };
 
   return (
@@ -209,7 +240,8 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
           variant={progress.captureSetupMethod === "shizuku" ? "secondary" : "ghost"}
           role="radio"
           aria-checked={progress.captureSetupMethod === "shizuku"}
-          onClick={() => choose("shizuku")}
+          disabled={checkpointing || arm.isPending}
+          onClick={() => void choose("shizuku")}
         >
           {t("onboarding.capture.setup.shizuku")}
         </Button>
@@ -218,24 +250,53 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
           variant={progress.captureSetupMethod === "adb" ? "secondary" : "ghost"}
           role="radio"
           aria-checked={progress.captureSetupMethod === "adb"}
-          onClick={() => choose("adb")}
+          disabled={checkpointing || arm.isPending}
+          onClick={() => void choose("adb")}
         >
           {t("onboarding.capture.setup.adb")}
         </Button>
       </div>
-      {progress.captureSetupMethod !== null ? (
-        <p>{t(progress.captureSetupMethod === "shizuku"
-          ? "onboarding.capture.setup.shizukuDetail"
-          : "onboarding.capture.setup.adbDetail")}</p>
+      {progress.captureSetupMethod === "shizuku" ? (
+        <div className={styles.recoveryActions}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={checkpointing || shizuku.isPending}
+            onClick={async () => {
+              if (!await checkpoint({ captureSetupMethod: "shizuku", captureSetupStage: "commands" })) return;
+              shizuku.mutate();
+            }}
+          >
+            {t("onboarding.capture.setup.openShizuku")}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={developerOptions.isPending}
+            onClick={() => developerOptions.mutate()}
+          >
+            {t("onboarding.capture.setup.openDeveloperOptions")}
+          </Button>
+          <Button
+            type="button"
+            disabled={checkpointing || arm.isPending}
+            state={arm.isPending ? "loading" : "normal"}
+            onClick={() => void applyShizuku()}
+          >
+            {t("onboarding.capture.setup.apply")}
+          </Button>
+        </div>
+      ) : progress.captureSetupMethod === "adb" ? (
+        <p>{t("onboarding.capture.setup.adbDetail")}</p>
       ) : null}
       {instructions.isError ? <FieldFeedback state="error">{t("onboarding.capture.setup.unavailable")}</FieldFeedback> : null}
-      {commands?.length ? (
+      {progress.captureSetupMethod === "adb" && commands?.length ? (
         <div className={styles.commands}>
           <h4>{t("onboarding.capture.setup.commands")}</h4>
           {commands.map((argv: readonly string[], index: number) => (
             <div key={index} className={styles.command}>
               <code>{formatCommand(argv)}</code>
-              <Button type="button" size="sm" variant="secondary" onClick={() => void copy(argv)}>
+              <Button type="button" size="sm" variant="secondary" disabled={checkpointing} onClick={() => void copy(argv)}>
                 {t("onboarding.capture.setup.copy")}
               </Button>
             </div>
@@ -243,14 +304,15 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
         </div>
       ) : null}
       {instructions.data?.requiresRestart ? <FieldFeedback state="neutral">{t("onboarding.capture.setup.restart")}</FieldFeedback> : null}
-      {copyFeedback ? <FieldFeedback state="success">{copyFeedback}</FieldFeedback> : null}
+      {feedback ? <FieldFeedback state={feedback.state}>{feedback.message}</FieldFeedback> : null}
       <div className={styles.recoveryActions}>
         <Button
           type="button"
           variant="secondary"
           state={refresh.isPending ? "loading" : "normal"}
+          disabled={checkpointing || refresh.isPending}
           onClick={() => refresh.mutate(() => captureRefresh(), {
-            onSuccess: () => setOnboarding({ captureSetupStage: "verify" }),
+            onSuccess: (fresh) => void finishFromSnapshot(fresh),
           })}
         >
           {t(refresh.isPending ? "onboarding.capture.setup.verifying" : "onboarding.capture.setup.verify")}
@@ -260,7 +322,7 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
             type="button"
             state={arm.isPending ? "loading" : "normal"}
             onClick={() => arm.mutate(() => captureArm(), {
-              onSuccess: () => setOnboarding({ captureSetupStage: "complete" }),
+              onSuccess: (fresh) => void finishFromSnapshot(fresh),
             })}
           >
             {t("onboarding.capture.setup.arm")}
