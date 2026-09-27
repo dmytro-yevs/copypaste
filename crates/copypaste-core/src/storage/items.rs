@@ -489,11 +489,44 @@ impl Store {
 mod tests {
     use std::ops::ControlFlow;
 
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+
     use super::super::model::NewItem;
     use super::super::test_support::{
         fts_dump, fts_row_count, item, plant_fts_row, sensitive_item, store, KEY, T0,
     };
     use super::super::{Store, StoreError};
+
+    fn source_icon() -> crate::SourceAppIconMetadata {
+        let image = ImageBuffer::from_pixel(64, 64, Rgba([0x24u8, 0x65, 0xa8, 0xff]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut png, ImageFormat::Png)
+            .unwrap();
+        crate::SourceAppIconMetadata::new(&png.into_inner(), 64, 64).unwrap()
+    }
+
+    #[test]
+    fn source_icon_lookup_never_reads_the_item_body() {
+        let s = store();
+        let item = s.insert(item("not read", T0)).unwrap();
+        let icon = source_icon();
+        let metadata = crate::PayloadMetadata {
+            file: None,
+            source_app_icon: Some(icon.clone()),
+        }
+        .to_json("text")
+        .unwrap();
+
+        let conn = s.conn().unwrap();
+        conn.execute(
+            "UPDATE clipboard_items SET payload_metadata = ?1, content_ciphertext = NULL, nonce = NULL WHERE id = ?2",
+            rusqlite::params![metadata, item.id],
+        )
+        .unwrap();
+
+        assert_eq!(s.source_app_icon_metadata(&item.id).unwrap(), Some(icon));
+    }
 
     #[test]
     fn a_capture_writes_its_payload_to_the_wal_once() {
