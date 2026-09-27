@@ -13,6 +13,7 @@ use crate::pairing_presentation::NativeAbort;
 pub(super) struct StatusCopy {
     pub(super) heading: &'static str,
     pub(super) message: &'static str,
+    pub(super) action: &'static str,
 }
 
 pub(super) fn spawn(progress: &PairingProgressData, abort: NativeAbort) -> Option<CloseHandle> {
@@ -36,12 +37,12 @@ fn run(
     ready: mpsc::SyncSender<Option<CloseHandle>>,
     abort: NativeAbort,
 ) -> winsafe::AnyResult<i32> {
-    let wnd = common::window("CopyPaste pairing", (520, 250));
+    let wnd = common::window("CopyPaste — Pairing", (520, 250));
     let _heading = common::label(&wnd, copy.heading, (24, 20), (460, 38));
     let _message = common::label(&wnd, copy.message, (24, 68), (460, 76));
     let close = common::button(
         &wnd,
-        "&Close",
+        copy.action,
         (374, 164),
         (110, 34),
         co::DLGID::CANCEL.raw(),
@@ -71,10 +72,16 @@ fn run(
 }
 
 pub(super) fn copy(progress: &PairingProgressData) -> StatusCopy {
-    let copy = resolve_pairing_semantics(progress.state, progress.error_code).copy;
+    let semantics = resolve_pairing_semantics(progress.state, progress.error_code);
+    let copy = semantics.copy;
     StatusCopy {
         heading: copy.title,
         message: copy.detail,
+        action: if semantics.active {
+            "&Cancel pairing"
+        } else {
+            "&Close"
+        },
     }
 }
 
@@ -120,5 +127,17 @@ mod tests {
         assert!(copy(&progress(PairingState::Cancelled, None))
             .heading
             .contains("cancelled"));
+    }
+
+    #[test]
+    fn active_progress_has_a_clear_cancel_action() {
+        assert_eq!(
+            copy(&progress(PairingState::Handshaking, None)).action,
+            "&Cancel pairing"
+        );
+        assert_eq!(
+            copy(&progress(PairingState::TimedOut, None)).action,
+            "&Close"
+        );
     }
 }
