@@ -206,7 +206,7 @@ beforeAllWithEvidence("settings", async () => {
     app,
     Array.from({ length: 101 }, (_, index) => `${marker} fixture ${index}`),
   );
-  await reloadHistoryWith(app, `${marker} fixture 100`);
+  await reloadHistoryWith(app, `${marker} fixture 100`, { search: "open" });
   await filterHistoryTo(app, marker, marker);
   await waitForRows(app, 2);
   // The previous file may have left the list scrolled: a virtualised list
