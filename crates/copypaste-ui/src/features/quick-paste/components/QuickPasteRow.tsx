@@ -192,6 +192,7 @@ export function QuickPasteRow({
       aria-current={active || undefined}
       data-state={active ? "selected" : "idle"}
       data-kind={kind}
+      data-pinned={item.pinned || undefined}
       onMouseEnter={onSelect}
       className={styles.root}
     >
@@ -219,6 +220,14 @@ export function QuickPasteRow({
             imagePreview={image ? <ClipImageLoader id={item.id} size="fill" /> : undefined}
             surface="quickPaste"
           />
+          {item.pinned ? <SourceMetaBadge icon="pin" label={t("quickPaste.row.pinned")} /> : null}
+          {hasPotentialFinding ? (
+            <SourceMetaBadge
+              icon="sensitive"
+              tone="warning"
+              label={t("quickPaste.row.potentialSensitive")}
+            />
+          ) : null}
         </div>
         {active && copyAvailability.reason !== null ? (
           <div className={styles.availability} role="status">
@@ -251,31 +260,11 @@ export function QuickPasteRow({
           <SourceMeta
             source={source}
             createdAt={item.created_at}
-            sourceIcon={
-              <SourceAppIcon
-                bundleId={item.source_app_bundle_id}
-                Fallback={iconComponent(source.icon)}
-                fallbackText={source.label.slice(0, 2)}
-                size="xs"
-              />
-            }
             origin={origin}
             kind={kind}
             content={cardContent}
             density="compact"
             devicePresentation="label"
-            extras={
-              <>
-                {item.pinned ? <SourceMetaBadge icon="pin" label={t("quickPaste.row.pinned")} /> : null}
-                {hasPotentialFinding ? (
-                  <SourceMetaBadge
-                    icon="sensitive"
-                    tone="warning"
-                    label={t("quickPaste.row.potentialSensitive")}
-                  />
-                ) : null}
-              </>
-            }
           />
         </VisuallyHidden>
       </div>

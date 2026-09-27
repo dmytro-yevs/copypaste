@@ -110,6 +110,18 @@ describe("QuickPasteRow", () => {
     expect(screen.getByText("Notes")).toBeTruthy();
   });
 
+  it("keeps pinned and potential-sensitive states visible in compact rows", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <QuickPasteRow item={item({ pinned: true, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview: "••••• fragment" } })} active={false} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("Pinned")).toBeTruthy();
+    expect(container.querySelector('[data-tone="warning"]')).toBeTruthy();
+    expect(container.querySelector('[role="listitem"]')?.getAttribute("data-pinned")).toBe("true");
+  });
+
   it.each(["", "   "])("keeps a %j finding redaction out of the row label and DOM", (redacted_preview) => {
     const raw = "raw secret fragment";
     render(
