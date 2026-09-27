@@ -2,18 +2,45 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { captureSnapshot, withClient } from "@/test/harness";
-import { DEFAULT_ONBOARDING_PROGRESS, usePrefs } from "@/store/prefs";
 import { CaptureSetup } from "./CaptureSetup";
 
 const ipc = vi.hoisted(() => ({
   instructions: vi.fn(),
   copy: vi.fn(),
+  openShizuku: vi.fn(),
+  openDeveloperOptions: vi.fn(),
+  arm: vi.fn(),
+  refresh: vi.fn(),
+}));
+const prefs = vi.hoisted(() => ({
+  onboarding: {
+    step: "capture",
+    captureSkipped: false,
+    privacySkipped: false,
+    syncChoice: null,
+    captureSetupMethod: null as "shizuku" | "adb" | null,
+    captureSetupStage: "choose",
+  },
+  checkpoint: vi.fn(),
 }));
 
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ipc")>()),
   captureSetupInstructions: () => ipc.instructions(),
   copyText: (text: string) => ipc.copy(text),
+  captureOpenShizuku: () => ipc.openShizuku(),
+  captureOpenDeveloperOptions: () => ipc.openDeveloperOptions(),
+  captureArm: () => ipc.arm(),
+  captureRefresh: () => ipc.refresh(),
+}));
+vi.mock("@/store/prefs", () => ({
+  usePrefs: (selector: (state: {
+    onboarding: typeof prefs.onboarding;
+    checkpointOnboarding: typeof prefs.checkpoint;
+  }) => unknown) => selector({
+    onboarding: prefs.onboarding,
+    checkpointOnboarding: prefs.checkpoint,
+  }),
 }));
 
 beforeEach(() => {
@@ -24,12 +51,32 @@ beforeEach(() => {
     requiresRestart: true,
   });
   ipc.copy.mockResolvedValue(undefined);
-  usePrefs.setState({ onboarding: { ...DEFAULT_ONBOARDING_PROGRESS } });
+  ipc.openShizuku.mockResolvedValue(undefined);
+  ipc.openDeveloperOptions.mockResolvedValue(undefined);
+  ipc.arm.mockResolvedValue(captureSnapshot({ health: { state: "working" } }));
+  ipc.refresh.mockResolvedValue(captureSnapshot({ health: { state: "working" } }));
+  prefs.onboarding = {
+    step: "capture",
+    captureSkipped: false,
+    privacySkipped: false,
+    syncChoice: null,
+    captureSetupMethod: null,
+    captureSetupStage: "choose",
+  };
+  prefs.checkpoint.mockImplementation(async (patch) => {
+    prefs.onboarding = { ...prefs.onboarding, ...patch };
+    return true;
+  });
 });
 
 afterEach(() => {
   ipc.instructions.mockReset();
   ipc.copy.mockReset();
+  ipc.openShizuku.mockReset();
+  ipc.openDeveloperOptions.mockReset();
+  ipc.arm.mockReset();
+  ipc.refresh.mockReset();
+  prefs.checkpoint.mockReset();
 });
 
 describe("CaptureSetup", () => {
@@ -51,15 +98,51 @@ describe("CaptureSetup", () => {
     await screen.findByRole("radio", { name: "Use ADB on a computer" });
     expect(screen.queryByRole("switch", { name: "Capture from other apps" })).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: "Use ADB on a computer" }));
-    expect(usePrefs.getState().onboarding.captureSetupMethod).toBe("adb");
-    expect(usePrefs.getState().onboarding.captureSetupStage).toBe("commands");
+    await waitFor(() => expect(prefs.onboarding.captureSetupMethod).toBe("adb"));
+    expect(prefs.onboarding.captureSetupStage).toBe("commands");
     await screen.findByText("adb shell pm grant com.copypaste.app android.permission.READ_LOGS");
     fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
     await waitFor(() => expect(ipc.copy).toHaveBeenCalledWith(
       "adb shell pm grant com.copypaste.app android.permission.READ_LOGS",
     ));
-    expect(usePrefs.getState().onboarding.captureSetupStage).toBe("verify");
+    expect(prefs.onboarding.captureSetupStage).toBe("verify");
     expect(screen.getByText("Command copied. Run it, then verify permissions.")).toBeTruthy();
+  });
+
+  it("waits for the durable checkpoint before opening Shizuku", async () => {
+    prefs.onboarding = { ...prefs.onboarding, captureSetupMethod: "shizuku" };
+    let release: ((saved: boolean) => void) | undefined;
+    prefs.checkpoint.mockImplementation(() => new Promise<boolean>((resolve) => {
+      release = resolve;
+    }));
+    const snapshot = captureSnapshot({
+      health: { state: "not_granted", reason: "no_permission" },
+      nextStep: "grant_permission",
+    });
+    withClient(<CaptureSetup snapshot={snapshot} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Shizuku" }));
+    expect(ipc.openShizuku).not.toHaveBeenCalled();
+    release?.(true);
+    await waitFor(() => expect(ipc.openShizuku).toHaveBeenCalledOnce());
+  });
+
+  it("does not complete setup when the native arm result is still not working", async () => {
+    prefs.onboarding = { ...prefs.onboarding, captureSetupMethod: "shizuku" };
+    ipc.arm.mockResolvedValue(captureSnapshot({
+      health: { state: "not_granted", reason: "no_permission" },
+      nextStep: "grant_permission",
+    }));
+    const snapshot = captureSnapshot({
+      health: { state: "not_granted", reason: "no_permission" },
+      nextStep: "grant_permission",
+    });
+    withClient(<CaptureSetup snapshot={snapshot} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply permissions" }));
+    await waitFor(() => expect(ipc.arm).toHaveBeenCalledOnce());
+    expect(prefs.onboarding.captureSetupStage).toBe("verify");
+    expect(screen.getByText("Capture is not working yet. Check the permission result and verify again.")).toBeTruthy();
   });
 
   it("uses the shared warning notice for dropped captures", () => {
