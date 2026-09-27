@@ -11,6 +11,7 @@ OUT="${SMOKE_OUT:-artifacts/android-smoke}"
 check_tree() {
     python3 - "$1" "$PKG" <<'PY'
 import sys
+import re
 import xml.etree.ElementTree as ET
 
 path, package = sys.argv[1:]
@@ -46,6 +47,16 @@ def is_interactive(node):
         return False
     if any(node.get(attribute) == "true" for attribute in ("clickable", "long-clickable", "checkable")):
         return True
+    # WebView hosts and zero-area live-region focus guards are containers,
+    # not controls. Clickable nodes and native input widgets stay checked.
+    if node.get("class") == "android.webkit.WebView":
+        return False
+    if node.get("class") == "android.view.View":
+        bounds = re.fullmatch(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", node.get("bounds", ""))
+        if bounds:
+            left, top, right, bottom = map(int, bounds.groups())
+            if right == left or bottom == top:
+                return False
     return node.get("focusable") == "true" and node.get("scrollable") != "true"
 
 named = [node for node in owned if has_name(node)]
@@ -90,6 +101,17 @@ self_test() {
     printf '%s\n' '<hierarchy><node package="com.copypaste.app" class="android.webkit.WebView" text="CopyPaste"><node package="com.copypaste.app" class="android.widget.Button" text="Library" clickable="true"/></node></hierarchy>' > "$too_few"
     check_tree "$good" >/dev/null || return 1
     check_tree "$virtual_children" >/dev/null || return 1
+    python3 - "$good" "$dir/host-containers.xml" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+tree = ET.parse(sys.argv[1])
+host = tree.getroot().find("node")
+host.set("focusable", "true")
+host.set("text", "")
+ET.SubElement(host, "node", {"class": "android.view.View", "focusable": "true", "bounds": "[0,640][320,640]"})
+tree.write(sys.argv[2])
+PY
+    check_tree "$dir/host-containers.xml" >/dev/null || return 1
     reject_fixture "$unnamed" "interactive CopyPaste nodes have no accessible name" || return 1
     reject_fixture "$unnamed_input" "android.widget.EditText#android-exclusion-search at [0,0][0,0]" || return 1
     reject_fixture "$no_webview" "contains no Android WebView surface" || return 1
