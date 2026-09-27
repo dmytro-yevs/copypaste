@@ -41,6 +41,7 @@
     "capture_open_shizuku",
     "capture_open_developer_options",
     "capture_request_battery_exemption",
+    "capture_setup_instructions",
     "service_state",
     "start_service",
     "restart_service",

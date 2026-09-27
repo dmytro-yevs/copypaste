@@ -45,6 +45,7 @@ macro_rules! command_registry {
                 CaptureOpenShizuku => ("capture_open_shizuku", crate::commands::capture::capture_open_shizuku, "undefined", "void"),
                 CaptureOpenDeveloperOptions => ("capture_open_developer_options", crate::commands::capture::capture_open_developer_options, "undefined", "void"),
                 CaptureRequestBatteryExemption => ("capture_request_battery_exemption", crate::commands::capture::capture_request_battery_exemption, "undefined", "void"),
+                CaptureSetupInstructions => ("capture_setup_instructions", crate::commands::capture::capture_setup_instructions, "undefined", "CaptureSetupInstructions"),
                 ServiceState => ("service_state", crate::commands::service::service_state, "undefined", "ServiceState"),
                 StartService => ("start_service", crate::commands::service::start_service, "undefined", "ServiceState"),
                 RestartService => ("restart_service", crate::commands::service::restart_service, "undefined", "ServiceState"),

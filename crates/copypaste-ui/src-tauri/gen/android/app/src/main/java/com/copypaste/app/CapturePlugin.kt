@@ -160,6 +160,20 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun setupInstructions(invoke: Invoke) {
+        val commands = persistentCaptureStateCommands(activity.packageName)
+        invoke.resolve(CaptureBridgeJson.objectOf(
+            SetupInstructions.serializer(),
+            SetupInstructions(
+                activity.packageName,
+                commands,
+                commands,
+                requiresRestart = true,
+            ),
+        ))
+    }
+
+    @Command
     fun requestBatteryExemption(invoke: Invoke) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             invoke.resolve(JSObject())
