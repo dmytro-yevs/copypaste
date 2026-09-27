@@ -52,7 +52,6 @@ export function QuickPasteScreen() {
   }, []);
   const {
     holding,
-    previewLinesPopup,
     dismiss,
     dismissOnRootBlur,
     currentCacheGeneration,
@@ -280,7 +279,6 @@ export function QuickPasteScreen() {
                 key={item.id}
                 item={item}
                 active={selectedId === item.id}
-                previewLines={previewLinesPopup}
                 shortcut={!searching && index < 9
                   ? acceleratorLabel(`CmdOrCtrl+${index + 1}`)
                   : null}

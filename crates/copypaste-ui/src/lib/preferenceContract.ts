@@ -21,7 +21,6 @@ export interface Prefs {
   colorTheme: (typeof APPEARANCE_SERIALIZATION.colorThemes)[number];
   translucency: boolean;
   previewLines: number;
-  previewLinesPopup: number;
   sortByDevice: boolean;
   historyDisplayLimit: (typeof HISTORY_DISPLAY_LIMITS)[number];
   /** Default on (n9gp). There is deliberately no "Mask sensitive data" toggle
@@ -35,7 +34,6 @@ export interface Prefs {
 export const DEFAULT_PREFS: Prefs = {
   ...APPEARANCE_SERIALIZATION.defaults,
   previewLines: DEFAULT_PREVIEW_LINES,
-  previewLinesPopup: DEFAULT_PREVIEW_LINES,
   sortByDevice: false,
   historyDisplayLimit: 1000,
   warnBeforeReveal: true,
