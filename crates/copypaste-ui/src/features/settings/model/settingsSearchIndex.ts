@@ -76,7 +76,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { tab: "cloud-sync", section: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.url", keywords: ["host", "address", "server"], disclosure: "cloud-server" },
   { tab: "cloud-sync", section: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.publishableKey", keywords: ["anon key", "server credential"], disclosure: "cloud-server" },
 
-  { tab: "storage", title: "settings.storage.stored.title", description: "settings.storage.stored.description" },
+  { tab: "storage", title: "settings.storage.stored.title" },
   { tab: "storage", title: "settings.transfer.export.title", description: "settings.transfer.export.description" },
   { tab: "storage", title: "settings.transfer.import.title", description: "settings.transfer.import.description" },
   { tab: "storage", section: "settings.transfer.recoverySection", title: "settings.transfer.backup.title", description: "settings.transfer.backup.description" },

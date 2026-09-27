@@ -1,5 +1,5 @@
 import { Icon } from "@/components/ui/icon";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { SettingsRow } from "@/components/shared";
 import {
@@ -25,15 +25,11 @@ export function StorageHistorySettings() {
   const { pendingAll, removeAll } = useDeferredDelete();
   const [clearOpen, setClearOpen] = useState(false);
   const [clearStarting, setClearStarting] = useState(false);
-  const clearDescriptionId = useId();
 
   return (
     <>
       <Section title={t("settings.storage.historySection")}>
-        <SettingsRow
-          title={t("settings.storage.stored.title")}
-          description={t("settings.storage.stored.description")}
-        >
+        <SettingsRow title={t("settings.storage.stored.title")}>
           <span className={styles.metric}>
             {status.isPending
               ? "Checking…"
@@ -47,8 +43,7 @@ export function StorageHistorySettings() {
       <Section title={t("settings.storage.dangerSection")}>
         <SettingsRow
           title={t("settings.storage.clear.title")}
-          descriptionId={clearDescriptionId}
-          description={t("settings.storage.clear.description")}
+          help={t("settings.storage.clear.description")}
         >
           <Button
             variant="secondary"
@@ -56,7 +51,6 @@ export function StorageHistorySettings() {
             tone="danger"
             disabled={clearStarting || pendingAll}
             aria-busy={clearStarting || pendingAll || undefined}
-            aria-describedby={clearDescriptionId}
             onClick={() => setClearOpen(true)}
           >
             <Icon name="trash" aria-hidden="true" />
