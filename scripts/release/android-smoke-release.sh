@@ -51,9 +51,21 @@ RELEASE_FOREIGN_KILL_REASON=""
 
 claim_release_foreign_recovery() { # <log> <original app pid>
     (( RELEASE_FOREIGN_RECOVERIES == 0 )) || return 1
+    RELEASE_FOREIGN_KILL_REASON=""
+    [[ -z "$(crash_report "$1" "$2")" ]] || return 1
+    [[ -z "$(r8_report "$1" "$2")" ]] || return 1
     RELEASE_FOREIGN_KILL_REASON="$(foreign_dependency_kill "$1" "$2" 2>/dev/null)" || return 1
     [[ -n "$RELEASE_FOREIGN_KILL_REASON" ]] || return 1
     RELEASE_FOREIGN_RECOVERIES=1
+}
+
+preserve_pairing_first_entry() { # <evidence directory>
+    [[ ! -e "$1/pairing-entry.xml" ]] \
+        || cp "$1/pairing-entry.xml" "$1/pairing-first-entry.xml"
+}
+
+promote_pairing_retry_entry() { # <evidence directory>
+    cp "$1/pairing-retry-entry.xml" "$1/pairing-entry.xml"
 }
 
 release_foreign_recovery_self_test() { # <temporary directory>
@@ -64,11 +76,30 @@ release_foreign_recovery_self_test() { # <temporary directory>
     printf '%s\n' \
         'I am_kill : [0,4242,com.copypaste.app,0,depends on provider com.google.android.gms/.fonts.provider.FontsProvider in dying proc com.google.android.gms.persistent (adj -10000)]' \
         > "$temp/release-foreign-kill.log"
+    {
+        cat "$temp/release-foreign-kill.log"
+        printf '%s\n' \
+            '09-26 18:46:54.900  4242  4242 E AndroidRuntime: FATAL EXCEPTION: main' \
+            '09-26 18:46:54.901  4242  4242 E AndroidRuntime: Process: com.copypaste.app, PID: 4242'
+    } > "$temp/release-foreign-with-crash.log"
+    {
+        cat "$temp/release-foreign-kill.log"
+        printf '%s\n' \
+            '09-26 18:46:54.900  4242  4242 E AndroidRuntime: java.lang.NoSuchMethodError: com.copypaste.app.CapturePlugin.start'
+    } > "$temp/release-foreign-with-r8.log"
     RELEASE_FOREIGN_RECOVERIES=0
     ! claim_release_foreign_recovery "$temp/release-unmatched-kill.log" 4242 \
         && (( RELEASE_FOREIGN_RECOVERIES == 0 )) \
         && ok "an unmatched kill cannot spend release recovery" \
         || bad "an unmatched kill cannot spend release recovery"
+    ! claim_release_foreign_recovery "$temp/release-foreign-with-crash.log" 4242 \
+        && (( RELEASE_FOREIGN_RECOVERIES == 0 )) \
+        && ok "an app crash overrides the foreign kill recovery" \
+        || bad "an app crash overrides the foreign kill recovery"
+    ! claim_release_foreign_recovery "$temp/release-foreign-with-r8.log" 4242 \
+        && (( RELEASE_FOREIGN_RECOVERIES == 0 )) \
+        && ok "an app R8 failure overrides the foreign kill recovery" \
+        || bad "an app R8 failure overrides the foreign kill recovery"
     claim_release_foreign_recovery "$temp/release-foreign-kill.log" 4242 \
         && (( RELEASE_FOREIGN_RECOVERIES == 1 )) \
         && [[ "$RELEASE_FOREIGN_KILL_REASON" == "depends on provider "* ]] \
@@ -80,6 +111,21 @@ release_foreign_recovery_self_test() { # <temporary directory>
         || bad "a second foreign kill cannot claim release recovery"
     RELEASE_FOREIGN_RECOVERIES=0
     RELEASE_FOREIGN_KILL_REASON=""
+}
+
+release_pairing_artifact_self_test() { # <temporary directory>
+    local temp="$1/pairing-artifacts"
+    mkdir -p "$temp"
+    printf '<hierarchy><first/></hierarchy>\n' > "$temp/pairing-entry.xml"
+    printf '<hierarchy><retry/></hierarchy>\n' > "$temp/pairing-retry-entry.xml"
+    if preserve_pairing_first_entry "$temp" \
+        && promote_pairing_retry_entry "$temp" \
+        && cmp -s "$temp/pairing-first-entry.xml" <(printf '<hierarchy><first/></hierarchy>\n') \
+        && cmp -s "$temp/pairing-entry.xml" "$temp/pairing-retry-entry.xml"; then
+        ok "retry receipt keeps the canonical pairing entry and the first attempt"
+    else
+        bad "retry receipt keeps the canonical pairing entry and the first attempt"
+    fi
 }
 
 release_history_self_test() { # <temporary directory>
@@ -200,10 +246,15 @@ assert 'node_center "$pairing_entry_artifact" "Scan pairing code"' in block2a
 assert 'node_center "$pairing_entry_artifact" "Enter pairing code"' in block2a
 assert 'dump_logcat pairing-first' in block2a
 assert 'dump_logcat pairing-retry' in block2a
+assert '[[ -s "$OUT/pairing-retry.log" ]]' in block2a
 assert '"$(app_pid)" != "$pairing_pid"' in block2a
 assert 'claim_release_foreign_recovery "$OUT/pairing-first.log" "$pairing_pid"' in block2a
-assert 'pairing_entry_artifact="$OUT/pairing-retry-entry.xml"' in block2a
-assert 'accessibility=${pairing_entry_artifact##*/}' in prod
+assert 'preserve_pairing_first_entry "$OUT"' in block2a
+assert 'promote_pairing_retry_entry "$OUT"' in block2a
+assert block2a.index('preserve_pairing_first_entry "$OUT"') < block2a.index('promote_pairing_retry_entry "$OUT"')
+assert block2a.index('claim_release_foreign_recovery "$OUT/pairing-first.log" "$pairing_pid"') < block2a.index('adb logcat -c')
+assert block2a.index('claim_release_foreign_recovery "$OUT/pairing-first.log" "$pairing_pid"') < block2a.index('pid1="$(app_pid)"')
+assert '--feature-state devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml' in prod
 assert block4a.index("android_recover_onboarding") < block4a.index('tap_until_state "Library"')
 assert "history_capture_current_holds" in block4a
 assert "seed_onboarding_complete" not in prod
@@ -224,6 +275,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     release_history_receipt_self_test
     release_onboarding_recovery_self_test
     release_foreign_recovery_self_test "$SELF_TEST_TMP"
+    release_pairing_artifact_self_test "$SELF_TEST_TMP"
     [[ $FAIL -eq 0 ]]
     exit $?
 fi
@@ -359,9 +411,13 @@ if android_recover_onboarding "$OUT/pairing-onboarding.xml" 30 \
     && wait_selector "Scan pairing code" "$OUT/pairing-entry.xml" 15; then
     pairing_reached=1
 else
-    dump_logcat pairing-first
-    sh_ dumpsys window > "$OUT/pairing-first-focus.txt" 2>&1 || true
-    if [[ -n "$pairing_pid" && "$(app_pid)" != "$pairing_pid" ]] \
+    pairing_first_saved=1
+    dump_logcat pairing-first || pairing_first_saved=0
+    sh_ dumpsys window > "$OUT/pairing-first-focus.txt" 2>&1 || pairing_first_saved=0
+    preserve_pairing_first_entry "$OUT" || pairing_first_saved=0
+    if (( pairing_first_saved )) \
+        && [[ -s "$OUT/pairing-first.log" && -s "$OUT/pairing-first-focus.txt" ]] \
+        && [[ -n "$pairing_pid" && "$(app_pid)" != "$pairing_pid" ]] \
         && claim_release_foreign_recovery "$OUT/pairing-first.log" "$pairing_pid"; then
         probe "the platform killed the release app during pairing" "$RELEASE_FOREIGN_KILL_REASON"
         sh_ am force-stop "$PKG" 2>/dev/null || true
@@ -375,9 +431,11 @@ else
                 && tap_selector "Devices" "$OUT/pairing-retry-devices-action.xml" 15 \
                 && wait_selector "Connect a device" "$OUT/pairing-retry-devices.xml" 15 \
                 && tap_selector "Connect a device" "$OUT/pairing-retry-launcher-action.xml" 15 \
-                && wait_selector "Scan pairing code" "$OUT/pairing-retry-entry.xml" 15; then
+                && wait_selector "Scan pairing code" "$OUT/pairing-retry-entry.xml" 15 \
+                && dump_logcat pairing-retry \
+                && [[ -s "$OUT/pairing-retry.log" ]] \
+                && promote_pairing_retry_entry "$OUT"; then
                 pairing_reached=1
-                pairing_entry_artifact="$OUT/pairing-retry-entry.xml"
             else
                 dump_logcat pairing-retry
                 sh_ dumpsys window > "$OUT/pairing-retry-focus.txt" 2>&1 || true
@@ -600,9 +658,9 @@ PY
         --elapsed-ms "$paint_elapsed_ms" \
         --qualified-artifact "$APK" \
         --qualified-artifact-identity "$qualified_artifact_identity" \
-        --feature-state "devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=${pairing_entry_artifact##*/}" \
+        --feature-state devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml \
         --artifact screenshot=pairing-entry.png \
-        --artifact "accessibility=${pairing_entry_artifact##*/}" \
+        --artifact accessibility=pairing-entry.xml \
         --artifact screenshot=history-ui.png \
         --artifact accessibility=history-ui.xml \
         --artifact measurement=latency.json \
