@@ -24,6 +24,7 @@ object ClipQueue {
     private const val CAPACITY = 128
 
     const val MAX_TEXT_BYTES = 4 * 1024 * 1024
+    const val MAX_BINARY_BYTES = 4 * 1024 * 1024
 
     private val queue = ArrayDeque<CapturedClip>(CAPACITY)
     private var dropped = 0L
@@ -56,7 +57,9 @@ object ClipQueue {
                 return@synchronized nextWakeLocked()
             }
             queue.addLast(
-                CapturedClip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName),
+                CapturedClip(
+                    text, null, null, null, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName,
+                ),
             )
             while (queue.size > CAPACITY) {
                 queue.removeFirst()
@@ -65,6 +68,44 @@ object ClipQueue {
             nextWakeLocked()
         }
         wake?.invoke()
+    }
+
+    fun offerBinary(
+        bytesBase64: String,
+        contentType: String,
+        filename: String?,
+        source: CaptureSource,
+        sourceAppBundleId: String? = null,
+        sourceAppName: String? = null,
+    ) {
+        val wake = synchronized(this) {
+            if (privateMode || bytesBase64.isBlank()) return
+            // Base64 is bridge transport only.  The cap names raw bytes and is
+            // enforced before this queue owns the encoded representation.
+            if (bytesBase64.length > ((MAX_BINARY_BYTES + 2) / 3) * 4) {
+                dropped++
+                return@synchronized nextWakeLocked()
+            }
+            queue.addLast(
+                CapturedClip(
+                    null, bytesBase64, contentType, filename, source,
+                    System.currentTimeMillis(), sourceAppBundleId, sourceAppName,
+                ),
+            )
+            while (queue.size > CAPACITY) {
+                queue.removeFirst()
+                dropped++
+            }
+            nextWakeLocked()
+        }
+        wake?.invoke()
+    }
+
+    @Synchronized
+    fun acceptsCapture(source: CaptureSource, sourcePackage: String?): Boolean {
+        if (privateMode) return false
+        return source != CaptureSource.BACKGROUND ||
+            CaptureExclusions.decide(sourcePackage) == ExternalReadDecision.READ
     }
 
     @Synchronized

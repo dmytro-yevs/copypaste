@@ -26,6 +26,8 @@
 //! definition of the same thing.
 
 use std::collections::VecDeque;
+
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::future::Future;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -196,21 +198,67 @@ pub struct StoredCapture {
 }
 
 pub async fn store<B: Backend>(backend: &B, clip: &Clip) -> Result<Option<StoredCapture>> {
-    if clip.text.trim().is_empty() {
-        return Ok(None);
-    }
-    let item = backend
-        .add_captured(
-            &clip.text,
-            clip.source,
-            clip.source_app_bundle_id.as_deref(),
-            clip.source_app_name.as_deref(),
-        )
-        .await?;
+    let item = match (
+        &clip.text,
+        &clip.bytes_base64,
+        &clip.content_type,
+        &clip.filename,
+    ) {
+        (Some(text), None, None, None) => {
+            if text.trim().is_empty() {
+                return Ok(None);
+            }
+            backend
+                .add_captured(
+                    text,
+                    clip.source,
+                    clip.source_app_bundle_id.as_deref(),
+                    clip.source_app_name.as_deref(),
+                )
+                .await?
+        }
+        (None, Some(encoded), Some(content_type), filename) => {
+            const MAX_BASE64_BINARY_BYTES: usize = ((copypaste_ipc::MAX_CONTENT_BYTES + 2) / 3) * 4;
+            if encoded.len() > MAX_BASE64_BINARY_BYTES || !valid_binary_content_type(content_type) {
+                return Err(BackendError::Invalid("That captured item is unavailable."));
+            }
+            let bytes = STANDARD
+                .decode(encoded)
+                .map_err(|_| BackendError::Invalid("That captured item is unavailable."))?;
+            backend
+                .add_captured_binary(
+                    &bytes,
+                    content_type,
+                    filename.as_deref(),
+                    clip.source,
+                    clip.source_app_bundle_id.as_deref(),
+                    clip.source_app_name.as_deref(),
+                )
+                .await?
+        }
+        _ => return Err(BackendError::Invalid("That captured item is unavailable.")),
+    };
     Ok(item.map(|CaptureWrite { item, saved }| StoredCapture {
         item: item.into(),
         saved,
     }))
+}
+
+fn valid_binary_content_type(value: &str) -> bool {
+    let (type_, subtype) = match value.split_once('/') {
+        Some(parts) => parts,
+        None => return false,
+    };
+    !type_.is_empty()
+        && !subtype.is_empty()
+        && type_ != "text"
+        && type_.bytes().chain(subtype.bytes()).all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-'
+                )
+        })
 }
 
 /// Capture the clipboard right now and store it — the Quick Settings tile and
@@ -589,7 +637,10 @@ mod tests {
 
     fn clip(text: &str) -> Clip {
         Clip {
-            text: text.into(),
+            text: Some(text.into()),
+            bytes_base64: None,
+            content_type: None,
+            filename: None,
             source: CaptureSource::Tile,
             at_ms: 1_700_000_000_000,
             source_app_bundle_id: None,
@@ -623,6 +674,27 @@ mod tests {
         assert!(is_structural(&err), "{err:?}");
     }
 
+    #[tokio::test]
+    async fn malformed_binary_transport_is_rejected_before_any_text_ingest() {
+        let backend = FakeBackend::running("2.0.0").accepting_adds();
+        let clip = Clip {
+            text: None,
+            bytes_base64: Some("not base64!".into()),
+            content_type: Some("image/png".into()),
+            filename: None,
+            source: CaptureSource::Share,
+            at_ms: 1_700_000_000_000,
+            source_app_bundle_id: None,
+            source_app_name: None,
+        };
+
+        assert!(matches!(
+            store(&backend, &clip).await,
+            Err(BackendError::Invalid(_))
+        ));
+        assert!(backend.added().is_empty());
+    }
+
     #[test]
     fn a_failed_clip_is_retried_before_anything_newer() {
         let mut buffer = Buffer::default();
@@ -630,9 +702,9 @@ mod tests {
         let first = buffer.pop().unwrap();
         buffer.requeue(first);
         buffer.push_all([clip("third")]);
-        assert_eq!(buffer.pop().unwrap().text, "first");
-        assert_eq!(buffer.pop().unwrap().text, "second");
-        assert_eq!(buffer.pop().unwrap().text, "third");
+        assert_eq!(buffer.pop().unwrap().text.as_deref(), Some("first"));
+        assert_eq!(buffer.pop().unwrap().text.as_deref(), Some("second"));
+        assert_eq!(buffer.pop().unwrap().text.as_deref(), Some("third"));
     }
 
     #[test]
@@ -649,7 +721,7 @@ mod tests {
 
         assert!(continue_drain);
         assert_eq!(buffer.dropped(), 1);
-        assert_eq!(buffer.pop().unwrap().text, "still wanted");
+        assert_eq!(buffer.pop().unwrap().text.as_deref(), Some("still wanted"));
         assert!(buffer.is_empty());
     }
 
@@ -663,8 +735,8 @@ mod tests {
 
         assert!(!continue_drain);
         assert_eq!(buffer.dropped(), 0);
-        assert_eq!(buffer.pop().unwrap().text, "first");
-        assert_eq!(buffer.pop().unwrap().text, "second");
+        assert_eq!(buffer.pop().unwrap().text.as_deref(), Some("first"));
+        assert_eq!(buffer.pop().unwrap().text.as_deref(), Some("second"));
     }
 
     #[test]
@@ -701,7 +773,7 @@ mod tests {
 
         assert_eq!(calls.get(), 1);
         assert_eq!(taken.len(), 1);
-        assert_eq!(taken[0].text, "one Android batch");
+        assert_eq!(taken[0].text.as_deref(), Some("one Android batch"));
     }
 
     #[test]
@@ -754,7 +826,7 @@ mod tests {
         assert_eq!(buffer.dropped(), 5);
         // The oldest went, not the newest: the most recent copies are the ones
         // a user is most likely to still want.
-        assert_eq!(buffer.pop().unwrap().text, "clip 5");
+        assert_eq!(buffer.pop().unwrap().text.as_deref(), Some("clip 5"));
     }
 
     #[test]
