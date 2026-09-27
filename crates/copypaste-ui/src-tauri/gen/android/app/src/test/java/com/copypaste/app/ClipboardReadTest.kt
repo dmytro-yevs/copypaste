@@ -151,17 +151,16 @@ class ClipboardReadTest {
     @Test
     fun scheduledExpiryPurgesWithoutAnotherCopy() {
         val directory = stagingDirectory(context).apply { mkdirs() }
-        val stale = File(directory, "later.png").apply {
-            writeBytes(byteArrayOf(1))
-            setLastModified(System.currentTimeMillis() - STAGING_MAX_AGE_MS - 1)
-        }
+        val staged = File(directory, "later.png").apply { writeBytes(byteArrayOf(1)) }
+        val createdAt = staged.lastModified()
+        var now = createdAt
         val handler = android.os.Handler(Looper.getMainLooper())
-        ClipboardStaging.schedule(context, handler)
+        ClipboardStaging.schedule(context, handler) { now }
 
+        now += STAGING_MAX_AGE_MS
         shadowOf(Looper.getMainLooper()).idleFor(STAGING_MAX_AGE_MS + 1, TimeUnit.MILLISECONDS)
 
-        assertFalse(stale.exists())
-        ClipboardStaging.stop(handler)
+        assertFalse(staged.exists())
     }
 
     @Test
