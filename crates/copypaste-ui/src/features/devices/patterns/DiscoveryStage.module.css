@@ -4,60 +4,11 @@
     gap: var(--s-3);
 }
 
-.stage > [data-slot="surface"] {
+.stage > [data-slot="status-card"] {
     inline-size: 100%;
     margin: 0;
 }
 
-.summary {
-    display: grid;
-    min-inline-size: 0;
-    padding: var(--s-3);
-    grid-template-columns: var(--s-7) minmax(0, 1fr);
-    align-items: center;
-    gap: var(--s-3);
-}
-
-.summaryIcon {
-    display: grid;
-    inline-size: var(--s-7);
-    block-size: var(--s-7);
-    place-items: center;
-    border-radius: var(--r-row);
-    color: var(--accent-2);
-    background: var(--selected);
-}
-
-.summaryCopy {
-    display: grid;
-    min-inline-size: 0;
-    gap: calc(var(--s-1) / 2);
-}
-
-.summaryCopy strong {
-    color: var(--text);
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-semibold);
-}
-
-.summaryCopy span {
-    color: var(--dim);
-    font-size: var(--fs-xs);
-    overflow-wrap: anywhere;
-}
-
 .results {
     min-inline-size: 0;
-}
-
-.spinner {
-    animation: discovery-refresh-spin var(--dur-progress) var(--ease-linear) infinite;
-}
-
-@keyframes discovery-refresh-spin {
-    to { transform: rotate(1turn); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .spinner { animation: none; }
 }

@@ -33,6 +33,7 @@ describe("DiscoveryStage", () => {
         const summary = screen.getByRole("status");
         expect(summary.textContent).toContain("2 devices found");
         expect(summary.textContent).toContain("Protected pairing starts");
+        expect(summary.getAttribute("aria-atomic")).toBe("true");
 
         rerender(
             <DiscoveryStage state="results" deviceCount={2} refreshing>
@@ -57,6 +58,19 @@ describe("DiscoveryStage", () => {
         );
 
         expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+        expect(screen.getByRole("status").getAttribute("data-variant")).toBe("prominent");
         expect(screen.getByText("Checking nearby devices…")).toBeTruthy();
+    });
+
+    it("uses the shared prominent card while no devices are visible", () => {
+        render(
+            <DiscoveryStage state="idle" deviceCount={0}>
+                <div>Not rendered</div>
+            </DiscoveryStage>,
+        );
+
+        const card = screen.getByRole("status");
+        expect(card.getAttribute("data-variant")).toBe("prominent");
+        expect(card.getAttribute("aria-busy")).toBeNull();
     });
 });
