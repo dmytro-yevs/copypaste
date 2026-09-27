@@ -34,6 +34,25 @@
     overflow: hidden;
   }
 
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--raised-2) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: calc(var(--s-1) + var(--stroke-2));
+    height: calc(var(--s-1) + var(--stroke-2));
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--raised-2);
+    border-radius: var(--r-pill);
+  }
+
   ::selection {
     background: var(--selected);
   }
