@@ -33,7 +33,6 @@ export function SettingsCompactNavigation({
     return (
       <section className={styles.detail} aria-label={definition.label}>
         <ScreenHeader
-          className={styles.detailHeader}
           leading={<ActionButton
             size="compactIcon"
             variant="ghost"
@@ -42,7 +41,6 @@ export function SettingsCompactNavigation({
             onClick={onBack}
           />}
           title={definition.label}
-          description={definition.description}
         />
         <div className={styles.detailContent}>{renderSection(active)}</div>
       </section>

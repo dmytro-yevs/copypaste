@@ -52,6 +52,14 @@ vi.mock("@/features/settings/patterns/settingsTabs", () => ({
         section === "clipboard" ? "row:Group by device" : undefined
       }
     >
+      {section === "clipboard" ? (
+        <>
+          <button title="Help with Group by device">?</button>
+          <div data-settings-control>
+            <button aria-label="Group by device">Toggle group by device</button>
+          </div>
+        </>
+      ) : null}
       {section === "diagnostics" ? controller.diagnosticsView === "runtime-events" ? (
         <>
           {controller.onBackFromEvents ? <button onClick={controller.onBackFromEvents}>Back to Diagnostics</button> : null}
@@ -190,6 +198,27 @@ it("search opens a collapsed advanced group and focuses its field", async () => 
     expect(field.closest("details")?.open).toBe(true);
     expect(document.activeElement).toBe(field);
   });
+});
+
+it("focuses the setting control before adjacent helper buttons", async () => {
+  render(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.change(searchbox, { target: { value: "Group by device" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Group by device/ }));
+
+  const control = await screen.findByRole("button", { name: "Group by device" });
+  await waitFor(() => expect(document.activeElement).toBe(control));
+});
+
+it("uses the terse screen header on settings and its compact subpages", async () => {
+  render(<TooltipProvider><SettingsScreen /></TooltipProvider>);
+  const homeHeader = screen.getByRole("heading", { name: "Settings" }).closest("header");
+
+  expect(homeHeader?.querySelector("p")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Appearance/ }));
+
+  const detailHeader = (await screen.findByRole("heading", { name: "Appearance" })).closest("header");
+  expect(detailHeader?.querySelector("p")).toBeNull();
 });
 
 it.each([

@@ -1,6 +1,9 @@
 import { Container } from "@/components/layout";
 import { ScreenHeader } from "@/components/shared";
-import { historyCountNumber } from "@/features/history/model/libraryToolbarOptions";
+import {
+    historyCompactCount,
+    historyCount,
+} from "@/features/history/model/libraryToolbarOptions";
 import { useTranslation } from "@/i18n";
 import styles from "./LibraryToolbar.module.css";
 
@@ -21,14 +24,18 @@ export function LibraryToolbarHeader({
     return (
         <Container width="library" gutter="screen" className={styles.header}>
             <ScreenHeader
-                eyebrow={t("history.header.eyebrow")}
                 title={t("history.header.title")}
-                description={t("history.header.description")}
                 actions={
                     compact ? (
-                        <span aria-hidden="true" className={styles.headerCount}>
-                            {historyCountNumber(filtered, visible, total)}
-                        </span>
+                        <output
+                            className={styles.headerCount}
+                            data-slot="history-count"
+                            aria-label={historyCount(filtered, visible, total)}
+                        >
+                            <span aria-hidden="true">
+                                {historyCompactCount(filtered, visible, total)}
+                            </span>
+                        </output>
                     ) : undefined
                 }
             />

@@ -420,3 +420,55 @@ describe("Library toolbar compact gutters", () => {
         );
     });
 });
+
+describe("Library count presentation", () => {
+    it("uses a non-interactive compact count tile with its full filtered count", () => {
+        toolbarSize.width = 390;
+        const { container } = render(
+            toolbar({ filtered: true, visible: 999, total: 12_000 }),
+        );
+        const count = container.querySelector<HTMLOutputElement>(
+            '[data-slot="history-count"]',
+        );
+
+        expect(count?.tagName).toBe("OUTPUT");
+        expect(count?.getAttribute("aria-label")).toBe("999 filtered items");
+        expect(count?.textContent).toBe("999");
+        expect(count?.closest("button")).toBeNull();
+    });
+
+    it("compacts large counts without losing the full accessible value", () => {
+        toolbarSize.width = 390;
+        const { container } = render(
+            toolbar({ filtered: true, visible: 1_250, total: 12_000 }),
+        );
+        const count = container.querySelector<HTMLOutputElement>(
+            '[data-slot="history-count"]',
+        );
+
+        expect(count?.getAttribute("aria-label")).toBe("1,250 filtered items");
+        expect(count?.textContent).toBe("1K");
+    });
+
+    it("uses compact millions in the same tile", () => {
+        toolbarSize.width = 390;
+        const { container } = render(
+            toolbar({ filtered: true, visible: 1_250_000, total: 12_000_000 }),
+        );
+        const count = container.querySelector<HTMLOutputElement>(
+            '[data-slot="history-count"]',
+        );
+
+        expect(count?.getAttribute("aria-label")).toBe("1,250,000 filtered items");
+        expect(count?.textContent).toBe("1M");
+    });
+
+    it("keeps the full count in the desktop toolbar", () => {
+        const { container } = render(toolbar({ visible: 1_250, total: 1_250 }));
+
+        expect(
+            container.querySelector('[data-slot="history-count"]'),
+        ).toBeNull();
+        expect(screen.getAllByText("1,250 items")).toHaveLength(2);
+    });
+});

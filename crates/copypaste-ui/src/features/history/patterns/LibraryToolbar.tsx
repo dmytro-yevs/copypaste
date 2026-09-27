@@ -334,9 +334,11 @@ export function LibraryToolbar({
                                     />
                                 </ActiveControlBadge>
                             ) : null}
-                            <VisuallyHidden aria-live="polite">
-                                {historyCount(filtered, visible, total)}
-                            </VisuallyHidden>
+                            {!compactSearch ? (
+                                <VisuallyHidden aria-live="polite">
+                                    {historyCount(filtered, visible, total)}
+                                </VisuallyHidden>
+                            ) : null}
                         </>
                     )}
                 </div>

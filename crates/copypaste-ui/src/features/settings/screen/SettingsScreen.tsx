@@ -244,13 +244,15 @@ export function SettingsScreen() {
           if (!target) return false;
           cancel();
           target.scrollIntoView({ behavior: "smooth", block: "center" });
+          const controlSelector =
+            ':is([role="combobox"], input, select, textarea, button, [role="switch"], [role="slider"])';
           const field = target instanceof HTMLDetailsElement
             ? target.querySelector<HTMLElement>("summary")
             : result.item.tab === "runtime-events"
             ? target.querySelector<HTMLElement>('[role="searchbox"], input[type="search"]')
             : target.querySelector<HTMLElement>(
-              '[role="combobox"], input, select, textarea, button, [role="switch"], [role="slider"]',
-            );
+              `[data-settings-control] ${controlSelector}`,
+            ) ?? target.querySelector<HTMLElement>(controlSelector);
           if (!field) target.tabIndex = -1;
           (field ?? target).focus({ preventScroll: true });
           if (highlightTimer.current !== undefined) {
@@ -299,9 +301,7 @@ export function SettingsScreen() {
       {compact && mobileSection === null ? (
         <div className={styles.compactHeader}>
           <ScreenHeader
-            eyebrow="Personalize CopyPaste"
             title="Settings"
-            description="Choose a focused page for each part of CopyPaste."
           />
           {search}
         </div>
@@ -328,9 +328,7 @@ export function SettingsScreen() {
         <ScrollViewport ref={contentViewportRef} className={styles.contentViewport}>
           <Container width="fluid" gutter="screen" className={styles.desktopContent}>
             <ScreenHeader
-              eyebrow="Personalize CopyPaste"
               title="Settings"
-              description="Choose a focused page for each part of CopyPaste."
               actions={search}
             />
             <Tabs value={desktopSection} onValueChange={(value) => openSection(value as PreferenceSection)}>

@@ -1,8 +1,6 @@
 export const history = {
   header: {
-    eyebrow: "Your clipboard memory",
     title: "Library",
-    description: "The content you copied — recognizable at a glance.",
   },
 
   stream: {
@@ -61,6 +59,8 @@ export const history = {
     group: "Group",
     count_one: "{{count}} item",
     count_other: "{{count}} items",
+    filteredCount_one: "{{count}} filtered item",
+    filteredCount_other: "{{count}} filtered items",
     displayLimitHint:
       "Showing first {{limit}} of {{count}} results — adjust the display limit in Settings › Clipboard behavior.",
   },

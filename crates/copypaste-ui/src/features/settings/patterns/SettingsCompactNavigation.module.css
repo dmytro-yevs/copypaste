@@ -61,14 +61,6 @@
   gap: var(--s-4);
 }
 
-.detailHeader {
-  min-inline-size: 0;
-  padding-block-start: 0;
-  padding-block-end: var(--s-3);
-  align-items: flex-start;
-  border-block-end: var(--stroke-1) solid var(--divider);
-}
-
 .detailContent {
   display: flex;
   min-inline-size: 0;
