@@ -1,91 +1,64 @@
-## Highlights
+## Download CopyPaste
 
-- Pairing uses one QR link format and shared state messages across macOS,
-  Android and Windows. Cancelling a pairing no longer blocks the next attempt.
-- Android discovery uses the same metadata, validation, pairing identity and
-  expiry rules as desktop, and respects network visibility changes.
-- Android background capture uses Shizuku without starting app-owned device-log
-  requests. Keep Shizuku running while background capture is enabled.
-- Android applies system-bar and cutout insets at startup. Capture setup lives
-  in Clipboard settings, and saved-copy system notifications are removed.
-- Devices and update checks keep a stable layout. Android and Windows update
-  checks have a bounded deadline and recoverable error state.
-- Quick Paste has compact rows, visible shortcuts, virtualized results and
-  on-demand access to older history. Search uses the shared bounded backend.
-- Capture and pairing updates use shared events; idle retention work waits for
-  the next deadline. Test databases use injected keys instead of the macOS
-  login Keychain.
+| Platform | Supported devices | Download |
+| --- | --- | --- |
+| **macOS** | Apple Silicon · macOS 14+ | **[Download for Mac (.dmg)](https://github.com/{{repository}}/releases/download/v{{version}}/CopyPaste-v{{version}}-macos-arm64.dmg)** |
+| **Windows** | Windows 10 / 11 · 64-bit | **[Download for Windows (.exe)](https://github.com/{{repository}}/releases/download/v{{version}}/CopyPaste-v{{version}}-windows-x86_64-setup.exe)** |
+| **Android** | Universal APK · phones and tablets | **[Download for Android (.apk)](https://github.com/{{repository}}/releases/download/v{{version}}/CopyPaste-v{{version}}-android.apk)** |
 
-## Release verification
+Open the downloaded installer, then follow the setup steps in CopyPaste.
 
-The release pipeline checks native installation, startup, capture, persistence,
-protection and signed artifacts before publication. The macOS DMG, Android APK
-and Windows installer are published from the exact files used by their native
-qualification jobs. This alpha does not claim comprehensive validation of every
-OEM background-process policy or every historical feature-evidence state.
+## What's changed
 
-## Install
+- Guided setup for capture, permissions, privacy and device or cloud sync.
+  Android offers Shizuku setup on the phone or copyable adb commands for a computer.
+- Shizuku grants Android setup permissions. CopyPaste owns the background reader
+  afterward; reopening the app reuses the running reader.
+- One pairing link and state flow across macOS, Android and Windows. QR codes
+  open immediately, followed by the protected security-code comparison.
+- Fixed Android QR cleanup crashes and discovery showing the local endpoint.
+- Consistent screen headers, compact settings rows and information panels.
+  The mobile clip count sits beside the toolbar actions.
+- Compact Quick Paste rows, keyboard shortcuts and lazy loading of older history.
+- Stable update-check layout and bounded checks. Android saved-copy notifications
+  are removed; system-bar and screen-cutout insets apply from startup.
+- Fewer duplicate updates and idle background cycles. Test databases no longer
+  request access to the macOS device key.
 
-**macOS 14 Sonoma or later** (Apple Silicon):
+<details>
+<summary>CLI, checksums and signatures</summary>
+
+| File | Download |
+| --- | --- |
+| macOS CLI and daemon · Apple Silicon | [Download archive](https://github.com/{{repository}}/releases/download/v{{version}}/copypaste-cli-v{{version}}-macos-arm64.tar.gz) |
+| Checksums for release files | [SHA256SUMS](https://github.com/{{repository}}/releases/download/v{{version}}/SHA256SUMS) |
+| Android updater signature | [APK signature](https://github.com/{{repository}}/releases/download/v{{version}}/CopyPaste-v{{version}}-android.apk.sig) |
+| Windows updater signature | [Installer signature](https://github.com/{{repository}}/releases/download/v{{version}}/CopyPaste-v{{version}}-windows-x86_64-setup.exe.sig) |
+
+Homebrew:
 
 ```sh
 brew tap dmytro-yevs/copypaste
-brew install --cask copypaste     # the app
-brew install copypaste-cli        # the CLI and daemon
+brew install --cask copypaste
 ```
 
-The same release page also includes the Apple Silicon DMG for direct install.
+Install the optional CLI with `brew install copypaste-cli`.
 
-### Windows
+</details>
 
-On Windows 10 or 11 (x86-64), download and run the
-`CopyPaste-…-windows-x86_64-setup.exe` asset from the release page.
+<details>
+<summary>Release verification and platform notes</summary>
 
-### Android
+The macOS DMG, Android APK and Windows installer are the exact files exercised
+by the release qualification jobs before publication.
 
-On the [releases page](https://github.com/dmytro-yevs/copypaste/releases), open
-the newest prerelease; GitHub's **Latest** link does not select prereleases.
-Download its `CopyPaste-…-android.apk` asset as `CopyPaste-android.apk` in the
-directory where you run `adb`, then install or update it with:
+The macOS build is not Apple-notarized; the Homebrew cask removes quarantine
+from the installed CopyPaste bundle and signs it locally. The Windows alpha
+uses a project-generated signing certificate, so SmartScreen may display a
+warning. Android uses the durable release signing key.
 
-```sh
-adb install -r ./CopyPaste-android.apk
-```
+Android may require log-access confirmation again after its reader is stopped
+by a reboot, force-stop or the operating system. Source-app exclusions remain
+fail-closed when Android cannot identify the clipboard's source.
 
-The release package is `com.copypaste.app`. A first install starts with an
-empty history and no pairings. An in-place update of an existing package with
-the same signing key uses `adb install -r` and retains that package's data,
-including its history, pairings, and settings.
-
-Only an APK installed as `com.copypaste.app` with an incompatible signing key
-needs an uninstall. If installation reports
-`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, inspect every Android user, including a
-work profile, before removing anything:
-
-```sh
-adb shell pm list users
-adb shell pm list packages --user 0 com.copypaste.app
-adb shell pm list packages --user 10 com.copypaste.app  # repeat for each listed ID
-```
-
-**Uninstalling erases the package's history, pairings and settings for all
-users and profiles.** Remove only the incompatibly signed `com.copypaste.app`
-package, then rerun the install command above:
-
-```sh
-adb uninstall com.copypaste.app
-```
-
-Future debug builds use `com.copypaste.app.debug`, so they do not replace the
-release app.
-
-## Signing and verification caveats
-
-The macOS workflow uses ad-hoc signing and does not notarize artifacts with
-Apple. The Homebrew cask removes quarantine only from the installed CopyPaste
-bundle and re-signs it locally. Android publication requires the configured
-durable release key and fails closed when it is unavailable. Windows
-Authenticode on this alpha uses a project-generated code-signing certificate,
-not a public CA; SmartScreen may warn until a CA-issued identity is in place.
-
-Verify downloaded artifacts against their attached `.sha256` files.
+</details>
