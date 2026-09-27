@@ -238,7 +238,7 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn revoke(&self, pairing_id: &str) -> Result<()> {
-        self.node().await?.revoke(pairing_id)
+        self.node().await?.revoke(&self.inner, pairing_id)
     }
 
     async fn sync(&self, pairing_id: Option<&str>) -> Result<Vec<SyncResult>> {
