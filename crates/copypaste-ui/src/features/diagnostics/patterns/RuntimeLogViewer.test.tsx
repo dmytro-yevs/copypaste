@@ -69,7 +69,7 @@ describe("RuntimeLogViewer errors", () => {
         expect(alerts[1]?.textContent).toContain("Live updates stopped");
     });
 
-    it("uses the illustrated recovery state and retries the feed", async () => {
+    it("keeps failure details in the help popover and retries the feed", async () => {
         const user = userEvent.setup();
         const refetch = vi.fn();
         runtimeLogMock.mockReturnValue({
@@ -85,7 +85,7 @@ describe("RuntimeLogViewer errors", () => {
             refetch,
         });
 
-        const { container } = render(
+        render(
             <TooltipProvider>
                 <RuntimeLogViewer />
             </TooltipProvider>,
@@ -93,10 +93,10 @@ describe("RuntimeLogViewer errors", () => {
 
         const alert = screen.getByRole("alert");
         expect(alert.textContent).toContain("Couldn’t load runtime events");
-        expect(alert.textContent).toContain(
-            "The diagnostic feed isn’t available right now.",
-        );
-        expect(container.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+        expect(alert.textContent).not.toContain("The diagnostic feed isn’t available right now.");
+        await user.click(screen.getByRole("button", { name: "Error details" }));
+        expect(screen.getByRole("dialog").textContent).toContain("The diagnostic feed isn’t available right now.");
+        await user.keyboard("{Escape}");
 
         await user.click(screen.getByRole("button", { name: "Try again" }));
         expect(refetch).toHaveBeenCalledOnce();
