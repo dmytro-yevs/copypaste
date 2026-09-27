@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -13,7 +14,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.setMargins
-import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textview.MaterialTextView
 import kotlin.math.min
@@ -30,6 +30,10 @@ internal class PairingDialogController(
     private var abortOnDismiss = true
     private var showingInvite = false
     private var timeout: Runnable? = null
+    private var countdown: Runnable? = null
+    private var activePanel: LinearLayout? = null
+    private var activeInviteState: MaterialTextView? = null
+    private var activeQrView: ImageView? = null
     private var destroyed = false
 
     fun presentInvite(
@@ -39,47 +43,38 @@ internal class PairingDialogController(
         onRefresh: (() -> Unit)? = null,
         onAbort: (() -> Unit)? = null,
     ): Boolean {
-        if (destroyed || payload.isEmpty() || code.isEmpty() || expiresInSecs <= 0) return false
-        dismissActive()
-        this.onAbort = onAbort
-        showingInvite = true
-        val root = column()
+        if (
+            destroyed ||
+            payload.isEmpty() ||
+            code.isEmpty() ||
+            expiresInSecs <= 0 ||
+            expiresInSecs > Long.MAX_VALUE / 1_000L
+        ) return false
         val qrSize = min(
             dim(R.dimen.copypaste_pairing_qr_size),
             activity.resources.displayMetrics.widthPixels - dim(R.dimen.copypaste_space_6) * 2,
         )
+        val bitmap = runCatching {
+            qrRenderer.render(payload, qrSize)
+        }.getOrNull()?.takeUnless { it.isRecycled } ?: return false
+        dismissActive()
+        this.onAbort = onAbort
+        showingInvite = true
+        val root = column()
         val qr = ImageView(activity).apply {
             id = R.id.pairing_qr
             contentDescription = activity.getString(R.string.pairing_qr_label)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-            visibility = View.GONE
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(space(3), space(3), space(3), space(3))
             setBackgroundResource(R.drawable.copypaste_pairing_qr_background)
             clipToOutline = true
+            setImageBitmap(bitmap)
         }
-        val reveal = MaterialButton(
-            activity,
-            null,
-            com.google.android.material.R.attr.materialButtonOutlinedStyle,
-        ).apply {
-            id = R.id.pairing_reveal
-            text = activity.getString(R.string.pairing_reveal)
-            contentDescription = activity.getString(R.string.pairing_reveal_label)
-            minimumHeight = touchTarget()
-            setOnClickListener {
-                val bitmap = runCatching {
-                    qrRenderer.render(payload, qrSize)
-                }.getOrNull() ?: return@setOnClickListener
-                activeQr = bitmap
-                qr.setImageBitmap(bitmap)
-                qr.visibility = View.VISIBLE
-                visibility = View.GONE
-            }
-        }
-        root.addView(reveal, matchWidth())
         root.addView(qr, centered(qrSize))
+        val state = label(activity.getString(R.string.pairing_ready_status))
+        root.addView(state)
         val expires = label(activity.getString(R.string.pairing_expires, expiresInSecs))
         root.addView(expires)
         val dialog = MaterialAlertDialogBuilder(activity)
@@ -87,15 +82,22 @@ internal class PairingDialogController(
             .setView(root)
             .setNegativeButton(R.string.pairing_cancel) { dialog, _ -> dialog.dismiss() }
             .create()
+        activeQr = bitmap
+        activePanel = root
+        activeInviteState = state
+        activeQrView = qr
         show(dialog)
+        val expiresInMs = expiresInSecs * 1_000L
+        val expiresAt = SystemClock.uptimeMillis() + expiresInMs
         timeout = Runnable {
             if (activeDialog !== dialog) return@Runnable
-            reveal.setOnClickListener(null)
-            reveal.visibility = View.GONE
+            clearCountdown()
             qr.setImageDrawable(null)
             qr.contentDescription = null
             qr.visibility = View.GONE
             clearQr()
+            state.text = activity.getString(R.string.pairing_checking_status)
+            state.contentDescription = state.text
             expires.text = activity.getString(R.string.pairing_checking_status)
             expires.contentDescription = activity.getString(R.string.pairing_checking_status)
             this.onAbort = null
@@ -104,7 +106,17 @@ internal class PairingDialogController(
                 activity.getString(R.string.pairing_close)
             timeout = null
             onRefresh?.invoke()
-        }.also { handler.postDelayed(it, expiresInSecs * 1_000L) }
+        }.also { handler.postDelayed(it, expiresInMs) }
+        countdown = object : Runnable {
+            override fun run() {
+                if (activeDialog !== dialog || !showingInvite) return
+                val remainingMs = (expiresAt - SystemClock.uptimeMillis()).coerceAtLeast(0)
+                val remainingSecs = ((remainingMs + 999L) / 1_000L).coerceAtMost(expiresInSecs)
+                expires.text = activity.getString(R.string.pairing_expires, remainingSecs)
+                expires.contentDescription = expires.text
+                if (remainingMs > 0) handler.postDelayed(this, min(1_000L, remainingMs))
+            }
+        }.also { handler.postDelayed(it, min(1_000L, expiresInMs)) }
         return true
     }
 
@@ -117,26 +129,38 @@ internal class PairingDialogController(
     ): Boolean {
         if (destroyed || title.isBlank() || detail.isBlank()) return false
         if (messageId == "waiting_for_peer" && showingInvite && activeDialog?.isShowing == true) {
+            activeInviteState?.let { state ->
+                state.text = detail
+                state.contentDescription = detail
+            }
+            this.onAbort = if (active) onAbort else null
             return true
         }
-        // SAS confirmation is owned by confirm(). Opening a modal progress sheet
-        // here would block WebView Confirm and abort on dismiss before the user
-        // can compare codes — close any prior progress without aborting.
+        // SAS confirmation owns the next protected panel, so close progress
+        // without aborting before the user compares the codes.
         if (messageId == "compare_codes") {
             dismissActive()
             this.onAbort = null
             showingInvite = false
             return true
         }
+        if (activeDialog?.isShowing == true && activePanel != null) {
+            updateActivePanelForProgress(title, detail, active, onAbort)
+            return true
+        }
         dismissActive()
         this.onAbort = if (active) onAbort else null
         showingInvite = false
+        val root = column()
+        val progressDetail = text(detail)
+        root.addView(progressDetail, matchWidth())
         val builder = MaterialAlertDialogBuilder(activity)
             .setTitle(title)
-            .setMessage(detail)
-        if (active) {
-            builder.setNegativeButton(R.string.pairing_cancel) { dialog, _ -> dialog.dismiss() }
-        }
+            .setView(root)
+        builder.setNegativeButton(
+            if (active) R.string.pairing_cancel else R.string.pairing_close,
+        ) { dialog, _ -> dialog.dismiss() }
+        activePanel = root
         show(builder.create())
         return true
     }
@@ -149,8 +173,8 @@ internal class PairingDialogController(
             .setPositiveButton(R.string.pairing_close, null)
             .create()
             .also { dialog ->
-                dialog.show()
                 dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                dialog.show()
             }
     }
 
@@ -229,14 +253,16 @@ internal class PairingDialogController(
         dialog.setOnDismissListener {
             if (activeDialog === dialog) {
                 activeDialog = null
+                clearCountdown()
                 if (abortOnDismiss) fireAbort()
                 deliver("cancel")
                 clearQr()
+                clearPanelReferences()
                 showingInvite = false
             }
         }
-        dialog.show()
         dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.show()
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
             minimumHeight = touchTarget()
             minimumWidth = touchTarget()
@@ -247,11 +273,13 @@ internal class PairingDialogController(
         abortOnDismiss = false
         timeout?.let(handler::removeCallbacks)
         timeout = null
+        clearCountdown()
         activeDialog?.dismiss()
         activeDialog = null
         abortOnDismiss = true
         deliver("cancel")
         clearQr()
+        clearPanelReferences()
         showingInvite = false
     }
 
@@ -270,9 +298,51 @@ internal class PairingDialogController(
     }
 
     private fun clearQr() {
-        activeQr?.eraseColor(Color.WHITE)
-        activeQr?.recycle()
+        val qr = activeQr ?: return
         activeQr = null
+        try {
+            if (!qr.isRecycled && qr.isMutable) qr.eraseColor(Color.WHITE)
+        } finally {
+            if (!qr.isRecycled) qr.recycle()
+        }
+    }
+
+    private fun clearCountdown() {
+        countdown?.let(handler::removeCallbacks)
+        countdown = null
+    }
+
+    private fun updateActivePanelForProgress(
+        title: String,
+        detail: String,
+        active: Boolean,
+        onAbort: (() -> Unit)?,
+    ) {
+        val dialog = activeDialog ?: return
+        timeout?.let(handler::removeCallbacks)
+        timeout = null
+        clearCountdown()
+        activeQrView?.setImageDrawable(null)
+        clearQr()
+        activePanel?.apply {
+            removeAllViews()
+            addView(text(detail), matchWidth())
+        }
+        activeInviteState = null
+        activeQrView = null
+        dialog.setTitle(title)
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
+            text = activity.getString(if (active) R.string.pairing_cancel else R.string.pairing_close)
+            visibility = View.VISIBLE
+        }
+        this.onAbort = if (active) onAbort else null
+        showingInvite = false
+    }
+
+    private fun clearPanelReferences() {
+        activePanel = null
+        activeInviteState = null
+        activeQrView = null
     }
 
     private fun sasView(sas: String): LinearLayout = LinearLayout(activity).apply {
