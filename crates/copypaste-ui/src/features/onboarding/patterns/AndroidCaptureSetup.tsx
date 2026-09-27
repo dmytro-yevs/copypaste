@@ -10,9 +10,7 @@ import {
   usePermissionRequest,
 } from "@/hooks/useOnboardingPermissions";
 import {
-  useCaptureMutation,
   useCaptureNow,
-  useCaptureState,
 } from "@/hooks/useCapture";
 import {
   permissionPresentation,
@@ -22,11 +20,7 @@ import {
 } from "@/features/onboarding/model/permissionPresentation";
 import { useTranslation } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
-import {
-  captureArm,
-  type OnboardingPermissionId,
-  type OnboardingPermissionStatus,
-} from "@/lib/ipc";
+import { type OnboardingPermissionId, type OnboardingPermissionStatus } from "@/lib/ipc";
 import styles from "./AndroidCaptureSetup.module.css";
 
 
@@ -35,9 +29,7 @@ export function AndroidCaptureSetup() {
   const permissions = useOnboardingPermissions();
   const request = usePermissionRequest();
   const openSettings = usePermissionOpenSettings();
-  const capture = useCaptureState();
   const now = useCaptureNow();
-  const arm = useCaptureMutation();
   const [actionState, setActionState] = useState<{
     id: OnboardingPermissionId;
     action: PermissionAction;
@@ -46,13 +38,11 @@ export function AndroidCaptureSetup() {
   const notificationStatus = permissions.data?.notifications.status;
   const tileStatus = permissions.data?.tile.status;
   const permissionReadFailed = permissions.error !== null;
-  const captureWorking = capture.data?.health.state === "working";
   const busy =
     permissions.isFetching ||
     request.isPending ||
     openSettings.isPending ||
-    now.isPending ||
-    arm.isPending;
+    now.isPending;
 
   const afterPermission = (id: OnboardingPermissionId, action: PermissionAction) => ({
     onSuccess: () => {
@@ -132,16 +122,6 @@ export function AndroidCaptureSetup() {
         busy={busy}
         onRun={runPermission}
         feedback={permissionFeedback("notifications", permissionPresentation(notificationStatus ?? "prompt").action)}
-      />
-      <SetupAction
-        icon="play"
-        title={t("onboarding.capture.background")}
-        detail={t("onboarding.capture.backgroundDetail")}
-        label={captureWorking
-          ? t("onboarding.capture.backgroundActive")
-          : t("onboarding.capture.backgroundAction")}
-        disabled={busy || captureWorking || capture.data === undefined}
-        onClick={() => arm.mutate(() => captureArm())}
       />
     </section>
   );
