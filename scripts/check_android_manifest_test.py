@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -15,6 +17,10 @@ REPO = Path(__file__).resolve().parent.parent
 CURRENT_MANIFEST = (
     REPO
     / "crates/copypaste-ui/src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+)
+CAPTURE_GUARD = REPO / "scripts/check-android-manifest.sh"
+ANDROID_KOTLIN = Path(
+    "crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/com/copypaste/app"
 )
 
 
@@ -135,6 +141,85 @@ class AndroidManifestCheckTest(unittest.TestCase):
         self.assertTrue(
             any("not valid XML" in error for error in manifest_errors("<manifest>"))
         )
+
+
+class AndroidCaptureGuardTest(unittest.TestCase):
+    @staticmethod
+    def run_guard(overrides=None):
+        files = {
+            "MainActivity.kt": "window.setFlags(FLAG_SECURE, FLAG_SECURE)\n",
+            "ScreenProtectionPlugin.kt": "window.clearFlags(FLAG_SECURE)\n",
+            "CaptureService.kt": "return START_NOT_STICKY\n",
+            "ShizukuClipboard.kt": "internal fun sourcePackage(): String? = null\n",
+        }
+        files.update(overrides or {})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            kotlin = root / ANDROID_KOTLIN
+            kotlin.mkdir(parents=True)
+            for name, source in files.items():
+                (kotlin / name).write_text(source)
+
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            python = bin_dir / "python3"
+            python.write_text(
+                "#!/usr/bin/env sh\n"
+                "if [ \"$1\" = \"-m\" ] && [ \"$2\" = \"unittest\" ]; then exit 0; fi\n"
+                "if [ \"$1\" = \"scripts/check_android_manifest.py\" ]; then exit 0; fi\n"
+                "exit 64\n"
+            )
+            python.chmod(0o755)
+            environment = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+            return subprocess.run(
+                ["sh", str(CAPTURE_GUARD)],
+                cwd=root,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+    def test_onboarding_only_null_source_passes_capture_guard(self):
+        result = self.run_guard()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("PASS: Android capture-ladder static contracts", result.stdout)
+
+    def test_capture_guard_rejects_protected_regressions(self):
+        regressions = {
+            "missing startup screen protection": (
+                {"MainActivity.kt": "class MainActivity\n"},
+                "MainActivity no longer sets FLAG_SECURE",
+            ),
+            "media projection": (
+                {"MediaProjection.kt": "val capture = MediaProjection\n"},
+                "MediaProjection appeared in shipping Kotlin",
+            ),
+            "sticky restart": (
+                {
+                    "CaptureService.kt": (
+                        "return START_NOT_STICKY\nreturn START_STICKY\n"
+                    )
+                },
+                "CaptureService uses START_STICKY",
+            ),
+            "escaped Shizuku binder": (
+                {"ClipboardRead.kt": "val binder = ShizukuBinderWrapper()\n"},
+                "Shizuku clipboard binder escaped its source-attribution boundary",
+            ),
+            "Shizuku clipboard transport": (
+                {"ClipboardRead.kt": 'val read = "getPrimaryClip"\n'},
+                "Shizuku clipboard content transport reappeared",
+            ),
+        }
+
+        for name, (overrides, message) in regressions.items():
+            with self.subTest(regression=name):
+                result = self.run_guard(overrides)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
 
 
 if __name__ == "__main__":
