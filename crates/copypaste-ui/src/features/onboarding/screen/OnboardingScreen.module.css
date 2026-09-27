@@ -29,8 +29,10 @@
 
 .slide {
   display: grid;
+  block-size: 100%;
   min-block-size: calc(var(--s-9) * 14);
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   animation: onboarding-slide-enter var(--dur-theme) var(--ease) both;
 }
 
@@ -39,7 +41,7 @@
   min-inline-size: 0;
   padding: var(--s-9);
   flex-direction: column;
-  justify-content: center;
+  padding-block-end: var(--s-4);
 }
 
 .copy h1 {
@@ -86,7 +88,7 @@
 
 .actions {
   display: grid;
-  margin-block-start: var(--s-7);
+  padding: var(--s-4) var(--s-9) var(--s-7);
   grid-template-columns: repeat(2, minmax(0, calc(var(--s-9) * 3.7)));
   gap: var(--s-2);
   /* grid gap */
@@ -96,9 +98,10 @@
   position: relative;
   display: grid;
   min-inline-size: 0;
-  place-items: center;
-  overflow: hidden;
-  border-inline-start: var(--stroke-1) solid var(--divider);
+  align-items: start;
+  justify-items: center;
+  overflow-y: auto;
+  border-block: var(--stroke-1) solid var(--divider);
   background: var(--elevated);
 }
 
@@ -129,15 +132,12 @@
 }
 
 .syncChoice {
-  display: grid;
   inline-size: 100%;
   min-block-size: var(--tap-min);
   padding: var(--s-3);
-  grid-template-columns: var(--s-6) minmax(0, 1fr);
-  align-items: start;
-  gap: var(--s-2);
   text-align: start;
 }
+.syncChoice > [data-slot="button-content"] { display: grid; grid-template-columns: var(--s-6) minmax(0, 1fr); align-items: start; gap: var(--s-2); }
 
 .syncChoice strong,
 .syncChoice small {
