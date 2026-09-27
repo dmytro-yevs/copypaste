@@ -239,7 +239,7 @@ mod refusal_tests {
 
     use super::*;
     use crate::pairing_presentation::invite as codec;
-    use crate::pairing_presentation::{NativePairingUi, PairingDecision};
+    use crate::pairing_presentation::{NativePairingUi, PairingDecision, ScannedPairing};
 
     /// What the window looked like when it asked to be excluded from capture.
     static ASKED: AtomicBool = AtomicBool::new(false);
@@ -380,7 +380,7 @@ mod refusal_tests {
     #[ignore = "opens a real native Windows window"]
     fn a_refused_entry_scans_nothing_and_never_reaches_the_validator() {
         let ui = presenter(refuse);
-        assert!(ui.scan_invite().is_none());
+        assert!(matches!(ui.scan_invite(), NativeScanOutcome::Cancelled));
         assert_asked_before_the_window_was_shown();
         assert_eq!(
             VALIDATIONS.load(Ordering::Acquire),
