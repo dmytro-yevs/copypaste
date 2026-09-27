@@ -19,6 +19,7 @@ type PayloadEncoder = fn(&PairingInviteData) -> Option<Zeroizing<String>>;
 
 pub(super) struct WindowsPairingUi {
     active: Mutex<Option<CloseHandle>>,
+    active_progress: Mutex<Option<PairingState>>,
     encode_payload: PayloadEncoder,
     validate_fields: entry::FieldValidator,
     affinity: Affinity,
@@ -51,6 +52,7 @@ impl WindowsPairingUi {
     ) -> Self {
         Self {
             active: Mutex::new(None),
+            active_progress: Mutex::new(None),
             encode_payload,
             validate_fields,
             affinity,
@@ -71,6 +73,30 @@ impl WindowsPairingUi {
 
     fn close_active(&self) {
         self.replace(None);
+        if let Ok(mut state) = self.active_progress.lock() {
+            *state = None;
+        }
+    }
+
+    fn is_presenting_progress(&self, state: PairingState) -> bool {
+        let Ok(active_state) = self.active_progress.lock() else {
+            return false;
+        };
+        if *active_state != Some(state) {
+            return false;
+        }
+        self.active
+            .lock()
+            .ok()
+            .and_then(|active| active.as_ref().map(CloseHandle::is_open))
+            .unwrap_or(false)
+    }
+
+    fn replace_progress(&self, state: PairingState, next: Option<CloseHandle>) {
+        self.replace(next);
+        if let Ok(mut active_state) = self.active_progress.lock() {
+            *active_state = Some(state);
+        }
     }
 }
 
@@ -121,6 +147,9 @@ impl NativePairingUi for WindowsPairingUi {
         if progress.state == PairingState::WaitingForPeer {
             return PairingPresentationState::Presented;
         }
+        if self.is_presenting_progress(progress.state) {
+            return PairingPresentationState::Presented;
+        }
         self.close_active();
         let window = status::spawn(progress, self.abort.clone());
         let state = if window.is_some() {
@@ -128,7 +157,11 @@ impl NativePairingUi for WindowsPairingUi {
         } else {
             PairingPresentationState::Unavailable
         };
-        self.replace(window);
+        if state == PairingPresentationState::Presented {
+            self.replace_progress(progress.state, window);
+        } else {
+            self.close_active();
+        }
         state
     }
 
@@ -222,6 +255,14 @@ mod tests {
         }
         assert!(entry.contains("co::ES::PASSWORD"));
         assert!(entry.contains("co::DLGID::CANCEL"));
+    }
+
+    #[test]
+    fn native_progress_reuses_an_open_window_for_the_same_state() {
+        let source = production(include_str!("mod.rs"));
+        assert!(source.contains("is_presenting_progress(progress.state)"));
+        assert!(source.contains("replace_progress(progress.state, window)"));
+        assert!(source.contains("CloseHandle::is_open"));
     }
 }
 
