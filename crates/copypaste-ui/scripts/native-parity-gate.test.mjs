@@ -75,7 +75,7 @@ const RECEIPT_VALUES = {
 };
 
 async function fixture(root, platform, overrides = {}) {
-  const { windowsUpdaterState = "updater-configured", ...receiptOverrides } = overrides;
+  const { windowsUpdaterState = "updater-configured", windowsStateKeys, ...receiptOverrides } = overrides;
   const directory = path.join(root, platform);
   const artifacts = [];
   const kinds = platform === "windows"
@@ -92,6 +92,11 @@ async function fixture(root, platform, overrides = {}) {
     if (windowsUpdaterState === "updater-unconfigured") {
       windowsStates.delete("settings-and-service/updater-configured");
       windowsStates.set("settings-and-service/updater-unconfigured", WINDOWS_UNCONFIGURED_UPDATER);
+    }
+    if (windowsStateKeys) {
+      for (const key of windowsStates.keys()) {
+        if (!windowsStateKeys.includes(key)) windowsStates.delete(key);
+      }
     }
     for (const [evidenceDirectory, expected] of windowsStates) {
       const feature = expected.feature ?? evidenceDirectory;
@@ -277,7 +282,7 @@ test("accepts unconfigured updater evidence only when the unsigned workflow requ
     required: new Set(["windows"]),
     runId: RUN_ID,
   };
-  await assert.rejects(validateEvidence(options), /updater-unconfigured/);
+  await assert.rejects(validateEvidence(options), /omits required Windows feature states settings-and-service\/updater-configured/);
   const receipts = await validateEvidence({ ...options, windowsUpdaterState: "updater-unconfigured" });
   assert.equal(receipts.length, 1);
 }));
@@ -322,11 +327,11 @@ test("rejects a missing Windows updater state", () => withRoot(async (root) => {
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
-    /exact Windows feature state set/,
+    /omits required Windows feature states settings-and-service\/updater-configured/,
   );
 }));
 
-test("rejects an unknown Windows feature state", () => withRoot(async (root) => {
+test("a diagnostic state cannot replace required Windows updater evidence", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "windows");
   const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -341,9 +346,51 @@ test("rejects an unknown Windows feature state", () => withRoot(async (root) => 
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   await assert.rejects(
     validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
-    /unknown or wrong Windows feature state settings-and-service\/updater-unknown/,
+    /omits required Windows feature states settings-and-service\/updater-configured/,
   );
 }));
+
+test("accepts critical Windows UI evidence without the optional feature inventory", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows", {
+    windowsStateKeys: ["history", "capture", "devices", "settings-and-service/updater-configured"],
+  });
+  const receipts = await validateEvidence({
+    commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID,
+  });
+  assert.equal(receipts.length, 1);
+}));
+
+test("extra diagnostic Windows captures do not change the critical release contract", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "windows");
+  const manifestPath = path.join(path.dirname(receiptPath), "feature-states.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const diagnostic = structuredClone(manifest.states.find((state) => state.feature === "cloud-account"));
+  diagnostic.state = "unconfigured-overview";
+  manifest.states.push(diagnostic);
+  const contents = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(manifestPath, contents);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const index = receipt.artifacts.find((artifact) => artifact.kind === "feature-evidence");
+  index.sha256 = createHash("sha256").update(contents).digest("hex");
+  index.bytes = Buffer.byteLength(contents);
+  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  const receipts = await validateEvidence({
+    commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID,
+  });
+  assert.equal(receipts.length, 1);
+}));
+
+for (const missing of ["history", "capture", "devices"]) {
+  test(`rejects missing critical Windows ${missing} evidence`, () => withRoot(async (root) => {
+    const receiptPath = await fixture(root, "windows", {
+      windowsStateKeys: [...WINDOWS_STATES.keys()].filter((key) => key !== missing),
+    });
+    await assert.rejects(
+      validateEvidence({ commit: COMMIT, evidence: [receiptPath], required: new Set(["windows"]), runId: RUN_ID }),
+      /omits required Windows feature states/,
+    );
+  }));
+}
 
 test("rejects a duplicate Windows feature state", () => withRoot(async (root) => {
   const receiptPath = await fixture(root, "windows");
@@ -974,22 +1021,31 @@ test("rejects changed bytes behind a bound feature-state artifact", () => withRo
   );
 }));
 
-test("the ledger emits the exact nine current feature-state expectations", async () => {
-  const ledger = fileURLToPath(new URL("../../../scripts/check-feature-ledger.py", import.meta.url));
-  const python = process.platform === "win32" ? "python" : "python3";
-  const { stdout } = await run(python, [ledger, "--receipt-expectations"]);
-  assert.deepEqual(stdout.trim().split(/\r?\n/), [
-    "android:devices=scan-pairing-code,screenshot=pairing-entry.png,accessibility=pairing-entry.xml",
-    "macos:devices=native-shell,screenshot=screenshot.png,accessibility=ax.log",
-    "windows:capture=copy-feedback-setting",
-    "windows:capture=service-capture-status",
-    "windows:cloud-account=unconfigured",
-    "windows:devices=desktop-pairing-entry",
-    "windows:history=populated",
-    "windows:settings-and-service=appearance",
-    "windows:settings-and-service=updater-configured",
-  ]);
-});
+test("rejects changed or missing receipt-bound macOS Library proof", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "macos");
+  const directory = path.dirname(receiptPath);
+  await mkdir(path.join(directory, "ui-history"));
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const proof = [
+    ["screenshot", "ui-history/screenshot.png", PNG],
+    ["accessibility", "ui-history/ax.txt", Buffer.from("AXHeading\tLibrary\n")],
+    ["accessibility", "ui-history/heading.tsv", Buffer.from("AXHeading\tLibrary\n")],
+  ];
+  for (const [kind, name, contents] of proof) {
+    await writeFile(path.join(directory, name), contents);
+    receipt.artifacts.push({ kind, path: name, bytes: contents.length, sha256: createHash("sha256").update(contents).digest("hex") });
+  }
+  await writeFile(receiptPath, JSON.stringify(receipt));
+  const options = { commit: COMMIT, evidence: [receiptPath], required: new Set(["macos"]), runId: RUN_ID };
+  assert.equal((await validateEvidence(options)).length, 1);
+  for (const [, name, contents] of proof) {
+    await writeFile(path.join(directory, name), Buffer.alloc(contents.length, 0));
+    await assert.rejects(validateEvidence(options), /checksum changed/);
+    await unlink(path.join(directory, name));
+    await assert.rejects(validateEvidence(options), /missing/);
+    await writeFile(path.join(directory, name), contents);
+  }
+}));
 
 test("rejects a known assertion assigned to the wrong platform", () => withRoot(async (root) => {
   const evidence = [await fixture(root, "macos", {

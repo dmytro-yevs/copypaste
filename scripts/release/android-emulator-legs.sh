@@ -39,6 +39,23 @@ run_required_leg() { # <name> <command...>
     return "$status"
 }
 
+valid_smoke_profile() { # <profile>
+    case "$1" in
+        full|critical) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+profile_runs_extended_debug_legs() { # <profile>
+    [[ "$1" == full ]]
+}
+
+SMOKE_PROFILE="${COPYPASTE_SMOKE_PROFILE:-full}"
+if ! valid_smoke_profile "$SMOKE_PROFILE"; then
+    printf 'COPYPASTE_SMOKE_PROFILE must be full or critical, got %s\n' "$SMOKE_PROFILE" >&2
+    exit 2
+fi
+
 self_test() {
     local failures=0
 
@@ -118,11 +135,56 @@ self_test() {
         bad "a failed emulator leg stops the sequence" "observed: $observed"
     fi
 
-    printf '\n%d passed, %d failed\n' $((7 - failures)) "$failures"
+    if valid_smoke_profile full && valid_smoke_profile critical \
+        && ! valid_smoke_profile unknown \
+        && profile_runs_extended_debug_legs full \
+        && ! profile_runs_extended_debug_legs critical; then
+        ok "the critical profile omits extended debug legs"
+    else
+        bad "the critical profile omits extended debug legs"
+    fi
+
+    local critical_legs="" successful_critical_legs=""
+    critical_runner() {
+        critical_legs+="$1 "
+        [[ "$1" != "Android WebView critical UI" ]]
+    }
+    critical_runner_ok() {
+        successful_critical_legs+="$1 "
+    }
+    if run_critical_debug_legs critical_runner_ok >/dev/null 2>&1 \
+        && [[ "$successful_critical_legs" == "Android smoke Android WebView critical UI " ]]; then
+        ok "the critical profile runs the retained debug legs"
+    else
+        bad "the critical profile runs the retained debug legs" "observed: $successful_critical_legs"
+    fi
+    if run_critical_debug_legs critical_runner >/dev/null 2>&1; then
+        bad "a failed critical UI leg stops the debug smoke"
+    elif [[ "$critical_legs" == "Android smoke Android WebView critical UI " ]]; then
+        ok "a failed critical UI leg stops the debug smoke"
+    else
+        bad "a failed critical UI leg stops the debug smoke" "observed: $critical_legs"
+    fi
+
+    printf '\n%d passed, %d failed\n' $((10 - failures)) "$failures"
     [[ $failures -eq 0 ]]
 }
 
+run_critical_debug_legs() { # [runner]
+    local runner="${1:-run_required_leg}"
+    "$runner" "Android smoke" "$here/android-smoke.sh" || return 1
+    "$runner" "Android WebView critical UI" npm --prefix e2e-android test -- \
+        tests/attach.android.test.ts \
+        tests/history-controls.android.test.ts \
+        tests/leaks.android.test.ts || return 1
+}
+
 run_emulator_legs() {
+    if ! profile_runs_extended_debug_legs "$SMOKE_PROFILE"; then
+        run_critical_debug_legs || return 1
+        printf '\n== critical debug profile: cloud, storage, and rungs are deferred ==\n'
+        return 0
+    fi
     run_required_leg "Android smoke" "$here/android-smoke.sh" || return 1
     run_required_leg "Android harness unit tests" npm --prefix e2e-android run test:harness || return 1
     run_required_leg "Android WebView E2E" npm --prefix e2e-android test || return 1

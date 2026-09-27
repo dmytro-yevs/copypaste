@@ -7,6 +7,25 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/release/macos-ui-evidence-lib.sh
 . "$REPO_ROOT/scripts/release/macos-ui-evidence-lib.sh"
 
+SMOKE_PROFILE="${COPYPASTE_SMOKE_PROFILE:-full}"
+case "$SMOKE_PROFILE" in
+  full|critical) ;;
+  *) echo "COPYPASTE_SMOKE_PROFILE must be full or critical" >&2; exit 2 ;;
+esac
+
+should_capture_route_evidence() {
+  [[ "$SMOKE_PROFILE" == "full" ]]
+}
+
+set_route_feature_state_args() {
+  ROUTE_FEATURE_STATE_ARGS=()
+  if should_capture_route_evidence; then
+    ROUTE_FEATURE_STATE_ARGS=(
+      --feature-state "devices=native-shell,screenshot=screenshot.png,accessibility=ax.log"
+    )
+  fi
+}
+
 check_accessibility_surface() {
   python3 - "$1" <<'PY'
 import csv
@@ -36,6 +55,15 @@ capture_route_state() { # <state> <navigation label> <heading>
   mac_press_unique_exact_description_role "$navigation" "AXButton" >/dev/null || return 1
   mac_wait_safe_role_label "$heading" "AXHeading" "$state_dir/heading.tsv" 30 || return 1
   mac_capture_state "$state_dir"
+}
+
+capture_required_routes() {
+  mac_recover_onboarding "$out/onboarding.tsv" 30 || return 1
+  capture_route_state history "Library" "Library" || return 1
+  if should_capture_route_evidence; then
+    capture_route_state devices "Devices" "Devices" || return 1
+    capture_route_state settings "Settings" "Settings" || return 1
+  fi
 }
 
 seed_native_preferences() { # [preferences.json]
@@ -92,6 +120,103 @@ if [[ "${1:-}" == "--self-test" ]]; then
   if check_accessibility_surface "$fixture_dir/unnamed.tsv" >/dev/null 2>&1; then
     echo "self-test failed: surface without a name passed" >&2
     exit 1
+  fi
+  if COPYPASTE_SMOKE_PROFILE=invalid "$REPO_ROOT/scripts/release/macos-native-evidence.sh" --self-test >/dev/null 2>&1; then
+    echo "self-test failed: invalid smoke profile was accepted" >&2
+    exit 1
+  fi
+  library_receipt_self_test() {
+    python3 - "$REPO_ROOT/scripts/release/write-native-evidence.py" "$fixture_dir/receipt" <<'PY'
+import hashlib
+import json
+import pathlib
+import subprocess
+import sys
+
+from PIL import Image
+
+writer = pathlib.Path(sys.argv[1])
+root = pathlib.Path(sys.argv[2])
+history = root / "ui-history"
+history.mkdir(parents=True)
+qualified = root / "CopyPaste"
+qualified.write_bytes(b"fixture app executable\n")
+image = Image.new("RGB", (100, 100), "black")
+for x in range(50, 100):
+    for y in range(100):
+        image.putpixel((x, y), (24, 120, 220))
+(root / "screenshot.png").parent.mkdir(parents=True, exist_ok=True)
+image.save(root / "screenshot.png")
+image.save(history / "screenshot.png")
+(root / "ax.log").write_text("AXMenuBar\tCopyPaste\n", encoding="utf-8")
+(history / "ax.txt").write_text("AXHeading\tLibrary\n", encoding="utf-8")
+(history / "heading.tsv").write_text("AXHeading\tLibrary\n", encoding="utf-8")
+(root / "latency.json").write_text('{"latency_ms":1}\n', encoding="utf-8")
+identity = subprocess.check_output(
+    [sys.executable, str(writer), "--capture-qualified-artifact", str(qualified)],
+    text=True,
+)
+receipt = root / "native-evidence.json"
+command = [
+    sys.executable, str(writer), "--output", str(receipt), "--platform", "macos",
+    "--environment", "hosted-runner", "--os-version", "fixture", "--architecture", "arm64",
+    "--commit", "a" * 40, "--run-id", "self-test", "--elapsed-ms", "1",
+    "--qualified-artifact", str(qualified), "--qualified-artifact-identity", identity,
+    "--artifact", "screenshot=screenshot.png", "--artifact", "accessibility=ax.log",
+    "--artifact", "screenshot=ui-history/screenshot.png",
+    "--artifact", "accessibility=ui-history/ax.txt",
+    "--artifact", "accessibility=ui-history/heading.tsv", "--artifact", "measurement=latency.json",
+]
+result = subprocess.run(command, capture_output=True, text=True)
+if result.returncode:
+    raise SystemExit(f"Library receipt fixture failed: {result.stderr.strip()}")
+records = {
+    (record["kind"], record["path"]): record
+    for record in json.loads(receipt.read_text(encoding="utf-8"))["artifacts"]
+}
+expected = {
+    ("screenshot", "ui-history/screenshot.png"),
+    ("accessibility", "ui-history/ax.txt"),
+    ("accessibility", "ui-history/heading.tsv"),
+}
+if not expected <= records.keys():
+    raise SystemExit("Library artifacts were not registered in the receipt")
+
+def matches_receipt():
+    for key in expected:
+        record = records[key]
+        path = root / record["path"]
+        if not path.is_file() or path.stat().st_size != record["bytes"]:
+            return False
+        if hashlib.sha256(path.read_bytes()).hexdigest() != record["sha256"]:
+            return False
+    return True
+
+def writer_rejects_current_library_proof(name):
+    rejected = list(command)
+    candidate = root / name
+    rejected[rejected.index("--output") + 1] = str(candidate)
+    result = subprocess.run(rejected, capture_output=True, text=True)
+    if result.returncode == 0 or candidate.exists():
+        raise SystemExit(f"{name} accepted invalid Library proof")
+
+if not matches_receipt():
+    raise SystemExit("original Library artifacts did not match their receipt")
+(history / "screenshot.png").write_bytes(b"altered")
+if matches_receipt():
+    raise SystemExit("altered Library screenshot matched the original receipt")
+writer_rejects_current_library_proof("altered-library.json")
+image.save(history / "screenshot.png")
+(history / "ax.txt").unlink()
+if matches_receipt():
+    raise SystemExit("missing Library accessibility proof matched the original receipt")
+writer_rejects_current_library_proof("missing-library.json")
+PY
+  }
+  if library_receipt_self_test; then
+    ok "Library UI artifacts are receipt-bound and detect alteration or removal"
+  else
+    bad "Library UI artifacts are receipt-bound and detect alteration or removal"
   fi
   mac_ui_self_test "$fixture_dir"
   out="$fixture_dir/ui"
@@ -386,6 +511,31 @@ JS
     eval "$original_ax"
   }
   mac_description_role_self_test
+  profile_self_test() {
+    local saved_profile="$SMOKE_PROFILE"
+    SMOKE_PROFILE=full
+    set_route_feature_state_args
+    if ! should_capture_route_evidence || [[ "${#ROUTE_FEATURE_STATE_ARGS[@]}" != 2 ]]; then
+      bad "full profile captures the route inventory"
+    fi
+    SMOKE_PROFILE=critical
+    set_route_feature_state_args
+    if should_capture_route_evidence || [[ "${#ROUTE_FEATURE_STATE_ARGS[@]}" != 0 ]]; then
+      bad "critical profile omits the route inventory"
+    fi
+    SMOKE_PROFILE="$saved_profile"
+  }
+  profile_self_test
+  critical_array_expansion_self_test() {
+    local expanded
+    if expanded="$(/bin/bash -c 'set -u; ROUTE_FEATURE_STATE_ARGS=(); printf "%s\\n" before "${ROUTE_FEATURE_STATE_ARGS[@]+${ROUTE_FEATURE_STATE_ARGS[@]}}" after')" \
+      && [[ "$expanded" == $'before\nafter' ]]; then
+      ok "critical profile expands empty receipt arguments under Bash 3.2"
+    else
+      bad "critical profile expands empty receipt arguments under Bash 3.2"
+    fi
+  }
+  critical_array_expansion_self_test
   native_production_order_self_test() {
     local script="$REPO_ROOT/scripts/release/macos-native-evidence.sh"
     if python3 - "$script" <<'PY'
@@ -400,41 +550,70 @@ names = [
     "mac_ax ready",
     "mac_prepare_webview_ax",
     "mac_ax surface",
-    "mac_recover_onboarding",
+    "capture_required_routes",
 ]
 idxs = [prod.index(name) for name in names]
 sys.exit(0 if idxs == sorted(idxs) else 1)
 PY
     then
-      ok "production seeds, prepares, then recovers in order"
+      ok "production seeds, prepares, then reaches required routes in order"
     else
-      bad "production seeds, prepares, then recovers in order"
+      bad "production seeds, prepares, then reaches required routes in order"
     fi
   }
   native_production_order_self_test
   route_presses=()
+  onboarding_recoveries=0
+  route_failure=""
   mac_press_unique_exact_description_role() {
     route_presses+=("$1 $2")
-    [[ "$1" == "Library" && "$2" == "AXButton" ]]
+    [[ "$2" == "AXButton" && "$1" != "$route_failure" ]]
   }
   mac_wait_safe_role_label() {
-    [[ "$1" == "Library" && "$2" == "AXHeading" ]] || return 1
-    printf 'AXHeading\tLibrary\n' > "$3"
+    [[ "$2" == "AXHeading" ]] || return 1
+    printf 'AXHeading\t%s\n' "$1" > "$3"
   }
-  mac_capture_state() { mkdir -p "$1"; printf 'AXHeading\tLibrary\n' > "$1/ax.txt"; printf 'png' > "$1/screenshot.png"; }
-  mac_recover_onboarding() { [[ "$1" == "$out/onboarding.tsv" ]] && printf 'AXButton\tExplore first\n' > "$1"; }
-  mac_recover_onboarding "$out/onboarding.tsv" 2 || bad "onboarding recovery remains bounded"
-  capture_route_state history "Library" "Library" \
-    && [[ "${route_presses[*]}" == "Library AXButton" && -s "$out/ui-history/heading.tsv" && -s "$out/ui-history/ax.txt" && -s "$out/ui-history/screenshot.png" ]] \
-    && ok "route evidence requires navigation, a unique heading, and both artifacts" \
-    || bad "route evidence requires navigation, a unique heading, and both artifacts"
-  if capture_route_state settings "Settings" "Settings"; then
-    bad "wrong routes cannot produce route evidence"
-  else
-    [[ "${route_presses[1]}" == "Settings AXButton" ]] \
-      && ok "wrong routes cannot produce route evidence" \
-      || bad "wrong routes cannot produce route evidence"
-  fi
+  mac_capture_state() { mkdir -p "$1"; printf 'AXHeading\n' > "$1/ax.txt"; printf 'png' > "$1/screenshot.png"; }
+  mac_recover_onboarding() {
+    [[ "$1" == "$out/onboarding.tsv" ]] || return 1
+    onboarding_recoveries=$((onboarding_recoveries + 1))
+    printf 'AXButton\tExplore first\n' > "$1"
+  }
+  route_profile_self_test() {
+    local saved_profile="$SMOKE_PROFILE"
+    SMOKE_PROFILE=critical
+    route_presses=()
+    onboarding_recoveries=0
+    route_failure=""
+    if capture_required_routes \
+      && [[ "${route_presses[*]}" == "Library AXButton" ]] \
+      && [[ "$onboarding_recoveries" == 1 ]] \
+      && [[ -s "$out/ui-history/heading.tsv" && -s "$out/ui-history/ax.txt" && -s "$out/ui-history/screenshot.png" ]]; then
+      ok "critical profile reaches onboarding and Library with native artifacts"
+    else
+      bad "critical profile reaches onboarding and Library with native artifacts"
+    fi
+    SMOKE_PROFILE=full
+    route_presses=()
+    onboarding_recoveries=0
+    if capture_required_routes \
+      && [[ "${route_presses[*]}" == "Library AXButton Devices AXButton Settings AXButton" ]] \
+      && [[ "$onboarding_recoveries" == 1 ]]; then
+      ok "full profile retains the complete route inventory"
+    else
+      bad "full profile retains the complete route inventory"
+    fi
+    SMOKE_PROFILE=critical
+    route_failure="Library"
+    if capture_required_routes; then
+      bad "critical Library route failures propagate"
+    else
+      ok "critical Library route failures propagate"
+    fi
+    route_failure=""
+    SMOKE_PROFILE="$saved_profile"
+  }
+  route_profile_self_test
   unset -f osascript mac_press_unique_exact_description_role mac_wait_safe_role_label mac_capture_state mac_recover_onboarding mac_capture_state_self_test
   [[ "$FAIL" -eq 0 ]] || exit 1
   echo "macOS native accessibility self-test passed"
@@ -504,23 +683,11 @@ test -s "$out/ax.log"
 test -s "$out/screenshot.png"
 test -s "$out/latency.json"
 
-# These exact-DMG observations are deliberately not receipt feature states:
-# root owns the ledger bindings. Each route requires its source-confirmed
-# navigation control, its own AXHeading, and both native artifacts.
-mac_recover_onboarding "$out/onboarding.tsv" 30 || {
-  echo "Onboarding recovery could not reach the exact Explore first control" >&2
-  exit 1
-}
-capture_route_state history "Library" "Library" || {
-  echo "History route did not expose its Library heading and artifacts" >&2
-  exit 1
-}
-capture_route_state devices "Devices" "Devices" || {
-  echo "Devices route did not expose its Devices heading and artifacts" >&2
-  exit 1
-}
-capture_route_state settings "Settings" "Settings" || {
-  echo "Settings route did not expose its Settings heading and artifacts" >&2
+set_route_feature_state_args
+# The critical profile reaches the first real WebView route. The full profile
+# also records Devices and Settings for the manual/nightly evidence inventory.
+capture_required_routes || {
+  echo "Required macOS UI route did not expose its heading and artifacts" >&2
   exit 1
 }
 
@@ -535,7 +702,10 @@ python3 scripts/release/write-native-evidence.py \
   --elapsed-ms "$((ready_ms - start_ms))" \
   --qualified-artifact "$qualified_artifact" \
   --qualified-artifact-identity "$qualified_artifact_identity" \
-  --feature-state devices=native-shell,screenshot=screenshot.png,accessibility=ax.log \
+  "${ROUTE_FEATURE_STATE_ARGS[@]+${ROUTE_FEATURE_STATE_ARGS[@]}}" \
   --artifact screenshot=screenshot.png \
   --artifact accessibility=ax.log \
+  --artifact screenshot=ui-history/screenshot.png \
+  --artifact accessibility=ui-history/ax.txt \
+  --artifact accessibility=ui-history/heading.tsv \
   --artifact measurement=latency.json
