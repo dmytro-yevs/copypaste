@@ -31,7 +31,6 @@ import styles from "./LibraryScreen.module.css";
 
 const captureModes = (data: StatusData) => ({
     privateMode: data.private_mode === true,
-    capturePaused: data.capture_running === false,
 });
 
 const INSPECTOR_SIZE_KEY = "copypaste.library.inspector-width";
@@ -262,12 +261,10 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                         searching={history.searching}
                         filtered={history.filtered}
                         privateMode={status.data?.privateMode === true}
-                        capturePaused={status.data?.capturePaused === true}
                         query={history.query}
                         hasMore={history.hasMore}
                         onLoadMore={history.loadMore}
                         onRetry={history.retry}
-                        onOpenCapture={() => setView("capture")}
                         onOpenDiagnostics={() => {
                             setSettingsTab("diagnostics");
                             setView("settings");

@@ -7,6 +7,7 @@
  * the list between a keydown and the Enter that follows it (CopyPaste-8ebg.17).
  */
 import { create } from "zustand";
+import { usePrefs, type OnboardingStep } from "@/store/prefs";
 
 export const VIEWS = ["history", "devices", "settings"] as const;
 export type View = (typeof VIEWS)[number];
@@ -37,6 +38,7 @@ interface UiStore {
   dismiss: (id: BannerId) => void;
   isDismissed: (id: BannerId) => boolean;
   openOnboarding: () => void;
+  openOnboardingAt: (step: OnboardingStep) => void;
   closeOnboarding: () => void;
 }
 
@@ -50,7 +52,10 @@ export const useUi = create<UiStore>()((set, get) => ({
 
   setView: (view) => set({ view: resolveView(view) }),
   setSettingsTab: (settingsTab) => set({ settingsTab }),
-  openCaptureSettings: () => set({ view: "settings", settingsTab: "clipboard" }),
+  openCaptureSettings: () => {
+    usePrefs.getState().setOnboarding({ step: "capture" });
+    set({ onboardingOpen: true });
+  },
   setQuery: (query) => set({ query }),
   setActiveId: (activeId) => set({ activeId }),
   // Dismissed for this session only: the condition is live, and a new launch
@@ -63,5 +68,9 @@ export const useUi = create<UiStore>()((set, get) => ({
     ),
   isDismissed: (id) => get().dismissed.includes(id),
   openOnboarding: () => set({ onboardingOpen: true }),
+  openOnboardingAt: (step) => {
+    usePrefs.getState().setOnboarding({ step });
+    set({ onboardingOpen: true });
+  },
   closeOnboarding: () => set({ onboardingOpen: false }),
 }));

@@ -42,6 +42,37 @@ const nativePreferences = new LazyStore(NATIVE_PREFERENCES_FILE, {
 export const THEMES = APPEARANCE_SERIALIZATION.themes;
 export const COLOR_THEMES = APPEARANCE_SERIALIZATION.colorThemes;
 
+export const ONBOARDING_STEPS = [
+  "welcome",
+  "capture",
+  "privacy",
+  "sync",
+  "complete",
+] as const;
+
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
+export type OnboardingSyncChoice = "lan" | "cloud" | "both" | "later" | null;
+export type CaptureSetupMethod = "shizuku" | "adb" | null;
+export type CaptureSetupStage = "choose" | "commands" | "verify" | "complete";
+
+export interface OnboardingProgress {
+  step: OnboardingStep;
+  captureSkipped: boolean;
+  privacySkipped: boolean;
+  syncChoice: OnboardingSyncChoice;
+  captureSetupMethod: CaptureSetupMethod;
+  captureSetupStage: CaptureSetupStage;
+}
+
+export const DEFAULT_ONBOARDING_PROGRESS: OnboardingProgress = {
+  step: "welcome",
+  captureSkipped: false,
+  privacySkipped: false,
+  syncChoice: null,
+  captureSetupMethod: null,
+  captureSetupStage: "choose",
+};
+
 export type { ColorTheme, ThemePref, Translucency };
 
 export {
@@ -70,6 +101,26 @@ const FIELD = {
   allowScreenshots: z.boolean(),
   onboardingComplete: z.boolean(),
 } as const;
+
+const ONBOARDING_PROGRESS = z.object({
+  step: z.enum(ONBOARDING_STEPS),
+  captureSkipped: z.boolean(),
+  privacySkipped: z.boolean(),
+  syncChoice: z.enum(["lan", "cloud", "both", "later"]).nullable(),
+  captureSetupMethod: z.enum(["shizuku", "adb"]).nullable(),
+  captureSetupStage: z.enum(["choose", "commands", "verify", "complete"]),
+});
+
+export function parseOnboardingProgress(raw: unknown): OnboardingProgress {
+  const parsed = ONBOARDING_PROGRESS.partial().safeParse(
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>).onboarding
+      : undefined,
+  );
+  return parsed.success
+    ? { ...DEFAULT_ONBOARDING_PROGRESS, ...parsed.data }
+    : { ...DEFAULT_ONBOARDING_PROGRESS };
+}
 
 /** Never throws. Unknown keys are dropped by construction: the result is built
  *  from the known key list, so nothing else survives to be re-persisted. */
@@ -187,7 +238,9 @@ const durableStorage: StateStorage<unknown> = {
 };
 
 interface PrefsStore extends Prefs {
+  onboarding: OnboardingProgress;
   set<K extends keyof Prefs>(key: K, value: Prefs[K]): void;
+  setOnboarding: (patch: Partial<OnboardingProgress>) => void;
   reset(): void;
 }
 
@@ -195,30 +248,43 @@ export const usePrefs = create<PrefsStore>()(
   persist(
     (setState) => ({
       ...DEFAULT_PREFS,
+      onboarding: { ...DEFAULT_ONBOARDING_PROGRESS },
       set: (key, value) => setState({ [key]: value } as Partial<Prefs>),
+      setOnboarding: (patch) => setState((state) => ({
+        onboarding: { ...state.onboarding, ...patch },
+      })),
       reset: () =>
         setState((state) => ({
           ...DEFAULT_PREFS,
           onboardingComplete: state.onboardingComplete,
+          onboarding: state.onboarding,
         })),
     }),
     {
       name: STORAGE_KEY,
       version: PREFERENCES_VERSION,
       storage: createJSONStorage(() => durableStorage),
-      partialize: (state) =>
+      partialize: (state) => (
         // Built from the known key list so an action can never be persisted,
         // and so a key removed from `Prefs` stops being written on the next
         // save rather than lingering in storage forever.
-        Object.fromEntries(
-          Object.keys(DEFAULT_PREFS).map((key) => [
-            key,
-            state[key as keyof Prefs],
-          ]),
-        ) as unknown as Prefs,
+        {
+          ...Object.fromEntries(
+            Object.keys(DEFAULT_PREFS).map((key) => [
+              key,
+              state[key as keyof Prefs],
+            ]),
+          ),
+          onboarding: state.onboarding,
+        } as Prefs & Pick<PrefsStore, "onboarding">
+      ),
       // INV-21: validated on the way in, so a corrupt entry cannot reach a
       // component.
-      merge: (persisted, current) => ({ ...current, ...parsePrefs(persisted) }),
+      merge: (persisted, current) => ({
+        ...current,
+        ...parsePrefs(persisted),
+        onboarding: parseOnboardingProgress(persisted),
+      }),
     },
   ),
 );

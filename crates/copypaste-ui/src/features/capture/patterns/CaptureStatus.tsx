@@ -17,7 +17,7 @@ export function CaptureStatus() {
   const snapshot = capture.data;
   if (snapshot === undefined) return null;
   const presentation = capturePresentationOf(snapshot.health);
-  if (presentation.tone === "positive") return null;
+  if (presentation.tone === "positive" || presentation.tone === "off") return null;
 
   const summary = snapshot.detail
     ? `${snapshot.headline} ${snapshot.detail}`

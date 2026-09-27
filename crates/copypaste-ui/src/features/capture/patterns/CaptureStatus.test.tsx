@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { captureSnapshot } from "@/test/harness";
 import { CaptureStatus } from "./CaptureStatus";
+import { DEFAULT_ONBOARDING_PROGRESS, usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ vi.mock("@/hooks/useCapture", () => ({
 
 afterEach(() => {
   mocks.snapshot = undefined;
+  usePrefs.setState({ onboarding: { ...DEFAULT_ONBOARDING_PROGRESS } });
   useUi.setState({ view: "history", settingsTab: null });
 });
 
@@ -43,7 +45,13 @@ describe("CaptureStatus", () => {
       "polite",
     );
     fireEvent.click(screen.getByRole("button", { name: "Set up" }));
-    expect(useUi.getState().view).toBe("settings");
-    expect(useUi.getState().settingsTab).toBe("clipboard");
+    expect(useUi.getState().onboardingOpen).toBe(true);
+    expect(usePrefs.getState().onboarding.step).toBe("capture");
+  });
+
+  it("keeps an intentionally disabled capture mode out of the Library status", () => {
+    mocks.snapshot = captureSnapshot({ health: { state: "disabled" } });
+    render(<CaptureStatus />);
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

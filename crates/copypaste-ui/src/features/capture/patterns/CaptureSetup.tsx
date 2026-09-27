@@ -1,24 +1,19 @@
-/**
- * Restarting Shizuku is a normal status, not a failure. Only a refused read
- * gets an alert, and no action is offered for work CopyPaste cannot perform.
- */
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+
 import { Icon } from "@/components/ui/icon";
 
 import {
   EmptyState,
+  FieldFeedback,
   InlineNotice,
   SettingsRow,
   StatusCard,
 } from "@/components/shared";
-import { Button, Switch } from "@/components/ui";
-import { SettingsDisclosure } from "@/features/settings/components/SettingsDisclosure";
+import { Button } from "@/components/ui";
 import { SettingsGroupSurface } from "@/features/settings/components/SettingsGroupSurface";
-import { CaptureLadder } from "@/features/capture/components/CaptureLadder";
-import { CapturePhoneOnlyHelp } from "./CapturePhoneOnlyHelp";
-import { ToastNotice } from "./ToastNotice";
 import {
   type CapturePrimary,
-  ladderOf,
   primaryOf,
   capturePresentationOf,
 } from "@/features/capture/model";
@@ -33,8 +28,11 @@ import {
   type CaptureSnapshot,
   captureArm,
   captureRefresh,
-  captureSetEnabled,
+  captureSetupInstructions,
+  copyText,
+  type CaptureSetupInstructions,
 } from "@/lib/ipc";
+import { usePrefs } from "@/store/prefs";
 import styles from "./CaptureSetup.module.css";
 
 const PRIMARY_LABEL = {
@@ -82,40 +80,27 @@ export function CaptureSetup({ snapshot }: { snapshot: CaptureSnapshot }) {
   return (
     <div className={styles.content}>
       <h2 className={styles.heading}>{t("capture.title")}</h2>
-      <CaptureStateCard snapshot={snapshot} />
+      <CaptureStateCard snapshot={snapshot} suppressAction={managed} />
       {snapshot.droppedClips > 0 && <Dropped count={snapshot.droppedClips} />}
-      {managed && (
-        <SettingsGroupSurface>
-          {snapshot.shizuku.supported && (
-            <EnableRow enabled={snapshot.shizuku.enabled} />
-          )}
-          <AlwaysOn />
-        </SettingsGroupSurface>
-      )}
-      {managed && snapshot.shizuku.supported && (
-        <SettingsDisclosure title={t("capture.help.title")} description={t("capture.help.summary")}>
-          <div className={styles.help}>
-            <CapturePhoneOnlyHelp snapshot={snapshot} />
-            <CaptureLadder rungs={ladderOf(snapshot)} />
-          </div>
-        </SettingsDisclosure>
-      )}
-      {managed && snapshot.shizuku.permission && (
-        <SettingsDisclosure title={t("capture.options.title")}>
-          <ToastNotice suppressed={snapshot.toastSuppressed} />
-        </SettingsDisclosure>
-      )}
+      {managed ? <AndroidCaptureRecovery snapshot={snapshot} /> : null}
+      <SettingsGroupSurface><AlwaysOn /></SettingsGroupSurface>
     </div>
   );
 }
 
-function CaptureStateCard({ snapshot }: { snapshot: CaptureSnapshot }) {
+function CaptureStateCard({
+  snapshot,
+  suppressAction = false,
+}: {
+  snapshot: CaptureSnapshot;
+  suppressAction?: boolean;
+}) {
   const { t } = useTranslation();
   const run = useCaptureMutation();
   const presentation = capturePresentationOf(snapshot.health);
   const primary = primaryOf(snapshot.nextStep);
 
-  const action = primary === "none" ? undefined : (
+  const action = suppressAction || primary === "none" ? undefined : (
     <Button
       state={run.isPending ? "loading" : "normal"}
       onClick={() =>
@@ -175,23 +160,121 @@ function AlwaysOn() {
   );
 }
 
-function EnableRow({ enabled }: { enabled: boolean }) {
+function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
   const { t } = useTranslation();
-  const run = useCaptureMutation();
+  const progress = usePrefs((state) => state.onboarding);
+  const setOnboarding = usePrefs((state) => state.setOnboarding);
+  const instructions = useQuery<CaptureSetupInstructions>({
+    queryKey: ["capture", "setup-instructions"],
+    queryFn: captureSetupInstructions,
+    retry: false,
+  });
+  const refresh = useCaptureMutation();
+  const arm = useCaptureMutation();
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const readyToArm = snapshot.nextStep === "arm";
+
+  if (snapshot.health.state === "working") return null;
+
+  const commands = progress.captureSetupMethod === "shizuku"
+    ? instructions.data?.shizukuCommands
+    : progress.captureSetupMethod === "adb"
+      ? instructions.data?.adbCommands
+      : undefined;
+
+  const choose = (method: "shizuku" | "adb") => {
+    // The platform may terminate the process when pm grant changes its groups.
+    // Save before the user can run either canonical command.
+    setOnboarding({ captureSetupMethod: method, captureSetupStage: "commands" });
+    setCopyFeedback(null);
+  };
+
+  const copy = async (argv: readonly string[]) => {
+    setOnboarding({ captureSetupStage: "verify" });
+    try {
+      await copyText(formatCommand(argv));
+      setCopyFeedback(t("onboarding.capture.setup.copied"));
+    } catch {
+      setCopyFeedback(t("onboarding.capture.setup.unavailable"));
+    }
+  };
 
   return (
-    <SettingsRow
-      title={t("capture.setup.enable.title")}
-      description={t("capture.setup.enable.body")}
-    >
-      <Switch
-        checked={enabled}
-        disabled={run.isPending}
-        aria-label={t("capture.setup.enable.title")}
-        onCheckedChange={(next) => run.mutate(() => captureSetEnabled(next))}
-      />
-    </SettingsRow>
+    <section className={styles.recovery} aria-labelledby="capture-recovery-title">
+      <h3 id="capture-recovery-title">{t("onboarding.capture.setup.title")}</h3>
+      <p>{t("onboarding.capture.setup.body")}</p>
+      <div className={styles.methodChoices} role="radiogroup" aria-label={t("onboarding.capture.setup.title")}>
+        <Button
+          type="button"
+          variant={progress.captureSetupMethod === "shizuku" ? "secondary" : "ghost"}
+          role="radio"
+          aria-checked={progress.captureSetupMethod === "shizuku"}
+          onClick={() => choose("shizuku")}
+        >
+          {t("onboarding.capture.setup.shizuku")}
+        </Button>
+        <Button
+          type="button"
+          variant={progress.captureSetupMethod === "adb" ? "secondary" : "ghost"}
+          role="radio"
+          aria-checked={progress.captureSetupMethod === "adb"}
+          onClick={() => choose("adb")}
+        >
+          {t("onboarding.capture.setup.adb")}
+        </Button>
+      </div>
+      {progress.captureSetupMethod !== null ? (
+        <p>{t(progress.captureSetupMethod === "shizuku"
+          ? "onboarding.capture.setup.shizukuDetail"
+          : "onboarding.capture.setup.adbDetail")}</p>
+      ) : null}
+      {instructions.isError ? <FieldFeedback state="error">{t("onboarding.capture.setup.unavailable")}</FieldFeedback> : null}
+      {commands?.length ? (
+        <div className={styles.commands}>
+          <h4>{t("onboarding.capture.setup.commands")}</h4>
+          {commands.map((argv: readonly string[], index: number) => (
+            <div key={index} className={styles.command}>
+              <code>{formatCommand(argv)}</code>
+              <Button type="button" size="sm" variant="secondary" onClick={() => void copy(argv)}>
+                {t("onboarding.capture.setup.copy")}
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {instructions.data?.requiresRestart ? <FieldFeedback state="neutral">{t("onboarding.capture.setup.restart")}</FieldFeedback> : null}
+      {copyFeedback ? <FieldFeedback state="success">{copyFeedback}</FieldFeedback> : null}
+      <div className={styles.recoveryActions}>
+        <Button
+          type="button"
+          variant="secondary"
+          state={refresh.isPending ? "loading" : "normal"}
+          onClick={() => refresh.mutate(() => captureRefresh(), {
+            onSuccess: () => setOnboarding({ captureSetupStage: "verify" }),
+          })}
+        >
+          {t(refresh.isPending ? "onboarding.capture.setup.verifying" : "onboarding.capture.setup.verify")}
+        </Button>
+        {readyToArm ? (
+          <Button
+            type="button"
+            state={arm.isPending ? "loading" : "normal"}
+            onClick={() => arm.mutate(() => captureArm(), {
+              onSuccess: () => setOnboarding({ captureSetupStage: "complete" }),
+            })}
+          >
+            {t("onboarding.capture.setup.arm")}
+          </Button>
+        ) : null}
+      </div>
+    </section>
   );
+}
+
+function formatCommand(argv: readonly string[]): string {
+  return argv.map((part) => /^[A-Za-z0-9_@%+=:,./-]+$/.test(part)
+    ? part
+    : `'${part.replace(/'/g, "'\\\"'\\\"'")}'`).join(" ");
 }
 
 function Dropped({ count }: { count: number }) {

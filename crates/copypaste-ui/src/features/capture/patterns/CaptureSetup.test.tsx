@@ -1,28 +1,65 @@
-import { fireEvent, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { captureSnapshot, withClient } from "@/test/harness";
+import { DEFAULT_ONBOARDING_PROGRESS, usePrefs } from "@/store/prefs";
 import { CaptureSetup } from "./CaptureSetup";
 
+const ipc = vi.hoisted(() => ({
+  instructions: vi.fn(),
+  copy: vi.fn(),
+}));
+
+vi.mock("@/lib/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ipc")>()),
+  captureSetupInstructions: () => ipc.instructions(),
+  copyText: (text: string) => ipc.copy(text),
+}));
+
+beforeEach(() => {
+  ipc.instructions.mockResolvedValue({
+    packageName: "com.copypaste.app",
+    shizukuCommands: [["pm", "grant", "com.copypaste.app", "android.permission.READ_LOGS"]],
+    adbCommands: [["adb", "shell", "pm", "grant", "com.copypaste.app", "android.permission.READ_LOGS"]],
+    requiresRestart: true,
+  });
+  ipc.copy.mockResolvedValue(undefined);
+  usePrefs.setState({ onboarding: { ...DEFAULT_ONBOARDING_PROGRESS } });
+});
+
+afterEach(() => {
+  ipc.instructions.mockReset();
+  ipc.copy.mockReset();
+});
+
 describe("CaptureSetup", () => {
-  it("keeps setup instructions and Android notice options collapsed", () => {
+  it("keeps normal capture compact and does not rerun its setup", () => {
     const { container } = withClient(<CaptureSetup snapshot={captureSnapshot()} />);
-    const disclosures = container.querySelectorAll("details");
-    expect(disclosures.length).toBe(2);
-    for (const disclosure of disclosures) expect(disclosure.open).toBe(false);
+    expect(container.querySelector("details")).toBeNull();
     expect(screen.getByRole("button", { name: "Save now" })).toBeTruthy();
-    fireEvent.click(screen.getByText("Setup instructions"));
-    expect(disclosures[0].open).toBe(true);
+    expect(screen.queryByRole("radiogroup")).toBeNull();
   });
 
-  it("shows the user's enabled preference even when capture needs setup", () => {
+  it("uses canonical ADB commands and waits for live verification", async () => {
     const snapshot = captureSnapshot({
-      health: { state: "not_granted", reason: "not_installed" },
-      nextStep: "install_shizuku",
+      health: { state: "not_granted", reason: "no_permission" },
+      nextStep: "grant_permission",
       shizuku: { ...captureSnapshot().shizuku, enabled: false },
     });
     withClient(<CaptureSetup snapshot={snapshot} />);
-    expect(screen.getByRole("switch", { name: "Capture from other apps" }).getAttribute("aria-checked")).toBe("false");
+
+    await screen.findByRole("radio", { name: "Use ADB on a computer" });
+    expect(screen.queryByRole("switch", { name: "Capture from other apps" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Use ADB on a computer" }));
+    expect(usePrefs.getState().onboarding.captureSetupMethod).toBe("adb");
+    expect(usePrefs.getState().onboarding.captureSetupStage).toBe("commands");
+    await screen.findByText("adb shell pm grant com.copypaste.app android.permission.READ_LOGS");
+    fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+    await waitFor(() => expect(ipc.copy).toHaveBeenCalledWith(
+      "adb shell pm grant com.copypaste.app android.permission.READ_LOGS",
+    ));
+    expect(usePrefs.getState().onboarding.captureSetupStage).toBe("verify");
+    expect(screen.getByText("Command copied. Run it, then verify permissions.")).toBeTruthy();
   });
 
   it("uses the shared warning notice for dropped captures", () => {
@@ -54,22 +91,6 @@ describe("CaptureSetup", () => {
 
     expect(screen.getByRole("alert").getAttribute("aria-live")).toBe(
       "assertive",
-    );
-  });
-
-  it("keeps setup states polite when no capture failure occurred", () => {
-    withClient(
-      <CaptureSetup
-        snapshot={captureSnapshot({
-          rung: "desktop",
-          health: { state: "disabled" },
-          headline: "Background capture is off.",
-        })}
-      />,
-    );
-
-    expect(screen.getByRole("status").getAttribute("aria-live")).toBe(
-      "polite",
     );
   });
 });

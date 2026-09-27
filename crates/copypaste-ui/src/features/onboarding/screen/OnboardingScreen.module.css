@@ -107,6 +107,43 @@
   overflow-y: auto;
 }
 
+.art[data-interactive] > div {
+  inline-size: min(100%, calc(var(--s-9) * 12));
+  padding-inline: var(--s-4);
+}
+
+.syncChoices {
+  display: grid;
+  gap: var(--s-2);
+  margin-block-end: var(--s-4);
+}
+
+.syncChoice {
+  display: block;
+  inline-size: 100%;
+  min-block-size: var(--tap-min);
+  padding: var(--s-3);
+  text-align: start;
+}
+
+.syncChoice strong,
+.syncChoice small {
+  display: block;
+}
+
+.syncChoice small {
+  margin-block-start: var(--s-1);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+.savedChoice {
+  margin: var(--s-3) 0 0;
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+
 .dotsPosition {
   position: absolute;
   z-index: 5;

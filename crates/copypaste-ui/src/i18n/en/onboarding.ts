@@ -6,14 +6,14 @@ export const onboarding = {
 
   welcome: {
     eyebrow: "Welcome",
-    title: "Your clipboard finally remembers.",
-    body: "Find anything you copied across your devices — privately encrypted and ready in a keystroke.",
+    title: "Set up CopyPaste for this device.",
+    body: "Choose the capture, privacy, and sync options that work for you. You can change every choice later.",
     action: "Set up capture",
     secondary: "Explore first",
   },
 
   capture: {
-    eyebrow: "Step 2 of 3",
+    eyebrow: "Capture",
     title: "Keep new copies within reach.",
     body: "CopyPaste watches the clipboard locally. Sensitive content stays protected and is never shown until you reveal it.",
     androidBody: "CopyPaste already works with copies made here, shared to it, or saved from Quick Settings. Choose the Android helpers you want now; every one is optional.",
@@ -46,6 +46,23 @@ export const onboarding = {
     backgroundDetail: "Advanced setup on this phone; re-arm after restart.",
     backgroundAction: "Set up",
     backgroundActive: "Active",
+    setup: {
+      title: "Set up capture from other apps",
+      body: "Choose one setup method. CopyPaste checks the real permission state after you run its commands.",
+      shizuku: "Use Shizuku on this phone",
+      shizukuDetail: "Run the copied commands in Shizuku after it is started.",
+      adb: "Use ADB on a computer",
+      adbDetail: "Connect this phone to a computer with Android Debug Bridge.",
+      commands: "Run these commands",
+      copy: "Copy command",
+      copied: "Command copied. Run it, then verify permissions.",
+      verify: "Verify permissions",
+      verifying: "Checking permissions…",
+      verified: "Permissions are ready. Turn on capture to finish setup.",
+      arm: "Turn on background capture",
+      restart: "Android may restart CopyPaste after these grants. Reopen it to verify the result.",
+      unavailable: "Setup instructions are unavailable. Try again after CopyPaste reconnects to Android.",
+    },
   },
 
   connections: {
@@ -54,6 +71,47 @@ export const onboarding = {
     body: "Connect up to {{pairingLimit}} other devices now, or open your Library immediately.",
     action: "Connect a device",
     secondary: "Open Library",
+  },
+
+  privacy: {
+    eyebrow: "Privacy and basics",
+    title: "Keep control of what CopyPaste remembers.",
+    body: "Sensitive content stays protected by default. Choose how long ordinary copies remain available and which optional notices you want.",
+    action: "Save and continue",
+    secondary: "Keep defaults",
+  },
+
+  sync: {
+    eyebrow: "Sync",
+    title: "Choose how this device connects.",
+    body: "You can pair nearby devices, configure encrypted cloud sync, use both, or leave sync for later.",
+    lan: "Nearby devices",
+    lanDetail: "Pair this device with another CopyPaste device on your network.",
+    cloud: "Encrypted cloud sync",
+    cloudDetail: "Configure an account or a compatible hosted server.",
+    both: "Use both",
+    bothDetail: "Pair nearby devices and configure cloud sync.",
+    later: "Set up sync later",
+    laterDetail: "Keep this device local for now.",
+    setupLan: "Pair a nearby device",
+    setupCloud: "Configure cloud sync",
+    selectionSaved: "Your sync choice is saved. Finish whenever you are ready.",
+    action: "Finish setup",
+  },
+
+  complete: {
+    eyebrow: "Ready",
+    title: "CopyPaste is ready for you.",
+    body: "Your choices are saved on this device. You can reopen this setup from Settings whenever you need it.",
+    action: "Open Library",
+    secondary: "Review sync",
+  },
+
+  startup: {
+    title: "Open at login",
+    description: "Start CopyPaste when you sign in to this computer.",
+    checking: "Checking startup setting…",
+    unavailable: "Startup could not be changed.",
   },
 
   settings: {
