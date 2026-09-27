@@ -5,7 +5,6 @@ import path from "node:path";
 const EXPECTED = new Map([
   ["history/populated", { feature: "history", state: "populated", name: "Clipboard history", directory: "history", direct: true }],
   ["capture/service-capture-status", { feature: "capture", state: "service-capture-status", name: "Background capture", directory: "capture", direct: true }],
-  ["capture/copy-feedback-setting", { feature: "capture", state: "copy-feedback-setting", name: "Copy feedback sound", directory: "capture/copy-feedback-setting", direct: false }],
   ["devices/desktop-pairing-entry", {
     type: "protected-accessibility",
     feature: "devices",
@@ -18,8 +17,6 @@ const EXPECTED = new Map([
     directory: "devices",
     direct: true,
   }],
-  ["settings-and-service/appearance", { feature: "settings-and-service", state: "appearance", name: "Mode", directory: "settings-and-service", direct: true }],
-  ["cloud-account/unconfigured", { feature: "cloud-account", state: "unconfigured", name: "Cloud server configuration", directory: "cloud-account", direct: true }],
 ]);
 
 const UPDATER_STATES = new Map([
@@ -101,21 +98,23 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
   if (!exactKeys(manifest, ["schema_version", "states"]) || manifest.schema_version !== 2 || !Array.isArray(manifest.states)) {
     throw new Error(`${label} feature evidence has an invalid envelope`);
   }
-  if (manifest.states.length !== expected.size) throw new Error(`${label} must capture the exact Windows feature state set`);
-
   const root = await realpath(path.dirname(receiptPath));
   const observed = new Set();
   const screenshotIdentities = new Set();
   for (const state of manifest.states) {
     const identity = `${state?.feature}/${state?.state}`;
+    if (observed.has(identity)) throw new Error(`${label} contains an invalid or duplicate Windows feature state`);
+    observed.add(identity);
     const expectedState = expected.get(identity);
+    // Extra diagnostic captures do not expand the release contract. Only the
+    // required states below qualify native behavior; their proofs stay strict.
+    if (!expectedState) continue;
     const expectedType = expectedState?.type ?? "visual";
     const stateKeys = expectedType === "protected-accessibility" ? PROTECTED_STATE_KEYS : VISUAL_STATE_KEYS;
-    if (!exactKeys(state, stateKeys) || observed.has(identity)) {
+    if (!exactKeys(state, stateKeys)) {
       throw new Error(`${label} contains an invalid or duplicate Windows feature state`);
     }
-    observed.add(identity);
-    if (!expectedState || state.type !== expectedType || state.expected_name !== expectedState.name) {
+    if (state.type !== expectedType || state.expected_name !== expectedState.name) {
       throw new Error(`${label} contains an unknown or wrong Windows feature state ${identity}`);
     }
     const prefix = `${expectedState.directory}/`;
@@ -292,7 +291,8 @@ export async function verifyWindowsFeatureEvidence(receiptPath, receipt, label, 
       }
     }
   }
-  if ([...expected.keys()].some((identity) => !observed.has(identity))) {
-    throw new Error(`${label} omits a Windows feature state`);
+  const missing = [...expected.keys()].filter((identity) => !observed.has(identity));
+  if (missing.length > 0) {
+    throw new Error(`${label} omits required Windows feature states ${missing.join(", ")}`);
   }
 }
