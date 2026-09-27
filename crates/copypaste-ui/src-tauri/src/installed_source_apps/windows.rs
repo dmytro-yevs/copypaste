@@ -7,14 +7,14 @@ const APPLICATIONS: &str = r"Applications";
 const OWN_IMAGES: &[&str] = &["copypaste-ui.exe", "copypaste.exe", "copypaste-daemon.exe"];
 
 pub(super) fn list() -> Result<Vec<InstalledSourceApp>> {
-    let names = crate::source_app_icon::registry::image_names().ok_or(CatalogUnavailable)?;
+    let names = copypaste_source_app::registry::image_names().ok_or(CatalogUnavailable)?;
 
     let apps = names
         .into_iter()
         .filter(|name| is_application_image(name))
         .filter(|name| !shell_suppresses(name))
         .filter_map(|name| {
-            crate::source_app_icon::registry::executable(&name)?;
+            copypaste_source_app::registry::executable(&name)?;
             let label = friendly_name(&name).unwrap_or_else(|| image_label(&name));
             Some(InstalledSourceApp { id: name, label })
         })

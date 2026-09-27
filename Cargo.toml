@@ -9,6 +9,7 @@ members = [
     "crates/copypaste-ipc",
     "crates/copypaste-runtime-log",
     "crates/copypaste-core",
+    "crates/copypaste-source-app",
     "crates/copypaste-p2p",
     "crates/copypaste-cloud",
     "crates/copypaste-daemon",
