@@ -218,7 +218,7 @@ pub async fn store<B: Backend>(backend: &B, clip: &Clip) -> Result<Option<Stored
                 .await?
         }
         (None, Some(encoded), Some(content_type), filename) => {
-            const MAX_BASE64_BINARY_BYTES: usize = ((copypaste_ipc::MAX_CONTENT_BYTES + 2) / 3) * 4;
+            const MAX_BASE64_BINARY_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES.div_ceil(3) * 4;
             if encoded.len() > MAX_BASE64_BINARY_BYTES || !valid_binary_content_type(content_type) {
                 return Err(BackendError::Invalid("That captured item is unavailable."));
             }

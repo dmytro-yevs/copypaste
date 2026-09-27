@@ -16,21 +16,11 @@ pub(crate) trait LifecycleOperation {
     fn release(&self) -> LifecycleFuture<'_, ()>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct Desired {
     pub(crate) name: String,
     pub(crate) pairing_ids: Vec<String>,
     pub(crate) visible: bool,
-}
-
-impl Default for Desired {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            pairing_ids: Vec::new(),
-            visible: false,
-        }
-    }
 }
 
 #[derive(Default)]
@@ -118,13 +108,13 @@ impl LifecycleCoordinator {
             let (generation, desired) = self.current();
             if !desired.visible {
                 operation.release().await;
-            } else if operation.acquire().await && self.current_generation(generation) {
-                if !operation
+            } else if operation.acquire().await
+                && self.current_generation(generation)
+                && !operation
                     .advertise(&desired.name, &desired.pairing_ids)
                     .await
-                {
-                    tracing::warn!("Android LAN discovery did not start advertising");
-                }
+            {
+                tracing::warn!("Android LAN discovery did not start advertising");
             }
             if self.finish(generation) {
                 return;
