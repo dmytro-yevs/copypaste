@@ -296,6 +296,13 @@ jobs:
           set -euo pipefail
           cargo install tauri-driver --version 2.0.6 --locked
           cargo +1.96 build -p copypaste-ui -p copypaste-daemon -p copypaste-cli --locked
+      - name: Native Windows clipboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(cargo +1.96 test -p copypaste-daemon --locked clipboard::windows:: -- --include-ignored --test-threads=1 --nocapture 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
+          printf '%s\n' "$out"
+          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no Windows clipboard test ran"; exit 1; }
       - name: Install native evidence dependencies
         shell: pwsh
         run: python -m pip install --requirement requirements-ci.txt
