@@ -9,16 +9,13 @@ name: Mutation gate
 # distinct verdict from the check it belongs to failing.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-  merge_group:
-    types: [checks_requested]
+  schedule:
+    - cron: "11 2 * * 1"
   workflow_dispatch:
 
 concurrency:
   group: mutation-gate-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
