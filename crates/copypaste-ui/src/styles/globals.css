@@ -4,6 +4,10 @@
     background: var(--bg);
   }
 
+  html[data-surface="quick-paste"] {
+    background: transparent;
+  }
+
   #root {
     padding-block-start: var(--inset-top);
     padding-inline: var(--inset-left) var(--inset-right);
