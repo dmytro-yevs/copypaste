@@ -1,7 +1,7 @@
-#[cfg(target_os = "windows")]
-use super::UpdateProgress;
 #[cfg(any(target_os = "windows", test))]
 use super::{UiBoundaryErrorCode, UiError, UpdateStatus};
+#[cfg(target_os = "windows")]
+use super::{UpdateProgress, INSTALL_TIMEOUT, UPDATE_CHECK_TIMEOUT};
 #[cfg(target_os = "windows")]
 use tauri::{ipc::Channel, AppHandle};
 
@@ -48,8 +48,7 @@ pub(super) fn status(app: &AppHandle) -> UpdateStatus {
 
 #[cfg(target_os = "windows")]
 pub(super) async fn check(app: &AppHandle) -> Result<UpdateStatus, UiError> {
-    let Some(updater) = super::config::updater(app, Some(std::time::Duration::from_secs(300)))?
-    else {
+    let Some(updater) = super::config::updater(app, Some(UPDATE_CHECK_TIMEOUT))? else {
         return Ok(UpdateStatus::Unconfigured);
     };
     Ok(
@@ -70,8 +69,7 @@ pub(super) async fn install(
     expected: String,
     progress: Channel<UpdateProgress>,
 ) -> Result<UpdateStatus, UiError> {
-    let Some(updater) = super::config::updater(app, Some(std::time::Duration::from_secs(300)))?
-    else {
+    let Some(updater) = super::config::updater(app, Some(INSTALL_TIMEOUT))? else {
         return Ok(UpdateStatus::Unconfigured);
     };
     let Some(update) = updater.check().await.map_err(|error| {

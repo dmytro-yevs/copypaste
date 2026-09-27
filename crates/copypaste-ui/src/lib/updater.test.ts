@@ -24,18 +24,22 @@ afterEach(() => {
 });
 
 describe("checkForUpdate", () => {
-  it("stops waiting at its own deadline when the native command hangs", async () => {
-    vi.useFakeTimers();
-    invoke.mockReturnValue(new Promise(() => {}));
+  it.each(["android", "windows"] as const)(
+    "stops waiting at its own deadline when the %s native command hangs",
+    async (platform) => {
+      vi.useFakeTimers();
+      currentPlatform.mockReturnValue(platform);
+      invoke.mockReturnValue(new Promise(() => {}));
 
-    const outcome = checkForUpdate();
-    const rejection = expect(outcome).rejects.toMatchObject({
-      code: "timeout",
-      retryable: true,
-    });
-    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_TIMEOUT_MS);
+      const outcome = checkForUpdate();
+      const rejection = expect(outcome).rejects.toMatchObject({
+        code: "timeout",
+        retryable: true,
+      });
+      await vi.advanceTimersByTimeAsync(UPDATE_CHECK_TIMEOUT_MS);
 
-    await rejection;
-    expect(invoke).toHaveBeenCalledWith(UI_COMMANDS.check_for_update, undefined);
-  });
+      await rejection;
+      expect(invoke).toHaveBeenCalledWith(UI_COMMANDS.check_for_update, undefined);
+    },
+  );
 });
