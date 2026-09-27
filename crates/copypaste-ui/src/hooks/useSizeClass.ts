@@ -5,7 +5,7 @@
  * which controls exist (`lib/platform.ts`); only width decides how they are
  * arranged.
  */
-import { useViewportMetrics, type SizeClass } from "@/hooks/useViewportMetrics";
+import { useViewportSizeClass, type SizeClass } from "@/hooks/useViewportMetrics";
 
 export { EXPANDED_MIN_PX, EXPANDED_QUERY } from "@/lib/layoutBreakpoints";
 
@@ -15,5 +15,5 @@ export type { SizeClass } from "@/hooks/useViewportMetrics";
  *  event that changes the layout, and a window drag fires `resize` for every
  *  pixel of itself. */
 export function useSizeClass(): SizeClass {
-  return useViewportMetrics().sizeClass;
+  return useViewportSizeClass();
 }

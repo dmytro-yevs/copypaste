@@ -46,8 +46,10 @@ vi.mock("@juggle/resize-observer", () => ({
 import {
   ViewportMetricsProvider,
   useObservedElementSize,
+  usePointerKind,
   useViewportMetrics,
 } from "./useViewportMetrics";
+import { useSizeClass } from "./useSizeClass";
 
 function metricsEntry(target: Element, width: number, height: number): ResizeObserverEntry {
   return {
@@ -58,6 +60,13 @@ function metricsEntry(target: Element, width: number, height: number): ResizeObs
 
 function setMaxTouchPoints(value: number): void {
   Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, value });
+}
+
+function setDocumentWidth(width: number): void {
+  Object.defineProperty(document.documentElement, "clientWidth", {
+    configurable: true,
+    value: width,
+  });
 }
 
 function mediaQuery(query: string, matches: boolean): TestMediaQuery {
@@ -117,8 +126,18 @@ function Probe({ onRender }: { onRender: () => void }) {
 }
 
 function PointerProbe() {
-  const { pointer } = useViewportMetrics();
+  const pointer = usePointerKind();
   return <output data-testid="pointer">{pointer}</output>;
+}
+
+function SizeClassProbe({ onRender }: { onRender: () => void }) {
+  onRender();
+  return <output data-testid="size-class">{useSizeClass()}</output>;
+}
+
+function WidthProbe({ onRender }: { onRender: () => void }) {
+  onRender();
+  return <output data-testid="width">{useViewportMetrics().width}</output>;
 }
 
 function ElementSubscriber({ element }: { element: HTMLDivElement }) {
@@ -151,6 +170,7 @@ afterEach(() => {
     delete (navigator as { maxTouchPoints?: number }).maxTouchPoints;
   }
   delete document.documentElement.dataset.pointer;
+  delete (document.documentElement as { clientWidth?: number }).clientWidth;
   TestResizeObserver.instances = [];
   TestResizeObserver.latest = null;
 });
@@ -245,6 +265,49 @@ describe("ViewportMetricsProvider", () => {
     expect(screen.getByTestId("viewport").textContent).toBe("800x800");
     expect(screen.getByTestId("observed").textContent).toBe("320x48");
     expect(renders).toHaveBeenCalledTimes(rendersAfterMount + 1);
+  });
+
+  it("only rerenders size-class consumers when the breakpoint changes", () => {
+    let scheduled: FrameRequestCallback | undefined;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      scheduled = callback;
+      return 1;
+    });
+    const sizeClassRenders = vi.fn();
+    const widthRenders = vi.fn();
+
+    render(
+      <ViewportMetricsProvider>
+        <SizeClassProbe onRender={sizeClassRenders} />
+        <WidthProbe onRender={widthRenders} />
+      </ViewportMetricsProvider>,
+    );
+
+    const observer = TestResizeObserver.latest;
+    const sizeClassAfterMount = sizeClassRenders.mock.calls.length;
+    const widthAfterMount = widthRenders.mock.calls.length;
+
+    act(() => {
+      setDocumentWidth(900);
+      observer?.emit([metricsEntry(document.documentElement, 900, 800)]);
+      scheduled?.(0);
+    });
+
+    expect(screen.getByTestId("size-class").textContent).toBe("expanded");
+    expect(screen.getByTestId("width").textContent).toBe("900");
+    expect(sizeClassRenders).toHaveBeenCalledTimes(sizeClassAfterMount);
+    expect(widthRenders).toHaveBeenCalledTimes(widthAfterMount + 1);
+
+    act(() => {
+      setDocumentWidth(599);
+      observer?.emit([metricsEntry(document.documentElement, 599, 800)]);
+      scheduled?.(0);
+    });
+
+    expect(screen.getByTestId("size-class").textContent).toBe("compact");
+    expect(screen.getByTestId("width").textContent).toBe("599");
+    expect(sizeClassRenders).toHaveBeenCalledTimes(sizeClassAfterMount + 1);
+    expect(widthRenders).toHaveBeenCalledTimes(widthAfterMount + 2);
   });
 
   it("cleans up and re-establishes the shared observer under StrictMode", () => {

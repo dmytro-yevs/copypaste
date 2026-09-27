@@ -3,7 +3,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import { ActionButton } from "@/components/shared/ActionButton";
 import { Button, Tooltip } from "@/components/ui";
-import { useObservedElementSize, useViewportMetrics } from "@/hooks/useViewportMetrics";
+import { useObservedElementSize, usePointerKind } from "@/hooks/useViewportMetrics";
 import styles from "./TruncatedValue.module.css";
 
 export function TruncatedValue({
@@ -21,7 +21,7 @@ export function TruncatedValue({
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [overflowed, setOverflowed] = useState(false);
-  const { pointer } = useViewportMetrics();
+  const pointer = usePointerKind();
   const { ref: observedRef, width } = useObservedElementSize<HTMLSpanElement>();
   const coarse = pointer === "coarse";
   const shown = sensitive ? "••••••••" : value;
