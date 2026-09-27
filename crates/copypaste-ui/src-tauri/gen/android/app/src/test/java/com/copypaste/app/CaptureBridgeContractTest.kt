@@ -44,12 +44,12 @@ class CaptureBridgeContractTest {
         assertOptionality(TilePermissionFacts.serializer(), setOf("lastAddResult"))
         assertOptionality(
             ReadResult.serializer(),
-            setOf("text", "sourceAppBundleId", "sourceAppName"),
+            setOf("clip", "sourceAppBundleId", "sourceAppName"),
         )
         assertOptionality(EmptyResult.serializer())
         assertOptionality(
             CapturedClip.serializer(),
-            setOf("sourceAppBundleId", "sourceAppName"),
+            setOf("text", "bytesBase64", "contentType", "filename", "sourceAppBundleId", "sourceAppName"),
         )
         assertOptionality(DrainResult.serializer())
     }
