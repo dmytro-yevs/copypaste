@@ -432,10 +432,11 @@ impl PairingPresenter {
                     coordinator.record_presentation(&token.transition, progress_state);
                 }
                 let decision = self.native.confirm(progress);
-                let state = decision
-                    .is_some()
-                    .then_some(PairingPresentationState::Presented)
-                    .unwrap_or(PairingPresentationState::Unavailable);
+                let state = if decision.is_some() {
+                    PairingPresentationState::Presented
+                } else {
+                    PairingPresentationState::Unavailable
+                };
                 if let Ok(mut coordinator) = self.coordinator.lock() {
                     coordinator.decision_finished(&token, decision.is_some());
                 }
