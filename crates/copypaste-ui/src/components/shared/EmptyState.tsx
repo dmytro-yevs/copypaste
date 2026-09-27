@@ -25,6 +25,7 @@ interface EmptyStateProps {
     secondary?: ReactNode;
     secondaryPlacement?: "attached" | "separated";
     compact?: boolean;
+    fullWidth?: boolean;
 }
 
 export function EmptyState({
@@ -37,11 +38,16 @@ export function EmptyState({
     secondary,
     secondaryPlacement = "separated",
     compact = false,
+    fullWidth = false,
 }: EmptyStateProps) {
     return (
         <Surface asChild elevation="raised" border="subtle" radius="md">
           <section
-              className={cn(styles.root, compact && styles.compact)}
+              className={cn(
+                  styles.root,
+                  compact && styles.compact,
+                  fullWidth && styles.fullWidth,
+              )}
               data-tone={tone}
               role={busy ? "status" : tone === "danger" ? "alert" : undefined}
               aria-live={busy ? "polite" : undefined}
