@@ -1,6 +1,8 @@
 package com.copypaste.app
 
 import kotlin.system.exitProcess
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 internal fun clipboardNotificationCommand(suppressed: Boolean): List<String> = listOf(
     "settings",
@@ -10,6 +12,19 @@ internal fun clipboardNotificationCommand(suppressed: Boolean): List<String> = l
     if (suppressed) "0" else "1",
 )
 
+internal fun clipboardNotificationReadCommand(): List<String> = listOf(
+    "settings",
+    "get",
+    "secure",
+    "clipboard_show_access_notifications",
+)
+
+internal fun parseClipboardAccessNotifications(value: String): Int = when (value.trim()) {
+    "0" -> 0
+    "1" -> 1
+    else -> -1
+}
+
 /**
  * ClipCascade's documented one-shot setup commands, retargeted to our package.
  */
@@ -17,9 +32,6 @@ internal fun clipCascadeGrantCommands(packageName: String): List<List<String>> =
     listOf("pm", "grant", packageName, "android.permission.READ_LOGS"),
     listOf("cmd", "appops", "set", packageName, "SYSTEM_ALERT_WINDOW", "allow"),
 )
-
-internal fun clipCascadeRefreshCommand(packageName: String): List<String> =
-    listOf("am", "force-stop", packageName)
 
 /**
  * Keep ClipCascade's one-shot grants and our existing residency relaxations.
@@ -39,11 +51,12 @@ class ShizukuSettingsService : IShizukuSettingsService.Stub() {
         runCommand(clipboardNotificationCommand(suppressed))
 
     override fun refreshClipCascadeSetup(packageName: String): Boolean =
-        persistentCaptureStateCommands(packageName).all(::runCommand) &&
-            startCommand(clipCascadeRefreshCommand(packageName))
+        persistentCaptureStateCommands(packageName).all(::runCommand)
 
     override fun preparePersistentCaptureState(packageName: String): Boolean =
         persistentCaptureStateCommands(packageName).all(::runCommand)
+
+    override fun clipboardAccessNotifications(): Int = readCommand(clipboardNotificationReadCommand())
 
     private fun runCommand(command: List<String>): Boolean = try {
         val process = ProcessBuilder(command).start()
@@ -58,13 +71,20 @@ class ShizukuSettingsService : IShizukuSettingsService.Stub() {
         false
     }
 
-    private fun startCommand(command: List<String>): Boolean = try {
+    private fun readCommand(command: List<String>): Int = try {
         val process = ProcessBuilder(command).start()
         process.outputStream.close()
-        process.inputStream.close()
+        val value = BufferedReader(InputStreamReader(process.inputStream)).use { it.readLine() }
         process.errorStream.close()
-        true
+        if (process.waitFor() == 0 && value != null) {
+            parseClipboardAccessNotifications(value)
+        } else {
+            -1
+        }
+    } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        -1
     } catch (_: Exception) {
-        false
+        -1
     }
 }
