@@ -710,6 +710,17 @@ PY
     receipt_route_log="$OUT/release-receipt-route.log"
     serial_candidate="$(android_serial_candidate)" || serial_candidate=""
     environment="$(python3 scripts/release/native_evidence_policy.py value --platform android --field environment)"
+    upgrade_receipt_artifacts=()
+    if [[ -n "${PREVIOUS_APK:-}" ]]; then
+        upgrade_receipt_artifacts=(
+            --artifact screenshot=upgrade-before-history.png
+            --artifact accessibility=upgrade-before-history.xml
+            --artifact screenshot=upgrade-after-history.png
+            --artifact accessibility=upgrade-after-history.xml
+            --artifact screenshot=upgrade-restart-history.png
+            --artifact accessibility=upgrade-restart-history.xml
+        )
+    fi
     if ! serial="$(verified_android_serial "$serial_candidate" "$receipt_route_log")"; then
         bad "native evidence receipt was written" \
             "$(tail -n 4 "$receipt_route_log" | tr '\n' ' ')"
@@ -733,7 +744,8 @@ PY
         --artifact screenshot=history-ui.png \
         --artifact accessibility=history-ui.xml \
         --artifact measurement=latency.json \
-        --artifact diagnostic-log=release-final.log; then
+        --artifact diagnostic-log=release-final.log \
+        "${upgrade_receipt_artifacts[@]}"; then
         ok "native evidence receipt was written"
     else
         if profile_runs_pairing_inventory "$SMOKE_PROFILE"; then
@@ -756,7 +768,8 @@ PY
             --artifact screenshot=history-restart.png \
             --artifact accessibility=history-restart.xml \
             --artifact measurement=latency.json \
-            --artifact diagnostic-log=release-final.log; then
+            --artifact diagnostic-log=release-final.log \
+            "${upgrade_receipt_artifacts[@]}"; then
             ok "native evidence receipt was written"
         else
             bad "native evidence receipt was written"
