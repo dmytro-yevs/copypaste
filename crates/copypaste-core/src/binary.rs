@@ -1,5 +1,6 @@
 //! Encrypted, content-addressed binary clipboard payloads.
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chacha20poly1305::aead::Buffer;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,61 @@ impl FileMetadata {
     #[must_use]
     pub fn is_valid(&self) -> bool {
         Self::new(self.filename.clone(), self.mime_type.clone()).is_some()
+    }
+}
+
+/// Strict, optional application-identity icon carried in signed metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceAppIconMetadata {
+    pub png_base64: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl SourceAppIconMetadata {
+    pub fn new(png: &[u8], width: u32, height: u32) -> Option<Self> {
+        (png.starts_with(b"\x89PNG\r\n\x1a\n")
+            && !png.is_empty()
+            && png.len() <= copypaste_ipc::MAX_SOURCE_APP_ICON_BYTES
+            && matches!(width, 64 | copypaste_ipc::SOURCE_APP_ICON_EDGE)
+            && matches!(height, 64 | copypaste_ipc::SOURCE_APP_ICON_EDGE))
+        .then(|| Self {
+            png_base64: STANDARD.encode(png),
+            width,
+            height,
+        })
+    }
+
+    pub fn png(&self) -> Option<Vec<u8>> {
+        let png = STANDARD.decode(&self.png_base64).ok()?;
+        Self::new(&png, self.width, self.height).map(|_| png)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PayloadMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<FileMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_app_icon: Option<SourceAppIconMetadata>,
+}
+
+impl PayloadMetadata {
+    pub fn from_json(value: &str, content_type: &str) -> Option<Self> {
+        if let Some(file) = FileMetadata::from_json(value) {
+            return (content_type == copypaste_ipc::content_type::FILE).then_some(Self {
+                file: Some(file),
+                source_app_icon: None,
+            });
+        }
+        let metadata: Self = serde_json::from_str(value).ok()?;
+        (metadata.file.is_none()
+            && metadata
+                .source_app_icon
+                .as_ref()
+                .is_some_and(|icon| icon.png().is_some())
+            && value.len() <= copypaste_ipc::MAX_CLOUD_METADATA_BYTES)
+            .then_some(metadata)
     }
 }
 

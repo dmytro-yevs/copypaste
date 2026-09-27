@@ -13,6 +13,13 @@ pub use export::{ExportFrameBudget, ExportFrameBudgetExceeded};
 /// is also transportable to a peer.
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 
+/// A normalized source-app PNG is identity metadata, never clipboard content.
+pub const MAX_SOURCE_APP_ICON_BYTES: usize = 32 * 1024;
+pub const SOURCE_APP_ICON_EDGE: u32 = 128;
+/// Metadata limits differ by transport framing; all must exceed a valid icon.
+pub const MAX_P2P_METADATA_BYTES: usize = 512;
+pub const MAX_CLOUD_METADATA_BYTES: usize = 1024;
+
 /// Worst-case JSON expansion of one content byte: a control character below
 /// U+0020 with no short escape encodes as `\u00XX`.
 const JSON_ESCAPE_WORST_CASE: usize = 6;
