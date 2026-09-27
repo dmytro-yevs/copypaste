@@ -11,6 +11,10 @@ export type { UpdateProgress, UpdateStatus };
 // control until the generic five-minute IPC deadline.
 export const UPDATE_CHECK_TIMEOUT_MS = 25_000;
 
+function usesNativeFeedCheck(platform: ReturnType<typeof currentPlatform>): boolean {
+  return platform === "android" || platform === "windows";
+}
+
 export function getUpdateStatus(): Promise<UpdateStatus> {
   if (!hasNativeBridge()) return Promise.resolve({ state: "unsupported" });
   return call(UI_COMMANDS.update_status);
@@ -18,7 +22,7 @@ export function getUpdateStatus(): Promise<UpdateStatus> {
 
 export function checkForUpdate(): Promise<UpdateStatus> {
   if (!hasNativeBridge()) return Promise.resolve({ state: "unsupported" });
-  if (currentPlatform() !== "android") return call(UI_COMMANDS.check_for_update);
+  if (!usesNativeFeedCheck(currentPlatform())) return call(UI_COMMANDS.check_for_update);
   return call(UI_COMMANDS.check_for_update, undefined, {
     timeoutMs: UPDATE_CHECK_TIMEOUT_MS,
   });
