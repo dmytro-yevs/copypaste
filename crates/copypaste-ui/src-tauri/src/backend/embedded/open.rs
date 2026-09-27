@@ -113,7 +113,6 @@ impl EmbeddedBackend {
     /// comes from the Android context and not from `directories`.
     pub fn open(data_dir: &Path, clipboard: Box<dyn Clipboard>) -> Result<Self> {
         let (events, _) = tokio::sync::broadcast::channel(64);
-        let (retention_shutdown, _) = watch::channel(());
         let state = BackendState::open(data_dir)?;
         Self::open_with_state(state, clipboard, events)
     }
@@ -134,6 +133,7 @@ impl EmbeddedBackend {
         clipboard: Box<dyn Clipboard>,
         events: tokio::sync::broadcast::Sender<copypaste_ipc::EventData>,
     ) -> Result<Self> {
+        let (retention_shutdown, _) = watch::channel(());
         let cloud = EmbeddedCloud::open(&state)?;
         let inner = Arc::new(Inner {
             state,

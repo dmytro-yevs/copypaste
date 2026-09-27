@@ -44,6 +44,7 @@ const IDLE = {
     needs_devices: false,
     review_secure: false,
     retry: false,
+    copy: { title: "Pair a device", detail: "No device pairing is in progress." },
   },
   presentation: "available",
   known_device: null,
