@@ -714,9 +714,11 @@ mod tests {
         let (backend, _clip, _dir) = backend();
         let item = backend.add("mine").await.unwrap();
         assert!(!item.origin_device_id.is_empty());
+        let device_name = backend.status().await.unwrap().device_name;
+        assert!(!device_name.is_empty());
         assert_eq!(
             item.origin_device_name.as_deref(),
-            Some("CopyPaste phone"),
+            Some(device_name.as_str()),
             "this device is in its own name registry"
         );
 
