@@ -1,6 +1,7 @@
 import { ClipImage, type ClipImageProps } from "@/components/shared";
 import { useImagePreview } from "@/features/clip-content/hooks/useImagePreview";
 import { useObservedElementSize } from "@/hooks/useViewportMetrics";
+import styles from "./ClipImageLoader.module.css";
 
 export function ClipImageLoader({
   id,
@@ -9,8 +10,8 @@ export function ClipImageLoader({
   const observed = useObservedElementSize<HTMLElement>();
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   const maxEdge = previewEdge(observed.width, observed.height, dpr);
-  const preview = useImagePreview(id, maxEdge);
-  return <ClipImage {...props} measureRef={observed.ref} pngBase64={preview.data?.png_base64 ?? null} loading={preview.isPending} failed={preview.isError} />;
+  const preview = useImagePreview(id, maxEdge, observed.width > 0 && observed.height > 0);
+  return <span ref={observed.ref} className={styles.container}><ClipImage {...props} pngBase64={preview.data?.png_base64 ?? null} loading={preview.isPending} failed={preview.isError} /></span>;
 }
 
 export function previewEdge(width: number, height: number, dpr: number): number {
