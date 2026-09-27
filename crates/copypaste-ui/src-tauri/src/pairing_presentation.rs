@@ -34,8 +34,10 @@ pub fn native_refresh(app: AppHandle) -> NativeRefresh {
                 return;
             };
             let presenter = app.state::<PairingPresenter>();
-            let _ =
-                crate::commands::pairing::reconcile_progress(&*backend, &presenter, progress).await;
+            let _ = crate::commands::pairing::reconcile_progress(
+                &*backend, &presenter, progress, false,
+            )
+            .await;
         });
     })
 }
@@ -136,6 +138,14 @@ struct ConfirmationToken {
     ceremony_id: Option<String>,
     generation: u64,
     sequence: u64,
+    transition: PresentationToken,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PresentationToken {
+    ceremony_id: Option<String>,
+    generation: u64,
+    finishes_ceremony: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -200,9 +210,25 @@ impl CeremonyCoordinator {
         self.presentation = Some(PairingPresentationState::Presented);
     }
 
-    fn next(&mut self, progress: &PairingProgressData) -> PresentationAction {
+    fn transition(&self, finishes_ceremony: bool) -> PresentationToken {
+        PresentationToken {
+            ceremony_id: self.ceremony_id.clone(),
+            generation: self.generation,
+            finishes_ceremony,
+        }
+    }
+
+    fn next(
+        &mut self,
+        progress: &PairingProgressData,
+        retry_confirmation: bool,
+    ) -> PresentationAction {
         if progress.pairing_id.is_some() && progress.pairing_id != self.ceremony_id {
             self.start(progress.pairing_id.clone());
+        }
+
+        if progress.state == PairingState::Idle && self.ceremony_id.is_none() {
+            return PresentationAction::None(Some(PairingPresentationState::Available));
         }
 
         let signature = ProgressSignature {
@@ -210,22 +236,36 @@ impl CeremonyCoordinator {
             error_code: progress.error_code,
         };
         if self.signature == Some(signature) {
+            if progress.state == PairingState::AwaitingConfirmation
+                && retry_confirmation
+                && self.confirmation == ConfirmationState::Ready
+            {
+                return self.confirm();
+            }
             return PresentationAction::None(self.presentation);
         }
         self.signature = Some(signature);
 
         if progress.state != PairingState::AwaitingConfirmation {
-            return PresentationAction::Progress;
+            return PresentationAction::Progress(self.transition(
+                progress.state == PairingState::Idle && progress.pairing_id.is_none(),
+            ));
         }
 
+        self.confirm()
+    }
+
+    fn confirm(&mut self) -> PresentationAction {
         match self.confirmation {
             ConfirmationState::Ready => {
                 let sequence = self.generation.wrapping_add(1);
+                let transition = self.transition(false);
                 self.confirmation = ConfirmationState::Prompting { sequence };
                 PresentationAction::Confirm(ConfirmationToken {
                     ceremony_id: self.ceremony_id.clone(),
                     generation: self.generation,
                     sequence,
+                    transition,
                 })
             }
             ConfirmationState::Prompting { .. } | ConfirmationState::Decided { .. } => {
@@ -234,30 +274,38 @@ impl CeremonyCoordinator {
         }
     }
 
-    fn decision_finished(&mut self, token: &ConfirmationToken) {
+    fn decision_finished(&mut self, token: &ConfirmationToken, decided: bool) {
         if self.matches(token) {
-            self.confirmation = ConfirmationState::Decided {
-                sequence: token.sequence,
+            self.confirmation = if decided {
+                ConfirmationState::Decided {
+                    sequence: token.sequence,
+                }
+            } else {
+                ConfirmationState::Ready
             };
         }
     }
 
     fn record_presentation(
         &mut self,
-        progress: &PairingProgressData,
+        token: &PresentationToken,
         presentation: PairingPresentationState,
     ) {
-        let signature = ProgressSignature {
-            state: progress.state,
-            error_code: progress.error_code,
-        };
-        if self.signature == Some(signature) {
+        if self.matches_transition(token) {
             self.presentation = Some(presentation);
+            if token.finishes_ceremony {
+                self.ceremony_id = None;
+                self.generation = self.generation.wrapping_add(1);
+                self.signature = None;
+                self.presentation = Some(PairingPresentationState::Available);
+                self.confirmation = ConfirmationState::Ready;
+            }
         }
     }
 
     fn matches(&self, token: &ConfirmationToken) -> bool {
-        self.ceremony_id == token.ceremony_id
+        self.matches_transition(&token.transition)
+            && self.ceremony_id == token.ceremony_id
             && self.generation == token.generation
             && matches!(
             self.confirmation,
@@ -265,11 +313,15 @@ impl CeremonyCoordinator {
                     if sequence == token.sequence
             )
     }
+
+    fn matches_transition(&self, token: &PresentationToken) -> bool {
+        self.ceremony_id == token.ceremony_id && self.generation == token.generation
+    }
 }
 
 enum PresentationAction {
     None(Option<PairingPresentationState>),
-    Progress,
+    Progress(PresentationToken),
     Confirm(ConfirmationToken),
 }
 
@@ -346,11 +398,15 @@ impl PairingPresenter {
         self.native.scan_invite()
     }
 
-    pub(crate) fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentation {
+    pub(crate) fn present_progress(
+        &self,
+        progress: &PairingProgressData,
+        retry_confirmation: bool,
+    ) -> PairingPresentation {
         let action = self
             .coordinator
             .lock()
-            .map(|mut coordinator| coordinator.next(progress))
+            .map(|mut coordinator| coordinator.next(progress, retry_confirmation))
             .unwrap_or(PresentationAction::None(None));
 
         match action {
@@ -358,10 +414,10 @@ impl PairingPresenter {
                 state: state.unwrap_or_else(|| self.state_for_progress(progress.state)),
                 confirmation: None,
             },
-            PresentationAction::Progress => {
+            PresentationAction::Progress(token) => {
                 let state = self.native.present_progress(progress);
                 if let Ok(mut coordinator) = self.coordinator.lock() {
-                    coordinator.record_presentation(progress, state);
+                    coordinator.record_presentation(&token, state);
                 }
                 PairingPresentation {
                     state,
@@ -369,14 +425,19 @@ impl PairingPresenter {
                 }
             }
             PresentationAction::Confirm(token) => {
+                // The platform transition clears the QR/progress surface before
+                // its single native SAS prompt opens.
+                let progress_state = self.native.present_progress(progress);
+                if let Ok(mut coordinator) = self.coordinator.lock() {
+                    coordinator.record_presentation(&token.transition, progress_state);
+                }
                 let decision = self.native.confirm(progress);
                 let state = decision
                     .is_some()
                     .then_some(PairingPresentationState::Presented)
                     .unwrap_or(PairingPresentationState::Unavailable);
                 if let Ok(mut coordinator) = self.coordinator.lock() {
-                    coordinator.decision_finished(&token);
-                    coordinator.record_presentation(progress, state);
+                    coordinator.decision_finished(&token, decision.is_some());
                 }
                 PairingPresentation {
                     state,
@@ -444,6 +505,8 @@ mod presenter_tests {
         decision: Arc<Mutex<PairingDecision>>,
     }
 
+    struct OrderedPairingUi(Arc<Mutex<Vec<&'static str>>>);
+
     impl NativePairingUi for ConfiguredPairingUi {
         fn present_invite(&self, _invite: &PairingInviteData) -> NativePresentationOutcome {
             NativePresentationOutcome::Unavailable
@@ -504,6 +567,26 @@ mod presenter_tests {
         }
     }
 
+    impl NativePairingUi for OrderedPairingUi {
+        fn present_invite(&self, _invite: &PairingInviteData) -> NativePresentationOutcome {
+            NativePresentationOutcome::Presented
+        }
+
+        fn scan_invite(&self) -> NativeScanOutcome {
+            NativeScanOutcome::Cancelled
+        }
+
+        fn present_progress(&self, _progress: &PairingProgressData) -> PairingPresentationState {
+            self.0.lock().expect("events").push("progress");
+            PairingPresentationState::Presented
+        }
+
+        fn confirm(&self, _progress: &PairingProgressData) -> Option<PairingDecision> {
+            self.0.lock().expect("events").push("confirm");
+            Some(PairingDecision::Accept)
+        }
+    }
+
     fn progress(pairing_id: &str, state: PairingState) -> PairingProgressData {
         PairingProgressData {
             pairing_id: Some(pairing_id.into()),
@@ -517,6 +600,12 @@ mod presenter_tests {
             known_device: None,
             error_code: None,
         }
+    }
+
+    fn idle_progress() -> PairingProgressData {
+        let mut progress = progress("unused", PairingState::Idle);
+        progress.pairing_id = None;
+        progress
     }
 
     fn recording_presenter(
@@ -580,16 +669,16 @@ mod presenter_tests {
         let waiting = progress("ceremony-1", PairingState::WaitingForPeer);
 
         assert_eq!(
-            presenter.present_progress(&waiting).state,
+            presenter.present_progress(&waiting, false).state,
             PairingPresentationState::Presented
         );
         assert_eq!(
-            presenter.present_progress(&waiting).state,
+            presenter.present_progress(&waiting, false).state,
             PairingPresentationState::Presented
         );
         assert_eq!(
             presenter
-                .present_progress(&progress("ceremony-1", PairingState::Handshaking))
+                .present_progress(&progress("ceremony-1", PairingState::Handshaking), false)
                 .state,
             PairingPresentationState::Presented
         );
@@ -597,19 +686,53 @@ mod presenter_tests {
     }
 
     #[test]
+    fn initial_idle_never_opens_a_native_pairing_surface() {
+        let (presenter, progress_calls, confirm_calls) =
+            recording_presenter(PairingDecision::Cancel);
+
+        assert_eq!(
+            presenter.present_progress(&idle_progress(), false).state,
+            PairingPresentationState::Available
+        );
+        assert_eq!(progress_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(confirm_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn compare_transition_updates_the_native_surface_before_sas() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let presenter = PairingPresenter::new(OrderedPairingUi(Arc::clone(&events)));
+
+        presenter.present_progress(
+            &progress("ceremony-1", PairingState::AwaitingConfirmation),
+            false,
+        );
+        assert_eq!(
+            events.lock().expect("events").as_slice(),
+            ["progress", "confirm"]
+        );
+    }
+
+    #[test]
     fn native_sas_is_once_per_ceremony_and_rearms_for_a_new_one() {
         let (presenter, _, confirm_calls) = recording_presenter(PairingDecision::Accept);
         let awaiting = progress("ceremony-1", PairingState::AwaitingConfirmation);
-        let confirmation = presenter.present_progress(&awaiting).confirmation.unwrap();
+        let confirmation = presenter
+            .present_progress(&awaiting, false)
+            .confirmation
+            .unwrap();
 
         assert!(presenter.confirmation_is_current(&confirmation, &awaiting));
         assert_eq!(confirm_calls.load(Ordering::Relaxed), 1);
-        presenter.present_progress(&progress("ceremony-1", PairingState::WaitingForPeer));
-        presenter.present_progress(&awaiting);
+        presenter.present_progress(&progress("ceremony-1", PairingState::WaitingForPeer), false);
+        presenter.present_progress(&awaiting, false);
         assert_eq!(confirm_calls.load(Ordering::Relaxed), 1);
 
         let next = progress("ceremony-2", PairingState::AwaitingConfirmation);
-        let next_confirmation = presenter.present_progress(&next).confirmation.unwrap();
+        let next_confirmation = presenter
+            .present_progress(&next, false)
+            .confirmation
+            .unwrap();
         assert!(presenter.confirmation_is_current(&next_confirmation, &next));
         assert_eq!(confirm_calls.load(Ordering::Relaxed), 2);
     }
@@ -618,11 +741,55 @@ mod presenter_tests {
     fn a_stale_native_decision_cannot_confirm_a_replacement_ceremony() {
         let (presenter, _, _) = recording_presenter(PairingDecision::Accept);
         let original = progress("ceremony-1", PairingState::AwaitingConfirmation);
-        let confirmation = presenter.present_progress(&original).confirmation.unwrap();
+        let confirmation = presenter
+            .present_progress(&original, false)
+            .confirmation
+            .unwrap();
         let replacement = progress("ceremony-2", PairingState::AwaitingConfirmation);
 
-        presenter.present_progress(&replacement);
+        presenter.present_progress(&replacement, false);
         assert!(!presenter.confirmation_is_current(&confirmation, &replacement));
+    }
+
+    #[test]
+    fn stale_platform_result_cannot_overwrite_a_new_ceremony_presentation() {
+        let mut coordinator = CeremonyCoordinator::default();
+        let original = progress("ceremony-1", PairingState::WaitingForPeer);
+        let replacement = progress("ceremony-2", PairingState::WaitingForPeer);
+        let PresentationAction::Progress(original_token) = coordinator.next(&original, false)
+        else {
+            panic!("original transition must present");
+        };
+        let PresentationAction::Progress(replacement_token) = coordinator.next(&replacement, false)
+        else {
+            panic!("replacement transition must present");
+        };
+
+        coordinator.record_presentation(&replacement_token, PairingPresentationState::Presented);
+        coordinator.record_presentation(&original_token, PairingPresentationState::Unavailable);
+        assert_eq!(
+            coordinator.presentation,
+            Some(PairingPresentationState::Presented)
+        );
+    }
+
+    #[test]
+    fn an_explicit_confirmation_retries_only_after_a_transient_native_failure() {
+        let mut coordinator = CeremonyCoordinator::default();
+        let awaiting = progress("ceremony-1", PairingState::AwaitingConfirmation);
+        let PresentationAction::Confirm(token) = coordinator.next(&awaiting, false) else {
+            panic!("first confirmation must prompt");
+        };
+
+        coordinator.decision_finished(&token, false);
+        assert!(matches!(
+            coordinator.next(&awaiting, false),
+            PresentationAction::None(_)
+        ));
+        assert!(matches!(
+            coordinator.next(&awaiting, true),
+            PresentationAction::Confirm(_)
+        ));
     }
 
     #[test]
@@ -630,12 +797,12 @@ mod presenter_tests {
         for decision in [PairingDecision::Cancel, PairingDecision::Refresh] {
             let (presenter, progress_calls, confirm_calls) = recording_presenter(decision);
             let awaiting = progress("ceremony-1", PairingState::AwaitingConfirmation);
-            let outcome = presenter.present_progress(&awaiting);
+            let outcome = presenter.present_progress(&awaiting, false);
 
             assert_eq!(outcome.confirmation.unwrap().decision, decision);
-            presenter.present_progress(&awaiting);
+            presenter.present_progress(&awaiting, false);
             assert_eq!(confirm_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(progress_calls.load(Ordering::Relaxed), 0);
+            assert_eq!(progress_calls.load(Ordering::Relaxed), 1);
         }
     }
 }
@@ -679,7 +846,7 @@ mod tests {
             PairingPresentationState::Unavailable
         );
         assert_eq!(
-            presenter.present_progress(&progress()).state,
+            presenter.present_progress(&progress(), false).state,
             PairingPresentationState::Unavailable
         );
         assert!(matches!(
