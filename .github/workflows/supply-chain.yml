@@ -61,5 +61,11 @@ jobs:
           tool: cargo-deny@0.20.2
           checksum: true
           fallback: none
+      - name: Cache cargo-deny advisory database
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/cargo-deny-advisory-db
+          key: cargo-deny-advisory-db-${{ steps.stamp.outputs.week }}
+          restore-keys: cargo-deny-advisory-db-
       - name: Check Rust dependency policy
         run: cargo deny --manifest-path Cargo.toml --config deny.toml --all-features --locked check advisories bans licenses sources --show-stats
