@@ -22,12 +22,10 @@ interface HistoryContentStateProps {
     searching: boolean;
     filtered: boolean;
     privateMode: boolean;
-    capturePaused: boolean;
     query: string;
     hasMore: boolean;
     onLoadMore: () => void;
     onRetry: () => void;
-    onOpenCapture: () => void;
     onOpenDiagnostics: () => void;
     list: ComponentProps<typeof HistoryList>;
 }
@@ -63,12 +61,10 @@ export function HistoryContentState({
     searching,
     filtered,
     privateMode,
-    capturePaused,
     query,
     hasMore,
     onLoadMore,
     onRetry,
-    onOpenCapture,
     onOpenDiagnostics,
     list,
 }: HistoryContentStateProps) {
@@ -162,22 +158,6 @@ export function HistoryContentState({
                 icon="lock"
                 title={t("history.empty.private.title")}
                 body={t("history.empty.private.body")}
-            />
-        );
-    }
-
-    if (capturePaused) {
-        return (
-            <InlineLibraryState
-                icon="library"
-                title={t("history.empty.capturePaused.title")}
-                body={t("history.empty.capturePaused.body")}
-                actions={
-                    <Button variant="secondary" size="sm" onClick={onOpenCapture}>
-                        <Icon name="sliders" size="sm" />
-                        {t("history.empty.capturePaused.action")}
-                    </Button>
-                }
             />
         );
     }

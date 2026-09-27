@@ -26,6 +26,8 @@ import {
   DEFAULT_PREFS,
   PREFERENCES_VERSION,
   STORAGE_KEY,
+  DEFAULT_ONBOARDING_PROGRESS,
+  parseOnboardingProgress,
   parsePrefs,
   readPrefs,
   usePrefs,
@@ -39,7 +41,10 @@ afterEach(() => {
   nativePreferences.delete.mockReset();
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   window.localStorage.clear();
-  usePrefs.setState(DEFAULT_PREFS);
+  usePrefs.setState({
+    ...DEFAULT_PREFS,
+    onboarding: { ...DEFAULT_ONBOARDING_PROGRESS },
+  });
 });
 
 const currentEnvelope = (state: unknown) => ({
@@ -284,5 +289,27 @@ describe("first-run onboarding completion", () => {
     expect(parsePrefs({ onboardingComplete: false }).onboardingComplete).toBe(
       false,
     );
+  });
+});
+
+describe("onboarding progress", () => {
+  it("persists a complete, validated resume point without changing completion", () => {
+    expect(parseOnboardingProgress({
+      onboarding: {
+        step: "sync",
+        captureSkipped: true,
+        privacySkipped: false,
+        syncChoice: "both",
+      },
+    })).toEqual({
+      step: "sync",
+      captureSkipped: true,
+      privacySkipped: false,
+      syncChoice: "both",
+      captureSetupMethod: null,
+      captureSetupStage: "choose",
+    });
+    expect(parseOnboardingProgress({ onboarding: { step: "unknown" } }))
+      .toEqual(DEFAULT_ONBOARDING_PROGRESS);
   });
 });
