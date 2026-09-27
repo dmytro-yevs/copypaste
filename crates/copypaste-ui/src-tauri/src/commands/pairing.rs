@@ -13,8 +13,9 @@ pub(crate) async fn reconcile_progress<B: PairingBackend + ?Sized>(
     backend: &B,
     presenter: &PairingPresenter,
     progress: PairingProgressData,
+    retry_confirmation: bool,
 ) -> Result<PairingCeremony> {
-    let presentation = presenter.present_progress(&progress);
+    let presentation = presenter.present_progress(&progress, retry_confirmation);
     let Some(confirmation) = presentation.confirmation else {
         return Ok(PairingCeremony::from_progress(progress, presentation.state));
     };
@@ -33,7 +34,7 @@ pub(crate) async fn reconcile_progress<B: PairingBackend + ?Sized>(
         PairingDecision::Cancel => backend.pair_cancel().await?,
         PairingDecision::Refresh => current,
     };
-    let presentation = presenter.present_progress(&next);
+    let presentation = presenter.present_progress(&next, false);
     Ok(PairingCeremony::from_progress(next, presentation.state))
 }
 
@@ -112,15 +113,15 @@ pub async fn pair_create_invite(
         }),
         NativePresentationOutcome::Cancelled => {
             let progress = backend.pair_cancel().await?;
-            reconcile_progress(&*backend, &presenter, progress).await
+            reconcile_progress(&*backend, &presenter, progress, false).await
         }
         NativePresentationOutcome::Presented => {
             let progress = backend.pair_progress().await?;
-            reconcile_progress(&*backend, &presenter, progress).await
+            reconcile_progress(&*backend, &presenter, progress, false).await
         }
         NativePresentationOutcome::Refresh => {
             let progress = backend.pair_progress().await?;
-            reconcile_progress(&*backend, &presenter, progress).await
+            reconcile_progress(&*backend, &presenter, progress, false).await
         }
     }
 }
@@ -134,14 +135,14 @@ pub async fn pair_scan_invite(
         NativeScanOutcome::Scanned(scanned) => scanned,
         NativeScanOutcome::Cancelled | NativeScanOutcome::Failed => {
             let progress = backend.pair_progress().await?;
-            return reconcile_progress(&*backend, &presenter, progress).await;
+            return reconcile_progress(&*backend, &presenter, progress, false).await;
         }
         NativeScanOutcome::Unavailable => return Ok(PairingCeremony::unavailable()),
     };
     let progress = backend
         .pair_join(scanned.code.as_str(), scanned.addr.as_str())
         .await?;
-    reconcile_progress(&*backend, &presenter, progress).await
+    reconcile_progress(&*backend, &presenter, progress, false).await
 }
 
 #[tauri::command]
@@ -155,10 +156,10 @@ pub async fn pair_progress(
             let progress = backend
                 .pair_join(scanned.code.as_str(), scanned.addr.as_str())
                 .await?;
-            return reconcile_progress(&*backend, &presenter, progress).await;
+            return reconcile_progress(&*backend, &presenter, progress, false).await;
         }
     }
-    reconcile_progress(&*backend, &presenter, progress).await
+    reconcile_progress(&*backend, &presenter, progress, false).await
 }
 
 #[tauri::command]
@@ -167,7 +168,7 @@ pub async fn pair_present(
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
     let progress = backend.pair_progress().await?;
-    reconcile_progress(&*backend, &presenter, progress).await
+    reconcile_progress(&*backend, &presenter, progress, false).await
 }
 
 #[tauri::command]
@@ -176,7 +177,7 @@ pub async fn pair_confirm(
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
     let progress = backend.pair_progress().await?;
-    reconcile_progress(&*backend, &presenter, progress).await
+    reconcile_progress(&*backend, &presenter, progress, true).await
 }
 
 #[tauri::command]
@@ -185,7 +186,7 @@ pub async fn pair_reject(
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
     let progress = backend.pair_confirm(false).await?;
-    reconcile_progress(&*backend, &presenter, progress).await
+    reconcile_progress(&*backend, &presenter, progress, false).await
 }
 
 #[tauri::command]
@@ -194,7 +195,7 @@ pub async fn pair_cancel(
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
     let progress = backend.pair_cancel().await?;
-    reconcile_progress(&*backend, &presenter, progress).await
+    reconcile_progress(&*backend, &presenter, progress, false).await
 }
 
 #[cfg(test)]
@@ -321,7 +322,7 @@ mod tests {
         let backend = FakeBackend::new([awaiting.clone()], waiting.clone(), waiting.clone());
         let (presenter, confirmation_calls) = presenter(PairingDecision::Accept);
 
-        let result = reconcile_progress(&backend, &presenter, awaiting)
+        let result = reconcile_progress(&backend, &presenter, awaiting, false)
             .await
             .unwrap();
         assert_eq!(result.state, PairingState::WaitingForPeer);
@@ -333,7 +334,7 @@ mod tests {
                 .as_slice(),
             &[true]
         );
-        reconcile_progress(&backend, &presenter, waiting)
+        reconcile_progress(&backend, &presenter, waiting, false)
             .await
             .unwrap();
         assert_eq!(confirmation_calls.load(Ordering::Relaxed), 1);
@@ -350,7 +351,7 @@ mod tests {
         );
         let (presenter, _) = presenter(PairingDecision::Accept);
 
-        let result = reconcile_progress(&backend, &presenter, awaiting)
+        let result = reconcile_progress(&backend, &presenter, awaiting, false)
             .await
             .unwrap();
         assert_eq!(result.ceremony_id.as_deref(), Some("ceremony-2"));
@@ -369,7 +370,7 @@ mod tests {
             let backend = FakeBackend::new([awaiting.clone()], cancelled.clone(), cancelled);
             let (presenter, _) = presenter(decision);
 
-            let result = reconcile_progress(&backend, &presenter, awaiting)
+            let result = reconcile_progress(&backend, &presenter, awaiting, false)
                 .await
                 .unwrap();
             assert!(backend
