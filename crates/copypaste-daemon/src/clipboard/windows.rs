@@ -14,6 +14,7 @@ use tracing::{debug, warn};
 
 mod attribution;
 mod read;
+mod staging;
 mod transcode;
 #[cfg(test)]
 mod two_writers;
@@ -80,6 +81,7 @@ pub struct WindowsClipboard {
     rejected_too_large: u64,
     opt_out: OptOutFormats,
     formats: read::RegisteredFormats,
+    staging: Option<staging::StagingArea>,
     attribution: Attribution,
     sequence_unavailable_logged: bool,
 }
@@ -91,9 +93,16 @@ impl WindowsClipboard {
             rejected_too_large: 0,
             opt_out: OptOutFormats::register(),
             formats: read::RegisteredFormats::register(),
+            staging: None,
             attribution: Attribution::default(),
             sequence_unavailable_logged: false,
         })
+    }
+
+    pub fn with_data_dir(data_dir: &std::path::Path) -> std::io::Result<Self> {
+        let mut clipboard = Self::new()?;
+        clipboard.staging = Some(staging::StagingArea::new(data_dir)?);
+        Ok(clipboard)
     }
 
     /// The change count. `None` means the process cannot read it at all, which
@@ -367,13 +376,23 @@ impl ClipboardSource for WindowsClipboard {
         _item_id: &str,
         content_type: &str,
         bytes: &[u8],
-        _metadata: Option<&copypaste_core::FileMetadata>,
+        metadata: Option<&copypaste_core::FileMetadata>,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
 
         if content_type == copypaste_ipc::content_type::FILE {
-            // File paste-back needs a managed plaintext staging directory.
-            return Err(ClipboardWriteError::UnsupportedContent);
+            let metadata = metadata.ok_or(ClipboardWriteError::Failed)?;
+            let staging = self.staging.as_ref().ok_or(ClipboardWriteError::Failed)?;
+            let path = staging
+                .materialize(bytes, metadata)
+                .map_err(|_| ClipboardWriteError::Failed)?;
+            let path = path.to_string_lossy().into_owned();
+            return self
+                .write(move || {
+                    raw::empty()?;
+                    raw::set_file_list(&[path])
+                })
+                .map_err(|_| ClipboardWriteError::Failed);
         }
         if !matches!(
             copypaste_ipc::content_type::classify(content_type),
@@ -720,6 +739,48 @@ mod tests {
             clipboard.poll().is_none(),
             "multiple file references are unsupported"
         );
+
+        write_file_list(&[r"\\server\share\remote.txt"]);
+        assert!(
+            clipboard.poll().is_none(),
+            "UNC paths are not local captures"
+        );
+
+        write_file_list(&[r"\\?\UNC\server\share\remote.txt"]);
+        assert!(
+            clipboard.poll().is_none(),
+            "verbatim UNC paths are not local captures"
+        );
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn a_file_paste_back_materializes_one_owner_only_file_list_entry() {
+        let _lock = serialised();
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut clipboard = WindowsClipboard::with_data_dir(data_dir.path()).unwrap();
+        let metadata =
+            copypaste_core::FileMetadata::new("fixture.txt", "application/octet-stream").unwrap();
+
+        clipboard
+            .set_binary_contents(
+                "item-id",
+                copypaste_ipc::content_type::FILE,
+                b"synthetic bytes",
+                Some(&metadata),
+            )
+            .expect("file paste-back must publish a file list");
+        let mut paths = Vec::new();
+        {
+            let _clipboard = Clipboard::new_attempts(OPEN_ATTEMPTS).expect("open the clipboard");
+            raw::get_file_list_path(&mut paths).expect("read the file list");
+        }
+        assert_eq!(paths.len(), 1);
+        assert_eq!(
+            paths[0].file_name().and_then(|name| name.to_str()),
+            Some("fixture.txt")
+        );
+        assert_eq!(std::fs::read(&paths[0]).unwrap(), b"synthetic bytes");
     }
 
     /// The measurement `MAX_SELF_WRITE_DELTA` is a guess about. A delta beyond
