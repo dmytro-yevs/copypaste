@@ -56,15 +56,16 @@ separately ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
 
 ### Product limits
 
-Native clipboard capture takes one representation, plain text: a change that
-offers only an image, a file reference or rich text is acknowledged and skipped
-(`crates/copypaste-daemon/src/clipboard/format.rs`). Non-text content is first
-class everywhere else: `crates/copypaste-ipc/src/content_type.rs` is the
-vocabulary, naming RTF, HTML, PNG, TIFF and file references, and an item of
-those types arriving from a paired peer or from cloud sync is stored,
-size-gated under its own limit class, listed, and pasted back to the system
-clipboard in its original representation. An image row also serves a preview
-to the app.
+Native clipboard capture takes one canonical representation in this order:
+plain text, RTF, HTML, PNG, TIFF, then one local file URL
+(`crates/copypaste-daemon/src/clipboard/format.rs`). Rich text and HTML are
+used only when plain text is absent. File capture accepts a local `file:` URL,
+checks its active file limit on the blocking worker before allocating bytes,
+and stores only its basename and generic MIME type; network URLs and multiple
+file URLs are unsupported. `crates/copypaste-ipc/src/content_type.rs` is the
+vocabulary for these types. Every captured type is stored under its own limit
+class, listed, and pasted back in its original representation. An image row
+also serves a preview to the app.
 
 Frontmost application identity is retained as provenance and as an independent
 sensitivity signal.
