@@ -35,17 +35,29 @@ const DEFAULT_TIMEOUT_MS = 60_000;
  */
 const HANDBACK_END = /\r?\nEND$/;
 
+/**
+ * GetFormats(false) can include Windows' synthesized text aliases and CF_LOCALE.
+ * Preserve only those documented aliases when UnicodeText itself has usable data:
+ * https://learn.microsoft.com/en-gb/windows/desktop/dataxchg/clipboard-formats
+ * https://learn.microsoft.com/en-us/windows/win32/dataxchg/standard-clipboard-formats
+ */
+export const WINDOWS_CLIPBOARD_FORMAT_GUARD = [
+  "$preservableFormats = @('UnicodeText', 'Text', 'OEMText', 'Locale')",
+  "$hasPreservableUnicodeText = $hasUnicodeText -and ($formats -contains 'UnicodeText')",
+  "$hasUnsupportedFormat = @($formats | Where-Object { $_ -notin $preservableFormats }).Count -gt 0",
+  "if ($formats.Count -gt 0 -and (-not $hasPreservableUnicodeText -or $hasUnsupportedFormat)) { throw " +
+    '"the Windows clipboard contains formats that cannot be preserved by ' +
+    "this test harness: $($formats -join ', ')\" }",
+].join("; ");
+
 const SNAPSHOT_COMMAND = [
   "Add-Type -AssemblyName System.Windows.Forms",
   "$data = [System.Windows.Forms.Clipboard]::GetDataObject()",
   "$formats = if ($null -eq $data) { @() } else { @($data.GetFormats($false)) }",
   "$unicodeText = [System.Windows.Forms.DataFormats]::UnicodeText",
-  "$hasText = $null -ne $data -and $data.GetDataPresent($unicodeText, $false)",
-  "$isPlainText = $formats.Count -eq 1 -and @($formats)[0] -eq $unicodeText -and $hasText",
-  "if ($formats.Count -gt 0 -and -not $isPlainText) { throw " +
-    '"the Windows clipboard contains formats that cannot be preserved by ' +
-    'this test harness: $($formats -join \', \')" }',
-  "$text = if ($hasText) { [string]$data.GetData($unicodeText, $false) } else { $null }",
+  "$hasUnicodeText = $null -ne $data -and $data.GetDataPresent($unicodeText, $false)",
+  WINDOWS_CLIPBOARD_FORMAT_GUARD,
+  "$text = if ($hasUnicodeText) { [string]$data.GetData($unicodeText, $false) } else { $null }",
   "$encoded = if ($null -eq $text) { '' } else { [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text)) }",
   '[Console]::Out.Write("$encoded`nEND")',
   "[Console]::Out.Flush()",
