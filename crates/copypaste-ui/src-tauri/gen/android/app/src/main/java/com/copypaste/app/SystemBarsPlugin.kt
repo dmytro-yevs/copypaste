@@ -3,25 +3,21 @@ package com.copypaste.app
 import android.app.Activity
 import android.graphics.Color
 import android.os.Build
-import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
-import kotlin.math.roundToInt
 
 /** Keeps Android's edge-to-edge system bars and cutouts in the CSS inset tokens. */
 @TauriPlugin
 class SystemBarsPlugin(private val activity: Activity) : Plugin(activity) {
     private var webView: WebView? = null
-    private var lastInsets: InsetsPx? = null
 
     override fun load(webView: WebView) {
         super.load(webView)
@@ -32,12 +28,9 @@ class SystemBarsPlugin(private val activity: Activity) : Plugin(activity) {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
-        // One listener per WebView: this plugin used to replace
-        // [WebViewImeInsets], which left the document at full height while
-        // the IME was visible.
-        WebViewImeInsets.install(webView) { host, insets ->
-            publishInsets(host, insets)
-        }
+        // The activity installs the single inset owner before Wry starts its
+        // first navigation. This plugin only replays that owner's state when
+        // native appearance changes.
     }
 
     @Command
@@ -57,61 +50,11 @@ class SystemBarsPlugin(private val activity: Activity) : Plugin(activity) {
                 isAppearanceLightNavigationBars = light
             }
             webView?.let { view ->
-                lastInsets?.let { publishCss(view, it) }
+                WebViewImeInsets.replayCss(view)
                 ViewCompat.requestApplyInsets(view)
             }
         }
         invoke.resolve(JSObject())
     }
 
-    private fun publishInsets(view: View, insets: WindowInsetsCompat) {
-        val bars = insets.getInsets(
-            WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
-        )
-        val density = view.resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
-        val imeBottom = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
-            cssPx(insets.getInsets(WindowInsetsCompat.Type.ime()).bottom, density)
-        } else {
-            0
-        }
-        // API 36 can report a visible IME window with a tiny inset while the
-        // keyboard is not up. Only treat a real keyboard height as IME-open.
-        val next = InsetsPx(
-            top = cssPx(bars.top, density),
-            right = cssPx(bars.right, density),
-            bottom = cssPx(bars.bottom, density),
-            left = cssPx(bars.left, density),
-            ime = if (imeBottom >= 80) imeBottom else 0,
-        )
-        lastInsets = next
-        val webView = this.webView ?: return
-        publishCss(webView, next)
-    }
-
-    private fun publishCss(webView: WebView, insets: InsetsPx) {
-        val script = """
-            (function () {
-              var root = document.documentElement;
-              if (!root) return;
-              root.style.setProperty('--inset-top', '${insets.top}px');
-              root.style.setProperty('--inset-right', '${insets.right}px');
-              root.style.setProperty('--inset-bottom', '${insets.bottom}px');
-              root.style.setProperty('--inset-left', '${insets.left}px');
-              if (${insets.ime} > 0) root.setAttribute('data-ime', '');
-              else root.removeAttribute('data-ime');
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(script, null)
-    }
-
-    private fun cssPx(pixels: Int, density: Float): Int =
-        (pixels.toFloat() / density).roundToInt().coerceAtLeast(0)
-
-    private data class InsetsPx(
-        val top: Int,
-        val right: Int,
-        val bottom: Int,
-        val left: Int,
-        val ime: Int = 0,
-    )
 }
