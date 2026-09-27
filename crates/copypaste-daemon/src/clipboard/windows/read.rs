@@ -10,6 +10,7 @@
 
 use clipboard_win::{formats, raw};
 use tracing::debug;
+use typed_path::{Utf8WindowsPath, Utf8WindowsPrefix};
 
 use crate::clipboard::CapturePolicy;
 
@@ -313,14 +314,29 @@ fn file() -> Reading {
         debug!("the clipboard file metadata is invalid; the change was dropped");
         return Reading::Nothing;
     };
-    if !path.is_absolute() {
-        debug!("the clipboard file reference is not local; the change was dropped");
+    if !is_local_disk_path(path) {
+        debug!("the clipboard file reference is not a local disk path; the change was dropped");
         return Reading::Nothing;
     }
     Reading::Got(Representation::File {
         path: path.clone(),
         metadata,
     })
+}
+
+fn is_local_disk_path(path: &std::path::Path) -> bool {
+    let Some(path) = path.to_str() else {
+        return false;
+    };
+    let prefix = Utf8WindowsPath::new(path)
+        .components()
+        .next()
+        .and_then(|component| component.prefix_kind());
+    path.is_absolute()
+        && matches!(
+            prefix,
+            Some(Utf8WindowsPrefix::Disk(_) | Utf8WindowsPrefix::VerbatimDisk(_))
+        )
 }
 
 fn preflight(format: u32) -> Option<u64> {
