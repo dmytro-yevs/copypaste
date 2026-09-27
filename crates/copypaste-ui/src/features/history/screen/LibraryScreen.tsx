@@ -9,7 +9,7 @@ import { ClipDetailDialog } from "@/features/history/patterns/ClipDetailDialog";
 import { HistoryContentState } from "@/features/history/patterns/HistoryContentState";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { LibraryToolbar } from "@/features/history/patterns/LibraryToolbar";
-import { markedOrigin, markedOrigins } from "@/lib/itemOrigin";
+import { originOf } from "@/lib/itemOrigin";
 import { HISTORY_LAYOUT_METRICS } from "@/features/history/model/virtualizationMetrics";
 import {
     useCopy,
@@ -149,7 +149,6 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
             setActiveId(items[0]?.id ?? null);
     }, [activeId, items, setActiveId]);
 
-    const originsMarked = useMemo(() => markedOrigins(items), [items]);
     const inspected = useMemo(
         () => items.find((item) => item.id === activeId) ?? null,
         [activeId, items],
@@ -162,9 +161,9 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
         if (detailId === null) return null;
         const item = items.find((candidate) => candidate.id === detailId);
         return item
-            ? { item, origin: markedOrigin(item, originsMarked) }
+            ? { item, origin: originOf(item) }
             : null;
-    }, [detailId, items, originsMarked]);
+    }, [detailId, items]);
 
     const detailBody = useItemBody(
         detail?.item ?? (desktopInspector && inspectorOpen ? inspected : null),
@@ -345,7 +344,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
             <LibraryInspectorPanel
                 item={inspected}
                 origin={
-                    inspected ? markedOrigin(inspected, originsMarked) : null
+                    inspected ? originOf(inspected) : null
                 }
                 revealedContent={
                     inspected?.id === reveal.revealedId

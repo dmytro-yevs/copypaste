@@ -107,6 +107,24 @@ describe("LibraryScreen reader reachability", () => {
         expect(document.activeElement).toBe(openReader);
     });
 
+    it("keeps the source device in inspector and reader for a single-device history", async () => {
+        viewport.width = 1200;
+        const localItem = item({
+            id: "local-origin",
+            content: "Local clipboard entry",
+            origin_device_id: "mac-1",
+            origin_device_name: "MacBook Air",
+        });
+        ipc.listItems.mockResolvedValue(page([localItem]));
+        const { user } = renderScreen([localItem]);
+        await user.click(await screen.findByRole("button", { name: "Local clipboard entry" }));
+        const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+        expect(within(inspector).getByText("MacBook Air")).toBeTruthy();
+        await user.click(within(inspector).getByRole("button", { name: "Show full contents" }));
+        const reader = await screen.findByRole("dialog", { name: "Clipboard item" });
+        expect(within(reader).getByText(/From MacBook Air/)).toBeTruthy();
+    });
+
     it("opens the reader from the compact inspector sheet", async () => {
         viewport.width = 390;
         const { user } = renderScreen();
