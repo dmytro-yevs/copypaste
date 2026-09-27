@@ -121,6 +121,19 @@ class CaptureServiceTest {
     }
 
     @Test
+    fun recoveryRequiredBlocksRestoreUntilExplicitArmAttemptsAgain() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        seedPersistedCopy(context)
+        context.getSharedPreferences("capture-service", Context.MODE_PRIVATE)
+            .edit().putBoolean("recoveryRequired", true).commit()
+
+        assertTrue(CaptureService.recoveryRequired(context))
+        assertFalse(CaptureService.restoreIfArmed(context))
+        assertFalse(CaptureService.start(context, CaptureArmRequest("ongoing", "stopped", "body")))
+        assertFalse(CaptureService.recoveryRequired(context))
+    }
+
+    @Test
     fun armCompletionSettlesExactlyOnceAcrossLossAndTeardown() {
         val completions = CaptureStartCompletions()
         val results = mutableListOf<Boolean>()

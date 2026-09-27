@@ -126,9 +126,9 @@ without the user doing anything.
 |---|---|---|---|---|---|---|
 | **0 — nothing** | nothing | copies made inside CopyPaste; anything sent via share sheet or the text-selection "Copy to CopyPaste" action (`ACTION_PROCESS_TEXT`); one tap on a Quick Settings tile captures whatever is on the clipboard right now (the tile gives our activity focus, so the read is legal); everything the Mac captured, over sync | ✅ | ✅ | ✅ | n/a — this is the floor |
 | **1 — overlay** | one toggle: Settings → Display over other apps | a floating bubble the user taps after copying, without leaving the app they are in; also the background-activity-start exemption rung 2 does not need but rung 0's tile benefits from | ✅ | ✅ | ✅ (declare `specialUse` FGS) | `Settings.canDrawOverlays()` on every resume; app hibernation can revoke it |
-| **2 — Shizuku UserService** ⭐ | install Shizuku (Play); Developer options → Wireless debugging; pair once with a code; tap Start; grant CopyPaste's Shizuku permission once | **full background capture from every app** while Shizuku is running; its UserService owns the filtered logcat reader and CopyPaste owns the focused overlay read | ❌ start Shizuku after reboot | ✅ | Shizuku is on Play; nothing in policy prohibits using it as a setup bridge | overlay, binder loss, battery policy and OEM logcat behaviour still need device evidence |
+| **2 — one-time setup** | use Shizuku on the phone or copy the provided adb commands on a computer | app-owned logcat and focused overlay capture; Shizuku can be removed after grants | new reader may need OS consent | existing live reader is reused | distribution policy must be reviewed separately | explicit recovery after reader loss |
 | **3 — become the keyboard** | switch their keyboard to ours | the only *documented, supported, reboot-proof* background access | ✅ | ✅ | ✅ | user switches keyboard back |
-| ~~4 — adb from a computer~~ | plug into a Mac, paste `pm grant … READ_LOGS` | **nothing, on Android 13+** | — | — | — | — |
+| **Manual adb setup** | run the same permission commands from a computer | same runtime as rung 2 | same reader-consent constraint | same runtime | same policy | same recovery |
 
 **Rejected outright.** *AccessibilityService*: not an exemption (§1), plus
 Play's [AccessibilityService policy](https://support.google.com/googleplay/android-developer/answer/10964491)
@@ -144,72 +144,34 @@ manager that requires you to change keyboards is a keyboard product, and a bad
 keyboard loses the user more than background capture wins them. Worth
 reconsidering only if rung 2 turns out to be unusable in practice.
 
-## 4. Rung 2 in detail — Shizuku UserService
+## 4. Rung 2 in detail — app-owned reader
 
-**How it works.** Shizuku's maintained UserService is the live log transport.
-It runs one fixed `ClipboardService:E` logcat reader as shell or root and sends
-CopyPaste only an occurrence callback for this application id. It does not send
-clipboard content or log lines. CopyPaste then launches
-`ClipboardFloatingActivity` and reads the clipboard only after that activity
-has focus.
+Shizuku is a setup helper. Both setup methods use the same native command list:
 
-The setup bridge retains the app's overlay and residency state:
-
-- `pm grant <pkg> android.permission.READ_LOGS` for the existing manifest and
-  upgrade contract; CopyPaste no longer invokes `logcat` under that app UID
+- `pm grant <pkg> android.permission.READ_LOGS`
 - `cmd appops set <pkg> SYSTEM_ALERT_WINDOW allow`
 - `cmd appops set <pkg> RUN_IN_BACKGROUND allow`
 - `cmd appops set <pkg> RUN_ANY_IN_BACKGROUND allow`
 - `am set-inactive <pkg> false`
 - `am set-standby-bucket <pkg> active`
 
-What Shizuku can persist for us is narrower than "background clipboard access".
-Its user-service may set app-ops and standby state:
+The computer instructions prefix each command with `adb shell`. Onboarding
+saves its checkpoint before a grant can restart the process, then verifies
+actual permissions rather than trusting a completion marker.
 
-- `cmd appops set <pkg> RUN_IN_BACKGROUND allow`
-- `cmd appops set <pkg> RUN_ANY_IN_BACKGROUND allow`
-- `am set-inactive <pkg> false`
-- `am set-standby-bucket <pkg> active`
+`CaptureService` owns a single app-UID `ClipboardService:E` logcat reader.
+The reader matches only this application id and signals a focused overlay
+read; it does not publish log contents. Reopening the UI reuses the live reader.
+Shizuku is not needed afterward. Android log-access approval applies to the
+open reader: process death, reboot or logd restart may require a new foreground
+approval. See [Android 16 LogcatManagerService](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/services/core/java/com/android/server/logcat/LogcatManagerService.java).
 
-It may also read or write the clipboard-toast setting. Shizuku must remain
-running while rung 2 is armed. One privacy feature is intentionally stricter:
-while app exclusions are non-empty, CopyPaste needs Shizuku running
-to ask the API 31+ clipboard service which package wrote the clip. If that
-source cannot be resolved, implicit background capture skips the event before
-reading its content. Explicit share, Process Text, tile and in-app actions do
-not depend on attribution.
+Exact source-app attribution is unavailable without a privileged runtime.
+Configured exclusions therefore fail closed before an implicit read; explicit
+share, Process Text, tile and in-app capture remain available.
 
-> **Partially verified.** The API 36 emulator leg proves the app-owned tile
-> capture and fail-closed service state. The remaining unknowns are the
-> device-only ones: Shizuku UserService logcat access, overlay focus, binder
-> death, OEM logcat behaviour, and battery managers.
-
-**What the user installs.** [Shizuku](https://github.com/RikkaApps/Shizuku),
-Apache-2.0, ~28k stars, on Google Play as `moe.shizuku.privileged.api`; the
-[Shizuku-API](https://github.com/RikkaApps/Shizuku-API) client library is MIT.
-Maintenance: not archived, but the last commit to either repo is mid-2025 —
-**over a year quiet as of today**. That is a real risk to state: our best
-background path depends on a third-party app with one maintainer.
-
-**Does it need a PC?** No, on Android 11+.
-[Official setup](https://github.com/RikkaApps/websites/blob/master/shizuku/guide/setup.md):
-*"Starting with wireless debugging works on Android 11 or above. This startup
-method does not require a connection to a computer."* The phone enables
-Wireless debugging in Developer options and Shizuku pairs against the device's
-own adb daemon over localhost. Android 10 and below still need a computer.
-
-**Does it survive a reboot?** **No** — the same page: *"Due to system
-limitations, the startup steps need to be performed again after each reboot."*
-Pairing is once; **starting is every boot**. Reported to break on Wi-Fi network
-changes too ([Shizuku #864](https://github.com/RikkaApps/Shizuku/issues/864) —
-*marked, community report, not verified*). This is the single biggest cost of
-rung 2 and the UI must be built around it, not apologise for it afterwards.
-
-**The toast.** A clipboard read can produce an Android access notice. It can be turned off system-wide
-(`Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS = 0`), which shell can do —
-**offer it as an explicit, explained opt-in and never do it silently.** Turning
-off one of the OS's privacy indicators on the user's behalf is precisely the
-move a clipboard manager must not make.
+Physical validation must cover consent, reader reuse across UI closure,
+reader loss, overlay focus and OEM battery policy.
 
 ## 5. What we tell the user when a grant disappears
 

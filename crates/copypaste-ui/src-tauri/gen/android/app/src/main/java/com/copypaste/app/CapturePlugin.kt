@@ -167,7 +167,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             SetupInstructions(
                 activity.packageName,
                 commands,
-                commands,
+                commands.map { listOf("adb", "shell") + it },
                 requiresRestart = true,
             ),
         ))
@@ -448,7 +448,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             ShizukuClipboard.isRunning() || setupComplete,
             ShizukuClipboard.hasPermission() || setupComplete,
             CaptureService.userWantsCapture(activity),
-            ShizukuClipboard.isToastSuppressed(activity),
+            ShizukuClipboard.isToastSuppressed(),
             takeRearmRequest(),
         )
     }

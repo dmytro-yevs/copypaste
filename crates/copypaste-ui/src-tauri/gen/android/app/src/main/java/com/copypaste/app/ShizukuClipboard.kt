@@ -1,30 +1,20 @@
 package com.copypaste.app
 
-import android.content.Context
 import android.os.Build
-import android.os.IBinder
-import android.os.Process
 import android.util.Log
 import rikka.shizuku.Shizuku
-import rikka.shizuku.ShizukuBinderWrapper
-import rikka.shizuku.SystemServiceHelper
 
 /**
  * Shizuku is the rung-2 setup/settings and source-attribution bridge.
  *
- * The live log reader is a Shizuku user service, while CopyPaste owns the
- * focused clipboard read after its occurrence callback. Clipboard content
- * never crosses the privileged service. Shizuku remains for:
+ * Shizuku is onboarding-only. It applies the one-time app grants and may then
+ * be removed; runtime capture never binds its service.
  * - checking whether its server is available;
  * - requesting our one-time permission; and
- * - calling user services for capture and the optional clipboard-notice
- *   setting; and
- * - asking the clipboard service for source-package metadata before a read.
+ * - calling the setup user service once.
  */
 object ShizukuClipboard {
     private const val TAG = "CopyPasteShizuku"
-    private const val SHELL_PACKAGE = "com.android.shell"
-    private const val PER_USER_RANGE = 100_000
 
     @Volatile
     var lastFailure: String? = null
@@ -71,49 +61,7 @@ object ShizukuClipboard {
      * The maintained Shizuku wrapper supplies the shell identity that owns
      * SET_CLIP_SOURCE; ordinary app reflection would still be permission-denied.
      */
-    internal fun sourcePackage(context: Context): String? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
-        if (!isRunning() || !hasPermission()) return null
-        return try {
-            // Mirrors hidden UserHandle.getUserId; the public SDK exposes no numeric accessor.
-            val userId = Process.myUid() / PER_USER_RANGE
-            val rawBinder = SystemServiceHelper.getSystemService("clipboard")
-            val binder: IBinder = ShizukuBinderWrapper(rawBinder)
-            val stub = Class.forName("android.content.IClipboard\$Stub")
-            val service = stub
-                .getMethod("asInterface", IBinder::class.java)
-                .invoke(null, binder)
-                ?: return null
-            val clipboard = Class.forName("android.content.IClipboard")
-            val source = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val deviceId = context.deviceId
-                clipboard
-                    .getMethod(
-                        "getPrimaryClipSource",
-                        String::class.java,
-                        String::class.java,
-                        Int::class.javaPrimitiveType,
-                        Int::class.javaPrimitiveType,
-                    )
-                    .invoke(service, SHELL_PACKAGE, null, userId, deviceId)
-            } else {
-                clipboard
-                    .getMethod(
-                        "getPrimaryClipSource",
-                        String::class.java,
-                        Int::class.javaPrimitiveType,
-                    )
-                    .invoke(service, SHELL_PACKAGE, userId)
-            }
-            (source as? String)
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() && it != SHELL_PACKAGE }
-        } catch (error: Throwable) {
-            lastFailure = error.javaClass.simpleName
-            Log.d(TAG, "clipboard source attribution is unavailable")
-            null
-        }
-    }
+    internal fun sourcePackage(): String? = null
 
     /**
      * `Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS`.
@@ -124,13 +72,9 @@ object ShizukuClipboard {
      * is tested.
      */
     fun setToastSuppressed(suppressed: Boolean, completion: (Boolean) -> Unit) {
-        ShizukuSettings.setClipboardAccessNotifications(suppressed) { changed ->
-            if (!changed) lastFailure = "clipboard notice setting was refused"
-            ClipboardNoticeSetting.invalidate()
-            completion(changed)
-        }
+        if (suppressed) lastFailure = "clipboard notice setup is unavailable after onboarding"
+        completion(false)
     }
 
-    fun isToastSuppressed(context: android.content.Context): Boolean =
-        ClipboardNoticeSetting.suppressed(context)
+    fun isToastSuppressed(): Boolean = false
 }

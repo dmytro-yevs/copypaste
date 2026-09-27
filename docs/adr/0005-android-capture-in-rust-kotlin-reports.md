@@ -42,13 +42,12 @@ doorways — the share sheet (`ACTION_SEND`), the text-selection action
 (`copypaste_core::ingest`). The tile's tap is what gives `IntakeActivity` focus,
 and focus is the clipboard exemption we can reach with no permission at all.
 
-**Rung 2 written, partially verified.** The maintained Shizuku UserService
-starts the narrowly filtered `logcat` reader with its shell or root identity.
-It returns only a ClipboardService occurrence callback; raw log lines and
-clipboard content never cross that binder. `ClipCascadeCapture` receives the
-callback, opens `ClipboardFloatingActivity`, and the app reads only after it
-has focus. `ShizukuSettingsService` retains setup, residency, and optional
-clipboard-notice setting operations.
+**Rung 2 uses one-time setup grants.** Shizuku applies the same fixed permission
+commands shown by the manual adb setup. It is not a runtime dependency.
+`CaptureService` owns one app-UID logcat reader and its focused overlay hand-off.
+Only occurrence signals leave the reader; raw logs never enter history or IPC.
+Android may ask for log-access consent when a new reader starts, but reopening
+the activity reuses an existing reader.
 
 **Rungs 1 and 3 are not built** and are not represented in the state model. An
 overlay bubble and becoming the default IME are both in the specification's
@@ -64,68 +63,22 @@ background, which is the only thing `Working` claims. Counting them would turn
 the setup screen green at the exact moment it knows least. `CopyPaste-qzhu`
 requires `record_read` to carry the `focused` fact.
 
-**Kotlin owns the device-only runtime.** `ShizukuCaptureService` owns the
-privileged logcat process; `ClipCascadeCapture` owns its connection, timeout,
-binder-loss handling, and focused overlay hand-off. A disconnect clears the
-live reader before posting the loss notification. Rust therefore receives facts
-and clips, not callbacks into its own process.
+**Kotlin owns the device-only runtime.** `ClipCascadeCapture` owns the process,
+reader and generation fence. Stop, replacement and queued callbacks are scoped
+to their run so old work cannot restart capture or announce a false loss.
 
-**Kotlin queues and Rust drains once a second.** This is not clipboard polling:
-the clipboard signal is produced on the Kotlin side, and the drain only moves
-already captured text between two halves of one process. The alternative was a
-JNI callback, which needs `unsafe` in a crate that forbids it. The cost is up
-to a second of latency to storage and a loss window if the process dies with
-clips queued — `Buffer` counts what it loses and the count is surfaced, because
-a copy that was not saved is precisely what the user must not have to discover
-for themselves.
+**Kotlin queues; Rust drains on notification.** The maintained Tauri channel
+wakes the Rust intake worker. Startup replay and a bounded fallback recover
+missed notifications; an empty idle queue does not require a polling loop.
 
-**App exclusions run before the clipboard read.** Android exposes the writer
-package only through hidden `getPrimaryClipSource` from API 31, guarded by the
-signature-level `SET_CLIP_SOURCE` permission. The existing maintained Shizuku
-client supplies the shell identity; Kotlin resolves the package and cached
-label before asking for `primaryClip`. With exclusions configured, an excluded
-or unavailable source skips only implicit background capture. Share, Process
-Text, the tile and the in-app action remain explicit user-directed intake.
-
-No maintained package exposes this hidden clipboard-service method or its
-versioned signature. This is dependency rule exemption 1: the bridge keeps the
-AOSP API 31–33 and API 34+ signatures at the platform boundary, while Shizuku
-continues to own binder identity and transport.
+**App exclusions run before the clipboard read.** Exact source attribution
+requires Android's signature-level `SET_CLIP_SOURCE` permission. A one-time
+adb grant cannot provide it. Without a source, configured exclusions skip
+implicit background reads. Explicit share, Process Text, tile and in-app
+capture remain available. The app never guesses the source or silently drops
+an existing exclusion rule.
 
 No maintained package exposes a product-specific, content-free interpretation
-of ClipboardService log events. That is dependency-rule exemption 1 for the
-small local user service: it accepts only the fixed ClipboardService filter,
-matches only this application id, and sends an occurrence callback. It cannot
-return log lines, clipboard values, or an arbitrary command result.
-
-The bridge targets the clipboard that owns the reading context, not user 0 or
-the default device. The numeric user ID mirrors AOSP
-[`UserHandle.getUserId(Process.myUid())`](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android16-release/core/java/android/os/UserHandle.java),
-whose numeric accessor is hidden from the public SDK. On API 34+ the bridge
-also passes public [`Context.getDeviceId()`](https://developer.android.com/reference/android/content/Context#getDeviceId()),
-so work-profile and virtual-device clipboards cannot silently resolve source
-metadata from a different clipboard silo.
-
-## What this creates for other people
-
-* **Attribution is device-level, not surface-level.** `Item` now carries
-  `origin_device_id`, so "from the Mac" versus "from this phone" is renderable.
-  Which *doorway* an item came through — share sheet, tile, background — travels
-  only on the `copypaste://captured` event and is not persisted. Persisting it
-  needs a column and an `Item` field, and is worth deciding rather than
-  assuming.
-* **Settings persist locally on Android.** The embedded backend atomically
-  writes `settings-v2.json`; an unreadable record starts with private mode,
-  sync and LAN visibility disabled instead of silently restoring defaults.
-* **The React side owns the surfaces.** Commands and events exist
-  (`capture_state`, `capture_arm`, `capture_now`,
-  `capture_set_toast_suppressed`, `copypaste://capture-state`,
-  `copypaste://captured`); the rung 2 setup screen, the status indicator beside
-  history and the toast-consent dialog are not written. The shipped UI for
-  this capability is incomplete, and this is the gap to close first.
-
-## Unverified
-
-The bridge DTOs compile in Android debug unit-test variants, and their fixture
-guard is attached to debug APK assembly. Rung 2 still needs pairing and capture
-evidence on a real phone; `docs/rewrite/android-spike.md` remains its checklist.
+of ClipboardService log events. This is dependency-rule exemption 1 for the
+small app-owned reader: it accepts only the fixed ClipboardService filter and
+matches this application id. It does not expose arbitrary shell execution.
