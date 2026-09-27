@@ -45,8 +45,9 @@ export const devices = {
       syncFailed: "Sync failed",
       syncFailedDetail: "The last manual sync did not finish.",
       unavailable: "Unavailable",
-      paused: "Paused",
-      captureActive: "Capture active",
+      privateMode: "Private mode",
+      captureChecking: "Checking capture…",
+      captureUnavailable: "Capture status unavailable",
       paired: "Paired",
       notPaired: "Not paired",
     },
@@ -133,8 +134,8 @@ export const devices = {
           body: "Open CopyPaste on another device, then scan again.",
         },
         scanning: {
-          title: "Scanning your network…",
-          body: "Available CopyPaste devices will appear on the radar.",
+          title: "Scanning nearby devices…",
+          body: "Looking for devices running CopyPaste on this network.",
         },
         error: {
           title: "Network discovery is unavailable",
@@ -142,13 +143,10 @@ export const devices = {
         },
         results: {
           title: "Nearby devices",
-          body: "Select a device on the radar or from the list to pair securely.",
+          body: "Choose a device to review its details and connect securely.",
         },
       },
-      radar: {
-        label: "Nearby device radar",
-        latencyUnknown: "Latency unavailable, shown in the unknown-distance band",
-        latencyMilliseconds: "{{count}} milliseconds",
+      results: {
         found_one: "{{count}} device found",
         found_other: "{{count}} devices found",
         foundDetail: "Protected pairing starts only after you choose Connect.",
@@ -261,6 +259,9 @@ export const devices = {
   discovered: {
     heading: "Discovered on your network",
     refresh: "Refresh",
+    scan: "Scan",
+    scanning: "Scanning…",
+    refreshing: "Refreshing nearby devices…",
     refreshLabel: "Refresh devices discovered on this network",
     loading: "Looking for devices on this network…",
     unavailable: "Network discovery is unavailable.",
@@ -271,6 +272,14 @@ export const devices = {
     paired: "Paired",
     address: "Reported address",
     lastSeen: "Last discovered",
+  },
+
+  roster: {
+    yourDevices: "Your devices",
+    cloudConnection: "Cloud connection",
+    pairingLimit: "Pairing limit reached. Remove a device to connect another.",
+    pairingsAvailable_one: "{{count}} more device pairing available.",
+    pairingsAvailable_other: "{{count}} more device pairings available.",
   },
 
   loading: { title: "Loading…", body: "Looking for paired devices." },

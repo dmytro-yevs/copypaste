@@ -49,14 +49,7 @@
     color: var(--accent-2);
 }
 .discoveryAction {
-    inline-size: calc(var(--s-9) * 2 + var(--s-7));
     margin-inline-start: auto;
-}
-.discoveryGrid > :nth-child(2) {
-    animation-delay: var(--dur-fast);
-}
-.discoveryGrid > :nth-child(n + 3) {
-    animation-delay: var(--dur);
 }
 
 @container (min-width: $cpRoster) {
@@ -82,7 +75,6 @@
         flex-basis: 100%;
     }
     .discoveryAction {
-        inline-size: 100%;
         margin-block-start: var(--s-2);
         margin-inline-start: 0;
     }
