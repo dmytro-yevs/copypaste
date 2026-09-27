@@ -1,11 +1,8 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::OnceLock;
 
 use copypaste_core::p2p_contract;
 use copypaste_ipc::DiscoveredDevice;
-use copypaste_p2p::discovery::DiscoveredPeer;
-use copypaste_p2p::{DeviceClass, DevicePlatform, DeviceProfile};
 use serde::{Deserialize, Serialize};
 use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{Manager as _, Wry};
@@ -37,6 +34,7 @@ struct ResolvedPeer {
     port: u16,
     #[serde(default)]
     attributes: HashMap<String, String>,
+    last_seen_ms: i64,
 }
 
 #[derive(Serialize)]
@@ -62,14 +60,14 @@ impl AndroidNetworkDiscovery {
     }
 
     pub async fn advertise(&self, name: &str, pairing_ids: &[String]) -> bool {
-        let mut attributes = HashMap::new();
-        attributes.insert("v".into(), "1".into());
-        attributes.insert("n".into(), name.to_string());
-        attributes.insert("pf".into(), "android".into());
-        attributes.insert("dc".into(), "phone".into());
-        for (index, id) in pairing_ids.iter().take(16).enumerate() {
-            attributes.insert(format!("p{index}"), id.clone());
-        }
+        let attributes = match copypaste_p2p::discovery::advertisement_attributes(name, pairing_ids)
+        {
+            Ok(attributes) => attributes,
+            Err(error) => {
+                tracing::warn!(%error, "Android NSD advertisement is invalid");
+                return false;
+            }
+        };
         self.0
             .run_mobile_plugin_async::<Availability>(
                 "advertise",
@@ -84,7 +82,7 @@ impl AndroidNetworkDiscovery {
             .unwrap_or(false)
     }
 
-    pub async fn resolved(&self) -> Result<Vec<DiscoveredDevice>> {
+    pub async fn resolved(&self, known_pairing_ids: &[String]) -> Result<Vec<DiscoveredDevice>> {
         let peers = self
             .0
             .run_mobile_plugin_async::<ResolvedPeers>("resolved", ())
@@ -94,58 +92,34 @@ impl AndroidNetworkDiscovery {
         let now = copypaste_core::now_ms();
         Ok(peers
             .into_iter()
-            .filter_map(|peer| nsd_device(peer, now))
+            .filter_map(|peer| nsd_device(peer, now, known_pairing_ids))
+            .take(copypaste_p2p::discovery::MAX_PEERS)
             .collect())
     }
 }
 
-fn nsd_device(peer: ResolvedPeer, now_ms: i64) -> Option<DiscoveredDevice> {
+fn nsd_device(
+    peer: ResolvedPeer,
+    now_ms: i64,
+    known_pairing_ids: &[String],
+) -> Option<DiscoveredDevice> {
     if peer.port == 0 {
         return None;
     }
     let host: std::net::IpAddr = peer.host.parse().ok()?;
-    let addr = SocketAddr::new(host, peer.port);
-    let name = peer
-        .attributes
-        .get("n")
-        .cloned()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| peer.service_name.clone());
-    let pairing_ids = (0..16)
-        .filter_map(|index| peer.attributes.get(&format!("p{index}")).cloned())
-        .filter(|id| !id.is_empty())
-        .collect::<Vec<_>>();
-    let found = DiscoveredPeer {
-        discovery_id: format!("nsd:{}", peer.service_name),
-        pairing_ids,
-        name,
-        profile: Some(DeviceProfile {
-            app_version: peer.attributes.get("av").cloned(),
-            protocol_version: peer
-                .attributes
-                .get("pv")
-                .and_then(|value| value.parse().ok()),
-            platform: match peer.attributes.get("pf").map(String::as_str) {
-                Some("macos") => DevicePlatform::Macos,
-                Some("windows") => DevicePlatform::Windows,
-                Some("android") => DevicePlatform::Android,
-                _ => DevicePlatform::Unknown,
-            },
-            device_class: match peer.attributes.get("dc").map(String::as_str) {
-                Some("desktop") => DeviceClass::Desktop,
-                Some("laptop") => DeviceClass::Laptop,
-                Some("phone") => DeviceClass::Phone,
-                Some("tablet") => DeviceClass::Tablet,
-                _ => DeviceClass::Unknown,
-            },
-            os_name: peer.attributes.get("os").cloned(),
-            os_version: peer.attributes.get("ov").cloned(),
-            model: peer.attributes.get("m").cloned(),
-        }),
-        addr,
-        last_seen_ms: now_ms,
-    };
-    Some(p2p_contract::discovered_device(found, false))
+    let found = copypaste_p2p::discovery::peer_from_record(
+        &peer.service_name,
+        host,
+        peer.port,
+        &peer.attributes,
+        peer.last_seen_ms,
+    )?;
+    let paired = found
+        .pairing_ids
+        .iter()
+        .any(|id| known_pairing_ids.contains(id));
+    copypaste_p2p::discovery::is_peer_fresh(found.last_seen_ms, now_ms)
+        .then(|| p2p_contract::discovered_device(found, paired))
 }
 
 pub async fn enrich_discovered(
@@ -167,7 +141,7 @@ pub async fn enrich_discovered(
     if !discovery.advertise(advertise_name, pairing_ids).await {
         tracing::warn!("NSD advertise did not start");
     }
-    match discovery.resolved().await {
+    match discovery.resolved(pairing_ids).await {
         Ok(extra) => Ok(merge_discovered(devices, extra)),
         Err(error) if devices.is_empty() => Err(error),
         Err(error) => {

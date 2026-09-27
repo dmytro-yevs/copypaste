@@ -175,22 +175,6 @@ pub fn run() {
             app.manage(Supervisor::default());
             app.manage(shell::shortcut::ShortcutSettings::load(app.handle())?);
 
-            #[cfg(target_os = "android")]
-            {
-                let discovery = app
-                    .state::<network_discovery::AndroidNetworkDiscovery>()
-                    .inner()
-                    .clone();
-                tauri::async_runtime::spawn(async move {
-                    if !discovery.acquire().await {
-                        tracing::warn!("Android LAN discovery did not start browsing");
-                    }
-                    if !discovery.advertise("CopyPaste", &[]).await {
-                        tracing::warn!("Android LAN discovery did not start advertising");
-                    }
-                });
-            }
-
             #[cfg(not(target_os = "android"))]
             app.manage(capture::desktop::DesktopCapture::default());
 

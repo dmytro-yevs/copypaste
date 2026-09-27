@@ -83,11 +83,23 @@ pub(super) fn build_service_info(
     port: u16,
 ) -> Result<ServiceInfo, DiscoveryError> {
     let instance = sanitise_instance(instance).ok_or(DiscoveryError::InvalidDeviceName)?;
-    let display = sanitise_display_name(device_name).ok_or(DiscoveryError::InvalidDeviceName)?;
     let hostname = format!(
         "{}.local.",
         sanitise_host_label(device_name).unwrap_or_else(|| "copypaste".to_string())
     );
+
+    let txt = advertisement_attributes(device_name, pairing_ids)?;
+    let info = ServiceInfo::new(SERVICE_TYPE, &instance, &hostname, (), port, txt)?;
+    Ok(info.enable_addr_auto())
+}
+
+/// Encode the shared CopyPaste TXT schema for an mDNS transport that is not
+/// backed by `mdns-sd` (Android NSD).
+pub fn advertisement_attributes(
+    device_name: &str,
+    pairing_ids: &[String],
+) -> Result<HashMap<String, String>, DiscoveryError> {
+    let display = sanitise_display_name(device_name).ok_or(DiscoveryError::InvalidDeviceName)?;
 
     // Deduplicate, keeping the caller's order, then cap.
     let mut advertised: Vec<&String> = Vec::new();
@@ -118,11 +130,7 @@ pub(super) fn build_service_info(
         txt.insert(format!("{TXT_KEY_PAIRING_PREFIX}{i}"), (*id).clone());
     }
 
-    // Addresses are left to the daemon: `enable_addr_auto` keeps the A/AAAA
-    // records in step with the host as interfaces come and go, which a laptop
-    // moving between Wi-Fi and a dock does constantly.
-    let info = ServiceInfo::new(SERVICE_TYPE, &instance, &hostname, (), port, txt)?;
-    Ok(info.enable_addr_auto())
+    Ok(txt)
 }
 
 fn add_profile_properties(txt: &mut HashMap<String, String>, profile: &DeviceProfile) {
@@ -164,13 +172,17 @@ struct Advertisement {
 ///
 /// Everything here is attacker-controlled, so each field is length-bounded and
 /// character-checked before it can reach a log line or the peer table.
-fn parse_advertisement(txt: &TxtProperties, fallback_name: &str) -> Option<Advertisement> {
-    if txt.get_property_val_str(TXT_KEY_VERSION)? != TXT_VERSION {
+fn parse_advertisement(
+    txt: &HashMap<String, String>,
+    fallback_name: &str,
+) -> Option<Advertisement> {
+    if txt.get(TXT_KEY_VERSION)? != TXT_VERSION {
         return None;
     }
 
     let name = txt
-        .get_property_val_str(TXT_KEY_NAME)
+        .get(TXT_KEY_NAME)
+        .map(String::as_str)
         .and_then(sanitise_display_name)
         .or_else(|| sanitise_display_name(fallback_name))
         .unwrap_or_else(|| "unknown".to_string());
@@ -178,18 +190,17 @@ fn parse_advertisement(txt: &TxtProperties, fallback_name: &str) -> Option<Adver
     // Collect `p<n>` in index order so the result is deterministic regardless
     // of how the peer ordered its strings.
     let mut indexed: Vec<(usize, String)> = Vec::new();
-    for prop in txt.iter() {
-        let Some(index) = prop.key().strip_prefix(TXT_KEY_PAIRING_PREFIX) else {
+    for (key, value) in txt {
+        let Some(index) = key.strip_prefix(TXT_KEY_PAIRING_PREFIX) else {
             continue;
         };
         let Ok(index) = index.parse::<usize>() else {
             continue;
         };
-        let value = prop.val_str();
         if !is_valid_pairing_id(value) {
             continue;
         }
-        indexed.push((index, value.to_string()));
+        indexed.push((index, value.clone()));
     }
     indexed.sort_unstable();
 
@@ -210,17 +221,20 @@ fn parse_advertisement(txt: &TxtProperties, fallback_name: &str) -> Option<Adver
     })
 }
 
-fn parse_profile(txt: &TxtProperties) -> Option<DeviceProfile> {
+fn parse_profile(txt: &HashMap<String, String>) -> Option<DeviceProfile> {
     let app_version = profile_text(txt, TXT_KEY_APP_VERSION);
     let protocol_version = txt
-        .get_property_val_str(TXT_KEY_PROTOCOL_VERSION)
+        .get(TXT_KEY_PROTOCOL_VERSION)
+        .map(String::as_str)
         .and_then(|value| value.parse::<u32>().ok());
     let platform = txt
-        .get_property_val_str(TXT_KEY_PLATFORM)
+        .get(TXT_KEY_PLATFORM)
+        .map(String::as_str)
         .map(DevicePlatform::from_wire_name)
         .unwrap_or_default();
     let device_class = txt
-        .get_property_val_str(TXT_KEY_DEVICE_CLASS)
+        .get(TXT_KEY_DEVICE_CLASS)
+        .map(String::as_str)
         .map(DeviceClass::from_wire_name)
         .unwrap_or_default();
     let os_name = profile_text(txt, TXT_KEY_OS_NAME);
@@ -245,9 +259,35 @@ fn parse_profile(txt: &TxtProperties) -> Option<DeviceProfile> {
     })
 }
 
-fn profile_text(txt: &TxtProperties, key: &str) -> Option<String> {
-    txt.get_property_val_str(key)
-        .and_then(sanitise_display_name)
+fn profile_text(txt: &HashMap<String, String>, key: &str) -> Option<String> {
+    txt.get(key).and_then(|value| sanitise_display_name(value))
+}
+
+fn attributes_from_txt(txt: &TxtProperties) -> HashMap<String, String> {
+    txt.iter()
+        .map(|property| (property.key().to_string(), property.val_str().to_string()))
+        .collect()
+}
+
+/// Parse a resolved service whose TXT attributes came from a platform-native
+/// mDNS implementation. The same validation and discovery-id derivation apply
+/// to every transport.
+pub fn peer_from_record(
+    service_name: &str,
+    host: IpAddr,
+    port: u16,
+    attributes: &HashMap<String, String>,
+    last_seen_ms: i64,
+) -> Option<DiscoveredPeer> {
+    let advertisement = parse_advertisement(attributes, service_name)?;
+    (port != 0).then(|| DiscoveredPeer {
+        discovery_id: discovery_id(service_name),
+        pairing_ids: advertisement.pairing_ids,
+        name: advertisement.name,
+        profile: advertisement.profile,
+        addr: SocketAddr::new(host, port),
+        last_seen_ms,
+    })
 }
 
 /// A candidate device from one resolved mDNS service. This deliberately
@@ -257,23 +297,15 @@ pub(super) fn peer_from_resolved(
     resolved: &ResolvedService,
     now_ms: i64,
 ) -> Option<DiscoveredPeer> {
-    let advertisement = parse_advertisement(&resolved.txt_properties, &resolved.fullname)?;
-    if resolved.port == 0 {
-        return None;
-    }
-
     let addrs: Vec<IpAddr> = resolved.addresses.iter().map(|a| a.to_ip_addr()).collect();
     let ip = best_addr(&addrs)?;
-    let addr = SocketAddr::new(ip, resolved.port);
-
-    Some(DiscoveredPeer {
-        discovery_id: discovery_id(&resolved.fullname),
-        pairing_ids: advertisement.pairing_ids,
-        name: advertisement.name,
-        profile: advertisement.profile,
-        addr,
-        last_seen_ms: now_ms,
-    })
+    peer_from_record(
+        &resolved.fullname,
+        ip,
+        resolved.port,
+        &attributes_from_txt(&resolved.txt_properties),
+        now_ms,
+    )
 }
 
 /// Keeps the mDNS fullname (which is attacker-controlled and can be long) out
@@ -317,6 +349,10 @@ mod tests {
         out
     }
 
+    fn attrs(info: &ServiceInfo) -> HashMap<String, String> {
+        attributes_from_txt(info.get_properties())
+    }
+
     #[test]
     fn txt_round_trip() {
         let ids = vec![
@@ -327,8 +363,7 @@ mod tests {
         let info = build_service_info("Dmitriy's Laptop", "Dmitriy's Laptop", &ids, 47_654)
             .expect("valid advertisement");
 
-        let parsed =
-            parse_advertisement(info.get_properties(), "fallback").expect("record is ours");
+        let parsed = parse_advertisement(&attrs(&info), "fallback").expect("record is ours");
 
         assert_eq!(parsed.name, "Dmitriy's Laptop");
         assert_eq!(parsed.pairing_ids, ids);
@@ -345,7 +380,7 @@ mod tests {
         // What `republish` does after a conflict rename: instance differs from
         // the display name, but the display name still round-trips.
         let info = build_service_info("Laptop (2)", "Laptop", &ids, 47_654).unwrap();
-        let parsed = parse_advertisement(info.get_properties(), "fallback").unwrap();
+        let parsed = parse_advertisement(&attrs(&info), "fallback").unwrap();
         assert_eq!(parsed.name, "Laptop");
         assert_eq!(
             instance_of(info.get_fullname()).as_deref(),
@@ -358,12 +393,45 @@ mod tests {
         let mut txt = HashMap::new();
         txt.insert("p0".to_string(), "pair-one".to_string());
         let info = ServiceInfo::new(SERVICE_TYPE, "other", "other.local.", (), 1, txt).unwrap();
-        assert!(parse_advertisement(info.get_properties(), "other").is_none());
+        assert!(parse_advertisement(&attrs(&info), "other").is_none());
 
         let mut txt = HashMap::new();
         txt.insert("v".to_string(), "99".to_string());
         let info = ServiceInfo::new(SERVICE_TYPE, "future", "future.local.", (), 1, txt).unwrap();
-        assert!(parse_advertisement(info.get_properties(), "future").is_none());
+        assert!(parse_advertisement(&attrs(&info), "future").is_none());
+    }
+
+    #[test]
+    fn platform_records_use_the_canonical_parser() {
+        let ids = vec!["pair-one".to_string()];
+        let attributes = advertisement_attributes("Android", &ids).unwrap();
+        let peer = peer_from_record(
+            "phone._copypaste._tcp.local.",
+            "192.0.2.1".parse().unwrap(),
+            47_654,
+            &attributes,
+            10_000,
+        )
+        .expect("canonical record");
+
+        assert_eq!(peer.name, "Android");
+        assert_eq!(peer.pairing_ids, ids);
+        assert_eq!(peer.last_seen_ms, 10_000);
+        assert_eq!(
+            peer.profile.expect("current profile").platform,
+            DevicePlatform::current()
+        );
+
+        let mut invalid = attributes;
+        invalid.insert("v".into(), "99".into());
+        assert!(peer_from_record(
+            "phone._copypaste._tcp.local.",
+            "192.0.2.1".parse().unwrap(),
+            47_654,
+            &invalid,
+            10_000,
+        )
+        .is_none());
     }
 
     #[test]
@@ -378,7 +446,7 @@ mod tests {
         txt.insert("pnotanumber".to_string(), "sneaky".to_string());
         let info = ServiceInfo::new(SERVICE_TYPE, "evil", "evil.local.", (), 1, txt).unwrap();
 
-        let parsed = parse_advertisement(info.get_properties(), "fallback").unwrap();
+        let parsed = parse_advertisement(&attrs(&info), "fallback").unwrap();
         assert_eq!(parsed.name, "evil[31mname");
         assert_eq!(parsed.pairing_ids, vec!["ok-id".to_string()]);
     }
@@ -392,7 +460,7 @@ mod tests {
             txt.insert(format!("p{i}"), format!("id-{i}"));
         }
         let info = ServiceInfo::new(SERVICE_TYPE, "greedy", "greedy.local.", (), 1, txt).unwrap();
-        let parsed = parse_advertisement(info.get_properties(), "greedy").unwrap();
+        let parsed = parse_advertisement(&attrs(&info), "greedy").unwrap();
         assert_eq!(parsed.pairing_ids.len(), MAX_PAIRING_IDS_PER_PEER);
     }
 
@@ -403,7 +471,7 @@ mod tests {
             .collect();
         ids.push("id-0".to_string());
         let info = build_service_info("Laptop", "Laptop", &ids, 1).unwrap();
-        let parsed = parse_advertisement(info.get_properties(), "Laptop").unwrap();
+        let parsed = parse_advertisement(&attrs(&info), "Laptop").unwrap();
         assert_eq!(parsed.pairing_ids.len(), MAX_ADVERTISED_PAIRING_IDS);
         assert_eq!(parsed.pairing_ids[0], "id-0");
     }
