@@ -67,7 +67,6 @@ export function AppearanceTab({
       <SettingsGroupSurface>
         <SettingsRow
           title={t("settings.appearance.theme.title")}
-          help={t("settings.appearance.theme.override")}
         >
           <div
             role="group"

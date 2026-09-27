@@ -112,6 +112,16 @@
   padding-inline: var(--s-4);
 }
 
+.privacyFlow {
+  display: grid;
+  inline-size: min(100%, calc(var(--s-9) * 11));
+  gap: var(--s-4);
+}
+
+.privacyFlow :global([data-slot="surface"]) {
+  box-shadow: none;
+}
+
 .syncChoices {
   display: grid;
   gap: var(--s-2);
@@ -119,10 +129,13 @@
 }
 
 .syncChoice {
-  display: block;
+  display: grid;
   inline-size: 100%;
   min-block-size: var(--tap-min);
   padding: var(--s-3);
+  grid-template-columns: var(--s-6) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s-2);
   text-align: start;
 }
 

@@ -43,7 +43,6 @@ export function StorageHistorySettings() {
       <Section title={t("settings.storage.dangerSection")}>
         <SettingsRow
           title={t("settings.storage.clear.title")}
-          help={t("settings.storage.clear.description")}
         >
           <Button
             variant="secondary"

@@ -1,4 +1,5 @@
 .control {
-  inline-size: min(calc(var(--s-9) * 4), 50cqi);
+  inline-size: max-content;
+  max-inline-size: 100%;
   min-inline-size: 0;
 }

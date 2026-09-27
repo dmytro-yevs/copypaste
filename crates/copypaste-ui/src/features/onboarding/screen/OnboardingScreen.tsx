@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode,
 
 import { Screen } from "@/components/layout";
 import { BrandMark } from "@/components/shared/BrandMark";
-import { Button } from "@/components/ui";
+import { Button, Icon, type IconName } from "@/components/ui";
 import { CaptureSetupState } from "@/features/capture";
 import { PairingLauncherDialog } from "@/features/devices/patterns/PairingLauncherDialog";
 import { AndroidCaptureSetup } from "@/features/onboarding/patterns/AndroidCaptureSetup";
@@ -243,7 +243,7 @@ function PrivacyAndBasics() {
   const capabilities = settingsCapabilities(currentPlatform());
 
   return (
-    <div>
+    <div className={styles.privacyFlow}>
       <PrivacyDisplaySettings ready supportsScreenshots={capabilities.screenshots} />
       <ServiceSettingsProvider requiresPrivateMode>
         <PrivacyServiceSections />
@@ -318,11 +318,11 @@ function SyncSetup({
     <div>
       <div className={styles.syncChoices} role="radiogroup" aria-label={t("onboarding.sync.eyebrow")}>
         {([
-          ["lan", "onboarding.sync.lan", "onboarding.sync.lanDetail"],
-          ["cloud", "onboarding.sync.cloud", "onboarding.sync.cloudDetail"],
-          ["both", "onboarding.sync.both", "onboarding.sync.bothDetail"],
-          ["later", "onboarding.sync.later", "onboarding.sync.laterDetail"],
-        ] as const).map(([value, label, detail]) => (
+          ["lan", "devices", "onboarding.sync.lan", "onboarding.sync.lanDetail"],
+          ["cloud", "cloud", "onboarding.sync.cloud", "onboarding.sync.cloudDetail"],
+          ["both", "transfer", "onboarding.sync.both", "onboarding.sync.bothDetail"],
+          ["later", "more", "onboarding.sync.later", "onboarding.sync.laterDetail"],
+        ] as const).map(([value, icon, label, detail]) => (
           <Button
             key={value}
             type="button"
@@ -333,6 +333,7 @@ function SyncSetup({
             disabled={syncConfig.isPending}
             onClick={() => choose(value)}
           >
+            <Icon name={icon as IconName} size="sm" aria-hidden="true" />
             <span><strong>{t(label)}</strong><small>{t(detail)}</small></span>
           </Button>
         ))}

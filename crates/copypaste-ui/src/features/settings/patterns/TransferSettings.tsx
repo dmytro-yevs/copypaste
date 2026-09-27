@@ -35,7 +35,6 @@ export function TransferSettings() {
       <Section title={t("settings.transfer.transferSection")}>
         <SettingsRow
           title={t("settings.transfer.export.title")}
-          help={t("settings.transfer.export.description")}
           note={exportHistory.isError ? (
             <span id={exportFeedbackId}>
               <FieldFeedback state="error">History wasn’t exported.</FieldFeedback>
@@ -61,7 +60,6 @@ export function TransferSettings() {
 
         <SettingsRow
           title={t("settings.transfer.import.title")}
-          help={t("settings.transfer.import.description")}
           note={importHistory.prepare.isError || importHistory.apply.isError ? (
             <span id={importFeedbackId}>
               <FieldFeedback state="error">History wasn’t imported.</FieldFeedback>
