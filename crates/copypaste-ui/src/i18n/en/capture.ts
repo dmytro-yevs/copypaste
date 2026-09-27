@@ -5,6 +5,7 @@
  */
 export const capture = {
   title: "Background capture",
+  back: "Back to Library",
 
   loading: {
     title: "Checking…",
@@ -28,9 +29,9 @@ export const capture = {
 
   setup: {
     always: {
-      title: "Saving from this app",
-      body: "CopyPaste can read the clipboard whenever it is the app in front. This needs no permission and cannot lapse.",
-      action: "Save the clipboard now",
+      title: "Save current clipboard",
+      body: "Save a copy while CopyPaste is open.",
+      action: "Save now",
       saved: "Saved to your history",
       nothing: "There was nothing on the clipboard to save",
     },
@@ -60,7 +61,7 @@ export const capture = {
 
     enable: {
       title: "Capture from other apps",
-      body: "Turning this off leaves everything above running.",
+      body: "Save new copies automatically while using other apps.",
     },
 
     /** A copy that was taken and not stored is the failure this whole feature
@@ -72,12 +73,17 @@ export const capture = {
   },
 
   help: {
-    title: "Phone-only setup",
+    title: "Setup instructions",
+    summary: "Shizuku, permissions and battery settings",
     body:
-      "No PC or USB is required. On Android 11 or later, start Shizuku from this phone through Developer options and Wireless debugging, let it apply CopyPaste's setup grants once, and then return here. After setup, CopyPaste captures as itself and Shizuku can quit.",
+      "Install Shizuku, start it using Wireless debugging, then return to CopyPaste to allow background capture. Keep Shizuku running.",
     openShizuku: "Open Shizuku",
-    openDeveloperOptions: "Open Developer options",
-    requestBattery: "Allow unrestricted battery use",
+    openDeveloperOptions: "Developer options",
+    requestBattery: "Battery settings",
+  },
+
+  options: {
+    title: "Android clipboard notice",
   },
 
   toast: {
