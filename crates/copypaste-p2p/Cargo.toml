@@ -1,0 +1,56 @@
+[package]
+name = "copypaste-p2p"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+copypaste-clock = { path = "../copypaste-clock" }
+copypaste-fs = { path = "../copypaste-fs" }
+copypaste-ipc = { path = "../copypaste-ipc" }
+snow.workspace = true
+mdns-sd.workspace = true
+os_info.workspace = true
+data-encoding.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+serde.workspace = true
+# `raw_value` so a received sync message can be handed to `SyncMessage::decode`
+# verbatim: the bounds and the timestamp clamp live in that function, and
+# decoding straight into `SyncMessage` would skip both.
+serde_json = { workspace = true, features = ["raw_value"] }
+thiserror.workspace = true
+tracing.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+hex.workspace = true
+# The wire definition of content identity (protocol::content_hash).
+sha2.workspace = true
+uuid.workspace = true
+# Atomic peer-file writes, not just tests: the file holds PSKs.
+tempfile.workspace = true
+# Local interface addresses: where a pairing tells a peer to dial, and which
+# advertisements on the wire are this device's own. `getifaddrs(3)` behind a
+# maintained crate; covers every shipped platform (AGENTS.md rules 1 and 7).
+if-addrs = "0.15"
+
+[dev-dependencies]
+tempfile.workspace = true
+# The cursor-store warnings are the one place a path could reach a log, so the
+# test asserts on what is emitted rather than on a reading of the source.
+tracing-subscriber.workspace = true
+# `start_paused`, so the pairing commit deadline is asserted without a test
+# that really waits it out.
+tokio = { workspace = true, features = ["test-util"] }
+# Benchmark harness, configured exactly as `copypaste-core`'s is: no plotters,
+# no rayon, and the numbers land in `docs/rewrite/performance.md`.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+# `harness = false`: criterion parses its own arguments, and this keeps the
+# bench out of `cargo test`.
+[[bench]]
+name = "session"
+harness = false

@@ -1,0 +1,107 @@
+[package]
+name = "copypaste-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+copypaste-clock = { path = "../copypaste-clock" }
+copypaste-feedback = { path = "../copypaste-feedback" }
+copypaste-retry = { path = "../copypaste-retry" }
+copypaste-core = { path = "../copypaste-core" }
+copypaste-ipc = { path = "../copypaste-ipc" }
+copypaste-p2p = { path = "../copypaste-p2p" }
+copypaste-cloud = { path = "../copypaste-cloud" }
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+backon.workspace = true
+serde.workspace = true
+# `raw_value` so a received sync message can be handed to
+# `SyncMessage::decode` verbatim: the bounds and the timestamp clamp live in
+# that function, and re-deriving them here would be a second implementation of
+# the wire contract (AGENTS.md rule 1).
+serde_json = { workspace = true, features = ["raw_value"] }
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+copypaste-runtime-log = { path = "../copypaste-runtime-log" }
+clap.workspace = true
+uuid.workspace = true
+directories.workspace = true
+rusqlite.workspace = true
+hex.workspace = true
+zeroize.workspace = true
+# Local interface addresses for the `listen_addr` a freshly minted pairing
+# reports. `getifaddrs` behind a maintained crate rather than a hand-rolled
+# `SIOCGIFCONF` walk or a "connect a UDP socket and read its local end" trick;
+# works on every shipped platform (AGENTS.md rule 7).
+if-addrs = "0.15"
+base64.workspace = true
+url.workspace = true
+tempfile.workspace = true
+# Windows path parsing on every host: an exclusion entry and a process image
+# path are Windows paths whatever the machine is, and `std::path` would call an
+# entire `C:\…` string one file name off Windows — so the tests would pass while
+# the shipped behaviour did the opposite. One package, no transitive
+# dependencies. See ADR-0024.
+typed-path = "0.12"
+
+# flock(2) around the socket-bind critical section (CopyPaste-ah1m), and the
+# `*at` syscalls the file-drop staging directory is built from. A maintained
+# syscall wrapper rather than a raw libc call, and it is already in the tree.
+# Target-gated because `rustix::fs` is a POSIX surface with no Windows half.
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Windows clipboard. `arboard` is the cross-platform crate and is already in the
+# tree behind Tauri, but it exposes no sequence number, no arbitrary registered
+# format and no size-before-read — so polling it means reading the clipboard's
+# content every tick, which I-1 forbids and the do-not-record formats exist to
+# prevent. This is arboard's own Windows layer, one level down.
+clipboard-win = { version = "5.4", features = ["std"] }
+# Which process wrote the clipboard: `GetClipboardOwner` gives a window, and
+# these four calls turn it into a process image name. The crates that package
+# this (`active-win-pos-rs` and friends) also return the window title, which is
+# user content we deliberately never read. See ADR-0018.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# Windows puts screenshots on the clipboard as an uncompressed bitmap and the
+# rest of CopyPaste stores PNG. `bmp` is added here rather than on the workspace
+# line so macOS and Android builds carry neither the decoder nor the encoder.
+image = { workspace = true, features = ["bmp"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-app-kit.workspace = true
+security-framework.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+copypaste-cloud = { path = "../copypaste-cloud", features = ["test-endpoints"] }
+# The paste-file staging diagnostics are the one place a filename, a content id
+# or decrypted bytes could reach a log, so the tests assert on what is emitted
+# rather than on a reading of the source. Capturing that needs a subscriber.
+tracing-subscriber.workspace = true
+
+[features]
+# Demos and profiling only. Release and product builds pass no features.
+dev-ephemeral-key = ["copypaste-core/dev-ephemeral-key"]
+# Compile the watched-file clipboard source for isolated demos. It selects no
+# platform backend and is never enabled by product builds.
+dev-fake-clipboard = []
+# Only the macOS cloud-evidence sidecar may admit loopback plaintext.
+cloud-evidence = ["copypaste-cloud/test-endpoints"]
+
+# The pipe's access list. These maintained wrappers own token/SID querying,
+# SDDL memory and listener instance creation.
+[target.'cfg(windows)'.dependencies]
+interprocess.workspace = true
+widestring.workspace = true
+win-security-identifier.workspace = true

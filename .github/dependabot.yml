@@ -1,0 +1,10 @@
+# Security updates only. Version updates are deliberate lockfile changes, and
+# supply-chain.yml already runs cargo audit and cargo deny on pushes and weekly.
+# Security update pull requests remain enabled despite the zero version-PR cap.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0

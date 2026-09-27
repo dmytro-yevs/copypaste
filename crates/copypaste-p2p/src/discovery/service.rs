@@ -1,0 +1,543 @@
+//! The live half: the mDNS daemon, the advertisement's lifecycle, and the two
+//! background threads that keep the peer table current.
+//!
+//! Nothing here may fail loudly (see the module docs): [`Discovery::start`]
+//! returns a working handle even when the host forbids multicast — containers,
+//! guest Wi-Fi, a locked-down corporate network — and [`Discovery::peers`] then
+//! stays empty with the reason logged at debug. That degraded mode is the
+//! normal case in our own test environment, so the tests below exercise it.
+//!
+//! The two loops take an `IntoIterator` rather than the concrete mdns-sd
+//! receiver, so they can be driven from a plain `Vec` of events with no network
+//! and no daemon.
+
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::time::Duration;
+
+use mdns_sd::{DaemonEvent, ServiceDaemon, ServiceEvent};
+use tracing::debug;
+
+use super::names::{instance_of, sanitise_instance};
+use super::record::{build_service_info, peer_from_resolved};
+use super::table::{now_ms, DiscoveredPeer, PeerTable};
+use super::DiscoveryError;
+use crate::netif::{is_own_endpoint, LocalAddrs};
+use crate::SERVICE_TYPE;
+
+/// How long teardown waits for the mDNS daemon to acknowledge. Bounded so
+/// `shutdown` can never wedge the caller on a stuck daemon thread.
+const TEARDOWN_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Advertises this device and tracks the peers it hears from.
+///
+/// Cheap to keep around and safe to drop: dropping unregisters the
+/// advertisement and stops the background threads, same as [`Discovery::shutdown`].
+pub struct Discovery {
+    /// `None` once torn down, and also when the mDNS daemon could not be
+    /// created at all — the degraded mode described in the module docs.
+    daemon: Mutex<Option<ServiceDaemon>>,
+    shared: Arc<Shared>,
+    device_name: RwLock<String>,
+    port: u16,
+}
+
+/// State the background threads and the public API share.
+#[derive(Debug, Default)]
+struct Shared {
+    table: Mutex<PeerTable>,
+    /// Instance name and fullname we currently advertise, if registration went
+    /// through: needed to re-register on `republish`, unregister on teardown,
+    /// and filter our own advertisement out of browse results. mDNS resolves
+    /// name conflicts by renaming, so it is not necessarily what we asked for;
+    /// the monitor thread keeps it current.
+    registration: Mutex<Option<Registration>>,
+    /// The port this device listens on, and its own addresses — together, the
+    /// endpoint an advertisement of ours would resolve to. See [`is_own_endpoint`].
+    port: u16,
+    own_addrs: LocalAddrs,
+}
+
+impl Shared {
+    fn for_port(port: u16) -> Self {
+        Self {
+            port,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Registration {
+    instance: String,
+    fullname: String,
+}
+
+impl Discovery {
+    /// Start advertising this device and browsing for others.
+    ///
+    /// Returns `Err` only for input we refuse to put on the wire. Every network
+    /// failure — no multicast, no interfaces, no permission — yields `Ok` with
+    /// a handle whose [`peers`](Self::peers) stays empty, logged at debug.
+    pub fn start(
+        device_name: &str,
+        pairing_ids: &[String],
+        port: u16,
+    ) -> Result<Self, DiscoveryError> {
+        let this = Self::dormant(device_name, port)?;
+        this.publish(pairing_ids)?;
+        Ok(this)
+    }
+
+    pub fn dormant(device_name: &str, port: u16) -> Result<Self, DiscoveryError> {
+        sanitise_instance(device_name).ok_or(DiscoveryError::InvalidDeviceName)?;
+        Ok(Self {
+            daemon: Mutex::new(None),
+            shared: Arc::new(Shared::for_port(port)),
+            device_name: RwLock::new(device_name.to_string()),
+            port,
+        })
+    }
+
+    pub fn publish(&self, pairing_ids: &[String]) -> Result<(), DiscoveryError> {
+        let mut daemon = lock(&self.daemon);
+        if let Some(running) = daemon.as_ref() {
+            return self.readvertise(running, pairing_ids);
+        }
+        let device_name = self.device_name();
+        let port = self.port;
+        // Validate and encode before touching the network, so bad input is a
+        // clean error rather than a half-started daemon.
+        let info = build_service_info(&device_name, &device_name, pairing_ids, port)?;
+        let registration = Registration {
+            instance: sanitise_instance(&device_name).ok_or(DiscoveryError::InvalidDeviceName)?,
+            fullname: info.get_fullname().to_string(),
+        };
+
+        let shared = Arc::clone(&self.shared);
+
+        // `ServiceDaemon::new` only binds a loopback signalling socket; the
+        // multicast sockets are opened later on the daemon thread, so a host
+        // that forbids multicast fails through `DaemonEvent::Error` rather than
+        // here. Either way we degrade.
+        let started = match ServiceDaemon::new() {
+            Ok(started) => started,
+            Err(e) => {
+                debug!(reason = %e, "mdns daemon unavailable; discovery is disabled");
+                return Ok(());
+            }
+        };
+
+        match started.register(info) {
+            Ok(()) => *lock(&shared.registration) = Some(registration),
+            Err(e) => debug!(reason = %e, "mdns registration refused; not advertising"),
+        }
+
+        match started.browse(SERVICE_TYPE) {
+            Ok(events) => {
+                let shared = Arc::clone(&shared);
+                spawn("copypaste-mdns-browse", move || {
+                    browse_loop(&shared, events)
+                });
+            }
+            Err(e) => debug!(reason = %e, "mdns browse refused; peer list stays empty"),
+        }
+
+        match started.monitor() {
+            Ok(events) => {
+                let shared = Arc::clone(&shared);
+                spawn("copypaste-mdns-monitor", move || {
+                    monitor_loop(&shared, events);
+                });
+            }
+            Err(e) => debug!(reason = %e, "mdns monitor refused"),
+        }
+
+        daemon.replace(started);
+        Ok(())
+    }
+
+    pub fn stop(&self) {
+        self.teardown(&mut lock(&self.daemon));
+    }
+
+    pub fn set_device_name(&self, device_name: &str) -> Result<(), DiscoveryError> {
+        sanitise_instance(device_name).ok_or(DiscoveryError::InvalidDeviceName)?;
+        self.stop();
+        *self
+            .device_name
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = device_name.to_string();
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        lock(&self.daemon).is_some()
+    }
+
+    /// Currently-known peers, stale entries dropped.
+    ///
+    /// Never blocks on the network — it reads the table the browse thread fills.
+    pub fn peers(&self) -> Vec<DiscoveredPeer> {
+        lock(&self.shared.table).snapshot(now_ms())
+    }
+
+    /// Look up one by pairing id. If several addresses claim it, the most
+    /// recently seen wins.
+    pub fn find(&self, pairing_id: &str) -> Option<DiscoveredPeer> {
+        lock(&self.shared.table).find(pairing_id, now_ms())
+    }
+
+    /// Update the advertised pairing ids after a new pairing.
+    fn readvertise(
+        &self,
+        daemon: &ServiceDaemon,
+        pairing_ids: &[String],
+    ) -> Result<(), DiscoveryError> {
+        // Re-register under whatever instance name the daemon settled on, so a
+        // conflict-driven rename does not leave two advertisements behind.
+        let mut registration = lock(&self.shared.registration);
+        let instance = registration
+            .as_ref()
+            .map(|r| r.instance.clone())
+            .unwrap_or_else(|| self.device_name());
+
+        let device_name = self.device_name();
+        let mut info = build_service_info(&instance, &device_name, pairing_ids, self.port)?;
+        // The name is already ours; probing again would only conflict with our
+        // own records and rename us to "<name> (2)".
+        info.set_requires_probe(false);
+
+        let fullname = info.get_fullname().to_string();
+        daemon.register(info)?;
+        registration.replace(Registration { instance, fullname });
+        Ok(())
+    }
+
+    pub fn shutdown(self) {
+        self.stop();
+    }
+
+    fn teardown(&self, held: &mut Option<ServiceDaemon>) {
+        let Some(daemon) = held.take() else {
+            return;
+        };
+
+        if let Some(registration) = lock(&self.shared.registration).take() {
+            match daemon.unregister(&registration.fullname) {
+                // Bounded: a wedged daemon thread must not hold up the caller.
+                Ok(status) => drop(status.recv_timeout(TEARDOWN_TIMEOUT)),
+                Err(e) => debug!(reason = %e, "mdns unregister refused"),
+            }
+        }
+
+        match daemon.shutdown() {
+            Ok(status) => drop(status.recv_timeout(TEARDOWN_TIMEOUT)),
+            Err(e) => debug!(reason = %e, "mdns shutdown refused"),
+        }
+
+        // Dropping the daemon closes the browse and monitor channels, so both
+        // background threads fall out of their `recv` loops on their own.
+        lock(&self.shared.table).clear();
+    }
+
+    fn device_name(&self) -> String {
+        self.device_name
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
+impl Drop for Discovery {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+impl std::fmt::Debug for Discovery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Discovery")
+            .field("enabled", &self.is_running())
+            .field("port", &self.port)
+            .finish_non_exhaustive()
+    }
+}
+
+fn spawn(name: &str, body: impl FnOnce() + Send + 'static) {
+    if let Err(e) = std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(body)
+    {
+        // `io::Error` from thread spawning is a resource limit, not a path.
+        debug!(reason = %e, "could not spawn discovery thread; discovery is disabled");
+    }
+}
+
+/// Drains browse events until the daemon closes the channel.
+fn browse_loop(shared: &Shared, events: impl IntoIterator<Item = ServiceEvent>) {
+    for event in events {
+        match event {
+            ServiceEvent::ServiceResolved(resolved) => {
+                if is_self(shared, &resolved.fullname) {
+                    continue;
+                }
+                let now = now_ms();
+                let Some(peer) = peer_from_resolved(&resolved, now) else {
+                    continue;
+                };
+                if is_own_endpoint(&shared.own_addrs, shared.port, peer.addr, now) {
+                    continue;
+                }
+                lock(&shared.table).observe(&resolved.fullname, peer, now);
+            }
+            ServiceEvent::ServiceRemoved(_, fullname) => {
+                lock(&shared.table).remove_service(&fullname);
+            }
+            _ => {}
+        }
+    }
+    debug!("mdns browse channel closed; discovery is idle");
+}
+
+/// Logs daemon trouble at debug and keeps our advertised name current after a
+/// conflict-driven rename.
+fn monitor_loop(shared: &Shared, events: impl IntoIterator<Item = DaemonEvent>) {
+    for event in events {
+        match event {
+            // This is how "multicast is not permitted here" actually arrives.
+            DaemonEvent::Error(e) => debug!(reason = %e, "mdns daemon error; peers may be missed"),
+            DaemonEvent::NameChange(change) => {
+                let mut registration = lock(&shared.registration);
+                if let Some(current) = registration.as_mut() {
+                    if current.fullname == change.original {
+                        if let Some(instance) = instance_of(&change.new_name) {
+                            current.instance = instance;
+                            current.fullname = change.new_name;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn is_self(shared: &Shared, fullname: &str) -> bool {
+    lock(&shared.registration)
+        .as_ref()
+        .is_some_and(|r| r.fullname.eq_ignore_ascii_case(fullname))
+}
+
+/// A poisoned lock here means a background thread panicked while holding it.
+/// The peer table is a cache of hearsay, so recovering it is strictly better
+/// than propagating a panic into the daemon over a discovery convenience.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mdns_sd::{ResolvedService, ServiceInfo};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    /// A `ResolvedService` as the browse thread would receive one. Built from a
+    /// `ServiceInfo` because `ResolvedService` is `#[non_exhaustive]` — and it
+    /// keeps the test honest: the TXT record is the one our encoder produced.
+    fn resolved_from(instance: &str, ids: &[String], ip: &str, port: u16) -> ResolvedService {
+        let advertised = build_service_info(instance, instance, ids, port).unwrap();
+        let props: Vec<mdns_sd::TxtProperty> =
+            advertised.get_properties().iter().cloned().collect();
+        ServiceInfo::new(SERVICE_TYPE, instance, "laptop.local.", ip, port, props)
+            .unwrap()
+            .as_resolved_service()
+    }
+
+    // -- start / degraded mode ------------------------------------------------
+
+    /// The environment this runs in has no multicast. `start` must still hand
+    /// back a working handle, quickly, and every accessor must answer without
+    /// touching the network.
+    #[test]
+    fn start_degrades_without_multicast() {
+        let ids = vec!["pair-one".to_string()];
+        let discovery = Discovery::start("Test Device", &ids, crate::DEFAULT_PORT)
+            .expect("start must not fail when the network disallows multicast");
+
+        // No peer can have been resolved yet, with or without multicast.
+        assert!(discovery.peers().is_empty());
+        assert!(discovery.find("pair-one").is_none());
+        assert!(discovery.find("nobody").is_none());
+
+        // A new pairing must never fail because mDNS is unavailable.
+        discovery
+            .publish(&["pair-one".to_string(), "pair-two".to_string()])
+            .expect("republish must tolerate a degraded daemon");
+
+        discovery.shutdown();
+    }
+
+    #[test]
+    fn start_rejects_input_we_will_not_put_on_the_wire() {
+        assert!(matches!(
+            Discovery::start("   ", &[], crate::DEFAULT_PORT),
+            Err(DiscoveryError::InvalidDeviceName)
+        ));
+        assert!(matches!(
+            Discovery::start(
+                "Laptop",
+                &["not a valid id".to_string()],
+                crate::DEFAULT_PORT
+            ),
+            Err(DiscoveryError::InvalidPairingId)
+        ));
+    }
+
+    #[test]
+    fn renaming_a_discovery_handle_replaces_its_advertised_name() {
+        let discovery = Discovery::dormant("Old name", crate::DEFAULT_PORT).unwrap();
+        discovery.set_device_name("Kitchen Mac").unwrap();
+        assert_eq!(discovery.device_name(), "Kitchen Mac");
+        assert!(matches!(
+            discovery.set_device_name(" \n "),
+            Err(DiscoveryError::InvalidDeviceName)
+        ));
+        assert_eq!(discovery.device_name(), "Kitchen Mac");
+    }
+
+    // -- browse loop, driven from a Vec: no network, no daemon ----------------
+
+    #[test]
+    fn browse_loop_records_and_drops_services() {
+        let shared = Shared::default();
+        let ids = vec!["pair-one".to_string()];
+        let resolved = resolved_from("Laptop", &ids, "192.168.1.9", 47_654);
+        let fullname = resolved.fullname.clone();
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved))],
+        );
+
+        let found = lock(&shared.table).snapshot(now_ms());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].pairing_ids, ["pair-one"]);
+        assert_eq!(found[0].name, "Laptop");
+        assert_eq!(found[0].addr.port(), 47_654);
+        assert_eq!(
+            found[0].addr.ip(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 9))
+        );
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceRemoved(
+                SERVICE_TYPE.to_string(),
+                fullname,
+            )],
+        );
+        assert!(lock(&shared.table).snapshot(now_ms()).is_empty());
+    }
+
+    #[test]
+    fn browse_loop_keeps_a_fresh_device_without_any_pairings() {
+        let shared = Shared::default();
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved_from(
+                "New phone",
+                &[],
+                "192.168.1.9",
+                47_654,
+            )))],
+        );
+
+        let found = lock(&shared.table).snapshot(now_ms());
+        assert_eq!(found.len(), 1);
+        assert!(found[0].pairing_ids.is_empty());
+        assert_eq!(found[0].name, "New phone");
+    }
+
+    /// The case the fullname check misses: mDNS took our browse and refused our
+    /// registration, so there is no fullname to compare against — and the
+    /// record on the wire is still ours. Without this the sync timer dials this
+    /// device's own listener every round.
+    #[test]
+    fn our_own_advertisement_is_not_a_peer_even_with_no_registration_to_compare() {
+        let shared = Shared::for_port(47_654);
+        assert!(
+            lock(&shared.registration).is_none(),
+            "the fullname check must have nothing to work with"
+        );
+        let ids = vec!["pair-one".to_string()];
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved_from(
+                "Laptop",
+                &ids,
+                "127.0.0.1",
+                47_654,
+            )))],
+        );
+        assert!(lock(&shared.table).snapshot(now_ms()).is_empty());
+    }
+
+    /// A second daemon on this host binds a different port, so it is a peer.
+    /// That is the demo's whole arrangement and it must keep working.
+    #[test]
+    fn another_daemon_on_the_same_host_is_still_a_peer() {
+        let shared = Shared::for_port(47_701);
+        let ids = vec!["pair-one".to_string()];
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved_from(
+                "device-b",
+                &ids,
+                "127.0.0.1",
+                47_702,
+            )))],
+        );
+        let found = lock(&shared.table).snapshot(now_ms());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].addr.port(), 47_702);
+    }
+
+    /// The port alone is not the test: every device on a LAN uses the default.
+    #[test]
+    fn a_device_elsewhere_on_the_same_port_is_a_peer() {
+        let shared = Shared::for_port(47_654);
+        let ids = vec!["pair-one".to_string()];
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved_from(
+                "Elsewhere",
+                &ids,
+                // TEST-NET-1: never one of this host's own addresses.
+                "192.0.2.7",
+                47_654,
+            )))],
+        );
+        assert_eq!(lock(&shared.table).snapshot(now_ms()).len(), 1);
+    }
+
+    #[test]
+    fn our_own_advertisement_is_not_a_peer() {
+        let shared = Shared::default();
+        let ids = vec!["pair-one".to_string()];
+        let resolved = resolved_from("Laptop", &ids, "192.168.1.9", 47_654);
+        *lock(&shared.registration) = Some(Registration {
+            instance: "Laptop".to_string(),
+            fullname: resolved.fullname.clone(),
+        });
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved))],
+        );
+        assert!(lock(&shared.table).snapshot(now_ms()).is_empty());
+    }
+}

@@ -1,0 +1,274 @@
+//! This host's own network addresses.
+//!
+//! Two questions, one answer source: where should a peer dial this device, and
+//! is that address on the wire in fact ours? `getifaddrs(3)` behind a
+//! maintained crate rather than a `SIOCGIFCONF` walk or the "connect a UDP
+//! socket and read its local end" trick; the crate-backed enumeration works on
+//! all three shipped platforms (AGENTS.md rule 7).
+
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Mutex;
+use std::time::Duration;
+
+/// How long an enumeration is reused. A laptop moving between Wi-Fi and a dock
+/// changes its addresses in seconds, and this is only used to *discard*
+/// candidates, so a stale entry costs one refused advertisement.
+const CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// Every address this host currently holds, loopback included.
+///
+/// Loopback is deliberately kept: two daemons on one host talk over it, and
+/// telling our own advertisement apart from theirs is exactly what
+/// [`is_local`] is for.
+#[must_use]
+pub fn local_ips() -> Vec<IpAddr> {
+    match if_addrs::get_if_addrs() {
+        Ok(addrs) => addrs.iter().map(if_addrs::Interface::ip).collect(),
+        Err(e) => {
+            // Never fatal: without the list nothing is treated as local, which
+            // is the same behaviour as before this check existed.
+            tracing::debug!(reason = %e, "could not enumerate local interfaces");
+            Vec::new()
+        }
+    }
+}
+
+/// Where a peer on another device should dial this host, when that can be
+/// determined.
+///
+/// Loopback is skipped: a peer elsewhere cannot use it. When the host has no
+/// routable address the answer is `None` rather than a guess — the user is told
+/// to supply the address themselves.
+#[must_use]
+pub fn routable_ip() -> Option<IpAddr> {
+    local_ips()
+        .into_iter()
+        .filter(is_peer_reachable)
+        // IPv4 first: it is what a user can read out over the phone.
+        .min_by_key(|ip| u8::from(ip.is_ipv6()))
+}
+
+/// Is this a dial target worth storing against a peer?
+///
+/// A peer's `listen_addr` is a claim, and storing it *replaces* the address
+/// that worked. Authentication says who is speaking, not that what they said
+/// is a socket: `0.0.0.0`, port 0, a link-local address without its scope,
+/// broadcast and multicast are all storable and none of them dials the peer —
+/// the last two aim this device at the network instead.
+///
+/// Loopback is **kept**, unlike in [`routable_ip`]. There it is excluded
+/// because a peer elsewhere cannot use ours; here two daemons on one host is a
+/// supported topology and `127.0.0.1` is the address they exchange.
+#[must_use]
+pub fn is_dialable(addr: &std::net::SocketAddr) -> bool {
+    if addr.port() == 0 {
+        return false;
+    }
+    // Normalise IPv4-mapped IPv6 so the v4 checks apply (N2).
+    let ip = to_canonical(addr.ip());
+    match ip {
+        IpAddr::V4(ip) => {
+            !ip.is_unspecified() && !ip.is_broadcast() && !ip.is_link_local() && !ip.is_multicast()
+        }
+        IpAddr::V6(ip) => !ip.is_unspecified() && !ip.is_unicast_link_local() && !ip.is_multicast(),
+    }
+}
+
+fn is_peer_reachable(ip: &IpAddr) -> bool {
+    let ip = to_canonical(*ip);
+    match ip {
+        IpAddr::V4(ip) => {
+            !ip.is_loopback()
+                && !ip.is_unspecified()
+                && !ip.is_broadcast()
+                && !ip.is_link_local()
+                && !ip.is_multicast()
+        }
+        IpAddr::V6(ip) => {
+            !ip.is_loopback()
+                && !ip.is_unspecified()
+                && !ip.is_unicast_link_local()
+                && !ip.is_multicast()
+        }
+    }
+}
+
+/// Map `::ffff:a.b.c.d` to its IPv4 equivalent so classification uses
+/// the richer IPv4 checks (broadcast, link-local, etc.).
+fn to_canonical(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        other => other,
+    }
+}
+
+/// A cached "is this address one of ours".
+#[derive(Debug, Default)]
+pub struct LocalAddrs {
+    cached: Mutex<Option<(i64, Vec<IpAddr>)>>,
+}
+
+impl LocalAddrs {
+    /// Whether `ip` belongs to this host, re-enumerating at most every
+    /// [`CACHE_TTL`].
+    pub fn is_local(&self, ip: IpAddr, now_ms: i64) -> bool {
+        let ip = to_canonical(ip);
+        let mut cached = match self.cached.lock() {
+            Ok(guard) => guard,
+            // A cache, not a decision: a poisoned lock must not propagate a
+            // panic into a discovery convenience.
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let fresh = cached.as_ref().is_some_and(|(taken_at, _)| {
+            now_ms.saturating_sub(*taken_at) < CACHE_TTL.as_millis() as i64
+        });
+        if !fresh {
+            *cached = Some((now_ms, local_ips()));
+        }
+        cached.as_ref().is_some_and(|(_, ips)| {
+            ips.iter()
+                .copied()
+                .map(to_canonical)
+                .any(|local| local == ip)
+        })
+    }
+}
+
+/// Whether a resolved address points at this host's listener.
+///
+/// A local address alone is not enough: separate CopyPaste instances on one
+/// host use different ports and must remain discoverable as peers. Conversely,
+/// every device uses the configured port, so the address must also be local.
+/// The cached address matcher normalises IPv4-mapped IPv6 before comparing.
+#[must_use]
+pub fn is_own_endpoint(
+    local_addrs: &LocalAddrs,
+    configured_port: u16,
+    addr: SocketAddr,
+    now_ms: i64,
+) -> bool {
+    addr.port() == configured_port && local_addrs.is_local(addr.ip(), now_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    fn cached_addrs(ips: Vec<IpAddr>) -> LocalAddrs {
+        LocalAddrs {
+            cached: Mutex::new(Some((0, ips))),
+        }
+    }
+
+    /// Every host has loopback, including this container.
+    #[test]
+    fn loopback_is_local_and_a_lan_address_is_not() {
+        let addrs = LocalAddrs::default();
+        let now = crate::now_ms();
+        assert!(addrs.is_local(IpAddr::V4(Ipv4Addr::LOCALHOST), now));
+        // 192.0.2.0/24 is TEST-NET-1: reserved for documentation, never routed.
+        assert!(!addrs.is_local(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), now));
+    }
+
+    #[test]
+    fn a_routable_address_is_never_loopback() {
+        if let Some(ip) = routable_ip() {
+            assert!(!ip.is_loopback(), "{ip}");
+        }
+    }
+
+    #[test]
+    fn local_only_addresses_are_never_advertised_for_pairing() {
+        for ip in [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1)),
+            IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)),
+            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+            IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            IpAddr::V6("fe80::1".parse().unwrap()),
+        ] {
+            assert!(!is_peer_reachable(&ip), "{ip}");
+        }
+    }
+
+    /// An IPv4-mapped IPv6 address must be classified by its IPv4 rules (N2).
+    #[test]
+    fn ipv4_mapped_ipv6_is_classified_as_ipv4() {
+        use std::net::{Ipv6Addr, SocketAddr};
+        let mapped_broadcast: IpAddr =
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff));
+        let mapped_link_local: IpAddr =
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xa9fe, 0x0101));
+        let mapped_routable: IpAddr =
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101));
+
+        assert!(
+            !is_dialable(&SocketAddr::new(mapped_broadcast, 9000)),
+            "mapped broadcast"
+        );
+        assert!(
+            !is_dialable(&SocketAddr::new(mapped_link_local, 9000)),
+            "mapped link-local"
+        );
+        assert!(
+            is_dialable(&SocketAddr::new(mapped_routable, 9000)),
+            "mapped routable"
+        );
+        assert!(
+            !is_peer_reachable(&mapped_link_local),
+            "mapped link-local reachable"
+        );
+        assert!(
+            is_peer_reachable(&mapped_routable),
+            "mapped routable reachable"
+        );
+    }
+
+    #[test]
+    fn own_endpoint_matches_canonical_local_address_and_configured_port() {
+        let v4 = Ipv4Addr::new(192, 0, 2, 10);
+        let v6 = "2001:db8::10".parse::<Ipv6Addr>().unwrap();
+        let mapped_v4 = Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc000, 0x020a);
+        let local = cached_addrs(vec![IpAddr::V4(v4), IpAddr::V6(v6)]);
+        let port = 47_654;
+
+        assert!(is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V4(v4), port),
+            1
+        ));
+        assert!(is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V6(v6), port),
+            1
+        ));
+        assert!(is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V6(mapped_v4), port),
+            1
+        ));
+        assert!(!is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V4(v4), port + 1),
+            1
+        ));
+        assert!(!is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)), port),
+            1
+        ));
+        assert!(!is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V6("2001:db8::11".parse().unwrap()), port),
+            1
+        ));
+    }
+}

@@ -1,0 +1,166 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/copypaste-clock",
+    "crates/copypaste-feedback",
+    "crates/copypaste-retry",
+    "crates/copypaste-fs",
+    "tools/sensitive-rules",
+    "crates/copypaste-ipc",
+    "crates/copypaste-runtime-log",
+    "crates/copypaste-core",
+    "crates/copypaste-p2p",
+    "crates/copypaste-cloud",
+    "crates/copypaste-daemon",
+    "crates/copypaste-cli",
+    "crates/copypaste-ui/src-tauri",
+]
+
+[workspace.package]
+version = "2.0.0-alpha.37"
+edition = "2021"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dmytro-yevs/copypaste"
+
+[workspace.metadata.copypaste]
+android-release-application-id = "com.copypaste.app"
+android-debug-application-id-suffix = ".debug"
+android-release-certificate-sha256 = "a30ecf2ffd22fe36e781ac1e399c709e94392119a7437069364b9bd4ada22355"
+
+# Library-first (AGENTS.md rule 1). Every entry here avoids another local
+# implementation of an established primitive.
+[workspace.dependencies]
+# crypto
+chacha20poly1305 = { version = "0.10", features = ["stream"] }
+hkdf = "0.12"
+hmac = "0.12"
+# `asm` is enabled for aarch64 alone, in copypaste-core; this table has no
+# per-target form and the feature builds on neither windows-msvc nor 32-bit x86.
+sha2 = "0.10"
+rand = "0.8"
+zeroize = { version = "1.7", features = ["derive"] }
+subtle = "2.5"
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "backup"] }
+r2d2 = "0.8"
+r2d2_sqlite = { version = "0.25", default-features = false, features = ["bundled-sqlcipher"] }
+# serde
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+# Checked-in TypeScript bindings are generated explicitly; ordinary builds do
+# not run the generator. Exact because generated output is version-sensitive.
+ts-rs = { version = "=12.0.1", default-features = false, features = ["serde-compat"] }
+# async
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures-util = "0.3"
+# Windows named pipes, including listener instance replacement and owned
+# security descriptors. Target-gated at each consumer.
+interprocess = { version = "2.4", features = ["tokio"] }
+widestring = "1"
+win-security-identifier = "0.2"
+# retry/backoff — one implementation. `backon`, not `backoff`:
+# backoff 0.4 is unmaintained (RUSTSEC-2025-0012, which names this as the
+# replacement) and pulled unmaintained `instant` in with it (RUSTSEC-2024-0384).
+backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }
+# P2P secure channel. Noise (NNpsk0) gives a mutually-authenticated, forward-
+# secret channel from the pairing PSK alone: no TLS stack, certificate
+# lifecycle, pinning verifier, or DER parser.
+snow = "0.10"
+# mDNS-SD discovery. Convenience only — an explicit address always works.
+mdns-sd = "0.20"
+os_info = { version = "3.15", default-features = false }
+# base32 for the pairing code (case-insensitive, no ambiguous glyphs)
+data-encoding = "2"
+# Cloud sync (Supabase). rustls rather than native-tls so no OpenSSL C build
+# enters the tree.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+# Passphrase -> sync key. The server must never be able to derive it.
+argon2 = "0.5"
+base64 = "0.22"
+# Image previews use image-rs rather than asking a WebView to decode an
+# unbounded clipboard payload. PNG and TIFF are the formats our capture ports
+# store on macOS and Android.
+image = { version = "0.25.10", default-features = false, features = ["png", "tiff"] }
+url = "2"
+# errors, logging, cli, misc
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2.5"
+clap = { version = "4", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+unicode-segmentation = "1"
+hex = "0.4"
+regex = "1.10"
+unicode-normalization = "0.1"
+iban_validate = "=5.0.1"
+# Card brand ranges + per-brand length + Luhn. A Luhn-valid 13-19 digit run is
+# not a card: an ISBN, an order id and a column of amounts all pass the checksum
+# about one time in ten (DMY-162). The brand table is the part nobody should
+# maintain by hand.
+#
+# Low-churn, not actively maintained: 2.4.0 is from 2024-03-30 and the newest
+# commit as of 2026-08-14 is a 2025-01-06 CI bump. Kept anyway — issuer ranges
+# change on the scale of years, the alternative is the hand-rolled brand table
+# rule 1 exists to prevent, and it is pure Rust, MIT, no platform code, adding
+# only `lazy_static` and `regex`. A stale range now costs searchability rather
+# than data: a validated card is classified, never wiped (manifest 07 §3.3).
+card-validate = "2.4"
+directories = "5"
+# Scope guards. `guard_on_success` is the unwind policy the retention batch
+# needs — running SQLite in a destructor while a panic unwinds can abort the
+# process — and `into_inner` is how a caller retires one without firing it.
+scopeguard = "1.2"
+# flock(2) for the socket-bind critical section (CopyPaste-ah1m). rustix rather
+# than a libc call: it is already in the tree, is maintained, and covers macOS
+# and Android.
+rustix = { version = "1", features = ["fs"] }
+tempfile = "3"
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
+comfy-table = "7"
+# macOS clipboard (no crate exposes changeCount + org.nspasteboard.* markers)
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSArray"] }
+objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "NSImage"] }
+security-framework = "3.7"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.release.build-override]
+strip = false
+
+# Evidence builds, which test behaviour rather than performance. Trades the
+# runtime speed and size that `codegen-units = 1` and thin LTO buy for the
+# codegen parallelism they forbid. Never use it for an artifact a user installs.
+[profile.evidence]
+inherits = "release"
+lto = false
+codegen-units = 16
+
+[profile.dev]
+# `target/debug` reached 22 GB and filled the disk twice in one session. Full
+# debug info is most of that; line tables keep backtraces useful.
+#
+# This bounds artifact size, not artifact count, and the two were confused
+# here. `-Cmetadata` ignores source text, so a code revision overwrites in
+# place — six measured revisions moved the tree 141 bytes. Cargo retains a
+# generation per *configuration* instead, and collects none of them: see
+# ADR-0026 and `scripts/target-budget.py`.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
+# GHSA-wrw7-89jp-8q8g / RUSTSEC-2024-0429. Tauri 2.11 still pulls GTK3 glib
+# ^0.18; this path crate is 0.18.5 with the VariantStrIter `&mut p` fix.
+[patch.crates-io]
+glib = { path = "vendor/glib" }

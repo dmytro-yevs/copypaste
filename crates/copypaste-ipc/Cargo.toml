@@ -1,0 +1,36 @@
+[package]
+name = "copypaste-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# The one model of the wire contract; no unimported DTO mirror or
+# CLI never imported, a duplicate in the daemon, and untyped Value poking in the
+# CLI. Both the daemon and the CLI depend on this crate and on nothing else for
+# wire types.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+directories.workspace = true
+unicode-segmentation.workspace = true
+ts-rs = { workspace = true, optional = true }
+# `transport` only: the endpoint type every consumer of this crate already
+# frames over, so that "what a local IPC connection is" has one definition
+# rather than one per crate.
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[features]
+typescript = ["dep:ts-rs"]
+
+# The Windows endpoint. `interprocess` owns connection waiting, listener
+# instance replacement and the Tokio stream adapter; the digest keeps a path
+# and username out of the machine-global pipe name.
+[target.'cfg(windows)'.dependencies]
+interprocess.workspace = true
+sha2.workspace = true
+hex.workspace = true

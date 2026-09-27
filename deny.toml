@@ -1,0 +1,120 @@
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-linux-android" },
+]
+
+[advisories]
+db-path = "~/.cargo/cargo-deny-advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+version = 2
+ignore = [
+    # proc-macro-error 1.0.4 unmaintained.
+    # Transitive via tray-icon -> muda/libappindicator -> gtk -> glib-macros/gtk3-macros.
+    # No safe upgrade upstream. Revisit when tray-icon migrates off gtk3.
+    "RUSTSEC-2024-0370",
+    # gtk-rs GTK3 bindings unmaintained (atk, gdk, gdk-pixbuf, gdk-sys, gio,
+    # gtk, gtk-sys, pango). Transitive via tray-icon -> libappindicator -> gtk.
+    # No safe upgrade upstream until tray-icon migrates off gtk3.
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0420",
+    # More gtk-rs GTK3 X11/Wayland backend bindings unmaintained (same tray-icon ->
+    # libappindicator -> gtk chain; Linux UI only, not built on macOS/Android).
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    # unic-* unmaintained (char-range/common/char-property/ucd-version/ucd-ident).
+    # Transitive via urlpattern -> tauri-utils -> copypaste-ui (UI build only).
+    # No safe upgrade upstream; not on the core crypto/IPC path.
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+    # REMOVED 2026-07-30, with the same reasoning the note below records:
+    #   RUSTSEC-2025-0012 (backoff) — swapped for `backon`, the replacement the
+    #                                 advisory names; no longer in Cargo.lock
+    #   RUSTSEC-2024-0384 (instant) — came in with backoff 0.4 and left with it
+    #   RUSTSEC-2024-0436 (paste)   — `paste` is no longer in Cargo.lock
+    #   RUSTSEC-2025-0141 (bincode) — `bincode` is no longer in Cargo.lock
+    # An ignore that matches no advisory is itself a failure — cargo-deny
+    # reports `advisory-not-detected` — so an entry outlives its crate by
+    # exactly one commit. Re-add with a fresh justification if a dependency
+    # bump reintroduces any of them.
+    #
+    # RUSTSEC-2024-0429 is absent here because cargo-deny v2 does not raise
+    # `unsound` advisories. scripts/check_rustsec_policy.py gates it separately
+    # with the owner and expiry in config/rustsec-exceptions.json (ADR-0021).
+]
+
+[licenses]
+version = 2
+# cargo-deny 0.14+ removed `deny`, `copyleft`, `allow-osi-fsf-free`, `default`
+# (see EmbarkStudios/cargo-deny#611). Anything not in `allow` is implicitly
+# denied — including GPL-2.0 / GPL-3.0 / AGPL-3.0.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "BSL-1.0",                # Boost Software License — clipboard-win
+    "CC0-1.0",                # public-domain dedication used by a few transitives
+    "CDLA-Permissive-2.0",    # webpki-roots (transitive via reqwest/hyper-rustls in copypaste-supabase)
+]
+confidence-threshold = 0.8
+
+
+[bans]
+# Duplicate detection. "warn" rather than "deny": in a tree with Tauri in it,
+# some duplication is imposed by upstream and a hard gate would be permanently
+# red. The value is the report — AGENTS.md rule 1 is a rule about duplication,
+# and `--show-stats` in the CI job prints the count so it is visible whether it
+# is trending up or down.
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+
+# AGENTS.md's third dependency exemption is "it would pull a second crypto or
+# TLS stack into the tree", and Cargo.toml states the intent directly: reqwest
+# and tokio-tungstenite are configured for rustls "so no OpenSSL C build enters
+# the tree". This is what stops a future `default-features = true` somewhere
+# from quietly undoing it.
+#
+# openssl-sys is scoped rather than banned outright. SQLCipher's only portable
+# crypto backend is OpenSSL; neither the Android NDK sysroot nor a Windows host
+# ships a libcrypto to link against, so libsqlite3-sys vendors one for those
+# targets alone — ADR-0007. `wrappers` keeps that the only way it may appear:
+# native-tls, or a reqwest that lost its rustls features, still fails this
+# check. macOS is unaffected and stays on CommonCrypto, so no darwin target in
+# [graph] resolves openssl-sys at all.
+#
+# [graph] does NOT yet list a windows triple, so the Windows dependency graph
+# is unaudited by this file. Adding one is a decision for the ADR that makes
+# Windows a shipping platform, not a side effect of getting it to compile.
+#
+# This is the cheap half of rule 1: a stated invariant that a machine checks.
+deny = [
+    { name = "openssl", reason = "second TLS stack; the workspace is rustls-only (AGENTS.md rule 1, exemption 3)" },
+    { name = "openssl-sys", wrappers = ["libsqlite3-sys"], reason = "C OpenSSL build; permitted only as SQLCipher's Android crypto backend (ADR-0007)" },
+    { name = "native-tls", reason = "delegates to the platform/OpenSSL TLS stack; use rustls" },
+]
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

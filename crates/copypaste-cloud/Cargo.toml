@@ -1,0 +1,54 @@
+[package]
+name = "copypaste-cloud"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# Plaintext is only for loopback test servers. Shipped callers do not enable it.
+test-endpoints = []
+
+[[test]]
+name = "real_supabase"
+required-features = ["test-endpoints"]
+
+# Supabase owns auth, Postgres, Realtime and RLS; this crate owns encrypted rows,
+# signatures, polling and merge policy.
+[dependencies]
+copypaste-clock = { path = "../copypaste-clock" }
+copypaste-core = { path = "../copypaste-core" }
+# The content-type predicates that decide text from binary. One vocabulary for
+# the wire and for the store; a second copy here is how "is this text" comes to
+# mean two things on the two sides of the encryption boundary.
+copypaste-ipc = { path = "../copypaste-ipc" }
+reqwest.workspace = true
+tokio-tungstenite.workspace = true
+tokio.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
+futures-util = { workspace = true, features = ["sink"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+backon.workspace = true
+argon2.workspace = true
+base64.workspace = true
+chacha20poly1305.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+hex.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+# Test-only, and deliberately not a real dependency: `tests/constant_parity.rs`
+# is the only thing that reads it, so the skew ceiling the two transports share
+# cannot drift without a build failure, and no shipped binary gains an edge.
+copypaste-p2p = { path = "../copypaste-p2p" }
+tempfile.workspace = true
+# `start_paused` for deterministic retry tests without real sleeping.
+tokio = { workspace = true, features = ["test-util"] }
+wiremock = "=0.6.5"

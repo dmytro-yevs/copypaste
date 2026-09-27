@@ -1,0 +1,12 @@
+# Pin the workspace to stable Rust.
+#
+# Rationale (2026-05-23): we ship binaries through Homebrew Cask only — there is
+# no downstream-library MSRV obligation. Chasing transitive-dep MSRV bumps with
+# floor pins (1.75 → 1.85 → 1.86 → 1.88 → 1.89 over a few weeks) became a
+# whack-a-mole. Tracking `stable` makes the floor whatever Cargo.lock already
+# resolves to, and dev environments + CI agree by construction (rustup reads
+# this file automatically).
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
