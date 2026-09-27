@@ -448,23 +448,45 @@ async function tapWhere(
               )),
               dialogState: state === "open" || state === "closed" ? state : null,
               inspectorPresent: Boolean(dialog?.querySelector("aside")),
+              imeVisible: document.documentElement.hasAttribute("data-ime"),
               viewport: {
                 innerWidth,
                 innerHeight,
+                devicePixelRatio: window.devicePixelRatio,
                 visualWidth: window.visualViewport?.width ?? null,
                 visualHeight: window.visualViewport?.height ?? null,
+                visualScale: window.visualViewport?.scale ?? null,
+                visualPageLeft: window.visualViewport?.pageLeft ?? null,
+                visualPageTop: window.visualViewport?.pageTop ?? null,
                 visualOffsetLeft: window.visualViewport?.offsetLeft ?? null,
                 visualOffsetTop: window.visualViewport?.offsetTop ?? null,
                 documentScrollTop: document.documentElement.scrollTop,
               },
             };
           };
-          const events: Array<{ phase: string; target: ReturnType<typeof describe>; intended: boolean }> = [];
+          const events: Array<{
+            phase: string;
+            target: ReturnType<typeof describe>;
+            targetBox: ReturnType<typeof box>;
+            client: { x: number; y: number } | null;
+            hit: ReturnType<typeof describe>;
+            visualScale: number | null;
+            visualPageTop: number | null;
+            imeVisible: boolean;
+            intended: boolean;
+          }> = [];
           const listener = (event: Event) => {
             if (events.length < 8) {
+              const pointer = event instanceof MouseEvent ? event : null;
               events.push({
                 phase: event.type,
                 target: describe(event.target),
+                targetBox: box(event.target instanceof Element ? event.target : null),
+                client: pointer ? { x: pointer.clientX, y: pointer.clientY } : null,
+                hit: describe(pointer ? document.elementFromPoint(pointer.clientX, pointer.clientY) : null),
+                visualScale: window.visualViewport?.scale ?? null,
+                visualPageTop: window.visualViewport?.pageTop ?? null,
+                imeVisible: document.documentElement.hasAttribute("data-ime"),
                 intended: event.target instanceof Node && target.contains(event.target),
               });
             }
@@ -661,10 +683,11 @@ export async function filterHistoryTo(
   await scrollListToTop(app);
 }
 
-/** Start the history view with a new query cache after seeding through the bridge. */
+/** Start a fresh history query; a caller filtering next can retain open search. */
 export async function reloadHistoryWith(
   app: AndroidApp,
   expectedText: string,
+  options: { search?: "open" | "closed" } = {},
 ): Promise<void> {
   await app.withPage(async (page) => {
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -675,7 +698,7 @@ export async function reloadHistoryWith(
     60_000,
   );
   await gotoView(app, "Library");
-  await resetHistoryFilters(app);
+  await resetHistoryFilters(app, options);
   await scrollListToTop(app);
   await waitFor(
     async () => (await visibleText(app)).includes(expectedText),
