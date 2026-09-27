@@ -42,6 +42,10 @@
   background: transparent;
 }
 .item[data-layout="dock"] > [data-slot="button-content"] { display: contents; }
+.item[data-layout="dock"] svg {
+  inline-size: var(--s-6);
+  block-size: var(--s-6);
+}
 .item[data-layout="dock"] > [data-slot="button-content"] > span:last-child {
   font-size: calc(var(--fs-xs) - var(--stroke-2));
   font-weight: var(--fw-semibold);
