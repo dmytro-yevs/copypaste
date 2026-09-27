@@ -1,4 +1,4 @@
-//! The sentences the user reads.
+//! Capture status labels and their explanatory details.
 //!
 //! Separated from the state machine because they change for different reasons
 //! and by different hands: `model` decides which state the device is in, this
@@ -6,8 +6,8 @@
 //! either file inside the rule 5 budget.
 //!
 //! Every string here is shown verbatim — `CaptureSnapshot::headline` is not a
-//! code the view translates — so each is a complete sentence, names no
-//! filesystem path (AGENTS.md rule 4), and points only at a working recovery
+//! code the view translates. Short labels name the state; details explain
+//! recovery without filesystem paths (AGENTS.md rule 4) and point at a working
 //! action. AccessibilityService is not a clipboard exemption.
 
 use super::model::{CaptureHealth, NotGrantedReason, NotWorkingReason, Rung};
@@ -43,16 +43,16 @@ const RUNG0: &str = "CopyPaste is saving what you copy inside the app, share to 
 
 pub(super) fn headline(platform: Rung, health: CaptureHealth) -> &'static str {
     if platform == Rung::Desktop {
-        return "Capturing everything you copy.";
+        return "Capturing";
     }
     match health {
-        CaptureHealth::Working => ONGOING_TEXT,
-        CaptureHealth::Disabled => "Background capture is off.",
-        CaptureHealth::NotGranted { .. } => "Background capture isn't set up.",
+        CaptureHealth::Working => "Capturing",
+        CaptureHealth::Disabled => "Paused",
+        CaptureHealth::NotGranted { .. } => "Setup required",
         CaptureHealth::GrantedNotWorking { reason } => match reason {
-            NotWorkingReason::AwaitingFirstCopy => "Background capture is armed.",
-            NotWorkingReason::ReadRefused => "Background capture isn't working.",
-            NotWorkingReason::NotArmed => "Background capture needs turning back on.",
+            NotWorkingReason::AwaitingFirstCopy => "Ready",
+            NotWorkingReason::ReadRefused => "Capture unavailable",
+            NotWorkingReason::NotArmed => "Paused",
         },
     }
 }
@@ -103,7 +103,7 @@ mod tests {
     /// are shown verbatim, so they are checked the same way `BackendError`'s
     /// are.
     #[test]
-    fn every_sentence_is_a_sentence_and_names_no_path() {
+    fn capture_copy_is_nonempty_and_names_no_path() {
         let healths = [
             CaptureHealth::Working,
             CaptureHealth::Disabled,
@@ -143,7 +143,7 @@ mod tests {
             }
         }
         for text in texts {
-            assert!(text.ends_with('.'), "not a sentence: {text}");
+            assert!(!text.is_empty(), "capture copy must not be empty");
             assert!(!text.contains('/'), "a path could hide here: {text}");
             assert!(
                 !text.contains("Accessibility"),
