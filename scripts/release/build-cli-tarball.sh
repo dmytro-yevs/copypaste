@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build-cli-tarball.sh — build, ad-hoc sign and archive the CLI + daemon.
 #
-#   Usage: scripts/release/build-cli-tarball.sh <version> [arch]
+#   Usage: scripts/release/build-cli-tarball.sh <version> [arch] [--reuse-build]
 #
 # Output: dist/copypaste-cli-v<version>-macos-<arch>.tar.gz  (+ .sha256)
 #
@@ -30,6 +30,12 @@ case "$ARCH" in
     *) echo "ERROR: arch must be arm64 or x86_64" >&2; exit 1 ;;
 esac
 
+REUSE_BUILD="${3:-}"
+case "$REUSE_BUILD" in
+    ""|--reuse-build) ;;
+    *) echo "ERROR: third argument must be --reuse-build" >&2; exit 1 ;;
+esac
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
@@ -39,9 +45,13 @@ DIST="dist"
 OUT="${DIST}/copypaste-cli-v${VERSION}-macos-${ARCH}.tar.gz"
 mkdir -p "$DIST"
 
-echo "==> Building for $TRIPLE"
-rustup target add "$TRIPLE" >/dev/null 2>&1 || true
-cargo build --release --locked --target "$TRIPLE" -p copypaste-daemon -p copypaste-cli
+if [[ "$REUSE_BUILD" == "--reuse-build" ]]; then
+    echo "==> Reusing $TRIPLE binaries from the app build"
+else
+    echo "==> Building for $TRIPLE"
+    rustup target add "$TRIPLE" >/dev/null 2>&1 || true
+    cargo build --release --locked --target "$TRIPLE" -p copypaste-daemon -p copypaste-cli
+fi
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT

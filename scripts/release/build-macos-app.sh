@@ -2,6 +2,7 @@
 # build-macos-app.sh — build CopyPaste.app, inject the daemon and CLI, ad-hoc sign.
 #
 #   Usage: scripts/release/build-macos-app.sh <version> [arch]
+#   COPYPASTE_MACOS_BUILD_PROFILE=debug builds a debuggable validation bundle.
 #          arch defaults to the host (arm64 on Apple Silicon).
 #
 # Output: dist/CopyPaste.app — staged, complete and ad-hoc signed.
@@ -70,6 +71,12 @@ case "$ARCH" in
     *) echo "ERROR: arch must be arm64 or x86_64 (got: $ARCH)" >&2; exit 1 ;;
 esac
 
+BUILD_PROFILE="${COPYPASTE_MACOS_BUILD_PROFILE:-release}"
+case "$BUILD_PROFILE" in
+    release|debug) ;;
+    *) echo "ERROR: COPYPASTE_MACOS_BUILD_PROFILE must be release or debug" >&2; exit 1 ;;
+esac
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 source scripts/release/macos-bundle-lib.sh
@@ -100,11 +107,15 @@ if [[ "$WS_VERSION" != "$VERSION" ]]; then
 fi
 
 # 2. Build
-echo "==> Building the daemon and CLI for $TRIPLE"
+echo "==> Building the daemon and CLI for $TRIPLE ($BUILD_PROFILE)"
 rustup target add "$TRIPLE" >/dev/null 2>&1 || true
-cargo build --release --locked --target "$TRIPLE" -p copypaste-daemon -p copypaste-cli
+PROFILE_ARGS=()
+if [[ "$BUILD_PROFILE" == "release" ]]; then
+    PROFILE_ARGS+=(--release)
+fi
+cargo build "${PROFILE_ARGS[@]}" --locked --target "$TRIPLE" -p copypaste-daemon -p copypaste-cli
 
-echo "==> Building the frontend and the .app bundle"
+echo "==> Building the frontend and the .app bundle ($BUILD_PROFILE)"
 (
     cd "$UI_DIR"
     npm ci
@@ -121,14 +132,18 @@ echo "==> Building the frontend and the .app bundle"
     # leaking in from the runner environment cannot change what this produces,
     # because the bundler is left with no identity at all and skips signing,
     # which is the order the header requires.
-    env -u APPLE_SIGNING_IDENTITY npm run tauri -- build --target "$TRIPLE" --bundles app
+    TAURI_BUILD_ARGS=(build --target "$TRIPLE" --bundles app)
+    if [[ "$BUILD_PROFILE" == "debug" ]]; then
+        TAURI_BUILD_ARGS+=(--debug)
+    fi
+    env -u APPLE_SIGNING_IDENTITY npm run tauri -- "${TAURI_BUILD_ARGS[@]}"
 )
 
-BUILT_APP="target/${TRIPLE}/release/bundle/macos/${APP_NAME}.app"
+BUILT_APP="target/${TRIPLE}/${BUILD_PROFILE}/bundle/macos/${APP_NAME}.app"
 if [[ ! -d "$BUILT_APP" ]]; then
     echo "ERROR: $BUILT_APP not found after 'tauri build'." >&2
     echo "       Bundles present:" >&2
-    ls -1 "target/${TRIPLE}/release/bundle" 2>/dev/null >&2 || echo "       (no bundle directory)" >&2
+    ls -1 "target/${TRIPLE}/${BUILD_PROFILE}/bundle" 2>/dev/null >&2 || echo "       (no bundle directory)" >&2
     exit 1
 fi
 
@@ -140,7 +155,7 @@ cp -R "$BUILT_APP" "$APP"
 
 BIN_DIR="${APP}/Contents/MacOS"
 for bin in copypaste copypaste-daemon; do
-    src="target/${TRIPLE}/release/${bin}"
+    src="target/${TRIPLE}/${BUILD_PROFILE}/${bin}"
     [[ -f "$src" ]] || { echo "ERROR: $src missing" >&2; exit 1; }
     cp "$src" "$BIN_DIR/"
     echo "    injected $bin"
