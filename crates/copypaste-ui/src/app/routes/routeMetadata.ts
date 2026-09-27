@@ -1,7 +1,7 @@
 import type { IconName } from "@/components/ui";
 import type { View } from "@/store/ui";
 
-type RouteLabel = "nav.history" | "nav.devices" | "nav.settings" | "capture.title";
+type RouteLabel = "nav.history" | "nav.devices" | "nav.settings";
 type NavigationSurface = "sidebar" | "dock";
 
 export interface RouteMetadata {
@@ -26,7 +26,6 @@ export const routeMetadata = {
     icon: "settings",
     navigation: { sidebar: 2, dock: 2 },
   },
-  capture: { label: "capture.title", icon: "copy" },
 } as const satisfies Record<View, RouteMetadata>;
 
 export function navigationRoutes(surface: NavigationSurface) {

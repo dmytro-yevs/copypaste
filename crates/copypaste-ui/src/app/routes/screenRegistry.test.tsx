@@ -5,13 +5,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { Boundary } from "@/app/shell/Boundary";
 
 const routeModules = vi.hoisted(() => ({
-  capture: vi.fn(),
   devices: vi.fn(),
   history: vi.fn(),
   settings: vi.fn(),
 }));
 
-vi.mock("@/features/capture", () => routeModules.capture());
 vi.mock("@/features/devices", () => routeModules.devices());
 vi.mock("@/features/history", () => routeModules.history());
 vi.mock("@/features/settings", () => routeModules.settings());
@@ -38,7 +36,6 @@ function Route({ registry, view }: { registry: Registry; view: "history" | "devi
 }
 
 beforeEach(() => {
-  routeModules.capture.mockReset().mockResolvedValue({ CaptureScreen: component("Capture") });
   routeModules.devices.mockReset().mockResolvedValue({ DevicesScreen: component("Devices") });
   routeModules.history.mockReset().mockResolvedValue({ LibraryScreen: component("Library") });
   routeModules.settings.mockReset().mockResolvedValue({ SettingsScreen: component("Settings") });
