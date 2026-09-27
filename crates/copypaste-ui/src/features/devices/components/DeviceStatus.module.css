@@ -15,6 +15,8 @@
 
 .icon { inline-size: var(--icon-xs); block-size: var(--icon-xs); flex: none; }
 .label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wrap { align-items: flex-start; }
+.wrap .label { overflow: visible; text-overflow: clip; white-space: normal; }
 
 @media (prefers-reduced-motion: reduce) {
   .root { transition: none; }

@@ -52,4 +52,7 @@
 @container (max-width: $cpXs) {
   .card { min-block-size: calc(var(--ctl-h-lg) + var(--s-6)); padding: var(--s-2) var(--s-3); grid-template-columns: var(--sz-tile) minmax(0, 1fr) var(--s-5); gap: var(--s-2); /* grid gap */ }
   .identityWell { inline-size: var(--sz-tile); block-size: var(--sz-tile); }
+  .detailLayout { flex-wrap: wrap; align-items: flex-start; }
+  .separator { display: none; }
+  .status { flex: 1 1 100%; }
 }
