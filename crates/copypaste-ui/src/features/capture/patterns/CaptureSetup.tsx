@@ -11,6 +11,8 @@ import {
   StatusCard,
 } from "@/components/shared";
 import { Button, Switch } from "@/components/ui";
+import { SettingsDisclosure } from "@/features/settings/components/SettingsDisclosure";
+import { SettingsGroupSurface } from "@/features/settings/components/SettingsGroupSurface";
 import { CaptureLadder } from "@/features/capture/components/CaptureLadder";
 import { CapturePhoneOnlyHelp } from "./CapturePhoneOnlyHelp";
 import { SourceExclusions } from "./SourceExclusions";
@@ -89,6 +91,7 @@ export function CaptureSetup({
   snapshot: CaptureSnapshot;
   mode?: "full" | "supplemental";
 }) {
+  const { t } = useTranslation();
   const managed = snapshot.rung !== "desktop";
   const supplemental = mode === "supplemental";
 
@@ -96,21 +99,27 @@ export function CaptureSetup({
     <div className={styles.content}>
       {!supplemental && <CaptureStateCard snapshot={snapshot} />}
       {snapshot.droppedClips > 0 && <Dropped count={snapshot.droppedClips} />}
-      {managed && <AlwaysOn />}
-
-      {managed && snapshot.shizuku.supported && (
-        <>
-          <CapturePhoneOnlyHelp snapshot={snapshot} />
-          <CaptureLadder rungs={ladderOf(snapshot)} />
-          {!supplemental && (
-            <EnableRow enabled={snapshot.health.state !== "disabled"} />
+      {managed && (
+        <SettingsGroupSurface>
+          {snapshot.shizuku.supported && !supplemental && (
+            <EnableRow enabled={snapshot.shizuku.enabled} />
           )}
-        </>
+          <AlwaysOn />
+        </SettingsGroupSurface>
       )}
-
+      {managed && snapshot.shizuku.supported && (
+        <SettingsDisclosure title={t("capture.help.title")} description={t("capture.help.summary")}>
+          <div className={styles.help}>
+            <CapturePhoneOnlyHelp snapshot={snapshot} />
+            <CaptureLadder rungs={ladderOf(snapshot)} />
+          </div>
+        </SettingsDisclosure>
+      )}
       {managed && !supplemental && <SourceExclusionsPanel />}
       {managed && snapshot.shizuku.permission && (
-        <ToastNotice suppressed={snapshot.toastSuppressed} />
+        <SettingsDisclosure title={t("capture.options.title")}>
+          <ToastNotice suppressed={snapshot.toastSuppressed} />
+        </SettingsDisclosure>
       )}
     </div>
   );
@@ -142,7 +151,7 @@ function CaptureStateCard({ snapshot }: { snapshot: CaptureSnapshot }) {
 
   const action = primary === "none" ? undefined : (
     <Button
-      disabled={run.isPending}
+      state={run.isPending ? "loading" : "normal"}
       onClick={() =>
         run.mutate(
           primary === "recheck"
@@ -155,17 +164,14 @@ function CaptureStateCard({ snapshot }: { snapshot: CaptureSnapshot }) {
         aria-hidden="true"
         className={run.isPending ? styles.spinner : undefined}
       />
-      {t(
-        run.isPending
-          ? "capture.setup.action.busy"
-          : PRIMARY_LABEL[primary],
-      )}
+      {t(PRIMARY_LABEL[primary])}
     </Button>
   );
 
   return (
     <StatusCard
       status={presentation.tone}
+      density="compact"
       title={snapshot.headline}
       detail={snapshot.detail}
       meta={snapshot.lastCaptureAt === null
@@ -186,23 +192,20 @@ function AlwaysOn() {
   const now = useCaptureNow();
 
   return (
-    <section
-      data-settings-search-target={`section:${t("capture.setup.always.title")}`}
-      className={styles.alwaysOn}
+    <SettingsRow
+      title={t("capture.setup.always.title")}
+      description={t("capture.setup.always.body")}
     >
-      <h2 className={styles.alwaysTitle}>{t("capture.setup.always.title")}</h2>
-      <p className={styles.alwaysBody}>{t("capture.setup.always.body")}</p>
-      <div className={styles.actions}>
-        <Button
-          variant="secondary"
-          disabled={now.isPending}
-          onClick={() => now.mutate("in_app")}
-        >
-          <Icon name="library" size="md" />
-          {t("capture.setup.always.action")}
-        </Button>
-      </div>
-    </section>
+      <Button
+        variant="secondary"
+        size="sm"
+        state={now.isPending ? "loading" : "normal"}
+        onClick={() => now.mutate("in_app")}
+      >
+        <Icon name="copy" size="sm" />
+        {t("capture.setup.always.action")}
+      </Button>
+    </SettingsRow>
   );
 }
 
