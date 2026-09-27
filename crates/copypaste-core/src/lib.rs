@@ -32,8 +32,8 @@ pub use image_preview::{thumbnail_png, ImagePreviewError, ImageThumbnail, MAX_TH
 pub use ingest::{
     ingest, ingest_binary_into_with_capture_context, ingest_binary_into_with_capture_source,
     ingest_binary_into_with_capture_source_metadata, ingest_into, ingest_into_with_capture_context,
-    ingest_into_with_capture_source, ingest_into_with_capture_source_metadata, IngestError,
-    Ingested,
+    ingest_into_with_capture_source, ingest_into_with_capture_source_metadata,
+    ingest_into_with_capture_source_metadata_with_current_retention, IngestError, Ingested,
 };
 pub use sensitive::{
     purge_indexed_secrets, purge_indexed_secrets_in_transaction, sweep_sensitive, Detector,
