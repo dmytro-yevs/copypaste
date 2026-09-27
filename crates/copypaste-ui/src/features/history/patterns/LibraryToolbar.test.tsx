@@ -430,8 +430,17 @@ describe("Library count presentation", () => {
         const count = container.querySelector<HTMLOutputElement>(
             '[data-slot="history-count"]',
         );
+        const controls = screen.getByRole("toolbar", {
+            name: "Library controls",
+        });
 
         expect(count?.tagName).toBe("OUTPUT");
+        expect(controls.contains(count)).toBe(true);
+        expect(
+            screen.getByRole("heading", { name: "Library" })
+                .closest("header")
+                ?.querySelector('[data-slot="history-count"]'),
+        ).toBeNull();
         expect(count?.getAttribute("aria-label")).toBe("999 filtered items");
         expect(count?.textContent).toBe("999");
         expect(count?.closest("button")).toBeNull();
@@ -466,9 +475,22 @@ describe("Library count presentation", () => {
     it("keeps the full count in the desktop toolbar", () => {
         const { container } = render(toolbar({ visible: 1_250, total: 1_250 }));
 
-        expect(
-            container.querySelector('[data-slot="history-count"]'),
-        ).toBeNull();
+        const count = container.querySelector<HTMLOutputElement>(
+            '[data-slot="history-count"]',
+        );
+        expect(count?.getAttribute("aria-label")).toBe("1,250 items");
         expect(screen.getAllByText("1,250 items")).toHaveLength(2);
+    });
+
+    it("only displays the count tile with compact controls", () => {
+        const toolbarCss = readFileSync(
+            resolve(process.cwd(), "src/features/history/patterns/LibraryToolbar.module.css"),
+            "utf8",
+        );
+
+        expect(toolbarCss).toMatch(/\.compactCount\s*\{[^}]*display:\s*none;/s);
+        expect(toolbarCss).toMatch(
+            /\.toolbar\[data-compact-search\]\s+\.compactCount\s*\{[^}]*display:\s*grid;/s,
+        );
     });
 });
