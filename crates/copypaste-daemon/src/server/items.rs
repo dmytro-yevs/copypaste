@@ -151,7 +151,7 @@ pub(super) fn image_preview(
 ) -> Response {
     let row = match state.store.get(item_id) {
         Ok(Some(row)) => row,
-        Ok(None) => return Response::ok(id, ResponseData::Empty {}),
+        Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
         Err(error) => return storage_error(id, "image_preview", &error),
     };
     if row.is_sensitive
@@ -1096,7 +1096,7 @@ mod tests {
         };
         assert_eq!(listed[0].content, "[image]");
 
-        let preview = match image_preview(&state, 2, &image.id).data {
+        let preview = match image_preview(&state, 2, &image.id, None).data {
             Some(ResponseData::ImagePreview(preview)) => preview,
             other => panic!("{other:?}"),
         };
@@ -1188,7 +1188,7 @@ mod tests {
         .unwrap()
         .into_item();
 
-        let response = image_preview(&state, 1, &image.id);
+        let response = image_preview(&state, 1, &image.id, None);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         assert_eq!(response.error.as_deref(), Some(MSG_IMAGE_PREVIEW));
     }
@@ -1198,7 +1198,7 @@ mod tests {
         let (state, _dir) = test_state("image-preview-unknown");
         let unknown = binary_item(&state, "application/x-future", b"future bytes", None);
 
-        let response = image_preview(&state, 1, &unknown.id);
+        let response = image_preview(&state, 1, &unknown.id, None);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         assert_eq!(response.error.as_deref(), Some(MSG_IMAGE_PREVIEW));
     }
