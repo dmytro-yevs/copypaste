@@ -447,7 +447,7 @@ pub(super) fn upsert_in_tx(
                   is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, app_bundle_id, app_name, \
                   payload_metadata, fts_rowid, content_bytes) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                     LENGTH(COALESCE(?2, X''))) \
+                     LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?15, ''))) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
                  content_bytes      = excluded.content_bytes, \
