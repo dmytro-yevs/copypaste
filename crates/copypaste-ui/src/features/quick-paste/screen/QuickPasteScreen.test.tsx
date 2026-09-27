@@ -14,6 +14,7 @@ const ipc = vi.hoisted(() => ({
   copyItemAsPlainText: vi.fn(),
   getClipboardWriteAvailability: vi.fn(),
   listItems: vi.fn(),
+  searchItems: vi.fn(),
 }));
 const lifecycle = vi.hoisted(() => ({ dismiss: vi.fn(), generation: 0 }));
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
@@ -62,6 +63,7 @@ describe("quickPastePresentation", () => {
     ipc.copyItemAsPlainText.mockReset().mockResolvedValue(undefined);
     ipc.getClipboardWriteAvailability.mockReset().mockResolvedValue("available");
     ipc.listItems.mockReset();
+    ipc.searchItems.mockReset().mockResolvedValue(page([]));
     lifecycle.dismiss.mockReset();
     lifecycle.generation = 0;
     toast.error.mockReset();
@@ -315,7 +317,7 @@ describe("quickPastePresentation", () => {
     ]);
   });
 
-  it("loads older cursor pages as the virtual list reaches its end", async () => {
+  it("loads older cursor pages through the accessible virtual-list trigger", async () => {
     const newer = item({ id: "newer", content: "newer item" });
     const older = item({ id: "older", content: "older item" });
     ipc.listItems.mockImplementation((_limit: number, cursor: string | null) =>
@@ -328,16 +330,28 @@ describe("quickPastePresentation", () => {
       </QueryClientProvider>,
     );
 
-    const list = await screen.findByRole("list");
-    Object.defineProperties(list, {
-      clientHeight: { configurable: true, value: 40 },
-      scrollHeight: { configurable: true, value: 80 },
-      scrollTop: { configurable: true, value: 40 },
-    });
-    fireEvent.scroll(list);
+    await screen.findByRole("button", { name: "Copy newer item" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Load older clipboard items" }));
 
     await waitFor(() => expect(ipc.listItems).toHaveBeenCalledWith(200, "older-cursor"));
     expect(await screen.findByRole("button", { name: "Copy older item" })).toBeTruthy();
+  });
+
+  it("uses bounded backend search without walking older cursor pages", async () => {
+    ipc.listItems.mockResolvedValue(page([item({ content: "newer item" })], 0, "older-cursor", 2));
+    ipc.searchItems.mockResolvedValue(page([]));
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole("button", { name: "Copy newer item" });
+    await user.type(screen.getByRole("searchbox"), "no match");
+
+    await waitFor(() => expect(ipc.searchItems).toHaveBeenCalledWith("no match", 500));
+    expect(ipc.listItems).not.toHaveBeenCalledWith(200, "older-cursor");
   });
 
   it("advances keyboard selection into an older page", async () => {
