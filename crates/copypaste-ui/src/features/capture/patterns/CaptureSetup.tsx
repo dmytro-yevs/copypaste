@@ -15,7 +15,6 @@ import { SettingsDisclosure } from "@/features/settings/components/SettingsDiscl
 import { SettingsGroupSurface } from "@/features/settings/components/SettingsGroupSurface";
 import { CaptureLadder } from "@/features/capture/components/CaptureLadder";
 import { CapturePhoneOnlyHelp } from "./CapturePhoneOnlyHelp";
-import { SourceExclusions } from "./SourceExclusions";
 import { ToastNotice } from "./ToastNotice";
 import {
   type CapturePrimary,
@@ -28,10 +27,6 @@ import {
   useCaptureNow,
   useCaptureState,
 } from "@/hooks/useCapture";
-import {
-  useServiceConfig,
-  useSetServiceConfig,
-} from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import { longAge } from "@/lib/format";
 import {
@@ -48,16 +43,12 @@ const PRIMARY_LABEL = {
   recheck: "capture.setup.action.checkAgain",
 } as const satisfies Record<Exclude<CapturePrimary, "none">, string>;
 
-export function CaptureSetupState({
-  mode = "full",
-}: {
-  mode?: "full" | "supplemental";
-} = {}) {
+export function CaptureSetupState() {
   const { t } = useTranslation();
   const capture = useCaptureState();
 
   if (capture.data !== undefined) {
-    return <CaptureSetup snapshot={capture.data} mode={mode} />;
+    return <CaptureSetup snapshot={capture.data} />;
   }
 
   return (
@@ -84,24 +75,18 @@ export function CaptureSetupState({
   );
 }
 
-export function CaptureSetup({
-  snapshot,
-  mode = "full",
-}: {
-  snapshot: CaptureSnapshot;
-  mode?: "full" | "supplemental";
-}) {
+export function CaptureSetup({ snapshot }: { snapshot: CaptureSnapshot }) {
   const { t } = useTranslation();
   const managed = snapshot.rung !== "desktop";
-  const supplemental = mode === "supplemental";
 
   return (
     <div className={styles.content}>
-      {!supplemental && <CaptureStateCard snapshot={snapshot} />}
+      <h2 className={styles.heading}>{t("capture.title")}</h2>
+      <CaptureStateCard snapshot={snapshot} />
       {snapshot.droppedClips > 0 && <Dropped count={snapshot.droppedClips} />}
       {managed && (
         <SettingsGroupSurface>
-          {snapshot.shizuku.supported && !supplemental && (
+          {snapshot.shizuku.supported && (
             <EnableRow enabled={snapshot.shizuku.enabled} />
           )}
           <AlwaysOn />
@@ -115,31 +100,12 @@ export function CaptureSetup({
           </div>
         </SettingsDisclosure>
       )}
-      {managed && !supplemental && <SourceExclusionsPanel />}
       {managed && snapshot.shizuku.permission && (
         <SettingsDisclosure title={t("capture.options.title")}>
           <ToastNotice suppressed={snapshot.toastSuppressed} />
         </SettingsDisclosure>
       )}
     </div>
-  );
-}
-
-function SourceExclusionsPanel() {
-  const config = useServiceConfig();
-  const save = useSetServiceConfig();
-  const data = config.data?.config;
-
-  if (!data) return null;
-  return (
-    <SourceExclusions
-      ids={data.excluded_app_bundle_ids}
-      disabled={save.isPending}
-      collapsible
-      onChange={(excluded_app_bundle_ids) =>
-        save.mutate({ excluded_app_bundle_ids })
-      }
-    />
   );
 }
 

@@ -1,4 +1,4 @@
-import { ServiceCaptureControls } from "@/features/settings/patterns/ServiceCaptureControls";
+import { CaptureSetupState } from "@/features/capture";
 import { SettingsHealthNotice } from "@/features/settings/patterns/SettingsHealthNotice";
 import { AdvancedServiceSection } from "./service/AdvancedServiceSection";
 import {
@@ -22,7 +22,7 @@ function ScopedServiceSettings({ scope, revealAdvancedKey }: { scope: ServiceSco
       <div className={styles.root}>
         {showClipboard ? <SettingsHealthNotice /> : null}
         <ServiceRestartNotice />
-        {showClipboard ? <ServiceCaptureControls /> : null}
+        {showClipboard ? <CaptureSetupState /> : null}
         {showClipboard ? <ClipboardCaptureSection revealAdvancedKey={revealAdvancedKey} /> : null}
         {showPrivacy ? <PrivacyServiceSections /> : null}
         {showClipboard ? <ClipboardNotificationSection /> : null}
