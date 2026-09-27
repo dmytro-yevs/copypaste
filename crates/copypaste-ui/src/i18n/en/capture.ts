@@ -5,7 +5,6 @@
  */
 export const capture = {
   title: "Background capture",
-  back: "Back to Library",
 
   loading: {
     title: "Checking…",
