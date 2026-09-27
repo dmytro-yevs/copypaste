@@ -1,10 +1,8 @@
 //! macOS Keychain backend.
 //!
-//! Selected by the target alone: `security-framework` is declared under
-//! `[target.'cfg(target_os = "macos")'.dependencies]`, so it is already absent
-//! from every other build and a cargo feature could only add a way to forget
-//! it. It was one — every shipped macOS binary took the file backend, because
-//! nothing passed `--features macos-keychain`.
+//! Selected only by a non-debug macOS build. `security-framework` is declared
+//! under `[target.'cfg(target_os = "macos")'.dependencies]`; debug macOS uses
+//! the durable development file backend so it cannot prompt the login Keychain.
 
 use std::path::Path;
 
@@ -62,10 +60,8 @@ fn store_device_secret(secret: &[u8; KEY_LEN]) -> Result<(), SecurityFrameworkEr
 // coming back is satisfied by the `0600` file this backend exists to replace,
 // which is what shipped unnoticed for a year.
 //
-// Two guards, because the item under test is the real device secret and
-// deleting it leaves an installed history unopenable. `#[ignore]` keeps them
-// out of `cargo test`; `disposable_keychain` refuses a login keychain even
-// when they are asked for by name.
+// `#[ignore]` keeps these tests out of `cargo test`; `disposable_keychain`
+// refuses a login default or a broad search list even when they are asked for.
 
 #[cfg(test)]
 mod tests {
@@ -83,6 +79,7 @@ mod tests {
     /// keychain, makes it the default and sets this; a developer's Mac has
     /// neither.
     const ENV_ARMED: &str = "COPYPASTE_KEYCHAIN_TEST";
+    const ENV_KEYCHAIN_PATH: &str = "COPYPASTE_KEYCHAIN_TEST_PATH";
 
     static KEYCHAIN: Mutex<()> = Mutex::new(());
 
@@ -104,17 +101,53 @@ mod tests {
             return false;
         }
 
+        let expected = std::env::var(ENV_KEYCHAIN_PATH).expect(
+            "COPYPASTE_KEYCHAIN_TEST requires COPYPASTE_KEYCHAIN_TEST_PATH for the disposable search list",
+        );
         let default = Command::new("security")
             .arg("default-keychain")
             .output()
             .expect("the security tool must be present on macOS");
         let default = String::from_utf8_lossy(&default.stdout).into_owned();
         assert!(
-            !default.contains("login.keychain"),
-            "{ENV_ARMED} is set but the default keychain is the login keychain. \
-             Refusing: this would destroy a real device secret."
+            keychain_output_is_only(&default, &expected),
+            "{ENV_ARMED} requires the disposable keychain to be the default"
+        );
+        let search = Command::new("security")
+            .args(["list-keychains", "-d", "user"])
+            .output()
+            .expect("the security tool must be present on macOS");
+        assert!(
+            search.status.success(),
+            "could not read the keychain search list"
+        );
+        let search =
+            String::from_utf8(search.stdout).expect("the keychain search list must be valid UTF-8");
+        assert!(
+            keychain_output_is_only(&search, &expected),
+            "{ENV_ARMED} requires the disposable keychain to be the only search-list entry"
         );
         true
+    }
+
+    fn keychain_output_is_only(output: &str, expected: &str) -> bool {
+        let mut entries = output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty());
+        entries.next() == Some(format!("\"{expected}\"").as_str()) && entries.next().is_none()
+    }
+
+    #[test]
+    fn search_list_guard_requires_only_the_disposable_keychain() {
+        assert!(keychain_output_is_only(
+            "    \"/tmp/copypaste-ci.keychain-db\"\n",
+            "/tmp/copypaste-ci.keychain-db"
+        ));
+        assert!(!keychain_output_is_only(
+            "    \"/tmp/copypaste-ci.keychain-db\"\n    \"/Users/test/Library/Keychains/login.keychain-db\"\n",
+            "/tmp/copypaste-ci.keychain-db"
+        ));
     }
 
     /// No entry, whatever was there before.

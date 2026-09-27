@@ -7,7 +7,7 @@
 use std::path::Path;
 #[cfg(feature = "dev-ephemeral-key")]
 use std::sync::OnceLock;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(all(target_os = "macos", not(debug_assertions)), test))]
 use std::{
     sync::mpsc::{self, RecvTimeoutError},
     time::Duration,
@@ -38,9 +38,9 @@ const INFO_ITEM_KEY: &[u8] = b"copypaste/v2/item-content-key";
 #[cfg(feature = "dev-ephemeral-key")]
 const ENV_EPHEMERAL: &str = "COPYPASTE_EPHEMERAL_KEY";
 
-/// Upper bound on a macOS Keychain load during startup (port manifest 02,
-/// I-22).
-#[cfg(any(target_os = "macos", test))]
+/// Upper bound on a release macOS Keychain load during startup (port manifest
+/// 02, I-22).
+#[cfg(any(all(target_os = "macos", not(debug_assertions)), test))]
 const KEYSTORE_LOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// The device secret plus the keys derived from it. The secret is zeroized on
@@ -53,10 +53,11 @@ impl Keyring {
     /// Load the device secret that opens the history in `data_dir`, creating
     /// one on first run.
     ///
-    /// * **macOS** — a Keychain generic-password item under service
-    ///   `com.copypaste.daemon`, account `device-secret-key`. Selected by the
-    ///   target, not by a cargo feature: a feature is a way to ship without it,
-    ///   and that is what happened.
+    /// * **release macOS** — a Keychain generic-password item under service
+    ///   `com.copypaste.daemon`, account `device-secret-key`.
+    /// * **debug macOS** — the development-only `0600` file named
+    ///   `device_secret.key`, so local builds never read or prompt the login
+    ///   Keychain.
     /// * **Android** — a 32-byte secret sealed with an AES-GCM key held in the
     ///   Android Keystore, kept as a blob in app-private storage.
     /// * **Windows** — the same shape: sealed with DPAPI under the user's
@@ -90,7 +91,7 @@ impl Keyring {
             );
             return Ok(Self::from_secret(&random_secret()));
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", not(debug_assertions)))]
         let secret = {
             let lookup_dir = data_dir.to_path_buf();
             let lookup = load_with_timeout(KEYSTORE_LOAD_TIMEOUT, move || {
@@ -98,7 +99,7 @@ impl Keyring {
             })?;
             super::keystore::finish_load_or_create_secret(data_dir, lookup)?
         };
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(any(not(target_os = "macos"), debug_assertions))]
         let secret = super::keystore::load_or_create_secret(data_dir)?;
         Ok(Self { secret })
     }
@@ -126,7 +127,8 @@ impl Keyring {
 
 /// Run a potentially prompting Keychain load without allowing it to hold
 /// startup indefinitely.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(all(target_os = "macos", not(debug_assertions)), test))]
+#[cfg_attr(test, allow(dead_code))]
 fn load_with_timeout<T, F>(timeout: Duration, load: F) -> Result<T, CryptoError>
 where
     T: Send + 'static,
@@ -328,6 +330,18 @@ mod tests {
             std::env::set_var(ENV_EPHEMERAL, "1");
             assert!(!ephemeral_requested());
         }
+    }
+
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    #[test]
+    fn debug_macos_persists_a_file_secret_without_the_keychain() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let first = Keyring::load_or_create(dir.path()).unwrap();
+        assert!(dir.path().join("device_secret.key").is_file());
+
+        let reopened = Keyring::load_or_create(dir.path()).unwrap();
+        assert_eq!(first.db_key(), reopened.db_key());
     }
 
     #[test]

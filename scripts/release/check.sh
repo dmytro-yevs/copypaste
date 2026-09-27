@@ -125,11 +125,24 @@ else
     bad "the cask zaps the application data directory" \
         "zap removes no CopyPaste data at all"
 fi
-if grep -q 'Application Support/com.copypaste.CopyPaste' crates/copypaste-ui/scripts/dev-web-daemon.sh; then
-    ok "the browser bridge defaults to the application data directory"
+group "Development launchers isolate keystore and data"
+for f in \
+    crates/copypaste-ui/scripts/dev-web-daemon.sh \
+    crates/copypaste-ui/scripts/dev-native.sh; do
+    if grep -Fq 'mktemp -d /tmp/cpd.XXXXXX' "$f" \
+        && grep -Fq 'COPYPASTE_EPHEMERAL_KEY=1' "$f" \
+        && grep -Fq 'copypaste-daemon/dev-ephemeral-key' "$f"; then
+        ok "$f starts an isolated ephemeral-key daemon"
+    else
+        bad "$f starts an isolated ephemeral-key daemon" \
+            "development launchers must not reach installed data or a Keychain"
+    fi
+done
+if grep -Fq 'copypaste-daemon/dev-fake-clipboard' crates/copypaste-ui/scripts/dev-web-daemon.sh; then
+    ok "the browser preview uses the fake clipboard"
 else
-    bad "the browser bridge defaults to the application data directory" \
-        "without an explicit override it must share the current native database"
+    bad "the browser preview uses the fake clipboard" \
+        "browser screenshots must never read the host clipboard"
 fi
 
 group "Seeded values fail closed"

@@ -12,19 +12,15 @@ daemon_owned=false
 if ! acquire_bridge_session; then
   exit 0
 fi
-bridge_env=$(mktemp "${TMPDIR:-/tmp}/copypaste-web-bridge.XXXXXX")
+dev_data_dir=$(mktemp -d /tmp/cpd.XXXXXX)
 
-resolve_data_dir() {
-  if [ -n "${COPYPASTE_DATA_DIR:-}" ]; then
-    printf '%s\n' "$COPYPASTE_DATA_DIR"
-    return
-  fi
-
-  printf '%s\n' "$HOME/Library/Application Support/com.copypaste.CopyPaste"
-}
-
-COPYPASTE_DATA_DIR=$(resolve_data_dir)
-export COPYPASTE_DATA_DIR
+# Browser preview is never allowed to inspect an installed daemon, data store,
+# keychain item, or clipboard. The feature and environment switch must agree:
+# either one alone would leave this launcher able to reach a real Keychain.
+COPYPASTE_DATA_DIR="$dev_data_dir"
+COPYPASTE_SOCKET="$dev_data_dir/daemon.sock"
+COPYPASTE_EPHEMERAL_KEY=1
+export COPYPASTE_DATA_DIR COPYPASTE_SOCKET COPYPASTE_EPHEMERAL_KEY
 
 cleanup() {
   kill "${bridge_pid:-}" 2>/dev/null || true
@@ -34,31 +30,26 @@ cleanup() {
     wait "${daemon_pid:-}" 2>/dev/null || true
   fi
   clear_bridge_runtime
-  rm -f "$bridge_env"
+  rm -f "${bridge_env:-}"
   release_bridge_session
+  rm -rf "$dev_data_dir"
 }
 trap cleanup EXIT INT TERM
+bridge_env=$(mktemp "${TMPDIR:-/tmp}/copypaste-web-bridge.XXXXXX")
 
-cargo build --manifest-path "$repo_dir/Cargo.toml" -p copypaste-daemon
-if [ ! -x "$cli_bin" ]; then
-  cargo build --manifest-path "$repo_dir/Cargo.toml" -p copypaste-cli
-fi
+cargo build --manifest-path "$repo_dir/Cargo.toml" \
+  -p copypaste-daemon -p copypaste-cli \
+  --features copypaste-daemon/dev-ephemeral-key,copypaste-daemon/dev-fake-clipboard
 cargo build --manifest-path "$ui_dir/src-tauri/Cargo.toml" \
   --features dev-web-bridge --bin copypaste-web-bridge
 
-# Native CopyPaste and the browser bridge use the same daemon socket.  Reuse a
-# responsive daemon when one is already running; only this script's own child
-# is stopped on exit.  A stale socket simply fails `status` and is recovered by
-# starting a new daemon below.
-if "$cli_bin" status >/dev/null 2>&1; then
-  echo "Reusing the running CopyPaste daemon for the browser bridge."
-else
-  "$daemon_bin" --foreground &
-  daemon_pid=$!
-  daemon_owned=true
-  if ! wait_for_daemon; then
-    exit 1
-  fi
+# This launcher always owns a fresh daemon. Reusing a responsive socket would
+# make a browser screenshot session read an installed user's history.
+"$daemon_bin" --foreground --data-dir "$dev_data_dir" &
+daemon_pid=$!
+daemon_owned=true
+if ! wait_for_daemon; then
+  exit 1
 fi
 
 COPYPASTE_WEB_BRIDGE_ENV_FILE="$bridge_env" "$bridge_bin" &
