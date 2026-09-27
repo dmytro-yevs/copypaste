@@ -66,20 +66,13 @@ export function QuickPasteRow({
   const restoreCopyFocusRef = useRef(false);
   const kind = kindOf(item);
   const availability = useClipboardWriteAvailability(item.content_type);
-  const plainTextAvailability = useClipboardWriteAvailability(item.content_type, "plain_text");
+  useClipboardWriteAvailability(item.content_type, "plain_text");
   const copyAvailability = clipboardCopyPresentation(
     availability.isPending
       ? { status: "loading" }
       : availability.isError
         ? { status: "failed" }
         : { status: "resolved", availability: availability.data },
-  );
-  const plainTextCopyAvailability = clipboardCopyPresentation(
-    plainTextAvailability.isPending
-      ? { status: "loading" }
-      : plainTextAvailability.isError
-        ? { status: "failed" }
-        : { status: "resolved", availability: plainTextAvailability.data },
   );
   useLayoutEffect(() => {
     if (!active) {
@@ -240,16 +233,6 @@ export function QuickPasteRow({
                 onBlur={() => { restoreCopyFocusRef.current = false; }}
                 onClick={() => void availability.refetch()}
               >
-                {t("history.copyAvailability.retry")}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {active && copyAvailability.canCopy && plainTextCopyAvailability.reason !== null ? (
-          <div className={styles.availability} role="status">
-            <span>{t("quickPaste.row.plainTextPrefix")}: {plainTextCopyAvailability.reason}</span>
-            {plainTextCopyAvailability.canRetry ? (
-              <Button type="button" variant="ghost" size="sm" onClick={() => void plainTextAvailability.refetch()}>
                 {t("history.copyAvailability.retry")}
               </Button>
             ) : null}
