@@ -120,18 +120,20 @@ export type PairingTone = "neutral" | "info" | "success" | "warning" | "danger";
 
 export type PairingLive = "status" | "alert";
 
-export type PairingSemantics = { message_id: PairingMessageId, icon: PairingIcon, tone: PairingTone, live: PairingLive, active: boolean, terminal: boolean, needs_devices: boolean, review_secure: boolean, retry: boolean, };
+export type PairingCopy = { title: string, detail: string, };
+
+export type PairingSemantics = { message_id: PairingMessageId, icon: PairingIcon, tone: PairingTone, live: PairingLive, active: boolean, terminal: boolean, needs_devices: boolean, review_secure: boolean, retry: boolean, copy: PairingCopy, };
 
 export const PAIRING_SEMANTICS_BY_STATE = {
-  "idle": {"message_id":"ready","icon":"shieldCheck","tone":"neutral","live":"status","active":false,"terminal":false,"needs_devices":false,"review_secure":false,"retry":false},
-  "waiting_for_peer": {"message_id":"waiting_for_peer","icon":"spinner","tone":"info","live":"status","active":true,"terminal":false,"needs_devices":false,"review_secure":false,"retry":false},
-  "handshaking": {"message_id":"securing_connection","icon":"spinner","tone":"info","live":"status","active":true,"terminal":false,"needs_devices":true,"review_secure":false,"retry":false},
-  "awaiting_confirmation": {"message_id":"compare_codes","icon":"shieldCheck","tone":"warning","live":"status","active":true,"terminal":false,"needs_devices":true,"review_secure":true,"retry":false},
-  "confirmed": {"message_id":"paired","icon":"checkCircle","tone":"success","live":"status","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":false},
-  "rejected": {"message_id":"rejected","icon":"close","tone":"warning","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
-  "cancelled": {"message_id":"cancelled","icon":"close","tone":"neutral","live":"status","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
-  "timed_out": {"message_id":"timed_out","icon":"alert","tone":"warning","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true},
-  "failed": {"message_id":"failed","icon":"alert","tone":"danger","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":false},
+  "idle": {"message_id":"ready","icon":"shieldCheck","tone":"neutral","live":"status","active":false,"terminal":false,"needs_devices":false,"review_secure":false,"retry":false,"copy":{"title":"Pair a device","detail":"No device pairing is in progress."}},
+  "waiting_for_peer": {"message_id":"waiting_for_peer","icon":"spinner","tone":"info","live":"status","active":true,"terminal":false,"needs_devices":false,"review_secure":false,"retry":false,"copy":{"title":"Waiting for a device","detail":"Waiting for the other device to join."}},
+  "handshaking": {"message_id":"securing_connection","icon":"spinner","tone":"info","live":"status","active":true,"terminal":false,"needs_devices":true,"review_secure":false,"retry":false,"copy":{"title":"Securing the connection","detail":"Keep both devices nearby while CopyPaste establishes a secure connection."}},
+  "awaiting_confirmation": {"message_id":"compare_codes","icon":"shieldCheck","tone":"warning","live":"status","active":true,"terminal":false,"needs_devices":true,"review_secure":true,"retry":false,"copy":{"title":"Compare security codes","detail":"Confirm the code in the native security prompt."}},
+  "confirmed": {"message_id":"paired","icon":"checkCircle","tone":"success","live":"status","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":false,"copy":{"title":"Paired","detail":"The device was paired successfully."}},
+  "rejected": {"message_id":"rejected","icon":"close","tone":"warning","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true,"copy":{"title":"Pairing rejected","detail":"The security codes did not match, so no pairing was saved."}},
+  "cancelled": {"message_id":"cancelled","icon":"close","tone":"neutral","live":"status","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true,"copy":{"title":"Pairing cancelled","detail":"No pairing was saved."}},
+  "timed_out": {"message_id":"timed_out","icon":"alert","tone":"warning","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":true,"copy":{"title":"Pairing timed out","detail":"Check that both devices are on the same network and try again."}},
+  "failed": {"message_id":"failed","icon":"alert","tone":"danger","live":"alert","active":false,"terminal":true,"needs_devices":false,"review_secure":false,"retry":false,"copy":{"title":"Pairing failed","detail":"Pairing failed. No device was paired."}},
 } as const satisfies Record<PairingState, PairingSemantics>;
 
 export type PairingPresentationState = "available" | "presented" | "unavailable";

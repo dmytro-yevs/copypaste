@@ -141,6 +141,19 @@ internal class PairingDialogController(
         return true
     }
 
+    fun presentScanFailure() {
+        if (destroyed) return
+        MaterialAlertDialogBuilder(activity)
+            .setTitle(R.string.pairing_scan_failure_title)
+            .setMessage(R.string.pairing_scan_failure_body)
+            .setPositiveButton(R.string.pairing_close, null)
+            .create()
+            .also { dialog ->
+                dialog.show()
+                dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
+    }
+
     fun confirm(
         sas: String,
         peerName: String?,

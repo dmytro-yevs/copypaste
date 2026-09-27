@@ -13,25 +13,22 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33])
 class PairingDeepLinksTest {
     @Test
-    fun encodeAndParseRoundTripThePairingFields() {
-        val uri = PairingDeepLinks.encode("0123-4567-89AB-CDEF", "192.0.2.1:47654")
-        assertTrue(uri!!.startsWith("copypaste://pair"))
+    fun parseForwardsTheCanonicalPairingUriWithoutRebuildingCredentials() {
+        val uri = "copypaste://pair?v=1&code=0123-4567-89AB-CDEF&listen_addr=192.0.2.1%3A47654"
         val payload = PairingDeepLinks.parse(Uri.parse(uri))
-        assertTrue(payload!!.contains("\"code\":\"0123-4567-89AB-CDEF\""))
-        assertTrue(payload.contains("\"listen_addr\":\"192.0.2.1:47654\""))
+        assertEquals(uri, payload)
     }
 
     @Test
     fun httpsAndEmptyFieldsAreRejected() {
         assertNull(PairingDeepLinks.parse(Uri.parse("https://example.com/pair?code=a&listen_addr=b")))
-        assertNull(PairingDeepLinks.parse(Uri.parse("copypaste://pair?code=&listen_addr=host:1")))
-        assertNull(PairingDeepLinks.encode("", "host:1"))
+        assertNull(PairingDeepLinks.parse(Uri.parse("copypaste://not-pair?code=a&listen_addr=b")))
     }
 
     @Test
     fun takeClearsThePendingLinkOnce() {
         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
-        intent.data = Uri.parse(PairingDeepLinks.encode("secret-code", "192.0.2.8:47654"))
+        intent.data = Uri.parse("copypaste://pair?v=1&code=secret-code&listen_addr=192.0.2.8%3A47654")
         PairingDeepLinks.offer(intent)
         val first = PairingDeepLinks.take()
         assertEquals(PairingDeepLinks.parse(intent.data), first)
