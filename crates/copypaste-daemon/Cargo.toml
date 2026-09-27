@@ -68,6 +68,8 @@ clipboard-win = { version = "5.4", features = ["std"] }
 # user content we deliberately never read. See ADR-0018.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }
