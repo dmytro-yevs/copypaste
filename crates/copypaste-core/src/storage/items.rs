@@ -299,6 +299,35 @@ impl Store {
             .optional()?)
     }
 
+    /// Read only the bounded source-icon metadata needed by history chrome.
+    pub fn source_app_icon_metadata(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::SourceAppIconMetadata>, StoreError> {
+        let conn = self.conn()?;
+        let row = conn
+            .query_row(
+                "SELECT payload_metadata, content_type, is_sensitive FROM clipboard_items \
+                 WHERE id = ?1 AND deleted = 0",
+                [id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        Ok(row.and_then(|(metadata, content_type, sensitive)| {
+            (!sensitive)
+                .then_some(metadata)
+                .flatten()
+                .and_then(|metadata| crate::PayloadMetadata::from_json(&metadata, &content_type))
+                .and_then(|metadata| metadata.source_app_icon)
+        }))
+    }
+
     /// Soft-deletes an item, returning whether a live row was affected.
     ///
     /// The ciphertext and nonce are wiped and the FTS row is removed in the same

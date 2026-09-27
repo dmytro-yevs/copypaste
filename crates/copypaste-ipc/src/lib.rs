@@ -139,6 +139,10 @@ pub enum Method {
         #[serde(default)]
         max_edge: Option<u32>,
     },
+    /// Return one persisted source-application icon by item id.
+    SourceAppIcon {
+        id: String,
+    },
     /// Add an item directly, bypassing clipboard capture. Used by tests, by
     /// `copypaste add`, and by the fake clipboard source.
     Add {

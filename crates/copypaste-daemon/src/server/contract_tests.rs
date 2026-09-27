@@ -60,6 +60,7 @@ fn expected(method: &Method) -> Expected {
         | Method::CopyPlainText { .. }
         | Method::Get { .. }
         | Method::ImagePreview { .. }
+        | Method::SourceAppIcon { .. }
         | Method::Delete { .. }
         | Method::Pin { .. } => Expected::Error(ErrorCode::NotFound),
         Method::PairConfirm { .. } => Expected::Error(ErrorCode::NotReady),
@@ -97,6 +98,9 @@ fn cases(root: &Path) -> Vec<Method> {
             id: "missing".into(),
         },
         Method::ImagePreview {
+            id: "missing".into(),
+        },
+        Method::SourceAppIcon {
             id: "missing".into(),
         },
         Method::Add {
