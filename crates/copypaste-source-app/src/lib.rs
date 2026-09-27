@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageFormat, ImageReader, Limits};
 
 const MAX_CACHE_ENTRIES: usize = 64;
 const CACHE_TTL: Duration = Duration::from_secs(10 * 60);
@@ -34,7 +34,11 @@ pub struct AppIcon {
 
 impl AppIcon {
     pub fn from_base64(png_base64: impl AsRef<str>, width: u32, height: u32) -> Option<Self> {
-        let png = STANDARD.decode(png_base64.as_ref()).ok()?;
+        let encoded = png_base64.as_ref();
+        if encoded.len() > MAX_SOURCE_ICON_BYTES.div_ceil(3) * 4 {
+            return None;
+        }
+        let png = STANDARD.decode(encoded).ok()?;
         Self::from_png(png, width, height)
     }
 
@@ -48,7 +52,13 @@ impl AppIcon {
         {
             return None;
         }
-        let image = image::load_from_memory_with_format(&png, ImageFormat::Png).ok()?;
+        let mut reader = ImageReader::with_format(Cursor::new(&png), ImageFormat::Png);
+        let mut limits = Limits::default();
+        limits.max_image_width = Some(MAX_SOURCE_ICON_EDGE);
+        limits.max_image_height = Some(MAX_SOURCE_ICON_EDGE);
+        limits.max_alloc = Some(4 * 1024 * 1024);
+        reader.limits(limits);
+        let image = reader.decode().ok()?;
         if image.width() != width || image.height() != height {
             return None;
         }
@@ -343,6 +353,13 @@ mod tests {
             "cached icon resolve took {}us; must be near-free",
             p95
         );
+    }
+
+    #[test]
+    fn declared_dimensions_cannot_bypass_decoder_limits() {
+        assert!(AppIcon::from_png(png(513, 1), 32, 32).is_none());
+        let encoded = "A".repeat(MAX_SOURCE_ICON_BYTES.div_ceil(3) * 4 + 1);
+        assert!(AppIcon::from_base64(encoded, 32, 32).is_none());
     }
 
     #[test]
