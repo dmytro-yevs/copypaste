@@ -5,19 +5,15 @@
   selectable but is not presented as a copy action.
 - Long clips have an explicit full reader. Library and Quick Paste share the
   same content presentation and copy-availability rules.
+- Import rejects unsupported content types before it writes items, pins, or
+  runs retention cleanup for that batch.
 - Settings presents direct-device readiness and Cloud connection state
   consistently. Runtime events are under Diagnostics, while self-hosted Cloud
   fields stay in Advanced and open deliberately from search or setup.
 - Onboarding keeps actions reachable on short screens, explains permission
   failures, and uses platform-appropriate shortcut hints.
-- Android capture and pairing recovery preserve the first attempted action and
-  report the exact recovery outcome instead of silently treating an app failure
-  as a successful retry.
 - macOS update status explains whether automatic updates are available and
   provides the manual release-page fallback when they are not.
-- Windows Cloud qualification records the closed overview as diagnostic
-  evidence while the revealed configuration form remains the canonical
-  unconfigured state.
 
 ## Evidence note
 
@@ -26,7 +22,7 @@ the same 58 pending native-evidence states across history, capture, devices,
 settings/service, and Cloud account. They remain explicitly unverified and
 excluded from receipt expectations; this release does not claim them complete.
 
-## Not verified on this host
+## Remaining device validation
 
 Physical Android capture persistence, overlay hit-testing, LAN discovery, QR
 association, cutout insets, OEM process-kill survival, and Shizuku rung 2
