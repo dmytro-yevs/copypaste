@@ -16,9 +16,13 @@
 }
 
 # The initial-insets bridge is reached only from WebView JavaScript; R8 cannot
-# infer that reachability. Keep the explicitly annotated, side-effect-free API.
+# infer that reachability. Keep the explicitly annotated inset API.
 -keep class com.copypaste.app.WebViewImeInsets$InsetBridge {
     @android.webkit.JavascriptInterface <methods>;
+}
+
+-keepclassmembers class com.copypaste.app.ShizukuCaptureService {
+    public <init>();
 }
 
 # Uncomment this to preserve the line number information for

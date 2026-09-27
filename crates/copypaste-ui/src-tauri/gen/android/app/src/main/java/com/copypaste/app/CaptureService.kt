@@ -26,7 +26,7 @@ class CaptureService : Service() {
         if (!userWantsCapture(this) ||
             copy == null ||
             !CaptureNotifications.canPost(this) ||
-            !ClipCascadeCapture.hasRuntimePermissions(this)
+            !ClipCascadeCapture.isSetupComplete(this)
         ) {
             ClipCascadeCapture.disarm()
             stopSelf(startId)
@@ -38,12 +38,16 @@ class CaptureService : Service() {
             CaptureNotifications.ONGOING_ID,
             CaptureNotifications.ongoing(this, copy.ongoingText),
         )
-        if (!ClipCascadeCapture.arm(this, {
-                lost(this, copy)
-            })) {
-            CaptureNotifications.postLost(this, copy.lostTitle, copy.lostBody)
-            stopSelf(startId)
-            return START_NOT_STICKY
+        if (!ClipCascadeCapture.arm(
+                this,
+                onStarted = { started ->
+                    completeStart(started)
+                    if (!started) lost(this, copy)
+                },
+                onLost = { lost(this, copy) },
+            )) {
+            completeStart(false)
+            lost(this, copy)
         }
         return START_NOT_STICKY
     }
@@ -73,28 +77,32 @@ class CaptureService : Service() {
             return true
         }
 
-        fun start(context: Context, copy: CaptureArmRequest): Boolean {
+        fun start(
+            context: Context,
+            copy: CaptureArmRequest,
+            completion: ((Boolean) -> Unit)? = null,
+        ): Boolean {
             if (copy.ongoingText.isBlank() || copy.lostTitle.isBlank() || copy.lostBody.isBlank()) {
                 return false
             }
             writeWanted(context, true)
-            if (!ClipCascadeCapture.arm(context, {
-                    lost(context, copy)
-                })) {
+            if (!ClipCascadeCapture.isSetupComplete(context)) {
                 return false
             }
             if (!persistCopy(context, copy)) {
-                ClipCascadeCapture.disarm()
                 return false
             }
-            return startService(context)
+            completion?.let(::rememberStartCompletion)
+            if (startService(context)) return true
+            completeStart(false)
+            return false
         }
 
         fun restoreIfArmed(context: Context): Boolean {
             if (!userWantsCapture(context)) return false
             if (notificationCopy(context) == null) return false
             if (ClipCascadeCapture.isListening()) return true
-            if (!ClipCascadeCapture.hasRuntimePermissions(context)) return false
+            if (!ClipCascadeCapture.isSetupComplete(context)) return false
             if (!CaptureNotifications.canPost(context)) return false
             return startService(context)
         }
@@ -138,6 +146,18 @@ class CaptureService : Service() {
             context.stopService(Intent(context, CaptureService::class.java))
         }
 
+        @Synchronized
+        private fun rememberStartCompletion(completion: (Boolean) -> Unit) {
+            startCompletions += completion
+        }
+
+        @Synchronized
+        private fun completeStart(started: Boolean) {
+            val pending = startCompletions.toList()
+            startCompletions.clear()
+            pending.forEach { it(started) }
+        }
+
         private fun persistCopy(context: Context, copy: CaptureArmRequest): Boolean =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
@@ -174,5 +194,7 @@ class CaptureService : Service() {
                 it.ongoingText.isBlank() || it.lostTitle.isBlank() || it.lostBody.isBlank()
             }
         }
+
+        private val startCompletions = mutableListOf<(Boolean) -> Unit>()
     }
 }
