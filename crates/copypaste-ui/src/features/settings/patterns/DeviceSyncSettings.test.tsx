@@ -162,15 +162,13 @@ describe("Device sync settings", () => {
     mocks.peersPending = true;
     const { rerender } = render(<DeviceSyncSettings />);
     expect(screen.getByText("Checking…")).toBeTruthy();
-    expectDisabledSyncDescribes("Checking paired devices");
+    expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
 
     mocks.peersPending = false;
     mocks.peersError = true;
     rerender(<DeviceSyncSettings />);
     expect(screen.getByText("Unavailable")).toBeTruthy();
-    expectDisabledSyncDescribes("Paired devices are unavailable");
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(mocks.peersRefetch).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
 
     mocks.peers = [peer()];
     rerender(<DeviceSyncSettings />);
@@ -205,15 +203,14 @@ describe("Device sync settings", () => {
     mocks.peers = [];
     const { rerender } = render(<DeviceSyncSettings />);
     expect(screen.getByText("None")).toBeTruthy();
-    expect(screen.getByText("Pair a device before syncing.")).toBeTruthy();
-    expectDisabledSyncDescribes("Pair a device before syncing");
+    expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
 
     mocks.peers = undefined;
     mocks.peersError = true;
     rerender(<DeviceSyncSettings />);
     expect(screen.getByText("Unavailable")).toBeTruthy();
-    expect(screen.getByText(/Paired devices are unavailable/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Manage devices" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
   });
 
   it("shows manual failures and partial results without a success claim", () => {

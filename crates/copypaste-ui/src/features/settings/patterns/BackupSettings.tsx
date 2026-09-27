@@ -22,9 +22,7 @@ export function BackupSettings() {
   const backup = useBackupDatabase();
   const restore = useRestoreDatabase();
   const [restoreOpen, setRestoreOpen] = useState(false);
-  const backupDescriptionId = useId();
   const backupFeedbackId = useId();
-  const restoreDescriptionId = useId();
   const restoreFeedbackId = useId();
 
   return (
@@ -32,8 +30,7 @@ export function BackupSettings() {
       <Section title={t("settings.transfer.recoverySection")}>
         <SettingsRow
           title={t("settings.transfer.backup.title")}
-          descriptionId={backupDescriptionId}
-          description={t("settings.transfer.backup.description")}
+          help={t("settings.transfer.backup.description")}
           note={backup.isError ? (
             <span id={backupFeedbackId}>
               <FieldFeedback state="error">History wasn’t backed up.</FieldFeedback>
@@ -45,7 +42,7 @@ export function BackupSettings() {
             size="sm"
             disabled={backup.isPending}
             aria-busy={backup.isPending || undefined}
-            aria-describedby={`${backupDescriptionId}${backup.isError ? ` ${backupFeedbackId}` : ""}`}
+            aria-describedby={backup.isError ? backupFeedbackId : undefined}
             onClick={() => backup.mutate()}
           >
             <Icon name="file" aria-hidden="true" />
@@ -55,8 +52,7 @@ export function BackupSettings() {
 
         <SettingsRow
           title={t("settings.transfer.restore.title")}
-          descriptionId={restoreDescriptionId}
-          description={t("settings.transfer.restore.description")}
+          help={t("settings.transfer.restore.description")}
           note={restore.isError ? (
             <span id={restoreFeedbackId}>
               <FieldFeedback state="error">History wasn’t restored.</FieldFeedback>
@@ -69,7 +65,7 @@ export function BackupSettings() {
             tone="danger"
             disabled={restore.isPending}
             aria-busy={restore.isPending || undefined}
-            aria-describedby={`${restoreDescriptionId}${restore.isError ? ` ${restoreFeedbackId}` : ""}`}
+            aria-describedby={restore.isError ? restoreFeedbackId : undefined}
             onClick={() => setRestoreOpen(true)}
           >
             <Icon name="reset" aria-hidden="true" />

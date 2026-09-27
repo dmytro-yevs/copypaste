@@ -27,9 +27,7 @@ export function TransferSettings() {
   const [exportOpen, setExportOpen] = useState(false);
   const [includeSensitive, setIncludeSensitive] = useState(false);
   const [pendingImport, setPendingImport] = useState<ImportPreview | null>(null);
-  const exportDescriptionId = useId();
   const exportFeedbackId = useId();
-  const importDescriptionId = useId();
   const importFeedbackId = useId();
 
   return (
@@ -37,8 +35,7 @@ export function TransferSettings() {
       <Section title={t("settings.transfer.transferSection")}>
         <SettingsRow
           title={t("settings.transfer.export.title")}
-          descriptionId={exportDescriptionId}
-          description={t("settings.transfer.export.description")}
+          help={t("settings.transfer.export.description")}
           note={exportHistory.isError ? (
             <span id={exportFeedbackId}>
               <FieldFeedback state="error">History wasn’t exported.</FieldFeedback>
@@ -50,7 +47,7 @@ export function TransferSettings() {
             size="sm"
             disabled={exportHistory.isPending}
             aria-busy={exportHistory.isPending || undefined}
-            aria-describedby={`${exportDescriptionId}${exportHistory.isError ? ` ${exportFeedbackId}` : ""}`}
+            aria-describedby={exportHistory.isError ? exportFeedbackId : undefined}
             onClick={() => {
               // Sensitive-item consent is intentionally one export only.
               setIncludeSensitive(false);
@@ -64,8 +61,7 @@ export function TransferSettings() {
 
         <SettingsRow
           title={t("settings.transfer.import.title")}
-          descriptionId={importDescriptionId}
-          description={t("settings.transfer.import.description")}
+          help={t("settings.transfer.import.description")}
           note={importHistory.prepare.isError || importHistory.apply.isError ? (
             <span id={importFeedbackId}>
               <FieldFeedback state="error">History wasn’t imported.</FieldFeedback>
@@ -77,7 +73,7 @@ export function TransferSettings() {
             size="sm"
             disabled={importHistory.isPending}
             aria-busy={importHistory.isPending || undefined}
-            aria-describedby={`${importDescriptionId}${importHistory.prepare.isError || importHistory.apply.isError ? ` ${importFeedbackId}` : ""}`}
+            aria-describedby={importHistory.prepare.isError || importHistory.apply.isError ? importFeedbackId : undefined}
             onClick={() => {
               importHistory.prepare.mutate(undefined, {
                 onSuccess: (preview) => setPendingImport(preview),

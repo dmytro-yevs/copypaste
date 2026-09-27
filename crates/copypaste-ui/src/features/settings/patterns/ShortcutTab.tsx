@@ -43,7 +43,6 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [saved, setSaved] = useState<"saved" | "reset" | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const descriptionId = useId();
   const feedbackId = useId();
 
   const current = useQuery({
@@ -160,7 +159,7 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
       icon="reset"
       disabled={resetDisabled}
       aria-label={t("settings.shortcut.reset")}
-      aria-describedby={`${descriptionId}${feedback ? ` ${feedbackId}` : ""}`}
+      aria-describedby={feedback ? feedbackId : undefined}
       aria-busy={save.isPending || undefined}
       title={t("settings.shortcut.reset")}
       onClick={() => {
@@ -175,8 +174,7 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
       <SettingsGroupSurface>
         <SettingsRow
           title={t("settings.shortcut.title")}
-          descriptionId={descriptionId}
-          description={t("settings.shortcut.description")}
+          help={t("settings.shortcut.description")}
           note={feedback ? <span id={feedbackId}>{feedback}</span> : undefined}
         >
           <div className={styles.controlRow}>
@@ -187,7 +185,7 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
               size="md"
               disabled={shortcutLoading || shortcutUnknown || unavailable || save.isPending}
               aria-label={accessibleName}
-              aria-describedby={`${descriptionId}${feedback ? ` ${feedbackId}` : ""}`}
+              aria-describedby={feedback ? feedbackId : undefined}
               aria-busy={save.isPending || undefined}
               title={accessibleName}
               onClick={() => {

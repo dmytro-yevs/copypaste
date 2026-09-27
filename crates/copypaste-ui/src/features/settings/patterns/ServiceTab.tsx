@@ -55,7 +55,7 @@ function CaptureSetupEntry() {
   return (
     <SettingsRow
       title={t("capture.title")}
-      description={description}
+      help={description}
       note={presentation.tone === "danger" ? snapshot.headline : undefined}
     >
       <Button

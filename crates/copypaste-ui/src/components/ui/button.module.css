@@ -13,7 +13,7 @@
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
   line-height: 1;
-  white-space: nowrap;
+  white-space: normal;
   cursor: pointer;
   transition:
     transform var(--dur-fast) var(--ease),
@@ -36,6 +36,8 @@
 .content > * + * {
   margin-inline-start: var(--button-content-gap);
 }
+
+.content [data-slot="button-label"] { white-space: nowrap; }
 
 .button:focus-visible {
   outline: 0;

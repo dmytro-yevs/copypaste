@@ -8,11 +8,11 @@
 .currentName {
   display: flex;
   min-inline-size: 0;
-  inline-size: 100%;
   align-items: center;
   justify-content: flex-end;
   gap: var(--s-3);
 }
+.currentNameValue { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .field {
   display: flex;
   flex-direction: column;
@@ -52,11 +52,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation: none; }
-}
-
-@container (max-width: $cpSm) {
-  .currentName { align-items: stretch; flex-direction: column; }
-  .currentName button { inline-size: 100%; }
 }
 
 @media (--cp-xs) {

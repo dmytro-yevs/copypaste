@@ -38,12 +38,11 @@
 
 .title > * + * { margin-inline-start: var(--s-2); }
 
-.description { margin-block-start: var(--s-1); color: var(--dim); font-size: var(--fs-xs); }
 .control {
   display: flex;
   min-inline-size: 0;
   max-inline-size: 50%;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
 }

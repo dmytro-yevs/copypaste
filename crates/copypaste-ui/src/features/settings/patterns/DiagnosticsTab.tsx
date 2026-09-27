@@ -68,7 +68,7 @@ export function DiagnosticsTab({
       <DiagnosticsOverview />
       {onOpenEvents ? (
         <Section title={t("runtimeLog.title")} description={t("runtimeLog.description")}>
-          <SettingsRow title={t("runtimeLog.title")} description={t("runtimeLog.description")}>
+          <SettingsRow title={t("runtimeLog.title")} help={t("runtimeLog.description")}>
             <Button type="button" variant="secondary" size="sm" onClick={onOpenEvents}>
               {t("runtimeLog.open")}
             </Button>
@@ -164,7 +164,7 @@ function HistoryReadRow({
   return (
     <SettingsRow
       title={t("settings.diagnostics.running.history.title")}
-      description={t("settings.diagnostics.running.history.description")}
+      help={t("settings.diagnostics.running.history.description")}
     >
       <Badge variant={readable ? "ok" : "error"}>
         {readable
@@ -182,7 +182,7 @@ function StartedRow({ counters }: { counters: DiagnosticCounters | undefined }) 
   return (
     <SettingsRow
       title={t("settings.diagnostics.running.started.title")}
-      description={t("settings.diagnostics.running.started.description")}
+      help={t("settings.diagnostics.running.started.description")}
     >
       <span className={styles.metric}>
         {counters === undefined
@@ -228,7 +228,7 @@ function CountRow({
   return (
     <SettingsRow
       title={t(`settings.diagnostics.dropped.${name}.title`)}
-      description={t(`settings.diagnostics.dropped.${name}.description`)}
+      help={t(`settings.diagnostics.dropped.${name}.description`)}
     >
       <span
         className={count > 0 ? styles.warningCount : styles.count}
@@ -253,7 +253,7 @@ function ReportSection({ report }: { report: string }) {
     >
       <SettingsRow
         title={t("settings.diagnostics.report.title")}
-        description={t("settings.diagnostics.report.description")}
+        help={t("settings.diagnostics.report.description")}
       >
         <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
           Open

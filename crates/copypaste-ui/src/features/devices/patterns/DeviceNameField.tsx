@@ -147,6 +147,7 @@ export function DeviceNameField({
             setOpen(true);
           }}
         >
+          {showCurrentName ? <span className={styles.currentNameValue}>{displayedName}</span> : null}
           {showCurrentName ? "Rename" : null}
         </ActionButton>
         <DialogContent
