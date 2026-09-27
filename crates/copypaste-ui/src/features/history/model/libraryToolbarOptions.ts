@@ -7,8 +7,8 @@ import { type OriginDevice, originName } from "@/lib/itemOrigin";
 import { t } from "@/i18n";
 import { FILTERABLE_KINDS, sortLabel } from "@/lib/view";
 
-const fullCountFormatter = new Intl.NumberFormat(undefined);
-const compactCountFormatter = new Intl.NumberFormat(undefined, {
+const fullCountFormatter = new Intl.NumberFormat("en");
+const compactCountFormatter = new Intl.NumberFormat("en", {
     notation: "compact",
     maximumFractionDigits: 0,
 });
