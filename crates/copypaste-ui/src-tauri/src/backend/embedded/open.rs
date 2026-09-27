@@ -136,10 +136,14 @@ impl EmbeddedBackend {
             Ok(())
         })
         .await?;
-        self.inner
+        let node = self
+            .inner
             .node
             .get()
-            .ok_or_else(|| BackendError::internal("the peer node did not start"))
+            .ok_or_else(|| BackendError::internal("the peer node did not start"))?;
+        #[cfg(target_os = "android")]
+        self.reconcile_android_nsd();
+        Ok(node)
     }
 
     /// Run blocking work off the reactor.

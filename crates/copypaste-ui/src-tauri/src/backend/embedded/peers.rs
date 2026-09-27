@@ -165,6 +165,13 @@ impl PeerNode {
 
     fn pairing_progress(&self, inner: &Arc<Inner>, status: PairingStatus) -> PairingProgressData {
         if status.phase == PairingPhase::Confirmed {
+            self.node.republish();
+            #[cfg(target_os = "android")]
+            crate::network_discovery::reconcile(
+                inner.state.device_name(),
+                self.pairing_ids(),
+                inner.settings().lan_visibility,
+            );
             if let Some(peer) = &status.peer {
                 if let Err(error) = inner
                     .state
@@ -211,6 +218,12 @@ impl PeerNode {
                 BackendError::internal("that device could not be revoked")
             })?;
         self.node.republish();
+        #[cfg(target_os = "android")]
+        crate::network_discovery::reconcile(
+            inner.state.device_name(),
+            self.pairing_ids(),
+            inner.settings().lan_visibility,
+        );
         Ok(())
     }
 
@@ -306,6 +319,15 @@ impl PeerNode {
 
     pub(super) fn republish(&self) {
         self.node.republish();
+    }
+
+    pub(super) fn pairing_ids(&self) -> Vec<String> {
+        self.node
+            .peers()
+            .list()
+            .into_iter()
+            .map(|peer| peer.pairing_id)
+            .collect()
     }
 
     pub(super) fn set_device_name(&self, device_name: &str) {
