@@ -29,9 +29,6 @@ export function useQuickPasteLifecycle({
   searchRef,
   clearLocalState,
 }: QuickPasteLifecycleOptions) {
-  const [previewLinesPopup, setPreviewLinesPopup] = useState(
-    () => readPrefs().previewLinesPopup,
-  );
   const [holding, setHolding] = useState(true);
   const holdingRef = useRef(true);
   const cacheGeneration = useRef(0);
@@ -42,7 +39,6 @@ export function useQuickPasteLifecycle({
   const applyShownPrefs = useCallback(() => {
     const prefs = readPrefs();
     applyAppearance(prefs);
-    setPreviewLinesPopup(prefs.previewLinesPopup);
     void setAllowScreenshots(prefs.allowScreenshots).catch(() => {});
     window.setTimeout(() => searchRef.current?.focus(), 50);
   }, [searchRef]);
@@ -126,7 +122,6 @@ export function useQuickPasteLifecycle({
 
   return {
     holding,
-    previewLinesPopup,
     dismiss,
     dismissOnRootBlur,
     currentCacheGeneration,

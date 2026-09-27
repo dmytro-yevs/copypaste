@@ -100,16 +100,18 @@ describe("per-field recovery (AT-50)", () => {
     );
   });
 
-  it("bounds every display preference independently", () => {
+  it("bounds every active display preference independently", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const prefs = parsePrefs({
-      previewLinesPopup: 0,
       historyDisplayLimit: 999,
       sortByDevice: true,
     });
-    expect(prefs.previewLinesPopup).toBe(DEFAULT_PREFS.previewLinesPopup);
     expect(prefs.historyDisplayLimit).toBe(DEFAULT_PREFS.historyDisplayLimit);
     expect(prefs.sortByDevice).toBe(true);
+  });
+
+  it("drops the retired Quick Paste density so legacy three-line popups compact", () => {
+    expect(parsePrefs({ previewLinesPopup: 3 })).toEqual(DEFAULT_PREFS);
   });
 
   it("accepts the unlimited display sentinel", () => {
