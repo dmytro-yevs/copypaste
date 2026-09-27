@@ -5,13 +5,11 @@ import { expect, test, vi } from "vitest";
 import { Boundary } from "@/app/shell/Boundary";
 
 const routeModules = vi.hoisted(() => ({
-  capture: vi.fn(),
   devices: vi.fn(),
   history: vi.fn(),
   settings: vi.fn(),
 }));
 
-vi.mock("@/features/capture", () => routeModules.capture());
 vi.mock("@/features/devices", () => routeModules.devices());
 vi.mock("@/features/history", () => routeModules.history());
 vi.mock("@/features/settings", () => routeModules.settings());
@@ -22,7 +20,6 @@ function component(label: string): ComponentType {
 
 test("retries a rejected route with a fresh lazy import", async () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
-  routeModules.capture.mockResolvedValue({ CaptureScreen: component("Capture") });
   routeModules.history.mockResolvedValue({ LibraryScreen: component("Library") });
   routeModules.settings.mockResolvedValue({ SettingsScreen: component("Settings") });
   let reject = true;

@@ -1,26 +1,21 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { captureSnapshot } from "@/test/harness";
 import { CaptureStatus } from "./CaptureStatus";
+import { useUi } from "@/store/ui";
 
 const mocks = vi.hoisted(() => ({
   snapshot: undefined as ReturnType<typeof captureSnapshot> | undefined,
-  setView: vi.fn(),
 }));
 
 vi.mock("@/hooks/useCapture", () => ({
   useCaptureState: () => ({ data: mocks.snapshot }),
 }));
 
-vi.mock("@/store/ui", () => ({
-  useUi: (select: (state: { setView: typeof mocks.setView }) => unknown) =>
-    select({ setView: mocks.setView }),
-}));
-
 afterEach(() => {
   mocks.snapshot = undefined;
-  mocks.setView.mockReset();
+  useUi.setState({ view: "history", settingsTab: null });
 });
 
 describe("CaptureStatus", () => {
@@ -47,5 +42,8 @@ describe("CaptureStatus", () => {
     expect(screen.getByRole("status").getAttribute("aria-live")).toBe(
       "polite",
     );
+    fireEvent.click(screen.getByRole("button", { name: "Set up" }));
+    expect(useUi.getState().view).toBe("settings");
+    expect(useUi.getState().settingsTab).toBe("clipboard");
   });
 });

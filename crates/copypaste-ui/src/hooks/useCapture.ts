@@ -61,7 +61,7 @@ export function useCaptureState() {
  *  invalidation. */
 export function useCaptureSync() {
   const qc = useQueryClient();
-  const setView = useUi((s) => s.setView);
+  const openCaptureSettings = useUi((s) => s.openCaptureSettings);
   const snapshot = useCaptureState().data;
 
   useEffect(() => {
@@ -103,8 +103,8 @@ export function useCaptureSync() {
   // hunt through settings.
   const rearm = snapshot?.rearmRequested ?? false;
   useEffect(() => {
-    if (rearm) setView("capture");
-  }, [rearm, setView]);
+    if (rearm) openCaptureSettings();
+  }, [rearm, openCaptureSettings]);
 }
 
 /** Every capture command answers with the new snapshot, so the cache is written

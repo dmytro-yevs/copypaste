@@ -54,9 +54,6 @@ export function renderPreferenceSection(
     case "clipboard": return (
       <>
         <ClipboardServiceSettings revealAdvancedKey={disclosureRevealKey(controller.disclosureReveal, "clipboard-advanced")} />
-        {controller.capabilities.androidCapture ? (
-          <CaptureSetupState mode="supplemental" />
-        ) : null}
         <ClipboardListSettings
           ready={controller.prefsReady}
           supportsScreenshots={controller.capabilities.screenshots}

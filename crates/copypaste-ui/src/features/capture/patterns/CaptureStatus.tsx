@@ -10,7 +10,7 @@ import styles from "./CaptureStatus.module.css";
 export function CaptureStatus() {
   const { t } = useTranslation();
   const capture = useCaptureState();
-  const setView = useUi((s) => s.setView);
+  const openCaptureSettings = useUi((s) => s.openCaptureSettings);
 
   // Never guess while the answer is in flight, and never show a static success
   // strip for normal capture.
@@ -48,7 +48,7 @@ export function CaptureStatus() {
             variant="ghost"
             size="sm"
             title={t("capture.status.openHint")}
-            onClick={() => setView("capture")}
+            onClick={openCaptureSettings}
           >
             {t("capture.status.open")}
           </Button>

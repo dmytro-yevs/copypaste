@@ -8,10 +8,7 @@
  */
 import { create } from "zustand";
 
-/** `capture` is reachable but not navigable: it is opened from the status strip
- *  and from the loss notification's re-arm request, and putting it in the tab
- *  bar would give macOS — which has no ladder — a screen with nothing on it. */
-export const VIEWS = ["history", "devices", "settings", "capture"] as const;
+export const VIEWS = ["history", "devices", "settings"] as const;
 export type View = (typeof VIEWS)[number];
 
 /** Defensive narrowing, not state recovery: anything unrecognised is History
@@ -34,6 +31,7 @@ interface UiStore {
 
   setView: (view: unknown) => void;
   setSettingsTab: (tab: string | null) => void;
+  openCaptureSettings: () => void;
   setQuery: (query: string) => void;
   setActiveId: (id: string | null) => void;
   dismiss: (id: BannerId) => void;
@@ -52,6 +50,7 @@ export const useUi = create<UiStore>()((set, get) => ({
 
   setView: (view) => set({ view: resolveView(view) }),
   setSettingsTab: (settingsTab) => set({ settingsTab }),
+  openCaptureSettings: () => set({ view: "settings", settingsTab: "clipboard" }),
   setQuery: (query) => set({ query }),
   setActiveId: (activeId) => set({ activeId }),
   // Dismissed for this session only: the condition is live, and a new launch
