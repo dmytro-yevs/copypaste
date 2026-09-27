@@ -491,74 +491,9 @@ else
 fi
 rm -f "$WIRING"
 
-group "All shipped platforms reach one release page"
-check "publication depends on all shipped-platform qualification" python3 - <<'PY'
-import re, shlex, sys, yaml
-jobs = yaml.safe_load(open(".github/workflows/release.yml"))["jobs"]
-missing = [j for j in (
-    "version", "supabase-gate", "secret-scan", "pairing-e2e", "macos", "android",
-    "android-smoke", "android-smoke-api33", "windows", "native-parity", "packaging",
-) if j not in jobs]
-assert not missing, f"release.yml has no {missing} job"
-needs = set(jobs["publish"]["needs"])
-for j in (
-    "supabase-gate", "secret-scan", "pairing-e2e", "macos", "android", "android-smoke",
-    "android-smoke-api33", "windows", "native-parity", "packaging",
-):
-    assert j in needs, f"publish does not depend on {j}"
-assert jobs["publish"].get("if") == "needs.version.outputs.publish == 'true'", \
-    "only the publish output may create the release"
-
-smoke = jobs["android-smoke"]
-assert "android" in smoke["needs"], "android-smoke does not wait for Android artifact"
-qualification_if = "needs.version.outputs.qualify == 'true'"
-for name in (
-    "android-upgrade-fixture", "android-cloud-evidence", "android-smoke",
-    "android-smoke-api33", "native-parity",
-):
-    assert jobs[name].get("if") == qualification_if, \
-        f"{name} is not gated by canonical release qualification"
-version = jobs["version"]
-assert version.get("outputs", {}).get("qualify") == "${{ steps.resolve.outputs.qualify }}", \
-    "version does not expose qualification state"
-resolver = next(step for step in version["steps"] if step.get("id") == "resolve")
-assert resolver.get("env", {}).get("INPUT_QUALIFY") == "${{ inputs.qualify }}", \
-    "resolver does not receive the qualification input"
-ledger_steps = [
-    step for step in jobs["native-parity"]["steps"]
-    if any(
-        tuple(shlex.split(line, comments=True)) == (
-            "python3", "scripts/check-feature-ledger.py", "--require-complete",
-            "--version", "$RELEASE_VERSION",
-        )
-        for line in str(step.get("run", "")).splitlines()
-        if "check-feature-ledger.py" in line
-    )
-]
-assert len(ledger_steps) == 1, "native-parity must run one exact version-bound feature-ledger gate"
-assert "continue-on-error" not in jobs["native-parity"], \
-    "native-parity must not continue after a failed feature-ledger gate"
-assert "if" not in ledger_steps[0], \
-    "native-parity feature-ledger gate must run unconditionally"
-assert "continue-on-error" not in ledger_steps[0], \
-    "native-parity feature-ledger gate must not continue after failure"
-assert ledger_steps[0].get("env", {}).get("RELEASE_VERSION") == "${{ needs.version.outputs.version }}", \
-    "native-parity does not bind feature-ledger completion to the resolved version"
-assert re.search(r'if \[\[ "\$publish" == "true" \]\]; then\s+qualify=true\s+fi', resolver.get("run", "")), \
-    "publish must imply qualification"
-download = [s for s in smoke["steps"] if str(s.get("uses", "")).startswith("actions/download-artifact")]
-download_names = [step.get("with", {}).get("name") for step in download]
-assert download_names.count("android") == 1, \
-    "android-smoke does not download the published Android artifact"
-assert "android-cloud-evidence-apk" in download_names, \
-    "android-smoke does not download the configured cloud evidence APK"
-runner = [s for s in smoke["steps"] if "android-emulator-runner" in str(s.get("uses", ""))]
-script = str(runner[0].get("with", {}).get("script", "")) if len(runner) == 1 else ""
-if "android-release-emulator-legs.sh" in script:
-    script += open("scripts/release/android-release-emulator-legs.sh").read()
-assert "android-smoke-release.sh" in script, \
-    "android-smoke does not run the release smoke harness"
-PY
+group "Critical release provenance"
+check "three native receipts bind to the exact shipped artifacts" \
+    python3 scripts/release/check-native-parity-wiring.py
 for pattern in 'dist/\*\.dmg' 'dist/\*\.apk' 'dist/\*\.tar\.gz' 'dist/\*\.exe' 'dist/\*\.exe\.sig' 'dist/latest\.json' 'dist/SHA256SUMS'; do
     if grep -qE "$pattern" .github/workflows/release.yml; then
         ok "the release attaches ${pattern//\\/}"
