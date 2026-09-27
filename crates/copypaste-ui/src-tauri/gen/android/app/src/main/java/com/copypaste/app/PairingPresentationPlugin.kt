@@ -9,17 +9,23 @@ import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import com.google.android.gms.common.moduleinstall.InstallStatusListener
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallClient
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
-import com.google.android.gms.common.moduleinstall.ModuleInstall
 import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
 
 @TauriPlugin
 class PairingPresentationPlugin(private val activity: Activity) : Plugin(activity) {
     private val dialogs = PairingDialogController(activity)
     private val scanGate = PairingScanGate()
+    private val scannerInstall = PairingScanInstall()
     private var scanInvoke: Invoke? = null
+    private var scannerStarted = false
+    private var installClient: ModuleInstallClient? = null
+    private var installListener: InstallStatusListener? = null
 
     @Command
     fun presentInvite(invoke: Invoke) {
@@ -52,6 +58,7 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
                 ScanStep.BUSY -> resolveScan(invoke, ScanResult.BUSY)
                 ScanStep.START_SCANNER -> {
                     scanInvoke = invoke
+                    scannerStarted = false
                     installAndStartScanner(invoke)
                 }
             }
@@ -112,16 +119,40 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
             .enableAutoZoom()
             .build()
         val scanner = GmsBarcodeScanning.getClient(activity, options)
+        val client = ModuleInstall.getClient(activity)
+        val listener = InstallStatusListener { update ->
+            activity.runOnUiThread {
+                when (scannerInstall.updated(update.installState)) {
+                    ScanInstallStep.START_SCANNER -> startInstalledScanner(invoke, scanner)
+                    ScanInstallStep.FAILED -> completeScan(invoke, ScanResult.FAILED)
+                    ScanInstallStep.WAIT -> Unit
+                }
+            }
+        }
+        installClient = client
+        installListener = listener
         val request = ModuleInstallRequest.newBuilder()
             .addApi(scanner)
+            .setListener(listener)
             .build()
-        ModuleInstall.getClient(activity)
-            .installModules(request)
-            .addOnSuccessListener { startScanner(invoke, scanner) }
+        client.installModules(request)
+            .addOnSuccessListener { response ->
+                when (scannerInstall.requested(response.areModulesAlreadyInstalled())) {
+                    ScanInstallStep.START_SCANNER -> startInstalledScanner(invoke, scanner)
+                    ScanInstallStep.WAIT -> Unit
+                    ScanInstallStep.FAILED -> completeScan(invoke, ScanResult.FAILED)
+                }
+            }
             .addOnFailureListener { completeScan(invoke, ScanResult.FAILED) }
     }
 
-    private fun startScanner(invoke: Invoke, scanner: com.google.mlkit.vision.codescanner.GmsBarcodeScanner) {
+    private fun startInstalledScanner(
+        invoke: Invoke,
+        scanner: com.google.mlkit.vision.codescanner.GmsBarcodeScanner,
+    ) {
+        if (scanInvoke !== invoke || scannerStarted) return
+        scannerStarted = true
+        clearInstallListener()
         scanner
             .startScan()
             .addOnSuccessListener { barcode ->
@@ -137,6 +168,8 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
     private fun completeScan(invoke: Invoke, result: ScanResult) {
         if (scanInvoke !== invoke) return
         scanInvoke = null
+        scannerStarted = false
+        clearInstallListener()
         scanGate.finish()
         if (result == ScanResult.FAILED) dialogs.presentScanFailure()
         resolveScan(invoke, result)
@@ -146,6 +179,13 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
         val response = JSObject().put("outcome", result.wire)
         result.payload?.let { response.put("payload", it) }
         invoke.resolve(response)
+    }
+
+    private fun clearInstallListener() {
+        val listener = installListener ?: return
+        installListener = null
+        installClient?.unregisterListener(listener)
+        installClient = null
     }
 
     private companion object {
