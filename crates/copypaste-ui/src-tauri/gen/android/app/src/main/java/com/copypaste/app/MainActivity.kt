@@ -8,11 +8,13 @@ import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 
 class MainActivity : TauriActivity() {
+  override val handleBackNavigation = false
   private val notificationWaiters = ArrayList<(NotificationPermissionFacts) -> Unit>()
   private val permissionPreferences by lazy {
     getSharedPreferences(PERMISSION_PREFERENCES, Context.MODE_PRIVATE)
@@ -55,6 +57,17 @@ class MainActivity : TauriActivity() {
     // Wry calls this before it queues the initial navigation. Installing here
     // gives the document-start bootstrap the first window-inset snapshot.
     WebViewImeInsets.install(webView)
+    onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+      override fun handleOnBackPressed() {
+        if (webView.canGoBack()) {
+          webView.goBack()
+        } else {
+          // Destroying Tauri's last activity exits the process and its capture
+          // service. Back backgrounds the task so the approved reader survives.
+          moveTaskToBack(true)
+        }
+      }
+    })
   }
 
   /**
