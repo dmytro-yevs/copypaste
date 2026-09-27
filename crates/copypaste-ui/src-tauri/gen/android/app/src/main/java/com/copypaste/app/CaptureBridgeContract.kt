@@ -129,6 +129,7 @@ data class CapturedClip(
 data class DrainResult(
     val clips: List<CapturedClip>,
     val dropped: Long,
+    val stateDirty: Boolean,
     val probe: ShizukuProbe,
 )
 
