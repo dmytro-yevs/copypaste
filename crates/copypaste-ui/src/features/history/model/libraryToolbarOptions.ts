@@ -7,6 +7,12 @@ import { type OriginDevice, originName } from "@/lib/itemOrigin";
 import { t } from "@/i18n";
 import { FILTERABLE_KINDS, sortLabel } from "@/lib/view";
 
+const fullCountFormatter = new Intl.NumberFormat(undefined);
+const compactCountFormatter = new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: 0,
+});
+
 type LibraryToolbarIcon =
     | ClipPresentationIcon
     | "devices"
@@ -75,7 +81,19 @@ export function historyCount(
     visible: number,
     total: number | undefined,
 ): string {
-    return t("history.search.count", {
-        count: historyCountNumber(filtered, visible, total),
+    const count = historyCountNumber(filtered, visible, total);
+    const label = t(filtered ? "history.search.filteredCount" : "history.search.count", {
+        count,
     });
+    return label.replace(String(count), fullCountFormatter.format(count));
+}
+
+export function historyCompactCount(
+    filtered: boolean,
+    visible: number,
+    total: number | undefined,
+): string {
+    return compactCountFormatter.format(
+        historyCountNumber(filtered, visible, total),
+    );
 }
