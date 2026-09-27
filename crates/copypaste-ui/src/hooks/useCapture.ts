@@ -23,10 +23,10 @@ import {
 } from "@/lib/ipc";
 import { hasNativeBridge } from "@/lib/ipcCall";
 import { subscribeNativeEvent } from "@/lib/tauriEventRegistry";
-import { EVENT_CAPTURED, EVENT_CAPTURE_STATE } from "@/lib/tauriEvents";
+import { EVENT_CAPTURE_STATE } from "@/lib/tauriEvents";
 import { useUi } from "@/store/ui";
 
-export { EVENT_CAPTURED, EVENT_CAPTURE_STATE } from "@/lib/tauriEvents";
+export { EVENT_CAPTURE_STATE } from "@/lib/tauriEvents";
 
 export const CAPTURE_KEY = ["capture"] as const;
 export const TOAST_EXPLANATION_KEY = ["capture", "toast-explanation"] as const;
@@ -71,10 +71,8 @@ export function useCaptureSync() {
       subscribeNativeEvent<CaptureSnapshot>(EVENT_CAPTURE_STATE, (event) => {
         qc.setQueryData(CAPTURE_KEY, event.payload);
       }),
-      subscribeNativeEvent(EVENT_CAPTURED, () => {
-        void invalidateHistoryHead(qc);
-        void qc.invalidateQueries({ queryKey: STATUS_KEY });
-      }),
+      // `Captured` is native notification telemetry. Its matching `Changed`
+      // event owns history/status invalidation in usePush on every platform.
     ];
 
     function refresh() {
