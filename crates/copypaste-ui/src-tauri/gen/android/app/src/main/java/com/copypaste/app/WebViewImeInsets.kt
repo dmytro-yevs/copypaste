@@ -27,10 +27,7 @@ internal object WebViewImeInsets {
     }
 
     fun apply(host: WebView, insets: WindowInsetsCompat) {
-      applyBottomMargin(host, state.baseBottomMargin, insets)
-      val css = InsetsCss.from(host, insets)
-      state.latestCss.set(css)
-      publishCss(host, css)
+      applyInsets(host, state, insets)
     }
     ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
       val host = view as? WebView ?: return@setOnApplyWindowInsetsListener insets
@@ -65,10 +62,21 @@ internal object WebViewImeInsets {
   private fun installBootstrap(webView: WebView, state: State) {
     // This bridge only returns current CSS inset values. It has no side
     // effects and is installed before Wry starts navigation in MainActivity.
-    webView.addJavascriptInterface(InsetBridge(state.latestCss), BRIDGE_NAME)
+    webView.addJavascriptInterface(
+      InsetBridge(state.latestCss) {
+        webView.post { replayCssAtDocumentReady(webView, state) }
+      },
+      BRIDGE_NAME,
+    )
     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
       WebViewCompat.addDocumentStartJavaScript(webView, documentStartScript(), setOf("*"))
     }
+  }
+
+  private fun replayCssAtDocumentReady(webView: WebView, state: State) {
+    ViewCompat.getRootWindowInsets(webView)?.let { insets ->
+      applyInsets(webView, state, insets)
+    } ?: publishCss(webView, state.latestCss.get())
   }
 
   private fun applyBottomMargin(
@@ -89,6 +97,13 @@ internal object WebViewImeInsets {
       layoutParams.bottomMargin = desiredBottomMargin
       webView.layoutParams = layoutParams
     }
+  }
+
+  private fun applyInsets(webView: WebView, state: State, insets: WindowInsetsCompat) {
+    applyBottomMargin(webView, state.baseBottomMargin, insets)
+    val css = InsetsCss.from(webView, insets)
+    state.latestCss.set(css)
+    publishCss(webView, css)
   }
 
   private fun bottomMarginOf(webView: WebView): Int =
@@ -180,8 +195,14 @@ internal object WebViewImeInsets {
     var bootstrapInstalled = false
   }
 
-  internal class InsetBridge(private val latestCss: AtomicReference<InsetsCss>) {
+  internal class InsetBridge(
+    private val latestCss: AtomicReference<InsetsCss>,
+    private val onDocumentReady: () -> Unit,
+  ) {
     @JavascriptInterface
     fun latest(): String = latestCss.get().asJson()
+
+    @JavascriptInterface
+    fun ready() = onDocumentReady()
   }
 }
