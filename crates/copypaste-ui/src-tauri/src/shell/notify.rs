@@ -8,15 +8,16 @@
 //! `target/debug|release` (`tauri-plugin-notification-2.3.3/src/desktop.rs`),
 //! so a toast appears from an installed build and not under `tauri dev`.
 //!
-//! Native delivery remains release-host evidence. Unit tests exercise the
-//! policy gate and Android's explicitly silent notification payload.
+//! Native delivery remains release-host evidence. Android reserves notifications
+//! for ongoing capture and recovery, never a notification per saved clipboard item.
 
 use tauri::{AppHandle, Manager as _, Runtime};
-use tauri_plugin_notification::NotificationExt as _;
 #[cfg(not(target_os = "android"))]
-use tauri_plugin_notification::PermissionState;
+use tauri_plugin_notification::{NotificationExt as _, PermissionState};
 
+#[cfg(not(target_os = "android"))]
 use super::window;
+#[cfg(not(target_os = "android"))]
 use crate::backend::{Backend as _, SelectedBackend};
 
 /// No clipboard content, ever. The change event carries none by design, and a
@@ -29,6 +30,12 @@ pub const COPY_BODY: &str = "The clipping is ready to paste.";
 
 /// Something was captured. Post the notification, if the user asked for one and
 /// is not already looking at the app.
+#[cfg(target_os = "android")]
+pub fn on_capture<R: Runtime>(_app: &AppHandle<R>) {}
+
+/// Something was captured. Post the notification, if the user asked for one and
+/// is not already looking at the app.
+#[cfg(not(target_os = "android"))]
 pub fn on_capture<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -57,6 +64,12 @@ pub fn on_capture<R: Runtime>(app: &AppHandle<R>) {
 
 /// A tray selection is a copy just as a history-row selection is. It needs the
 /// same native notification without exposing the clipping.
+#[cfg(target_os = "android")]
+pub fn on_recent_copy<R: Runtime>(_app: &AppHandle<R>) {}
+
+/// A tray selection is a copy just as a history-row selection is. It needs the
+/// same native notification without exposing the clipping.
+#[cfg(not(target_os = "android"))]
 pub fn on_recent_copy<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -81,10 +94,12 @@ pub fn should_post(enabled: bool, foreground: bool) -> bool {
 }
 
 /// Whether the user is already looking at the app.
+#[cfg(not(target_os = "android"))]
 fn is_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
     window::main_window(app).is_some_and(|window| window.is_focused().unwrap_or(false))
 }
 
+#[cfg(not(target_os = "android"))]
 fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
     if !notification_granted(app) {
         return;
@@ -92,15 +107,6 @@ fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
     if let Err(error) = show_silent(app, title, body) {
         tracing::debug!(%error, "the capture notification was not posted");
     }
-}
-
-#[cfg(target_os = "android")]
-fn notification_granted<R: Runtime>(app: &AppHandle<R>) -> bool {
-    matches!(
-        super::permissions::notification_status(app),
-        Ok(super::permissions::PermissionStatus::Granted)
-            | Ok(super::permissions::PermissionStatus::NotRequired)
-    )
 }
 
 #[cfg(not(target_os = "android"))]
@@ -118,16 +124,6 @@ fn notification_granted<R: Runtime>(app: &AppHandle<R>) -> bool {
         return false;
     }
     true
-}
-
-#[cfg(target_os = "android")]
-fn show_silent<R: Runtime>(
-    app: &AppHandle<R>,
-    title: &str,
-    body: &str,
-) -> crate::backend::Result<()> {
-    app.state::<crate::capture::SelectedCapture>()
-        .post_silent_notification(title, body)
 }
 
 #[cfg(not(target_os = "android"))]

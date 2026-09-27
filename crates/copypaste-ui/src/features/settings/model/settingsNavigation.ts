@@ -58,6 +58,7 @@ export interface SettingsCapabilities {
   readonly translucency: boolean;
   readonly screenshots: boolean;
   readonly updater: boolean;
+  readonly copyNotifications: boolean;
 }
 
 export function settingsCapabilities(platform: AppPlatform): SettingsCapabilities {
@@ -70,5 +71,6 @@ export function settingsCapabilities(platform: AppPlatform): SettingsCapabilitie
     translucency: desktopNative,
     screenshots: desktopNative || platform === "android",
     updater: desktopNative || platform === "android",
+    copyNotifications: platform !== "android",
   };
 }

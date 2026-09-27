@@ -25,8 +25,8 @@ export const onboarding = {
     addTileDetail: "Save the current clipboard in one tap.",
     addTileAction: "Add tile",
     tileAdded: "Added",
-    notifications: "Save notifications",
-    notificationsDetail: "Know when a background copy was saved.",
+    notifications: "Capture notifications",
+    notificationsDetail: "Keep background capture active and tell you if it stops.",
     notificationsAction: "Allow",
     notificationsAllowed: "Allowed",
     permission: {

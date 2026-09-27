@@ -1,5 +1,6 @@
 import { CaptureSetupState } from "@/features/capture";
 import { SettingsHealthNotice } from "@/features/settings/patterns/SettingsHealthNotice";
+import { currentPlatform } from "@/lib/platform";
 import { AdvancedServiceSection } from "./service/AdvancedServiceSection";
 import {
   ClipboardCaptureSection,
@@ -16,6 +17,7 @@ function ScopedServiceSettings({ scope, revealAdvancedKey }: { scope: ServiceSco
   const showClipboard = scope === "all" || scope === "clipboard";
   const showPrivacy = scope === "all" || scope === "privacy";
   const showAdvanced = scope === "all" || scope === "advanced";
+  const supportsCopyNotifications = currentPlatform() !== "android";
 
   return (
     <ServiceSettingsProvider requiresPrivateMode={showPrivacy}>
@@ -25,7 +27,7 @@ function ScopedServiceSettings({ scope, revealAdvancedKey }: { scope: ServiceSco
         {showClipboard ? <CaptureSetupState /> : null}
         {showClipboard ? <ClipboardCaptureSection revealAdvancedKey={revealAdvancedKey} /> : null}
         {showPrivacy ? <PrivacyServiceSections /> : null}
-        {showClipboard ? <ClipboardNotificationSection /> : null}
+        {showClipboard ? <ClipboardNotificationSection supportsCopyNotifications={supportsCopyNotifications} /> : null}
         {showAdvanced ? <AdvancedServiceSection /> : null}
       </div>
     </ServiceSettingsProvider>
