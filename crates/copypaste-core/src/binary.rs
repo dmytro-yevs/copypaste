@@ -152,25 +152,26 @@ impl PayloadMetadata {
             file,
             source_app_icon,
         };
-        metadata
-            .is_valid_for(copypaste_ipc::content_type::FILE)
-            .then_some(metadata)
+        metadata.has_valid_components().then_some(metadata)
     }
 
     #[must_use]
     pub fn is_valid_for(&self, content_type: &str) -> bool {
-        let file_is_valid = self.file.as_ref().is_none_or(FileMetadata::is_valid);
-        let icon_is_valid = self
-            .source_app_icon
-            .as_ref()
-            .is_none_or(|icon| icon.png().is_some());
-        file_is_valid
-            && icon_is_valid
+        self.has_valid_components()
             && if content_type == copypaste_ipc::content_type::FILE {
                 self.file.is_some()
             } else {
                 self.file.is_none() && self.source_app_icon.is_some()
             }
+    }
+
+    fn has_valid_components(&self) -> bool {
+        let file_is_valid = self.file.as_ref().is_none_or(FileMetadata::is_valid);
+        let icon_is_valid = self
+            .source_app_icon
+            .as_ref()
+            .is_none_or(|icon| icon.png().is_some());
+        file_is_valid && icon_is_valid && (self.file.is_some() || self.source_app_icon.is_some())
     }
 
     #[must_use]
@@ -773,6 +774,12 @@ mod tests {
             source_app_icon: Some(icon),
         };
         assert!(icon_only.to_json("text").is_some());
+        let constructed = PayloadMetadata::new(None, icon_only.source_app_icon.clone()).unwrap();
+        let constructed_json = constructed.to_json("text").unwrap();
+        assert_eq!(
+            PayloadMetadata::from_json(&constructed_json, "text"),
+            Some(constructed)
+        );
         assert_eq!(
             PayloadMetadata::from_json(
                 r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#,
