@@ -58,6 +58,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         CaptureNotifications.ensureChannels(activity)
         PackageFacts.observe(activity)
         ClipboardNoticeSetting.observe(activity)
+        ClipboardStaging.initialize(activity, main)
         // Tells the rung 0 doorways that something is draining the queue, so
         // they need not start the app to make sure a clip is picked up.
         ClipQueue.rustIsUp = true
@@ -84,6 +85,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         // Before the requests go: a pending failsafe keeps this plugin, and the
         // request it closes over, reachable for the rest of its timeout.
         main.removeCallbacksAndMessages(null)
+        ClipboardStaging.stop(main)
         abandon(pendingArm.getAndSet(null))
         abandon(pendingShizukuArm.getAndSet(null))
     }
@@ -389,6 +391,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject("That item could not be copied to the clipboard.")
             return
         }
+        ClipboardStaging.schedule(activity, main)
         invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
     }
 
