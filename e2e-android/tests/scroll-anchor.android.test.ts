@@ -27,6 +27,7 @@ import {
 } from "../src/harness/list.js";
 import { beforeAllWithEvidence } from "../src/harness/suite.js";
 import {
+  count,
   gotoView,
   filterHistoryTo,
   reloadHistoryWith,
@@ -83,7 +84,9 @@ beforeAllWithEvidence("scroll-anchor", async () => {
     app,
     Array.from({ length: COUNT }, (_, i) => label(i)),
   );
-  await reloadHistoryWith(app, label(COUNT - 1));
+  await reloadHistoryWith(app, label(COUNT - 1), { search: "open" });
+  expect(await count(app, '[data-slot="history-toolbar"][data-search-expanded]')).toBe(1);
+  expect(await count(app, '[role="dialog"]')).toBe(0);
   await filterHistoryTo(app, marker, marker);
   await waitForRows(app, 4);
   await scrollListToTop(app);
