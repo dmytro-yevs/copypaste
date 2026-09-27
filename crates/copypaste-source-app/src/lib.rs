@@ -270,9 +270,79 @@ mod tests {
     #[test]
     fn package_ids_are_strictly_bounded() {
         assert!(valid_package_id("com.example.Writer"));
+        assert!(valid_package_id("org.mozilla.firefox"));
         assert!(valid_package_id("proton pass.exe"));
         assert!(!valid_package_id("/Applications/Writer.app"));
+        assert!(!valid_package_id("file:///tmp/icon.png"));
         assert!(!valid_package_id("writer"));
+    }
+
+    #[test]
+    fn windows_image_names_with_spaces_are_accepted() {
+        assert!(valid_package_id("chrome.exe"));
+        assert!(valid_package_id("proton pass.exe"));
+        assert!(valid_package_id("sticky password.exe"));
+        assert!(valid_package_id("robotaskbaricon-x64.exe"));
+        assert!(!valid_package_id(".exe"));
+        assert!(!valid_package_id(""));
+        assert!(!valid_package_id(r"C:\Apps\chrome.exe"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "drives the real Windows shell"]
+    fn windows_resolves_a_system_executable_icon() {
+        let cache = SourceAppIconCache::default();
+        assert!(
+            cache.resolve_desktop("cmd.exe").is_some(),
+            "cmd.exe is in System32 and must have an icon"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_returns_none_for_an_unknown_executable() {
+        let cache = SourceAppIconCache::default();
+        assert!(cache.resolve_desktop("not_an_app_at_all.exe").is_none());
+    }
+
+    /// DMY-158 blocker 2: the icon resolution path must not regress the poll
+    /// cadence. A cold resolve is a registry lookup + SHGetFileInfoW + GDI +
+    /// PNG encode; the cache makes a second resolve near-free.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "drives the real Windows shell"]
+    fn icon_resolution_is_bounded_and_the_cache_is_near_free() {
+        const ROUNDS: usize = 20;
+        let cache = SourceAppIconCache::default();
+
+        let started = std::time::Instant::now();
+        assert!(
+            cache.resolve_desktop("cmd.exe").is_some(),
+            "cold resolve must succeed"
+        );
+        let cold = started.elapsed();
+
+        let mut cached = Vec::with_capacity(ROUNDS);
+        for _ in 0..ROUNDS {
+            let started = std::time::Instant::now();
+            let _ = cache.resolve_desktop("cmd.exe");
+            cached.push(started.elapsed().as_micros());
+        }
+        cached.sort_unstable();
+        let p95 = cached[cached.len() * 95 / 100];
+
+        println!("icon cold={}us; cached p95={}us", cold.as_micros(), p95);
+        assert!(
+            cold.as_millis() < 500,
+            "cold icon resolve took {}ms; must fit in one poll period",
+            cold.as_millis()
+        );
+        assert!(
+            p95 < 100,
+            "cached icon resolve took {}us; must be near-free",
+            p95
+        );
     }
 
     #[test]
@@ -283,15 +353,72 @@ mod tests {
     }
 
     #[test]
-    fn cache_reuses_a_resolved_icon_and_rejects_invalid_identity() {
+    fn cache_is_bounded_and_reuses_a_resolved_icon() {
         let cache = SourceAppIconCache::default();
         let icon = AppIcon::from_png(png(1, 1), 1, 1).unwrap();
         assert!(cache
             .resolve_with("com.example.writer", |_| Some(icon.clone()))
             .is_some());
+        assert!(cache.resolve_with("com.example.writer", |_| None).is_some());
+        for index in 0..MAX_CACHE_ENTRIES + 4 {
+            let bundle_id = format!("com.example.app{index}");
+            let _ = cache.resolve_with(&bundle_id, |_| Some(icon.clone()));
+        }
+        assert_eq!(
+            cache.entries.lock().expect("source icon cache").len(),
+            MAX_CACHE_ENTRIES
+        );
+    }
+
+    #[test]
+    fn negative_cache_prevents_repeated_resolution() {
+        let cache = SourceAppIconCache::default();
+        let mut calls = 0u32;
         assert!(cache
-            .resolve_with("com.example.writer", |_| panic!("cache miss"))
+            .resolve_with("com.example.missing", |_| {
+                calls += 1;
+                None
+            })
+            .is_none());
+        assert_eq!(calls, 1);
+        assert!(cache
+            .resolve_with("com.example.missing", |_| {
+                calls += 1;
+                None
+            })
+            .is_none());
+        assert_eq!(calls, 1, "a second resolve called the resolver again");
+    }
+
+    #[test]
+    fn cache_keys_are_case_insensitive_on_windows_image_names() {
+        let cache = SourceAppIconCache::default();
+        let icon = AppIcon::from_png(png(1, 1), 1, 1).unwrap();
+        assert!(cache
+            .resolve_with("chrome.exe", |_| Some(icon.clone()))
             .is_some());
-        assert!(cache.resolve_with("invalid", |_| Some(icon)).is_none());
+        assert!(
+            cache
+                .resolve_with("Chrome.exe", |_| panic!("should hit cache"))
+                .is_some(),
+            "case variant must hit cache"
+        );
+    }
+
+    #[test]
+    fn cache_eviction_drops_oldest_entry() {
+        let cache = SourceAppIconCache::default();
+        let icon = AppIcon::from_png(png(1, 1), 1, 1).unwrap();
+        cache.resolve_with("com.example.first", |_| Some(icon.clone()));
+        for i in 0..MAX_CACHE_ENTRIES {
+            let id = format!("com.example.evict{i}");
+            cache.resolve_with(&id, |_| Some(icon.clone()));
+        }
+        let mut calls = 0u32;
+        cache.resolve_with("com.example.first", |_| {
+            calls += 1;
+            Some(icon.clone())
+        });
+        assert_eq!(calls, 1, "evicted entry should re-resolve");
     }
 }
