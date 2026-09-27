@@ -132,8 +132,8 @@ export function PairingLauncherDialog({
             ? available
                 ? preview
                     ? t("devices.pairing.previewUnavailable")
-                    : "Choose how to open the protected pairing flow on this device."
-                : "Protected pairing requires a current native CopyPaste build. Update or reopen the native app on both devices, then choose Connect a device again."
+                    : "Choose how to connect this device."
+                : "Secure pairing is unavailable. Reopen CopyPaste and try again."
             : t("devices.pairing.previewUnavailable");
 
     return (
