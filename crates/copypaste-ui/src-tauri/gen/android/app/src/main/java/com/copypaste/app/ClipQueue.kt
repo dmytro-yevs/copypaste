@@ -1,6 +1,8 @@
 package com.copypaste.app
 
 import java.util.ArrayDeque
+import app.tauri.plugin.Channel
+import app.tauri.plugin.JSObject
 
 /**
  * The hand-off between whichever Android component captured a clip and the Rust
@@ -8,8 +10,8 @@ import java.util.ArrayDeque
  *
  * A process-wide singleton rather than plugin state, because the components
  * that capture — a share target, a text-selection action, a Quick Settings tile
- * — can run before the WebView and the Rust library exist. Rust drains this
- * about once a second (`capture::intake`), and anything sitting here when the
+ * — can run before the WebView and the Rust library exist. A bounded native
+ * callback wakes Rust to drain this, and anything sitting here when the
  * process dies is lost, which is why [dropped] is reported rather than silently
  * absorbed.
  *
@@ -26,6 +28,8 @@ object ClipQueue {
     private val queue = ArrayDeque<CapturedClip>(CAPACITY)
     private var dropped = 0L
     private var privateMode = false
+    private var queueReady: (() -> Unit)? = null
+    private var wakePending = false
 
     /**
      * Set by [CapturePlugin.load] and cleared when its activity is destroyed;
@@ -38,25 +42,32 @@ object ClipQueue {
     @Volatile
     var rustIsUp = false
 
-    @Synchronized
     fun offer(
         text: String,
         source: CaptureSource,
         sourceAppBundleId: String? = null,
         sourceAppName: String? = null,
     ) {
-        if (privateMode || text.isBlank()) return
-        if (text.toByteArray(Charsets.UTF_8).size > MAX_TEXT_BYTES) {
-            dropped++
-            return
+        val wake = synchronized(this) {
+            if (privateMode || text.isBlank()) return
+            if (text.toByteArray(Charsets.UTF_8).size > MAX_TEXT_BYTES) {
+                dropped++
+                return
+            }
+            queue.addLast(
+                CapturedClip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName),
+            )
+            while (queue.size > CAPACITY) {
+                queue.removeFirst()
+                dropped++
+            }
+            if (!wakePending) {
+                queueReady?.also { wakePending = true }
+            } else {
+                null
+            }
         }
-        queue.addLast(
-            CapturedClip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName),
-        )
-        while (queue.size > CAPACITY) {
-            queue.removeFirst()
-            dropped++
-        }
+        wake?.invoke()
     }
 
     @Synchronized
@@ -73,6 +84,7 @@ object ClipQueue {
         // reported, so history would have a hole nobody was told about.
         dropped += queue.size
         queue.clear()
+        wakePending = false
     }
 
     /** Everything captured since the last call, oldest first. */
@@ -82,6 +94,29 @@ object ClipQueue {
         val lost = dropped
         queue.clear()
         dropped = 0
+        wakePending = false
         return taken to lost
+    }
+
+    fun subscribeQueueReady(channel: Channel?) {
+        setQueueReady(channel?.let { ready -> { ready.send(JSObject()) } })
+    }
+
+    internal fun subscribeQueueReadyForTest(callback: (() -> Unit)?) {
+        setQueueReady(callback)
+    }
+
+    private fun setQueueReady(callback: (() -> Unit)?) {
+        val wake = synchronized(this) {
+            queueReady = callback
+            if (callback == null) return@synchronized null
+            if (queue.isNotEmpty() && !wakePending) {
+                wakePending = true
+                callback
+            } else {
+                null
+            }
+        }
+        wake?.invoke()
     }
 }
