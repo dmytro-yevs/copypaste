@@ -17,9 +17,9 @@
 
 /// Plain text (`public.utf8-plain-text` on macOS).
 pub const TEXT: &str = "text";
-/// Rich text (`public.rtf` on macOS); currently accepted from imports/remotes.
+/// Rich text (`public.rtf` on macOS), imports, and remotes.
 pub const RICH_TEXT: &str = "text/rtf";
-/// HTML (`public.html`); currently accepted from imports/remotes.
+/// HTML (`public.html`), imports, and remotes.
 pub const HTML: &str = "text/html";
 /// A PNG image (`public.png`).
 pub const IMAGE_PNG: &str = "image/png";

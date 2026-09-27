@@ -43,7 +43,8 @@
 //!   before any representation is read.
 //! - **§3.9** a short-lived frontmost-app cache, private-mode and exclusion
 //!   gates; known password-manager origins are persisted as sensitive.
-//! - **I-11** text and native PNG/TIFF images are captured when offered.
+//! - **I-11** text, RTF, HTML, native PNG/TIFF images, and one local file URL
+//!   are captured in a fixed priority order.
 //! - **I-18** `NSData.length` checked before the bytes are copied out.
 //! - **I-39 / §6.5** rejections are counted and readable, not just logged.
 //! - **§3.12** the invariant UTI strings are built once, not once per tick.
@@ -97,21 +98,33 @@ impl<'a> CapturePolicy<'a> {
     }
 
     pub fn allows_materialized(self, capture: &Capture) -> bool {
-        let byte_len = match (
+        let within_limit = match (
             capture.content_type.as_str(),
             capture.binary_content.as_ref(),
             capture.file_path.as_ref(),
             capture.file_metadata.as_ref(),
         ) {
-            (copypaste_ipc::content_type::TEXT, None, None, None)
-                if !capture.content.is_empty() =>
+            (content_type, None, None, None)
+                if !capture.content.is_empty()
+                    && format::supports(content_type)
+                    && copypaste_ipc::content_type::is_text(content_type) =>
             {
-                capture.content.len()
+                capture.content.len() as u64 <= self.limit_bytes(content_type)
             }
             (content_type, Some(bytes), None, None)
-                if capture.content.is_empty() && format::supports(content_type) =>
+                if capture.content.is_empty()
+                    && format::supports(content_type)
+                    && matches!(
+                        copypaste_ipc::content_type::classify(content_type),
+                        copypaste_ipc::ContentClass::Image
+                    ) =>
             {
-                bytes.len()
+                bytes.len() as u64 <= self.limit_bytes(content_type)
+            }
+            (copypaste_ipc::content_type::FILE, None, Some(_), Some(metadata))
+                if capture.content.is_empty() && metadata.is_valid() =>
+            {
+                true
             }
             _ => return false,
         };
@@ -124,7 +137,7 @@ impl<'a> CapturePolicy<'a> {
                         .iter()
                         .all(|excluded| excluded != id)
                 }))
-            && byte_len as u64 <= self.limit_bytes(&capture.content_type)
+            && within_limit
     }
 }
 
@@ -150,12 +163,14 @@ pub(crate) use copypaste_core::sensitive::is_password_manager_app;
 pub struct Capture {
     /// UTF-8 text captured from the system pasteboard.
     pub content: String,
-    /// Raw bytes for image/file capture.  Text stays in `content`; the fields
+    /// Raw bytes for image capture. Text stays in `content`; the fields
     /// are mutually exclusive so no caller can accidentally feed binary to a
     /// string-only consumer.
     pub binary_content: Option<Vec<u8>>,
-    /// An absolute local file reference.  The tick opens it on the blocking
+    /// One absolute local file reference. The tick opens it on the blocking
     /// worker; polling itself must never read a file's bytes (manifest 01 I-16).
+    /// Multi-file clipboard changes are unsupported until this port carries a
+    /// batch rather than silently dropping all but one file.
     pub file_path: Option<std::path::PathBuf>,
     pub file_metadata: Option<copypaste_core::FileMetadata>,
     /// One of `copypaste_ipc::content_type`.

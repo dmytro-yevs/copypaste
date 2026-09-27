@@ -1,10 +1,12 @@
 # Port Manifest 01 — Clipboard Capture
 
 This manifest specifies the current v2 clipboard-capture contract. Native
-capture accepts one representation, plain text. A change that offers only an
-image, file reference or rich text is acknowledged and skipped. Binary values
-received through import or sync remain valid stored items and can be pasted
-back; that does not make binary clipboard capture a product capability.
+capture accepts one representation: plain text, RTF, HTML, PNG, TIFF, or one
+local file URL, in that priority order. A text representation wins over every
+fallback. File capture reads one regular local file only on the blocking worker,
+enforces the live file limit before allocation, and retains no source path. A
+multi-file clipboard change is unsupported until the capture port owns a batch
+rather than silently dropping all but one file.
 
 The implementation has one platform-neutral change tracker, one capture policy
 and one ingest path. Platform backends own only the OS calls needed to observe
@@ -96,12 +98,15 @@ stronger and prevents capture entirely.
 
 ### 3.2 Current representation contract
 
-- **I-11:** If plain text is offered, it is the single captured value.
-- A text read is bounded by the live text limit and the shared hard content cap.
-  The smaller applicable bound wins.
+- **I-11:** One representation is selected in this order: plain text, RTF,
+  HTML, PNG, TIFF, then one local file URL. If plain text is offered, it is the
+  single captured value.
+- Text, image, and file values use their live limit and the shared hard content
+  cap. The smaller applicable bound wins.
 - The native length is checked before copying bytes into an owned buffer.
-- A non-text-only change is acknowledged without materialising image, file or
-  rich-text bytes.
+- A file URL is accepted only when it resolves to one local path. The blocking
+  ingest worker checks that it is a regular file and limits the read before
+  allocating its bytes. Network URLs and multi-file changes are unsupported.
 - Unsupported types may increment bounded telemetry, but their names and
   payloads are not logged repeatedly.
 
@@ -208,11 +213,13 @@ display string.
 
 - A mixed clipboard offering text plus any binary format captures text without
   reading the binary representation.
-- A non-text-only change is acknowledged and creates no row.
+- A supported non-text fallback captures one RTF, HTML, image, or local file
+  representation; unsupported and multi-file changes are acknowledged without
+  creating a row.
 - Empty, malformed and invalid-UTF-8 platform values fail without panic or
   monitor termination.
-- Identical text creates one row and refreshes it; a dedup-query failure still
-  preserves the new capture.
+- Identical captured content creates one row and refreshes it; a dedup-query
+  failure still preserves the new capture.
 - Dedup notification ids always resolve to a stored row.
 - Sensitive detection or credential-store attribution keeps the item out of
   search, and re-copy refreshes its sensitive expiry.

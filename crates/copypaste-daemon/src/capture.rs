@@ -15,6 +15,9 @@
 //!   inside one.
 
 use std::borrow::Borrow;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -343,7 +346,10 @@ pub(crate) fn ingest_capture(
         capture.file_path.as_ref(),
         capture.file_metadata.as_ref(),
     ) {
-        (copypaste_ipc::content_type::TEXT, None, None, None) => {
+        (content_type, None, None, None)
+            if crate::clipboard::format::supports(content_type)
+                && copypaste_ipc::content_type::is_text(content_type) =>
+        {
             copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
                 &state.store,
                 &state.detector,
@@ -359,7 +365,12 @@ pub(crate) fn ingest_capture(
             )
         }
         (content_type, Some(bytes), None, None)
-            if capture.content.is_empty() && crate::clipboard::format::supports(content_type) =>
+            if capture.content.is_empty()
+                && crate::clipboard::format::supports(content_type)
+                && matches!(
+                    copypaste_ipc::content_type::classify(content_type),
+                    copypaste_ipc::ContentClass::Image
+                ) =>
         {
             copypaste_core::ingest_binary_into_with_capture_source(
                 &state.store,
@@ -374,8 +385,51 @@ pub(crate) fn ingest_capture(
                 settings,
             )
         }
+        (copypaste_ipc::content_type::FILE, None, Some(path), Some(metadata))
+            if capture.content.is_empty() && metadata.is_valid() =>
+        {
+            let bytes = read_file_capture(
+                path,
+                settings.capture_limit_bytes(copypaste_ipc::content_type::FILE),
+            )?;
+            copypaste_core::ingest_binary_into_with_capture_source(
+                &state.store,
+                &state.keyring,
+                &bytes,
+                copypaste_ipc::content_type::FILE,
+                created_at,
+                sensitive_floor,
+                capture.app_bundle_id.as_deref(),
+                capture.app_name.as_deref(),
+                Some(metadata),
+                settings,
+            )
+        }
         _ => Err(IngestError::Empty),
     }
+}
+
+fn read_file_capture(path: &Path, cap: u64) -> Result<Vec<u8>, IngestError> {
+    let file = File::open(path).map_err(|_| IngestError::Empty)?;
+    let metadata = file.metadata().map_err(|_| IngestError::Empty)?;
+    if !metadata.is_file() {
+        return Err(IngestError::Empty);
+    }
+    let len = metadata.len();
+    if len > cap {
+        return Err(IngestError::TooLarge);
+    }
+    let capacity = usize::try_from(len).map_err(|_| IngestError::TooLarge)?;
+    let mut bytes = Vec::with_capacity(capacity);
+    file.take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| IngestError::Empty)?;
+    if bytes.len() as u64 > cap {
+        return Err(IngestError::TooLarge);
+    }
+    (!bytes.is_empty())
+        .then_some(bytes)
+        .ok_or(IngestError::Empty)
 }
 
 pub fn ingest(
@@ -985,6 +1039,109 @@ mod tests {
         )
         .unwrap();
         assert_eq!(opened.as_slice(), bytes.as_slice());
+    }
+
+    #[test]
+    fn file_capture_reads_one_bounded_local_file_without_persisting_its_path() {
+        let (state, dir) = test_state("file-capture");
+        let path = dir.path().join("fixture.bin");
+        let bytes = b"synthetic file fixture".to_vec();
+        std::fs::write(&path, &bytes).unwrap();
+        let metadata =
+            copypaste_core::FileMetadata::new("fixture.bin", "application/octet-stream").unwrap();
+
+        let stored = ingest_capture(
+            &state,
+            &state.settings.get(),
+            crate::clipboard::Capture {
+                content: String::new(),
+                binary_content: None,
+                file_path: Some(path),
+                file_metadata: Some(metadata.clone()),
+                content_type: copypaste_ipc::content_type::FILE.to_string(),
+                app_bundle_id: None,
+                app_name: None,
+            },
+            copypaste_core::now_ms(),
+        )
+        .unwrap()
+        .into_item();
+
+        assert_eq!(stored.content_type, copypaste_ipc::content_type::FILE);
+        assert_eq!(
+            stored.payload_metadata.as_deref(),
+            Some(r#"{"filename":"fixture.bin","mime_type":"application/octet-stream"}"#)
+        );
+        assert!(state.store.search("fixture", 10).unwrap().is_empty());
+        let opened = copypaste_core::open_binary(
+            &stored.content_ciphertext,
+            &state.keyring.item_key(),
+            &stored.id,
+        )
+        .unwrap();
+        assert_eq!(opened.as_slice(), bytes.as_slice());
+    }
+
+    #[test]
+    fn file_capture_rejects_a_file_above_its_configured_limit() {
+        let (state, dir) = test_state("oversized-file-capture");
+        let settings = copypaste_ipc::ConfigData {
+            max_file_size_bytes: copypaste_ipc::MIN_FILE_SIZE_BYTES,
+            ..Default::default()
+        };
+        let path = dir.path().join("oversized.bin");
+        std::fs::write(
+            &path,
+            vec![0; copypaste_ipc::MIN_FILE_SIZE_BYTES as usize + 1],
+        )
+        .unwrap();
+        let metadata =
+            copypaste_core::FileMetadata::new("oversized.bin", "application/octet-stream").unwrap();
+
+        let result = ingest_capture(
+            &state,
+            &settings,
+            crate::clipboard::Capture {
+                content: String::new(),
+                binary_content: None,
+                file_path: Some(path),
+                file_metadata: Some(metadata),
+                content_type: copypaste_ipc::content_type::FILE.to_string(),
+                app_bundle_id: None,
+                app_name: None,
+            },
+            copypaste_core::now_ms(),
+        );
+        assert!(matches!(result, Err(IngestError::TooLarge)));
+        assert_eq!(state.store.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn rich_text_and_html_captures_use_the_text_ingest_path() {
+        let (state, _dir) = test_state("rich-text-capture");
+        for (content, content_type) in [
+            ("{\\rtf1 synthetic}", copypaste_ipc::content_type::RICH_TEXT),
+            ("<p>synthetic</p>", copypaste_ipc::content_type::HTML),
+        ] {
+            let stored = ingest_capture(
+                &state,
+                &state.settings.get(),
+                crate::clipboard::Capture {
+                    content: content.to_string(),
+                    binary_content: None,
+                    file_path: None,
+                    file_metadata: None,
+                    content_type: content_type.to_string(),
+                    app_bundle_id: None,
+                    app_name: None,
+                },
+                copypaste_core::now_ms(),
+            )
+            .unwrap()
+            .into_item();
+            assert_eq!(stored.content_type, content_type);
+        }
+        assert_eq!(state.store.search("synthetic", 10).unwrap().len(), 2);
     }
 
     #[test]
