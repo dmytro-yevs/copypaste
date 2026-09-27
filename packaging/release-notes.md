@@ -1,34 +1,39 @@
 ## Highlights
 
-- Android background capture and capture from other apps start on by default
-  and keep that choice across app restarts. A failed arm or a dismissed
-  permission prompt no longer persists as the user turning capture off.
-- The capture overlay no longer blocks touches in other apps.
-- LAN discovery on Android uses platform DNS-SD plus a multicast lock, so the
-  Devices radar is no longer stuck on “unavailable” when raw mDNS is dropped.
-- Third-party QR scanners can open `copypaste://pair` and start inbound
-  pairing. This is pairing association only, not HTTPS App Links and not the
-  Tauri deep-link plugin.
-- Edge-to-edge cutouts and system bars publish into the CSS inset tokens.
-- Long clips open a swipeable, scrollable compact sheet, and delete toasts use
-  the shared toaster tokens.
-- Onboarding stacks at the toolbar breakpoint (~748px) and uses larger capture,
-  card, and network artwork glyphs.
-- The compact library toolbar no longer gains an extra left inset from a hidden
-  search field.
-- `v2.0.0-alpha.35` inherits the same one-alpha release-risk acceptance that
-  authorized `v2.0.0-alpha.34`: the same 58 pinned pending native-evidence
-  states across history, capture, devices, settings/service, and cloud
-  account remain unverified and are not receipt expectations.
+- Copy now reflects native clipboard availability, shows progress, and keeps
+  the selected item and reader focus stable. Unsupported file content remains
+  selectable but is not presented as a copy action.
+- Long clips have an explicit full reader. Library and Quick Paste share the
+  same content presentation and copy-availability rules.
+- Settings presents direct-device readiness and Cloud connection state
+  consistently. Runtime events are under Diagnostics, while self-hosted Cloud
+  fields stay in Advanced and open deliberately from search or setup.
+- Onboarding keeps actions reachable on short screens, explains permission
+  failures, and uses platform-appropriate shortcut hints.
+- Android capture and pairing recovery preserve the first attempted action and
+  report the exact recovery outcome instead of silently treating an app failure
+  as a successful retry.
+- macOS update status explains whether automatic updates are available and
+  provides the manual release-page fallback when they are not.
+- Windows Cloud qualification records the closed overview as diagnostic
+  evidence while the revealed configuration form remains the canonical
+  unconfigured state.
+
+## Evidence note
+
+`v2.0.0-alpha.36` carries a documented one-alpha release-risk acceptance for
+the same 58 pending native-evidence states across history, capture, devices,
+settings/service, and Cloud account. They remain explicitly unverified and
+excluded from receipt expectations; this release does not claim them complete.
 
 ## Not verified on this host
 
 Physical Android capture persistence, overlay hit-testing, LAN discovery, QR
 association, cutout insets, OEM process-kill survival, and Shizuku rung 2
 were not walked on a device for this tag. Windows pairing and macOS TCC
-prompts were not exercised. Missing same-commit native evidence remains a
-blocker for claiming this alpha is qualified. This wave reuses the pending
-states `v2.0.0-alpha.34` already accepted and does not claim they are complete.
+prompts were not exercised. These limits, including the 58 documented pending
+states above, remain visible release risk and are not presented as completed
+native qualification.
 
 ## Install
 
@@ -58,8 +63,10 @@ directory where you run `adb`, then install or update it with:
 adb install -r ./CopyPaste-android.apk
 ```
 
-The release package is `com.copypaste.app` and starts with an empty history and
-no pairings.
+The release package is `com.copypaste.app`. A first install starts with an
+empty history and no pairings. An in-place update of an existing package with
+the same signing key uses `adb install -r` and retains that package's data,
+including its history, pairings, and settings.
 
 Only an APK installed as `com.copypaste.app` with an incompatible signing key
 needs an uninstall. If installation reports

@@ -49,12 +49,14 @@ REQUIRED_RELEASE = {
     "release-windows-native-evidence",
 }
 TEST_RUNNERS = {"cargo", "npm", "python", "python3", "pwsh", "bash", "./gradlew"}
-ALPHA35_EXCEPTION_VERSION = "2.0.0-alpha.35"
-ALPHA35_EXCEPTION_AUTHORIZED_ON = "2026-09-05"
-ALPHA35_EXCEPTION_DECISION = "one-alpha release risk acceptance"
-ALPHA35_EXCEPTION_SCOPE = "completion gate only; pending states remain unverified and excluded from receipt expectations"
-ALPHA35_PENDING_COUNT = 58
-ALPHA35_PENDING_DIGEST = "e28340bb48185621683f9e0338ff0d081bf9402f936e3452f26a924db472dfda"
+APPROVED_RELEASE_EXCEPTIONS = {
+    "2.0.0-alpha.35": {"authorized_on": "2026-09-05"},
+    "2.0.0-alpha.36": {"authorized_on": "2026-09-27"},
+}
+EXCEPTION_DECISION = "one-alpha release risk acceptance"
+EXCEPTION_SCOPE = "completion gate only; pending states remain unverified and excluded from receipt expectations"
+EXCEPTION_PENDING_COUNT = 58
+EXCEPTION_PENDING_DIGEST = "e28340bb48185621683f9e0338ff0d081bf9402f936e3452f26a924db472dfda"
 PENDING_STATE_ID = re.compile(r"[a-z0-9][a-z0-9_-]*/(?:android|macos|windows)/[a-z0-9][a-z0-9_-]*\Z")
 
 
@@ -332,7 +334,8 @@ def platform_errors(feature, root=ROOT, require_complete=False, uploads=None):
 
 
 def release_exception(version, pending, config_file=EXCEPTION_CONFIG):
-    if version != ALPHA35_EXCEPTION_VERSION:
+    expected = APPROVED_RELEASE_EXCEPTIONS.get(version)
+    if expected is None:
         return False, []
     try:
         config = json.loads(config_file.read_text(encoding="utf-8"))
@@ -341,28 +344,41 @@ def release_exception(version, pending, config_file=EXCEPTION_CONFIG):
     if not isinstance(config, dict) or set(config) != {"schema_version", "exceptions"}:
         return False, ["release evidence exception config has an invalid envelope"]
     exceptions = config.get("exceptions")
-    if config.get("schema_version") != 1 or not isinstance(exceptions, list) or len(exceptions) != 1:
-        return False, ["release evidence exception config must contain one current exception"]
-    exception = exceptions[0]
+    if config.get("schema_version") != 1 or not isinstance(exceptions, list):
+        return False, ["release evidence exception config has an invalid exceptions list"]
     required = {
         "version", "authorized_on", "decision", "scope", "pending_state_count",
         "pending_state_digest_sha256", "pending_states",
     }
-    if not isinstance(exception, dict) or set(exception) != required:
-        return False, ["release evidence exception has an invalid contract"]
-    states = exception.get("pending_states")
+    records = {}
     errors = []
-    if exception.get("version") != ALPHA35_EXCEPTION_VERSION:
-        errors.append("release evidence exception must name only 2.0.0-alpha.35")
-    if exception.get("authorized_on") != ALPHA35_EXCEPTION_AUTHORIZED_ON:
+    for exception in exceptions:
+        if not isinstance(exception, dict) or set(exception) != required:
+            errors.append("release evidence exception has an invalid contract")
+            continue
+        record_version = exception.get("version")
+        if not isinstance(record_version, str):
+            errors.append("release evidence exception version is invalid")
+            continue
+        if record_version in records:
+            errors.append("release evidence exception config has duplicate version records")
+            continue
+        records[record_version] = exception
+    if set(records) != set(APPROVED_RELEASE_EXCEPTIONS):
+        errors.append("release evidence exception config must contain exactly the approved alpha records")
+    exception = records.get(version)
+    if exception is None:
+        return False, errors
+    states = exception.get("pending_states")
+    if exception.get("authorized_on") != expected["authorized_on"]:
         errors.append("release evidence exception must pin its authorization date")
-    if exception.get("decision") != ALPHA35_EXCEPTION_DECISION:
+    if exception.get("decision") != EXCEPTION_DECISION:
         errors.append("release evidence exception must pin its one-alpha decision")
-    if exception.get("scope") != ALPHA35_EXCEPTION_SCOPE:
+    if exception.get("scope") != EXCEPTION_SCOPE:
         errors.append("release evidence exception must pin its completion-only scope")
-    if exception.get("pending_state_count") != ALPHA35_PENDING_COUNT:
+    if exception.get("pending_state_count") != EXCEPTION_PENDING_COUNT:
         errors.append("release evidence exception must pin 58 pending states")
-    if exception.get("pending_state_digest_sha256") != ALPHA35_PENDING_DIGEST:
+    if exception.get("pending_state_digest_sha256") != EXCEPTION_PENDING_DIGEST:
         errors.append("release evidence exception must pin the approved pending-state digest")
     if (
         not isinstance(states, list)
@@ -373,7 +389,7 @@ def release_exception(version, pending, config_file=EXCEPTION_CONFIG):
         errors.append("release evidence exception states must be unique sorted feature/platform/state IDs")
         states = []
     digest = hashlib.sha256(("\n".join(states) + "\n").encode()).hexdigest()
-    if len(states) != ALPHA35_PENDING_COUNT or digest != ALPHA35_PENDING_DIGEST:
+    if len(states) != EXCEPTION_PENDING_COUNT or digest != EXCEPTION_PENDING_DIGEST:
         errors.append("release evidence exception state set is stale")
     if not pending:
         errors.append("release evidence exception remains after pending evidence reaches zero")
@@ -861,56 +877,70 @@ def self_test():
         duplicate_paths_fail = "reuses an artifact path" in str(error)
     checks.append(("receipt expectations reject reused artifact paths", duplicate_paths_fail))
     exception_config = json.loads(EXCEPTION_CONFIG.read_text(encoding="utf-8"))
-    exception_states = exception_config["exceptions"][0]["pending_states"]
-    allowed, errors = release_exception(ALPHA35_EXCEPTION_VERSION, exception_states)
-    checks.append(("the exact alpha.35 pending set is the only accepted exception", allowed and not errors))
+    exception_states = {
+        record["version"]: record["pending_states"]
+        for record in exception_config["exceptions"]
+    }
+    for version, label in (
+        ("2.0.0-alpha.35", "the historical approved alpha"),
+        ("2.0.0-alpha.36", "the current approved alpha"),
+    ):
+        allowed, errors = release_exception(version, exception_states[version])
+        checks.append((f"{label} accepts only its exact pending set", allowed and not errors))
     for version, label in (
         (None, "an absent version"),
         ("2.0.0-alpha.33", "the immutable failed alpha"),
         ("2.0.0-alpha.34", "the previous authorized alpha"),
-        ("2.0.0-alpha.36", "the next alpha"),
+        ("2.0.0-alpha.37", "the unapproved next alpha"),
         ("2.0.0", "a stable version"),
     ):
-        allowed, _ = release_exception(version, exception_states)
-        checks.append((f"{label} cannot use the alpha.35 exception", not allowed))
+        allowed, _ = release_exception(version, exception_states["2.0.0-alpha.36"])
+        checks.append((f"{label} cannot use an approved exception", not allowed))
     allowed, errors = release_exception(
-        ALPHA35_EXCEPTION_VERSION, exception_states + ["history/windows/history-ui"]
+        "2.0.0-alpha.36", exception_states["2.0.0-alpha.36"] + ["history/windows/history-ui"]
     )
-    checks.append(("an added pending state invalidates the alpha.35 exception", not allowed and bool(errors)))
-    allowed, errors = release_exception(ALPHA35_EXCEPTION_VERSION, exception_states[1:])
-    checks.append(("a missing pending state invalidates the alpha.35 exception", not allowed and bool(errors)))
-    allowed, errors = release_exception(ALPHA35_EXCEPTION_VERSION, [])
-    checks.append(("the alpha.35 exception expires when pending evidence reaches zero", not allowed and bool(errors)))
+    checks.append(("an added pending state invalidates the alpha.36 exception", not allowed and bool(errors)))
+    allowed, errors = release_exception("2.0.0-alpha.36", exception_states["2.0.0-alpha.36"][1:])
+    checks.append(("a missing pending state invalidates the alpha.36 exception", not allowed and bool(errors)))
+    allowed, errors = release_exception("2.0.0-alpha.36", [])
+    checks.append(("the alpha.36 exception expires when pending evidence reaches zero", not allowed and bool(errors)))
     before_exception_tokens = receipt_expectation_tokens(receipt_fixture, {
         "android-evidence": [{"roots": [pathlib.PurePosixPath("artifacts/android")]}],
     })
-    release_exception(ALPHA35_EXCEPTION_VERSION, exception_states)
+    release_exception("2.0.0-alpha.36", exception_states["2.0.0-alpha.36"])
     after_exception_tokens = receipt_expectation_tokens(receipt_fixture, {
         "android-evidence": [{"roots": [pathlib.PurePosixPath("artifacts/android")]}],
     })
-    checks.append(("the alpha.35 exception does not alter receipt expectations", before_exception_tokens == after_exception_tokens))
+    checks.append(("the alpha.36 exception does not alter receipt expectations", before_exception_tokens == after_exception_tokens))
     with tempfile.TemporaryDirectory() as directory:
         missing = pathlib.Path(directory) / "missing-exceptions.json"
         malformed = pathlib.Path(directory) / "exceptions.json"
+        duplicate = pathlib.Path(directory) / "duplicate-exceptions.json"
         malformed.write_text("{}", encoding="utf-8")
         for version, label, config_file in (
             ("2.0.0-alpha.33", "the immutable failed alpha", missing),
             ("2.0.0-alpha.34", "the previous authorized alpha", missing),
-            ("2.0.0-alpha.36", "the next alpha", missing),
+            ("2.0.0-alpha.37", "the unapproved next alpha", missing),
             ("2.0.0", "a stable release", malformed),
         ):
             allowed, errors = release_exception(version, [], config_file)
             checks.append((
-                f"{label} with complete evidence ignores the alpha.35 exception config",
+                f"{label} with complete evidence ignores the approved exception config",
                 not allowed and not errors,
             ))
-        allowed, errors = release_exception(ALPHA35_EXCEPTION_VERSION, exception_states, missing)
-        checks.append(("a missing alpha.35 exception config fails closed", not allowed and bool(errors)))
-        allowed, errors = release_exception(ALPHA35_EXCEPTION_VERSION, exception_states, malformed)
-        checks.append(("a malformed alpha.35 exception config fails closed", not allowed and bool(errors)))
-        allowed, errors = release_exception("2.0.0-alpha.36", exception_states, missing)
+        allowed, errors = release_exception("2.0.0-alpha.36", exception_states["2.0.0-alpha.36"], missing)
+        checks.append(("a missing alpha.36 exception config fails closed", not allowed and bool(errors)))
+        allowed, errors = release_exception("2.0.0-alpha.36", exception_states["2.0.0-alpha.36"], malformed)
+        checks.append(("a malformed alpha.36 exception config fails closed", not allowed and bool(errors)))
+        duplicate.write_text(json.dumps({
+            "schema_version": 1,
+            "exceptions": exception_config["exceptions"] + [exception_config["exceptions"][1]],
+        }), encoding="utf-8")
+        allowed, errors = release_exception("2.0.0-alpha.36", exception_states["2.0.0-alpha.36"], duplicate)
+        checks.append(("a duplicate approved record fails closed", not allowed and bool(errors)))
+        allowed, errors = release_exception("2.0.0-alpha.37", exception_states["2.0.0-alpha.36"], missing)
         checks.append((
-            "the next alpha leaves pending evidence for strict completion failure",
+            "an unapproved alpha leaves pending evidence for strict completion failure",
             not allowed and not errors,
         ))
     for description, held in checks:
