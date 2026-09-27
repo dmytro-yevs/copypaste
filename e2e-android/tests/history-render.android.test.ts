@@ -62,7 +62,7 @@ beforeAllWithEvidence("history-render", async () => {
     ),
   );
 
-  await reloadHistoryWith(app, `${marker} item ${COUNT - 1}`);
+  await reloadHistoryWith(app, `${marker} item ${COUNT - 1}`, { search: "open" });
   await filterHistoryTo(app, marker, marker);
   await waitForRows(app, 4);
   await scrollListToTop(app);
