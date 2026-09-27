@@ -128,6 +128,12 @@ internal class PairingDialogController(
         onAbort: (() -> Unit)? = null,
     ): Boolean {
         if (destroyed || title.isBlank() || detail.isBlank()) return false
+        if (messageId == "ready") {
+            dismissActive()
+            this.onAbort = null
+            showingInvite = false
+            return true
+        }
         if (messageId == "waiting_for_peer" && showingInvite && activeDialog?.isShowing == true) {
             activeInviteState?.let { state ->
                 state.text = detail
