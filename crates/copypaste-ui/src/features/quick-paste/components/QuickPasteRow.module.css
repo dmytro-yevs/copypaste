@@ -5,7 +5,7 @@
   inline-size: 100%;
   min-block-size: var(--ctl-h-sm);
   padding: var(--s-2) var(--s-3);
-  align-items: center;
+  align-items: flex-start;
   gap: var(--s-2);
   overflow: hidden;
   transition: background-color var(--dur-fast) var(--ease);
@@ -23,6 +23,7 @@
   z-index: 2;
   display: inline-flex;
   flex: none;
+  margin-block-start: 2.5px;
   pointer-events: none;
 }
 
@@ -79,8 +80,6 @@
   white-space: normal;
   -webkit-line-clamp: 1;
 }
-
-.root[data-kind="image"] { align-items: flex-start; }
 
 .root[data-kind="image"] .body { padding-inline-end: 0; }
 

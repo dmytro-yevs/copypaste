@@ -31,6 +31,8 @@ const isQuickPaste =
   import.meta.env.VITE_ANDROID_BUILD !== "1" &&
   new URLSearchParams(window.location.search).get("surface") === "quick-paste";
 
+document.documentElement.dataset.surface = isQuickPaste ? "quick-paste" : "main";
+
 /**
  * The screens are imported here rather than above so that nothing they reach
  * is evaluated before the legacy polyfills are installed. `lib/format.ts`
