@@ -134,6 +134,12 @@ const SENSITIVE_EXISTS_SQL: &str = concat!(
     " WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0)"
 );
 
+const OLDEST_SENSITIVE_SQL: &str = concat!(
+    "SELECT MIN(created_at) FROM ",
+    "clipboard_items INDEXED BY idx_items_sensitive_wipe",
+    " WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0"
+);
+
 const EXPIRED_SENSITIVE_SQL: &str = concat!(
     "SELECT ",
     item_columns!(),
@@ -267,6 +273,16 @@ impl Store {
         };
         conn.query_row(SENSITIVE_EXISTS_SQL, [], |r| r.get::<_, bool>(0))
             .unwrap_or(true)
+    }
+
+    /// Oldest row the sensitive sweep may need to examine.
+    ///
+    /// The caller still has to re-check the plaintext before deletion; this is
+    /// only the next derived deadline for scheduling that bounded sweep.
+    pub fn oldest_wipeable_sensitive_ms(&self) -> Result<Option<i64>, StoreError> {
+        let conn = self.conn()?;
+        conn.query_row(OLDEST_SENSITIVE_SQL, [], |row| row.get(0))
+            .map_err(Into::into)
     }
 
     /// Sensitive, unpinned, live rows whose capture is older than `cutoff_ms`.
@@ -410,7 +426,9 @@ pub use copypaste_p2p::protocol::plaintext_content_hash as compute_content_hash;
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{fts_row_count, hash_of, item, plan_of, store, T0};
+    use super::super::test_support::{
+        fts_row_count, hash_of, item, plan_of, sensitive_item, store, T0,
+    };
     use super::*;
 
     /// Every sweep query must reach its index. `INDEXED BY` makes a mismatched
@@ -563,6 +581,22 @@ mod tests {
                 "the sensitive {label} must not sort, got {plan:?}"
             );
         }
+    }
+
+    #[test]
+    fn oldest_wipeable_sensitive_ignores_pins_and_tombstones() {
+        let s = store();
+        assert_eq!(s.oldest_wipeable_sensitive_ms().unwrap(), None);
+
+        let oldest = s.insert(sensitive_item("old", T0)).unwrap();
+        let newer = s.insert(sensitive_item("new", T0 + 60_000)).unwrap();
+        assert_eq!(s.oldest_wipeable_sensitive_ms().unwrap(), Some(T0));
+
+        assert!(s.set_pinned(&oldest.id, true).unwrap());
+        assert_eq!(s.oldest_wipeable_sensitive_ms().unwrap(), Some(T0 + 60_000));
+
+        assert!(s.delete(&newer.id).unwrap());
+        assert_eq!(s.oldest_wipeable_sensitive_ms().unwrap(), None);
     }
 
     /// One item bigger than the whole quota is permanently over it, and it is
