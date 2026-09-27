@@ -35,6 +35,27 @@
   overflow: hidden;
 }
 
+.virtualCanvas {
+  position: relative;
+  inline-size: 100%;
+}
+
+.virtualRow,
+.loadingMore {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 100%;
+}
+
+.loadingMore {
+  display: flex;
+  min-block-size: var(--ctl-h-sm);
+  align-items: center;
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+
 .footer {
   min-block-size: var(--ctl-h-sm);
   margin-block-start: var(--s-1);

@@ -1,2 +1,0 @@
-export const QUICK_PASTE_POLL_ACTIVE_MS = 3_000;
-export const QUICK_PASTE_POLL_BACKOFF_MS = 5_000;

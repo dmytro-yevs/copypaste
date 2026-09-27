@@ -78,7 +78,7 @@ function mergeHead(head: ItemPage, cached: { pages: ItemPage[] }): History {
 
 /** Paged by cursor, never by offset (B-1, `CopyPaste-8ebg.57`). Search is not
  *  paged at all. */
-export function useHistory(query: string, pushLive = false) {
+export function useHistory(query: string, pushLive = false, enabled = true) {
   const searching = query.length > 0;
 
   const pages = useInfiniteQuery({
@@ -92,6 +92,7 @@ export function useHistory(query: string, pushLive = false) {
     // in `skipped_undecryptable` were read and dropped, so stopping on a short
     // page hides the rest of the history behind a handful of corrupt rows.
     getNextPageParam: (lastPage) => (searching ? undefined : lastPage.next_cursor ?? undefined),
+    enabled,
     // A periodic refetch on an infinite query re-walks `oldPages.length` pages
     // sequentially. The freshness the poll exists for only concerns the head,
     // which the query below polls on its own.
@@ -105,7 +106,7 @@ export function useHistory(query: string, pushLive = false) {
   const head = useQuery({
     queryKey: HISTORY_HEAD_KEY,
     queryFn: () => listItems(HISTORY_PAGE_SIZE, null),
-    enabled: !searching,
+    enabled: enabled && !searching,
     refetchInterval: (q) => pollInterval(pushLive, q.state.status === "error"),
   });
 
@@ -132,6 +133,7 @@ export function useHistory(query: string, pushLive = false) {
     hasNextPage: pages.hasNextPage,
     isFetchingNextPage: pages.isFetchingNextPage,
     fetchNextPage: pages.fetchNextPage,
+    total: headPage?.total ?? cached?.pages[0]?.total,
     /** Both, because "try again" has to retry whichever one is failing. */
     async refetch() {
       const [paged, fresh] = await Promise.all([pages.refetch(), head.refetch()]);
