@@ -125,6 +125,9 @@ data class ReadResult(
 class EmptyResult
 
 @Serializable
+data class ClipboardWriteRequest(val bytesBase64: String, val contentType: String, val filename: String)
+
+@Serializable
 data class CapturedClip(
     val text: String?,
     val bytesBase64: String?,
