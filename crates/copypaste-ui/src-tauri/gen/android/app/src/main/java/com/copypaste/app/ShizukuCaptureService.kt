@@ -1,6 +1,7 @@
 package com.copypaste.app
 
 import android.os.RemoteException
+import android.os.SystemClock
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.text.SimpleDateFormat
@@ -11,11 +12,31 @@ import kotlin.system.exitProcess
 internal fun isClipboardAccessEvent(line: String, packageName: String): Boolean =
     line.contains("ClipboardService") && line.contains(packageName)
 
+internal class ClipboardAccessSignals(
+    private val nowMs: () -> Long = SystemClock::elapsedRealtime,
+) {
+    private var lastForwardedAtMs = Long.MIN_VALUE
+
+    fun shouldForward(): Boolean {
+        val now = nowMs()
+        if (lastForwardedAtMs != Long.MIN_VALUE && now - lastForwardedAtMs < DEBOUNCE_MS) {
+            return false
+        }
+        lastForwardedAtMs = now
+        return true
+    }
+
+    private companion object {
+        const val DEBOUNCE_MS = 1_000L
+    }
+}
+
 internal class ShizukuCaptureRuns {
     internal class Run(val listener: IClipCascadeCaptureListener) {
         @Volatile var stopped = false
         var process: Process? = null
         var reader: Thread? = null
+        val signals = ClipboardAccessSignals()
     }
 
     private var active: Run? = null
@@ -104,7 +125,9 @@ class ShizukuCaptureService : IShizukuCaptureService.Stub() {
             BufferedReader(InputStreamReader(process.inputStream)).use { input ->
                 while (!run.stopped) {
                     val line = input.readLine() ?: break
-                    if (isClipboardAccessEvent(line, BuildConfig.APPLICATION_ID)) {
+                    if (isClipboardAccessEvent(line, BuildConfig.APPLICATION_ID) &&
+                        run.signals.shouldForward()
+                    ) {
                         run.listener.onClipboardAccess()
                     }
                 }
