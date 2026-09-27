@@ -103,6 +103,30 @@ class ClipQueueTest {
         assertEquals(listOf("before Rust starts"), ClipQueue.drain().first.map(CapturedClip::text))
     }
 
+    @Test
+    fun oversizedOnlyCaptureWakesRustToReportItsDrop() {
+        var sent = 0
+        ClipQueue.subscribeQueueReadyForTest { sent += 1 }
+
+        ClipQueue.offer("x".repeat(ClipQueue.MAX_TEXT_BYTES + 1), CaptureSource.BACKGROUND)
+
+        assertEquals(1, sent)
+        val (clips, dropped) = ClipQueue.drain()
+        assertTrue(clips.isEmpty())
+        assertEquals(1L, dropped)
+    }
+
+    @Test
+    fun lossBeforeSubscriptionIsReplayedWhenRustRegisters() {
+        var sent = 0
+        ClipQueue.offer("x".repeat(ClipQueue.MAX_TEXT_BYTES + 1), CaptureSource.BACKGROUND)
+
+        ClipQueue.subscribeQueueReadyForTest { sent += 1 }
+
+        assertEquals(1, sent)
+        assertEquals(1L, ClipQueue.drain().second)
+    }
+
     private fun reset() {
         ClipQueue.subscribeQueueReadyForTest(null)
         ClipQueue.setPrivateMode(true)
