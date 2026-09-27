@@ -42,11 +42,9 @@ jobs:
           fail-on-severity: low
       - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
-          tool: cargo-deny@0.20.2
+          tool: cargo-audit
           checksum: true
           fallback: none
-      - name: Check Rust dependency policy
-        run: cargo deny --manifest-path Cargo.toml --config deny.toml --all-features --locked check advisories bans licenses sources --show-stats
       - name: Advisory DB cache key
         id: stamp
         run: echo "week=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
@@ -56,10 +54,12 @@ jobs:
           path: ~/.cargo/advisory-db
           key: advisory-db-${{ steps.stamp.outputs.week }}
           restore-keys: advisory-db-
-      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
-        with:
-          tool: cargo-audit
-          checksum: true
-          fallback: none
       - name: Audit Rust dependencies
         run: python3 scripts/check_rustsec_policy.py
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        with:
+          tool: cargo-deny@0.20.2
+          checksum: true
+          fallback: none
+      - name: Check Rust dependency policy
+        run: cargo deny --manifest-path Cargo.toml --config deny.toml --all-features --locked check advisories bans licenses sources --show-stats
