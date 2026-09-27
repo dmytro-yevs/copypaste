@@ -22,6 +22,12 @@ describe("QuickPasteRow compact presentation", () => {
     expect(css).toMatch(/\.shortcut \{[\s\S]*?display: inline-flex;/);
     expect(css).not.toContain("@media (--cp-lg)");
     expect(css).toMatch(/\.pinAction:focus-visible \{ opacity: 1; \}/);
+    expect(css).toMatch(/\.root\[data-pinned="true"\] \.pinAction/);
+  });
+
+  it("uses compact fine-pointer rows and restores touch targets on coarse pointers", () => {
+    expect(css).toMatch(/\.root \{[\s\S]*?min-block-size: var\(--ctl-h-sm\);/);
+    expect(css).toMatch(/@media \(pointer: coarse\) \{[\s\S]*?min-block-size: var\(--tap-min\);/);
   });
 
   it("does not move rows on hover", () => {

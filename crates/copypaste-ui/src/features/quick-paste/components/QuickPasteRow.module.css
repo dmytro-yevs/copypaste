@@ -3,7 +3,7 @@
   position: relative;
   display: flex;
   inline-size: 100%;
-  min-block-size: max(var(--ctl-h-sm), var(--tap-min));
+  min-block-size: var(--ctl-h-sm);
   padding: var(--s-2) var(--s-3);
   align-items: center;
   gap: var(--s-2);
@@ -47,10 +47,15 @@
 }
 
 .body {
+  display: flex;
   min-inline-size: 0;
   inline-size: 100%;
   padding-inline-end: var(--quick-paste-actions);
+  align-items: center;
+  gap: var(--s-1);
 }
+
+.body > :first-child { min-inline-size: 0; flex: 1; }
 
 .root[data-kind="file"] .body :global(small) { display: none; }
 
@@ -126,6 +131,12 @@
 
 .root:has(.hit:focus-visible) { box-shadow: var(--sh-focus); }
 
+.root .hit,
+.root .pinAction {
+  min-inline-size: var(--ctl-h-sm);
+  min-block-size: var(--ctl-h-sm);
+}
+
 .previewPopup {
   inline-size: min(calc(var(--s-9) * 7.5), calc(100vw - var(--s-6)));
   max-inline-size: min(calc(var(--s-9) * 7.5), calc(100vw - var(--s-6)));
@@ -173,7 +184,16 @@
 
 .root:hover .pinAction,
 .root[data-state="selected"] .pinAction,
+.root[data-pinned="true"] .pinAction,
 .pinAction:focus-visible { opacity: 1; }
+
+@media (pointer: coarse) {
+  .root,
+  .root .hit,
+  .root .pinAction { min-block-size: var(--tap-min); }
+
+  .root .pinAction { min-inline-size: var(--tap-min); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .root,
