@@ -10,7 +10,11 @@
 //! Android compiles this shared module, but [`hide_window`] is a no-op there:
 //! hiding the sole activity strands the user at the launcher.
 
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow};
+use serde::Serialize;
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Runtime,
+    WebviewWindow,
+};
 
 use crate::events::TauriEventName;
 
@@ -61,10 +65,12 @@ fn previous_application() -> &'static Mutex<Option<i32>> {
     PREVIOUS_APPLICATION.get_or_init(|| Mutex::new(None))
 }
 
-#[cfg(not(target_os = "android"))]
 const QUICK_PASTE_WIDTH: f64 = 403.0;
-#[cfg(not(target_os = "android"))]
 const QUICK_PASTE_HEIGHT: f64 = 624.0;
+/// Preferred width for the inline preview pane, in CSS logical pixels.
+const QUICK_PASTE_PREVIEW_WIDTH: f64 = 320.0;
+/// A narrower pane cannot show enough context to justify moving the list.
+const QUICK_PASTE_PREVIEW_MIN_WIDTH: f64 = 200.0;
 
 /// Gap between the menu bar and the top of the popover, in physical pixels at
 /// scale 1. Scaled by the target monitor's factor before use.
@@ -73,6 +79,46 @@ const GAP_PX: f64 = 6.0;
 /// Keep this much of the screen edge clear, so the popover never sits flush
 /// against the side of a display.
 const EDGE_INSET_PX: f64 = 8.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+#[serde(rename_all = "snake_case")]
+pub enum QuickPastePreviewSide {
+    Left,
+    Right,
+    Hidden,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+#[serde(rename_all = "camelCase")]
+pub struct QuickPastePreviewLayout {
+    pub side: QuickPastePreviewSide,
+    /// Width available to the pane in CSS logical pixels.
+    pub width: f64,
+}
+
+impl QuickPastePreviewLayout {
+    const fn hidden() -> Self {
+        Self {
+            side: QuickPastePreviewSide::Hidden,
+            width: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct QuickPastePreviewPlacement {
+    compact_position: PhysicalPosition<i32>,
+}
+
+fn preview_placement() -> &'static std::sync::Mutex<Option<QuickPastePreviewPlacement>> {
+    static PLACEMENT: std::sync::OnceLock<std::sync::Mutex<Option<QuickPastePreviewPlacement>>> =
+        std::sync::OnceLock::new();
+    PLACEMENT.get_or_init(|| std::sync::Mutex::new(None))
+}
 
 /// The pointer should not land inside Quick Paste when it opens. Apart from
 /// being visually surprising, opening underneath a held click turns that click
@@ -86,6 +132,132 @@ pub fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
 
 pub fn quick_paste_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(QUICK_PASTE)
+}
+
+/// Resize the one protected Quick Paste window to make room for its inline
+/// preview. This changes neither visibility nor focus.
+pub fn set_quick_paste_preview<R: Runtime>(
+    window: &WebviewWindow<R>,
+    open: bool,
+) -> QuickPastePreviewLayout {
+    if window.label() != QUICK_PASTE {
+        return QuickPastePreviewLayout::hidden();
+    }
+    if !open {
+        reset_quick_paste_preview(window);
+        return QuickPastePreviewLayout::hidden();
+    }
+
+    reset_quick_paste_preview(window);
+    let Ok(position) = window.outer_position() else {
+        return QuickPastePreviewLayout::hidden();
+    };
+    let Ok(size) = window.outer_size() else {
+        return QuickPastePreviewLayout::hidden();
+    };
+    let center_x = f64::from(position.x) + f64::from(size.width) / 2.0;
+    let center_y = f64::from(position.y) + f64::from(size.height) / 2.0;
+    let Ok(Some(monitor)) = window.monitor_from_point(center_x, center_y) else {
+        return QuickPastePreviewLayout::hidden();
+    };
+
+    let geometry = preview_geometry(
+        position,
+        size,
+        *monitor.position(),
+        *monitor.size(),
+        monitor.scale_factor(),
+    );
+    let Some(geometry) = geometry else {
+        return QuickPastePreviewLayout::hidden();
+    };
+    let preview_width = geometry.width;
+    if window
+        .set_size(LogicalSize::new(
+            QUICK_PASTE_WIDTH + preview_width,
+            QUICK_PASTE_HEIGHT,
+        ))
+        .is_err()
+    {
+        return QuickPastePreviewLayout::hidden();
+    }
+    if window.set_position(geometry.window_position).is_err() {
+        reset_quick_paste_preview(window);
+        return QuickPastePreviewLayout::hidden();
+    }
+    if let Ok(mut placement) = preview_placement().lock() {
+        *placement = Some(QuickPastePreviewPlacement {
+            compact_position: geometry.compact_position,
+        });
+    }
+    QuickPastePreviewLayout {
+        side: geometry.side,
+        width: preview_width,
+    }
+}
+
+fn reset_quick_paste_preview<R: Runtime>(window: &WebviewWindow<R>) {
+    let placement = preview_placement()
+        .lock()
+        .ok()
+        .and_then(|mut placement| placement.take());
+    let _ = window.set_size(LogicalSize::new(QUICK_PASTE_WIDTH, QUICK_PASTE_HEIGHT));
+    if let Some(placement) = placement {
+        let _ = window.set_position(placement.compact_position);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct QuickPastePreviewGeometry {
+    side: QuickPastePreviewSide,
+    width: f64,
+    compact_position: PhysicalPosition<i32>,
+    window_position: PhysicalPosition<i32>,
+}
+
+fn preview_geometry(
+    position: PhysicalPosition<i32>,
+    compact_size: PhysicalSize<u32>,
+    monitor_position: PhysicalPosition<i32>,
+    monitor_size: PhysicalSize<u32>,
+    scale: f64,
+) -> Option<QuickPastePreviewGeometry> {
+    let scale = scale.max(f64::EPSILON);
+    let inset = EDGE_INSET_PX * scale;
+    let monitor_left = f64::from(monitor_position.x) + inset;
+    let monitor_right = f64::from(monitor_position.x) + f64::from(monitor_size.width) - inset;
+    let monitor_top = f64::from(monitor_position.y) + inset;
+    let monitor_bottom = f64::from(monitor_position.y) + f64::from(monitor_size.height) - inset;
+    let compact_width = f64::from(compact_size.width);
+    let compact_height = f64::from(compact_size.height);
+    let compact_x = f64::from(position.x)
+        .max(monitor_left)
+        .min((monitor_right - compact_width).max(monitor_left));
+    let compact_y = f64::from(position.y)
+        .max(monitor_top)
+        .min((monitor_bottom - compact_height).max(monitor_top));
+    let right = (monitor_right - (compact_x + compact_width)).max(0.0);
+    let left = (compact_x - monitor_left).max(0.0);
+    let minimum = QUICK_PASTE_PREVIEW_MIN_WIDTH * scale;
+    let preferred = QUICK_PASTE_PREVIEW_WIDTH * scale;
+    let (side, width) = if right >= minimum {
+        (QuickPastePreviewSide::Right, right.min(preferred))
+    } else if left >= minimum {
+        (QuickPastePreviewSide::Left, left.min(preferred))
+    } else {
+        return None;
+    };
+    let window_x = match side {
+        QuickPastePreviewSide::Right => compact_x,
+        QuickPastePreviewSide::Left => compact_x - width,
+        QuickPastePreviewSide::Hidden => return None,
+    };
+    Some(QuickPastePreviewGeometry {
+        side,
+        width: width / scale,
+        compact_position: PhysicalPosition::new(compact_x.round() as i32, compact_y.round() as i32),
+        window_position: PhysicalPosition::new(window_x.round() as i32, compact_y.round() as i32),
+    })
 }
 
 /// Show the full application surface. This is intentionally not the tray or
@@ -123,6 +295,7 @@ pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
             }
         },
     };
+    reset_quick_paste_preview(&window);
     if !window.is_visible().unwrap_or(false) {
         remember_frontmost_application();
     }
@@ -274,6 +447,15 @@ fn free_quick_paste_memory<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window.eval("window.__copypasteFreeMemory?.()");
 }
 
+fn hide_and_reset_quick_paste<R: Runtime>(window: &WebviewWindow<R>) -> bool {
+    if window.hide().is_err() {
+        return false;
+    }
+    reset_quick_paste_preview(window);
+    free_quick_paste_memory(window);
+    true
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HideStep {
@@ -295,14 +477,11 @@ const NO_PRIOR_APPLICATION_HIDE: [HideStep; 4] = [
 fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickPasteHideTarget) {
     match target {
         QuickPasteHideTarget::MainWindow => {
-            if window.hide().is_ok() {
-                free_quick_paste_memory(window);
-            }
+            let _ = hide_and_reset_quick_paste(window);
         }
         QuickPasteHideTarget::RestorePreviousApplication => {
             if has_previous_application() {
-                if window.hide().is_ok() {
-                    free_quick_paste_memory(window);
+                if hide_and_reset_quick_paste(window) {
                     restore_previous_application();
                 }
                 return;
@@ -314,9 +493,7 @@ fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickP
             // Cmd+Tab retain their normal main-app behaviour.
             let app = window.app_handle();
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            if window.hide().is_ok() {
-                free_quick_paste_memory(window);
-            }
+            let _ = hide_and_reset_quick_paste(window);
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
         }
     }
@@ -324,8 +501,7 @@ fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickP
 
 #[cfg(not(target_os = "macos"))]
 fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickPasteHideTarget) {
-    if window.hide().is_ok() {
-        free_quick_paste_memory(window);
+    if hide_and_reset_quick_paste(window) {
         if target == QuickPasteHideTarget::RestorePreviousApplication {
             restore_previous_application();
         }
@@ -643,6 +819,70 @@ mod tests {
         width: 420,
         height: 640,
     };
+
+    #[test]
+    fn preview_expands_right_without_moving_the_list() {
+        let (position, size) = primary();
+        let geometry =
+            preview_geometry(PhysicalPosition::new(400, 100), WINDOW, position, size, 1.0)
+                .expect("the right side has room");
+
+        assert_eq!(geometry.side, QuickPastePreviewSide::Right);
+        assert_eq!(geometry.width, QUICK_PASTE_PREVIEW_WIDTH);
+        assert_eq!(geometry.compact_position, PhysicalPosition::new(400, 100));
+        assert_eq!(geometry.window_position, geometry.compact_position);
+    }
+
+    #[test]
+    fn preview_expands_left_at_the_right_edge_without_moving_the_list() {
+        let (position, size) = primary();
+        let geometry = preview_geometry(
+            PhysicalPosition::new(1_000, 100),
+            WINDOW,
+            position,
+            size,
+            1.0,
+        )
+        .expect("the left side has room");
+
+        assert_eq!(geometry.side, QuickPastePreviewSide::Left);
+        assert_eq!(geometry.width, QUICK_PASTE_PREVIEW_WIDTH);
+        assert_eq!(geometry.compact_position, PhysicalPosition::new(1_000, 100));
+        assert_eq!(
+            geometry.window_position.x,
+            1_000 - QUICK_PASTE_PREVIEW_WIDTH as i32
+        );
+    }
+
+    #[test]
+    fn preview_stays_hidden_when_neither_side_is_wide_enough() {
+        assert!(preview_geometry(
+            PhysicalPosition::new(32, 40),
+            PhysicalSize::new(403, 624),
+            PhysicalPosition::new(0, 0),
+            PhysicalSize::new(550, 800),
+            1.0,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn preview_uses_logical_width_on_a_scaled_negative_origin_monitor() {
+        let (position, size) = secondary_on_the_left();
+        let geometry = preview_geometry(
+            PhysicalPosition::new(-2_300, 120),
+            PhysicalSize::new(806, 1_248),
+            position,
+            size,
+            2.0,
+        )
+        .expect("the secondary monitor has room");
+
+        assert_eq!(geometry.side, QuickPastePreviewSide::Right);
+        assert_eq!(geometry.width, QUICK_PASTE_PREVIEW_WIDTH);
+        assert_eq!(geometry.compact_position.x, -2_300);
+        assert_eq!(geometry.window_position, geometry.compact_position);
+    }
 
     #[test]
     fn quick_paste_has_its_own_window_label_and_route() {
