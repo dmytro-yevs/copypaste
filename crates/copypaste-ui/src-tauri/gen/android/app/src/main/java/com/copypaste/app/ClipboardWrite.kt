@@ -12,6 +12,7 @@ import java.io.File
 
 private const val STAGING_MAX_FILES = 8
 internal const val STAGING_MAX_AGE_MS = 10 * 60 * 1000L
+private const val STAGING_RETRY_MS = 60 * 1000L
 
 internal object ClipboardStaging {
     private var expiry: Runnable? = null
@@ -21,17 +22,38 @@ internal object ClipboardStaging {
         schedule(context, handler)
     }
 
-    fun schedule(context: Context, handler: Handler) {
+    fun schedule(context: Context, handler: Handler, clock: () -> Long = System::currentTimeMillis) {
         expiry?.let(handler::removeCallbacks)
+        val directory = stagingDirectory(context)
+        val files = directory.listFiles()?.toList().orEmpty()
+        if (files.isEmpty()) {
+            expiry = null
+            return
+        }
         val application = context.applicationContext
-        expiry = Runnable { purgeClipboardStaging(stagingDirectory(application)) }.also {
-            handler.postDelayed(it, STAGING_MAX_AGE_MS)
+        val now = clock()
+        val deadline = files.minOf { it.lastModified() + STAGING_MAX_AGE_MS }
+        expiry = Runnable {
+            val retry = purgeClipboardStaging(stagingDirectory(application), clock())
+            schedule(application, handler, retry, clock)
+        }.also {
+            handler.postDelayed(it, (deadline - now).coerceAtLeast(0))
         }
     }
 
-    fun stop(handler: Handler) {
+    fun handoff(context: Context, handler: Handler) {
+        purgeClipboardStaging(stagingDirectory(context))
+        schedule(context, handler)
+    }
+
+    private fun schedule(context: Context, handler: Handler, retry: Boolean, clock: () -> Long) {
+        if (!retry) return schedule(context, handler, clock)
         expiry?.let(handler::removeCallbacks)
-        expiry = null
+        val application = context.applicationContext
+        expiry = Runnable {
+            val stillFailed = purgeClipboardStaging(stagingDirectory(application), clock())
+            schedule(application, handler, stillFailed, clock)
+        }.also { handler.postDelayed(it, STAGING_RETRY_MS) }
     }
 }
 
@@ -63,11 +85,15 @@ internal fun writeBinaryClipboard(context: Context, request: ClipboardWriteReque
     } catch (_: SecurityException) { file.delete(); false } catch (_: IllegalArgumentException) { file.delete(); false }
 }
 
-internal fun purgeClipboardStaging(directory: File, now: Long = System.currentTimeMillis(), maximumFiles: Int = STAGING_MAX_FILES) {
-    val files = directory.listFiles()?.sortedBy { it.lastModified() } ?: return
+internal fun purgeClipboardStaging(directory: File, now: Long = System.currentTimeMillis(), maximumFiles: Int = STAGING_MAX_FILES): Boolean {
+    val files = directory.listFiles()?.sortedBy { it.lastModified() } ?: return false
+    var failed = false
     files.forEachIndexed { index, file ->
-        if (now - file.lastModified() > STAGING_MAX_AGE_MS || index < files.size - maximumFiles) file.delete()
+        if (now - file.lastModified() >= STAGING_MAX_AGE_MS || index < files.size - maximumFiles) {
+            failed = !file.delete() || failed
+        }
     }
+    return failed
 }
 
 internal fun stagingDirectory(context: Context) = File(context.cacheDir, "clipboard-staging")
