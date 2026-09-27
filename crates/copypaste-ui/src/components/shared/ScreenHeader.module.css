@@ -1,9 +1,13 @@
 .root {
   --pane-header-gap: var(--s-4);
 
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-sticky);
   padding-block-start: var(--s-6);
+  background: var(--app-bg);
 }
-.layout { align-items: flex-end; }
+.layout { align-items: center; }
 .leading,
 .actions { flex: none; }
 .copy { min-inline-size: 0; flex: 1; }
