@@ -14,6 +14,15 @@ describe("visiblePreferenceSections", () => {
     expect(sections.map((section) => section.value)).not.toContain("shortcuts");
   });
 
+  it("does not offer Android a saved-copy notification preference", () => {
+    expect(settingsCapabilities("android").copyNotifications).toBe(false);
+    expect(settingsCapabilities("macos").copyNotifications).toBe(true);
+    expect(
+      SETTINGS_SEARCH_ITEMS.find((item) => item.title === "settings.service.notify.title")
+        ?.capability,
+    ).toBe("copyNotifications");
+  });
+
   it("keeps shortcuts in the desktop preference navigation", () => {
     const sections = visiblePreferenceSections(settingsCapabilities("macos"));
 

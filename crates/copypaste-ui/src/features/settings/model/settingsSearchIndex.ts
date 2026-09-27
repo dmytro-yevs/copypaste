@@ -56,7 +56,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { tab: "privacy", section: "settings.service.groups.keeping.title", title: "settings.service.storageQuota.title", description: "settings.service.storageQuota.description" },
   { tab: "privacy", section: "settings.service.groups.keeping.title", title: "settings.service.retention.title", description: "settings.service.retention.description" },
   { tab: "privacy", section: "settings.service.groups.keeping.title", title: "settings.service.sensitive.title", description: "settings.service.sensitive.description", keywords: ["password", "key", "token", "delete"] },
-  { tab: "clipboard", section: "settings.service.groups.telling.title", title: "settings.service.notify.title", description: "settings.service.notify.description", keywords: ["notification"] },
+  { tab: "clipboard", section: "settings.service.groups.telling.title", title: "settings.service.notify.title", description: "settings.service.notify.description", keywords: ["notification"], capability: "copyNotifications" },
   { tab: "clipboard", section: "settings.service.groups.telling.title", title: "settings.service.sound.title", description: "settings.service.sound.description" },
   { tab: "device-sync", section: "settings.service.groups.network.title", title: "settings.service.syncEnabled.title", description: "settings.service.syncEnabled.description", keywords: ["pair", "devices"] },
   { tab: "device-sync", section: "settings.service.groups.network.title", title: "settings.service.lan.title", description: "settings.service.lan.description", keywords: ["network", "discover"] },

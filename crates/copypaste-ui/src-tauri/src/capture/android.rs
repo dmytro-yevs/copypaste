@@ -119,13 +119,6 @@ struct ExcludedAppsArgs<'a> {
     bundle_ids: &'a [String],
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SilentNotificationArgs<'a> {
-    title: &'a str,
-    body: &'a str,
-}
-
 impl AndroidCapture {
     fn new(handle: PluginHandle<Wry>) -> Self {
         Self {
@@ -169,15 +162,6 @@ impl AndroidCapture {
     pub fn installed_source_apps(&self) -> Result<Vec<AndroidInstalledSourceApp>> {
         self.call::<_, AndroidInstalledSourceApps>("installedSourceApps", (), MSG_BRIDGE)
             .map(|response| response.apps)
-    }
-
-    pub fn post_silent_notification(&self, title: &str, body: &str) -> Result<()> {
-        self.call::<_, AndroidEmptyResult>(
-            "postSilentNotification",
-            SilentNotificationArgs { title, body },
-            MSG_BRIDGE,
-        )
-        .map(|_| ())
     }
 
     fn open(&self, command: &'static str) -> Result<()> {

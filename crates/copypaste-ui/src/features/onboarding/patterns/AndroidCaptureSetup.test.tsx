@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   notificationStatus: "denied",
   request: vi.fn(),
   openSettings: vi.fn(),
-  save: vi.fn(),
   capture: vi.fn(),
   captureNow: vi.fn(),
   refetch: vi.fn(),
@@ -51,16 +50,11 @@ vi.mock("@/hooks/useCapture", () => ({
   useCaptureMutation: () => ({ mutate: mocks.capture, isPending: false }),
 }));
 
-vi.mock("@/hooks/useServiceConfig", () => ({
-  useSetServiceConfig: () => ({ mutate: mocks.save, isPending: false }),
-}));
-
 afterEach(() => {
   mocks.tileStatus = "granted";
   mocks.notificationStatus = "denied";
   mocks.request.mockReset();
   mocks.openSettings.mockReset();
-  mocks.save.mockReset();
   mocks.capture.mockReset();
   mocks.captureNow.mockReset();
   mocks.refetch.mockReset();
@@ -137,7 +131,7 @@ describe("AndroidCaptureSetup", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("shows a safe request error, allows retry, and applies notification setup on success", async () => {
+  it("shows a safe request error and allows notification permission retry", async () => {
     const user = userEvent.setup();
     mocks.notificationStatus = "prompt";
     const view = render(<AndroidCaptureSetup />);
@@ -158,13 +152,11 @@ describe("AndroidCaptureSetup", () => {
     expect(alert.textContent).toContain("That action is unavailable.");
     expect(alert.textContent).not.toContain("/Users/private/");
     expect(screen.getByRole("button", { name: "Allow" }).hasAttribute("disabled")).toBe(false);
-    expect(mocks.save).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Allow" }));
     expect(mocks.request).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("alert")).toBeNull();
     act(() => mocks.request.mock.calls[1][1].onSuccess({ notifications: { status: "granted" } }));
-    expect(mocks.save).toHaveBeenCalledWith({ notify_on_copy: true });
     expect(screen.queryByRole("alert")).toBeNull();
   });
 

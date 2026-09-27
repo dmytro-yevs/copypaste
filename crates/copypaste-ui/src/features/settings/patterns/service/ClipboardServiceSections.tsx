@@ -169,23 +169,29 @@ export function ClipboardCaptureSection({ revealAdvancedKey }: { revealAdvancedK
   );
 }
 
-export function ClipboardNotificationSection() {
+export function ClipboardNotificationSection({
+  supportsCopyNotifications,
+}: {
+  supportsCopyNotifications: boolean;
+}) {
   const { t } = useTranslation();
   const controller = useServiceSettings();
   const { data } = controller;
 
   return (
     <Section title={t("settings.service.groups.telling.title")}>
-      <SwitchRow
-        title={t("settings.service.notify.title")}
-        description={t("settings.service.notify.description")}
-        id="notify-on-copy"
-        checked={data.notify_on_copy}
-        disabled={controller.fieldPending("notify_on_copy")}
-        busy={controller.fieldPending("notify_on_copy")}
-        note={<ServiceFieldNote field="notify_on_copy" />}
-        onChange={(notify_on_copy) => controller.apply({ notify_on_copy })}
-      />
+      {supportsCopyNotifications ? (
+        <SwitchRow
+          title={t("settings.service.notify.title")}
+          description={t("settings.service.notify.description")}
+          id="notify-on-copy"
+          checked={data.notify_on_copy}
+          disabled={controller.fieldPending("notify_on_copy")}
+          busy={controller.fieldPending("notify_on_copy")}
+          note={<ServiceFieldNote field="notify_on_copy" />}
+          onChange={(notify_on_copy) => controller.apply({ notify_on_copy })}
+        />
+      ) : null}
 
       <SwitchRow
         title={t("settings.service.sound.title")}
