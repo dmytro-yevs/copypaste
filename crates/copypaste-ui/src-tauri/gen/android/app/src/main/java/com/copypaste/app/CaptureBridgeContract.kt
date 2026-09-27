@@ -114,7 +114,7 @@ data class TilePermissionFacts(
 @Serializable
 data class ReadResult(
     val outcome: ReadOutcome,
-    val text: String?,
+    val clip: CapturedClip?,
     val atMs: Long,
     val focused: Boolean,
     val sourceAppBundleId: String?,
@@ -126,7 +126,10 @@ class EmptyResult
 
 @Serializable
 data class CapturedClip(
-    val text: String,
+    val text: String?,
+    val bytesBase64: String?,
+    val contentType: String?,
+    val filename: String?,
     val source: CaptureSource,
     val atMs: Long,
     val sourceAppBundleId: String?,
