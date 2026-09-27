@@ -481,8 +481,8 @@ impl CaptureModel {
 /// Capture state as the WebView sees it.
 ///
 /// The android doc's §5 rule 1 puts this next to the history, not in a
-/// diagnostics screen, which is why [`CaptureSnapshot::headline`] is a finished
-/// sentence rather than a code the view has to translate.
+/// diagnostics screen, which is why [`CaptureSnapshot::headline`] is a short
+/// status label rather than a code the view has to translate.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
@@ -749,7 +749,7 @@ mod tests {
     /// are shown verbatim, so they are checked the same way `BackendError`'s
     /// are.
     #[test]
-    fn every_sentence_is_a_sentence_and_names_no_path() {
+    fn capture_copy_is_nonempty_and_names_no_path() {
         let healths = [
             CaptureHealth::Working,
             CaptureHealth::Disabled,
@@ -783,7 +783,7 @@ mod tests {
             }
         }
         for text in texts {
-            assert!(text.ends_with('.'), "not a sentence: {text}");
+            assert!(!text.is_empty(), "capture copy must not be empty");
             assert!(!text.contains('/'), "a path could hide here: {text}");
             assert!(
                 !text.contains("Accessibility"),
