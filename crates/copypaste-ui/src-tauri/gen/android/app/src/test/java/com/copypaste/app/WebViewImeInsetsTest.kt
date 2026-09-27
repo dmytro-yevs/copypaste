@@ -8,8 +8,10 @@ import android.widget.FrameLayout
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -120,8 +122,7 @@ class WebViewImeInsetsTest {
       systemBarsVisible = true,
     )
     layout(root)
-    var published = 0
-    WebViewImeInsets.install(webView) { _, _ -> published += 1 }
+    WebViewImeInsets.install(webView)
     dispatchInsets(
       webView,
       imeBottom = IME_BOTTOM,
@@ -130,9 +131,30 @@ class WebViewImeInsetsTest {
       systemBarsVisible = true,
     )
     layout(root)
-    assertEquals(1, published)
     assertEquals(ORIGINAL_BOTTOM_MARGIN + IME_BOTTOM, bottomMarginOf(webView))
     assertEquals(ROOT_HEIGHT - ORIGINAL_BOTTOM_MARGIN - IME_BOTTOM, webView.measuredHeight)
+  }
+
+  @Test
+  fun documentStartBridgeReturnsTheLatestInsetsAtDocumentReady() {
+    val latest = AtomicReference(WebViewImeInsets.InsetsCss(top = 12, bottom = 24))
+    val bridge = WebViewImeInsets.InsetBridge(latest)
+
+    latest.set(WebViewImeInsets.InsetsCss(top = 48, right = 8, bottom = 32, left = 4, ime = 240))
+
+    assertEquals(
+      "{\"top\":48,\"right\":8,\"bottom\":32,\"left\":4,\"ime\":240}",
+      bridge.latest(),
+    )
+  }
+
+  @Test
+  fun documentStartBootstrapAppliesThenReplaysAtDomReady() {
+    val script = WebViewImeInsets.documentStartScript()
+
+    assertTrue(script.contains("window.__copypasteSystemBarInsets.latest()"))
+    assertTrue(script.contains("window.__copypasteApplySystemBarInsets = apply"))
+    assertTrue(script.contains("document.addEventListener('DOMContentLoaded', replay, { once: true })"))
   }
 
   private fun dispatchInsets(
