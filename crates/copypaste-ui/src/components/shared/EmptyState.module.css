@@ -1,9 +1,9 @@
 .root {
   position: relative;
   display: grid;
-  inline-size: min(100%, calc(var(--s-9) * 8));
-  margin: clamp(var(--s-4), 8vh, var(--s-8)) auto auto;
-  padding: var(--s-4);
+  inline-size: min(100%, calc(var(--s-9) * 10));
+  margin: clamp(var(--s-3), 5vh, var(--s-6)) auto auto;
+  padding: var(--s-3) var(--s-4);
   grid-template-columns: var(--s-7) minmax(0, 1fr);
   align-items: start;
   gap: var(--s-3);
@@ -35,11 +35,11 @@
 .content,
 .copy { min-inline-size: 0; }
 .copy { display: grid; gap: calc(var(--s-1) / 2); padding-block-start: var(--s-1); }
+.titleRow { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-2); }
 .title { color: var(--text); font-size: var(--fs-base); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
 .body { max-inline-size: calc(var(--s-9) * 10); color: var(--dim); font-size: var(--fs-sm); overflow-wrap: anywhere; }
-.action { display: flex; margin-block-start: var(--s-3); flex-wrap: wrap; }
-.secondary { inline-size: 100%; margin-block-start: var(--s-4); padding-block-start: var(--s-3); border-block-start: var(--stroke-1) solid var(--divider); }
-.attached { padding-block-start: 0; border: 0; }
+.actions { display: flex; margin-block-start: var(--s-3); flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.secondary { display: flex; flex: none; }
 .spinner { animation: empty-state-spin var(--dur-progress) var(--ease-linear) infinite; }
 @keyframes empty-state-spin { to { transform: rotate(1turn); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

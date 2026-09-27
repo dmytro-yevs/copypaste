@@ -3,10 +3,9 @@
  * the row. Explanatory copy belongs in the optional popover so controls remain
  * aligned with their labels at narrow widths.
  */
-import * as PopoverPrimitive from "@radix-ui/react-popover";
 import type { ReactNode } from "react";
 
-import { Icon } from "@/components/ui/icon";
+import { HelpPopover } from "./HelpPopover";
 import styles from "./SettingsRow.module.css";
 
 interface SettingsRowProps {
@@ -35,27 +34,7 @@ export function SettingsRow({
         <span className={styles.title}>
           <span>{title}</span>
           {help ? (
-            <PopoverPrimitive.Root>
-              <PopoverPrimitive.Trigger asChild>
-                <button
-                  type="button"
-                  className={styles.help}
-                  aria-label={helpLabel ?? `More about ${title}`}
-                >
-                  <Icon name="info" size="sm" />
-                </button>
-              </PopoverPrimitive.Trigger>
-              <PopoverPrimitive.Portal>
-                <PopoverPrimitive.Content
-                  sideOffset={8}
-                  collisionPadding={8}
-                  className={styles.helpContent}
-                >
-                  {help}
-                  <PopoverPrimitive.Arrow className={styles.helpArrow} />
-                </PopoverPrimitive.Content>
-              </PopoverPrimitive.Portal>
-            </PopoverPrimitive.Root>
+            <HelpPopover content={help} label={helpLabel ?? `More about ${title}`} />
           ) : null}
           {badge}
         </span>

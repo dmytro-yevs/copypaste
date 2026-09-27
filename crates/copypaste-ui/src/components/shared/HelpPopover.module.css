@@ -1,0 +1,5 @@
+.trigger { display: inline-grid; inline-size: var(--tap-min); block-size: var(--tap-min); margin: calc((var(--tap-min) - var(--icon-sm)) / -2); place-items: center; border: 0; border-radius: var(--r-pill); color: var(--dim); background: transparent; cursor: pointer; }
+.trigger:hover { color: var(--text); background: var(--hover); }
+.trigger:focus-visible { outline: 0; box-shadow: var(--sh-focus); }
+.content { z-index: var(--z-popover); max-inline-size: min(calc(var(--s-9) * 6), calc(100vw - var(--s-6))); padding: var(--s-3); border: var(--stroke-1) solid var(--border); border-radius: var(--r-card); color: var(--text); background: var(--panel); box-shadow: var(--sh2); font-size: var(--fs-xs); line-height: var(--lh-normal); overflow-wrap: anywhere; }
+.arrow { fill: var(--panel); }

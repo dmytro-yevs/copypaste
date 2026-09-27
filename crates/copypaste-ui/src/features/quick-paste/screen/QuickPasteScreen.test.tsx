@@ -272,7 +272,8 @@ describe("quickPastePresentation", () => {
         <TooltipProvider><QuickPasteScreen /></TooltipProvider>
       </QueryClientProvider>,
     );
-    await screen.findByText("Plain text copy: This clipboard format can’t be copied.");
+    await screen.findByRole("button", { name: "Copy Image" });
+    expect(screen.queryByText(/Plain text copy/)).toBeNull();
     await user.click(screen.getByRole("searchbox"));
     await user.keyboard("{Alt>}{Enter}{/Alt}");
     expect(ipc.copyItemAsPlainText).not.toHaveBeenCalled();

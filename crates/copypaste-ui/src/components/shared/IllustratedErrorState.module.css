@@ -1,16 +1,18 @@
 .root {
   container: illustrated-error / inline-size;
-  inline-size: min(100%, calc(var(--s-9) * 14));
-  margin: clamp(var(--s-4), 7vh, var(--s-8)) auto auto;
+  inline-size: min(100%, calc(var(--s-9) * 12));
+  margin: clamp(var(--s-3), 5vh, var(--s-6)) auto auto;
 }
 
 .layout {
   display: grid;
-  min-block-size: calc(var(--s-9) * 4.5);
-  padding: var(--s-5) var(--s-3);
-  align-content: center;
-  gap: var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  grid-template-columns: var(--s-7) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s-3);
 }
+
+.marker { display: grid; inline-size: var(--s-7); block-size: var(--s-7); place-items: center; color: var(--err-strong); }
 
 .artworkWell {
   display: grid;
@@ -118,13 +120,7 @@
   gap: var(--s-1);
 }
 
-.kicker {
-  color: var(--err-strong);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-bold);
-  letter-spacing: var(--ls-wider);
-  text-transform: uppercase;
-}
+.titleRow { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-2); }
 
 .title {
   color: var(--text);
@@ -134,16 +130,8 @@
   overflow-wrap: anywhere;
 }
 
-.body {
-  max-inline-size: calc(var(--s-9) * 7);
-  color: var(--dim);
-  font-size: var(--fs-sm);
-  line-height: var(--lh-normal);
-  overflow-wrap: anywhere;
-}
-
 .actions {
-  margin-block-start: var(--s-3);
+  margin-block-start: var(--s-2);
 }
 
 .actionLayout {
@@ -153,12 +141,11 @@
 }
 
 .compact {
-  max-inline-size: calc(var(--s-9) * 9);
+  max-inline-size: calc(var(--s-9) * 10);
   margin-block-start: var(--s-2);
 }
 
 .compact .layout {
-  min-block-size: calc(var(--s-9) * 3.75);
   padding-block: var(--s-3);
 }
 
@@ -179,30 +166,15 @@
 }
 
 @container illustrated-error (min-width: $cpXs) {
-  .layout {
-    padding-inline: var(--s-5);
-    grid-template-columns: minmax(calc(var(--s-9) * 3), 4fr) minmax(0, 5fr);
-    align-items: center;
-    gap: var(--s-5);
-  }
+  .layout { padding-inline: var(--s-5); }
 }
 
 @container illustrated-error (max-width: $cpXs) {
   .layout {
-    min-block-size: 0;
     padding-inline: 0;
-    grid-template-columns: minmax(0, 1fr);
   }
 
-  .artwork {
-    max-inline-size: calc(var(--s-9) * 3.25);
-  }
-
-  .actions,
-  .actionLayout,
-  .actionLayout > * {
-    inline-size: 100%;
-  }
+  .actionLayout { inline-size: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

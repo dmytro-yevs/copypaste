@@ -10,7 +10,7 @@ function BrokenRegion(): never {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Boundary recovery", () => {
-    it("offers a focused recovery path with a decorative repair illustration", () => {
+    it("offers a focused compact recovery path", () => {
         vi.spyOn(console, "error").mockImplementation(() => undefined);
         const { container } = render(
             <Boundary label="Connections">
@@ -23,6 +23,7 @@ describe("Boundary recovery", () => {
         expect(
             screen.getByRole("button", { name: "Open diagnostics" }),
         ).toBeTruthy();
-        expect(container.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+        expect(container.querySelector('svg[aria-hidden="true"]')).toBeNull();
+        expect(screen.getByRole("button", { name: "Error details" })).toBeTruthy();
     });
 });

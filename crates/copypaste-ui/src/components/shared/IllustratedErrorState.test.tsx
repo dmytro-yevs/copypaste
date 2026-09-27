@@ -25,12 +25,10 @@ describe("IllustratedErrorState", () => {
 
         const alert = screen.getByRole("alert");
         expect(alert.textContent).toContain("History needs attention");
-        expect(alert.textContent).toContain("The service did not answer.");
-        expect(
-            container
-                .querySelector('svg[aria-hidden="true"]')
-                ?.getAttribute("focusable"),
-        ).toBe("false");
+        expect(alert.textContent).not.toContain("The service did not answer.");
+        expect(container.querySelector('svg[aria-hidden="true"]')).toBeNull();
+        await user.click(screen.getByRole("button", { name: "Error details" }));
+        expect(await screen.findByText("The service did not answer.")).toBeTruthy();
 
         await user.click(screen.getByRole("button", { name: "Try again" }));
         await user.click(
