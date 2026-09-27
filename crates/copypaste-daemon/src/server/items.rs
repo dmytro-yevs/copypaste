@@ -151,7 +151,7 @@ pub(super) fn image_preview(
 ) -> Response {
     let row = match state.store.get(item_id) {
         Ok(Some(row)) => row,
-        Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
+        Ok(None) => return Response::ok(id, ResponseData::Empty {}),
         Err(error) => return storage_error(id, "image_preview", &error),
     };
     if row.is_sensitive
@@ -188,6 +188,25 @@ pub(super) fn image_preview(
     )
 }
 
+/// Return persisted source-icon metadata without opening an item's clipboard body.
+pub(super) fn source_app_icon(state: &AppState, id: u64, item_id: &str) -> Response {
+    let icon = match state.store.source_app_icon_metadata(item_id) {
+        Ok(icon) => icon,
+        Err(error) => return storage_error(id, "source_app_icon", &error),
+    };
+    let Some(icon) = icon else {
+        return Response::ok(id, ResponseData::Empty {});
+    };
+    Response::ok(
+        id,
+        ResponseData::SourceAppIcon(copypaste_ipc::ImagePreview {
+            png_base64: icon.png_base64,
+            width: icon.width,
+            height: icon.height,
+        }),
+    )
+}
+
 pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
     // Same ingest path as the capture loop: detector, encrypt, dedup, insert,
     // evict. `add` cannot skip the detector — an item entering here is exactly
@@ -206,6 +225,7 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
             error!(error = ?e, "add failed to encrypt");
             Response::err(id, ErrorCode::Internal, MSG_ENCRYPT)
         }
+        Err(IngestError::InvalidMetadata) => Response::err(id, ErrorCode::Internal, MSG_ENCRYPT),
         Err(IngestError::Storage(e)) => storage_error(id, "add", &e),
     }
 }

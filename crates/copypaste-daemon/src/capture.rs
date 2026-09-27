@@ -21,10 +21,17 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use copypaste_source_app::SourceAppIconCache;
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 pub use copypaste_core::{IngestError, Ingested};
+
+fn source_icon_cache() -> &'static SourceAppIconCache {
+    static CACHE: std::sync::OnceLock<SourceAppIconCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(SourceAppIconCache::default)
+}
 
 #[cfg(test)]
 static TEST_PERSIST_MODE: Mutex<Option<TestPersistMode>> = Mutex::new(None);
@@ -340,6 +347,7 @@ pub(crate) fn ingest_capture(
         .app_bundle_id
         .as_deref()
         .is_some_and(crate::clipboard::is_password_manager_app);
+    let payload_metadata = capture_metadata(capture, sensitive_floor);
     match (
         capture.content_type.as_str(),
         capture.binary_content.as_deref(),
@@ -350,7 +358,7 @@ pub(crate) fn ingest_capture(
             if crate::clipboard::format::supports(content_type)
                 && copypaste_ipc::content_type::is_text(content_type) =>
         {
-            copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
+            copypaste_core::ingest::ingest_into_with_capture_source_metadata_with_current_retention(
                 &state.store,
                 &state.detector,
                 &state.keyring,
@@ -360,6 +368,7 @@ pub(crate) fn ingest_capture(
                 sensitive_floor,
                 capture.app_bundle_id.as_deref(),
                 capture.app_name.as_deref(),
+                payload_metadata.as_ref(),
                 settings,
                 || state.settings.get().clone(),
             )
@@ -372,7 +381,7 @@ pub(crate) fn ingest_capture(
                     copypaste_ipc::ContentClass::Image
                 ) =>
         {
-            copypaste_core::ingest_binary_into_with_capture_source(
+            copypaste_core::ingest_binary_into_with_capture_source_metadata(
                 &state.store,
                 &state.keyring,
                 bytes,
@@ -381,7 +390,7 @@ pub(crate) fn ingest_capture(
                 sensitive_floor,
                 capture.app_bundle_id.as_deref(),
                 capture.app_name.as_deref(),
-                None,
+                payload_metadata.as_ref(),
                 settings,
             )
         }
@@ -392,7 +401,7 @@ pub(crate) fn ingest_capture(
                 path,
                 settings.capture_limit_bytes(copypaste_ipc::content_type::FILE),
             )?;
-            copypaste_core::ingest_binary_into_with_capture_source(
+            copypaste_core::ingest_binary_into_with_capture_source_metadata(
                 &state.store,
                 &state.keyring,
                 &bytes,
@@ -401,12 +410,40 @@ pub(crate) fn ingest_capture(
                 sensitive_floor,
                 capture.app_bundle_id.as_deref(),
                 capture.app_name.as_deref(),
-                Some(metadata),
+                payload_metadata.as_ref(),
                 settings,
             )
         }
         _ => Err(IngestError::Empty),
     }
+}
+
+fn capture_metadata(
+    capture: &crate::clipboard::Capture,
+    sensitive_floor: bool,
+) -> Option<copypaste_core::PayloadMetadata> {
+    capture_metadata_with(capture, sensitive_floor, |app_id| {
+        source_icon_cache().resolve_desktop(app_id)
+    })
+}
+
+fn capture_metadata_with(
+    capture: &crate::clipboard::Capture,
+    sensitive_floor: bool,
+    resolver: impl FnOnce(&str) -> Option<copypaste_source_app::AppIcon>,
+) -> Option<copypaste_core::PayloadMetadata> {
+    let source_app_icon = (!sensitive_floor)
+        .then(|| capture.app_bundle_id.as_deref().and_then(resolver))
+        .flatten()
+        .and_then(|icon| {
+            let png = STANDARD.decode(icon.png_base64).ok()?;
+            copypaste_core::SourceAppIconMetadata::new(&png, icon.width, icon.height)
+        });
+    let metadata = copypaste_core::PayloadMetadata {
+        file: capture.file_metadata.clone(),
+        source_app_icon,
+    };
+    (metadata.file.is_some() || metadata.source_app_icon.is_some()).then_some(metadata)
 }
 
 fn read_file_capture(path: &Path, cap: u64) -> Result<Vec<u8>, IngestError> {
