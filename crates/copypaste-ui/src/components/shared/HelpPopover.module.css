@@ -1,4 +1,4 @@
-.trigger { display: inline-grid; inline-size: calc(var(--icon-sm) + var(--s-2)); block-size: calc(var(--icon-sm) + var(--s-2)); margin-inline-start: var(--s-1); place-items: center; border: 0; border-radius: var(--r-pill); color: var(--dim); background: transparent; cursor: pointer; }
+.trigger { display: inline-grid; inline-size: calc(var(--icon-sm) + var(--s-2)); block-size: calc(var(--icon-sm) + var(--s-2)); margin-inline-start: 0; place-items: center; border: 0; border-radius: var(--r-pill); color: var(--dim); background: transparent; cursor: pointer; }
 .trigger:hover { color: var(--text); background: var(--hover); }
 .trigger:focus-visible { outline: 0; box-shadow: var(--sh-focus); }
 @media (pointer: coarse) { .trigger { inline-size: var(--tap-min); block-size: var(--tap-min); margin: calc((var(--tap-min) - var(--icon-sm)) / -2); } }

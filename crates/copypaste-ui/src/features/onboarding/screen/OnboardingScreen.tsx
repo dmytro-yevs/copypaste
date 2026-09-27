@@ -29,6 +29,7 @@ import styles from "./OnboardingScreen.module.css";
 
 export const ONBOARDING_SLIDE_IDS = ONBOARDING_STEPS;
 const SLIDE_COUNT = ONBOARDING_SLIDE_IDS.length;
+const SYNC_CHOICES = [["lan", "devices", "onboarding.sync.lan", "onboarding.sync.lanDetail"], ["cloud", "cloud", "onboarding.sync.cloud", "onboarding.sync.cloudDetail"], ["both", "transfer", "onboarding.sync.both", "onboarding.sync.bothDetail"], ["later", "more", "onboarding.sync.later", "onboarding.sync.laterDetail"]] as const satisfies ReadonlyArray<readonly [Exclude<OnboardingSyncChoice, null>, IconName, string, string]>;
 
 export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "children">) {
   const { t } = useTranslation();
@@ -209,19 +210,11 @@ function OnboardingSlide({
         <span className={styles.eyebrow}>{eyebrow}</span>
         <h1 ref={headingRef} tabIndex={-1}>{title}</h1>
         <p>{body}</p>
-        <div className={styles.actions}>
-          {pagination}
-          <Button size="md" disabled={primary.disabled} onClick={primary.onClick}>
-            {primary.label}
-          </Button>
-          <Button size="md" variant="secondary" onClick={secondary.onClick}>
-            {secondary.label}
-          </Button>
-        </div>
       </div>
       <div className={styles.art} data-interactive={contentInteractive || undefined}>
         {content}
       </div>
+      <footer className={styles.actions}>{pagination}<Button size="md" disabled={primary.disabled} onClick={primary.onClick}>{primary.label}</Button><Button size="md" variant="secondary" onClick={secondary.onClick}>{secondary.label}</Button></footer>
     </section>
   );
 }
@@ -317,12 +310,7 @@ function SyncSetup({
   return (
     <div>
       <div className={styles.syncChoices} role="radiogroup" aria-label={t("onboarding.sync.eyebrow")}>
-        {([
-          ["lan", "devices", "onboarding.sync.lan", "onboarding.sync.lanDetail"],
-          ["cloud", "cloud", "onboarding.sync.cloud", "onboarding.sync.cloudDetail"],
-          ["both", "transfer", "onboarding.sync.both", "onboarding.sync.bothDetail"],
-          ["later", "more", "onboarding.sync.later", "onboarding.sync.laterDetail"],
-        ] as const).map(([value, icon, label, detail]) => (
+        {SYNC_CHOICES.map(([value, icon, label, detail]) => (
           <Button
             key={value}
             type="button"
@@ -333,7 +321,7 @@ function SyncSetup({
             disabled={syncConfig.isPending}
             onClick={() => choose(value)}
           >
-            <Icon name={icon as IconName} size="sm" aria-hidden="true" />
+            <Icon name={icon} size="sm" aria-hidden="true" />
             <span><strong>{t(label)}</strong><small>{t(detail)}</small></span>
           </Button>
         ))}
