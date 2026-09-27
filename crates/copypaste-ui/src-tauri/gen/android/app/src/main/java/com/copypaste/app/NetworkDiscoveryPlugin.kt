@@ -1,13 +1,7 @@
 package com.copypaste.app
 
-import android.Manifest
 import android.app.Activity
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
-import app.tauri.annotation.Permission
-import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
@@ -15,31 +9,15 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import org.json.JSONObject
 
-@TauriPlugin(
-    permissions = [
-        Permission(
-            strings = [Manifest.permission.NEARBY_WIFI_DEVICES],
-            alias = "nearbyWifi",
-        ),
-    ],
-)
+@TauriPlugin
 class NetworkDiscoveryPlugin(private val activity: Activity) : Plugin(activity) {
     private val discovery = LanDiscovery(activity)
 
     @Command
     fun acquire(invoke: Invoke) {
         activity.runOnUiThread {
-            if (needsNearbyPermission() && !hasNearbyPermission()) {
-                requestPermissionForAlias("nearbyWifi", invoke, "nearbyPermissionResult")
-                return@runOnUiThread
-            }
-            invoke.resolve(availability(start()))
+            start { available -> invoke.resolve(availability(available)) }
         }
-    }
-
-    @PermissionCallback
-    private fun nearbyPermissionResult(invoke: Invoke) {
-        invoke.resolve(availability(start()))
     }
 
     @Command
@@ -55,8 +33,9 @@ class NetworkDiscoveryPlugin(private val activity: Activity) : Plugin(activity) 
             }
         }
         activity.runOnUiThread {
-            val ready = start()
-            invoke.resolve(availability(ready && discovery.advertise(name, port, attributes)))
+            start { ready ->
+                invoke.resolve(availability(ready && discovery.advertise(name, port, attributes)))
+            }
         }
     }
 
@@ -73,23 +52,10 @@ class NetworkDiscoveryPlugin(private val activity: Activity) : Plugin(activity) 
         }
     }
 
-    private fun start(): Boolean {
-        if (needsNearbyPermission() && !hasNearbyPermission()) {
-            return false
-        }
+    private fun start(onReady: (Boolean) -> Unit) {
         discovery.acquireMulticastLock()
-        return discovery.startBrowse()
+        discovery.startBrowse(onReady)
     }
-
-    private fun needsNearbyPermission(): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-
-    private fun hasNearbyPermission(): Boolean =
-        !needsNearbyPermission() ||
-            ContextCompat.checkSelfPermission(
-                activity,
-                Manifest.permission.NEARBY_WIFI_DEVICES,
-            ) == PackageManager.PERMISSION_GRANTED
 
     private fun availability(available: Boolean) = JSObject().put("available", available)
 
