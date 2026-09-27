@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use copypaste_ipc::{EventData, EventKind};
-use tokio::sync::{Notify, OnceCell};
+use tokio::sync::{watch, Notify, OnceCell};
 
 use super::cloud::EmbeddedCloud;
 use super::peers::PeerNode;
@@ -27,6 +27,7 @@ pub(super) struct Inner {
     pub(super) clipboard: Box<dyn Clipboard>,
     pub(super) events: tokio::sync::broadcast::Sender<copypaste_ipc::EventData>,
     pub(super) retention_wake: Arc<Notify>,
+    pub(super) retention_shutdown: watch::Sender<()>,
     pub(super) cloud: EmbeddedCloud,
 }
 
@@ -112,6 +113,7 @@ impl EmbeddedBackend {
     /// comes from the Android context and not from `directories`.
     pub fn open(data_dir: &Path, clipboard: Box<dyn Clipboard>) -> Result<Self> {
         let (events, _) = tokio::sync::broadcast::channel(64);
+        let (retention_shutdown, _) = watch::channel(());
         let state = BackendState::open(data_dir)?;
         let cloud = EmbeddedCloud::open(&state)?;
         let inner = Arc::new(Inner {
@@ -120,6 +122,7 @@ impl EmbeddedBackend {
             clipboard,
             events,
             retention_wake: Arc::new(Notify::new()),
+            retention_shutdown,
             cloud,
         });
         super::retention::sweep(&inner);
