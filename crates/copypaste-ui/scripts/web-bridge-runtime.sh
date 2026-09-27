@@ -37,7 +37,7 @@ write_bridge_runtime_value() {
 }
 
 write_bridge_runtime() {
-  write_bridge_runtime_value "$(printf '{\"url\":\"%s\",\"token\":\"%s\"}' \
+  write_bridge_runtime_value "$(node -p 'JSON.stringify({url: process.argv[1], token: process.argv[2]})' \
     "$VITE_COPYPASTE_WEB_BRIDGE_URL" \
     "$VITE_COPYPASTE_WEB_BRIDGE_TOKEN")"
   bridge_runtime_owned=true
