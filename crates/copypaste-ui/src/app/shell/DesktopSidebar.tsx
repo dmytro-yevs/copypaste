@@ -2,6 +2,8 @@ import { BrandLockup } from "@/components/shared";
 import { NavigationItem } from "@/app/shell/NavigationItem";
 import { navigationRoutes } from "@/app/routes/routeMetadata";
 import { useTranslation } from "@/i18n";
+import { hasNativeBridge } from "@/lib/ipcCall";
+import { currentPlatform } from "@/lib/platform";
 import { useUi } from "@/store/ui";
 import styles from "./DesktopSidebar.module.css";
 
@@ -11,9 +13,11 @@ export function DesktopSidebar({ navigationReady = true }: { navigationReady?: b
   const { t } = useTranslation();
   const view = useUi((state) => state.view);
   const setView = useUi((state) => state.setView);
+  const nativeMac = hasNativeBridge() && currentPlatform() === "macos";
   return (
     <aside
       data-size-class="expanded"
+      data-native-macos={nativeMac || undefined}
       className={styles.sidebar}
       aria-label={t("nav.primary")}
     >
