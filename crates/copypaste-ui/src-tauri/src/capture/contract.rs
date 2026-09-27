@@ -64,6 +64,7 @@ pub(crate) struct AndroidDrainResult {
     pub dropped: u64,
     pub state_dirty: bool,
     pub probe: ShizukuProbe,
+    pub listening: bool,
 }
 
 #[cfg(test)]
@@ -173,6 +174,7 @@ mod tests {
         );
         assert_eq!(fixture.drain.dropped, 2);
         assert!(!fixture.drain.state_dirty);
+        assert!(fixture.drain.listening);
         let _ = fixture.empty;
         assert!(fixture.drain.probe.running);
         assert_eq!(
