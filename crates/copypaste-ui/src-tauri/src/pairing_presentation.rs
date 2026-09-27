@@ -900,7 +900,9 @@ mod native_pairing_source_contracts {
             "Security code: {spoken}",
             "for (index, digit) in sas.chars().enumerate()",
             "NativeAbort",
-            "(self.abort)()",
+            "if matches!(action, SheetAction::Cancel)",
+            "close_active_invite(Some(&cancel_token))",
+            "(cancel_abort)()",
         ] {
             assert!(macos.contains(required), "missing macOS guard: {required}");
         }
@@ -962,23 +964,39 @@ mod native_pairing_source_contracts {
     }
 
     #[test]
-    fn native_deadlines_remove_secrets_then_refresh_rust_progress() {
+    fn native_deadlines_clear_secrets_and_leave_timeout_to_backend_progress() {
         let macos = production(include_str!("pairing_presentation/macos.rs"));
         assert!(macos.contains("ModalDeadline::arm"));
         assert!(macos.contains("abortModal"));
         assert!(macos.contains("PairingDecision::Refresh"));
+        let invite = macos
+            .split_once("fn present_invite")
+            .and_then(|(_, source)| source.split_once("fn scan_invite").map(|(body, _)| body))
+            .expect("macOS invite implementation");
+        let expiry = invite
+            .split_once("let expiry_token")
+            .and_then(|(_, source)| source.split_once("let cancel_token").map(|(body, _)| body))
+            .expect("macOS invite expiry handler");
+        assert!(expiry.contains("close_active_invite(Some(&expiry_token))"));
+        assert!(!expiry.contains("abort"));
+        let cancel = invite
+            .split_once("let cancel_token")
+            .and_then(|(_, source)| {
+                source
+                    .split_once("let Some((invite_view")
+                    .map(|(body, _)| body)
+            })
+            .expect("macOS invite cancellation handler");
+        assert!(cancel.contains("close_active_invite(Some(&cancel_token))"));
+        assert!(cancel.contains("(cancel_abort)()"));
         let progress = macos
             .split("fn present_progress")
             .nth(1)
             .and_then(|body| body.split("fn confirm").next())
             .expect("macOS progress implementation");
         assert!(progress.contains("AwaitingConfirmation"));
-        assert!(progress.contains("(self.abort)()"));
-        assert!(
-            progress.find("AwaitingConfirmation").unwrap()
-                < progress.find("(self.abort)()").unwrap(),
-            "awaiting confirmation must return before Close aborts the ceremony"
-        );
+        assert!(progress.contains("close_active_invite(None)"));
+        assert!(!progress.contains("abort"));
 
         let windows_invite = production(include_str!("pairing_presentation/windows/invite.rs"));
         assert!(windows_invite.contains("SetWindowText(\"\")"));
@@ -991,7 +1009,10 @@ mod native_pairing_source_contracts {
         let android = include_str!(
             "../gen/android/app/src/main/java/com/copypaste/app/PairingDialogController.kt"
         );
-        assert!(android.contains("reveal.setOnClickListener(null)"));
+        assert!(android.contains("qr.setImageDrawable(null)"));
+        assert!(android.contains("qr.visibility = View.GONE"));
+        assert!(android.contains("clearQr()"));
+        assert!(android.contains("onRefresh?.invoke()"));
         assert!(android.contains("sasView?.removeAllViews()"));
         assert!(android.contains("deliver(\"refresh\")"));
         assert!(!android.contains("presentProgress(\"timed_out\")"));
