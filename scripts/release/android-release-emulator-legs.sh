@@ -18,6 +18,10 @@ profile_runs_extended_release_legs() { # <profile>
     [[ "$1" == full ]]
 }
 
+critical_upgrade_fixture_present() {
+    [[ -n "${PREVIOUS_APK:-}" && -n "${PREVIOUS_VERSION:-}" ]]
+}
+
 run_release_leg() { # <name> <command...>
     local name="$1"
     shift
@@ -50,6 +54,10 @@ run_cloud_leg() {
 
 run_profiled_release_legs() { # <profile> [runner]
     local profile="$1" runner="${2:-run_release_leg}"
+    if [[ "$profile" == critical ]] && ! critical_upgrade_fixture_present; then
+        printf 'critical Android release requires PREVIOUS_APK and PREVIOUS_VERSION\n' >&2
+        return 1
+    fi
     "$runner" "Android upgrade persistence" run_upgrade_leg || return 1
     "$runner" "Android release smoke" run_release_smoke_leg || return 1
     if profile_runs_extended_release_legs "$profile"; then
@@ -64,21 +72,42 @@ if ! valid_smoke_profile "$SMOKE_PROFILE"; then
 fi
 
 if [[ "${1:-}" == "--self-test" ]]; then
-    critical_legs="" failed_critical_legs=""
+    critical_legs="" failed_critical_legs="" full_legs="" missing_critical_legs=""
     successful_runner() { critical_legs+="$1 "; }
+    full_runner() { full_legs+="$1 "; }
+    missing_critical_runner() { missing_critical_legs+="$1 "; }
     failing_runner() {
         failed_critical_legs+="$1 "
         [[ "$1" != "Android release smoke" ]]
     }
+    saved_previous_apk="${PREVIOUS_APK-}"
+    saved_previous_version="${PREVIOUS_VERSION-}"
+    PREVIOUS_APK=""
+    PREVIOUS_VERSION=""
+    run_profiled_release_legs full full_runner || exit 1
+    full_without_fixture="$full_legs"
+    if run_profiled_release_legs critical missing_critical_runner 2>/dev/null; then
+        missing_fixture_rejected=0
+    else
+        missing_fixture_rejected=1
+    fi
+    PREVIOUS_APK="previous.apk"
+    PREVIOUS_VERSION="2.0.0-alpha.35"
     if valid_smoke_profile full && valid_smoke_profile critical \
         && ! valid_smoke_profile unknown \
         && run_profiled_release_legs critical successful_runner \
         && [[ "$critical_legs" == "Android upgrade persistence Android release smoke " ]] \
         && ! run_profiled_release_legs critical failing_runner \
-        && [[ "$failed_critical_legs" == "Android upgrade persistence Android release smoke " ]]; then
+        && [[ "$failed_critical_legs" == "Android upgrade persistence Android release smoke " ]] \
+        && [[ "$full_without_fixture" == "Android upgrade persistence Android release smoke Android storage transfer Android cloud evidence " ]] \
+        && [[ $missing_fixture_rejected -eq 1 && -z "$missing_critical_legs" ]]; then
+        PREVIOUS_APK="$saved_previous_apk"
+        PREVIOUS_VERSION="$saved_previous_version"
         printf 'release emulator profile self-test passed\n'
         exit 0
     fi
+    PREVIOUS_APK="$saved_previous_apk"
+    PREVIOUS_VERSION="$saved_previous_version"
     printf 'release emulator profile self-test failed\n' >&2
     exit 1
 fi
