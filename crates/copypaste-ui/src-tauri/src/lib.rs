@@ -353,13 +353,33 @@ impl<R: tauri::Runtime> backend::embedded::Clipboard for AppClipboard<R> {
         payload: &copypaste_core::ClipboardPayload,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use tauri_plugin_clipboard_manager::ClipboardExt;
-        let copypaste_core::ClipboardPayload::Text(text) = payload else {
-            return Err(copypaste_core::ClipboardWriteError::UnsupportedContent);
-        };
-        self.app
-            .clipboard()
-            .write_text(text.to_string())
-            .map_err(|_| copypaste_core::ClipboardWriteError::Failed)
+        match payload {
+            copypaste_core::ClipboardPayload::Text(text) => self
+                .app
+                .clipboard()
+                .write_text(text.to_string())
+                .map_err(|_| copypaste_core::ClipboardWriteError::Failed),
+            copypaste_core::ClipboardPayload::Image {
+                content_type,
+                bytes,
+            } => self
+                .app
+                .state::<capture::android::AndroidCapture>()
+                .write_binary_clipboard(bytes, content_type, "copypaste-image.png")
+                .map_err(|_| copypaste_core::ClipboardWriteError::Failed),
+            copypaste_core::ClipboardPayload::File { bytes, metadata } => {
+                let Some(metadata) = metadata else {
+                    return Err(copypaste_core::ClipboardWriteError::UnsupportedContent);
+                };
+                self.app
+                    .state::<capture::android::AndroidCapture>()
+                    .write_binary_clipboard(bytes, &metadata.mime_type, &metadata.filename)
+                    .map_err(|_| copypaste_core::ClipboardWriteError::Failed)
+            }
+            copypaste_core::ClipboardPayload::Unsupported { .. } => {
+                Err(copypaste_core::ClipboardWriteError::UnsupportedContent)
+            }
+        }
     }
 }
 
