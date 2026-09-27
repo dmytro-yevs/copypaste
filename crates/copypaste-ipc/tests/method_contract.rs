@@ -13,6 +13,7 @@ fn wire_name(method: &Method) -> &'static str {
         Method::CopyPlainText { .. } => "copy_plain_text",
         Method::Get { .. } => "get",
         Method::ImagePreview { .. } => "image_preview",
+        Method::SourceAppIcon { .. } => "source_app_icon",
         Method::Add { .. } => "add",
         Method::Delete { .. } => "delete",
         Method::DeleteAll { .. } => "delete_all",
@@ -59,6 +60,7 @@ fn catalog() -> Vec<Value> {
         json!({"method":"copy_plain_text","params":{"id":"item"}}),
         json!({"method":"get","params":{"id":"item"}}),
         json!({"method":"image_preview","params":{"id":"item"}}),
+        json!({"method":"source_app_icon","params":{"id":"item"}}),
         json!({"method":"add","params":{"content":"text"}}),
         json!({"method":"delete","params":{"id":"item"}}),
         json!({"method":"delete_all","params":{"through":null}}),
@@ -109,7 +111,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        41,
+        42,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }
@@ -145,4 +147,18 @@ fn every_parameterized_method_rejects_a_missing_or_malformed_payload() {
 #[test]
 fn unknown_methods_are_rejected_by_the_shared_contract() {
     assert!(serde_json::from_value::<Method>(json!({"method":"future_method"})).is_err());
+}
+
+#[test]
+fn image_preview_resolution_is_an_optional_wire_argument() {
+    let value = json!({"method":"image_preview","params":{"id":"item","max_edge":1024}});
+    let method: Method = serde_json::from_value(value.clone()).unwrap();
+    assert!(matches!(
+        method,
+        Method::ImagePreview {
+            max_edge: Some(1024),
+            ..
+        }
+    ));
+    assert_eq!(serde_json::to_value(method).unwrap(), value);
 }
