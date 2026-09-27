@@ -80,7 +80,8 @@
   background: var(--button-secondary-hover-bg);
 }
 
-.secondary[aria-pressed="true"] {
+.secondary[aria-pressed="true"],
+.secondary[aria-checked="true"] {
   border-color: var(--button-secondary-pressed-border);
   color: var(--accent-2);
   background: var(--selected);

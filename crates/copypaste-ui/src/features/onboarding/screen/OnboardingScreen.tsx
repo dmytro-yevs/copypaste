@@ -326,7 +326,7 @@ function SyncSetup({
           <Button
             key={value}
             type="button"
-            variant={choice === value ? "secondary" : "ghost"}
+            variant="secondary"
             className={styles.syncChoice}
             role="radio"
             aria-checked={choice === value}
