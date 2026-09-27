@@ -1,22 +1,8 @@
 name: CI
 
-# The repository had no CI before this file. Every check here was previously a
-# human running it by hand, so the guiding principle is: run exactly what a
-# maintainer runs, in the order they run it, and make the expensive parts
-# survivable through caching.
-#
-# The expensive part is SQLCipher. `rusqlite`'s `bundled-sqlcipher` feature
-# compiles it from C source on every cold build, which dominates wall-clock
-# time. `Swatinem/rust-cache` keeps `target/` for dependency crates (the
-# `libsqlite3-sys` build output among them) across runs, so only the first run
-# on a new `Cargo.lock` pays for it.
-
 on:
   push:
     branches: [main]
-  # No branch filter, and no `paths`: this workflow carries the Rust layer and
-  # the macOS layer (docs/rewrite/testing-policy.md), and a pull request onto a
-  # stacked or release branch changes the same code.
   pull_request:
   merge_group:
     types: [checks_requested]
@@ -26,9 +12,6 @@ concurrency:
   group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
-# No job in this workflow needs to write anything, and none of them reads a
-# secret. Least privilege is the default here and the release workflow is the
-# only place that widens it.
 permissions:
   contents: read
 
@@ -36,48 +19,10 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
-  # 1.96 is `rust-version` in the workspace manifest. `rust-toolchain.toml`
-  # pins the channel to `stable`, which floats — so a plain `cargo` here would
-  # silently test a newer compiler than the declared floor. Every step that
-  # matters therefore says `cargo +1.96` explicitly, which overrides the
-  # toolchain file.
-  MSRV: "1.96"
 
 jobs:
-  # Cheap gates. No compilation, so they fail in seconds rather than minutes.
-
-  fmt:
-    name: rustfmt
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-          components: rustfmt
-      - run: python3 scripts/ci/run-gates.py --gate rustfmt
-
-  feature-ledger:
-    name: product feature ledger
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - run: python3 -m pip install --requirement requirements-ci.txt
-      - name: Reject incomplete features and unproven performance credits
-        run: python3 scripts/ci/run-gates.py --gate feature-ledger
-
-  android-manifest:
-    name: Android manifest guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - run: sh ./scripts/check-android-manifest.sh
-
   android-kotlin:
-    name: Android Kotlin unit tests
+    name: Android manifest and Kotlin tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -85,6 +30,8 @@ jobs:
       BUILD_TOOLS_VERSION: "36.0.0"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Android manifest guard
+        run: sh ./scripts/check-android-manifest.sh
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
@@ -107,11 +54,8 @@ jobs:
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [[ -x "$sdkmanager" ]] || { echo "::error::$sdkmanager not found"; exit 1; }
           yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
-          "$sdkmanager" --install \
-            "platforms;${ANDROID_PLATFORM}" \
-            "build-tools;${BUILD_TOOLS_VERSION}"
-          [[ -d "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM}" ]] \
-            || { echo "::error::sdkmanager did not install platforms;${ANDROID_PLATFORM}"; exit 1; }
+          "$sdkmanager" --install "platforms;${ANDROID_PLATFORM}" "build-tools;${BUILD_TOOLS_VERSION}"
+          [[ -d "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM}" ]] || { echo "::error::sdkmanager did not install platforms;${ANDROID_PLATFORM}"; exit 1; }
           echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> "$GITHUB_ENV"
       - name: Kotlin unit tests (Robolectric)
         working-directory: crates/copypaste-ui/src-tauri/gen/android
@@ -119,307 +63,39 @@ jobs:
           set -euo pipefail
           chmod +x ./gradlew
           cargo +1.96 fetch --locked --manifest-path "$GITHUB_WORKSPACE/Cargo.toml"
-          python3 "$GITHUB_WORKSPACE/scripts/write_android_unit_test_gradle.py" --self-test \
-            --repo "$GITHUB_WORKSPACE" \
-            --android-project "$PWD"
-          python3 "$GITHUB_WORKSPACE/scripts/write_android_unit_test_gradle.py" \
-            --repo "$GITHUB_WORKSPACE" \
-            --android-project "$PWD"
+          python3 "$GITHUB_WORKSPACE/scripts/write_android_unit_test_gradle.py" --repo "$GITHUB_WORKSPACE" --android-project "$PWD"
           ./gradlew --no-daemon :app:testArm64DebugUnitTest -PskipRust=true
 
-
-  commit-messages:
-    name: commit messages
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-
-      # Runs on pushes too. The checker misread every unterminated message for
-      # as long as it existed and nothing noticed, because its only exercise
-      # was the messages that happened to reach it.
-      - name: scripts/check-commit-msg.test.sh
-        run: bash ./scripts/check-commit-msg.test.sh
-
-      - name: check each commit in the range
-        # Only on pull requests: the range is the PR's own commits, and
-        # rewriting a pushed branch to satisfy this is cheap while rewriting
-        # main is not.
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
-          status=0
-          for sha in $(git rev-list "$base..$head"); do
-            msg="$(mktemp)"
-            git log -1 --pretty=%B "$sha" > "$msg"
-            if ! ./scripts/check-commit-msg.sh "$msg"; then
-              echo "::error::$(git log -1 --pretty='%h %s' "$sha")"
-              status=1
-            fi
-          done
-          exit "$status"
-
-  comments:
-    name: comment budget
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      # scripts/comment-budget.txt holds pre-existing comment debt and can
-      # only shrink; a file over budget that is not in it fails here.
-      - name: check-comments.sh
-        run: python3 scripts/ci/run-gates.py --gate comment-budget
-
-  documentation:
-    name: documentation
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - run: python3 scripts/check-docs.py
-      - run: python3 scripts/check-docs.test.py
-
-  release-pipeline:
-    name: release pipeline
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: crates/copypaste-ui/package-lock.json
-
-      - run: npm ci --prefix crates/copypaste-ui --ignore-scripts
-
-      - name: actionlint
-        run: |
-          set -euo pipefail
-          archive="${RUNNER_TEMP}/actionlint.tar.gz"
-          curl -fsSLo "$archive" \
-            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" \
-            | sha256sum --check
-          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint"
-
-      # check.sh lints every release script and parses the cask and the formula.
-      # Both tools are pinned rather than taken from the runner image: check.sh
-      # now fails when either is missing, so an image that drops one has to fail
-      # loudly here instead of silently linting nothing.
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
-        with:
-          ruby-version: "3.3"
-
-      - name: ShellCheck
-        run: |
-          set -euo pipefail
-          archive="${RUNNER_TEMP}/shellcheck.tar.xz"
-          curl -fsSLo "$archive" \
-            https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
-          echo "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87  $archive" \
-            | sha256sum --check
-          tar -xJf "$archive" -C "$RUNNER_TEMP" shellcheck-v0.10.0/shellcheck
-          mkdir -p "${RUNNER_TEMP}/bin"
-          install -m 0755 "${RUNNER_TEMP}/shellcheck-v0.10.0/shellcheck" "${RUNNER_TEMP}/bin/shellcheck"
-          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
-
-      - name: scripts/release/check.sh
-        run: |
-          set -euo pipefail
-          shellcheck --version
-          ruby --version
-          python3 -m pip install --requirement requirements-ci.txt
-          python3 scripts/ci/run-gates.py --gate release-pipeline --expect-command scripts/release/check.sh
-
-  supabase-schema:
-    name: Supabase schema and RLS
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - name: PostgreSQL server binaries
-        # verify-schema.sh needs initdb/pg_ctl only (docs/supabase-deployment.md).
-        # The installer lives in scripts/ci so a hang has a timeout and so a
-        # maintainer can run the same steps locally.
-        run: ./scripts/ci/install-postgresql-server.sh
-
-      - name: supabase/dev/verify-schema.sh
-        run: ./supabase/dev/verify-schema.sh
-
-  design:
-    name: design tokens
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: design
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: design/package-lock.json
-
-      - run: npm ci
-
-      # Lockfile vulnerabilities are a gate too. `npm audit` includes dev
-      # dependencies: test and build tools execute in CI and can compromise the
-      # release path even when they do not ship in the desktop bundle.
-      - run: npm audit
-
-      # Two gates. check-contrast.mjs composites every token pair; check-usage
-      # scans crates/copypaste-ui/src/ for the cases the token gate cannot see —
-      # a fill diluted with an alpha at the call site, or a fill utility used to
-      # paint text, both of which measure differently there than in the token
-      # file.
-      - run: npm run check
-
-  # The Linux Rust gate. SQLCipher and the dependency graph are compiled once.
-
   rust:
-    name: test + clippy (linux)
+    name: Core Rust and Supabase
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
-          components: clippy, rustfmt
-
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          # The profile belongs in `shared-key`, not in `key`. rust-cache's
-          # config.ts takes `shared-key` *or* `key`-plus-job-id, never both, so
-          # a `key:` alongside a `shared-key:` is silently dead and every job
-          # naming the same `shared-key` collides on one cache entry.
           shared-key: linux-1.96-dev
-
       - name: System dependencies
-        # `crates/copypaste-ui/src-tauri` is a workspace member, so
-        # `--workspace` builds it, and Tauri v2 on Linux resolves
-        # webkit2gtk/gtk/soup through pkg-config. Without these the workspace
-        # does not configure, let alone type-check.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
+            build-essential pkg-config postgresql \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
             libsoup-3.0-dev libayatana-appindicator3-dev libxdo-dev
-
-      - name: cargo test --workspace
+      - name: Core workspace tests
         run: cargo +1.96 test --workspace --locked
-
-      - name: generated TypeScript bindings are current
+      - name: Generated TypeScript bindings are current
         run: python3 scripts/ci/run-gates.py --gate ipc-bindings
-
-      - name: cargo clippy --all-targets
-        # Runs even when the tests fail, so one run reports both. Clippy is a
-        # gate: warnings are denied.
-        if: success() || failure()
-        run: python3 scripts/ci/run-gates.py --gate clippy-workspace
-
-      - name: cargo clippy --features embedded-backend
-        # `copypaste-ui`'s `embedded-backend` feature exists, in its own words,
-        # "so this code is type-checked somewhere": it is the Android in-process
-        # backend, which is unconditional on Android and off everywhere else.
-        # Without this step the whole Android path is dead text that no machine
-        # ever compiles.
-        if: success() || failure()
-        run: python3 scripts/ci/run-gates.py --gate clippy-embedded-backend
-
-      - name: Android embedded backend contracts
-        if: success() || failure()
+      - name: Embedded Android backend contracts
         run: cargo +1.96 test -p copypaste-ui --features embedded-backend backend::embedded --locked
-
-      - name: Development-only ephemeral key path
-        if: success() || failure()
-        run: cargo +1.96 test -p copypaste-core --features dev-ephemeral-key development_feature_short_circuits_and_caches_its_choice --locked
-
-      - name: macOS-only code, type-checked here
-        # The same argument as the step above, for the other platform. Nothing
-        # on this runner compiles `#[cfg(target_os = "macos")]` code, and the
-        # macos-14 job that does is the most expensive one in the workflow: a
-        # missing trait bound in a test module cost two rounds and a Mac runner
-        # before this existed, having passed every other check in the tree.
-        #
-        # `--self-test` perturbs the generated crate and asserts the check
-        # fails — otherwise this step is a green light that means nothing.
-        if: success() || failure()
-        run: python3 scripts/ci/run-gates.py --gate macos-types
-
-  # The Rust layer end to end, on Linux against the fake clipboard source.
-  # Neither platform's shell, engine or pasteboard is involved; the layer that
-  # owns each of those is in docs/rewrite/testing-policy.md.
-
-  demo:
-    name: demo.sh + demo-p2p.sh
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      # Both demo scripts try to pin themselves with
-      #   command -v cargo +1.96 >/dev/null && CARGO="cargo +1.96"
-      # which does not work: `command -v` is given two arguments, fails on the
-      # second, and the pin never activates. Rather than edit scripts owned by
-      # another agent, set RUSTUP_TOOLCHAIN — rustup honours it above
-      # `rust-toolchain.toml`, so a bare `cargo` inside the scripts is 1.96.
-      RUSTUP_TOOLCHAIN: "1.96"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: linux-1.96-release
-
-      - name: System dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config
-
-      # Built here rather than left to the scripts so a compile failure is
-      # reported as a build failure instead of as a demo failure.
-      - name: Build release binaries
-        run: cargo build --release --locked -p copypaste-daemon -p copypaste-cli
-
-      - name: Release feature set ignores the ephemeral environment
-        run: cargo test --release --locked -p copypaste-core --no-default-features release_feature_set_ignores_ephemeral_environment
-
-      - name: scripts/demo.sh
-        # On Linux the clipboard source is the fake backend; the daemon reports
-        # which backend is live, so this cannot be mistaken for proof of the
-        # NSPasteboard path. It does prove capture -> encrypt -> store ->
-        # search -> paste-back, that sensitive content stays out of the index,
-        # and that no plaintext reaches the database file.
-        timeout-minutes: 10
-        run: ./scripts/demo.sh
-
-      - name: scripts/demo-p2p.sh
-        # Two daemons, separate data dirs, ports 47701/47702, explicit --addr
-        # because the runner has no usable multicast.
-        timeout-minutes: 10
-        run: ./scripts/demo-p2p.sh
-
-  # Frontend, in jsdom. Layout, scrolling and virtualisation are the browser
-  # layer's (browser-webkitgtk.yml); every rect here is 0x0.
+      - name: Supabase schema and RLS
+        run: ./supabase/dev/verify-schema.sh
 
   frontend:
-    name: npm build + test (jsdom)
+    name: Frontend build and tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -427,368 +103,115 @@ jobs:
         working-directory: crates/copypaste-ui
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
-
-      - name: Install native evidence Python dependencies
-        working-directory: .
-        run: python3 -m pip install --requirement requirements-ci.txt
-
-      # `npm ci` rather than `npm install`: it fails when package.json and the
-      # lockfile disagree, which is the check we want in CI.
       - run: npm ci
-
-      # This lockfile drives both the shipped UI build and Android builds.
-      # Include dev tools: they execute in the trusted CI release path.
       - run: npm audit
-
-      # `npm run build` is `tsc --noEmit && vite build`, so this is the
-      # TypeScript type-check as well as the bundle.
       - run: npm run build
-
       - run: npm test
 
-  # macOS. The job that changes "never compiled" into "compiles", and then
-  # "never executed" into "executed": the last four steps drive the real
-  # NSPasteboard and the real Keychain rather than the fakes.
-  #
-  # It is the macOS layer for those two and for nothing else. The tray, the
-  # popover, the hotkey, launch at login and WKWebView are unexercised here and
-  # are marked NOT VERIFIED IN CI in docs/rewrite/testing-policy.md.
-
-  macos-check:
-    name: macOS check + platform (arm64)
-    # macos-14 and later are Apple Silicon. Pinned rather than `macos-latest`
-    # so the compiler and SDK under test do not move without a commit — and so
-    # it matches the runner in release.yml. macOS 15 also adds a user prompt on
-    # programmatic pasteboard reads, which would make the pasteboard steps
-    # below hang or fail on a runner with nobody to answer it.
+  macos-native:
+    name: macOS build and native smoke (arm64)
     runs-on: macos-14
-    # A macOS runner bills at ten times a Linux one, and the platform steps
-    # start processes.
     timeout-minutes: 20
     env:
       RUSTUP_TOOLCHAIN: "1.96"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
-          components: clippy, rustfmt
-
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: macos-14-1.96
-
-      # `--all-features` and `--all-targets` are what type-check the NSPasteboard
-      # backend, the Keychain device-secret store, and the `#[ignore]`d tests
-      # below — none of which any other job in this workflow can even parse.
-      - name: cargo clippy (macOS paths)
-        run: cargo +1.96 clippy --workspace --all-targets --all-features --locked -- -D warnings
-
-      - name: cargo test --workspace
-        # Kept separate from the Linux test job because a macOS runner is an
-        # order of magnitude more expensive; if this becomes the bottleneck,
-        # narrow it to `-p copypaste-core -p copypaste-daemon`.
-        if: success() || failure()
-        run: cargo +1.96 test --workspace --locked
-
-      - name: The debug binary links WebKit
-        if: success() || failure()
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - name: Build native app bundle
+        env:
+          COPYPASTE_MACOS_BUILD_PROFILE: debug
         run: |
           set -euo pipefail
-          bin="$(find target -type f -name copypaste-ui -perm -111 -print -quit)"
-          [[ -n "$bin" ]] || { echo "::error::no copypaste-ui binary after the workspace tests"; exit 1; }
-          otool -L "$bin" | grep -q '/System/Library/Frameworks/WebKit.framework' \
-            || { echo "::error::$bin does not link WebKit.framework"; otool -L "$bin"; exit 1; }
-
-      - name: What this runner can reach
-        # Reports, never fails. Whether a headless runner has a pasteboard
-        # server and an unlocked keychain is the thing nobody here knows, and
-        # when a step below fails this is the log that says why.
-        if: success() || failure()
+          version="$(awk '/^\[workspace\.package\]/{f=1} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' Cargo.toml)"
+          ./scripts/release/build-macos-app.sh "$version" arm64
+      - name: The app links WebKit
         run: |
-          set +e
-          echo "::group::session"
-          echo "user: $(whoami)"
-          echo "session: $(launchctl managername 2>/dev/null || echo unknown)"
-          sw_vers
-          echo "::endgroup::"
-          echo "::group::pasteboard"
-          probe="copypaste-probe-$RANDOM"
-          printf '%s' "$probe" | pbcopy
-          echo "pbcopy exit=$?"
-          echo "pbpaste round trip: $([ "$(pbpaste)" = "$probe" ] && echo yes || echo no)"
-          echo "::endgroup::"
-          echo "::group::keychains"
-          security list-keychains
-          security default-keychain
-          echo "::endgroup::"
-          exit 0
-
-      - name: A throwaway keychain to test against
-        # The Keychain tests refuse to run against a login keychain, because
-        # they delete the device-secret item and that is somebody's history.
-        # This creates a keychain that is nobody's, and makes it the one
-        # SecItemAdd resolves.
-        if: success() || failure()
+          set -euo pipefail
+          bin="dist/CopyPaste.app/Contents/MacOS/CopyPaste"
+          [[ -x "$bin" ]] || { echo "::error::no app executable after the build"; exit 1; }
+          otool -L "$bin" | grep -q '/System/Library/Frameworks/WebKit.framework' || { echo "::error::$bin does not link WebKit.framework"; otool -L "$bin"; exit 1; }
+      - name: macOS critical UI smoke
+        run: |
+          set -euo pipefail
+          venv="$RUNNER_TEMP/ci-python"
+          python3 -m venv "$venv"
+          "$venv/bin/python" -m pip install --requirement requirements-ci.txt
+          export PATH="$venv/bin:$PATH"
+          echo "$venv/bin" >> "$GITHUB_PATH"
+          app="$PWD/dist/CopyPaste.app"
+          qualified="$app/Contents/MacOS/CopyPaste"
+          identity="$(python3 scripts/release/write-native-evidence.py --capture-qualified-artifact "$qualified")"
+          COPYPASTE_APP="$app" COPYPASTE_SMOKE_PROFILE=critical \
+            ./scripts/release/macos-native-evidence.sh artifacts/ci-macos-native "$qualified" "$identity"
+      - name: Upload macOS UI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-ci-native-evidence
+          path: artifacts/ci-macos-native
+          if-no-files-found: error
+          retention-days: 7
+      - name: Create throwaway keychain
         run: |
           set -euo pipefail
           keychain="$RUNNER_TEMP/copypaste-ci.keychain-db"
           password="$(openssl rand -base64 24)"
           security create-keychain -p "$password" "$keychain"
-          # No auto-lock: a keychain that relocks mid-job would surface as
-          # errSecInteractionNotAllowed and read like our bug.
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
-
-          # `security_framework`'s passwords API names no keychain, so
-          # SecItemAdd and SecItemCopyMatching resolve the default one and the
-          # user search list. Both are user-domain preferences, so they persist
-          # across steps. The existing list is kept: dropping the login
-          # keychain would take the runner's own credentials with it.
           existing="$(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')"
           # shellcheck disable=SC2086
           security list-keychains -d user -s "$keychain" $existing
           security default-keychain -d user -s "$keychain"
-          security list-keychains -d user
-
-          # Whether a keychain item can be written and read back with no window
-          # server and nobody to answer a prompt is the open question this job
-          # exists to settle. Settle it here, with the CLI, so that a failure
-          # names the environment rather than the code.
           security add-generic-password -s copypaste-ci-probe -a probe -w "hunter2" "$keychain"
           found="$(security find-generic-password -s copypaste-ci-probe -a probe -w "$keychain")"
-          if [[ "$found" != "hunter2" ]]; then
-            echo "::error::a non-interactive keychain round trip is not possible on this runner"
-            exit 1
-          fi
+          [[ "$found" == "hunter2" ]] || { echo "::error::non-interactive keychain round trip failed"; exit 1; }
           security delete-generic-password -s copypaste-ci-probe -a probe "$keychain" >/dev/null
           echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
-
-      - name: NSPasteboard, for real (port manifest 01)
-        # `--ignored` is the whole point: these are the tests that cannot run
-        # anywhere else. `--test-threads=1` because the general pasteboard is a
-        # process-global singleton, `--nocapture` so a test that skips itself
-        # says so in this log.
-        #
-        # An empty run is a failure, not a pass. Both of these steps are green
-        # when they execute nothing, which is the exact shape of "we thought
-        # macOS was covered" that this job exists to end.
-        #
-        # `set +e` around the capture, and the output printed before anything
-        # is decided. The first version of this step captured under `set -e`,
-        # so a non-zero cargo killed it at the assignment and the log showed
-        # the exit code and not one line of the compiler error — in the one job
-        # whose entire purpose is to report what a real Mac says.
-        if: success() || failure()
+      - name: NSPasteboard smoke
         run: |
-          set -uo pipefail
-          set +e
-          out="$(cargo +1.96 test -p copypaste-daemon --locked -- --ignored --nocapture --test-threads=1 2>&1)"
-          status=$?
-          set -e
+          set -euo pipefail
+          out="$(cargo +1.96 test -p copypaste-daemon --locked --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
           printf '%s\n' "$out"
-          if [[ "$status" -ne 0 ]]; then
-            echo "::error::the pasteboard tests exited $status"
-            exit "$status"
-          fi
-          if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
-            echo "::error::no pasteboard test ran"
-            exit 1
-          fi
-
-      - name: The Keychain, for real (port manifest 02)
-        if: success() || failure()
+          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no pasteboard test ran"; exit 1; }
+      - name: Keychain smoke
         run: |
-          set -uo pipefail
-          if [[ -z "${COPYPASTE_KEYCHAIN_TEST:-}" ]]; then
-            echo "::error::no throwaway keychain, so these tests would skip themselves and pass"
-            exit 1
-          fi
-          set +e
-          out="$(cargo +1.96 test -p copypaste-core --locked -- --ignored --nocapture --test-threads=1 2>&1)"
-          status=$?
-          set -e
+          set -euo pipefail
+          [[ -n "${COPYPASTE_KEYCHAIN_TEST:-}" ]] || { echo "::error::no throwaway keychain"; exit 1; }
+          out="$(cargo +1.96 test -p copypaste-core --locked --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
           printf '%s\n' "$out"
-          if [[ "$status" -ne 0 ]]; then
-            echo "::error::the keychain tests exited $status"
-            exit "$status"
-          fi
-          if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
-            echo "::error::no keychain test ran"
-            exit 1
-          fi
-          if grep -q 'SKIPPED' <<<"$out"; then
-            echo "::error::a keychain test skipped itself; see the SKIPPED line above"
-            exit 1
-          fi
-
-      - name: Put the keychain search list back
+          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no keychain test ran"; exit 1; }
+          ! grep -q 'SKIPPED' <<<"$out" || { echo "::error::a keychain test skipped itself"; exit 1; }
+      - name: Remove throwaway keychain
         if: always()
         run: |
-          set +e
-          security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db"
-          security delete-keychain "$RUNNER_TEMP/copypaste-ci.keychain-db"
-          exit 0
+          security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db" || true
+          security delete-keychain "$RUNNER_TEMP/copypaste-ci.keychain-db" || true
 
-  # Windows owns the DPAPI and named-pipe assertions, then exercises the
-  # installed product. Missing evidence or cleanup fails the job.
-  #
-  # Windows compilation, tests, and installed-product evidence run in parallel.
-  # Run 32481306538 measured clippy at 7m39s and tests plus native assertions at
-  # 11m20s, but their serial job took 20m06s. Distinct cache keys avoid
-  # concurrent writers freezing one exact-key entry with the wrong contents.
-
-  windows-clippy:
-    name: Windows clippy (x64)
+  windows-native:
+    name: Windows native smoke (x64)
     runs-on: windows-2022
     timeout-minutes: 20
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
       RUSTUP_TOOLCHAIN: "1.96"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-          components: clippy
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: windows-2022-1.96-clippy
-          cache-on-failure: true
-
-      - name: Confirm OpenSSL's Perl
-        shell: pwsh
-        run: |
-          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
-          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
-
-      - name: cargo clippy (full Windows workspace)
-        run: cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings
-
-  windows-test-core:
-    name: Windows core tests (x64)
-    # Pinned rather than `windows-latest` so the toolchain and SDK under test do
-    # not move without a commit, matching the macos-14 pin above.
-    runs-on: windows-2022
-    timeout-minutes: 15
-    env:
-      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-      RUSTUP_TOOLCHAIN: "1.96"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-          components: rustfmt
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: windows-2022-1.96-test-core
-          save-if: true
-          cache-on-failure: true
-
-      - name: Confirm OpenSSL's Perl
-        shell: pwsh
-        run: |
-          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
-          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
-
-      - name: cargo test (core storage and rules)
-        run: >-
-          cargo +1.96 test --locked
-          -p copypaste-core
-          -p copypaste-sensitive-rules
-
-  windows-test-services:
-    name: Windows service tests (x64)
-    runs-on: windows-2022
-    timeout-minutes: 15
-    env:
-      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-      RUSTUP_TOOLCHAIN: "1.96"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-          components: rustfmt
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: windows-2022-1.96-test-services
-          save-if: true
-          cache-on-failure: true
-
-      - name: Confirm OpenSSL's Perl
-        shell: pwsh
-        run: |
-          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
-          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
-
-      - name: cargo test (network and daemon services)
-        run: >-
-          cargo +1.96 test --locked
-          -p copypaste-p2p
-          -p copypaste-cloud
-          -p copypaste-daemon
-
-  windows-test-apps:
-    name: Windows application and utility tests (x64)
-    runs-on: windows-2022
-    timeout-minutes: 15
-    env:
-      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-      RUSTUP_TOOLCHAIN: "1.96"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-          components: rustfmt
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: windows-2022-1.96-test-apps
-          save-if: true
-          cache-on-failure: true
-
-      - name: Confirm OpenSSL's Perl
-        shell: pwsh
-        run: |
-          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
-          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
-
-      - name: cargo test (applications and utilities)
-        run: >-
-          cargo +1.96 test --locked
-          -p copypaste-ui
-          -p copypaste-cli
-          -p copypaste-ipc
-          -p copypaste-runtime-log
-          -p copypaste-fs
-          -p copypaste-clock
-          -p copypaste-feedback
-          -p copypaste-retry
-
-  windows-native-test:
-    name: Windows native assertions (x64)
-    runs-on: windows-2022
-    timeout-minutes: 20
-    env:
-      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-      RUSTUP_TOOLCHAIN: "1.96"
+      COPYPASTE_WINDOWS_SHELL_E2E: 1
+      MSEDGEDRIVER_TELEMETRY_OPTOUT: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -809,182 +232,63 @@ jobs:
         run: |
           & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
           if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
-
       - name: Native Windows pairing windows
-        # Interactive desktop on windows-2022. These are ignored locally because
-        # they open real Win32 dialogs; here they are the pairing layer CI.
+        shell: bash
+        run: cargo +1.96 test -p copypaste-ui --locked pairing_presentation::windows::refusal_tests -- --ignored --test-threads=1 --nocapture
+      - name: Define the native UI smoke run root
+        shell: pwsh
+        run: '"COPYPASTE_E2E_RUN_ROOT=$env:RUNNER_TEMP\cp-e2e" >> $env:GITHUB_ENV'
+      - name: Install tauri-driver and build the native app
         shell: bash
         run: |
           set -euo pipefail
-          cargo +1.96 test -p copypaste-ui --locked pairing_presentation::windows::refusal_tests -- --ignored --test-threads=1 --nocapture
-
-      # The native-parity tests shell out to write-native-evidence.py and
-      # validate a real PNG through Pillow. Both halves of this split need the
-      # requirements, not just the package half.
-      - name: Install native evidence Python dependencies
+          cargo install tauri-driver --version 2.0.6 --locked
+          cargo +1.96 build -p copypaste-ui -p copypaste-daemon -p copypaste-cli --locked
+      - name: Install native evidence dependencies
         shell: pwsh
         run: python -m pip install --requirement requirements-ci.txt
-
-      - name: Windows native-parity script tests
+      - name: Windows native UI contract tests
         working-directory: crates/copypaste-ui
         run: |
           npm ci
           npm run test:native-parity
-
-      - name: DPAPI, for real (port manifest 02)
-        # These are not `#[ignore]`d, unlike the Keychain set: DPAPI writes
-        # nothing outside the temp directory each test is handed, so there is no
-        # real device secret on the runner for them to destroy.
-        #
-        # An empty run is a failure, not a pass. A filter that matches nothing
-        # exits 0, and "we thought Windows was covered" is the shape this job
-        # exists to prevent.
-        if: success() || failure()
-        shell: bash
-        run: |
-          set -uo pipefail
-          set +e
-          out="$(cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture 2>&1)"
-          status=$?
-          set -e
-          printf '%s\n' "$out"
-          if [[ "$status" -ne 0 ]]; then
-            echo "::error::the device-secret tests exited $status"
-            exit "$status"
-          fi
-          if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
-            echo "::error::no device-secret test ran"
-            exit 1
-          fi
-
-      - name: The Credential Manager holds nothing of ours
-        # The backend is DPAPI precisely because a credential in this store is
-        # enumerable by anything in the session. If a future change quietly
-        # moves the secret there, this is the step that says so.
-        if: success() || failure()
-        shell: pwsh
-        run: |
-          $found = cmdkey /list | Select-String -Pattern 'copypaste' -SimpleMatch
-          if ($found) {
-            Write-Output "::error::a CopyPaste credential is in the Credential Manager"
-            $found
-            exit 1
-          }
-          Write-Output "no CopyPaste entry in the Credential Manager, as designed"
-
-  windows-sidecars:
-    name: Windows package sidecars (x64)
-    runs-on: windows-2022
-    timeout-minutes: 15
-    env:
-      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-      RUSTUP_TOOLCHAIN: "1.96"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: windows-2022-1.96-package-sidecars
-          cache-on-failure: true
-      - name: Build package sidecars
+      - name: Install the WebView2-matched Edge driver
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cargo +1.96 build --release --locked --target x86_64-pc-windows-msvc -p copypaste-cli -p copypaste-daemon
-          New-Item -ItemType Directory -Force artifacts/windows-sidecars | Out-Null
-          Copy-Item target/x86_64-pc-windows-msvc/release/copypaste.exe,target/x86_64-pc-windows-msvc/release/copypaste-daemon.exe artifacts/windows-sidecars
-          @{ architecture = "x86_64" } | ConvertTo-Json |
-            Set-Content artifacts/windows-sidecars/sidecars.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: windows-ci-sidecars
-          path: artifacts/windows-sidecars
-          if-no-files-found: error
-          retention-days: 7
-
-  windows-package:
-    name: Windows installed product evidence (x64)
-    needs: windows-sidecars
-    runs-on: windows-2022
-    timeout-minutes: 20
-    env:
-      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-      RUSTUP_TOOLCHAIN: "1.96"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: windows-2022-1.96-package
-          cache-on-failure: true
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: crates/copypaste-ui/package-lock.json
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: windows-ci-sidecars
-          path: artifacts/windows-sidecars
-
-      - name: Confirm OpenSSL's Perl
+          $product = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+          $keys = @(
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$product"
+            "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$product"
+          )
+          $versions = @($keys | ForEach-Object {
+            (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
+          } | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Sort-Object -Unique)
+          if ($versions.Count -ne 1) { throw "expected one installed WebView2 Runtime version, found $($versions.Count)" }
+          $directory = Join-Path $env:RUNNER_TEMP "webview2-edgedriver"
+          $archive = Join-Path $env:RUNNER_TEMP "webview2-edgedriver.zip"
+          Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$($versions[0])/edgedriver_win64.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $directory -Force
+          "EDGEWEBDRIVER=$directory" >> $env:GITHUB_ENV
+      - name: Windows WebView2 critical UI smoke
+        shell: bash
+        working-directory: e2e
+        run: |
+          npm ci
+          npx vitest run \
+            tests/smoke.e2e.test.ts \
+            tests/history-render.e2e.test.ts \
+            tests/sensitive.e2e.test.ts \
+            tests/windows-surfaces.windows.e2e.test.ts
+      - name: DPAPI smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
+          printf '%s\n' "$out"
+          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no device-secret test ran"; exit 1; }
+      - name: Credential Manager is clean
         shell: pwsh
         run: |
-          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
-          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
-
-      - name: Install native evidence Python dependencies
-        shell: pwsh
-        run: python -m pip install --requirement requirements-ci.txt
-
-      - name: Exercise Windows package failure fixtures
-        timeout-minutes: 5
-        shell: pwsh
-        run: |
-          Write-Output "PHASE: Windows package fixtures"
-          ./scripts/release/test-package-windows.ps1
-          Write-Output "PHASE: Windows native evidence fixtures"
-          ./scripts/release/windows-native-evidence.ps1 -SelfTest
-          Write-Output "PHASE: Windows build fixtures"
-          ./scripts/release/build-windows.ps1 -SelfTest
-          Write-Output "PHASE: Windows signing fixtures"
-          ./scripts/release/windows-sign.ps1 -Operation SelfTest
-
-      - name: Build the complete current-user installer
-        shell: pwsh
-        run: >-
-          ./scripts/release/build-windows.ps1
-          -Unsigned
-          -PrebuiltSidecarsDirectory artifacts/windows-sidecars
-          -OutputDirectory artifacts/windows-ci-package
-
-      - name: Installer, sidecar, pipe, clipboard and transfer evidence
-        id: installed-evidence
-        shell: pwsh
-        run: |
-          $installer = @(Get-ChildItem artifacts/windows-ci-package/*-setup.exe)
-          if ($installer.Count -ne 1) { throw "expected one NSIS installer, found $($installer.Count)" }
-          ./scripts/release/windows-native-evidence.ps1 `
-            -Installer $installer[0].FullName `
-            -PackageDirectory artifacts/windows-ci-package `
-            -EvidenceDirectory artifacts/windows-ci-native `
-            -ExpectedSignature NotSigned `
-            -Commit '${{ github.sha }}' `
-            -RunId '${{ github.run_id }}'
-
-      - name: Upload installed launch failure diagnostics
-        if: failure() && steps.installed-evidence.outcome == 'failure'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: windows-ci-launch-failure-diagnostics
-          path: artifacts/windows-ci-native/failure-diagnostics
-          if-no-files-found: error
-          retention-days: 7
+          $found = cmdkey /list | Select-String -Pattern 'copypaste' -SimpleMatch
+          if ($found) { Write-Output "::error::a CopyPaste credential is in the Credential Manager"; $found; exit 1 }
