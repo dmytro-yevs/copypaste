@@ -34,7 +34,7 @@ use crate::pairing_presentation::semantics::{
     resolve_pairing_semantics, PairingIcon, PairingLive, PairingMessageId, PairingSemantics,
     PairingTone,
 };
-use crate::pairing_presentation::PairingPresentationState;
+use crate::pairing_presentation::{PairingCopy, PairingPresentationState};
 use crate::service::diagnostics::{Diagnostics, HistoryRead};
 use crate::service::push::{ChangePayload, PushStatePayload};
 use crate::service::ServiceState;
@@ -113,6 +113,7 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<PairingIcon>(&config, &mut output);
     declaration::<PairingTone>(&config, &mut output);
     declaration::<PairingLive>(&config, &mut output);
+    declaration::<PairingCopy>(&config, &mut output);
     declaration::<PairingSemantics>(&config, &mut output);
     pairing_semantics_metadata(&mut output);
     declaration::<PairingPresentationState>(&config, &mut output);

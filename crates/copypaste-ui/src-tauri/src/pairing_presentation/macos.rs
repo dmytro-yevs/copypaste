@@ -24,11 +24,12 @@ use objc2_foundation::{MainThreadMarker, NSData, NSPoint, NSRect, NSSize, NSStri
 use qrcode::QrCode;
 use zeroize::Zeroizing;
 
-use super::invite::{encode_native_invite, validate_native_invite_fields};
+use super::invite::validate_native_invite_fields;
 use super::macos_model::{progress_copy, sas_digits};
+use super::pairing_link::encode_pairing_link;
 use super::{
-    NativeAbort, NativePairingUi, NativePresentationOutcome, PairingDecision,
-    PairingPresentationState, ScannedPairing,
+    NativeAbort, NativePairingUi, NativePresentationOutcome, NativeScanOutcome, PairingDecision,
+    PairingPresentationState,
 };
 use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 
@@ -51,7 +52,7 @@ impl NativePairingUi for MacOsPairingUi {
             );
             return NativePresentationOutcome::Unavailable;
         };
-        let Some(payload) = encode_native_invite(invite) else {
+        let Some(payload) = encode_pairing_link(invite) else {
             show_message(
                 "Pair a new device",
                 "This Mac does not have a reachable pairing address yet. Check the network and try again.",
@@ -72,7 +73,6 @@ impl NativePairingUi for MacOsPairingUi {
         };
         let code = Zeroizing::new(invite.code.clone());
         let address = Zeroizing::new(listen_addr.to_owned());
-        let abort = self.abort.clone();
 
         on_main(move |mtm| unsafe {
             let reveal = alert(
@@ -87,15 +87,14 @@ impl NativePairingUi for MacOsPairingUi {
                 if watchdog.finish() {
                     return NativePresentationOutcome::Refresh;
                 }
-                abort();
-                return NativePresentationOutcome::Unavailable;
+                return NativePresentationOutcome::Cancelled;
             }
 
             let Some((invite_view, code_value, address_value)) =
                 invite_view(mtm, &png, &code, &address)
             else {
                 watchdog.finish();
-                return NativePresentationOutcome::Unavailable;
+                return NativePresentationOutcome::Cancelled;
             };
             let shown = alert(
                 mtm,
@@ -113,13 +112,12 @@ impl NativePairingUi for MacOsPairingUi {
             if response == NSAlertFirstButtonReturn {
                 NativePresentationOutcome::Presented
             } else {
-                abort();
-                NativePresentationOutcome::Unavailable
+                NativePresentationOutcome::Cancelled
             }
         })
     }
 
-    fn scan_invite(&self) -> Option<ScannedPairing> {
+    fn scan_invite(&self) -> NativeScanOutcome {
         on_main(|mtm| unsafe {
             loop {
                 let prompt = alert(
@@ -134,7 +132,7 @@ impl NativePairingUi for MacOsPairingUi {
                 if response != NSAlertFirstButtonReturn {
                     code.setStringValue(&NSString::from_str(""));
                     address.setStringValue(&NSString::from_str(""));
-                    return None;
+                    return NativeScanOutcome::Cancelled;
                 }
 
                 let code_value = Zeroizing::new(code.stringValue().to_string());
@@ -142,7 +140,7 @@ impl NativePairingUi for MacOsPairingUi {
                 code.setStringValue(&NSString::from_str(""));
                 address.setStringValue(&NSString::from_str(""));
                 if let Some(scanned) = validate_native_invite_fields(code_value, address_value) {
-                    return Some(scanned);
+                    return NativeScanOutcome::Scanned(scanned);
                 }
 
                 let invalid = alert(
@@ -152,7 +150,7 @@ impl NativePairingUi for MacOsPairingUi {
                     &["Try Again", "Cancel"],
                 );
                 if invalid.runModal() != NSAlertFirstButtonReturn {
-                    return None;
+                    return NativeScanOutcome::Cancelled;
                 }
             }
         })
@@ -168,7 +166,7 @@ impl NativePairingUi for MacOsPairingUi {
         show_message(copy.title, copy.message);
         // INV-16: Close must reset the ceremony, matching Windows/Android.
         (self.abort)();
-        PairingPresentationState::Unavailable
+        PairingPresentationState::Available
     }
 
     fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision> {

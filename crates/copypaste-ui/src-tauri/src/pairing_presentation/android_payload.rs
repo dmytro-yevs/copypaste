@@ -1,7 +1,6 @@
 use copypaste_ipc::{PairingProgressData, PairingState};
 use serde::Serialize;
 
-use super::native_copy;
 use super::resolve_pairing_semantics;
 use super::semantics::PairingMessageId;
 
@@ -30,7 +29,6 @@ pub(super) struct AndroidPairingCopy {
 impl From<&PairingProgressData> for AndroidProgressPayload {
     fn from(progress: &PairingProgressData) -> Self {
         let semantics = resolve_pairing_semantics(progress.state, progress.error_code);
-        let copy = native_copy::copy(semantics.message_id);
         Self {
             semantics: AndroidPairingSemantics {
                 message_id: semantics.message_id,
@@ -39,8 +37,8 @@ impl From<&PairingProgressData> for AndroidProgressPayload {
                 retry: semantics.retry,
             },
             copy: AndroidPairingCopy {
-                title: copy.title,
-                detail: copy.detail,
+                title: semantics.copy.title,
+                detail: semantics.copy.detail,
             },
         }
     }

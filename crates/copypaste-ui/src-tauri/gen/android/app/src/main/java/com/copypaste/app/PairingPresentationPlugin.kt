@@ -1,14 +1,9 @@
 package com.copypaste.app
 
-import android.Manifest
 import android.app.Activity
-import android.content.pm.PackageManager
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
-import app.tauri.annotation.Permission
-import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
@@ -17,10 +12,10 @@ import app.tauri.plugin.Plugin
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
 
-@TauriPlugin(
-    permissions = [Permission(strings = [Manifest.permission.CAMERA], alias = "camera")],
-)
+@TauriPlugin
 class PairingPresentationPlugin(private val activity: Activity) : Plugin(activity) {
     private val dialogs = PairingDialogController(activity)
     private val scanGate = PairingScanGate()
@@ -53,30 +48,13 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
     @Command
     fun scanInvite(invoke: Invoke) {
         activity.runOnUiThread {
-            val granted = ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) ==
-                PackageManager.PERMISSION_GRANTED
-            when (scanGate.begin(granted)) {
-                ScanStep.BUSY -> invoke.resolve(JSObject())
-                ScanStep.REQUEST_PERMISSION -> {
-                    scanInvoke = invoke
-                    requestPermissionForAlias("camera", invoke, "cameraPermissionResult")
-                }
+            when (scanGate.begin()) {
+                ScanStep.BUSY -> resolveScan(invoke, ScanResult.BUSY)
                 ScanStep.START_SCANNER -> {
                     scanInvoke = invoke
-                    startScanner(invoke)
+                    installAndStartScanner(invoke)
                 }
-                ScanStep.PERMISSION_DENIED -> invoke.resolve(JSObject())
             }
-        }
-    }
-
-    @PermissionCallback
-    private fun cameraPermissionResult(invoke: Invoke) {
-        val granted = ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        when (scanGate.permissionResult(granted)) {
-            ScanStep.START_SCANNER -> startScanner(invoke)
-            else -> completeScan(invoke, null)
         }
     }
 
@@ -125,33 +103,67 @@ class PairingPresentationPlugin(private val activity: Activity) : Plugin(activit
 
     override fun onDestroy(activity: AppCompatActivity) {
         dialogs.destroy()
-        scanInvoke?.let { completeScan(it, null) }
+        scanInvoke?.let { completeScan(it, ScanResult.CANCELLED) }
     }
 
-    private fun startScanner(invoke: Invoke) {
+    private fun installAndStartScanner(invoke: Invoke) {
         val options = GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
             .enableAutoZoom()
             .build()
-        GmsBarcodeScanning.getClient(activity, options)
-            .startScan()
-            .addOnSuccessListener { barcode -> completeScan(invoke, barcode.rawValue) }
-            .addOnCanceledListener { completeScan(invoke, null) }
-            .addOnFailureListener { completeScan(invoke, null) }
+        val scanner = GmsBarcodeScanning.getClient(activity, options)
+        val request = ModuleInstallRequest.newBuilder()
+            .addApi(scanner)
+            .build()
+        ModuleInstall.getClient(activity)
+            .installModules(request)
+            .addOnSuccessListener { startScanner(invoke, scanner) }
+            .addOnFailureListener { completeScan(invoke, ScanResult.FAILED) }
     }
 
-    private fun completeScan(invoke: Invoke, payload: String?) {
+    private fun startScanner(invoke: Invoke, scanner: com.google.mlkit.vision.codescanner.GmsBarcodeScanner) {
+        scanner
+            .startScan()
+            .addOnSuccessListener { barcode ->
+                barcode.rawValue
+                    ?.takeIf { it.withinUtf8Bytes(MAX_PAYLOAD_BYTES) }
+                    ?.let { completeScan(invoke, ScanResult.scanned(it)) }
+                    ?: completeScan(invoke, ScanResult.FAILED)
+            }
+            .addOnCanceledListener { completeScan(invoke, ScanResult.CANCELLED) }
+            .addOnFailureListener { completeScan(invoke, ScanResult.FAILED) }
+    }
+
+    private fun completeScan(invoke: Invoke, result: ScanResult) {
         if (scanInvoke !== invoke) return
         scanInvoke = null
         scanGate.finish()
-        val result = JSObject()
-        payload?.takeIf { it.withinUtf8Bytes(MAX_PAYLOAD_BYTES) }?.let { result.put("payload", it) }
-        invoke.resolve(result)
+        if (result == ScanResult.FAILED) dialogs.presentScanFailure()
+        resolveScan(invoke, result)
+    }
+
+    private fun resolveScan(invoke: Invoke, result: ScanResult) {
+        val response = JSObject().put("outcome", result.wire)
+        result.payload?.let { response.put("payload", it) }
+        invoke.resolve(response)
     }
 
     private companion object {
         const val MAX_PAYLOAD_BYTES = 512
         const val MAX_CODE_BYTES = 128
+    }
+}
+
+private class ScanResult private constructor(
+    val wire: String,
+    val payload: String? = null,
+) {
+    companion object {
+        val BUSY = ScanResult("failed")
+        val CANCELLED = ScanResult("cancelled")
+        val FAILED = ScanResult("failed")
+
+        fun scanned(payload: String) = ScanResult("scanned", payload)
     }
 }
 

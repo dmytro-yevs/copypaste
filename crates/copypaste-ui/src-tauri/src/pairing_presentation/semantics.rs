@@ -1,5 +1,8 @@
 use copypaste_ipc::{ErrorCode, PairingState};
 
+use super::native_copy::copy;
+use super::PairingCopy;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
@@ -68,6 +71,7 @@ pub struct PairingSemantics {
     pub needs_devices: bool,
     pub review_secure: bool,
     pub retry: bool,
+    pub copy: PairingCopy,
 }
 
 pub fn resolve_pairing_semantics(
@@ -132,6 +136,7 @@ fn semantics_for(message_id: PairingMessageId) -> PairingSemantics {
             needs_devices,
             review_secure,
             retry,
+            copy: copy(message_id),
         }
     };
     match message_id {

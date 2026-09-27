@@ -62,6 +62,10 @@ describe("DiscoveryPairingFooter", () => {
                     needs_devices: true,
                     review_secure: false,
                     retry: false,
+                    copy: {
+                        title: "Securing the connection",
+                        detail: "Keep both devices nearby while CopyPaste establishes a secure connection.",
+                    },
                 },
                 presentation: "presented",
                 known_device: null,

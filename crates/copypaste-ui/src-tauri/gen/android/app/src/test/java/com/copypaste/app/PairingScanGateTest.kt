@@ -7,15 +7,15 @@ import org.junit.Test
 
 class PairingScanGateTest {
     @Test
-    fun permissionDenialReleasesTheGateAndAGrantCanRecover() {
+    fun cancellationReleasesTheGateAndAScanCanRecover() {
         val gate = PairingScanGate()
 
-        assertEquals(ScanStep.REQUEST_PERMISSION, gate.begin(permissionGranted = false))
+        assertEquals(ScanStep.START_SCANNER, gate.begin())
         assertTrue(gate.inFlight)
-        assertEquals(ScanStep.PERMISSION_DENIED, gate.permissionResult(granted = false))
+        gate.finish()
         assertFalse(gate.inFlight)
 
-        assertEquals(ScanStep.START_SCANNER, gate.begin(permissionGranted = true))
+        assertEquals(ScanStep.START_SCANNER, gate.begin())
         assertTrue(gate.inFlight)
         gate.finish()
         assertFalse(gate.inFlight)
@@ -25,9 +25,9 @@ class PairingScanGateTest {
     fun concurrentScansAreRefusedUntilCancellationCompletes() {
         val gate = PairingScanGate()
 
-        assertEquals(ScanStep.START_SCANNER, gate.begin(permissionGranted = true))
-        assertEquals(ScanStep.BUSY, gate.begin(permissionGranted = true))
+        assertEquals(ScanStep.START_SCANNER, gate.begin())
+        assertEquals(ScanStep.BUSY, gate.begin())
         gate.finish()
-        assertEquals(ScanStep.START_SCANNER, gate.begin(permissionGranted = true))
+        assertEquals(ScanStep.START_SCANNER, gate.begin())
     }
 }

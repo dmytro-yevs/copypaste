@@ -58,7 +58,7 @@ export function PairingProgressCard({
           {pairing.isChecking || pairing.isPending || (clientError === null && semantics.active) ? (
             <Icon name="spinner" className={styles.spinner} />
           ) : (
-            <Icon name={clientError?.icon ?? presentation.icon} />
+            <Icon name={clientError?.icon ?? semantics.icon} />
           )}
         </span>
 
@@ -75,16 +75,12 @@ export function PairingProgressCard({
               ? t("devices.pairing.progress.checking")
               : pairing.isPending
                 ? t("devices.pairing.progress.opening")
-                : t(presentation.titleKey)}
+                : presentation.title}
           </p>
           <p className={styles.body}>
             {clientError !== null
               ? clientError.body
-              : presentation.deviceName === undefined
-              ? t(presentation.bodyKey)
-              : t("devices.pairing.semantic.paired.device", {
-                  name: presentation.deviceName,
-                })}
+              : presentation.detail}
           </p>
           {pairing.presentation === "unavailable" && semantics.active ? (
             <InlineNotice tone="warning" icon="alert">

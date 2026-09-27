@@ -32,13 +32,16 @@ describe("pairingPresentation", () => {
       needs_devices: true,
       review_secure: true,
       retry: false,
+      copy: {
+        title: "Compare security codes",
+        detail: "Confirm the code in the native security prompt.",
+      },
     };
 
     expect(pairingPresentation(ceremony(semantics))).toMatchObject({
       semantics,
-      icon: "shieldCheck",
-      titleKey: "devices.pairing.semantic.compare_codes.title",
-      bodyKey: "devices.pairing.semantic.compare_codes.body",
+      title: "Compare security codes",
+      detail: "Confirm the code in the native security prompt.",
     });
     expect(pairingIsActive(ceremony(semantics))).toBe(true);
   });
@@ -57,9 +60,10 @@ describe("pairingPresentation", () => {
           needs_devices: false,
           review_secure: false,
           retry: true,
+          copy: { title: `Status ${message_id}`, detail: `Recover ${message_id}` },
         }),
       );
-      expect(presentation.titleKey).toContain(message_id);
+      expect(presentation.title).toContain(message_id);
       expect(presentation.semantics.retry).toBe(true);
     }
   });

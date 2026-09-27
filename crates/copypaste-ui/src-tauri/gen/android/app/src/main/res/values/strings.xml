@@ -29,4 +29,6 @@
     <string name="pairing_match">Match</string>
     <string name="pairing_match_label">Codes match — confirm pairing</string>
     <string name="pairing_mismatch">Doesn’t match</string>
+    <string name="pairing_scan_failure_title">Can’t open QR scanner</string>
+    <string name="pairing_scan_failure_body">Update Google Play services, then choose Scan pairing code again.</string>
 </resources>

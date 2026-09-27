@@ -1,11 +1,16 @@
 use copypaste_ipc::PairingInviteData;
 use zeroize::Zeroizing;
 
-use super::invite::{decode_native_invite, encode_native_invite, validate_native_invite_fields};
+use super::invite::encode_native_invite;
+#[cfg(any(test, target_os = "android"))]
+use super::invite::{decode_native_invite, validate_native_invite_fields};
+#[cfg(any(test, target_os = "android"))]
 use super::ScannedPairing;
 
 const SCHEME_PAIR: &str = "copypaste://pair";
+#[cfg(any(test, target_os = "android"))]
 const SCHEME_PAIR_SLASH: &str = "copypaste://pair/";
+#[cfg(any(test, target_os = "android"))]
 const SCHEME_OPAQUE: &str = "copypaste:pair";
 const MAX_LINK_BYTES: usize = 512;
 
@@ -20,6 +25,7 @@ pub(crate) fn encode_pairing_link(invite: &PairingInviteData) -> Option<Zeroizin
     (encoded.len() <= MAX_LINK_BYTES).then_some(encoded)
 }
 
+#[cfg(any(test, target_os = "android"))]
 pub(crate) fn decode_pairing_link(payload: &str) -> Option<ScannedPairing> {
     if payload.len() > MAX_LINK_BYTES {
         return None;
@@ -47,6 +53,7 @@ pub(crate) fn decode_pairing_link(payload: &str) -> Option<ScannedPairing> {
     validate_native_invite_fields(Zeroizing::new(code?), Zeroizing::new(listen_addr?))
 }
 
+#[cfg(any(test, target_os = "android"))]
 pub(crate) fn decode_pairing_payload(payload: Zeroizing<String>) -> Option<ScannedPairing> {
     if let Some(scanned) = decode_pairing_link(&payload) {
         return Some(scanned);
@@ -67,6 +74,7 @@ fn percent_encode(value: &str) -> String {
     out
 }
 
+#[cfg(any(test, target_os = "android"))]
 fn percent_decode(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -95,6 +103,7 @@ fn percent_decode(value: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+#[cfg(any(test, target_os = "android"))]
 fn from_hex(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
@@ -136,6 +145,17 @@ mod tests {
         let json = encode_native_invite(&invite()).unwrap();
         let from_json = decode_pairing_payload(json).unwrap();
         assert_eq!(from_json.addr.as_str(), "192.0.2.1:47654");
+    }
+
+    #[test]
+    fn canonical_link_is_the_only_emitted_qr_format_and_json_is_legacy_input() {
+        let link = encode_pairing_link(&invite()).unwrap();
+        let legacy_json = encode_native_invite(&invite()).unwrap();
+
+        assert!(link.starts_with("copypaste://pair?v=1&"));
+        assert!(!link.starts_with('{'));
+        assert!(decode_pairing_payload(link).is_some());
+        assert!(decode_pairing_payload(legacy_json).is_some());
     }
 
     #[test]
