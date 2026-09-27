@@ -50,6 +50,7 @@ class CaptureService : Service() {
             !ClipCascadeCapture.isSetupComplete(this)
         ) {
             completeStart(false)
+            ClipQueue.markCaptureStateDirty()
             ClipCascadeCapture.disarm()
             stopSelf(startId)
             return START_NOT_STICKY
@@ -63,7 +64,12 @@ class CaptureService : Service() {
         if (!ClipCascadeCapture.arm(
                 this,
                 onStarted = { started ->
-                    if (started) completeStart(true) else lost(this, copy)
+                    if (started) {
+                        completeStart(true)
+                        ClipQueue.markCaptureStateDirty()
+                    } else {
+                        lost(this, copy)
+                    }
                 },
                 onLost = { lost(this, copy) },
             )) {
@@ -74,6 +80,7 @@ class CaptureService : Service() {
 
     override fun onDestroy() {
         completeStart(false)
+        ClipQueue.markCaptureStateDirty()
         ClipCascadeCapture.disarm()
         super.onDestroy()
     }
@@ -130,6 +137,7 @@ class CaptureService : Service() {
 
         fun stop(context: Context) {
             completeStart(false)
+            ClipQueue.markCaptureStateDirty()
             writeWanted(context, false)
             clearCopy(context)
             ClipCascadeCapture.disarm()
@@ -164,6 +172,7 @@ class CaptureService : Service() {
 
         private fun lost(context: Context, copy: CaptureArmRequest) {
             completeStart(false)
+            ClipQueue.markCaptureStateDirty()
             ClipCascadeCapture.disarm()
             CaptureNotifications.postLost(context, copy.lostTitle, copy.lostBody)
             context.stopService(Intent(context, CaptureService::class.java))
