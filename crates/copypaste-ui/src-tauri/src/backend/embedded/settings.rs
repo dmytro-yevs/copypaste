@@ -247,6 +247,7 @@ fn apply_runtime_effects(inner: &Inner, transition: &SettingsTransition) {
     if removed > 0 {
         inner.publish_items(false, 0);
     }
+    inner.wake_retention();
     if transition.lan_visibility_changed() {
         if let Some(node) = inner.node.get() {
             node.set_lan_visibility(transition.config().lan_visibility);

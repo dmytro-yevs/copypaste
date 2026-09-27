@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use copypaste_ipc::{EventData, EventKind};
-use tokio::sync::OnceCell;
+use tokio::sync::{Notify, OnceCell};
 
 use super::cloud::EmbeddedCloud;
 use super::peers::PeerNode;
@@ -26,6 +26,7 @@ pub(super) struct Inner {
     /// one — see `Clipboard`.
     pub(super) clipboard: Box<dyn Clipboard>,
     pub(super) events: tokio::sync::broadcast::Sender<copypaste_ipc::EventData>,
+    pub(super) retention_wake: Arc<Notify>,
     pub(super) cloud: EmbeddedCloud,
 }
 
@@ -44,6 +45,7 @@ impl Inner {
     }
 
     pub(super) fn publish_items(&self, captured: bool, swept: u32) {
+        self.retention_wake.notify_one();
         if self.events.receiver_count() > 0 {
             let _ = self.events.send(self.items_event(captured, swept));
         }
@@ -58,6 +60,10 @@ impl Inner {
                 swept: 0,
             });
         }
+    }
+
+    pub(super) fn wake_retention(&self) {
+        self.retention_wake.notify_one();
     }
 
     pub(super) fn note_version_written(&self, created_at: i64) {
@@ -113,6 +119,7 @@ impl EmbeddedBackend {
             node: OnceCell::new(),
             clipboard,
             events,
+            retention_wake: Arc::new(Notify::new()),
             cloud,
         });
         super::retention::sweep(&inner);
