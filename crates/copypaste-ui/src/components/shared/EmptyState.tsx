@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ActionButton } from "./ActionButton";
 import { cn } from "@/lib/cn";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { Surface } from "@/components/ui";
 import styles from "./EmptyState.module.css";
 
 export type EmptyStateTone =
@@ -38,13 +39,14 @@ export function EmptyState({
     compact = false,
 }: EmptyStateProps) {
     return (
-        <section
-            className={cn(styles.root, compact && styles.compact)}
-            data-tone={tone}
-            role={busy ? "status" : tone === "danger" ? "alert" : undefined}
-            aria-live={busy ? "polite" : undefined}
-            aria-busy={busy || undefined}
-        >
+        <Surface asChild elevation="raised" border="subtle" radius="md">
+          <section
+              className={cn(styles.root, compact && styles.compact)}
+              data-tone={tone}
+              role={busy ? "status" : tone === "danger" ? "alert" : undefined}
+              aria-live={busy ? "polite" : undefined}
+              aria-busy={busy || undefined}
+          >
             <span aria-hidden="true" className={styles.marker}>
                 {busy ? (
                     <Icon name="spinner" className={styles.spinner} size="md" />
@@ -80,6 +82,7 @@ export function EmptyState({
                     </div>
                 ) : null}
             </div>
-        </section>
+          </section>
+        </Surface>
     );
 }

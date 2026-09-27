@@ -1,0 +1,4 @@
+.control {
+  inline-size: min(calc(var(--s-9) * 4), 50cqi);
+  min-inline-size: 0;
+}

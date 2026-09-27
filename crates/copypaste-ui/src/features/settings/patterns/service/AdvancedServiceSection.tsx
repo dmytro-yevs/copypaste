@@ -13,7 +13,7 @@ export function AdvancedServiceSection() {
     <Section title={t("settings.service.groups.network.title")}>
       <SwitchRow
         title={t("settings.service.syncEnabled.title")}
-        description={t("settings.service.syncEnabled.description")}
+        help={t("settings.service.syncEnabled.description")}
         id="sync-enabled"
         checked={data.sync_enabled}
         disabled={controller.fieldPending("sync_enabled")}
@@ -24,7 +24,7 @@ export function AdvancedServiceSection() {
 
       <SwitchRow
         title={t("settings.service.lan.title")}
-        description={t("settings.service.lan.description")}
+        help={t("settings.service.lan.description")}
         id="lan-visibility"
         checked={data.lan_visibility}
         disabled={controller.fieldPending("lan_visibility")}
