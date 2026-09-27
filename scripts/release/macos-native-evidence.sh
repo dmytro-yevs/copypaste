@@ -526,6 +526,16 @@ JS
     SMOKE_PROFILE="$saved_profile"
   }
   profile_self_test
+  critical_array_expansion_self_test() {
+    local expanded
+    if expanded="$(/bin/bash -c 'set -u; ROUTE_FEATURE_STATE_ARGS=(); printf "%s\\n" before "${ROUTE_FEATURE_STATE_ARGS[@]+${ROUTE_FEATURE_STATE_ARGS[@]}}" after')" \
+      && [[ "$expanded" == $'before\nafter' ]]; then
+      ok "critical profile expands empty receipt arguments under Bash 3.2"
+    else
+      bad "critical profile expands empty receipt arguments under Bash 3.2"
+    fi
+  }
+  critical_array_expansion_self_test
   native_production_order_self_test() {
     local script="$REPO_ROOT/scripts/release/macos-native-evidence.sh"
     if python3 - "$script" <<'PY'
@@ -692,7 +702,7 @@ python3 scripts/release/write-native-evidence.py \
   --elapsed-ms "$((ready_ms - start_ms))" \
   --qualified-artifact "$qualified_artifact" \
   --qualified-artifact-identity "$qualified_artifact_identity" \
-  "${ROUTE_FEATURE_STATE_ARGS[@]}" \
+  "${ROUTE_FEATURE_STATE_ARGS[@]+${ROUTE_FEATURE_STATE_ARGS[@]}}" \
   --artifact screenshot=screenshot.png \
   --artifact accessibility=ax.log \
   --artifact screenshot=ui-history/screenshot.png \
