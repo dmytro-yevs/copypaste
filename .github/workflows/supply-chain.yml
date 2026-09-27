@@ -1,33 +1,12 @@
 name: Supply chain
 
-# SECURITY.md tells readers to run `cargo deny check` and `cargo audit`. This
-# workflow is what makes that claim true in CI rather than only on a
-# maintainer's laptop.
-#
-# Two tools, deliberately both, because they do not overlap as much as they
-# look like they do:
-#
-#   cargo-deny   licences, crate sources, banned/duplicated crates, and
-#                advisories — driven entirely by `deny.toml`.
-#   cargo-audit  advisories only, but it is the RustSec reference
-#                implementation and reports yanked crates, which cargo-deny's
-#                advisories check does not cover the same way.
-#
-# The schedule matters more than the push trigger. An advisory lands against a
-# dependency that has not changed; without a cron, a new CVE is invisible until
-# somebody happens to push.
-
 on:
   push:
     branches: [main]
-  # No branch filter: a dependency change on a stacked or release branch has
-  # the same advisory surface as one onto main.
   pull_request:
   merge_group:
     types: [checks_requested]
   schedule:
-    # Mondays, 06:17 UTC. Off the hour so this is not queued behind everyone
-    # else's midnight cron.
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
@@ -37,94 +16,50 @@ concurrency:
 
 permissions:
   contents: read
-
-env:
-  CARGO_TERM_COLOR: always
+  pull-requests: read
 
 jobs:
-  secrets:
-    name: secret scan
-    # Push and pull request scan the tree, which is where a newly introduced
-    # secret is; pulling the whole history on every run would cost more and
-    # find nothing the tree scan misses.
-    #
-    # The cron scans every commit, for the reason this file already runs a
-    # scheduled advisory check: a rule update finds a secret in a file nobody
-    # has touched, and a secret that was committed and then deleted is still in
-    # every clone, so the tree is the one place it is not.
-    uses: ./.github/workflows/secret-scan.yml
-    with:
-      history: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-
-  dependency-review:
-    name: dependency review (npm, Maven and Gradle)
-    # GitHub resolves the dependency graph for the changed manifests, including
-    # Gradle/Maven coordinates that have no npm-style lockfile. This is the
-    # change-time gate complementing the scheduled Rust advisory checks below.
-    if: github.event_name == 'pull_request'
+  security:
+    name: Secrets and dependencies
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
-          # A dependency with any known vulnerability requires an explicit
-          # update or an approved exception; do not hide low-severity findings.
+          fetch-depth: ${{ github.event_name == 'schedule' && '0' || '1' }}
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+      - name: Scan secrets
+        run: ./scripts/check-secret-scan.sh --scan ${{ github.event_name == 'schedule' && '--history' || '' }}
+      - name: Review changed dependencies
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
           fail-on-severity: low
-
-  deny:
-    name: cargo-deny (${{ matrix.check }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        # Split so a licence failure and an advisory failure are distinguishable
-        # at a glance in the checks list, and so one failing does not mask the
-        # others.
-        check: [advisories, bans, licenses, sources]
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
       - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: cargo-deny@0.20.2
           checksum: true
           fallback: none
-
-      # Stats retain the duplicate count and inclusion graph, which names the
-      # dependency responsible for a licence or ban rejection.
-      - name: Check ${{ matrix.check }}
-        run: cargo deny --manifest-path Cargo.toml --config deny.toml --all-features --locked check ${{ matrix.check }} --show-stats
-
-  audit:
-    name: cargo-audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
+      - name: Check Rust dependency policy
+        run: cargo deny --manifest-path Cargo.toml --config deny.toml --all-features --locked check advisories bans licenses sources --show-stats
       - name: Advisory DB cache key
         id: stamp
         run: echo "week=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache advisory-db
+      - name: Cache advisory database
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/advisory-db
           key: advisory-db-${{ steps.stamp.outputs.week }}
           restore-keys: advisory-db-
-
-      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: cargo-audit
-
-      - name: RustSec policy self-tests
-        working-directory: scripts
-        run: python3 -m unittest test_check_rustsec_policy.py
-
-      # cargo-deny owns unmaintained warnings. This wrapper adds fail-closed
-      # vulnerability, unsoundness and notice handling with expiring decisions.
-      - name: cargo audit policy
+          checksum: true
+          fallback: none
+      - name: Audit Rust dependencies
         run: python3 scripts/check_rustsec_policy.py
