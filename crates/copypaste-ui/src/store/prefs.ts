@@ -60,11 +60,6 @@ export type { Prefs };
  */
 const FIELD = {
   previewLines: z.number().int().min(MIN_PREVIEW_LINES).max(MAX_PREVIEW_LINES),
-  previewLinesPopup: z
-    .number()
-    .int()
-    .min(MIN_PREVIEW_LINES)
-    .max(MAX_PREVIEW_LINES),
   sortByDevice: z.boolean(),
   historyDisplayLimit: z
     .number()

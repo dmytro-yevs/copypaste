@@ -9,7 +9,8 @@ import {
 } from "@/components/shared";
 import { ClipImageLoader } from "@/features/clip-content";
 import {
-    Button,
+  Button,
+  Icon,
   iconComponent,
   ShortcutBadge,
   Surface,
@@ -17,6 +18,7 @@ import {
   TooltipPortal,
   TooltipRoot,
   TooltipTrigger,
+  VisuallyHidden,
 } from "@/components/ui";
 import type { OriginDevice } from "@/lib/itemOrigin";
 import { resolveClipBodyPresentation } from "@/lib/clipPresentation";
@@ -28,12 +30,12 @@ import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailabi
 import { type Item } from "@/lib/ipc";
 import { t } from "@/i18n";
 import { kindOf } from "@/lib/format";
+import { QUICK_PASTE_PREVIEW_LINES } from "@/lib/previewDensity";
 import styles from "./QuickPasteRow.module.css";
 
 interface QuickPasteRowProps {
   item: Item;
   active: boolean;
-  previewLines: number;
   shortcut: string | null;
   pinPending: boolean;
   copyPending?: boolean;
@@ -49,7 +51,6 @@ interface QuickPasteRowProps {
 export function QuickPasteRow({
   item,
   active,
-  previewLines,
   shortcut,
   pinPending,
   copyPending = false,
@@ -111,6 +112,7 @@ export function QuickPasteRow({
           ? rowLabel
           : item.content ?? "";
   const previewContent = body.state === "content" ? body.content : "";
+  const compactContent = cardContent.replace(/\s+/gu, " ").trim();
   const preview = image ? (
     <ClipImageLoader id={item.id} size="detail" />
   ) : body.state === "unavailable" ? (
@@ -184,9 +186,9 @@ export function QuickPasteRow({
   const row = (
     <Surface
       role="listitem"
-      elevation="raised"
-      border="subtle"
-      radius="md"
+      elevation="flat"
+      border="none"
+      radius="sm"
       aria-current={active || undefined}
       data-state={active ? "selected" : "idle"}
       data-kind={kind}
@@ -195,14 +197,27 @@ export function QuickPasteRow({
     >
       {!copyAvailability.canCopy ? copyButton : null}
       {canPreview ? <TooltipTrigger asChild>{activeHit}</TooltipTrigger> : activeHit}
+      <span className={styles.sourceIcon} aria-hidden="true">
+        {source.available ? (
+          <SourceAppIcon
+            bundleId={item.source_app_bundle_id}
+            Fallback={iconComponent(source.icon)}
+            fallbackText={source.label.slice(0, 2)}
+            size="xs"
+          />
+        ) : (
+          <span className={styles.sourceFallback}><Icon name={source.icon} size="sm" /></span>
+        )}
+      </span>
       <div className={styles.content}>
         <div className={styles.body}>
           <ClipBodyPreview
             kind={kind}
             masked={body.state === "masked"}
-            content={cardContent}
-            previewLines={previewLines}
+            content={compactContent}
+            previewLines={QUICK_PASTE_PREVIEW_LINES}
             imagePreview={image ? <ClipImageLoader id={item.id} size="fill" /> : undefined}
+            surface="quickPaste"
           />
         </div>
         {active && copyAvailability.reason !== null ? (
@@ -232,35 +247,37 @@ export function QuickPasteRow({
             ) : null}
           </div>
         ) : null}
-        <SourceMeta
-          source={source}
-          createdAt={item.created_at}
-          sourceIcon={
-            <SourceAppIcon
-              bundleId={item.source_app_bundle_id}
-              Fallback={iconComponent(source.icon)}
-              fallbackText={source.label.slice(0, 2)}
-              size="xs"
-            />
-          }
-          origin={origin}
-          kind={kind}
-          content={cardContent}
-          density="compact"
-          devicePresentation="label"
-          extras={
-            <>
-              {item.pinned ? <SourceMetaBadge icon="pin" label={t("quickPaste.row.pinned")} /> : null}
-              {hasPotentialFinding ? (
-                <SourceMetaBadge
-                  icon="sensitive"
-                  tone="warning"
-                  label={t("quickPaste.row.potentialSensitive")}
-                />
-              ) : null}
-            </>
-          }
-        />
+        <VisuallyHidden asChild>
+          <SourceMeta
+            source={source}
+            createdAt={item.created_at}
+            sourceIcon={
+              <SourceAppIcon
+                bundleId={item.source_app_bundle_id}
+                Fallback={iconComponent(source.icon)}
+                fallbackText={source.label.slice(0, 2)}
+                size="xs"
+              />
+            }
+            origin={origin}
+            kind={kind}
+            content={cardContent}
+            density="compact"
+            devicePresentation="label"
+            extras={
+              <>
+                {item.pinned ? <SourceMetaBadge icon="pin" label={t("quickPaste.row.pinned")} /> : null}
+                {hasPotentialFinding ? (
+                  <SourceMetaBadge
+                    icon="sensitive"
+                    tone="warning"
+                    label={t("quickPaste.row.potentialSensitive")}
+                  />
+                ) : null}
+              </>
+            }
+          />
+        </VisuallyHidden>
       </div>
       {shortcut !== null && copyAvailability.canCopy ? (
         <ShortcutBadge aria-hidden="true" className={styles.shortcut}>

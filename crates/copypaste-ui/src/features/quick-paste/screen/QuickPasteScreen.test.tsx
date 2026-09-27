@@ -23,7 +23,6 @@ vi.mock("@/features/quick-paste/hooks/useQuickPasteLifecycle", () => ({
   QUICK_PASTE_QUERY_KEY: ["quick-paste", "items"],
   useQuickPasteLifecycle: () => ({
     holding: true,
-    previewLinesPopup: 2,
     dismiss: lifecycle.dismiss,
     dismissOnRootBlur: () => undefined,
     currentCacheGeneration: () => lifecycle.generation,

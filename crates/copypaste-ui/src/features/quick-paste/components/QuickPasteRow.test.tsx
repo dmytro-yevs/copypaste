@@ -32,7 +32,6 @@ describe("QuickPasteRow", () => {
         <TooltipProvider><QuickPasteRow
           item={item({ content: null, content_type: "image/png", content_class: "image" })}
           active
-          previewLines={2}
           shortcut="⌘1"
           pinPending={false}
           origin={null}
@@ -67,7 +66,6 @@ describe("QuickPasteRow", () => {
         <QuickPasteRow
           item={unsupported}
           active
-          previewLines={2}
           shortcut={null}
           pinPending={false}
           origin={null}
@@ -90,11 +88,33 @@ describe("QuickPasteRow", () => {
     expect(quickPastePresentation(unsupported).rowLabel).toBe("Unsupported clipboard content");
   });
 
+  it("normalizes line breaks for the compact action list", () => {
+    render(
+      <TooltipProvider>
+        <QuickPasteRow item={item({ content: "first line\nsecond line" })} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("first line second line").getAttribute("data-preview-lines")).toBe("1");
+  });
+
+  it("keeps source metadata available to assistive technology", () => {
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider>
+          <QuickPasteRow item={item({ source_app_name: "Notes" })} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        </TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("Notes")).toBeTruthy();
+  });
+
   it.each(["", "   "])("keeps a %j finding redaction out of the row label and DOM", (redacted_preview) => {
     const raw = "raw secret fragment";
     render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ content: raw, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview } })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ content: raw, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview } })} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
@@ -107,7 +127,7 @@ describe("QuickPasteRow", () => {
     const user = userEvent.setup();
     render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ content: "short preview", truncated: true })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent="complete body" fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ content: "short preview", truncated: true })} active shortcut={null} pinPending={false} origin={null} fullContent="complete body" fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
@@ -133,7 +153,7 @@ describe("QuickPasteRow", () => {
     const user = userEvent.setup();
     render(
       <TooltipProvider>
-        <QuickPasteRow item={target} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={failed} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={target} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={failed} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
@@ -146,7 +166,7 @@ describe("QuickPasteRow", () => {
     const raw = "raw secret fragment";
     render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ content: raw, truncated: true, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview: "••••• fragment" } })} active previewLines={2} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ content: raw, truncated: true, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview: "••••• fragment" } })} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
