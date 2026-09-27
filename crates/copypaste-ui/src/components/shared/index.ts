@@ -17,6 +17,7 @@ export { InlineNotice } from "./InlineNotice";
 export { IllustratedErrorState, RepairBotArtwork } from "./IllustratedErrorState";
 export { IconButton } from "./IconButton";
 export { HighlightedCode } from "./HighlightedCode";
+export { HelpPopover } from "./HelpPopover";
 export type { IconButtonProps } from "./IconButton";
 export { InspectorShell } from "./InspectorShell";
 export { MetadataLabel, MetadataList, MetadataRow, MetadataValue } from "./MetadataList";

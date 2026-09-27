@@ -81,8 +81,6 @@
   -webkit-line-clamp: 1;
 }
 
-.root[data-kind="image"] .body { padding-inline-end: 0; }
-
 .root[data-kind="image"] .body > * {
   max-inline-size: min(100%, calc(var(--s-9) * 6));
   block-size: calc(var(--s-9) * 4);

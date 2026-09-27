@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, screen, waitFor } from "@testing-library/react";
 
 import type { ServiceState } from "@/lib/ipc";
 import { testClient, withUser } from "@/test/harness";
@@ -45,6 +45,37 @@ beforeEach(() => {
     toastError.mockReset();
 });
 
+afterEach(() => vi.restoreAllMocks());
+
+function unhealthyProbeTimers() {
+    const scheduled = new Map<number, () => Promise<void>>();
+    let nextId = 1;
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    const nativeClearTimeout = window.clearTimeout.bind(window);
+    vi.spyOn(window, "setTimeout").mockImplementation((handler, delay, ...args) => {
+        if (delay === 5_000 && typeof handler === "function") {
+            const id = nextId++;
+            scheduled.set(id, async () => { await handler(...args); });
+            return id as unknown as ReturnType<typeof window.setTimeout>;
+        }
+        return nativeSetTimeout(handler, delay, ...args) as unknown as ReturnType<typeof window.setTimeout>;
+    });
+    vi.spyOn(window, "clearTimeout").mockImplementation((timer) => {
+        scheduled.delete(Number(timer));
+        nativeClearTimeout(timer);
+    });
+    return {
+        active: () => scheduled.size,
+        runNext: async () => {
+            const [id, callback] = scheduled.entries().next().value ?? [];
+            if (id !== undefined && callback !== undefined) {
+                scheduled.delete(id);
+                await callback();
+            }
+        },
+    };
+}
+
 describe("offline service recovery", () => {
     it("starts only from stopped and blocks an unresolved double click", async () => {
         const pending = deferred<ServiceState>();
@@ -62,7 +93,7 @@ describe("offline service recovery", () => {
         expect(start.hasAttribute("disabled")).toBe(true);
 
         pending.resolve(MATCHING);
-        await screen.findByText("The clipboard service is running");
+        await screen.findByText("Service is running");
     });
 
     it("keeps the start action available after a failed attempt", async () => {
@@ -87,7 +118,7 @@ describe("offline service recovery", () => {
             <ServiceOfflineState onOpenDiagnostics={vi.fn()} />,
         );
 
-        expect(await screen.findByText("Checking the clipboard service…")).toBeTruthy();
+        expect(await screen.findByText("Checking service…")).toBeTruthy();
         expect(
             screen.queryByRole("button", { name: "Start the service" }),
         ).toBeNull();
@@ -113,7 +144,7 @@ describe("offline service recovery", () => {
         withUser(<ServiceOfflineState onOpenDiagnostics={vi.fn()} />);
 
         expect(
-            await screen.findByText("This build has no background service"),
+            await screen.findByText("Service unavailable"),
         ).toBeTruthy();
         expect(
             screen.queryByRole("button", { name: "Start the service" }),
@@ -141,7 +172,7 @@ describe("offline service recovery", () => {
         expect(ipc.restartService).toHaveBeenCalledOnce();
         expect(restart.hasAttribute("disabled")).toBe(true);
         pending.resolve(MATCHING);
-        await screen.findByText("The clipboard service is running");
+        await screen.findByText("Service is running");
     });
 
     it("refreshes history and status when a matching service wins the race", async () => {
@@ -150,7 +181,7 @@ describe("offline service recovery", () => {
         const invalidate = vi.spyOn(client, "invalidateQueries");
         withUser(<ServiceOfflineState onOpenDiagnostics={vi.fn()} />, client);
 
-        expect(await screen.findByText("The clipboard service is running")).toBeTruthy();
+        expect(await screen.findByText("Service is running")).toBeTruthy();
         await waitFor(() => {
             expect(
                 invalidate.mock.calls.some(
@@ -177,7 +208,7 @@ describe("offline service recovery", () => {
         );
 
         expect(
-            await screen.findByText("The clipboard service isn't responding correctly"),
+            await screen.findByText("Service unavailable"),
         ).toBeTruthy();
         expect(
             screen.queryByRole("button", { name: "Start the service" }),
@@ -189,5 +220,37 @@ describe("offline service recovery", () => {
         expect(
             await screen.findByRole("button", { name: "Start the service" }),
         ).toBeTruthy();
+    });
+
+    it("re-probes an unhealthy service once at the shared backoff and refreshes consumers when it recovers", async () => {
+        const scheduled = unhealthyProbeTimers();
+        ipc.serviceState
+            .mockResolvedValueOnce({ state: "unhealthy" })
+            .mockResolvedValueOnce(MATCHING);
+        const client = testClient();
+        const invalidate = vi.spyOn(client, "invalidateQueries");
+        withUser(<ServiceOfflineState onOpenDiagnostics={vi.fn()} />, client);
+
+        await screen.findByText("Service unavailable");
+        await act(async () => { await scheduled.runNext(); });
+        await screen.findByText("Service is running");
+        await waitFor(() => {
+            expect(invalidate).toHaveBeenCalledWith({ queryKey: ["history", "pages"] });
+            expect(invalidate).toHaveBeenCalledWith({ queryKey: ["status"] });
+        });
+    });
+
+    it("stops unhealthy re-probes after three attempts and leaves manual retry available", async () => {
+        const scheduled = unhealthyProbeTimers();
+        ipc.serviceState.mockResolvedValue({ state: "unhealthy" });
+        withUser(<ServiceOfflineState onOpenDiagnostics={vi.fn()} />);
+
+        await screen.findByText("Service unavailable");
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            await act(async () => { await scheduled.runNext(); });
+        }
+        expect(ipc.serviceState).toHaveBeenCalledTimes(4);
+        expect(scheduled.active()).toBe(0);
+        expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     });
 });

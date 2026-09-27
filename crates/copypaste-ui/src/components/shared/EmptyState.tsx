@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { ActionButton } from "./ActionButton";
+import { HelpPopover } from "./HelpPopover";
 import { cn } from "@/lib/cn";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { Surface } from "@/components/ui";
@@ -16,6 +17,8 @@ interface EmptyStateProps {
     tone?: EmptyStateTone;
     title: string;
     body?: string;
+    details?: ReactNode;
+    detailsLabel?: string;
     action?: {
         label: string;
         onClick: () => void;
@@ -23,7 +26,6 @@ interface EmptyStateProps {
         disabled?: boolean;
     };
     secondary?: ReactNode;
-    secondaryPlacement?: "attached" | "separated";
     compact?: boolean;
     fullWidth?: boolean;
 }
@@ -34,14 +36,15 @@ export function EmptyState({
     tone = "neutral",
     title,
     body,
+    details,
+    detailsLabel = "More information",
     action,
     secondary,
-    secondaryPlacement = "separated",
     compact = false,
     fullWidth = false,
 }: EmptyStateProps) {
     return (
-        <Surface asChild elevation="raised" border="subtle" radius="md">
+        <Surface asChild elevation="flat" border="none" radius="md">
           <section
               className={cn(
                   styles.root,
@@ -62,11 +65,15 @@ export function EmptyState({
             </span>
             <div className={styles.content}>
                 <div className={styles.copy}>
-                    <p className={styles.title}>{title}</p>
+                    <div className={styles.titleRow}>
+                        <p className={styles.title}>{title}</p>
+                        {details ? <HelpPopover content={details} label={detailsLabel} /> : null}
+                    </div>
                     {body ? <p className={styles.body}>{body}</p> : null}
                 </div>
-                {action ? (
-                    <div className={styles.action}>
+                {action || secondary ? (
+                    <div className={styles.actions}>
+                      {action ? (
                         <ActionButton
                             disabled={action.disabled}
                             onClick={action.onClick}
@@ -74,17 +81,10 @@ export function EmptyState({
                         >
                             {action.label}
                         </ActionButton>
-                    </div>
-                ) : null}
-                {secondary ? (
-                    <div
-                        className={cn(
-                            styles.secondary,
-                            secondaryPlacement === "attached" &&
-                                styles.attached,
-                        )}
-                    >
-                        {secondary}
+                      ) : null}
+                      {secondary ? (
+                        <div className={styles.secondary}>{secondary}</div>
+                      ) : null}
                     </div>
                 ) : null}
             </div>

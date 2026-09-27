@@ -5,6 +5,7 @@ export const common = {
   cancel: "Cancel",
   tryAgain: "Try again",
   error: "Error",
+  errorDetails: "Error details",
   on: "On",
   off: "Off",
   unknown: "Unknown",

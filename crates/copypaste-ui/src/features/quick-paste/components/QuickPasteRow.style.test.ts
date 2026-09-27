@@ -35,6 +35,12 @@ describe("QuickPasteRow compact presentation", () => {
     expect(css).toMatch(/\.sourceIcon \{[\s\S]*?margin-block-start: 2\.5px;/);
   });
 
+  it("reserves the action column for every clip kind, including images", () => {
+    expect(css).toMatch(/\.body \{[\s\S]*?padding-inline-end: var\(--quick-paste-actions\);/);
+    expect(css).not.toContain('.root[data-kind="image"] .body { padding-inline-end: 0; }');
+    expect(css).toMatch(/\.root\[data-kind="image"\] \.body > \* \{[\s\S]*?max-inline-size: min\(100%, calc\(var\(--s-9\) \* 6\)\);/);
+  });
+
   it("does not move rows on hover", () => {
     const hoverRule = css.match(/\.root:hover \{(?<rule>[\s\S]*?)\}/)?.groups?.rule;
     expect(hoverRule).toBeDefined();
