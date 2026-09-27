@@ -69,7 +69,8 @@ class NetworkDiscoveryPlugin(private val activity: Activity) : Plugin(activity) 
                     .put("serviceName", peer.serviceName)
                     .put("host", peer.host)
                     .put("port", peer.port)
-                    .put("attributes", attributes),
+                    .put("attributes", attributes)
+                    .put("lastSeenMs", peer.lastSeenMs),
             )
         }
         return peers

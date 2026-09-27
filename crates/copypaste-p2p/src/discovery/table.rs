@@ -80,7 +80,7 @@ impl PeerTable {
         // `now - last_seen` rather than a stored deadline, so a backwards step
         // of the wall clock expires entries early instead of stranding them.
         self.entries
-            .retain(|_, peer| now_ms.saturating_sub(peer.last_seen_ms) < ttl);
+            .retain(|_, peer| is_peer_fresh_for(peer.last_seen_ms, now_ms, ttl));
     }
 
     /// Evict least-recently-seen until we are inside the cap. A live peer
@@ -132,6 +132,15 @@ impl PeerTable {
     }
 }
 
+/// Whether a transport observation is still inside the common discovery TTL.
+pub fn is_peer_fresh(last_seen_ms: i64, now_ms: i64) -> bool {
+    is_peer_fresh_for(last_seen_ms, now_ms, PEER_TTL.as_millis() as i64)
+}
+
+fn is_peer_fresh_for(last_seen_ms: i64, now_ms: i64, ttl_ms: i64) -> bool {
+    now_ms.saturating_sub(last_seen_ms) < ttl_ms
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +171,13 @@ mod tests {
 
         assert!(table.snapshot(11_000).is_empty());
         assert!(table.find("fresh", 11_000).is_none());
+    }
+
+    #[test]
+    fn public_freshness_uses_the_peer_ttl() {
+        let now = 10_000;
+        assert!(is_peer_fresh(now - PEER_TTL.as_millis() as i64 + 1, now));
+        assert!(!is_peer_fresh(now - PEER_TTL.as_millis() as i64, now));
     }
 
     #[test]

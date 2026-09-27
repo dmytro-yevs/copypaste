@@ -39,6 +39,9 @@ impl EmbeddedBackend {
     ) -> Result<Vec<DiscoveredDevice>> {
         #[cfg(target_os = "android")]
         {
+            if !self.inner.settings().lan_visibility {
+                return Ok(devices);
+            }
             let name = self.inner.state.device_name();
             let pairing_ids = self
                 .inner
