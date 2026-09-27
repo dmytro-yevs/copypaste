@@ -159,7 +159,7 @@ export function getItemBody(id: string): Promise<string> {
 
 /** A bounded PNG thumbnail requested only for a visible history image. */
 export function getImagePreview(id: string, maxEdge?: number): Promise<ImagePreview> {
-  return call(UI_COMMANDS.get_image_preview, { id, maxEdge } as never);
+  return call(UI_COMMANDS.get_image_preview, { id, maxEdge });
 }
 
 /** A bounded native app icon resolved from a captured bundle/package id. */
