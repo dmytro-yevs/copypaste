@@ -144,6 +144,14 @@ PY
             rm -rf "$fixture"
             return 1
         fi
+        failed_list_stub() { printf '%s\n' "$nonce"; return 17; }
+        missing_list_stub() { printf '%s\n' '{"items":[]}'; }
+        if list_response_contains_canary failed_list_stub "$nonce" "$fixture/list.json" "$fixture/list.err" \
+            || list_response_contains_canary missing_list_stub "$nonce" "$fixture/list.json" "$fixture/list.err"; then
+            echo "self-test failed: a failed list command or missing canary passed" >&2
+            rm -rf "$fixture"
+            return 1
+        fi
         rm -rf "$fixture"
     }
     if capture_poll_self_test; then
@@ -472,8 +480,9 @@ for _ in $(seq 1 20); do
         LIST_LAST_EXIT=0
         CAPTURED="yes"
         break
+    else
+        LIST_LAST_EXIT=$?
     fi
-    LIST_LAST_EXIT=$?
     sleep 0.5
 done
 if capture_status after; then
