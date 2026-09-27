@@ -178,7 +178,16 @@ impl SyncMessage {
                     check_id("origin_device_id", &item.origin_device_id)?;
                     check_len("content_type", &item.content_type, MAX_CONTENT_TYPE_BYTES)?;
                     if let Some(metadata) = &item.payload_metadata {
-                        check_len("payload_metadata", metadata, 512)?;
+                        check_len(
+                            "payload_metadata",
+                            metadata,
+                            copypaste_ipc::MAX_SYNC_METADATA_BYTES,
+                        )?;
+                        if item.deleted || !valid_payload_metadata(metadata, &item.content_type) {
+                            return Err(ProtocolError::Decode(
+                                "item carries invalid payload metadata".into(),
+                            ));
+                        }
                     }
                     check_len("content_hash", &item.content_hash, MAX_HASH_BYTES)?;
                     check_timestamp(item.created_at)?;
@@ -196,7 +205,9 @@ impl SyncMessage {
                             max: MAX_CONTENT_BYTES,
                         });
                     }
-                    total = total.saturating_add(content_len);
+                    total = total
+                        .saturating_add(content_len)
+                        .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
                 }
                 if total > MAX_ITEM_BYTES_PER_MESSAGE {
                     return Err(ProtocolError::BatchTooLarge {
@@ -209,6 +220,57 @@ impl SyncMessage {
         }
         Ok(())
     }
+}
+
+/// The protocol crate cannot depend on core (core owns the sync source), so it
+/// checks the strict JSON envelope shape here. Core then decodes the PNG under
+/// allocation limits before any row is stored.
+fn valid_payload_metadata(value: &str, content_type: &str) -> bool {
+    use serde_json::Value;
+
+    let Ok(Value::Object(metadata)) = serde_json::from_str(value) else {
+        return false;
+    };
+    let is_file = content_type == copypaste_ipc::content_type::FILE;
+    let valid_file = |value: &Value| match value {
+        Value::Object(file) => {
+            file.len() == 2
+                && file.contains_key("filename")
+                && file.contains_key("mime_type")
+                && file.get("filename").is_some_and(Value::is_string)
+                && file.get("mime_type").is_some_and(Value::is_string)
+        }
+        _ => false,
+    };
+    let valid_icon = |value: &Value| match value {
+        Value::Object(icon) => {
+            icon.len() == 3
+                && icon.contains_key("png_base64")
+                && icon.contains_key("width")
+                && icon.contains_key("height")
+                && icon.get("png_base64").is_some_and(Value::is_string)
+                && icon.get("width").is_some_and(Value::is_u64)
+                && icon.get("height").is_some_and(Value::is_u64)
+        }
+        _ => false,
+    };
+
+    if metadata.contains_key("filename") || metadata.contains_key("mime_type") {
+        return is_file && valid_file(&Value::Object(metadata));
+    }
+
+    if metadata.len() > 2
+        || metadata
+            .keys()
+            .any(|key| key != "file" && key != "source_app_icon")
+    {
+        return false;
+    }
+    let file = metadata.get("file");
+    let icon = metadata.get("source_app_icon");
+    (file.is_some() || icon.is_some())
+        && file.is_none_or(|value| is_file && valid_file(value))
+        && icon.is_none_or(valid_icon)
 }
 
 fn validate_device_profile(profile: &DeviceProfile) -> Result<(), ProtocolError> {
@@ -331,7 +393,7 @@ mod tests {
                 content: String::new(),
                 binary_content: bytes.clone(),
                 payload_metadata: Some(
-                    r#"{\"filename\":\"image.png\",\"mime_type\":\"image/png\"}"#.into(),
+                    r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64}}"#.into(),
                 ),
                 source_app_bundle_id: None,
                 source_app_name: None,
@@ -347,6 +409,33 @@ mod tests {
         };
         let decoded = SyncMessage::decode(&message.encode().unwrap()).unwrap();
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn icon_envelopes_reject_unknown_fields_and_tombstones() {
+        let mut message = item("icon", "body");
+        message.payload_metadata = Some(
+            r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64},"unknown":true}"#
+                .into(),
+        );
+        assert!(matches!(
+            SyncMessage::Items {
+                items: vec![message.clone()]
+            }
+            .validate(),
+            Err(ProtocolError::Decode(_))
+        ));
+
+        message.payload_metadata =
+            Some(r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64}}"#.into());
+        message.deleted = true;
+        assert!(matches!(
+            SyncMessage::Items {
+                items: vec![message]
+            }
+            .validate(),
+            Err(ProtocolError::Decode(_))
+        ));
     }
 
     #[test]

@@ -276,21 +276,20 @@ pub fn local_winner_stamp(
 /// Shapes that are never stored, whichever transport carried them. Checked by
 /// the entry points so the local row is read exactly once per incoming item.
 pub(super) fn payload_is_refused(incoming: &RemoteVersion<'_>) -> bool {
+    if incoming.deleted {
+        return incoming.payload_metadata.is_some();
+    }
     if !incoming.deleted
         && copypaste_ipc::content_type::is_binary(incoming.content_type)
         && incoming.binary_content.is_none()
     {
         return true;
     }
-    if !incoming.deleted && incoming.content_type == copypaste_ipc::content_type::FILE {
-        incoming
-            .payload_metadata
-            .and_then(crate::FileMetadata::from_json)
-            .is_none()
-    } else {
-        // Metadata belongs only to a file payload. Keeping it on a text/image
-        // row would preserve unactionable, user-controlled cleartext forever.
-        incoming.payload_metadata.is_some()
+    match incoming.payload_metadata {
+        None => incoming.content_type == copypaste_ipc::content_type::FILE,
+        Some(metadata) => {
+            crate::PayloadMetadata::from_json(metadata, incoming.content_type).is_none()
+        }
     }
 }
 
