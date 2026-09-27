@@ -28,6 +28,7 @@ class ClipboardReadTest {
     @After
     fun clearClipboard() {
         clipboard.clearPrimaryClip()
+        CaptureExclusions.replace(false, emptyList())
     }
 
     @Test
@@ -53,6 +54,17 @@ class ClipboardReadTest {
 
         assertEquals(ReadOutcome.SUCCEEDED, read.outcome)
         assertEquals("genuine text", read.text)
+    }
+
+    @Test
+    fun configuredExclusionsFailClosedWithoutRuntimeSourceAttribution() {
+        CaptureExclusions.replace(true, listOf("com.password.manager"))
+        clipboard.setPrimaryClip(ClipData.newPlainText("text", "genuine text"))
+
+        val read = clipboardRead(context, CaptureSource.BACKGROUND)
+
+        assertEquals(ReadOutcome.EMPTY, read.outcome)
+        assertNull(read.text)
     }
 
     @Test

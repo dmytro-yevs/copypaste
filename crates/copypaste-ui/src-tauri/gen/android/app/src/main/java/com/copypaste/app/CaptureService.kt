@@ -92,6 +92,7 @@ class CaptureService : Service() {
         private const val KEY_ONGOING_TEXT = "ongoingText"
         private const val KEY_LOST_TITLE = "lostTitle"
         private const val KEY_LOST_BODY = "lostBody"
+        private const val KEY_RECOVERY_REQUIRED = "recoveryRequired"
 
         fun rememberWanted(context: Context, wanted: Boolean) {
             writeWanted(context, wanted)
@@ -102,6 +103,7 @@ class CaptureService : Service() {
                 return false
             }
             writeWanted(context, true)
+            setRecoveryRequired(context, false)
             return true
         }
 
@@ -114,6 +116,7 @@ class CaptureService : Service() {
                 return false
             }
             writeWanted(context, true)
+            setRecoveryRequired(context, false)
             if (!ClipCascadeCapture.isSetupComplete(context)) {
                 return false
             }
@@ -128,6 +131,7 @@ class CaptureService : Service() {
 
         fun restoreIfArmed(context: Context): Boolean {
             if (!userWantsCapture(context)) return false
+            if (recoveryRequired(context)) return false
             if (notificationCopy(context) == null) return false
             if (ClipCascadeCapture.isListening()) return true
             if (!ClipCascadeCapture.isSetupComplete(context)) return false
@@ -139,6 +143,7 @@ class CaptureService : Service() {
             completeStart(false)
             writeWanted(context, false)
             clearCopy(context)
+            setRecoveryRequired(context, false)
             ClipCascadeCapture.disarm()
             ClipQueue.markCaptureStateDirty()
             context.stopService(Intent(context, CaptureService::class.java))
@@ -155,6 +160,10 @@ class CaptureService : Service() {
 
         fun isArmed(context: Context): Boolean =
             userWantsCapture(context) && notificationCopy(context) != null
+
+        fun recoveryRequired(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_RECOVERY_REQUIRED, false)
 
         private fun startService(context: Context): Boolean {
             val intent = Intent(context, CaptureService::class.java)
@@ -173,6 +182,7 @@ class CaptureService : Service() {
         private fun lost(context: Context, copy: CaptureArmRequest) {
             completeStart(false)
             ClipCascadeCapture.disarm()
+            setRecoveryRequired(context, true)
             ClipQueue.markCaptureStateDirty()
             CaptureNotifications.postLost(context, copy.lostTitle, copy.lostBody)
             context.stopService(Intent(context, CaptureService::class.java))
@@ -205,6 +215,11 @@ class CaptureService : Service() {
                 .putBoolean(KEY_WANTED, wanted)
                 .putBoolean(KEY_ENABLED, wanted)
                 .commit()
+        }
+
+        private fun setRecoveryRequired(context: Context, required: Boolean) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_RECOVERY_REQUIRED, required).commit()
         }
 
         private fun clearCopy(context: Context) {
