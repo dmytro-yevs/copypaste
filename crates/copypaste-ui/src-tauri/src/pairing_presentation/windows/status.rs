@@ -72,16 +72,12 @@ fn run(
 }
 
 pub(super) fn copy(progress: &PairingProgressData) -> StatusCopy {
-    let semantics = resolve_pairing_semantics(progress.state, progress.error_code);
-    let copy = semantics.copy;
+    let copy = resolve_pairing_semantics(progress.state, progress.error_code).copy;
+    let active = resolve_pairing_semantics(progress.state, progress.error_code).active;
     StatusCopy {
         heading: copy.title,
         message: copy.detail,
-        action: if semantics.active {
-            "&Cancel pairing"
-        } else {
-            "&Close"
-        },
+        action: if active { "&Cancel pairing" } else { "&Close" },
     }
 }
 

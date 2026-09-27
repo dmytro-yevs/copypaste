@@ -144,8 +144,17 @@ impl NativePairingUi for WindowsPairingUi {
     }
 
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState {
-        if progress.state == PairingState::WaitingForPeer {
-            return PairingPresentationState::Presented;
+        match progress.state {
+            PairingState::Idle => {
+                self.close_active();
+                return PairingPresentationState::Available;
+            }
+            PairingState::WaitingForPeer => return PairingPresentationState::Presented,
+            PairingState::AwaitingConfirmation => {
+                self.close_active();
+                return PairingPresentationState::Presented;
+            }
+            _ => {}
         }
         if self.is_presenting_progress(progress.state) {
             return PairingPresentationState::Presented;
@@ -173,6 +182,8 @@ impl NativePairingUi for WindowsPairingUi {
 
 #[cfg(test)]
 mod tests {
+    use copypaste_ipc::PairingState;
+
     use crate::pairing_presentation::{NativePresentationOutcome, PairingPresentationState};
 
     fn production(source: &'static str) -> &'static str {
@@ -263,6 +274,42 @@ mod tests {
         assert!(source.contains("is_presenting_progress(progress.state)"));
         assert!(source.contains("replace_progress(progress.state, window)"));
         assert!(source.contains("CloseHandle::is_open"));
+    }
+
+    #[test]
+    fn idle_and_confirmation_progress_close_the_native_surface_without_a_status_window() {
+        let ui = super::WindowsPairingUi::new(
+            crate::pairing_presentation::invite::encode_native_invite,
+            crate::pairing_presentation::invite::validate_native_invite_fields,
+            std::sync::Arc::new(|| {}),
+            std::sync::Arc::new(|| {}),
+        );
+        for (state, expected) in [
+            (PairingState::Idle, PairingPresentationState::Available),
+            (
+                PairingState::AwaitingConfirmation,
+                PairingPresentationState::Presented,
+            ),
+        ] {
+            let progress = copypaste_ipc::PairingProgressData {
+                pairing_id: None,
+                role: None,
+                state,
+                expires_in_ms: None,
+                sas: None,
+                peer_device_id: None,
+                peer_name: None,
+                peer_addr: None,
+                known_device: None,
+                error_code: None,
+            };
+            assert_eq!(
+                crate::pairing_presentation::NativePairingUi::present_progress(&ui, &progress),
+                expected
+            );
+            assert!(ui.active.lock().expect("active").is_none());
+            assert!(ui.active_progress.lock().expect("progress").is_none());
+        }
     }
 }
 
