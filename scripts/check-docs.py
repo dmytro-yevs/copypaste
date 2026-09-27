@@ -63,7 +63,7 @@ CLOUD_REQUIRED = (
     ("calls the demo backend a local stub", re.compile(r"(?i)\blocal\s+stub\b")),
     ("says no workflow runs the cloud demo", re.compile(r"(?i)\bno\s+workflow\s+runs\s+it\b")),
     ("names the real-Supabase gate script", re.compile(r"supabase/tests/real-supabase\.sh")),
-    ("names the release job that runs the gate", re.compile(r"\bsupabase-gate\b")),
+    ("names the release job that runs the gate", re.compile(r"`supabase` job")),
     (
         "calls that gate's stack local and disposable",
         re.compile(r"(?i)\bdisposable\s+local\s+supabase\s+stack\b"),
@@ -75,7 +75,7 @@ CLOUD_REQUIRED = (
 )
 CLOUD_ANCHORS = (
     ("supabase/tests/real-supabase.sh", None),
-    (".github/workflows/release.yml", re.compile(r"(?m)^\s*supabase-gate:")),
+    (".github/workflows/release.yml", re.compile(r"(?m)^\s*supabase:")),
 )
 
 
@@ -184,7 +184,7 @@ def check_cloud_claims(*, inject=None):
         if not path.is_file():
             errs.append(f"{README}: cloud copy cites {relative}, which does not exist")
         elif pattern and not pattern.search(path.read_text(encoding="utf-8")):
-            errs.append(f"{README}: cloud copy cites the supabase-gate job, absent from {relative}")
+            errs.append(f"{README}: cloud copy cites the supabase job, absent from {relative}")
     for number, line in enumerate(text.splitlines(), 1):
         if not CLOUD_LINE_RE.search(line):
             continue
