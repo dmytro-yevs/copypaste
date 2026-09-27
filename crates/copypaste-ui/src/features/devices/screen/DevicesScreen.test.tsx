@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   serviceError: false,
   peerPending: false,
   peerError: false,
+  capture: undefined as unknown,
   syncPending: false,
   mutate: vi.fn(),
   refetchService: vi.fn(),
@@ -32,6 +33,10 @@ vi.mock("@/hooks/useStatus", () => ({
     isError: mocks.serviceError,
     refetch: mocks.refetchService,
   }),
+}));
+
+vi.mock("@/hooks/useCapture", () => ({
+  useCaptureState: () => ({ data: mocks.capture }),
 }));
 
 vi.mock("@/hooks/useServiceConfig", () => ({
@@ -98,6 +103,7 @@ beforeEach(() => {
   mocks.serviceError = false;
   mocks.peerPending = false;
   mocks.peerError = false;
+  mocks.capture = undefined;
   mocks.syncPending = false;
   mocks.mutate.mockReset();
   mocks.refetchService.mockReset();
@@ -107,11 +113,23 @@ beforeEach(() => {
 });
 
 describe("Devices sync readiness", () => {
+  it("uses the canonical capture snapshot instead of inferring capture state", () => {
+    mocks.capture = {
+      headline: "Background capture needs setup.",
+      health: { state: "not_granted", reason: "no_permission" },
+    };
+    render(<TooltipProvider><DevicesScreen /></TooltipProvider>);
+
+    expect(screen.getByRole("button", {
+      name: /This device\. This device\. Background capture needs setup\./,
+    })).toBeTruthy();
+  });
+
   it("allows detail and retry syncs only when the master setting is ready", () => {
     render(<TooltipProvider><DevicesScreen /></TooltipProvider>);
 
     fireEvent.click(screen.getByRole("button", { name: "Force summary retry" }));
-    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Unverified device name/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Device name is self-reported/ }));
     fireEvent.click(screen.getByRole("button", { name: "Force detail sync" }));
     expect(mocks.mutate).toHaveBeenCalledTimes(2);
     expect(mocks.mutate).toHaveBeenNthCalledWith(1, "pair-1", expect.any(Object));
@@ -126,7 +144,7 @@ describe("Devices sync readiness", () => {
     fireEvent.click(screen.getByRole("button", { name: "Force summary retry" }));
     fireEvent.click(screen.getByRole("button", { name: "Open Device sync settings" }));
     expect(useUi.getState()).toMatchObject({ view: "settings", settingsTab: "device-sync" });
-    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Unverified device name/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Device name is self-reported/ }));
     fireEvent.click(screen.getByRole("button", { name: "Force detail sync" }));
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
@@ -136,7 +154,7 @@ describe("Devices sync readiness", () => {
     render(<TooltipProvider><DevicesScreen /></TooltipProvider>);
 
     fireEvent.click(screen.getByRole("button", { name: "Force summary retry" }));
-    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Unverified device name/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Device name is self-reported/ }));
     fireEvent.click(screen.getByRole("button", { name: "Force detail sync" }));
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
@@ -149,7 +167,7 @@ describe("Devices sync readiness", () => {
     expect(screen.getByText("The clipboard service is unavailable.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(mocks.refetchService).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Unverified device name/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Device name is self-reported/ }));
     fireEvent.click(screen.getByRole("button", { name: "Force detail sync" }));
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
@@ -172,7 +190,7 @@ describe("Devices sync readiness", () => {
     render(<TooltipProvider><DevicesScreen /></TooltipProvider>);
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Unverified device name/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Device name is self-reported/ }));
     fireEvent.click(screen.getByRole("button", { name: "Recover detail sync" }));
     expect(mocks.refetchConfig).toHaveBeenCalledTimes(2);
   });
@@ -181,7 +199,7 @@ describe("Devices sync readiness", () => {
     mocks.config = { config: { sync_enabled: false } };
     render(<TooltipProvider><DevicesScreen /></TooltipProvider>);
 
-    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Unverified device name/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Kitchen Mac\. Device name is self-reported/ }));
     fireEvent.click(screen.getByRole("button", { name: "Recover detail sync" }));
     expect(useUi.getState()).toMatchObject({ view: "settings", settingsTab: "device-sync" });
   });

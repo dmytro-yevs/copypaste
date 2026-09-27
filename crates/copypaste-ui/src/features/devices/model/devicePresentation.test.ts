@@ -6,6 +6,7 @@ import type { PeerInfo } from "@/lib/ipc";
 import {
     connectionSummary,
     deviceIconKind,
+    ownDeviceStatus,
     peerIdentity,
     peerStatus,
 } from "./devicePresentation";
@@ -247,6 +248,32 @@ describe("device icon presentation", () => {
 });
 
 describe("device status descriptors", () => {
+    it("keeps a capture snapshot's headline instead of inferring a paused sync", () => {
+        const capture = {
+            icon: "alert" as const,
+            label: "Background capture needs setup.",
+            tone: "attention" as const,
+            busy: false,
+            a11y: {},
+        };
+        expect(ownDeviceStatus(false, false, false, capture)).toMatchObject({
+            label: "Background capture needs setup.",
+            tone: "attention",
+        });
+        expect(ownDeviceStatus(false, false, false)).toMatchObject({
+            label: "Checking capture…",
+            tone: "busy",
+        });
+        expect(ownDeviceStatus(false, false, false, undefined, true)).toMatchObject({
+            label: "Capture status unavailable",
+            tone: "danger",
+        });
+        expect(ownDeviceStatus(false, false, true, capture)).toMatchObject({
+            label: "Private mode",
+            tone: "neutral",
+        });
+    });
+
     it.each([
         ["online", "On this network"],
         ["offline", "Not seen on this network"],
