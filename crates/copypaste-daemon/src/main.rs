@@ -210,6 +210,12 @@ async fn run() -> anyhow::Result<()> {
     let shutdown_rx = state.shutdown_rx();
 
     let capture = tokio::spawn(capture::run(Arc::clone(&state), shutdown_rx.clone()));
+    let pairing_changes = state.p2p.node().subscribe_pairing_changes();
+    let pairing_events = tokio::spawn(p2p::forward_pairing_changes(
+        Arc::clone(&state),
+        pairing_changes,
+        shutdown_rx.clone(),
+    ));
     let peers_task = peer_listener.map(|listener| {
         tokio::spawn(p2p::listen(
             listener,
@@ -249,6 +255,7 @@ async fn run() -> anyhow::Result<()> {
         ("cloud refresh", refresh_task),
         ("cloud realtime", realtime_task),
         ("peer sync", peer_sync),
+        ("pairing events", pairing_events),
     ];
     let mut loops = loops;
     loops.extend(peers_task.map(|task| ("peer listener", task)));

@@ -83,7 +83,6 @@ fn pairing_progress(state: &AppState, id: u64, status: PairingStatus) -> Respons
                 warn!(%error, "could not record a paired device name");
             }
         }
-        state.note_peers_changed();
     }
     let known_device = if status.phase == PairingPhase::Confirmed {
         status

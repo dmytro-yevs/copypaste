@@ -30,7 +30,7 @@ pub enum EventKind {
     /// History changed — an item was added, deleted, pinned, imported or
     /// arrived from a peer or the cloud.
     Items,
-    /// The paired-device list changed.
+    /// The paired-device list or protected pairing ceremony changed.
     Peers,
 }
 

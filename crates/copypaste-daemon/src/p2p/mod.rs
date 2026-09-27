@@ -177,6 +177,27 @@ pub async fn listen(listener: TcpListener, state: Arc<AppState>, shutdown: watch
     copypaste_p2p::node::listen(node, listener, source, on_session, shutdown).await;
 }
 
+/// Pairing transitions originate in the shared node, including an inbound
+/// handshake that reaches `AwaitingConfirmation` without an IPC request.
+/// Forward them through the daemon's existing peer-change stream.
+pub async fn forward_pairing_changes(
+    state: Arc<AppState>,
+    mut changes: watch::Receiver<()>,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => return,
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                state.note_peers_changed();
+            }
+        }
+    }
+}
+
 /// Remember what the device on the other end of a session calls itself.
 ///
 /// The origin table has always held the device *id*, because the merge
@@ -203,6 +224,7 @@ pub(crate) fn remember_device(state: &AppState, outcome: &SyncOutcome) {
 mod tests {
     use super::*;
     use crate::testutil::{add, contents, test_state};
+    use copypaste_ipc::{EventKind, ResponseData};
     use copypaste_p2p::peers::Peer;
     use std::net::SocketAddr;
 
@@ -243,6 +265,64 @@ mod tests {
             })
             .expect("store the pairing on B");
         (pairing_id, addr)
+    }
+
+    #[tokio::test]
+    async fn inbound_pairing_forwards_a_peer_event_before_trust_is_committed() {
+        let (responder, _responder_dir) = test_state("responder");
+        let (initiator, _initiator_dir) = test_state("initiator");
+        let mut events = responder.subscribe();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let changes = responder.p2p.node().subscribe_pairing_changes();
+        let bridge = tokio::spawn(forward_pairing_changes(
+            Arc::clone(&responder),
+            changes,
+            shutdown_rx.clone(),
+        ));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("listener address");
+        tokio::spawn(listen(listener, Arc::clone(&responder), shutdown_rx));
+
+        let invite = match crate::p2p::handlers::pair_create_invite(&responder, 1)
+            .await
+            .data
+        {
+            Some(ResponseData::PairingInvite(invite)) => invite,
+            other => panic!("expected pairing invite, got {other:?}"),
+        };
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+                .await
+                .expect("invite event was not published")
+                .expect("event stream closed")
+                .event,
+            EventKind::Peers,
+        );
+
+        assert!(
+            crate::p2p::handlers::pair_join(&initiator, 2, &invite.code, &addr.to_string(),)
+                .await
+                .ok
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                assert_eq!(
+                    events.recv().await.expect("event stream closed").event,
+                    EventKind::Peers
+                );
+                if responder.p2p.node().pair_progress().phase
+                    == copypaste_p2p::PairingPhase::AwaitingConfirmation
+                {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("inbound AwaitingConfirmation event was not published");
+        assert!(responder.p2p.peers().list().is_empty());
+
+        let _ = shutdown_tx.send(true);
+        bridge.await.expect("pairing event bridge stopped");
     }
 
     /// The whole thing, in process: a listener, a dialler, two databases with

@@ -78,6 +78,17 @@ impl PeerNode {
         let node = Arc::new(Node::new(peers, discovery, PORT, lan_visibility));
         let (shutdown, shutdown_rx) = watch::channel(false);
 
+        let mut pairing_changes = node.subscribe_pairing_changes();
+        let events = Arc::downgrade(inner);
+        tokio::spawn(async move {
+            while pairing_changes.changed().await.is_ok() {
+                let Some(inner) = events.upgrade() else {
+                    return;
+                };
+                inner.publish_peers();
+            }
+        });
+
         match copypaste_p2p::node::bind(PORT).and_then(tokio::net::TcpListener::from_std) {
             Ok(listener) => {
                 let listening = Arc::clone(&node);
@@ -361,7 +372,11 @@ impl PeerNode {
 }
 
 /// The TCP port the peer listener binds.
+#[cfg(not(test))]
 const PORT: u16 = copypaste_p2p::DEFAULT_PORT;
+
+#[cfg(test)]
+const PORT: u16 = 0;
 
 /// This device's history, as a session sees it.
 ///

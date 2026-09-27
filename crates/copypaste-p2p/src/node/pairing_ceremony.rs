@@ -101,6 +101,13 @@ impl Node {
         status
     }
 
+    /// The transport can advance an inbound ceremony without an IPC request.
+    /// Adapters subscribe to this signal and publish their normal peer-change
+    /// event so every product reaches the protected confirmation promptly.
+    pub fn subscribe_pairing_changes(&self) -> watch::Receiver<()> {
+        self.pairing.changes()
+    }
+
     pub fn pair_confirm(&self, accept: bool) -> Result<PairingStatus, NodeError> {
         self.pairing.confirm(accept)
     }
