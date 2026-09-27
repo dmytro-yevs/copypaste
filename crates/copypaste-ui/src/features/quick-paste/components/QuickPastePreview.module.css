@@ -1,0 +1,4 @@
+.pane { display: flex; min-inline-size: 0; block-size: 100%; flex: none; }
+.surface { inline-size: 100%; min-inline-size: 0; block-size: 100%; }
+.surface > p { margin: 0; color: var(--dim); font-size: var(--fs-sm); }
+.surface :global([data-slot="clip-thumbnail"]) { block-size: 100%; }

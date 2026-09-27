@@ -134,31 +134,6 @@
   min-block-size: var(--ctl-h-sm);
 }
 
-.previewPopup {
-  inline-size: min(calc(var(--s-9) * 7.5), calc(100vw - var(--s-6)));
-  max-inline-size: min(calc(var(--s-9) * 7.5), calc(100vw - var(--s-6)));
-  max-block-size: min(calc(var(--s-9) * 5.5), calc(100vh - var(--s-6)));
-  padding: var(--s-4);
-  overflow: auto;
-  border-radius: var(--r-card);
-  background: var(--panel);
-  box-shadow: var(--sh3);
-  font-size: var(--fs-sm);
-}
-
-.previewPopup pre,
-.previewPopup p {
-  margin: 0;
-  line-height: var(--lh-normal);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  word-break: break-word;
-  user-select: text;
-}
-
-.previewPopup > pre { font-family: var(--f-ui); }
-.previewPopup p { color: var(--dim); }
-
 .shortcut {
   position: absolute;
   z-index: 2;
