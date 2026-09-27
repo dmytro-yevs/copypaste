@@ -98,6 +98,28 @@ impl AndroidNetworkDiscovery {
     }
 }
 
+pub fn reconcile(name: String, pairing_ids: Vec<String>, visible: bool) {
+    let Some(discovery) = DISCOVERY.get().cloned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        if !visible {
+            let _ = discovery
+                .0
+                .run_mobile_plugin_async::<serde_json::Value>("release", ())
+                .await;
+            return;
+        }
+        if !discovery.acquire().await {
+            tracing::warn!("Android LAN discovery did not start browsing");
+            return;
+        }
+        if !discovery.advertise(&name, &pairing_ids).await {
+            tracing::warn!("Android LAN discovery did not start advertising");
+        }
+    });
+}
+
 fn nsd_device(
     peer: ResolvedPeer,
     now_ms: i64,
