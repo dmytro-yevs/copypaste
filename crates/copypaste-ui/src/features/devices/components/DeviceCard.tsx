@@ -52,7 +52,7 @@ export function DeviceCard({
             <span className={styles.detailLayout}>
               <span className={styles.meta}>{trustLabel}</span>
               <span className={styles.separator} aria-hidden="true">·</span>
-              <DeviceStatus status={status} className={styles.status} />
+              <DeviceStatus status={status} wrap className={styles.status} />
             </span>
           </span>
         </span>
