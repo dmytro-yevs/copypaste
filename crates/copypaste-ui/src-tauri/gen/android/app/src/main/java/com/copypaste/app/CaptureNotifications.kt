@@ -26,10 +26,10 @@ import androidx.core.content.ContextCompat
 object CaptureNotifications {
     private const val CHANNEL_STATUS = "capture-status"
     private const val CHANNEL_LOST = "capture-lost"
-    private const val CHANNEL_SAVED = "capture-saved"
     const val ONGOING_ID = 1
     private const val LOST_ID = 2
-    private const val SAVED_ID = 3
+    private const val LEGACY_SAVED_ID = 3
+    private const val LEGACY_SAVED_CHANNEL = "capture-saved"
 
     /** Lands on the rung 2 screen with the start step selected. */
     const val EXTRA_REARM = "com.copypaste.app.REARM"
@@ -42,8 +42,10 @@ object CaptureNotifications {
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     fun ensureChannels(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(LEGACY_SAVED_ID)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        manager.deleteNotificationChannel(LEGACY_SAVED_CHANNEL)
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_STATUS,
@@ -64,17 +66,6 @@ object CaptureNotifications {
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
                 description = context.getString(R.string.capture_lost_channel_description)
-            }
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_SAVED,
-                context.getString(R.string.capture_saved_channel),
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = context.getString(R.string.capture_saved_channel_description)
-                setSound(null, null)
-                enableVibration(false)
             }
         )
     }
@@ -110,28 +101,6 @@ object CaptureNotifications {
             .build()
         context.getSystemService(NotificationManager::class.java)
             .notify(LOST_ID, notification)
-    }
-
-    @Suppress("DEPRECATION")
-    fun postSaved(context: Context, title: String, body: String) {
-        if (!canPost(context)) return
-        ensureChannels(context)
-        val notification = builder(context, CHANNEL_SAVED)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setSmallIcon(R.drawable.ic_copypaste_notification)
-            .setColor(context.getColor(R.color.copypaste_accent))
-            .setCategory(Notification.CATEGORY_STATUS)
-            .setAutoCancel(true)
-            .setContentIntent(open(context, rearm = false))
-            .apply {
-                setDefaults(0)
-                setSound(null)
-                setVibrate(null)
-            }
-            .build()
-        context.getSystemService(NotificationManager::class.java)
-            .notify(SAVED_ID, notification)
     }
 
     private fun builder(context: Context, channel: String): Notification.Builder =
