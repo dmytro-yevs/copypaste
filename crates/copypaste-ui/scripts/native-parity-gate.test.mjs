@@ -1021,6 +1021,32 @@ test("rejects changed bytes behind a bound feature-state artifact", () => withRo
   );
 }));
 
+test("rejects changed or missing receipt-bound macOS Library proof", () => withRoot(async (root) => {
+  const receiptPath = await fixture(root, "macos");
+  const directory = path.dirname(receiptPath);
+  await mkdir(path.join(directory, "ui-history"));
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const proof = [
+    ["screenshot", "ui-history/screenshot.png", PNG],
+    ["accessibility", "ui-history/ax.txt", Buffer.from("AXHeading\tLibrary\n")],
+    ["accessibility", "ui-history/heading.tsv", Buffer.from("AXHeading\tLibrary\n")],
+  ];
+  for (const [kind, name, contents] of proof) {
+    await writeFile(path.join(directory, name), contents);
+    receipt.artifacts.push({ kind, path: name, bytes: contents.length, sha256: createHash("sha256").update(contents).digest("hex") });
+  }
+  await writeFile(receiptPath, JSON.stringify(receipt));
+  const options = { commit: COMMIT, evidence: [receiptPath], required: new Set(["macos"]), runId: RUN_ID };
+  assert.equal((await validateEvidence(options)).length, 1);
+  for (const [, name, contents] of proof) {
+    await writeFile(path.join(directory, name), Buffer.alloc(contents.length, 0));
+    await assert.rejects(validateEvidence(options), /checksum changed/);
+    await unlink(path.join(directory, name));
+    await assert.rejects(validateEvidence(options), /missing/);
+    await writeFile(path.join(directory, name), contents);
+  }
+}));
+
 test("rejects a known assertion assigned to the wrong platform", () => withRoot(async (root) => {
   const evidence = [await fixture(root, "macos", {
     assertions: [
