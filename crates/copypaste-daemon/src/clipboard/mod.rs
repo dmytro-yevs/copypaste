@@ -310,10 +310,9 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
     }
     #[cfg(all(target_os = "windows", not(feature = "dev-fake-clipboard")))]
     {
-        // No staging directory: this backend refuses a file paste-back rather
-        // than materialising plaintext it has no sweeper for.
-        let _ = data_dir;
-        Ok(Box::new(windows::WindowsClipboard::new()?))
+        Ok(Box::new(windows::WindowsClipboard::with_data_dir(
+            data_dir,
+        )?))
     }
     #[cfg(all(
         not(feature = "dev-fake-clipboard"),
