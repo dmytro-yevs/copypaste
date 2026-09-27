@@ -131,6 +131,7 @@ data class DrainResult(
     val dropped: Long,
     val stateDirty: Boolean,
     val probe: ShizukuProbe,
+    val listening: Boolean,
 )
 
 object CaptureBridgeJson {

@@ -368,7 +368,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         val (clips, dropped, stateDirty) = ClipQueue.drain()
         invoke.resolve(CaptureBridgeJson.objectOf(
             DrainResult.serializer(),
-            DrainResult(clips, dropped, stateDirty, probePayload()),
+            DrainResult(clips, dropped, stateDirty, probePayload(), ClipCascadeCapture.isListening()),
         ))
     }
 
