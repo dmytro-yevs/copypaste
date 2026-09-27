@@ -98,6 +98,25 @@ impl Backend for EmbeddedBackend {
         items::add_captured(self, content, source, app_bundle_id, app_name).await
     }
 
+    async fn add_captured_with_source_icon(
+        &self,
+        content: &str,
+        source: crate::capture::model::CaptureSource,
+        app_bundle_id: Option<&str>,
+        app_name: Option<&str>,
+        source_icon: Option<&crate::capture::model::CaptureSourceIcon>,
+    ) -> Result<Option<CaptureWrite>> {
+        items::add_captured_with_source_icon(
+            self,
+            content,
+            source,
+            app_bundle_id,
+            app_name,
+            source_icon,
+        )
+        .await
+    }
+
     async fn add_captured_binary(
         &self,
         bytes: &[u8],
@@ -119,12 +138,39 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
+    async fn add_captured_binary_with_source_icon(
+        &self,
+        bytes: &[u8],
+        content_type: &str,
+        filename: Option<&str>,
+        source: crate::capture::model::CaptureSource,
+        app_bundle_id: Option<&str>,
+        app_name: Option<&str>,
+        source_icon: Option<&crate::capture::model::CaptureSourceIcon>,
+    ) -> Result<Option<CaptureWrite>> {
+        items::add_captured_binary_with_source_icon(
+            self,
+            bytes,
+            content_type,
+            filename,
+            source,
+            app_bundle_id,
+            app_name,
+            source_icon,
+        )
+        .await
+    }
+
     async fn get(&self, id: &str) -> Result<Item> {
         items::get(self, id).await
     }
 
     async fn image_preview(&self, id: &str, max_edge: Option<u32>) -> Result<ImagePreview> {
         items::image_preview(self, id, max_edge).await
+    }
+
+    async fn source_app_icon(&self, id: &str) -> Result<Option<ImagePreview>> {
+        items::source_app_icon(self, id).await
     }
 
     async fn copy(&self, id: &str) -> Result<Item> {

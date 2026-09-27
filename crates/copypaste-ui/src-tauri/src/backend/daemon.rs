@@ -221,6 +221,13 @@ impl Backend for DaemonBackend {
         )
     }
 
+    async fn source_app_icon(&self, id: &str) -> Result<Option<ImagePreview>> {
+        response::expect_source_app_icon(
+            self.call(Method::SourceAppIcon { id: id.to_string() })
+                .await?,
+        )
+    }
+
     async fn copy(&self, id: &str) -> Result<Item> {
         expect_item(self.call(Method::Copy { id: id.to_string() }).await?)
     }

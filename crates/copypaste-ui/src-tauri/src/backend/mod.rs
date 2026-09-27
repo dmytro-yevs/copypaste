@@ -53,7 +53,7 @@ use copypaste_ipc::{
 };
 use tokio::sync::mpsc::Receiver;
 
-use crate::capture::model::CaptureSource;
+use crate::capture::model::{CaptureSource, CaptureSourceIcon};
 
 pub mod error;
 mod pairing;
@@ -159,6 +159,18 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
             .map(|item| Some(CaptureWrite { item, saved: true }))
     }
 
+    async fn add_captured_with_source_icon(
+        &self,
+        content: &str,
+        source: CaptureSource,
+        app_bundle_id: Option<&str>,
+        app_name: Option<&str>,
+        _source_icon: Option<&CaptureSourceIcon>,
+    ) -> Result<Option<CaptureWrite>> {
+        self.add_captured(content, source, app_bundle_id, app_name)
+            .await
+    }
+
     /// Store one binary capture. Only Android's embedded backend has a native
     /// byte source; other backends refuse instead of reinterpreting it as text.
     async fn add_captured_binary(
@@ -173,6 +185,27 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
         Err(BackendError::Unsupported("Binary capture is unavailable."))
     }
 
+    async fn add_captured_binary_with_source_icon(
+        &self,
+        bytes: &[u8],
+        content_type: &str,
+        filename: Option<&str>,
+        source: CaptureSource,
+        app_bundle_id: Option<&str>,
+        app_name: Option<&str>,
+        _source_icon: Option<&CaptureSourceIcon>,
+    ) -> Result<Option<CaptureWrite>> {
+        self.add_captured_binary(
+            bytes,
+            content_type,
+            filename,
+            source,
+            app_bundle_id,
+            app_name,
+        )
+        .await
+    }
+
     /// Fetch one item by id, including a sensitive one's plaintext.
     ///
     /// The only route back to a secret, and it exists for the explicit reveal
@@ -181,6 +214,11 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
 
     /// Decode one non-sensitive history image into a bounded preview on demand.
     async fn image_preview(&self, id: &str, max_edge: Option<u32>) -> Result<ImagePreview>;
+
+    /// Return persisted source-icon metadata by item id, without returning its body.
+    async fn source_app_icon(&self, _id: &str) -> Result<Option<ImagePreview>> {
+        Ok(None)
+    }
 
     /// Put an item's content on the system clipboard.
     ///

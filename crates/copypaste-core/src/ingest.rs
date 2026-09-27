@@ -558,8 +558,8 @@ fn encode_payload_metadata(
         };
         return encode_payload_metadata(Some(&file), content_type, false);
     }
-    if metadata.source_app_icon.is_none() && metadata.file.is_some() {
-        return serde_json::to_string(metadata.file.as_ref().expect("checked above"))
+    if let (None, Some(file)) = (&metadata.source_app_icon, &metadata.file) {
+        return serde_json::to_string(file)
             .ok()
             .filter(|json| json.len() <= copypaste_ipc::MAX_SYNC_METADATA_BYTES)
             .filter(|json| crate::PayloadMetadata::from_json(json, content_type).is_some())
