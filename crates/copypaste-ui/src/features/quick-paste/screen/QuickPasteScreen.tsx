@@ -1,5 +1,6 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { toast } from "sonner";
 
 import { Screen, ScrollViewport } from "@/components/layout";
@@ -8,22 +9,17 @@ import { Surface } from "@/components/ui";
 import { QuickPasteLoadingState } from "@/features/quick-paste/components/QuickPasteLoadingState";
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
 import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";
+import { historyOf, useHistory } from "@/hooks/useHistory";
 import { clipboardWriteAvailabilityOptions, requireClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { useItemBody } from "@/hooks/useItemBody";
 import {
-  QUICK_PASTE_QUERY_KEY,
   useQuickPasteLifecycle,
 } from "@/features/quick-paste/hooks/useQuickPasteLifecycle";
 import { useQuickPasteSelection } from "@/features/quick-paste/hooks/useQuickPasteSelection";
-import {
-  QUICK_PASTE_POLL_ACTIVE_MS,
-  QUICK_PASTE_POLL_BACKOFF_MS,
-} from "@/features/quick-paste/model/quickPastePolling";
 import { quickPastePresentation } from "@/features/quick-paste/model/quickPastePresentation";
 import {
   copyItem,
   copyItemAsPlainText,
-  listItems,
   openSettingsFromQuickPaste,
   restartService,
   setPinned,
@@ -36,7 +32,9 @@ import { acceleratorLabel } from "@/lib/accelerator";
 import { rankFuzzy } from "@/lib/fuzzy";
 import { markedOrigin, markedOrigins } from "@/lib/itemOrigin";
 import styles from "./QuickPasteScreen.module.css";
-const LIMIT = 100;
+
+const QUICK_PASTE_ROW_ESTIMATE_PX = 40;
+const QUICK_PASTE_OVERSCAN_ROWS = 5;
 
 export function QuickPasteScreen() {
   const queryClient = useQueryClient();
@@ -58,25 +56,17 @@ export function QuickPasteScreen() {
     isCacheGenerationCurrent,
   } = useQuickPasteLifecycle({ searchRef, clearLocalState });
 
-  const history = useQuery({
-    queryKey: QUICK_PASTE_QUERY_KEY,
-    queryFn: () => listItems(LIMIT, null),
-    enabled: holding,
-    refetchInterval: (request) =>
-      request.state.status === "error"
-        ? QUICK_PASTE_POLL_BACKOFF_MS
-        : QUICK_PASTE_POLL_ACTIVE_MS,
-    refetchOnWindowFocus: false,
-  });
+  const history = useHistory("", false, holding);
+  const loadedHistory = historyOf(history.data);
   const { refetch } = history;
 
   const items = useMemo(
-    () => rankFuzzy(history.data?.items ?? [], query, (item) => [quickPastePresentation(item).searchLabel]),
-    [history.data?.items, query],
+    () => rankFuzzy(loadedHistory.items, query, (item) => [quickPastePresentation(item).searchLabel]),
+    [loadedHistory.items, query],
   );
   const originMarks = useMemo(
-    () => markedOrigins(history.data?.items ?? []),
-    [history.data?.items],
+    () => markedOrigins(loadedHistory.items),
+    [loadedHistory.items],
   );
 
   const restart = async () => {
@@ -176,16 +166,48 @@ export function QuickPasteScreen() {
     [queryClient],
   );
 
+  const loadMore = useCallback(() => {
+    if (!history.hasNextPage || history.isFetchingNextPage) return;
+    void history.fetchNextPage();
+  }, [history.fetchNextPage, history.hasNextPage, history.isFetchingNextPage]);
+  const virtualizer = useVirtualizer({
+    count: items.length + (history.hasNextPage ? 1 : 0),
+    getScrollElement: () => listRef.current,
+    estimateSize: () => QUICK_PASTE_ROW_ESTIMATE_PX,
+    getItemKey: (index) => items[index]?.id ?? "loading-more",
+    overscan: QUICK_PASTE_OVERSCAN_ROWS,
+    useFlushSync: false,
+  });
+  const virtualRows = virtualizer.getVirtualItems();
+  const scrollToItemIndex = useCallback(
+    (index: number) => virtualizer.scrollToIndex(index, { align: "auto" }),
+    [virtualizer],
+  );
+  useEffect(() => {
+    if (virtualRows.some((row) => row.index >= items.length)) loadMore();
+  }, [items.length, loadMore, virtualRows]);
   const { selectedId, onKeyDown, selectFromPointer, selectFromKeyboard, noteScroll } = useQuickPasteSelection({
     active: holding,
     items,
     query,
-    listRef,
+    scrollToItemIndex,
+    hasMore: history.hasNextPage,
+    onLoadMore: loadMore,
     canCopy,
     copyPending,
     onCopy: copyAndDismiss,
     onDismiss: dismiss,
   });
+  const onScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      noteScroll();
+      const element = event.currentTarget;
+      if (element.scrollHeight - element.scrollTop - element.clientHeight < QUICK_PASTE_ROW_ESTIMATE_PX * 3) {
+        loadMore();
+      }
+    },
+    [loadMore, noteScroll],
+  );
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
@@ -220,7 +242,8 @@ export function QuickPasteScreen() {
         <ScrollViewport
           ref={listRef}
           role="list"
-          onScroll={noteScroll}
+          aria-busy={history.isFetchingNextPage || undefined}
+          onScroll={onScroll}
           className={cn(styles.list, history.isPending && styles.loadingList)}
         >
           {history.isPending ? (
@@ -274,25 +297,51 @@ export function QuickPasteScreen() {
               body={t(searching ? "quickPaste.noResults.body" : "quickPaste.empty.body")}
             />
           ) : (
-            items.map((item, index) => (
-              <QuickPasteRow
-                key={item.id}
-                item={item}
-                active={selectedId === item.id}
-                shortcut={!searching && index < 9
-                  ? acceleratorLabel(`CmdOrCtrl+${index + 1}`)
-                  : null}
-                pinPending={pinPendingId === item.id}
-                copyPending={copyPending}
-                origin={markedOrigin(item, originMarks)}
-                fullContent={selectedId === item.id ? selectedBody.text : null}
-                fullContentFailed={selectedId === item.id && selectedBody.failed}
-                onSelect={() => selectFromPointer(item.id)}
-                onSelectFromKeyboard={() => selectFromKeyboard(item.id)}
-                onCopy={(plainText) => void copyAndDismiss(item, plainText)}
-                onTogglePin={() => void changePin(item.id, !item.pinned)}
-              />
-            ))
+            <div className={styles.virtualCanvas} style={{ height: virtualizer.getTotalSize() }}>
+              {virtualRows.map((row) => {
+                const item = items[row.index];
+                if (!item) {
+                  return (
+                    <div
+                      key={row.key}
+                      ref={virtualizer.measureElement}
+                      data-index={row.index}
+                      role="status"
+                      className={styles.loadingMore}
+                      style={{ transform: `translateY(${row.start}px)` }}
+                    >
+                      {history.isFetchingNextPage ? t("quickPaste.loadingMore") : null}
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    key={row.key}
+                    ref={virtualizer.measureElement}
+                    data-index={row.index}
+                    className={styles.virtualRow}
+                    style={{ transform: `translateY(${row.start}px)` }}
+                  >
+                    <QuickPasteRow
+                      item={item}
+                      active={selectedId === item.id}
+                      shortcut={!searching && row.index < 9
+                        ? acceleratorLabel(`CmdOrCtrl+${row.index + 1}`)
+                        : null}
+                      pinPending={pinPendingId === item.id}
+                      copyPending={copyPending}
+                      origin={markedOrigin(item, originMarks)}
+                      fullContent={selectedId === item.id ? selectedBody.text : null}
+                      fullContentFailed={selectedId === item.id && selectedBody.failed}
+                      onSelect={() => selectFromPointer(item.id)}
+                      onSelectFromKeyboard={() => selectFromKeyboard(item.id)}
+                      onCopy={(plainText) => void copyAndDismiss(item, plainText)}
+                      onTogglePin={() => void changePin(item.id, !item.pinned)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           )}
         </ScrollViewport>
 
@@ -304,12 +353,12 @@ export function QuickPasteScreen() {
                 : searching
                   ? t("quickPaste.count.partial", {
                       shown: items.length,
-                      total: history.data?.items.length ?? 0,
+                      total: history.total ?? loadedHistory.items.length,
                     })
-                  : (history.data?.total ?? 0) > items.length
+                  : (history.total ?? 0) > items.length
                     ? t("quickPaste.count.partial", {
                         shown: items.length,
-                        total: history.data?.total ?? 0,
+                        total: history.total ?? loadedHistory.items.length,
                       })
                     : t("quickPaste.count.all", { count: items.length })}
             </p>
