@@ -150,6 +150,7 @@ image.save(root / "screenshot.png")
 image.save(history / "screenshot.png")
 (root / "ax.log").write_text("AXMenuBar\tCopyPaste\n", encoding="utf-8")
 (history / "ax.txt").write_text("AXHeading\tLibrary\n", encoding="utf-8")
+(history / "heading.tsv").write_text("AXHeading\tLibrary\n", encoding="utf-8")
 (root / "latency.json").write_text('{"latency_ms":1}\n', encoding="utf-8")
 identity = subprocess.check_output(
     [sys.executable, str(writer), "--capture-qualified-artifact", str(qualified)],
@@ -163,7 +164,8 @@ command = [
     "--qualified-artifact", str(qualified), "--qualified-artifact-identity", identity,
     "--artifact", "screenshot=screenshot.png", "--artifact", "accessibility=ax.log",
     "--artifact", "screenshot=ui-history/screenshot.png",
-    "--artifact", "accessibility=ui-history/ax.txt", "--artifact", "measurement=latency.json",
+    "--artifact", "accessibility=ui-history/ax.txt",
+    "--artifact", "accessibility=ui-history/heading.tsv", "--artifact", "measurement=latency.json",
 ]
 result = subprocess.run(command, capture_output=True, text=True)
 if result.returncode:
@@ -175,6 +177,7 @@ records = {
 expected = {
     ("screenshot", "ui-history/screenshot.png"),
     ("accessibility", "ui-history/ax.txt"),
+    ("accessibility", "ui-history/heading.tsv"),
 }
 if not expected <= records.keys():
     raise SystemExit("Library artifacts were not registered in the receipt")
@@ -694,4 +697,5 @@ python3 scripts/release/write-native-evidence.py \
   --artifact accessibility=ax.log \
   --artifact screenshot=ui-history/screenshot.png \
   --artifact accessibility=ui-history/ax.txt \
+  --artifact accessibility=ui-history/heading.tsv \
   --artifact measurement=latency.json
