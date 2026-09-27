@@ -63,6 +63,15 @@ def critical_pr_errors(ci):
 
     windows = jobs.get("windows-native") or {}
     windows_commands = commands(windows)
+    clipboard_commands = re.findall(r"\bcargo\s+\+\S+\s+test[^\n]*", windows_commands)
+    if not any(
+        re.search(r"\s(?:-p|--package)\s+copypaste-daemon\b", command)
+        and all(marker in command.split() for marker in (
+            "--locked", "clipboard::windows::", "--include-ignored", "--test-threads=1",
+        ))
+        for command in clipboard_commands
+    ):
+        errors.append("PR CI must run all Windows clipboard tests serially, including ignored native tests")
     for marker in (
         "pairing_presentation::windows::refusal_tests",
         "crypto::keystore::",
