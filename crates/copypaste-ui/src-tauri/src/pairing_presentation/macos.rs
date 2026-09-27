@@ -153,11 +153,8 @@ impl NativePairingUi for MacOsPairingUi {
             close_active_invite(None);
             let dismissed = Arc::new(AtomicBool::new(false));
             let expiry_token = Arc::clone(&dismissed);
-            let expiry_abort = abort.clone();
             let Some(watchdog) = ModalDeadline::arm(Duration::from_secs(expires), move || {
-                if close_active_invite(Some(&expiry_token)) {
-                    (expiry_abort)();
-                }
+                close_active_invite(Some(&expiry_token));
             }) else {
                 return NativePresentationOutcome::Refresh;
             };
@@ -687,15 +684,26 @@ mod tests {
         let queued_expiry = ExpiryGate::new();
         let old_invite = Arc::new(AtomicBool::new(false));
         let replacement_invite = Arc::new(AtomicBool::new(false));
-        let aborts = AtomicBool::new(false);
 
         queued_expiry.cancel();
-        if queued_expiry.claim_on_main() && Arc::ptr_eq(&old_invite, &replacement_invite) {
-            aborts.store(true, Ordering::Release);
-        }
-
-        assert!(!aborts.load(Ordering::Acquire));
+        assert!(!queued_expiry.claim_on_main());
         assert!(!Arc::ptr_eq(&old_invite, &replacement_invite));
+    }
+
+    #[test]
+    fn invite_expiry_hides_the_matching_sheet_without_cancelling_the_ceremony() {
+        let source = include_str!("macos.rs");
+        let invite = source
+            .split_once("fn present_invite")
+            .and_then(|(_, source)| source.split_once("fn scan_invite").map(|(body, _)| body))
+            .expect("invite implementation");
+        let expiry = invite
+            .split_once("let expiry_token")
+            .and_then(|(_, source)| source.split_once("let cancel_token").map(|(body, _)| body))
+            .expect("expiry handler");
+
+        assert!(expiry.contains("close_active_invite(Some(&expiry_token))"));
+        assert!(!expiry.contains("abort"));
     }
 
     #[test]
