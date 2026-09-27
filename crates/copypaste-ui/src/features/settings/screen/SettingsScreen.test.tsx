@@ -35,6 +35,10 @@ vi.mock("@/hooks/useViewportMetrics", () => ({
   }),
 }));
 
+vi.mock("@/hooks/useSizeClass", () => ({
+  useSizeClass: () => viewport.sizeClass,
+}));
+
 vi.mock("@/features/settings/patterns/settingsTabs", () => ({
   renderPreferenceSection: (section: string, controller: {
     diagnosticsView?: string;

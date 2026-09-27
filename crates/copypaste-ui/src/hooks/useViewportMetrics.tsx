@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import { ResizeObserver as MaintainedResizeObserver } from "@juggle/resize-observer";
+import { useStore } from "zustand";
+import { createStore, type StoreApi } from "zustand/vanilla";
 
 import { EXPANDED_MIN_PX } from "@/lib/layoutBreakpoints";
 
@@ -26,14 +28,19 @@ function sameSize(left: ElementSize, right: ElementSize): boolean {
   return left.width === right.width && left.height === right.height;
 }
 
-interface ViewportMetrics extends ElementSize {
-  pointer: PointerKind;
-  sizeClass: SizeClass;
-}
+interface ViewportMetrics extends ElementSize {}
 
 type SizeSubscriber = (size: ElementSize) => void;
 
-interface ViewportContextValue extends ViewportMetrics {
+interface ViewportStoreState {
+  metrics: ElementSize;
+  pointer: PointerKind;
+  sizeClass: SizeClass;
+  setMetrics: (size: ElementSize) => void;
+  setPointer: (pointer: PointerKind) => void;
+}
+
+interface ObservationContextValue {
   observe: (element: Element, subscriber: SizeSubscriber) => () => void;
 }
 
@@ -59,17 +66,40 @@ function pointerKind(
 }
 
 const initialSize = windowSize();
-const FALLBACK: ViewportContextValue = {
-  ...initialSize,
-  pointer: "fine",
-  sizeClass: initialSize.width >= EXPANDED_MIN_PX ? "expanded" : "compact",
+function sizeClassFor(width: number): SizeClass {
+  return width >= EXPANDED_MIN_PX ? "expanded" : "compact";
+}
+
+function createViewportStore(
+  metrics: ElementSize,
+  pointer: PointerKind = "fine",
+): StoreApi<ViewportStoreState> {
+  return createStore<ViewportStoreState>()((set) => ({
+    metrics,
+    pointer,
+    sizeClass: sizeClassFor(metrics.width),
+    setMetrics: (next) => set((current) => {
+      if (sameSize(current.metrics, next)) return current;
+      return {
+        ...current,
+        metrics: next,
+        sizeClass: sizeClassFor(next.width),
+      };
+    }),
+    setPointer: (next) => set((current) =>
+      current.pointer === next ? current : { ...current, pointer: next }),
+  }));
+}
+
+const FALLBACK_STORE = createViewportStore(initialSize);
+const FALLBACK_OBSERVATION: ObservationContextValue = {
   observe: () => () => {},
 };
 
-const ViewportContext = createContext<ViewportContextValue>(FALLBACK);
+const ViewportStoreContext = createContext<StoreApi<ViewportStoreState>>(FALLBACK_STORE);
+const ObservationContext = createContext<ObservationContextValue>(FALLBACK_OBSERVATION);
 
 export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
-  const [viewport, setViewport] = useState(windowSize);
   const [pointerMedia] = useState(() =>
     typeof window !== "undefined" && window.matchMedia
       ? window.matchMedia("(pointer: coarse)")
@@ -80,9 +110,12 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
       ? window.matchMedia("(hover: none)")
       : null,
   );
-  const [pointer, setPointer] = useState<PointerKind>(() =>
+  const storeRef = useRef<StoreApi<ViewportStoreState> | null>(null);
+  storeRef.current ??= createViewportStore(
+    windowSize(),
     pointerKind(pointerMedia, hoverMedia),
   );
+  const store = storeRef.current;
   const [registry] = useState(() => new Map<Element, Set<SizeSubscriber>>());
   const [observerRef] = useState<{
     current: MaintainedResizeObserver | null;
@@ -100,13 +133,13 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
       if (previous && sameSize(previous, size)) continue;
       publishedMeasurements.current.set(element, size);
       if (element === document.documentElement) {
-        setViewport((current) => (sameSize(current, size) ? current : size));
+        store.getState().setMetrics(size);
       }
       const subscribers = registry.get(element);
       if (!subscribers) continue;
       for (const subscriber of subscribers) subscriber(size);
     }
-  }, [registry]);
+  }, [registry, store]);
 
   const queueMeasurement = useCallback((element: Element, size: ElementSize) => {
     const pending = pendingMeasurements.current.get(element);
@@ -159,10 +192,7 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
     observerRef.current = observer;
     observer.observe(root);
     for (const element of registry.keys()) observer.observe(element);
-    setViewport((current) => {
-      const size = windowSize();
-      return sameSize(current, size) ? current : size;
-    });
+    store.getState().setMetrics(windowSize());
     return () => {
       observerRef.current = null;
       observer.disconnect();
@@ -173,11 +203,11 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
       pendingMeasurements.current.clear();
       publishedMeasurements.current.clear();
     };
-  }, [observerRef, queueMeasurement, registry]);
+  }, [observerRef, queueMeasurement, registry, store]);
 
   useEffect(() => {
     if (!pointerMedia && !hoverMedia) return;
-    const update = () => setPointer(pointerKind(pointerMedia, hoverMedia));
+    const update = () => store.getState().setPointer(pointerKind(pointerMedia, hoverMedia));
     update();
     pointerMedia?.addEventListener("change", update);
     hoverMedia?.addEventListener("change", update);
@@ -185,38 +215,49 @@ export function ViewportMetricsProvider({ children }: { children: ReactNode }) {
       pointerMedia?.removeEventListener("change", update);
       hoverMedia?.removeEventListener("change", update);
     };
-  }, [hoverMedia, pointerMedia]);
+  }, [hoverMedia, pointerMedia, store]);
 
   useLayoutEffect(() => {
-    document.documentElement.dataset.pointer = pointer;
-  }, [pointer]);
+    const root = document.documentElement;
+    const apply = (pointer: PointerKind) => {
+      root.dataset.pointer = pointer;
+    };
+    apply(store.getState().pointer);
+    return store.subscribe((next, previous) => {
+      if (next.pointer !== previous.pointer) apply(next.pointer);
+    });
+  }, [store]);
 
-  const value = useMemo<ViewportContextValue>(
-    () => ({
-      ...viewport,
-      pointer,
-      sizeClass: viewport.width >= EXPANDED_MIN_PX ? "expanded" : "compact",
-      observe,
-    }),
-    [observe, pointer, viewport],
-  );
+  const observation = useMemo<ObservationContextValue>(() => ({ observe }), [observe]);
 
   return (
-    <ViewportContext.Provider value={value}>
-      {children}
-    </ViewportContext.Provider>
+    <ViewportStoreContext.Provider value={store}>
+      <ObservationContext.Provider value={observation}>
+        {children}
+      </ObservationContext.Provider>
+    </ViewportStoreContext.Provider>
   );
 }
 
 export function useViewportMetrics(): ViewportMetrics {
-  const { observe: _observe, ...metrics } = useContext(ViewportContext);
-  return metrics;
+  const store = useContext(ViewportStoreContext);
+  return useStore(store, (state) => state.metrics);
+}
+
+export function useViewportSizeClass(): SizeClass {
+  const store = useContext(ViewportStoreContext);
+  return useStore(store, (state) => state.sizeClass);
+}
+
+export function usePointerKind(): PointerKind {
+  const store = useContext(ViewportStoreContext);
+  return useStore(store, (state) => state.pointer);
 }
 
 export function useObservedElementSize<T extends Element>(): ElementSize & {
   ref: RefCallback<T>;
 } {
-  const { observe } = useContext(ViewportContext);
+  const { observe } = useContext(ObservationContext);
   const [element, setElement] = useState<T | null>(null);
   const [size, setSize] = useState<ElementSize>({ width: 0, height: 0 });
   const ref = useCallback<RefCallback<T>>((node) => setElement(node), []);
