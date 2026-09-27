@@ -220,7 +220,6 @@ export function QuickPasteRow({
             imagePreview={image ? <ClipImageLoader id={item.id} size="fill" /> : undefined}
             surface="quickPaste"
           />
-          {item.pinned ? <SourceMetaBadge icon="pin" label={t("quickPaste.row.pinned")} /> : null}
           {hasPotentialFinding ? (
             <SourceMetaBadge
               icon="sensitive"

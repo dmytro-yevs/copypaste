@@ -30,6 +30,11 @@ describe("QuickPasteRow compact presentation", () => {
     expect(css).toMatch(/@media \(pointer: coarse\) \{[\s\S]*?min-block-size: var\(--tap-min\);/);
   });
 
+  it("aligns the source icon with the first content line", () => {
+    expect(css).toMatch(/\.root \{[\s\S]*?align-items: flex-start;/);
+    expect(css).toMatch(/\.sourceIcon \{[\s\S]*?margin-block-start: 2\.5px;/);
+  });
+
   it("does not move rows on hover", () => {
     const hoverRule = css.match(/\.root:hover \{(?<rule>[\s\S]*?)\}/)?.groups?.rule;
     expect(hoverRule).toBeDefined();
