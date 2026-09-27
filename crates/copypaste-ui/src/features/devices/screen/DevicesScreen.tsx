@@ -10,10 +10,13 @@ import {
 } from "@/components/ui";
 import { CloudConnectionCard } from "@/features/devices/components/CloudConnectionCard";
 import { ConnectionSummary } from "@/features/devices/components/ConnectionSummary";
+import { capturePresentationOf } from "@/features/capture/model";
 import {
     connectionSummary,
     localDeviceIdentity,
+    ownDeviceStatus,
 } from "@/features/devices/model/devicePresentation";
+import { deviceStatus, type DeviceStatusPresentation } from "@/features/devices/model/status";
 import {
     atPairingCap,
     noteSync,
@@ -40,6 +43,7 @@ import {
     useDeviceDetailTarget,
 } from "@/features/devices/patterns/useDeviceDetailTarget";
 import { usePairing } from "@/features/pairing";
+import { useCaptureState } from "@/hooks/useCapture";
 import { useCloudStatus } from "@/hooks/useCloud";
 import {
     useDiscovered,
@@ -55,7 +59,7 @@ import {
     useObservedElementSize,
     useViewportMetrics,
 } from "@/hooks/useViewportMetrics";
-import type { DiscoveredDevice, PeerInfo } from "@/lib/ipc";
+import type { CaptureSnapshot, DiscoveredDevice, PeerInfo } from "@/lib/ipc";
 import { EXPANDED_MIN_PX } from "@/lib/layoutBreakpoints";
 import { currentPlatform } from "@/lib/platform";
 import { useUi } from "@/store/ui";
@@ -65,6 +69,20 @@ type DeviceLayout = "narrow" | "drawer";
 
 function layoutFor(width: number): DeviceLayout {
     return width >= EXPANDED_MIN_PX ? "drawer" : "narrow";
+}
+
+function captureStatus(snapshot: CaptureSnapshot): DeviceStatusPresentation {
+    const presentation = capturePresentationOf(snapshot.health);
+    const visual = {
+        positive: { icon: "checkCircle", tone: "ready" },
+        info: { icon: "more", tone: "neutral" },
+        attention: { icon: "alert", tone: "attention" },
+        danger: { icon: "xCircle", tone: "danger" },
+        off: { icon: "circle", tone: "neutral" },
+    } as const;
+    const { icon, tone } = visual[presentation.tone];
+
+    return deviceStatus(icon, snapshot.headline, tone);
 }
 
 export function DevicesScreen() {
@@ -88,6 +106,7 @@ export function DevicesScreen() {
     const setSettingsTab = useUi((state) => state.setSettingsTab);
 
     const own = useStatus(selectDeviceStatus);
+    const capture = useCaptureState();
     const config = useServiceConfig();
     const cloud = useCloudStatus();
     const peers = usePeers();
@@ -99,6 +118,13 @@ export function DevicesScreen() {
     const unpair = useUnpair();
     const revoke = useRevoke();
     const pairing = usePairing();
+    const ownStatus = ownDeviceStatus(
+        own.isPending,
+        own.isError,
+        own.data?.private_mode,
+        capture.data ? captureStatus(capture.data) : undefined,
+        capture.isError,
+    );
 
     const peerList = peers.data ?? [];
     const discoveredList = discovered.data ?? [];
@@ -179,7 +205,7 @@ export function DevicesScreen() {
         discovered: discoveredList,
         peers: peerList,
         health,
-        own,
+        own: { ...own, status: ownStatus },
         syncAllPending,
         syncingPeerId,
     });
@@ -314,9 +340,7 @@ export function DevicesScreen() {
                     className={styles.content}
                 >
                     <ScreenHeader
-                        eyebrow="Your private network"
                         title="Devices"
-                        description="Every device, cloud and sync state in one place."
                         actions={
                             <DevicesHeaderActions
                                 pairButtonRef={pairButtonRef}
@@ -362,10 +386,10 @@ export function DevicesScreen() {
                                 own={{
                                     name:
                                         own.data?.device_name || "This device",
-                                    captureRunning: own.data?.capture_running,
                                     privateMode: own.data?.private_mode,
                                     loading: own.isPending,
                                     failed: own.isError,
+                                    status: ownStatus,
                                     identity:
                                         localDeviceIdentity(currentPlatform()),
                                 }}

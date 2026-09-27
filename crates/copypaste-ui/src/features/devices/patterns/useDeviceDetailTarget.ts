@@ -4,9 +4,9 @@ import {
     discoveredStatus,
     discoveredDeviceIdentity,
     localDeviceIdentity,
-    ownDeviceStatus,
     peerIdentity,
     peerStatus,
+    type DeviceStatusPresentation,
 } from "@/features/devices/model/devicePresentation";
 import {
     latestManualAttempt,
@@ -43,6 +43,7 @@ interface DeviceDetailTargetInput {
         data?: DeviceStatusData;
         isPending: boolean;
         isError: boolean;
+        status: DeviceStatusPresentation;
     };
     syncAllPending: boolean;
     syncingPeerId?: string;
@@ -64,12 +65,7 @@ export function useDeviceDetailTarget({
                 kind: "own",
                 name: own.data?.device_name || t("devices.own.name"),
                 identity: localDeviceIdentity(currentPlatform()),
-                status: ownDeviceStatus(
-                    own.isPending,
-                    own.isError,
-                    own.data?.capture_running,
-                    own.data?.private_mode,
-                ),
+                status: own.status,
                 loading: own.isPending,
                 version: own.data?.version,
                 protocolVersion: own.data?.protocol_version,
@@ -144,6 +140,7 @@ export function useDeviceDetailTarget({
         own.data,
         own.isError,
         own.isPending,
+        own.status,
         peers,
         selected,
         selectedDiscovered,
