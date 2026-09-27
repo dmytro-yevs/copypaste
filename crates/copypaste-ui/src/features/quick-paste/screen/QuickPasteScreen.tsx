@@ -1,12 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useMemo, useRef, useState, type UIEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { toast } from "sonner";
 
 import { Screen, ScrollViewport } from "@/components/layout";
 import { ActionButton, EmptyState, FieldFeedback, SearchField } from "@/components/shared";
 import { Button, Surface } from "@/components/ui";
 import { QuickPasteLoadingState } from "@/features/quick-paste/components/QuickPasteLoadingState";
+import { QuickPastePreview } from "@/features/quick-paste/components/QuickPastePreview";
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
 import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";
 import { historyOf, useHistory } from "@/hooks/useHistory";
@@ -22,8 +23,10 @@ import {
   copyItemAsPlainText,
   openSettingsFromQuickPaste,
   restartService,
+  setQuickPastePreview,
   setPinned,
   type Item,
+  type QuickPastePreviewLayout,
 } from "@/lib/ipc";
 import { classifyError, isRetryable } from "@/lib/errors";
 import { t } from "@/i18n";
@@ -44,6 +47,8 @@ export function QuickPasteScreen() {
   const [pinPendingId, setPinPendingId] = useState<string | null>(null);
   const copyInFlight = useRef(false);
   const [copyPending, setCopyPending] = useState(false);
+  const [previewLayout, setPreviewLayout] = useState<QuickPastePreviewLayout | null>(null);
+  const previewOpen = useRef(false);
   const clearLocalState = useCallback(() => {
     setQuery("");
     setPinPendingId(null);
@@ -211,11 +216,43 @@ export function QuickPasteScreen() {
     [items, selectedId],
   );
   const selectedBody = useItemBody(selectedItem);
+  const previewWanted = holding && selectedItem !== null && !selectedItem.is_sensitive;
+  const releasePreview = useCallback(() => {
+    if (!previewOpen.current) return;
+    previewOpen.current = false;
+    setPreviewLayout(null);
+    void setQuickPastePreview(false).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!previewWanted) {
+      releasePreview();
+      return;
+    }
+    if (previewOpen.current) return;
+    previewOpen.current = true;
+    void setQuickPastePreview(true)
+      .then((layout) => {
+        if (!previewOpen.current || layout.side === "hidden" || layout.width <= 0) {
+          previewOpen.current = false;
+          setPreviewLayout(null);
+          return;
+        }
+        setPreviewLayout(layout);
+      })
+      .catch(() => {
+        previewOpen.current = false;
+        setPreviewLayout(null);
+      });
+  }, [previewWanted, releasePreview]);
+
+  useEffect(() => releasePreview, [releasePreview]);
 
   const historyError = history.error ? classifyError(history.error) : null;
   const searching = query.trim().length > 0;
 
   return (
+    <main className={styles.frame} data-preview-side={previewLayout?.side ?? "hidden"}>
     <Surface asChild elevation="overlay" border="subtle" radius="lg">
       <Screen
         aria-label={t("quickPaste.title")}
@@ -389,5 +426,14 @@ export function QuickPasteScreen() {
         </footer>
       </Screen>
     </Surface>
+    {previewLayout !== null && selectedItem !== null ? (
+      <QuickPastePreview
+        item={selectedItem}
+        fullContent={selectedBody.text}
+        fullContentFailed={selectedBody.failed}
+        layout={previewLayout}
+      />
+    ) : null}
+    </main>
   );
 }
