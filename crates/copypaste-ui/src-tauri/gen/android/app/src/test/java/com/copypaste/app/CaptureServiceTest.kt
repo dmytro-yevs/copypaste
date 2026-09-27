@@ -120,6 +120,35 @@ class CaptureServiceTest {
         assertTrue(CaptureService.userWantsCapture(context))
     }
 
+    @Test
+    fun armCompletionSettlesExactlyOnceAcrossLossAndTeardown() {
+        val completions = CaptureStartCompletions()
+        val results = mutableListOf<Boolean>()
+        completions.add(results::add)
+
+        completions.complete(false)
+        completions.complete(true)
+
+        assertEquals(listOf(false), results)
+    }
+
+    @Test
+    fun rejectedServiceStartRemovesOnlyItsPendingCompletion() {
+        val completions = CaptureStartCompletions()
+        val first = mutableListOf<Boolean>()
+        val second = mutableListOf<Boolean>()
+        val firstCallback: (Boolean) -> Unit = first::add
+        val secondCallback: (Boolean) -> Unit = second::add
+        completions.add(firstCallback)
+        completions.add(secondCallback)
+
+        completions.remove(firstCallback)
+        completions.complete(false)
+
+        assertTrue(first.isEmpty())
+        assertEquals(listOf(false), second)
+    }
+
     private fun seedPersistedCopy(context: Context) {
         context.getSharedPreferences("capture-service", Context.MODE_PRIVATE)
             .edit()
