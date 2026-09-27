@@ -38,9 +38,18 @@ pub fn thumbnail_png(
         .unwrap_or(DEFAULT_THUMBNAIL_EDGE)
         .clamp(1, MAX_THUMBNAIL_EDGE);
     let budget = u64::from(decoded_memory_mb).saturating_mul(1024 * 1024);
-    let thumbnail_bytes = u64::from(edge)
-        .saturating_mul(u64::from(edge))
-        .saturating_mul(4);
+    let dimensions = ImageReader::new(Cursor::new(source))
+        .with_guessed_format()
+        .map_err(|_| ImagePreviewError::Decode)?
+        .into_dimensions()
+        .map_err(|_| ImagePreviewError::Decode)?;
+    let (source_width, source_height) = dimensions;
+    let scale = (edge as f64 / source_width.max(source_height) as f64).min(1.0);
+    let target_width = (source_width as f64 * scale).round() as u64;
+    let target_height = (source_height as f64 * scale).round() as u64;
+    // The decoder's limits enforce the source allocation using its actual
+    // colour depth. This reserves only the RGBA thumbnail we will allocate.
+    let thumbnail_bytes = target_width.saturating_mul(target_height).saturating_mul(4);
     let source_budget = budget
         .checked_sub(thumbnail_bytes)
         .ok_or(ImagePreviewError::TooLarge)?;
@@ -117,5 +126,11 @@ mod tests {
             thumbnail_png(&png(120, 60), 50, Some(1024)).unwrap().width,
             120
         );
+    }
+
+    #[test]
+    fn tiny_image_with_high_dpi_request_fits_a_small_budget() {
+        let thumbnail = thumbnail_png(&png(2, 2), 1, Some(2048)).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (2, 2));
     }
 }
