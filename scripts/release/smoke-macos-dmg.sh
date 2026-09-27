@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # smoke-macos-dmg.sh — install the DMG the way a user does, and watch it work.
 #
-#   Usage: scripts/release/smoke-macos-dmg.sh <version> [arch] [--force]
+#   Usage: COPYPASTE_SMOKE_PROFILE=critical scripts/release/smoke-macos-dmg.sh <version> [arch] [--force]
 #
 # The release pipeline had no install test at all: it produced a DMG and
 # published it, and every claim about whether the thing inside launches, reads a
@@ -26,8 +26,14 @@
 # and the summary is the deliverable.
 set -uo pipefail
 
+SMOKE_PROFILE="${COPYPASTE_SMOKE_PROFILE:-full}"
+case "$SMOKE_PROFILE" in
+    full|critical) ;;
+    *) echo "ERROR: COPYPASTE_SMOKE_PROFILE must be full or critical" >&2; exit 2 ;;
+esac
+
 self_test() {
-    local root tmp file pin mutated live script
+    local root tmp file pin mutated live script native_profile_export full_only_guard
     root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
     script="$root/scripts/release/smoke-macos-dmg.sh"
     python3 - "$root/scripts/release/write-native-evidence.py" "$script" <<'PY'
@@ -83,6 +89,19 @@ PY
     ln -s "$tmp/missing.dmg" "$file"
     if python3 "$root/scripts/release/write-native-evidence.py" --capture-qualified-artifact "$file" >/dev/null 2>&1; then
         echo "self-test failed: symlink capture was accepted" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+    if COPYPASTE_SMOKE_PROFILE=invalid "$script" --self-test >/dev/null 2>&1; then
+        echo "self-test failed: invalid smoke profile was accepted" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+    native_profile_export='COPYPASTE_SMOKE_PROFILE="$SMOKE_PROFILE"'
+    full_only_guard='if [[ "$SMOKE_PROFILE" == "full" ]]; then'
+    if ! grep -Fq "$native_profile_export" "$script" \
+        || ! grep -Fq "$full_only_guard" "$script"; then
+        echo "self-test failed: critical profile does not scope native evidence" >&2
         rm -rf "$tmp"
         return 1
     fi
@@ -160,6 +179,8 @@ note() {
     fi
 }
 group() { printf '\n== %s\n' "$1"; }
+
+printf 'Smoke profile: %s\n' "$SMOKE_PROFILE"
 
 # ADR-0001 ships ad-hoc. `codesign --verify --strict` rejects that on current
 # macOS runners even when the seal is intact, so ad-hoc is an accepted verify.
@@ -340,6 +361,7 @@ fi
 "$CLI" shutdown >/dev/null 2>&1
 wait "$DAEMON_PID" 2>/dev/null
 
+if [[ "$SMOKE_PROFILE" == "full" ]]; then
 group "The app itself (REPORTED — needs a window server)"
 # `open` rather than exec: it goes through LaunchServices, which is what a user
 # does and what Gatekeeper sees. The app is a menu-bar item with no dock icon,
@@ -403,10 +425,12 @@ else
     note "a re-signed daemon could not start" \
          "manifest 02 §3.8 predicts a Keychain ACL failure here: $(tail -10 "$LOGS/resigned.log")"
 fi
+fi
 
 # ---------------------------------------------------------------------------
 group "Native shell evidence (ENFORCED)"
 # ---------------------------------------------------------------------------
+export COPYPASTE_SMOKE_PROFILE="$SMOKE_PROFILE"
 if ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native "$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"; then
     ok "the installed app produced native accessibility, screenshot, and latency evidence"
 else
@@ -416,11 +440,15 @@ fi
 # COPYPASTE_EVIDENCE_AX / AXEnhancedUserInterface. Tray "Open Settings" is
 # visible; WebView labels (Settings, Sync, Sign in) are not. Keep running the
 # script for dumps/screenshots, but do not block the publish gate on it.
-if ./scripts/release/macos-cloud-evidence.sh artifacts/release-macos-cloud; then
-    ok "the installed app produced cloud account lifecycle evidence"
+if [[ "$SMOKE_PROFILE" == "full" ]]; then
+    if ./scripts/release/macos-cloud-evidence.sh artifacts/release-macos-cloud; then
+        ok "the installed app produced cloud account lifecycle evidence"
+    else
+        note "macOS cloud UI lifecycle evidence" \
+            "WKWebView AXWebArea stays empty on hosted runners; see testing-policy"
+    fi
 else
-    note "macOS cloud UI lifecycle evidence" \
-        "WKWebView AXWebArea stays empty on hosted runners; see testing-policy"
+    note "cloud account lifecycle evidence deferred to the full smoke profile"
 fi
 
 printf '\n%s\n' "-----------------------------------------------"
