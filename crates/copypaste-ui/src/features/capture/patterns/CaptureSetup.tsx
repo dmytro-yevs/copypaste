@@ -237,7 +237,7 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
       <div className={styles.methodChoices} role="radiogroup" aria-label={t("onboarding.capture.setup.title")}>
         <Button
           type="button"
-          variant={progress.captureSetupMethod === "shizuku" ? "secondary" : "ghost"}
+          variant="secondary"
           role="radio"
           aria-checked={progress.captureSetupMethod === "shizuku"}
           disabled={checkpointing || arm.isPending}
@@ -247,7 +247,7 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
         </Button>
         <Button
           type="button"
-          variant={progress.captureSetupMethod === "adb" ? "secondary" : "ghost"}
+          variant="secondary"
           role="radio"
           aria-checked={progress.captureSetupMethod === "adb"}
           disabled={checkpointing || arm.isPending}
