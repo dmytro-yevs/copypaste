@@ -450,7 +450,7 @@ mod tests {
         assert_eq!(main["minWidth"], 720);
         assert_eq!(main["minHeight"], 460);
         assert_eq!(main["skipTaskbar"], false);
-        assert_eq!(main["titleBarStyle"], "Overlay");
+        assert_eq!(main["titleBarStyle"], "Visible");
         assert_eq!(main["hiddenTitle"], true);
         assert_eq!(main["transparent"], true);
     }
