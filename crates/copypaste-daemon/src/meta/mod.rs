@@ -1,18 +1,8 @@
-//! This device's sync identity, and where an item came from.
-//!
-//! Everything else this module used to be is now `copypaste_core::storage`: the
-//! summaries a session advertises, the last-write-wins write, the cursor table
-//! and the device-name registry are all `Store` methods, and
-//! [`copypaste_core::StoreSource`] is the one `SyncSource` both platforms
-//! construct. What is left here is the daemon's cache of the identity — read
-//! once at start, because every hello and every merge key 4 needs it — and
-//! [`Origin`], which is attribution for a *user*, not for the merge.
-//!
-//! Note the shape that went with it: this module used to open the SQLCipher
-//! file on a second connection to read columns `StoredItem` did not carry. Two
-//! writers on one file, and two answers to "what is in this device's history".
+//! Cached local identity and display names used by history attribution and sync.
 
 mod error;
+mod name_refresh;
+pub use name_refresh::run_name_refresh;
 
 pub use error::MetaError;
 
@@ -43,19 +33,41 @@ pub struct Meta {
 }
 
 impl Meta {
-    /// Resolve this device's identity from the history database, minting it on
-    /// first run.
-    ///
-    /// `name_hint` is used only when no name has been stored yet: the device
-    /// name is cosmetic and peer-visible, so it stays put across a hostname
-    /// change rather than churning on every restart.
+    pub fn open_system(store: &Store) -> Result<Self, MetaError> {
+        let system = copypaste_core::device_name::SystemDeviceName::current();
+        Self::from_identity(store, store.system_device_identity(&system)?)
+    }
+
+    #[cfg(test)]
     pub fn open(store: &Store, name_hint: &str) -> Result<Self, MetaError> {
-        let identity = store.device_identity(name_hint)?;
+        Self::from_identity(store, store.device_identity(name_hint)?)
+    }
+
+    fn from_identity(
+        store: &Store,
+        identity: copypaste_core::storage::DeviceIdentity,
+    ) -> Result<Self, MetaError> {
         Ok(Self {
             store: store.clone(),
             device_id: identity.device_id,
             device_name: RwLock::new(identity.device_name),
         })
+    }
+
+    pub fn refresh_system_name(
+        &self,
+        system: &copypaste_core::device_name::SystemDeviceName,
+    ) -> Result<bool, StoreError> {
+        let mut current = self.device_name.write().unwrap_or_else(|p| p.into_inner());
+        let name = self.store.system_device_identity(system)?.device_name;
+        let changed = *current != name;
+        *current = name;
+        Ok(changed)
+    }
+
+    pub fn publish_device_name(&self, publish: impl FnOnce(&str)) {
+        let name = self.device_name.read().unwrap_or_else(|p| p.into_inner());
+        publish(&name);
     }
 
     #[must_use]
@@ -73,11 +85,8 @@ impl Meta {
 
     /// Replace the stored device name. Cosmetic; takes effect on the next hello.
     pub fn set_device_name(&self, name: &str) -> Result<(), StoreError> {
-        let name = self.store.set_device_name(&self.device_id, name)?;
-        *self
-            .device_name
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = name;
+        let mut current = self.device_name.write().unwrap_or_else(|p| p.into_inner());
+        *current = self.store.set_device_name(&self.device_id, name)?;
         Ok(())
     }
 
@@ -165,6 +174,24 @@ impl Meta {
 #[cfg(test)]
 mod tests {
     use crate::testutil::{add, test_state};
+
+    #[test]
+    fn automatic_refresh_and_manual_override_reach_the_published_name() {
+        use copypaste_core::device_name::SystemDeviceName;
+        let (state, _dir) = test_state("Before");
+        let next = SystemDeviceName::from_sources(Some("After"), None);
+        assert!(state.meta.refresh_system_name(&next).unwrap());
+        state
+            .meta
+            .publish_device_name(|name| assert_eq!(name, "After"));
+        assert!(!state.meta.refresh_system_name(&next).unwrap());
+        state.meta.set_device_name("Personal").unwrap();
+        assert!(!state.meta.refresh_system_name(&next).unwrap());
+        state
+            .meta
+            .publish_device_name(|name| assert_eq!(name, "Personal"));
+        assert_eq!(state.store.current_device_name().unwrap(), "Personal");
+    }
 
     #[test]
     fn an_item_captured_here_is_attributed_to_this_device_by_name() {

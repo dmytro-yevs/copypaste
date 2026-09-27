@@ -140,8 +140,7 @@ async fn run() -> anyhow::Result<()> {
     // Peer sync. The identity is minted in the database the store just opened,
     // so it must come second; the peer file and discovery do not
     // depend on either.
-    let hostname = gethostname::gethostname().to_string_lossy().into_owned();
-    let meta = Meta::open(&store, &hostname).context("resolve this device's identity")?;
+    let meta = Meta::open_system(&store).context("resolve this device's identity")?;
     if let Some(name) = args.device_name.as_deref() {
         meta.set_device_name(name).context("set the device name")?;
     }
@@ -209,6 +208,10 @@ async fn run() -> anyhow::Result<()> {
     };
     let shutdown_rx = state.shutdown_rx();
 
+    let device_names = tokio::spawn(meta::run_name_refresh(
+        Arc::clone(&state),
+        shutdown_rx.clone(),
+    ));
     let capture = tokio::spawn(capture::run(Arc::clone(&state), shutdown_rx.clone()));
     let pairing_changes = state.p2p.node().subscribe_pairing_changes();
     let pairing_events = tokio::spawn(p2p::forward_pairing_changes(
@@ -251,6 +254,7 @@ async fn run() -> anyhow::Result<()> {
     // but the wait for them is bounded, because the peer flush and the socket
     // removal below are what a killed daemon never reaches.
     let loops = vec![
+        ("device names", device_names),
         ("cloud sync", cloud_task),
         ("cloud refresh", refresh_task),
         ("cloud realtime", realtime_task),

@@ -10,6 +10,7 @@
 mod backup;
 mod clear;
 mod cloud;
+mod device_name;
 mod items;
 mod messages;
 mod open;

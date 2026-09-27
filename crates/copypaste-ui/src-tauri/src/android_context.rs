@@ -1,21 +1,11 @@
-//! Hands the app's Android `Context` to `copypaste-core`'s keystore backend.
-//!
-//! That backend reaches the Android Keystore through
-//! `android-native-keyring-store`, which finds the JavaVM and the application
-//! context through the `ndk-context` crate. **Tauri does not populate
-//! `ndk-context`** — tao keeps its own activity registry and wry deleted the
-//! dependency in 0.51 — so the app has to, and this module is the whole of
-//! that. Without it the first keystore call reports
-//! `CryptoError::KeystoreUnavailable` and the app opens no history at all.
-//!
-//! It is not routed through a Tauri plugin like `capture::android` is, because
-//! a plugin call cannot hand over a raw `JavaVM` pointer: `ndk-context` needs
-//! the JNI frame itself.
-//!
-//! **Never compiled on this host** — `jni` and `ndk-context` are Android-only
-//! dependencies. ADR-0003 records what a first device run would falsify.
+//! Process-lifetime Android context for the keystore and system device name.
+//! Tauri does not initialize ndk-context, so MainActivity supplies its
+//! application context before the backend starts.
 
 #![allow(unsafe_code)]
+
+mod device_name;
+pub use device_name::system_device_name;
 
 use std::ffi::c_void;
 use std::sync::OnceLock;

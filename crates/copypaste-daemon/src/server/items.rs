@@ -81,7 +81,9 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
 pub(super) fn set_device_name(state: &AppState, id: u64, name: &str) -> Response {
     match state.meta.set_device_name(name) {
         Ok(()) => {
-            state.p2p.node().set_device_name(&state.meta.device_name());
+            state
+                .meta
+                .publish_device_name(|name| state.p2p.node().set_device_name(name));
             Response::ok(id, ResponseData::Empty {})
         }
         Err(error) => storage_error(id, "rename device", &error),
