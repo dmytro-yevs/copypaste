@@ -273,16 +273,13 @@ pub(super) async fn add_captured_binary_with_source_icon(
                     })
                 })
                 .flatten();
-            let metadata = (!sensitive_floor)
-                .then(|| {
-                    (file.is_some() || source_icon.is_some()).then(|| {
-                        copypaste_core::PayloadMetadata {
-                            file,
-                            source_app_icon: source_icon,
-                        }
-                    })
-                })
-                .flatten();
+            let source_app_icon = (!sensitive_floor).then_some(source_icon).flatten();
+            let metadata = (file.is_some() || source_app_icon.is_some()).then(|| {
+                copypaste_core::PayloadMetadata {
+                    file,
+                    source_app_icon,
+                }
+            });
             match copypaste_core::ingest_binary_into_with_capture_source_metadata(
                 &inner.state.store,
                 &inner.state.keyring,
@@ -536,6 +533,50 @@ mod tests {
                 .and_then(copypaste_core::FileMetadata::from_json),
             copypaste_core::FileMetadata::new("report.pdf", "application/pdf"),
         );
+    }
+
+    #[tokio::test]
+    async fn sensitive_file_capture_keeps_file_metadata_and_strips_its_icon() {
+        let (backend, _clipboard, _dir) = backend();
+        let captured = backend
+            .add_captured_binary_with_source_icon(
+                b"%PDF-1.7\n",
+                "application/pdf",
+                Some("statement.pdf"),
+                CaptureSource::Background,
+                Some("com.1password.1password"),
+                Some("1Password"),
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let row = backend
+            .inner
+            .state
+            .store
+            .get(&captured.item.id)
+            .unwrap()
+            .unwrap();
+        let metadata = row
+            .payload_metadata
+            .as_deref()
+            .and_then(|metadata| {
+                copypaste_core::PayloadMetadata::from_json(metadata, &row.content_type)
+            })
+            .unwrap();
+        assert_eq!(
+            metadata.file,
+            copypaste_core::FileMetadata::new("statement.pdf", "application/pdf")
+        );
+        assert!(metadata.source_app_icon.is_none());
+        assert!(matches!(
+            copypaste_core::ClipboardPayload::open(&row, &backend.inner.state.keyring.item_key()),
+            Ok(copypaste_core::ClipboardPayload::File {
+                metadata: Some(_),
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
