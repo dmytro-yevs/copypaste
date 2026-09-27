@@ -13,12 +13,45 @@ use tracing::debug;
 
 use crate::clipboard::CapturePolicy;
 
+use super::transcode::{self, CapturedImage};
+
 /// Allowance on the pre-read text gate, in bytes. See [`text`].
 const SIZE_SLACK: u64 = 4096;
 
 /// One representation, read but not yet converted.
 pub(super) enum Representation {
-    Text(String),
+    Text {
+        content: String,
+        content_type: &'static str,
+    },
+    Image {
+        bytes: Vec<u8>,
+        content_type: &'static str,
+    },
+    File {
+        path: std::path::PathBuf,
+        metadata: copypaste_core::FileMetadata,
+    },
+}
+
+/// Clipboard atoms registered once when the backend starts. They are stable for
+/// the process lifetime and probing them does not materialise clipboard data.
+pub(super) struct RegisteredFormats {
+    png: Option<u32>,
+    tiff: Option<u32>,
+    rtf: Option<u32>,
+    html: Option<u32>,
+}
+
+impl RegisteredFormats {
+    pub(super) fn register() -> Self {
+        Self {
+            png: raw::register_format("PNG").map(|format| format.get()),
+            tiff: raw::register_format("TIFF").map(|format| format.get()),
+            rtf: raw::register_format("Rich Text Format").map(|format| format.get()),
+            html: raw::register_format("HTML Format").map(|format| format.get()),
+        }
+    }
 }
 
 pub(super) enum Reading {
@@ -29,14 +62,48 @@ pub(super) enum Reading {
         bytes: u64,
         cap: u64,
     },
+    DecodedTooLarge {
+        megabytes: u32,
+    },
     Nothing,
 }
 
-/// v2 captures plain text only. Other formats are acknowledged by the parent
-/// change cursor without being materialised.
-pub(super) fn representation(policy: CapturePolicy<'_>) -> Reading {
+/// The shared precedence is Unicode text, RTF, HTML, PNG, TIFF, then a native
+/// bitmap or file reference. Availability is checked before each read, so an
+/// earlier representation never materialises a later one.
+pub(super) fn representation(policy: CapturePolicy<'_>, registered: &RegisteredFormats) -> Reading {
     if raw::is_format_avail(formats::CF_UNICODETEXT) {
         return text(policy);
+    }
+    if let Some(format) = registered
+        .rtf
+        .filter(|format| raw::is_format_avail(*format))
+    {
+        return formatted_text(policy, format, copypaste_ipc::content_type::RICH_TEXT);
+    }
+    if let Some(format) = registered
+        .html
+        .filter(|format| raw::is_format_avail(*format))
+    {
+        return html(policy, format);
+    }
+    if let Some(format) = registered
+        .png
+        .filter(|format| raw::is_format_avail(*format))
+    {
+        return image(policy, format, ImageKind::Png);
+    }
+    if let Some(format) = registered
+        .tiff
+        .filter(|format| raw::is_format_avail(*format))
+    {
+        return image(policy, format, ImageKind::Tiff);
+    }
+    if raw::is_format_avail(formats::CF_DIB) {
+        return dib(policy);
+    }
+    if raw::is_format_avail(formats::CF_HDROP) {
+        return file();
     }
     Reading::Nothing
 }
@@ -79,5 +146,208 @@ fn text(policy: CapturePolicy<'_>) -> Reading {
     if text.is_empty() {
         return Reading::Nothing;
     }
-    Reading::Got(Representation::Text(text))
+    Reading::Got(Representation::Text {
+        content: text,
+        content_type: copypaste_ipc::content_type::TEXT,
+    })
+}
+
+fn formatted_text(policy: CapturePolicy<'_>, format: u32, content_type: &'static str) -> Reading {
+    let cap = policy.limit_bytes(content_type);
+    let Some(bytes) = preflight(format) else {
+        return Reading::Nothing;
+    };
+    if bytes > cap {
+        return Reading::TooLarge { bytes, cap };
+    }
+    let mut bytes = Vec::new();
+    if raw::get_vec(format, &mut bytes).is_err() {
+        debug!("the formatted clipboard text could not be read; the change was dropped");
+        return Reading::Nothing;
+    }
+    if bytes.len() as u64 > cap {
+        return Reading::TooLarge {
+            bytes: bytes.len() as u64,
+            cap,
+        };
+    }
+    normalized_text(bytes, content_type, cap)
+}
+
+fn html(policy: CapturePolicy<'_>, format: u32) -> Reading {
+    let cap = policy.limit_bytes(copypaste_ipc::content_type::HTML);
+    let Some(bytes) = preflight(format) else {
+        return Reading::Nothing;
+    };
+    if bytes > cap {
+        return Reading::TooLarge { bytes, cap };
+    }
+    let mut fragment = Vec::new();
+    if raw::get_html(format, &mut fragment).is_err() {
+        debug!("the clipboard HTML could not be read; the change was dropped");
+        return Reading::Nothing;
+    }
+    if fragment.len() as u64 > cap {
+        return Reading::TooLarge {
+            bytes: fragment.len() as u64,
+            cap,
+        };
+    }
+    normalized_text(fragment, copypaste_ipc::content_type::HTML, cap)
+}
+
+fn normalized_text(bytes: Vec<u8>, content_type: &'static str, cap: u64) -> Reading {
+    let content = String::from_utf8_lossy(&bytes)
+        .trim_end_matches('\0')
+        .to_owned();
+    if content.is_empty() {
+        return Reading::Nothing;
+    }
+    if content.len() as u64 > cap {
+        return Reading::TooLarge {
+            bytes: content.len() as u64,
+            cap,
+        };
+    }
+    Reading::Got(Representation::Text {
+        content,
+        content_type,
+    })
+}
+
+#[derive(Clone, Copy)]
+enum ImageKind {
+    Png,
+    Tiff,
+}
+
+fn image(policy: CapturePolicy<'_>, format: u32, kind: ImageKind) -> Reading {
+    let cap = policy.limit_bytes(copypaste_ipc::content_type::IMAGE_PNG);
+    let Some(bytes) = preflight(format) else {
+        return Reading::Nothing;
+    };
+    if bytes > cap {
+        return Reading::TooLarge { bytes, cap };
+    }
+    let mut encoded = Vec::new();
+    if raw::get_vec(format, &mut encoded).is_err() {
+        debug!("the clipboard image could not be read; the change was dropped");
+        return Reading::Nothing;
+    }
+    if encoded.len() as u64 > cap {
+        return Reading::TooLarge {
+            bytes: encoded.len() as u64,
+            cap,
+        };
+    }
+    image_read(
+        transcode::checked_image(
+            encoded,
+            match kind {
+                ImageKind::Png => image::ImageFormat::Png,
+                ImageKind::Tiff => image::ImageFormat::Tiff,
+            },
+            policy.settings.max_decoded_image_mb,
+        ),
+        cap,
+        match kind {
+            ImageKind::Png => copypaste_ipc::content_type::IMAGE_PNG,
+            ImageKind::Tiff => copypaste_ipc::content_type::IMAGE_TIFF,
+        },
+        policy.settings.max_decoded_image_mb,
+    )
+}
+
+fn dib(policy: CapturePolicy<'_>) -> Reading {
+    let cap = policy.limit_bytes(copypaste_ipc::content_type::IMAGE_PNG);
+    let Some(bytes) = preflight(formats::CF_DIB) else {
+        return Reading::Nothing;
+    };
+    if bytes > cap {
+        return Reading::TooLarge { bytes, cap };
+    }
+    let mut dib = Vec::new();
+    if raw::get_vec(formats::CF_DIB, &mut dib).is_err() {
+        debug!("the clipboard bitmap could not be read; the change was dropped");
+        return Reading::Nothing;
+    }
+    if dib.len() as u64 > cap {
+        return Reading::TooLarge {
+            bytes: dib.len() as u64,
+            cap,
+        };
+    }
+    let reading = image_read(
+        transcode::png_from_dib(&dib, policy.settings.max_decoded_image_mb, cap),
+        cap,
+        copypaste_ipc::content_type::IMAGE_PNG,
+        policy.settings.max_decoded_image_mb,
+    );
+    match reading {
+        Reading::Got(Representation::Image { ref bytes, .. }) if bytes.len() as u64 > cap => {
+            Reading::TooLarge {
+                bytes: bytes.len() as u64,
+                cap,
+            }
+        }
+        other => other,
+    }
+}
+
+fn file() -> Reading {
+    let mut paths = Vec::new();
+    if raw::get_file_list_path(&mut paths).is_err() {
+        debug!("the clipboard file list could not be read; the change was dropped");
+        return Reading::Nothing;
+    }
+    let [path] = paths.as_slice() else {
+        debug!("the clipboard file list is not a single file; the change was dropped");
+        return Reading::Nothing;
+    };
+    let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+        debug!("the clipboard file name could not be used; the change was dropped");
+        return Reading::Nothing;
+    };
+    let Some(metadata) = copypaste_core::FileMetadata::new(filename, "application/octet-stream")
+    else {
+        debug!("the clipboard file metadata is invalid; the change was dropped");
+        return Reading::Nothing;
+    };
+    if !path.is_absolute() {
+        debug!("the clipboard file reference is not local; the change was dropped");
+        return Reading::Nothing;
+    }
+    Reading::Got(Representation::File {
+        path: path.clone(),
+        metadata,
+    })
+}
+
+fn preflight(format: u32) -> Option<u64> {
+    raw::size(format).map(|size| size.get() as u64).or_else(|| {
+        debug!("the clipboard representation size could not be read; the change was dropped");
+        None
+    })
+}
+
+fn image_read(
+    image: CapturedImage,
+    cap: u64,
+    content_type: &'static str,
+    decoded_memory_mb: u32,
+) -> Reading {
+    match image {
+        CapturedImage::Image(bytes) => Reading::Got(Representation::Image {
+            bytes,
+            content_type,
+        }),
+        CapturedImage::TooLarge(bytes) => Reading::TooLarge { bytes, cap },
+        // The decoder limit is a byte budget, but an image format does not
+        // expose its exact decoded size safely before decode. The caller
+        // counts this rejection without logging an invented byte count.
+        CapturedImage::DecodedTooLarge => Reading::DecodedTooLarge {
+            megabytes: decoded_memory_mb,
+        },
+        CapturedImage::Invalid => Reading::Nothing,
+    }
 }

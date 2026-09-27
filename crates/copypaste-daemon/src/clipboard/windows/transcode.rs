@@ -3,9 +3,16 @@
 //! Every decode is bounded by `max_decoded_image_mb`; synced or imported image
 //! metadata cannot be trusted to describe the allocation it will require.
 
-use std::io::Cursor;
+use std::io::{Cursor, Seek, SeekFrom, Write};
 
-use image::{DynamicImage, ImageFormat, ImageReader, Limits};
+use image::{DynamicImage, ImageError, ImageFormat, ImageReader, Limits};
+
+pub(super) enum CapturedImage {
+    Image(Vec<u8>),
+    TooLarge(u64),
+    DecodedTooLarge,
+    Invalid,
+}
 
 /// A stored image, as the bitmap `SetClipboardData` wants.
 ///
@@ -17,12 +24,112 @@ pub(super) fn to_bitmap(encoded: &[u8], decoded_memory_mb: u32) -> Option<Vec<u8
     encode(DynamicImage::ImageRgb8(image.into_rgb8()), ImageFormat::Bmp)
 }
 
+/// Verify a registered image representation before retaining its compressed
+/// bytes. A tiny image can describe an unbounded decoded bitmap, so the
+/// capture boundary enforces the same decoded-memory limit as paste-back.
+pub(super) fn checked_image(
+    encoded: Vec<u8>,
+    format: ImageFormat,
+    decoded_memory_mb: u32,
+) -> CapturedImage {
+    match decode(Cursor::new(&encoded), format, decoded_memory_mb) {
+        Ok(_) => CapturedImage::Image(encoded),
+        Err(ImageError::Limits(_)) => CapturedImage::DecodedTooLarge,
+        Err(_) => CapturedImage::Invalid,
+    }
+}
+
+/// Convert a `CF_DIB` payload into the PNG representation CopyPaste stores.
+///
+/// A DIB is a BMP file without its 14-byte file header. The clipboard API
+/// exposes its allocation size before `get_vec` copies it, and this helper only
+/// rebuilds that standard header after the caller has enforced the compressed
+/// cap. The `image` crate then owns the actual bitmap decoder and its bounds.
+pub(super) fn png_from_dib(dib: &[u8], decoded_memory_mb: u32, encoded_cap: u64) -> CapturedImage {
+    let Some(bmp) = bmp_from_dib(dib) else {
+        return CapturedImage::Invalid;
+    };
+    match decode(Cursor::new(bmp), ImageFormat::Bmp, decoded_memory_mb) {
+        Ok(image) => encode_png_bounded(image, encoded_cap),
+        Err(ImageError::Limits(_)) => CapturedImage::DecodedTooLarge,
+        Err(_) => CapturedImage::Invalid,
+    }
+}
+
 fn guess_and_decode(bytes: &[u8], decoded_memory_mb: u32) -> Option<DynamicImage> {
     let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()?;
     reader.limits(limits(decoded_memory_mb));
     reader.decode().ok()
+}
+
+fn decode(
+    bytes: Cursor<impl AsRef<[u8]>>,
+    format: ImageFormat,
+    decoded_memory_mb: u32,
+) -> image::ImageResult<DynamicImage> {
+    let mut reader = ImageReader::with_format(bytes, format);
+    reader.limits(limits(decoded_memory_mb));
+    reader.decode()
+}
+
+fn bmp_from_dib(dib: &[u8]) -> Option<Vec<u8>> {
+    let header_size = u32::from_le_bytes(dib.get(..4)?.try_into().ok()?) as usize;
+    let (bit_count, compression, colors_used, color_size) = match header_size {
+        12 => (
+            u16::from_le_bytes(dib.get(10..12)?.try_into().ok()?),
+            0,
+            0,
+            3usize,
+        ),
+        size if size >= 40 => (
+            u16::from_le_bytes(dib.get(14..16)?.try_into().ok()?),
+            u32::from_le_bytes(dib.get(16..20)?.try_into().ok()?),
+            u32::from_le_bytes(dib.get(32..36)?.try_into().ok()?) as usize,
+            4usize,
+        ),
+        _ => return None,
+    };
+    if header_size > dib.len() {
+        return None;
+    }
+
+    let palette_entries = if colors_used != 0 {
+        colors_used
+    } else if bit_count <= 8 {
+        1usize.checked_shl(u32::from(bit_count))?
+    } else {
+        0
+    };
+    // `BI_BITFIELDS` masks follow the 40-byte BITMAPINFOHEADER. Newer DIB
+    // headers include their masks in the declared header length.
+    let masks = if header_size == 40 && matches!(compression, 3 | 6) {
+        if compression == 6 {
+            16
+        } else {
+            12
+        }
+    } else {
+        0
+    };
+    let pixel_offset = header_size
+        .checked_add(masks)?
+        .checked_add(palette_entries.checked_mul(color_size)?)?;
+    if pixel_offset > dib.len() {
+        return None;
+    }
+
+    let file_size = dib.len().checked_add(14)?;
+    let file_size = u32::try_from(file_size).ok()?;
+    let pixel_offset = u32::try_from(pixel_offset.checked_add(14)?).ok()?;
+    let mut bmp = Vec::with_capacity(dib.len().checked_add(14)?);
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&file_size.to_le_bytes());
+    bmp.extend_from_slice(&[0; 4]);
+    bmp.extend_from_slice(&pixel_offset.to_le_bytes());
+    bmp.extend_from_slice(dib);
+    Some(bmp)
 }
 
 fn limits(decoded_memory_mb: u32) -> Limits {
@@ -37,6 +144,92 @@ fn encode(image: DynamicImage, format: ImageFormat) -> Option<Vec<u8>> {
         .write_to(&mut Cursor::new(&mut encoded), format)
         .ok()?;
     Some(encoded)
+}
+
+fn encode_png_bounded(image: DynamicImage, cap: u64) -> CapturedImage {
+    let mut encoded = BoundedVec::new(cap);
+    match image.write_to(&mut encoded, ImageFormat::Png) {
+        Ok(()) => CapturedImage::Image(encoded.into_inner()),
+        Err(_) => encoded
+            .exceeded()
+            .map(CapturedImage::TooLarge)
+            .unwrap_or(CapturedImage::Invalid),
+    }
+}
+
+struct BoundedVec {
+    bytes: Vec<u8>,
+    cap: u64,
+    position: u64,
+    exceeded: Option<u64>,
+}
+
+impl BoundedVec {
+    fn new(cap: u64) -> Self {
+        Self {
+            bytes: Vec::new(),
+            cap,
+            position: 0,
+            exceeded: None,
+        }
+    }
+
+    fn into_inner(self) -> Vec<u8> {
+        self.bytes
+    }
+
+    fn exceeded(&self) -> Option<u64> {
+        self.exceeded
+    }
+}
+
+impl Write for BoundedVec {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let end = self.position.saturating_add(bytes.len() as u64);
+        if end > self.cap {
+            self.exceeded = Some(end);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "encoded image exceeds the capture limit",
+            ));
+        }
+        let end = usize::try_from(end).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::WriteZero, "encoded image is too large")
+        })?;
+        let start = self.position as usize;
+        if end > self.bytes.len() {
+            self.bytes.resize(end, 0);
+        }
+        self.bytes[start..end].copy_from_slice(bytes);
+        self.position = end as u64;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Seek for BoundedVec {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        let base = match position {
+            SeekFrom::Start(position) => 0i128.checked_add(position as i128),
+            SeekFrom::Current(offset) => (self.position as i128).checked_add(offset as i128),
+            SeekFrom::End(offset) => (self.bytes.len() as i128).checked_add(offset as i128),
+        }
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid seek"))?;
+        let position = u64::try_from(base)
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid seek"))?;
+        if position > self.cap {
+            self.exceeded = Some(position);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "encoded image exceeds the capture limit",
+            ));
+        }
+        self.position = position;
+        Ok(position)
+    }
 }
 
 #[cfg(test)]
@@ -69,5 +262,39 @@ mod tests {
     #[test]
     fn a_payload_that_is_not_an_image_is_refused() {
         assert!(to_bitmap(b"not an image", 50).is_none());
+    }
+
+    #[test]
+    fn a_native_dib_becomes_a_png() {
+        let bitmap = to_bitmap(&png(8, 8), 50).unwrap();
+        let CapturedImage::Image(png) = png_from_dib(&bitmap[14..], 50, 4 * 1024 * 1024) else {
+            panic!("a DIB made by the maintained bitmap codec must decode");
+        };
+        assert!(png.starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn a_native_dib_over_the_decoded_budget_is_refused() {
+        let bitmap = to_bitmap(&png(1024, 1024), 50).unwrap();
+        assert!(matches!(
+            png_from_dib(&bitmap[14..], 1, 4 * 1024 * 1024),
+            CapturedImage::DecodedTooLarge
+        ));
+    }
+
+    #[test]
+    fn a_registered_png_over_the_decoded_budget_is_refused() {
+        assert!(matches!(
+            checked_image(png(1024, 1024), ImageFormat::Png, 1),
+            CapturedImage::DecodedTooLarge
+        ));
+    }
+
+    #[test]
+    fn a_truncated_dib_does_not_reach_the_decoder() {
+        assert!(matches!(
+            png_from_dib(&[40, 0, 0, 0], 50, 4 * 1024 * 1024),
+            CapturedImage::Invalid
+        ));
     }
 }

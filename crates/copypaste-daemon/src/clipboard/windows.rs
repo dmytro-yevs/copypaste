@@ -79,6 +79,7 @@ pub struct WindowsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
     opt_out: OptOutFormats,
+    formats: read::RegisteredFormats,
     attribution: Attribution,
     sequence_unavailable_logged: bool,
 }
@@ -89,6 +90,7 @@ impl WindowsClipboard {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
             opt_out: OptOutFormats::register(),
+            formats: read::RegisteredFormats::register(),
             attribution: Attribution::default(),
             sequence_unavailable_logged: false,
         })
@@ -145,6 +147,16 @@ impl WindowsClipboard {
         warn!(
             bytes,
             cap, "clipboard representation exceeds the size cap; dropped"
+        );
+    }
+
+    fn reject_decoded_too_large(&mut self, megabytes: u32) {
+        self.rejected_too_large += 1;
+        // A decoder limit proves the allocation exceeds the configured budget,
+        // but it cannot safely report an exact decoded length before decoding.
+        warn!(
+            megabytes,
+            "clipboard image exceeds the decoded-memory cap; dropped"
         );
     }
 
@@ -286,7 +298,7 @@ impl ClipboardSource for WindowsClipboard {
             return None;
         }
 
-        let reading = read::representation(policy);
+        let reading = read::representation(policy, &self.formats);
         // Holding this open blocks every other application's copy and paste.
         drop(clipboard);
 
@@ -296,18 +308,47 @@ impl ClipboardSource for WindowsClipboard {
                 self.reject_too_large(bytes, cap);
                 return None;
             }
+            Reading::DecodedTooLarge { megabytes } => {
+                self.reject_decoded_too_large(megabytes);
+                return None;
+            }
             Reading::Nothing => return None,
         };
-        let Representation::Text(content) = representation;
-        Some(Capture {
-            content,
-            binary_content: None,
-            file_path: None,
-            file_metadata: None,
-            content_type: copypaste_ipc::content_type::TEXT.to_string(),
-            app_bundle_id,
-            app_name,
-        })
+        match representation {
+            Representation::Text {
+                content,
+                content_type,
+            } => Some(Capture {
+                content,
+                binary_content: None,
+                file_path: None,
+                file_metadata: None,
+                content_type: content_type.to_string(),
+                app_bundle_id,
+                app_name,
+            }),
+            Representation::Image {
+                bytes,
+                content_type,
+            } => Some(Capture {
+                content: String::new(),
+                binary_content: Some(bytes),
+                file_path: None,
+                file_metadata: None,
+                content_type: content_type.to_string(),
+                app_bundle_id,
+                app_name,
+            }),
+            Representation::File { path, metadata } => Some(Capture {
+                content: String::new(),
+                binary_content: None,
+                file_path: Some(path),
+                file_metadata: Some(metadata),
+                content_type: copypaste_ipc::content_type::FILE.to_string(),
+                app_bundle_id,
+                app_name,
+            }),
+        }
     }
 
     fn changed(&mut self) -> bool {
@@ -386,6 +427,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use clipboard_win::formats;
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
 
     use super::*;
     use crate::clipboard::MAX_CAPTURE_BYTES;
@@ -428,6 +470,53 @@ mod tests {
             raw::is_format_avail(formats::CF_UNICODETEXT),
             "the clipboard refused a test write"
         );
+    }
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        encoded_image(width, height, ImageFormat::Png)
+    }
+
+    fn tiff(width: u32, height: u32) -> Vec<u8> {
+        encoded_image(width, height, ImageFormat::Tiff)
+    }
+
+    fn encoded_image(width: u32, height: u32, format: ImageFormat) -> Vec<u8> {
+        let image = ImageBuffer::from_pixel(width, height, Rgb([0x24u8, 0x65, 0xa8]));
+        let mut bytes = Vec::new();
+        DynamicImage::ImageRgb8(image)
+            .write_to(&mut std::io::Cursor::new(&mut bytes), format)
+            .unwrap();
+        bytes
+    }
+
+    fn png_format() -> u32 {
+        raw::register_format("PNG")
+            .expect("register the PNG format")
+            .get()
+    }
+
+    fn rtf_format() -> u32 {
+        raw::register_format("Rich Text Format")
+            .expect("register the RTF format")
+            .get()
+    }
+
+    fn tiff_format() -> u32 {
+        raw::register_format("TIFF")
+            .expect("register the TIFF format")
+            .get()
+    }
+
+    fn html_format() -> u32 {
+        raw::register_format("HTML Format")
+            .expect("register the HTML format")
+            .get()
+    }
+
+    fn write_file_list(paths: &[&str]) {
+        let _clipboard = Clipboard::new_attempts(OPEN_ATTEMPTS).expect("open the clipboard");
+        raw::empty().expect("empty the clipboard");
+        raw::set_file_list(paths).expect("set a test file list");
     }
 
     /// T-21, T-4, I-1, I-2. Also the first question of all: does the sequence
@@ -478,6 +567,159 @@ mod tests {
         let capture = clipboard.poll().expect("plain text must win when offered");
         assert_eq!(capture.content, "plain fallback");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::TEXT);
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn an_image_only_change_captures_a_registered_png() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        let image = png(8, 8);
+
+        write_formats(&[(png_format(), &image)]);
+        let capture = clipboard.poll().expect("a registered PNG must be captured");
+        assert_eq!(capture.content, "");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::IMAGE_PNG);
+        assert_eq!(capture.binary_content.as_deref(), Some(image.as_slice()));
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn text_precedes_png_and_a_registered_png_precedes_a_dib() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        let image = png(8, 8);
+        let bitmap = transcode::to_bitmap(&image, copypaste_ipc::MAX_DECODED_IMAGE_MB)
+            .expect("the test PNG becomes a DIB");
+        let text = utf16("plain fallback");
+
+        write_formats(&[
+            (formats::CF_UNICODETEXT, &text),
+            (png_format(), &image),
+            (formats::CF_DIB, &bitmap[14..]),
+        ]);
+        let capture = clipboard.poll().expect("text must win");
+        assert_eq!(capture.content, "plain fallback");
+        assert_eq!(capture.binary_content, None);
+
+        write_formats(&[(png_format(), &image), (formats::CF_DIB, &bitmap[14..])]);
+        let capture = clipboard.poll().expect("PNG must win over DIB");
+        assert_eq!(capture.binary_content.as_deref(), Some(image.as_slice()));
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn a_native_dib_is_captured_as_a_bounded_png() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        let image = png(8, 8);
+        let bitmap = transcode::to_bitmap(&image, copypaste_ipc::MAX_DECODED_IMAGE_MB)
+            .expect("the test PNG becomes a DIB");
+
+        write_formats(&[(formats::CF_DIB, &bitmap[14..])]);
+        let capture = clipboard.poll().expect("a native DIB must be captured");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::IMAGE_PNG);
+        let captured = capture.binary_content.expect("the DIB becomes binary PNG");
+        assert!(captured.starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn a_registered_tiff_keeps_its_image_type() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        let image = tiff(8, 8);
+
+        write_formats(&[(tiff_format(), &image)]);
+        let capture = clipboard
+            .poll()
+            .expect("a registered TIFF must be captured");
+        assert_eq!(
+            capture.content_type,
+            copypaste_ipc::content_type::IMAGE_TIFF
+        );
+        assert_eq!(capture.binary_content.as_deref(), Some(image.as_slice()));
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn a_dib_over_the_decoded_cap_is_rejected_and_counted() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        let bitmap = transcode::to_bitmap(&png(1024, 1024), copypaste_ipc::MAX_DECODED_IMAGE_MB)
+            .expect("the test PNG becomes a DIB");
+        let settings = copypaste_ipc::ConfigData {
+            max_decoded_image_mb: copypaste_ipc::MIN_DECODED_IMAGE_MB,
+            ..Default::default()
+        };
+
+        write_formats(&[(formats::CF_DIB, &bitmap[14..])]);
+        assert!(clipboard
+            .poll_with_policy(CapturePolicy::new(&settings))
+            .is_none());
+        assert_eq!(clipboard.rejected_too_large_count(), 1);
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn rich_text_and_html_are_text_fallbacks_after_unicode_text() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        let rtf = br"{\rtf1\ansi formatted}";
+
+        write_formats(&[(rtf_format(), rtf)]);
+        let capture = clipboard.poll().expect("RTF must be captured without text");
+        assert_eq!(capture.content, "{\\rtf1\\ansi formatted}");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::RICH_TEXT);
+
+        {
+            let _clipboard = Clipboard::new_attempts(OPEN_ATTEMPTS).expect("open the clipboard");
+            raw::empty().expect("empty the clipboard");
+            raw::set_html(html_format(), "<strong>formatted</strong>").expect("set test HTML");
+        }
+        let capture = clipboard
+            .poll()
+            .expect("HTML must be captured without text");
+        assert_eq!(capture.content, "<strong>formatted</strong>");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::HTML);
+
+        let text = utf16("plain fallback");
+        write_formats(&[(formats::CF_UNICODETEXT, &text), (rtf_format(), rtf)]);
+        let capture = clipboard.poll().expect("Unicode text must win");
+        assert_eq!(capture.content, "plain fallback");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::TEXT);
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn one_file_reference_is_captured_and_multiple_references_are_dropped() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+
+        write_file_list(&[r"C:\copypaste-fixture.txt"]);
+        let capture = clipboard
+            .poll()
+            .expect("one file reference must be captured");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
+        assert_eq!(capture.content, "");
+        assert!(capture.binary_content.is_none());
+        assert_eq!(
+            capture
+                .file_metadata
+                .as_ref()
+                .map(|metadata| metadata.filename.as_str()),
+            Some("copypaste-fixture.txt")
+        );
+        assert!(capture
+            .file_path
+            .as_ref()
+            .is_some_and(|path| path.is_absolute()));
+
+        write_file_list(&[r"C:\one.txt", r"C:\two.txt"]);
+        assert!(
+            clipboard.poll().is_none(),
+            "multiple file references are unsupported"
+        );
     }
 
     /// The measurement `MAX_SELF_WRITE_DELTA` is a guess about. A delta beyond
