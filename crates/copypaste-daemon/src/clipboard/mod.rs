@@ -43,7 +43,7 @@
 //!   before any representation is read.
 //! - **§3.9** a short-lived frontmost-app cache, private-mode and exclusion
 //!   gates; known password-manager origins are persisted as sensitive.
-//! - **I-11** text is captured when offered; non-text-only changes are ignored.
+//! - **I-11** text and native PNG/TIFF images are captured when offered.
 //! - **I-18** `NSData.length` checked before the bytes are copied out.
 //! - **I-39 / §6.5** rejections are counted and readable, not just logged.
 //! - **§3.12** the invariant UTI strings are built once, not once per tick.
@@ -97,6 +97,25 @@ impl<'a> CapturePolicy<'a> {
     }
 
     pub fn allows_materialized(self, capture: &Capture) -> bool {
+        let byte_len = match (
+            capture.content_type.as_str(),
+            capture.binary_content.as_ref(),
+            capture.file_path.as_ref(),
+            capture.file_metadata.as_ref(),
+        ) {
+            (copypaste_ipc::content_type::TEXT, None, None, None)
+                if !capture.content.is_empty() =>
+            {
+                capture.content.len()
+            }
+            (content_type, Some(bytes), None, None)
+                if capture.content.is_empty() && format::supports(content_type) =>
+            {
+                bytes.len()
+            }
+            _ => return false,
+        };
+
         !self.settings.private_mode
             && (self.settings.excluded_app_bundle_ids.is_empty()
                 || capture.app_bundle_id.as_ref().is_some_and(|id| {
@@ -105,8 +124,7 @@ impl<'a> CapturePolicy<'a> {
                         .iter()
                         .all(|excluded| excluded != id)
                 }))
-            && !capture.content.is_empty()
-            && capture.content.len() as u64 <= self.limit_bytes(&capture.content_type)
+            && byte_len as u64 <= self.limit_bytes(&capture.content_type)
     }
 }
 

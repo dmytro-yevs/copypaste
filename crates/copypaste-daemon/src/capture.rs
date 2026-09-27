@@ -333,31 +333,49 @@ pub(crate) fn ingest_capture(
     created_at: i64,
 ) -> Result<Ingested, IngestError> {
     let capture = capture.borrow();
-    if crate::clipboard::format::preferred([capture.content_type.as_str()])
-        != Some(copypaste_ipc::content_type::TEXT)
-        || capture.binary_content.is_some()
-        || capture.file_path.is_some()
-        || capture.file_metadata.is_some()
-    {
-        return Err(IngestError::Empty);
-    }
     let sensitive_floor = capture
         .app_bundle_id
         .as_deref()
         .is_some_and(crate::clipboard::is_password_manager_app);
-    copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
-        &state.store,
-        &state.detector,
-        &state.keyring,
-        &capture.content,
-        &capture.content_type,
-        created_at,
-        sensitive_floor,
-        capture.app_bundle_id.as_deref(),
-        capture.app_name.as_deref(),
-        settings,
-        || state.settings.get().clone(),
-    )
+    match (
+        capture.content_type.as_str(),
+        capture.binary_content.as_deref(),
+        capture.file_path.as_ref(),
+        capture.file_metadata.as_ref(),
+    ) {
+        (copypaste_ipc::content_type::TEXT, None, None, None) => {
+            copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
+                &state.store,
+                &state.detector,
+                &state.keyring,
+                &capture.content,
+                &capture.content_type,
+                created_at,
+                sensitive_floor,
+                capture.app_bundle_id.as_deref(),
+                capture.app_name.as_deref(),
+                settings,
+                || state.settings.get().clone(),
+            )
+        }
+        (content_type, Some(bytes), None, None)
+            if capture.content.is_empty() && crate::clipboard::format::supports(content_type) =>
+        {
+            copypaste_core::ingest_binary_into_with_capture_source(
+                &state.store,
+                &state.keyring,
+                bytes,
+                content_type,
+                created_at,
+                sensitive_floor,
+                capture.app_bundle_id.as_deref(),
+                capture.app_name.as_deref(),
+                None,
+                settings,
+            )
+        }
+        _ => Err(IngestError::Empty),
+    }
 }
 
 pub fn ingest(
@@ -939,14 +957,15 @@ mod tests {
     }
 
     #[test]
-    fn non_text_capture_values_are_not_ingested() {
-        let (state, _dir) = test_state("text-capture-only");
-        let result = ingest_capture(
+    fn image_capture_values_are_stored_as_binary_without_search_text() {
+        let (state, _dir) = test_state("image-capture");
+        let bytes = vec![0x89, b'P', b'N', b'G', 7];
+        let stored = ingest_capture(
             &state,
             &state.settings.get(),
             crate::clipboard::Capture {
                 content: String::new(),
-                binary_content: Some(vec![1, 2, 3]),
+                binary_content: Some(bytes.clone()),
                 file_path: None,
                 file_metadata: None,
                 content_type: copypaste_ipc::content_type::IMAGE_PNG.to_string(),
@@ -954,9 +973,18 @@ mod tests {
                 app_name: None,
             },
             copypaste_core::now_ms(),
-        );
-        assert!(matches!(result, Err(IngestError::Empty)));
-        assert_eq!(state.store.count().unwrap(), 0);
+        )
+        .unwrap()
+        .into_item();
+        assert_eq!(stored.content_type, copypaste_ipc::content_type::IMAGE_PNG);
+        assert_eq!(state.store.search("PNG", 10).unwrap(), Vec::new());
+        let opened = copypaste_core::open_binary(
+            &stored.content_ciphertext,
+            &state.keyring.item_key(),
+            &stored.id,
+        )
+        .unwrap();
+        assert_eq!(opened.as_slice(), bytes.as_slice());
     }
 
     #[test]
