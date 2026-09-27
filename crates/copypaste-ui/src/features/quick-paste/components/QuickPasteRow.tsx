@@ -174,6 +174,7 @@ export function QuickPasteRow({
       <span className={styles.sourceIcon} aria-hidden="true">
         {source.available ? (
           <SourceAppIcon
+            itemId={item.id}
             bundleId={item.source_app_bundle_id}
             Fallback={iconComponent(source.icon)}
             fallbackText={source.label.slice(0, 2)}

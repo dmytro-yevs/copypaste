@@ -36,6 +36,7 @@ export function SelectedExclusions({
                 return (
                     <li key={id} className={styles.selectedItem}>
                         <SourceAppIcon
+                            itemId={item?.id ?? null}
                             bundleId={id}
                             Fallback={
                                 source

@@ -216,6 +216,15 @@ pub struct Clip {
     /// supplied a package id. It is not guessed from the copied content.
     #[serde(default)]
     pub source_app_name: Option<String>,
+    #[serde(skip)]
+    pub source_app_icon: Option<CaptureSourceIcon>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureSourceIcon {
+    pub png_base64: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Whether the user has been told what suppressing the toast turns off.

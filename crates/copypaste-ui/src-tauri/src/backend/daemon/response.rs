@@ -46,6 +46,14 @@ pub(super) fn expect_image_preview(data: Option<ResponseData>) -> Result<ImagePr
     }
 }
 
+pub(super) fn expect_source_app_icon(data: Option<ResponseData>) -> Result<Option<ImagePreview>> {
+    match data {
+        Some(ResponseData::SourceAppIcon(icon)) => Ok(Some(icon)),
+        Some(ResponseData::Empty { .. }) => Ok(None),
+        _ => Err(BackendError::wrong_shape("a source application icon")),
+    }
+}
+
 pub(super) fn expect_status(data: Option<ResponseData>) -> Result<StatusData> {
     match data {
         Some(ResponseData::Status(status)) => Ok(status),

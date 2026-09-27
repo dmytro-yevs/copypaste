@@ -19,6 +19,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use crate::backend::{Backend, BackendError, SelectedBackend};
 use crate::model::{UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon};
 use crate::source_app_icon::SourceAppIconCache;
+use copypaste_source_app::AppIcon;
 
 type Result<T> = std::result::Result<T, BackendError>;
 
@@ -284,11 +285,20 @@ pub async fn get_image_preview(
 /// to the WebView. A missing or unqueryable app is a normal fallback state.
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
-pub fn get_source_app_icon(
+pub async fn get_source_app_icon(
+    item_id: Option<String>,
     bundle_id: String,
     cache: State<'_, SourceAppIconCache>,
-) -> Option<UiSourceAppIcon> {
-    cache.resolve_desktop(&bundle_id)
+    backend: State<'_, SelectedBackend>,
+) -> Result<Option<UiSourceAppIcon>> {
+    if let Some(item_id) = item_id {
+        if let Ok(Some(icon)) = backend.source_app_icon(&item_id).await {
+            if let Some(icon) = AppIcon::from_base64(icon.png_base64, icon.width, icon.height) {
+                return Ok(Some(UiSourceAppIcon::from_app_icon(icon)));
+            }
+        }
+    }
+    Ok(cache.resolve_desktop(&bundle_id))
 }
 
 /// Installed application catalogue used by Settings → Service.
@@ -323,16 +333,25 @@ pub async fn list_installed_source_apps() -> Result<Vec<UiInstalledSourceApp>> {
 /// retain the semantic icon already rendered by the view.
 #[cfg(target_os = "android")]
 #[tauri::command]
-pub fn get_source_app_icon(
+pub async fn get_source_app_icon(
+    item_id: Option<String>,
     bundle_id: String,
     cache: State<'_, SourceAppIconCache>,
     capture: State<'_, crate::capture::SelectedCapture>,
-) -> Option<UiSourceAppIcon> {
-    cache.resolve_with(&bundle_id, |package_id| {
+    backend: State<'_, SelectedBackend>,
+) -> Result<Option<UiSourceAppIcon>> {
+    if let Some(item_id) = item_id {
+        if let Ok(Some(icon)) = backend.source_app_icon(&item_id).await {
+            if let Some(icon) = AppIcon::from_base64(icon.png_base64, icon.width, icon.height) {
+                return Ok(Some(UiSourceAppIcon::from_app_icon(icon)));
+            }
+        }
+    }
+    Ok(cache.resolve_with(&bundle_id, |package_id| {
         capture
             .source_app_icon(package_id)
             .and_then(|icon| UiSourceAppIcon::from_base64(icon.png_base64, icon.width, icon.height))
-    })
+    }))
 }
 
 /// `true` once the backend has confirmed the row is gone. An unknown id is a

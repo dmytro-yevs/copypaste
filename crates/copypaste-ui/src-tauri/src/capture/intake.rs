@@ -209,11 +209,12 @@ pub async fn store<B: Backend>(backend: &B, clip: &Clip) -> Result<Option<Stored
                 return Ok(None);
             }
             backend
-                .add_captured(
+                .add_captured_with_source_icon(
                     text,
                     clip.source,
                     clip.source_app_bundle_id.as_deref(),
                     clip.source_app_name.as_deref(),
+                    clip.source_app_icon.as_ref(),
                 )
                 .await?
         }
@@ -226,13 +227,14 @@ pub async fn store<B: Backend>(backend: &B, clip: &Clip) -> Result<Option<Stored
                 .decode(encoded)
                 .map_err(|_| BackendError::Invalid("That captured item is unavailable."))?;
             backend
-                .add_captured_binary(
+                .add_captured_binary_with_source_icon(
                     &bytes,
                     content_type,
                     filename.as_deref(),
                     clip.source,
                     clip.source_app_bundle_id.as_deref(),
                     clip.source_app_name.as_deref(),
+                    clip.source_app_icon.as_ref(),
                 )
                 .await?
         }
@@ -645,6 +647,7 @@ mod tests {
             at_ms: 1_700_000_000_000,
             source_app_bundle_id: None,
             source_app_name: None,
+            source_app_icon: None,
         }
     }
 
@@ -686,6 +689,7 @@ mod tests {
             at_ms: 1_700_000_000_000,
             source_app_bundle_id: None,
             source_app_name: None,
+            source_app_icon: None,
         };
 
         assert!(matches!(

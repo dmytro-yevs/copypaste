@@ -221,6 +221,7 @@ function ClipCardImpl({
                     createdAt={item.created_at}
                     sourceIcon={
                         <SourceAppIcon
+                            itemId={item.id}
                             bundleId={item.source_app_bundle_id}
                             Fallback={iconComponent(source.icon)}
                             fallbackText={source.label.slice(0, 2)}

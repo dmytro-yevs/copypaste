@@ -163,8 +163,8 @@ export function getImagePreview(id: string, maxEdge?: number): Promise<ImagePrev
 }
 
 /** A bounded native app icon resolved from a captured bundle/package id. */
-export function getSourceAppIcon(bundleId: string): Promise<SourceAppIcon | null> {
-  return call(UI_COMMANDS.get_source_app_icon, { bundleId });
+export function getSourceAppIcon(itemId: string | null, bundleId: string): Promise<SourceAppIcon | null> {
+  return call(UI_COMMANDS.get_source_app_icon, { itemId, bundleId });
 }
 
 /** Platform catalogue of user-launchable applications for exclusions. */
