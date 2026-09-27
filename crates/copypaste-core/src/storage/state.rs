@@ -123,7 +123,8 @@ mod tests {
         assert_eq!(s.state("a").unwrap(), None);
         assert_eq!(s.state("b").unwrap(), None);
         // The device identity lives in the same table and must survive.
-        assert_eq!(s.device_identity("ignored").unwrap(), me);
+        assert_eq!(s.current_device_name().unwrap(), me.device_name);
+        assert_eq!(s.device_identity("laptop").unwrap().device_id, me.device_id);
     }
 
     #[test]

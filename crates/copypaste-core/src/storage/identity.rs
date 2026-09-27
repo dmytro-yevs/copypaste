@@ -15,6 +15,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::model::StoreError;
 use super::store::Store;
+use crate::device_name::{sanitise_name, SystemDeviceName};
 
 /// Key of the persisted device id in `sync_device_state`.
 const KEY_DEVICE_ID: &str = "device_id";
@@ -29,42 +30,51 @@ pub struct DeviceIdentity {
 }
 
 impl Store {
-    /// Resolve this device's identity, minting it on first run.
-    ///
-    /// `name_hint` is used only when no name has been stored yet: the device
-    /// name is cosmetic and peer-visible, so it stays put across a hostname
-    /// change rather than churning on every restart.
-    ///
-    /// This device is entered in the name registry like any other, so resolving
-    /// an origin needs no special case for "the local one".
+    /// Resolve an automatic name without changing the stable device identity.
     pub fn device_identity(&self, name_hint: &str) -> Result<DeviceIdentity, StoreError> {
-        let conn = self.conn()?;
-        let device_id = load_or_set(&conn, KEY_DEVICE_ID, || uuid::Uuid::new_v4().to_string())?;
-        let device_name = load_or_set(&conn, KEY_DEVICE_NAME, || {
-            sanitise_name(name_hint).unwrap_or_else(|| "CopyPaste device".to_string())
-        })?;
-        drop(conn);
+        self.system_device_identity(&SystemDeviceName::from_sources(Some(name_hint), None))
+    }
 
-        self.record_device_name(&device_id, &device_name)?;
+    pub fn system_device_identity(
+        &self,
+        system: &SystemDeviceName,
+    ) -> Result<DeviceIdentity, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let device_id = load_or_set(&tx, KEY_DEVICE_ID, || uuid::Uuid::new_v4().to_string())?;
+        let previous = read_state(&tx, KEY_DEVICE_NAME)?;
+        let source = read_state(&tx, "device_name_source")?;
+        let automatic = source.as_deref() != Some("manual");
+        let device_name = if automatic {
+            system.as_str().to_string()
+        } else {
+            previous
+                .clone()
+                .unwrap_or_else(|| system.as_str().to_string())
+        };
+        if source.is_none() {
+            write_state(&tx, "device_name_source", "automatic")?;
+        }
+        if previous.as_deref() != Some(&device_name) {
+            write_state(&tx, KEY_DEVICE_NAME, &device_name)?;
+        }
+        write_registry(&tx, &device_id, &device_name)?;
+        tx.commit()?;
         Ok(DeviceIdentity {
             device_id,
             device_name,
         })
     }
 
-    /// Replace the stored device name, returning the sanitised form actually
-    /// stored. Cosmetic; takes effect on the next hello.
+    /// A user rename permanently takes precedence over subsequent OS changes.
     pub fn set_device_name(&self, device_id: &str, name: &str) -> Result<String, StoreError> {
         let name = sanitise_name(name).ok_or(StoreError::InvalidDeviceName)?;
-        {
-            let conn = self.conn()?;
-            conn.execute(
-                "INSERT INTO sync_device_state (key, value) VALUES (?1, ?2) \
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![KEY_DEVICE_NAME, &name],
-            )?;
-        }
-        self.record_device_name(device_id, &name)?;
+        let mut conn = self.conn()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        write_state(&tx, KEY_DEVICE_NAME, &name)?;
+        write_state(&tx, "device_name_source", "manual")?;
+        write_registry(&tx, device_id, &name)?;
+        tx.commit()?;
         Ok(name)
     }
 
@@ -165,19 +175,24 @@ fn load_or_set(
     Ok(value)
 }
 
-/// A device name goes on the wire and into a peer's UI, so it is bounded and
-/// stripped here rather than at each use.
-///
-/// `MAX_DEVICE_NAME_BYTES` is a *byte* bound and the name is user-supplied
-/// UTF-8, so the truncation walks characters.
-fn sanitise_name(raw: &str) -> Option<String> {
-    let cleaned: String = raw
-        .trim()
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(copypaste_p2p::protocol::MAX_DEVICE_NAME_BYTES / 4)
-        .collect();
-    (!cleaned.is_empty()).then_some(cleaned)
+fn read_state(conn: &Connection, key: &str) -> Result<Option<String>, StoreError> {
+    Ok(conn
+        .query_row(
+            "SELECT value FROM sync_device_state WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn write_state(conn: &Connection, key: &str, value: &str) -> Result<(), StoreError> {
+    conn.execute("INSERT INTO sync_device_state (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![key, value])?;
+    Ok(())
+}
+
+fn write_registry(conn: &Connection, device_id: &str, name: &str) -> Result<(), StoreError> {
+    conn.execute("INSERT INTO sync_device_name (device_id, name) VALUES (?1, ?2) ON CONFLICT(device_id) DO UPDATE SET name = excluded.name WHERE name != excluded.name", params![device_id, name])?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -203,7 +218,59 @@ mod tests {
         let s = Store::open(&path, &KEY).unwrap();
         let second = s.device_identity("something else").unwrap();
         assert_eq!(second.device_id, id);
-        assert_eq!(second.device_name, "laptop");
+        assert_eq!(second.device_name, "something else");
+    }
+
+    #[test]
+    fn automatic_names_update_both_identity_and_registry() {
+        let s = store();
+        let first = s.device_identity("Phone before").unwrap();
+        let next = s.device_identity("Phone after").unwrap();
+        assert_eq!(next.device_id, first.device_id);
+        assert_eq!(next.device_name, "Phone after");
+        assert_eq!(s.current_device_name().unwrap(), "Phone after");
+        assert_eq!(
+            s.device_names(std::slice::from_ref(&first.device_id))
+                .unwrap()[&first.device_id],
+            "Phone after"
+        );
+    }
+
+    #[test]
+    fn manual_name_survives_system_changes_and_reopening() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("identity.db");
+        let s = Store::open(&path, &KEY).unwrap();
+        let first = s.device_identity("System name").unwrap();
+        // Explicitly choosing even the same name makes it a manual override.
+        s.set_device_name(&first.device_id, "System name").unwrap();
+        assert_eq!(s.device_identity("Renamed OS").unwrap(), first);
+        drop(s);
+        let reopened = Store::open(&path, &KEY).unwrap();
+        assert_eq!(reopened.device_identity("Another OS name").unwrap(), first);
+    }
+
+    #[test]
+    fn a_rejected_rename_does_not_disable_automatic_names() {
+        let s = store();
+        let me = s.device_identity("Before").unwrap();
+        assert!(s.set_device_name(&me.device_id, " ").is_err());
+        assert_eq!(s.device_identity("After").unwrap().device_name, "After");
+    }
+
+    #[test]
+    fn naming_updates_roll_back_together_on_registry_failure() {
+        let s = store();
+        let me = s.device_identity("Before").unwrap();
+        s.conn().unwrap().execute_batch("CREATE TRIGGER refuse_name BEFORE UPDATE ON sync_device_name BEGIN SELECT RAISE(ABORT, 'refuse'); END;").unwrap();
+        assert!(s.set_device_name(&me.device_id, "Manual").is_err());
+        assert_eq!(s.current_device_name().unwrap(), "Before");
+        assert_eq!(
+            s.state("device_name_source").unwrap().as_deref(),
+            Some("automatic")
+        );
+        assert!(s.device_identity("After").is_err());
+        assert_eq!(s.current_device_name().unwrap(), "Before");
     }
 
     #[test]
