@@ -9,6 +9,7 @@
 //! is that checklist.
 
 use crate::backend::Result;
+use serde::Serialize;
 
 #[cfg(any(target_os = "android", test))]
 mod contract;
@@ -17,6 +18,17 @@ pub mod messages;
 pub mod model;
 
 pub use model::{CaptureSnapshot, Clip};
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureSetupInstructions {
+    pub package_name: String,
+    pub shizuku_commands: Vec<Vec<String>>,
+    pub adb_commands: Vec<Vec<String>>,
+    pub requires_restart: bool,
+}
 
 /// Everything the capture ladder can be asked to do.
 ///
@@ -100,6 +112,12 @@ pub trait CaptureControl: Send + Sync + 'static {
 
     /// Request Android's battery-optimization exemption for this app.
     fn request_battery_exemption(&self) -> Result<()>;
+
+    fn setup_instructions(&self) -> Result<CaptureSetupInstructions> {
+        Err(crate::backend::BackendError::Unsupported(
+            "Android setup is unavailable.",
+        ))
+    }
 
     /// Note that a clip reached the database, for the "last captured" line.
     fn note_stored(&self, at_ms: i64);
