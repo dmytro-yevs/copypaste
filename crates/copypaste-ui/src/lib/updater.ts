@@ -2,6 +2,7 @@ import { Channel } from "@tauri-apps/api/core";
 
 import { UI_COMMANDS, type UpdateProgress, type UpdateStatus } from "@/generated/ipc";
 import { call, hasNativeBridge } from "@/lib/ipcCall";
+import { currentPlatform } from "@/lib/platform";
 
 export type { UpdateProgress, UpdateStatus };
 
@@ -17,6 +18,7 @@ export function getUpdateStatus(): Promise<UpdateStatus> {
 
 export function checkForUpdate(): Promise<UpdateStatus> {
   if (!hasNativeBridge()) return Promise.resolve({ state: "unsupported" });
+  if (currentPlatform() !== "android") return call(UI_COMMANDS.check_for_update);
   return call(UI_COMMANDS.check_for_update, undefined, {
     timeoutMs: UPDATE_CHECK_TIMEOUT_MS,
   });

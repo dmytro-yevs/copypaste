@@ -31,6 +31,7 @@
   [data-state="ready"],
   [data-state="checking"],
   [data-state="up_to_date"],
+  [data-state="error"],
   [data-state="unsupported"],
   [data-state="unconfigured"]
 ) {
@@ -48,6 +49,7 @@
   [data-state="ready"],
   [data-state="checking"],
   [data-state="up_to_date"],
+  [data-state="error"],
   [data-state="unsupported"],
   [data-state="unconfigured"]:not([data-platform="macos"])
 ) .copy p {
@@ -64,21 +66,22 @@
   color: var(--accent-2);
 }
 
-.root[data-state="error"] .stateIcon {
-  color: var(--err-strong);
-}
-
 .root:is(
   [data-state="loading"],
   [data-state="ready"],
   [data-state="checking"],
   [data-state="up_to_date"],
+  [data-state="error"],
   [data-state="unsupported"],
   [data-state="unconfigured"]
 ) .stateIcon {
   align-self: center;
   margin-block-start: 0;
   color: var(--dim);
+}
+
+.root[data-state="error"] .stateIcon {
+  color: var(--err-strong);
 }
 
 .copy {
@@ -111,7 +114,6 @@
   font-size: var(--fs-xs);
   line-height: var(--lh-normal);
   overflow-wrap: anywhere;
-  animation: update-status-arrive var(--dur-fast) var(--ease);
 }
 
 .status {
@@ -140,7 +142,9 @@
 .root:is(
   [data-state="loading"],
   [data-state="ready"],
+  [data-state="checking"],
   [data-state="up_to_date"],
+  [data-state="error"],
   [data-state="unsupported"],
   [data-state="unconfigured"]
 ) .action {
@@ -151,7 +155,9 @@
 .root:is(
   [data-state="loading"],
   [data-state="ready"],
+  [data-state="checking"],
   [data-state="up_to_date"],
+  [data-state="error"],
   [data-state="unsupported"],
   [data-state="unconfigured"]
 ) .action > :is(button, a) {
@@ -194,13 +200,6 @@
   to { transform: rotate(1turn); }
 }
 
-@keyframes update-status-arrive {
-  from {
-    opacity: 0;
-    transform: translateY(var(--s-1));
-  }
-}
-
 @container (max-width: $cpSm) {
   .root {
     padding: var(--s-4) var(--s-3);
@@ -224,6 +223,7 @@
     [data-state="ready"],
     [data-state="checking"],
     [data-state="up_to_date"],
+    [data-state="error"],
     [data-state="unsupported"],
     [data-state="unconfigured"]
   ) {
@@ -236,6 +236,7 @@
     [data-state="ready"],
     [data-state="checking"],
     [data-state="up_to_date"],
+    [data-state="error"],
     [data-state="unsupported"],
     [data-state="unconfigured"]
   ) .action {
@@ -249,8 +250,6 @@
     transition: none;
   }
 
-  .status,
-  .errorStatus,
   .spinning,
   .activity > * {
     animation: none;
