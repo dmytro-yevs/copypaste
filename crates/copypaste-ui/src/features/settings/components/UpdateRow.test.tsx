@@ -16,6 +16,14 @@ const platform = vi.hoisted(() => ({
   currentPlatform: vi.fn(() => "windows"),
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((onResolve) => {
+    resolve = onResolve;
+  });
+  return { promise, resolve };
+}
+
 vi.mock("@/lib/updater", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/updater")>()),
   checkForUpdate: () => updater.checkForUpdate(),
@@ -113,6 +121,22 @@ describe("UpdateRow actions", () => {
     await user.click(check);
 
     await waitFor(() => expect(updater.checkForUpdate).toHaveBeenCalledOnce());
+    expect(await screen.findByText("CopyPaste is up to date.")).toBeTruthy();
+  });
+
+  it("keeps the check action disabled and busy while the check is pending", async () => {
+    const pending = deferred<UpdateStatus>();
+    updater.checkForUpdate.mockReturnValue(pending.promise);
+    const { user } = renderStatus({ state: "ready" });
+
+    await user.click(await screen.findByRole("button", { name: "Check for updates" }));
+
+    const checking = screen.getByRole("button", { name: "Check for updates" });
+    expect(checking.hasAttribute("disabled")).toBe(true);
+    expect(checking.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("status").textContent).toBe("Checking for updates…");
+
+    pending.resolve({ state: "up_to_date" });
     expect(await screen.findByText("CopyPaste is up to date.")).toBeTruthy();
   });
 });
