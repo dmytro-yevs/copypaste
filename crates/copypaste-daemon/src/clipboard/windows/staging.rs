@@ -23,9 +23,13 @@ const MAX_AGE: Duration = Duration::from_secs(10 * 60);
 
 pub(super) struct StagingArea {
     root: PathBuf,
-    entries: Arc<Mutex<Vec<Entry>>>,
-    wake: Arc<(Mutex<bool>, Condvar)>,
+    state: Arc<(Mutex<State>, Condvar)>,
     worker: Mutex<Option<JoinHandle<()>>>,
+}
+
+struct State {
+    entries: Vec<Entry>,
+    stopped: bool,
 }
 
 struct Entry {
@@ -41,11 +45,16 @@ impl StagingArea {
         }
         fs::create_dir_all(&root)?;
         protect_owner_only(&root)?;
-        let entries = Arc::new(Mutex::new(Vec::<Entry>::new()));
+        let state = Arc::new((
+            Mutex::new(State {
+                entries: Vec::new(),
+                stopped: false,
+            }),
+            Condvar::new(),
+        ));
         Ok(Self {
             root,
-            entries,
-            wake: Arc::new((Mutex::new(false), Condvar::new())),
+            state,
             worker: Mutex::new(None),
         })
     }
@@ -58,28 +67,33 @@ impl StagingArea {
             ));
         }
         let filename = metadata.filename.as_str();
-        let mut entries = self.entries.lock().unwrap_or_else(|held| held.into_inner());
-        prune_locked(&mut entries);
+        let (lock, wake) = &*self.state;
+        let mut state = lock.lock().unwrap_or_else(|held| held.into_inner());
+        prune_locked(&mut state.entries);
         let directory = tempfile::Builder::new()
             .prefix("file-")
             .tempdir_in(&self.root)?;
         let directory = directory.keep();
         let path = directory.join(filename);
-        entries.push(Entry {
+        state.entries.push(Entry {
             directory,
             expires: Instant::now() + MAX_AGE,
         });
         if let Err(error) = self.ensure_worker() {
-            let entry = entries.pop().expect("the staging entry was just inserted");
+            let entry = state
+                .entries
+                .pop()
+                .expect("the staging entry was just inserted");
             let _ = fs::remove_dir_all(entry.directory);
             return Err(error);
         }
+        wake.notify_one();
+        drop(state);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&path)?;
         file.write_all(bytes)?;
-        self.wake.1.notify_one();
         Ok(path)
     }
 
@@ -91,12 +105,11 @@ impl StagingArea {
         if let Some(worker) = worker.take() {
             let _ = worker.join();
         }
-        let entries = Arc::clone(&self.entries);
-        let wake = Arc::clone(&self.wake);
+        let state = Arc::clone(&self.state);
         *worker = Some(
             std::thread::Builder::new()
                 .name("copypaste-file-sweeper".into())
-                .spawn(move || sweep(entries, wake))?,
+                .spawn(move || sweep(state))?,
         );
         Ok(())
     }
@@ -104,8 +117,11 @@ impl StagingArea {
 
 impl Drop for StagingArea {
     fn drop(&mut self) {
-        let (stop, wake) = &*self.wake;
-        *stop.lock().unwrap_or_else(|held| held.into_inner()) = true;
+        let (state, wake) = &*self.state;
+        state
+            .lock()
+            .unwrap_or_else(|held| held.into_inner())
+            .stopped = true;
         wake.notify_one();
         if let Some(worker) = self
             .worker
@@ -115,41 +131,34 @@ impl Drop for StagingArea {
         {
             let _ = worker.join();
         }
-        prune_locked(&mut self.entries.lock().unwrap_or_else(|held| held.into_inner()));
+        prune_locked(
+            &mut state
+                .lock()
+                .unwrap_or_else(|held| held.into_inner())
+                .entries,
+        );
         if let Err(error) = fs::remove_dir_all(&self.root) {
             tracing::warn!(error_kind = ?error.kind(), "could not remove Windows paste-file staging");
         }
     }
 }
 
-fn sweep(entries: Arc<Mutex<Vec<Entry>>>, wake: Arc<(Mutex<bool>, Condvar)>) {
+fn sweep(state: Arc<(Mutex<State>, Condvar)>) {
     loop {
-        let deadline = {
-            let mut entries = entries.lock().unwrap_or_else(|held| held.into_inner());
-            prune_locked(&mut entries);
-            entries.iter().map(|entry| entry.expires).min()
-        };
-        let (stop, notify) = &*wake;
-        let stopped = stop.lock().unwrap_or_else(|held| held.into_inner());
-        if *stopped {
+        let (lock, wake) = &*state;
+        let mut state = lock.lock().unwrap_or_else(|held| held.into_inner());
+        prune_locked(&mut state.entries);
+        if state.stopped {
             return;
         }
-        let Some(deadline) = deadline else {
-            let (stopped, _) = notify
-                .wait_timeout(stopped, Duration::from_secs(1))
-                .unwrap_or_else(|held| held.into_inner());
-            if *stopped {
-                return;
-            }
+        let Some(deadline) = state.entries.iter().map(|entry| entry.expires).min() else {
+            let _state = wake.wait(state).unwrap_or_else(|held| held.into_inner());
             continue;
         };
         let wait = deadline.saturating_duration_since(Instant::now());
-        let (stopped, _) = notify
-            .wait_timeout(stopped, wait)
+        let _state = wake
+            .wait_timeout(state, wait)
             .unwrap_or_else(|held| held.into_inner());
-        if *stopped {
-            return;
-        }
     }
 }
 
