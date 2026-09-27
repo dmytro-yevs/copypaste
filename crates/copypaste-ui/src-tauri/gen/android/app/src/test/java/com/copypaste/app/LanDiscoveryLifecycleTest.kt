@@ -26,4 +26,11 @@ class LanDiscoveryLifecycleTest {
         assertTrue(lifecycle.stop())
         assertFalse(lifecycle.stop())
     }
+
+    @Test
+    fun acceptsOnlyTheExactCopyPasteServiceType() {
+        assertTrue(isCopyPasteService("_copypaste._tcp."))
+        assertFalse(isCopyPasteService("_not-copypaste._tcp."))
+        assertFalse(isCopyPasteService("_copypaste._tcp.local."))
+    }
 }
