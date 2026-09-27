@@ -150,24 +150,24 @@ impl NativePairingUi for MacOsPairingUi {
                 return NativePresentationOutcome::Unavailable;
             };
 
-            close_active_invite();
+            close_active_invite(None);
             let dismissed = Arc::new(AtomicBool::new(false));
-            let expiry_dismissed = Arc::clone(&dismissed);
+            let expiry_token = Arc::clone(&dismissed);
             let expiry_abort = abort.clone();
             let Some(watchdog) = ModalDeadline::arm(Duration::from_secs(expires), move || {
-                expiry_dismissed.store(true, Ordering::Release);
-                close_active_invite();
-                (expiry_abort)();
+                if close_active_invite(Some(&expiry_token)) {
+                    (expiry_abort)();
+                }
             }) else {
                 return NativePresentationOutcome::Refresh;
             };
-            let cancel_dismissed = Arc::clone(&dismissed);
+            let cancel_token = Arc::clone(&dismissed);
             let cancel_abort = abort.clone();
             let action: Arc<dyn Fn(SheetAction) + Send + Sync> = Arc::new(move |action| {
                 if matches!(action, SheetAction::Cancel) {
-                    cancel_dismissed.store(true, Ordering::Release);
-                    close_active_invite();
-                    (cancel_abort)();
+                    if close_active_invite(Some(&cancel_token)) {
+                        (cancel_abort)();
+                    }
                 }
             });
             let Some((invite_view, code_value, address_value)) =
@@ -180,14 +180,19 @@ impl NativePairingUi for MacOsPairingUi {
             let callback_code = code_value.clone();
             let callback_address = address_value.clone();
             let callback_watchdog = watchdog.clone();
-            let callback_dismissed = Arc::clone(&dismissed);
+            let callback_token = Arc::clone(&dismissed);
             let callback_abort = abort.clone();
             let callback = RcBlock::new(move |_response| {
                 callback_code.setStringValue(&NSString::from_str(""));
                 callback_address.setStringValue(&NSString::from_str(""));
                 let expired = callback_watchdog.finish();
-                if !callback_dismissed.load(Ordering::Acquire) && !expired {
-                    (callback_abort)();
+                if let Some(invite) = take_active_invite(Some(&callback_token)) {
+                    invite.code.setStringValue(&NSString::from_str(""));
+                    invite.address.setStringValue(&NSString::from_str(""));
+                    invite.watchdog.finish();
+                    if !invite.dismissed.load(Ordering::Acquire) && !expired {
+                        (callback_abort)();
+                    }
                 }
             });
             ACTIVE_INVITE.with(|active| {
@@ -247,7 +252,7 @@ impl NativePairingUi for MacOsPairingUi {
         if keeps_invite_visible(progress.state) {
             return PairingPresentationState::Presented;
         }
-        on_main(|_| close_active_invite());
+        on_main(|_| close_active_invite(None));
         // SAS comparison remains owned by confirm(), which the shared flow
         // invokes exactly once after the ceremony reaches this state.
         if progress.state == PairingState::AwaitingConfirmation {
@@ -306,7 +311,35 @@ impl NativePairingUi for MacOsPairingUi {
 #[derive(Clone)]
 struct ModalDeadline {
     armed: Arc<AtomicBool>,
+    gate: ExpiryGate,
+}
+
+#[derive(Clone)]
+struct ExpiryGate {
+    cancelled: Arc<AtomicBool>,
     expired: Arc<AtomicBool>,
+}
+
+impl ExpiryGate {
+    fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            expired: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn cancel(&self) -> bool {
+        self.cancelled.store(true, Ordering::Release);
+        self.expired.load(Ordering::Acquire)
+    }
+
+    fn claim_on_main(&self) -> bool {
+        if self.cancelled.load(Ordering::Acquire) {
+            return false;
+        }
+        self.expired.store(true, Ordering::Release);
+        true
+    }
 }
 
 impl ModalDeadline {
@@ -315,9 +348,9 @@ impl ModalDeadline {
             return None;
         }
         let armed = Arc::new(AtomicBool::new(true));
-        let expired = Arc::new(AtomicBool::new(false));
+        let gate = ExpiryGate::new();
         let timer_armed = Arc::clone(&armed);
-        let timer_expired = Arc::clone(&expired);
+        let timer_gate = gate.clone();
         let when = DispatchTime::try_from(delay).ok()?;
         DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
             DispatchQueueGlobalPriority::Default,
@@ -326,23 +359,33 @@ impl ModalDeadline {
             if !timer_armed.swap(false, Ordering::AcqRel) {
                 return;
             }
-            timer_expired.store(true, Ordering::Release);
             DispatchQueue::main().exec_async(move || {
-                on_expire();
+                if timer_gate.claim_on_main() {
+                    on_expire();
+                }
             });
         })
         .ok()?;
-        Some(Self { armed, expired })
+        Some(Self { armed, gate })
     }
 
     fn finish(&self) -> bool {
         self.armed.store(false, Ordering::Release);
-        self.expired.load(Ordering::Acquire)
+        self.gate.cancel()
     }
 }
 
-fn close_active_invite() {
-    let invite = ACTIVE_INVITE.with(|active| active.borrow_mut().take());
+fn take_active_invite(expected: Option<&Arc<AtomicBool>>) -> Option<ActiveInvite> {
+    ACTIVE_INVITE.with(|active| {
+        let matches = active.borrow().as_ref().is_some_and(|invite| {
+            expected.is_none_or(|expected| Arc::ptr_eq(expected, &invite.dismissed))
+        });
+        matches.then(|| active.borrow_mut().take()).flatten()
+    })
+}
+
+fn close_active_invite(expected: Option<&Arc<AtomicBool>>) -> bool {
+    let invite = take_active_invite(expected);
     if let Some(invite) = invite {
         invite.dismissed.store(true, Ordering::Release);
         unsafe {
@@ -354,6 +397,9 @@ fn close_active_invite() {
         if let Some(parent) = unsafe { sheet.sheetParent() } {
             unsafe { parent.endSheet_returnCode(&sheet, NSModalResponseCancel) };
         }
+        true
+    } else {
+        false
     }
 }
 
@@ -634,6 +680,22 @@ mod tests {
     #[test]
     fn elapsed_deadline_never_opens_a_secret_surface() {
         assert!(ModalDeadline::arm(Duration::ZERO, || {}).is_none());
+    }
+
+    #[test]
+    fn cancelled_queued_expiry_cannot_abort_a_replacement_invite() {
+        let queued_expiry = ExpiryGate::new();
+        let old_invite = Arc::new(AtomicBool::new(false));
+        let replacement_invite = Arc::new(AtomicBool::new(false));
+        let aborts = AtomicBool::new(false);
+
+        queued_expiry.cancel();
+        if queued_expiry.claim_on_main() && Arc::ptr_eq(&old_invite, &replacement_invite) {
+            aborts.store(true, Ordering::Release);
+        }
+
+        assert!(!aborts.load(Ordering::Acquire));
+        assert!(!Arc::ptr_eq(&old_invite, &replacement_invite));
     }
 
     #[test]
