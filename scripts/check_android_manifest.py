@@ -9,7 +9,6 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 QUERY_ALL_PACKAGES = "android.permission.QUERY_ALL_PACKAGES"
 REQUIRED_PERMISSIONS = frozenset(
     {
-        "android.permission.CAMERA",
         "android.permission.CHANGE_WIFI_MULTICAST_STATE",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",

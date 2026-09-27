@@ -13,6 +13,7 @@ describe("PairingProgressCard", () => {
     state: "awaiting_confirmation",
     semantics: {
       message_id: "compare_codes", icon: "shieldCheck", tone: "warning", live: "status", active: true, terminal: false, needs_devices: true, review_secure: true, retry: false,
+      copy: { title: "Compare security codes", detail: "Confirm the code in the native security prompt." },
     },
     presentation: "presented",
     known_device: null,

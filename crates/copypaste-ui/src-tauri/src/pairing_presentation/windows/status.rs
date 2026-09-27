@@ -6,7 +6,6 @@ use copypaste_ipc::PairingProgressData;
 use winsafe::{co, prelude::*};
 
 use super::common::{self, CloseHandle};
-use crate::pairing_presentation::native_copy::copy as native_pairing_copy;
 use crate::pairing_presentation::semantics::resolve_pairing_semantics;
 use crate::pairing_presentation::NativeAbort;
 
@@ -72,9 +71,7 @@ fn run(
 }
 
 pub(super) fn copy(progress: &PairingProgressData) -> StatusCopy {
-    let copy = native_pairing_copy(
-        resolve_pairing_semantics(progress.state, progress.error_code).message_id,
-    );
+    let copy = resolve_pairing_semantics(progress.state, progress.error_code).copy;
     StatusCopy {
         heading: copy.title,
         message: copy.detail,
