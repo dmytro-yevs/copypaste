@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn signing_covers_the_row_and_verification_refuses_a_tampered_one() {
+    fn signing_covers_source_icon_metadata_and_every_other_row_field() {
         let row = item("a1");
         row.verify(&key()).expect("a freshly signed row verifies");
 
@@ -372,7 +372,7 @@ mod tests {
 
         let mut forged_metadata = row.clone();
         forged_metadata.payload_metadata =
-            Some(r#"{"filename":"invoice.pdf","mime_type":"application/pdf"}"#.into());
+            Some(r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64}}"#.into());
         assert_eq!(
             forged_metadata.verify(&key()),
             Err(CloudCryptoError::SignatureInvalid)
