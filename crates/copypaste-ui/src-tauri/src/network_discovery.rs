@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use copypaste_core::p2p_contract;
 use copypaste_ipc::DiscoveredDevice;
@@ -15,6 +15,7 @@ const PORT: u16 = copypaste_p2p::DEFAULT_PORT;
 const MSG_DISCOVERY_UNAVAILABLE: &str = "Network discovery is unavailable.";
 
 static DISCOVERY: OnceLock<AndroidNetworkDiscovery> = OnceLock::new();
+static LIFECYCLE: OnceLock<Mutex<Lifecycle>> = OnceLock::new();
 
 #[derive(Deserialize)]
 struct Availability {
@@ -99,25 +100,99 @@ impl AndroidNetworkDiscovery {
 }
 
 pub fn reconcile(name: String, pairing_ids: Vec<String>, visible: bool) {
-    let Some(discovery) = DISCOVERY.get().cloned() else {
-        return;
+    let lifecycle = LIFECYCLE.get_or_init(|| Mutex::new(Lifecycle::default()));
+    let mut lifecycle = lifecycle
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    lifecycle.generation = lifecycle.generation.saturating_add(1);
+    lifecycle.desired = Desired {
+        name,
+        pairing_ids,
+        visible,
     };
-    tauri::async_runtime::spawn(async move {
-        if !visible {
+    if lifecycle.running {
+        return;
+    }
+    lifecycle.running = true;
+    drop(lifecycle);
+    tauri::async_runtime::spawn(drain_lifecycle());
+}
+
+async fn drain_lifecycle() {
+    loop {
+        let (generation, desired) = {
+            let lifecycle = LIFECYCLE
+                .get()
+                .unwrap()
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            (lifecycle.generation, lifecycle.desired.clone())
+        };
+        let Some(discovery) = DISCOVERY.get().cloned() else {
+            return finish_lifecycle(generation);
+        };
+        if !desired.visible {
             let _ = discovery
                 .0
                 .run_mobile_plugin_async::<serde_json::Value>("release", ())
                 .await;
+        } else if discovery.acquire().await && lifecycle_current(generation) {
+            if !discovery
+                .advertise(&desired.name, &desired.pairing_ids)
+                .await
+            {
+                tracing::warn!("Android LAN discovery did not start advertising");
+            }
+        }
+        if finish_lifecycle(generation) {
             return;
         }
-        if !discovery.acquire().await {
-            tracing::warn!("Android LAN discovery did not start browsing");
-            return;
+    }
+}
+
+fn lifecycle_current(generation: u64) -> bool {
+    LIFECYCLE
+        .get()
+        .unwrap()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .generation
+        == generation
+}
+
+fn finish_lifecycle(generation: u64) -> bool {
+    let mut lifecycle = LIFECYCLE
+        .get()
+        .unwrap()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if lifecycle.generation != generation {
+        return false;
+    }
+    lifecycle.running = false;
+    true
+}
+
+#[derive(Clone)]
+struct Desired {
+    name: String,
+    pairing_ids: Vec<String>,
+    visible: bool,
+}
+impl Default for Desired {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            pairing_ids: Vec::new(),
+            visible: false,
         }
-        if !discovery.advertise(&name, &pairing_ids).await {
-            tracing::warn!("Android LAN discovery did not start advertising");
-        }
-    });
+    }
+}
+#[derive(Default)]
+struct Lifecycle {
+    generation: u64,
+    desired: Desired,
+    running: bool,
 }
 
 fn nsd_device(
@@ -152,17 +227,7 @@ pub async fn enrich_discovered(
     let Some(discovery) = DISCOVERY.get() else {
         return Err(BackendError::Unsupported(MSG_DISCOVERY_UNAVAILABLE));
     };
-    if !discovery.acquire().await {
-        return if devices.is_empty() {
-            Err(BackendError::Unsupported(MSG_DISCOVERY_UNAVAILABLE))
-        } else {
-            Ok(devices)
-        };
-    }
-    let advertise_name = if name.is_empty() { "CopyPaste" } else { name };
-    if !discovery.advertise(advertise_name, pairing_ids).await {
-        tracing::warn!("NSD advertise did not start");
-    }
+    let _ = name;
     match discovery.resolved(pairing_ids).await {
         Ok(extra) => Ok(merge_discovered(devices, extra)),
         Err(error) if devices.is_empty() => Err(error),
