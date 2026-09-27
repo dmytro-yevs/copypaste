@@ -64,8 +64,8 @@ checks its active file limit on the blocking worker before allocating bytes,
 and stores only its basename and generic MIME type; network URLs and multiple
 file URLs are unsupported. `crates/copypaste-ipc/src/content_type.rs` is the
 vocabulary for these types. Every captured type is stored under its own limit
-class, listed, and pasted back in its original representation. An image row
-also serves a preview to the app.
+class and listed. Text entries paste back as plain text; images and files retain
+their payload. Image rows provide bounded previews sized for the display.
 
 Frontmost application identity is retained as provenance and as an independent
 sensitivity signal.

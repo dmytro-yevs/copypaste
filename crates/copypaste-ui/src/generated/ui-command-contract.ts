@@ -106,7 +106,7 @@ export interface UiCommandArgs {
   get_item_body: { id: string };
   copy_items: { ids: readonly string[] };
   get_image_preview: { id: string; maxEdge?: number };
-  get_source_app_icon: { bundleId: string };
+  get_source_app_icon: { itemId: string | null; bundleId: string };
   list_installed_source_apps: undefined;
   delete_item: { id: string };
   delete_all: { through: number | null };
