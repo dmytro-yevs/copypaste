@@ -5,6 +5,8 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.util.concurrent.ConcurrentHashMap
 
@@ -21,25 +23,33 @@ internal class LanDiscovery(
 ) {
     private val app = context.applicationContext
     private val nsd = app.getSystemService(Context.NSD_SERVICE) as? NsdManager
+    private val handler = Handler(Looper.getMainLooper())
     private var multicastLock: WifiManager.MulticastLock? = null
-    private var browsing = false
+    private val browse = BrowseLifecycle()
+    private val pendingBrowse = mutableListOf<(Boolean) -> Unit>()
+    private val browseTimeout = Runnable {
+        Log.w(TAG, "NSD browse start timed out")
+        finishBrowse(false)
+    }
     private var registered: NsdServiceInfo? = null
+    private var advertising: Advertisement? = null
+    private var registrationInFlight = false
     private val resolved = ConcurrentHashMap<String, ResolvedPeer>()
     private val resolveQueue = ArrayDeque<NsdServiceInfo>()
     private var resolving = false
 
     private val discoveryListener = object : NsdManager.DiscoveryListener {
         override fun onDiscoveryStarted(regType: String) {
-            browsing = true
+            finishBrowse(true)
         }
 
         override fun onDiscoveryStopped(serviceType: String) {
-            browsing = false
+            stopBrowseState()
         }
 
         override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-            browsing = false
-            Log.w(TAG, "NSD browse failed to start")
+            Log.w(TAG, "NSD browse failed to start: $errorCode")
+            finishBrowse(false)
         }
 
         override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
@@ -48,7 +58,7 @@ internal class LanDiscovery(
 
         override fun onServiceFound(service: NsdServiceInfo) {
             if (service.serviceType?.contains(SERVICE_TYPE_TOKEN) != true) return
-            if (registered?.serviceName == service.serviceName) return
+            if (registered?.serviceName == service.serviceName || advertising?.name == service.serviceName) return
             enqueueResolve(service)
         }
 
@@ -60,16 +70,27 @@ internal class LanDiscovery(
 
     private val registrationListener = object : NsdManager.RegistrationListener {
         override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-            registered = serviceInfo
+            synchronized(this@LanDiscovery) {
+                registered = serviceInfo
+                registrationInFlight = false
+            }
         }
 
         override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-            registered = null
-            Log.w(TAG, "NSD registration failed")
+            synchronized(this@LanDiscovery) {
+                registered = null
+                advertising = null
+                registrationInFlight = false
+            }
+            Log.w(TAG, "NSD registration failed: $errorCode")
         }
 
         override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
-            if (registered?.serviceName == serviceInfo.serviceName) registered = null
+            synchronized(this@LanDiscovery) {
+                if (registered?.serviceName == serviceInfo.serviceName) registered = null
+                advertising = null
+                registrationInFlight = false
+            }
         }
 
         override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
@@ -90,36 +111,64 @@ internal class LanDiscovery(
         false
     }
 
-    fun startBrowse(): Boolean {
-        if (browsing) return true
-        val manager = nsd ?: return false
-        return try {
+    fun startBrowse(onReady: (Boolean) -> Unit) {
+        val shouldStart = synchronized(this) {
+            when (browse.begin()) {
+                BrowseStart.READY -> false
+                BrowseStart.WAITING -> {
+                    pendingBrowse += onReady
+                    return
+                }
+                BrowseStart.START -> {
+                    pendingBrowse += onReady
+                    true
+                }
+            }
+        }
+        if (!shouldStart) {
+            onReady(true)
+            return
+        }
+        val manager = nsd
+        if (manager == null) {
+            finishBrowse(false)
+            return
+        }
+        try {
             manager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
-            true
+            handler.postDelayed(browseTimeout, BROWSE_START_TIMEOUT_MS)
         } catch (e: Throwable) {
             Log.w(TAG, "NSD browse could not start", e)
-            false
+            finishBrowse(false)
         }
     }
 
+    @Synchronized
     fun advertise(name: String, port: Int, attributes: Map<String, String>): Boolean {
         val manager = nsd ?: return false
         if (name.isBlank() || port !in 1..65535) return false
+        val requested = Advertisement(name.take(MAX_SERVICE_NAME), port, attributes)
+        if (advertising == requested && (registrationInFlight || registered != null)) return true
+        if (registrationInFlight) return false
         stopAdvertise()
         val info = NsdServiceInfo().apply {
-            serviceName = name.take(MAX_SERVICE_NAME)
+            serviceName = requested.name
             serviceType = SERVICE_TYPE
-            setPort(port)
-            attributes.forEach { (key, value) ->
+            setPort(requested.port)
+            requested.attributes.forEach { (key, value) ->
                 if (key.isNotEmpty() && value.isNotEmpty()) {
                     setAttribute(key.take(MAX_TXT_KEY), value.take(MAX_TXT_VALUE))
                 }
             }
         }
         return try {
+            advertising = requested
+            registrationInFlight = true
             manager.registerService(info, NsdManager.PROTOCOL_DNS_SD, registrationListener)
             true
         } catch (e: Throwable) {
+            advertising = null
+            registrationInFlight = false
             Log.w(TAG, "NSD registration could not start", e)
             false
         }
@@ -144,13 +193,17 @@ internal class LanDiscovery(
     }
 
     private fun stopBrowse() {
-        if (!browsing) return
+        val wasRunning = synchronized(this) {
+            handler.removeCallbacks(browseTimeout)
+            browse.stop()
+        }
+        if (!wasRunning) return
+        notifyBrowseStopped()
         try {
             nsd?.stopServiceDiscovery(discoveryListener)
         } catch (e: Throwable) {
             Log.w(TAG, "NSD browse could not stop", e)
         }
-        browsing = false
     }
 
     private fun stopAdvertise() {
@@ -161,6 +214,32 @@ internal class LanDiscovery(
             Log.w(TAG, "NSD registration could not stop", e)
         }
         registered = null
+        advertising = null
+        registrationInFlight = false
+    }
+
+    private fun finishBrowse(available: Boolean) {
+        val callbacks = synchronized(this) {
+            if (!browse.finish(available)) return
+            handler.removeCallbacks(browseTimeout)
+            pendingBrowse.toList().also { pendingBrowse.clear() }
+        }
+        callbacks.forEach { callback -> callback(available) }
+    }
+
+    private fun stopBrowseState() {
+        val wasRunning = synchronized(this) {
+            handler.removeCallbacks(browseTimeout)
+            browse.stop()
+        }
+        if (wasRunning) notifyBrowseStopped()
+    }
+
+    private fun notifyBrowseStopped() {
+        val callbacks = synchronized(this) {
+            pendingBrowse.toList().also { pendingBrowse.clear() }
+        }
+        callbacks.forEach { callback -> callback(false) }
     }
 
     @Synchronized
@@ -244,6 +323,12 @@ internal class LanDiscovery(
         val attributes: Map<String, String>,
     )
 
+    private data class Advertisement(
+        val name: String,
+        val port: Int,
+        val attributes: Map<String, String>,
+    )
+
     companion object {
         const val TAG = "copypaste-mdns"
         const val SERVICE_TYPE = "_copypaste._tcp."
@@ -251,5 +336,35 @@ internal class LanDiscovery(
         private const val MAX_SERVICE_NAME = 63
         private const val MAX_TXT_KEY = 9
         private const val MAX_TXT_VALUE = 200
+        private const val BROWSE_START_TIMEOUT_MS = 5_000L
     }
+}
+
+internal enum class BrowseStart { START, WAITING, READY }
+
+internal class BrowseLifecycle {
+    private var state = State.STOPPED
+
+    fun begin(): BrowseStart = when (state) {
+        State.STOPPED -> {
+            state = State.STARTING
+            BrowseStart.START
+        }
+        State.STARTING -> BrowseStart.WAITING
+        State.STARTED -> BrowseStart.READY
+    }
+
+    fun finish(available: Boolean): Boolean {
+        if (state != State.STARTING) return false
+        state = if (available) State.STARTED else State.STOPPED
+        return true
+    }
+
+    fun stop(): Boolean {
+        if (state == State.STOPPED) return false
+        state = State.STOPPED
+        return true
+    }
+
+    private enum class State { STOPPED, STARTING, STARTED }
 }
