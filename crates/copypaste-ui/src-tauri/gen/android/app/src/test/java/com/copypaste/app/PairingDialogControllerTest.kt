@@ -66,14 +66,23 @@ class PairingDialogControllerTest {
         assertSecure(dialog)
         assertNoViewValue(dialog.window!!.decorView, payload)
         assertTrue(allViews(dialog.window!!.decorView).none { it is WebView })
-        assertNull(rendered)
-
-        dialog.findViewById<View>(R.id.pairing_reveal)!!.performClick()
         assertEquals(payload, rendered)
         assertNoViewValue(dialog.window!!.decorView, payload)
         assertNoViewValue(dialog.window!!.decorView, "SECRET-CODE")
+        assertTrue(allText(dialog.window!!.decorView).none { it.contains("reveal", ignoreCase = true) })
         assertNull(dialog.findViewById(R.id.pairing_code))
         assertEquals("Pairing QR code", dialog.findViewById<View>(R.id.pairing_qr)!!.contentDescription)
+        assertEquals(View.VISIBLE, dialog.findViewById<View>(R.id.pairing_qr)!!.visibility)
+    }
+
+    @Test
+    fun renderFailureDoesNotOpenAPanel() {
+        val dialogs = PairingDialogController(activity, PairingQrRenderer { _, _ ->
+            throw IllegalStateException("render failure")
+        })
+
+        assertFalse(dialogs.presentInvite("payload", "CODE", 120))
+        assertNull(ShadowDialog.getLatestDialog()?.takeIf { it.isShowing })
     }
 
     @Test
@@ -150,7 +159,7 @@ class PairingDialogControllerTest {
     }
 
     @Test
-    fun waitingProgressDoesNotDestroyALiveInviteQr() {
+    fun waitingRetainsQrAndHandshakingUpdatesTheSameProtectedPanel() {
         var aborted = 0
         val renderer = PairingQrRenderer { _, _ ->
             Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
@@ -158,7 +167,6 @@ class PairingDialogControllerTest {
         val dialogs = PairingDialogController(activity, renderer)
         assertTrue(dialogs.presentInvite("payload", "CODE", 120) { aborted += 1 })
         val invite = latestDialog()
-        invite.findViewById<View>(R.id.pairing_reveal)!!.performClick()
         assertEquals(View.VISIBLE, invite.findViewById<View>(R.id.pairing_qr)!!.visibility)
 
         assertTrue(
@@ -181,9 +189,14 @@ class PairingDialogControllerTest {
                 active = true,
             ) { aborted += 1 },
         )
-        assertFalse(invite.isShowing)
+        assertTrue(invite.isShowing)
+        assertTrue(latestDialog() === invite)
         assertEquals(0, aborted)
-        assertNull(latestDialog().findViewById(R.id.pairing_qr))
+        assertNull(invite.findViewById(R.id.pairing_qr))
+        assertTrue(
+            allText(invite.window!!.decorView)
+                .contains("Keep both devices nearby while CopyPaste establishes a secure connection."),
+        )
     }
 
     @Test
@@ -259,7 +272,11 @@ class PairingDialogControllerTest {
         var aborted = 0
         var refreshed = 0
         val renderer = PairingQrRenderer { _, _ ->
-            Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).also { qr = it }
+            val source = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+            requireNotNull(source.copy(Bitmap.Config.ARGB_8888, false)).also {
+                source.recycle()
+                qr = it
+            }
         }
         val dialogs = PairingDialogController(activity, renderer)
         dialogs.presentInvite(
@@ -270,17 +287,34 @@ class PairingDialogControllerTest {
             onAbort = { aborted += 1 },
         )
         val invite = latestDialog()
-        invite.findViewById<View>(R.id.pairing_reveal)!!.performClick()
-
         shadowOf(Looper.getMainLooper()).idleFor(1, TimeUnit.SECONDS)
 
         assertEquals(0, aborted)
         assertEquals(1, refreshed)
         assertTrue(invite.isShowing)
         assertTrue(qr!!.isRecycled)
-        assertTrue(invite.findViewById<View>(R.id.pairing_reveal)!!.visibility != View.VISIBLE)
         assertTrue(invite.findViewById<View>(R.id.pairing_qr)!!.visibility != View.VISIBLE)
         assertTrue(allText(invite.window!!.decorView).contains("Checking pairing status…"))
+    }
+
+    @Test
+    fun immutableQrDismissesWithoutAnEraseColorCrash() {
+        var qr: Bitmap? = null
+        val renderer = PairingQrRenderer { _, _ ->
+            val source = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+            requireNotNull(source.copy(Bitmap.Config.ARGB_8888, false)).also {
+                source.recycle()
+                qr = it
+            }
+        }
+        val dialogs = PairingDialogController(activity, renderer)
+
+        assertTrue(dialogs.presentInvite("payload", "code", 120))
+        latestDialog().dismiss()
+        dialogs.destroy()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue(qr!!.isRecycled)
     }
 
     @Test
@@ -291,7 +325,6 @@ class PairingDialogControllerTest {
         }
         val dialogs = PairingDialogController(activity, renderer)
         dialogs.presentInvite("payload", "code", 120)
-        latestDialog().findViewById<View>(R.id.pairing_reveal)!!.performClick()
 
         val decisions = mutableListOf<String>()
         dialogs.confirm("654321", null, null, 60_000, decisions::add)
@@ -312,9 +345,10 @@ class PairingDialogControllerTest {
     }
 
     @Test
-    fun progressRendersCanonicalCopyWithoutAnInactiveCancelAction() {
+    fun terminalProgressRendersCanonicalCopyAndAnExplicitCloseAction() {
         val dialogs = PairingDialogController(activity)
         val untrusted = "failed at /data/user/0/name with 192.0.2.1"
+        var aborted = 0
 
         assertTrue(
             dialogs.presentProgress(
@@ -322,12 +356,16 @@ class PairingDialogControllerTest {
                 "Pairing failed",
                 "Pairing failed. No device was paired.",
                 active = false,
-            ) {},
+            ) { aborted += 1 },
         )
         val dialog = latestDialog()
         assertNoViewValue(dialog.window!!.decorView, untrusted)
         assertTrue(allText(dialog.window!!.decorView).contains("Pairing failed. No device was paired."))
-        assertTrue(dialog.getButton(AlertDialog.BUTTON_NEGATIVE).visibility != View.VISIBLE)
+        assertEquals("Close", dialog.getButton(AlertDialog.BUTTON_NEGATIVE).text.toString())
+        assertEquals(View.VISIBLE, dialog.getButton(AlertDialog.BUTTON_NEGATIVE).visibility)
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(0, aborted)
     }
 
     @Test
