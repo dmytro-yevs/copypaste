@@ -161,10 +161,9 @@ impl NativePairingUi for MacOsPairingUi {
             let cancel_token = Arc::clone(&dismissed);
             let cancel_abort = abort.clone();
             let action: Arc<dyn Fn(SheetAction) + Send + Sync> = Arc::new(move |action| {
-                if matches!(action, SheetAction::Cancel) {
-                    if close_active_invite(Some(&cancel_token)) {
-                        (cancel_abort)();
-                    }
+                if matches!(action, SheetAction::Cancel) && close_active_invite(Some(&cancel_token))
+                {
+                    (cancel_abort)();
                 }
             });
             let Some((invite_view, code_value, address_value)) =
