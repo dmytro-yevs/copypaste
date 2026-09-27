@@ -27,11 +27,11 @@ const cachedList = {
 } as unknown as ComponentProps<typeof HistoryList>;
 
 describe("HistoryContentState errors", () => {
-    it("shows the repair bot and preserves retry and diagnostics actions", async () => {
+    it("keeps recovery compact and preserves retry and diagnostics actions", async () => {
         const user = userEvent.setup();
         const retry = vi.fn();
         const diagnostics = vi.fn();
-        const { container } = render(
+        render(
             <HistoryContentState
                 loading={false}
                 errorKind="timeout"
@@ -50,7 +50,7 @@ describe("HistoryContentState errors", () => {
         expect(screen.getByRole("alert").textContent).toContain(
             "Failed to load history",
         );
-        expect(container.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Error details" })).toBeTruthy();
 
         await user.click(screen.getByRole("button", { name: "Try again" }));
         await user.click(
@@ -85,7 +85,7 @@ describe("HistoryContentState errors", () => {
             "cached clipboard entry",
         );
         expect(screen.getByRole("status").textContent).toContain(
-            "The clipboard service isn't running",
+            "Service is off",
         );
 
         await user.click(screen.getByRole("button", { name: "Try again" }));
