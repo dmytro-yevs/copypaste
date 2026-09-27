@@ -31,8 +31,12 @@ canary="CopyPasteUpgradeCanary$(date +%s)$RANDOM"
 }
 mkdir -p "$OUT"
 
+history_ready_holds() { # <accessibility artifact> <unused>
+    enabled_node_exists_exact "$1" "Search clipboard history, default|Search clipboard history, active"
+}
+
 history_canary_holds() { # <accessibility artifact> <unused>
-    enabled_node_exists_exact "$1" "Search clipboard history, default|Search clipboard history, active" \
+    history_ready_holds "$1" \
         && node_exists_exact "$1" "$canary"
 }
 
@@ -86,13 +90,20 @@ assert_persisted_history() { # <label>
 }
 
 adb uninstall "$package" >/dev/null 2>&1 || true
-adb install "$previous"
+# The prior release is a provisioned upgrade fixture: runtime permission
+# dialogs must not block the pre-upgrade Library/canary assertion.
+adb install -g "$previous"
 installed="$(adb shell dumpsys package "$package" | tr -d '\r')"
 grep -q "versionCode=${previous_code}\b" <<<"$installed" || {
     printf 'installed fixture did not report versionCode=%s\n' "$previous_code" >&2
     exit 1
 }
 launch_current_package previous-upgrade
+android_recover_onboarding "$OUT/upgrade-ready-onboarding.xml" 30 \
+    && tap_until_state "Library" "$OUT/upgrade-ready-history.xml" history_ready_holds none || {
+    printf 'previous fixture did not expose Library before seeding the upgrade canary\n' >&2
+    exit 1
+}
 capture_before_upgrade
 
 adb install -r "$current"
