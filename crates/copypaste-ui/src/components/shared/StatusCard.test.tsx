@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { Button } from "@/components/ui";
+import { SkeletonText } from "./SkeletonText";
 import { StatusCard } from "./StatusCard";
 
 describe("StatusCard", () => {
@@ -26,5 +27,23 @@ describe("StatusCard", () => {
     expect(card.getAttribute("data-status")).toBe("danger");
     expect(screen.getByText("The clipboard refused the read.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("accepts React detail content in the prominent card surface", () => {
+    const { container } = render(
+      <StatusCard
+        status="neutral"
+        title="Checking encrypted cloud"
+        detail={<SkeletonText width="md" />}
+        icon="cloud"
+        variant="prominent"
+        busy
+      />,
+    );
+
+    const card = screen.getByRole("status");
+    expect(card.getAttribute("data-variant")).toBe("prominent");
+    expect(card.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector('[data-width="md"]')).not.toBeNull();
   });
 });

@@ -39,6 +39,7 @@ describe("device presentation components", () => {
 
     const card = screen.getByRole("status");
     expect(card.getAttribute("aria-live")).toBe("polite");
+    expect(card.getAttribute("data-variant")).toBe("prominent");
     expect(screen.getByText("Encrypted cloud")).toBeTruthy();
     expect(screen.getByText("Cloud status is unavailable.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Manage" })).toBeTruthy();

@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
-import { EmptyState } from "@/components/shared";
-import { Icon, Surface } from "@/components/ui";
+import { EmptyState, StatusCard } from "@/components/shared";
 import {
     discoveryResultsPresentation,
     discoveryStagePresentation,
@@ -30,7 +29,7 @@ export function DiscoveryStage({
     const presentation = discoveryStagePresentation(state);
     const results = discoveryResultsPresentation(deviceCount);
 
-    if (state !== "results") {
+    if (state === "error") {
         return (
             <div className={styles.stage} data-state={state}>
                 <EmptyState
@@ -46,37 +45,39 @@ export function DiscoveryStage({
         );
     }
 
+    if (state !== "results") {
+        return (
+            <div className={styles.stage} data-state={state}>
+                <StatusCard
+                    status="neutral"
+                    title={presentation.title}
+                    detail={presentation.body}
+                    icon={presentation.icon ?? "spinner"}
+                    variant="prominent"
+                    role={presentation.tone === "danger" ? "alert" : "status"}
+                    busy={presentation.busy}
+                />
+            </div>
+        );
+    }
+
     return (
         <div
             className={styles.stage}
             data-state={state}
             aria-busy={refreshing || undefined}
         >
-            <Surface
-                elevation="raised"
-                border="subtle"
-                radius="md"
-                className={styles.summary}
+            <StatusCard
+                status="neutral"
+                title={results.label}
+                detail={refreshing ? t("devices.discovered.refreshing") : results.detail}
+                icon={refreshing ? "spinner" : "devices"}
+                variant="prominent"
                 role="status"
-                aria-live="polite"
-                aria-atomic="true"
-            >
-                <span className={styles.summaryIcon} aria-hidden="true">
-                    {refreshing ? (
-                        <Icon name="spinner" className={styles.spinner} size="sm" />
-                    ) : (
-                        <Icon name="devices" size="sm" />
-                    )}
-                </span>
-                <span className={styles.summaryCopy}>
-                    <strong>{results.label}</strong>
-                    <span>
-                        {refreshing
-                            ? t("devices.discovered.refreshing")
-                            : results.detail}
-                    </span>
-                </span>
-            </Surface>
+                live="polite"
+                atomic
+                busy={refreshing}
+            />
             <div className={styles.results}>{children}</div>
         </div>
     );
