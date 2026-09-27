@@ -18,7 +18,7 @@ release_exists() {
   gh release view "$1" --repo "$2" >/dev/null 2>&1
 }
 
-publish() {
+publish() (
   local tag="v${VERSION}"
   local asset create
 
@@ -32,12 +32,18 @@ publish() {
     [[ -s "$asset" ]] || die "release asset is missing or empty"
   done
 
+  local rendered_notes
+  rendered_notes=$(mktemp)
+  trap 'rm -f "$rendered_notes"' EXIT
+  sed -e "s|{{version}}|${VERSION}|g" -e "s|{{repository}}|${REPO}|g" \
+    "$NOTES" > "$rendered_notes"
+
   if ! release_exists "$tag" "$REPO"; then
     create=(
       gh release create "$tag"
       --repo "$REPO"
       --title "$tag"
-      --notes-file "$NOTES"
+      --notes-file "$rendered_notes"
       --verify-tag
     )
     if [[ "$VERSION" == *-* ]]; then
@@ -52,7 +58,7 @@ publish() {
   fi
 
   gh release upload "$tag" --repo "$REPO" --clobber "${ASSETS[@]}"
-}
+)
 
 self_test() {
   local root stub_bin log notes asset script
@@ -64,7 +70,7 @@ self_test() {
   notes="$root/notes.md"
   asset="$root/app.exe"
   script=$0
-  printf 'notes\n' >"$notes"
+  printf 'https://github.com/{{repository}}/releases/download/v{{version}}/CopyPaste-v{{version}}-android.apk\n' >"$notes"
   printf 'exe\n' >"$asset"
 
   cat >"$stub_bin/gh" <<'EOF'
@@ -75,6 +81,15 @@ printf '%s\n' "$*" >>"${GH_STUB_LOG:?}"
 shift
 case "${1:-}" in
   create)
+    if [[ -n "${GH_STUB_RENDERED_NOTES:-}" ]]; then
+      while (($#)); do
+        if [[ "$1" == --notes-file ]]; then
+          cp "$2" "$GH_STUB_RENDERED_NOTES"
+          break
+        fi
+        shift
+      done
+    fi
     case "${GH_STUB_CREATE:-ok}" in
       fail500)
         echo "HTTP 500 (https://api.github.com/repos/owner/repo/releases)" >&2
@@ -119,7 +134,7 @@ EOF
 
   run_pub() {
     : >"$log"
-    env PATH="$stub_bin:$PATH" GH_STUB_LOG="$log" \
+    env PATH="$stub_bin:$PATH" GH_STUB_LOG="$log" GH_STUB_RENDERED_NOTES="$root/rendered.md" \
       GH_STUB_CREATE="${GH_STUB_CREATE:-ok}" \
       GH_STUB_VIEW="${GH_STUB_VIEW:-missing}" \
       GH_STUB_UPLOAD="${GH_STUB_UPLOAD:-ok}" \
@@ -129,6 +144,8 @@ EOF
 
   GH_STUB_CREATE=ok GH_STUB_VIEW=missing run_pub \
     || die "self-test failed: create then upload"
+  grep -Fq 'https://github.com/owner/repo/releases/download/v2.0.0-alpha.35/CopyPaste-v2.0.0-alpha.35-android.apk' "$root/rendered.md" \
+    || die "self-test failed: download links must use the release identity"
   grep -q 'release create v2.0.0-alpha.35' "$log" \
     || die "self-test failed: create not invoked"
   grep -q -- '--verify-tag' "$log" \
