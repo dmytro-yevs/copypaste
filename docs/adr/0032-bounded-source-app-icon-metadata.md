@@ -6,7 +6,7 @@ Status: accepted, 2026-09-27.
 
 CopyPaste stores an optional normalized PNG icon beside the existing source
 application bundle ID and display name. The PNG is limited to 32 KiB and a
-decoded 64px or 128px edge. Its JSON envelope is bounded to 48 KiB and is
+decoded edge of at most 128px. Its JSON envelope is bounded to 48 KiB and is
 included in the local storage quota and bounded history-page budget.
 
 File metadata keeps its legacy flat `filename` and `mime_type` JSON spelling.

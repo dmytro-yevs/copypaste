@@ -115,8 +115,8 @@ impl SourceAppIconMetadata {
 fn valid_icon_dimensions(png: &[u8], width: u32, height: u32) -> bool {
     if png.is_empty()
         || png.len() > copypaste_ipc::MAX_SOURCE_APP_ICON_BYTES
-        || !matches!(width, 64 | copypaste_ipc::SOURCE_APP_ICON_EDGE)
-        || !matches!(height, 64 | copypaste_ipc::SOURCE_APP_ICON_EDGE)
+        || !(1..=copypaste_ipc::SOURCE_APP_ICON_EDGE).contains(&width)
+        || !(1..=copypaste_ipc::SOURCE_APP_ICON_EDGE).contains(&height)
     {
         return false;
     }
@@ -793,6 +793,15 @@ mod tests {
             "text",
         )
         .is_none());
+    }
+
+    #[test]
+    fn native_icon_dimensions_from_windows_and_android_are_preserved() {
+        for edge in [16, 32, 48, 64, 96, 128] {
+            let icon = SourceAppIconMetadata::new(&png(edge, edge), edge, edge)
+                .expect("bounded native icons need no artificial upscaling");
+            assert_eq!((icon.width, icon.height), (edge, edge));
+        }
     }
 
     #[test]
