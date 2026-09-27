@@ -72,12 +72,11 @@ class ShizukuSettingsService : IShizukuSettingsService.Stub() {
     }
 
     private fun readCommand(command: List<String>): Int = try {
-        val process = ProcessBuilder(command).start()
+        val process = ProcessBuilder(command).redirectErrorStream(true).start()
         process.outputStream.close()
-        val value = BufferedReader(InputStreamReader(process.inputStream)).use { it.readLine() }
-        process.errorStream.close()
-        if (process.waitFor() == 0 && value != null) {
-            parseClipboardAccessNotifications(value)
+        val output = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
+        if (process.waitFor() == 0) {
+            parseClipboardAccessNotifications(output)
         } else {
             -1
         }
