@@ -28,6 +28,8 @@ export type ShizukuProbe = { supported: boolean, installed: boolean, running: bo
 
 export type CaptureSnapshot = { rung: CaptureRung, health: CaptureHealth, shizuku: ShizukuProbe, nextStep: CaptureNextStep, headline: string, detail: string | null, lastReadOkAt: number | null, lastCaptureAt: number | null, droppedClips: number, toastSuppressed: boolean, toastAcknowledged: boolean, rearmRequested: boolean, };
 
+export type CaptureSetupInstructions = { packageName: string, shizukuCommands: Array<Array<string>>, adbCommands: Array<Array<string>>, requiresRestart: boolean, };
+
 export type CapturedPayload = { id: string, source: CaptureSource, isSensitive: boolean, };
 
 export type PermissionHost = "macos" | "windows" | "android" | "linux";
