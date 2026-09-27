@@ -12,13 +12,13 @@ import rikka.shizuku.SystemServiceHelper
 /**
  * Shizuku is the rung-2 setup/settings and source-attribution bridge.
  *
- * The live clipboard reader is app-owned (`ClipCascadeCapture` +
- * `ClipboardFloatingActivity` + `CaptureService`); clipboard content never
- * crosses this bridge. Shizuku remains for:
+ * The live log reader is a Shizuku user service, while CopyPaste owns the
+ * focused clipboard read after its occurrence callback. Clipboard content
+ * never crosses the privileged service. Shizuku remains for:
  * - checking whether its server is available;
  * - requesting our one-time permission; and
- * - calling the user service that applies ClipCascade-style grants and the
- *   optional clipboard-notice setting; and
+ * - calling user services for capture and the optional clipboard-notice
+ *   setting; and
  * - asking the clipboard service for source-package metadata before a read.
  */
 object ShizukuClipboard {

@@ -119,7 +119,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | A real Windows clipboard change reaches history, and private mode blocks it | Windows | Verified — WebView2 changes private mode and PowerShell writes the session clipboard |
 | Capture pipeline against the fake source | Rust | Verified |
 | `ACTION_SEND` / `ACTION_PROCESS_TEXT` reach SQLCipher | Android | Partial — debug leg only; the release leg has no `run-as` and prints `NOT ASSERTED`. `e2e-android/` follows an `ACTION_SEND` onto the screen |
-| Rung 2: the app-owned ClipCascade path | Android | Partial — the API 36 leg covers the static grants and fail-closed service state; `READ_LOGS`, overlay focus, and OEM behaviour still need device evidence |
+| Rung 2: the Shizuku UserService path | Android | Partial — the API 36 leg covers fail-closed service state; privileged logcat, overlay focus, binder loss, and OEM behaviour still need device evidence |
 | Kotlin → Rust capture bridge shape | Rust, Android | Verified — the debug APK build runs the Kotlin serializer/fixture guard, and the Rust workspace test strictly consumes that fixture |
 | `ClipCascadeCapture` / `ClipQueue` | Android | Partial — `ClipQueue` Robolectric tests run in `ci.yml`; the logcat reader and overlay hand-off still need device evidence |
 | `CaptureService` | Android | Partial — Robolectric asserts sticky-restart is `START_NOT_STICKY`; the API 36 emulator leg still proves it stays stopped without a reader |

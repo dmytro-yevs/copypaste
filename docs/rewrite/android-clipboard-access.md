@@ -15,9 +15,10 @@ Ship a **four-rung ladder**, and present rung 0 first.
    capture, a share-sheet/text-selection target, a one-tap Quick Settings tile,
    and the Mac's history over sync. A new user who does not know what ADB is
    never has to.
-2. **Rung 2 is optional advanced capture.** Shizuku applies the grants used by
-   the current ClipCascade path; CopyPaste then owns the logcat/overlay runtime
-   and reports working only after a real read (`CopyPaste-qzhu`).
+2. **Rung 2 is optional advanced capture.** Shizuku runs the narrowly filtered
+   logcat reader as shell or root; CopyPaste receives only an occurrence signal,
+   then owns the focused overlay read and reports working only after a real read
+   (`CopyPaste-qzhu`).
 3. **Direct shell-UID clipboard access is a platform spike, not a second
    shipped reader.** The current implementation stays fail-closed where OEM or
    Android policy prevents its granted runtime path.
@@ -125,7 +126,7 @@ without the user doing anything.
 |---|---|---|---|---|---|---|
 | **0 — nothing** | nothing | copies made inside CopyPaste; anything sent via share sheet or the text-selection "Copy to CopyPaste" action (`ACTION_PROCESS_TEXT`); one tap on a Quick Settings tile captures whatever is on the clipboard right now (the tile gives our activity focus, so the read is legal); everything the Mac captured, over sync | ✅ | ✅ | ✅ | n/a — this is the floor |
 | **1 — overlay** | one toggle: Settings → Display over other apps | a floating bubble the user taps after copying, without leaving the app they are in; also the background-activity-start exemption rung 2 does not need but rung 0's tile benefits from | ✅ | ✅ | ✅ (declare `specialUse` FGS) | `Settings.canDrawOverlays()` on every resume; app hibernation can revoke it |
-| **2 — Shizuku + ClipCascade grants** ⭐ | install Shizuku (Play); Developer options → Wireless debugging; pair once with a code; tap Start; grant CopyPaste's Shizuku permission once | **full background capture from every app** through CopyPaste's own logcat + overlay path after one-shot grants | ✅ after setup | ✅ | Shizuku is on Play; nothing in policy prohibits using it as a setup bridge | `READ_LOGS`, overlay, battery policy and OEM logcat behaviour still need device evidence |
+| **2 — Shizuku UserService** ⭐ | install Shizuku (Play); Developer options → Wireless debugging; pair once with a code; tap Start; grant CopyPaste's Shizuku permission once | **full background capture from every app** while Shizuku is running; its UserService owns the filtered logcat reader and CopyPaste owns the focused overlay read | ❌ start Shizuku after reboot | ✅ | Shizuku is on Play; nothing in policy prohibits using it as a setup bridge | overlay, binder loss, battery policy and OEM logcat behaviour still need device evidence |
 | **3 — become the keyboard** | switch their keyboard to ours | the only *documented, supported, reboot-proof* background access | ✅ | ✅ | ✅ | user switches keyboard back |
 | ~~4 — adb from a computer~~ | plug into a Mac, paste `pm grant … READ_LOGS` | **nothing, on Android 13+** | — | — | — | — |
 
@@ -143,24 +144,24 @@ manager that requires you to change keyboards is a keyboard product, and a bad
 keyboard loses the user more than background capture wins them. Worth
 reconsidering only if rung 2 turns out to be unusable in practice.
 
-## 4. Rung 2 in detail — Shizuku as the setup bridge
+## 4. Rung 2 in detail — Shizuku UserService
 
-**How it works.** Shizuku is not the live clipboard transport. It is the
-one-shot setup bridge that applies the grants CopyPaste's own ClipCascade path
-needs:
+**How it works.** Shizuku's maintained UserService is the live log transport.
+It runs one fixed `ClipboardService:E` logcat reader as shell or root and sends
+CopyPaste only an occurrence callback for this application id. It does not send
+clipboard content or log lines. CopyPaste then launches
+`ClipboardFloatingActivity` and reads the clipboard only after that activity
+has focus.
 
-- `pm grant <pkg> android.permission.READ_LOGS`
+The setup bridge retains the app's overlay and residency state:
+
+- `pm grant <pkg> android.permission.READ_LOGS` for the existing manifest and
+  upgrade contract; CopyPaste no longer invokes `logcat` under that app UID
 - `cmd appops set <pkg> SYSTEM_ALERT_WINDOW allow`
 - `cmd appops set <pkg> RUN_IN_BACKGROUND allow`
 - `cmd appops set <pkg> RUN_ANY_IN_BACKGROUND allow`
 - `am set-inactive <pkg> false`
 - `am set-standby-bucket <pkg> active`
-- `am force-stop <pkg>` so the new state takes effect cleanly
-
-After that, CopyPaste runs the runtime path as itself: `ClipCascadeCapture`
-tails logcat for the clipboard-denial line naming our package, launches
-`ClipboardFloatingActivity`, and reads the clipboard only after the overlay
-window has focus.
 
 What Shizuku can persist for us is narrower than "background clipboard access".
 Its user-service may set app-ops and standby state:
@@ -170,18 +171,18 @@ Its user-service may set app-ops and standby state:
 - `am set-inactive <pkg> false`
 - `am set-standby-bucket <pkg> active`
 
-It may also write the clipboard-toast setting. Shizuku may quit afterwards; the
-runtime reader is CopyPaste's own process. One privacy feature is intentionally
-stricter: while app exclusions are non-empty, CopyPaste needs Shizuku running
+It may also read or write the clipboard-toast setting. Shizuku must remain
+running while rung 2 is armed. One privacy feature is intentionally stricter:
+while app exclusions are non-empty, CopyPaste needs Shizuku running
 to ask the API 31+ clipboard service which package wrote the clip. If that
 source cannot be resolved, implicit background capture skips the event before
 reading its content. Explicit share, Process Text, tile and in-app actions do
 not depend on attribution.
 
 > **Partially verified.** The API 36 emulator leg proves the app-owned tile
-> capture, the fail-closed service state, and the static grant path. The
-> remaining unknowns are the device-only ones: `READ_LOGS`, overlay focus, OEM
-> logcat behaviour, and battery managers.
+> capture and fail-closed service state. The remaining unknowns are the
+> device-only ones: Shizuku UserService logcat access, overlay focus, binder
+> death, OEM logcat behaviour, and battery managers.
 
 **What the user installs.** [Shizuku](https://github.com/RikkaApps/Shizuku),
 Apache-2.0, ~28k stars, on Google Play as `moe.shizuku.privileged.api`; the
@@ -204,8 +205,7 @@ changes too ([Shizuku #864](https://github.com/RikkaApps/Shizuku/issues/864) —
 *marked, community report, not verified*). This is the single biggest cost of
 rung 2 and the UI must be built around it, not apologise for it afterwards.
 
-**The toast.** Every new clip we read as shell produces *"Shell pasted from your
-clipboard"* once. It can be turned off system-wide
+**The toast.** A clipboard read can produce an Android access notice. It can be turned off system-wide
 (`Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS = 0`), which shell can do —
 **offer it as an explicit, explained opt-in and never do it silently.** Turning
 off one of the OS's privacy indicators on the user's behalf is precisely the

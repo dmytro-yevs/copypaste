@@ -235,10 +235,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
 
     private fun finishArm(invoke: Invoke, copy: CaptureArmRequest) {
         if (ClipCascadeCapture.isSetupComplete(activity)) {
-            resolveArm(
-                invoke,
-                CaptureService.start(activity, copy),
-            )
+            startCapture(invoke, copy)
             return
         }
 
@@ -279,10 +276,11 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             }
             abandon(pendingShizukuArm.getAndSet(null))
             if (pendingArm.get() == null) active = null
-            val listening = prepared &&
-                CaptureService.start(activity, copy)
-
-            resolveArm(invoke, listening)
+            if (!prepared) {
+                resolveArm(invoke, false)
+                return@preparePersistentCaptureState
+            }
+            startCapture(invoke, copy)
         }
     }
 
@@ -299,6 +297,12 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
                 notificationPermission = CaptureNotifications.isPermissionGranted(activity),
             ),
         ))
+    }
+
+    private fun startCapture(invoke: Invoke, copy: CaptureArmRequest) {
+        if (!CaptureService.start(activity, copy) { listening -> resolveArm(invoke, listening) }) {
+            resolveArm(invoke, false)
+        }
     }
 
     private fun onNotificationPermissionResult(facts: NotificationPermissionFacts) {
@@ -498,13 +502,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
                 }
                 ClipCascadeCapture.markSetupComplete(activity)
                 active = null
-                resolveArm(
-                    pending.invoke,
-                    CaptureService.start(
-                        activity,
-                        pending.copy,
-                    ),
-                )
+                startCapture(pending.invoke, pending.copy)
             }
             return
         }

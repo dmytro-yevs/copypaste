@@ -5,4 +5,5 @@ interface IShizukuSettingsService {
     boolean setClipboardAccessNotifications(boolean suppressed) = 1;
     boolean preparePersistentCaptureState(String packageName) = 2;
     boolean refreshClipCascadeSetup(String packageName) = 3;
+    int clipboardAccessNotifications() = 4;
 }

@@ -39,8 +39,8 @@ So CI runs `tauri android build` and nothing else. There is no init step.
 | `app/src/main/res/values/strings.xml` | `capture_action` |
 | `app/src/main/java/com/copypaste/app/MainActivity.kt` | `onNewIntent`, so the loss notification's extra is not read off a stale intent |
 
-Everything else under `app/src/main/java/com/copypaste/app/` and the one
-`.aidl` is ours and was never in the template.
+Everything else under `app/src/main/java/com/copypaste/app/` and the AIDL
+contracts is ours and was never in the template.
 
 The Kotlin holds no policy — see
 [ADR-0005](../../../../docs/adr/0005-android-capture-in-rust-kotlin-reports.md).

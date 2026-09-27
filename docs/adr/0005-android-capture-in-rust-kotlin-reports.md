@@ -42,10 +42,13 @@ doorways — the share sheet (`ACTION_SEND`), the text-selection action
 (`copypaste_core::ingest`). The tile's tap is what gives `IntakeActivity` focus,
 and focus is the clipboard exemption we can reach with no permission at all.
 
-**Rung 2 written, partially verified.** `ShizukuSettingsService` is only the
-setup bridge: it applies the ClipCascade-style grants, standby relaxations and
-the optional toast setting. The live reader is app-owned
-(`ClipCascadeCapture` + `ClipboardFloatingActivity` + `CaptureService`).
+**Rung 2 written, partially verified.** The maintained Shizuku UserService
+starts the narrowly filtered `logcat` reader with its shell or root identity.
+It returns only a ClipboardService occurrence callback; raw log lines and
+clipboard content never cross that binder. `ClipCascadeCapture` receives the
+callback, opens `ClipboardFloatingActivity`, and the app reads only after it
+has focus. `ShizukuSettingsService` retains setup, residency, and optional
+clipboard-notice setting operations.
 
 **Rungs 1 and 3 are not built** and are not represented in the state model. An
 overlay bubble and becoming the default IME are both in the specification's
@@ -61,10 +64,11 @@ background, which is the only thing `Working` claims. Counting them would turn
 the setup screen green at the exact moment it knows least. `CopyPaste-qzhu`
 requires `record_read` to carry the `focused` fact.
 
-**Kotlin owns the device-only runtime.** The app-owned reader (`ClipCascadeCapture`
-plus `ClipboardFloatingActivity`) depends on logcat, overlay focus and Android
-service rules that Rust cannot exercise on this host. Rust therefore receives
-facts and clips, not callbacks into its own process.
+**Kotlin owns the device-only runtime.** `ShizukuCaptureService` owns the
+privileged logcat process; `ClipCascadeCapture` owns its connection, timeout,
+binder-loss handling, and focused overlay hand-off. A disconnect clears the
+live reader before posting the loss notification. Rust therefore receives facts
+and clips, not callbacks into its own process.
 
 **Kotlin queues and Rust drains once a second.** This is not clipboard polling:
 the clipboard signal is produced on the Kotlin side, and the drain only moves
@@ -87,6 +91,12 @@ No maintained package exposes this hidden clipboard-service method or its
 versioned signature. This is dependency rule exemption 1: the bridge keeps the
 AOSP API 31–33 and API 34+ signatures at the platform boundary, while Shizuku
 continues to own binder identity and transport.
+
+No maintained package exposes a product-specific, content-free interpretation
+of ClipboardService log events. That is dependency-rule exemption 1 for the
+small local user service: it accepts only the fixed ClipboardService filter,
+matches only this application id, and sends an occurrence callback. It cannot
+return log lines, clipboard values, or an arbitrary command result.
 
 The bridge targets the clipboard that owns the reading context, not user 0 or
 the default device. The numeric user ID mirrors AOSP

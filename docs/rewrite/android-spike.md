@@ -107,12 +107,10 @@ moved on an emulator; what is left is the Shizuku transport and the hardware.
 1. ~~**The Kotlin does not compile.**~~ Settled: it builds, installs, and runs.
    The AIDL package placement is still only known to *build* — whether a system
    binder accepts the stub's interface descriptor is item 3's question.
-2. **`Shizuku.newProcess` is not reachable by reflection** in the version of
-   the API library resolved. Only the toast-suppression opt-in depends on it;
-   everything else fails independently.
-3. **The app-owned ClipCascade path still needs real device proof.** The
-   runtime path is `READ_LOGS` + overlay focus + foreground service; what is
-   missing is proof on actual OEM builds, not another Shizuku-side fallback.
+2. **The Shizuku UserService capture transport needs real device proof.** The
+   runtime path is its shell or root logcat process, callback binder, overlay
+   focus, and foreground service; what is missing is proof on actual OEM
+   builds.
 4. ~~**The argument vector is wrong on this API level.**~~ Settled on API 36:
    `(String callingPackage, String attributionTag, int userId, int deviceId)`
    is the order, which is what `invoke` builds. Still open on other API levels,
@@ -139,6 +137,6 @@ moved on an emulator; what is left is the Shizuku transport and the hardware.
   rung 2 screen with the start step selected?
 * Does the tile save the clipboard in one tap, and how visible is
   `IntakeActivity` while it does?
-* Is `Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS` readable by the app
-  without the Shizuku user service? `ShizukuClipboard.isToastSuppressed`
-  assumes it is.
+* Does the Shizuku UserService read
+  `Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS` after permission is
+  granted, without an app-process `SecurityException` or repeated log noise?
