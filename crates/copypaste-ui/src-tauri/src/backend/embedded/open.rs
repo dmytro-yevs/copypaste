@@ -115,6 +115,25 @@ impl EmbeddedBackend {
         let (events, _) = tokio::sync::broadcast::channel(64);
         let (retention_shutdown, _) = watch::channel(());
         let state = BackendState::open(data_dir)?;
+        Self::open_with_state(state, clipboard, events)
+    }
+
+    #[cfg(test)]
+    pub(super) fn open_with_keyring(
+        data_dir: &Path,
+        keyring: copypaste_core::Keyring,
+        clipboard: Box<dyn Clipboard>,
+    ) -> Result<Self> {
+        let (events, _) = tokio::sync::broadcast::channel(64);
+        let state = BackendState::open_with_keyring(data_dir, keyring)?;
+        Self::open_with_state(state, clipboard, events)
+    }
+
+    fn open_with_state(
+        state: BackendState,
+        clipboard: Box<dyn Clipboard>,
+        events: tokio::sync::broadcast::Sender<copypaste_ipc::EventData>,
+    ) -> Result<Self> {
         let cloud = EmbeddedCloud::open(&state)?;
         let inner = Arc::new(Inner {
             state,

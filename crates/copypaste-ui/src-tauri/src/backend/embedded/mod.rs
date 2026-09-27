@@ -333,6 +333,7 @@ mod tests {
     use super::*;
     use crate::backend::PairingBackend;
     use crate::capture::model::CaptureSource;
+    use copypaste_core::Keyring;
     use std::sync::{Arc, Mutex};
 
     /// Records what was written, so `copy` can be asserted without a system
@@ -366,9 +367,17 @@ mod tests {
     pub(super) fn backend() -> (EmbeddedBackend, Arc<FakeClipboard>, tempfile::TempDir) {
         let dir = tempfile::TempDir::new().unwrap();
         let clipboard = Arc::new(FakeClipboard::default());
-        let backend = EmbeddedBackend::open(dir.path(), Box::new(Arc::clone(&clipboard)))
-            .expect("the embedded backend should open under a temp dir");
+        let backend = EmbeddedBackend::open_with_keyring(
+            dir.path(),
+            test_keyring(),
+            Box::new(Arc::clone(&clipboard)),
+        )
+        .expect("the embedded backend should open under a temp dir");
         (backend, clipboard, dir)
+    }
+
+    pub(super) fn test_keyring() -> Keyring {
+        Keyring::from_secret(&[0x54; 32])
     }
 
     #[test]
