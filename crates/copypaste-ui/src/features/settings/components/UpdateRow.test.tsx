@@ -139,4 +139,32 @@ describe("UpdateRow actions", () => {
     pending.resolve({ state: "up_to_date" });
     expect(await screen.findByText("CopyPaste is up to date.")).toBeTruthy();
   });
+
+  it("keeps the compact check row while a failed check recovers", async () => {
+    const pending = deferred<UpdateStatus>();
+    updater.checkForUpdate
+      .mockRejectedValueOnce({ code: "update_check_failed", retryable: true })
+      .mockReturnValueOnce(pending.promise);
+    const { user } = renderStatus({ state: "ready" });
+    const row = (await screen.findByText("App updates")).closest("section");
+    expect(row).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Check for updates" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "CopyPaste couldn't check for updates. Try again in a moment.",
+    );
+    expect(row?.getAttribute("data-state")).toBe("error");
+
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    const checking = screen.getByRole("button", { name: "Check for updates" });
+    expect(checking.hasAttribute("disabled")).toBe(true);
+    expect(checking.getAttribute("aria-busy")).toBe("true");
+    expect(row?.getAttribute("data-state")).toBe("checking");
+
+    pending.resolve({ state: "up_to_date" });
+    expect(await screen.findByText("CopyPaste is up to date.")).toBeTruthy();
+    expect(row?.getAttribute("data-state")).toBe("up_to_date");
+  });
 });

@@ -1,24 +1,41 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const call = vi.hoisted(() => vi.fn());
-const hasNativeBridge = vi.hoisted(() => vi.fn());
+const invoke = vi.hoisted(() => vi.fn());
+const currentPlatform = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/ipcCall", () => ({ call, hasNativeBridge }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@/lib/platform", () => ({ currentPlatform }));
 
 import { UI_COMMANDS } from "@/generated/ipc";
 import { checkForUpdate, UPDATE_CHECK_TIMEOUT_MS } from "./updater";
 
 beforeEach(() => {
-  call.mockReset().mockResolvedValue({ state: "up_to_date" });
-  hasNativeBridge.mockReset().mockReturnValue(true);
+  invoke.mockReset();
+  currentPlatform.mockReset().mockReturnValue("android");
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {},
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
 });
 
 describe("checkForUpdate", () => {
-  it("uses its bounded IPC deadline instead of the generic five-minute timeout", async () => {
-    await expect(checkForUpdate()).resolves.toEqual({ state: "up_to_date" });
+  it("stops waiting at its own deadline when the native command hangs", async () => {
+    vi.useFakeTimers();
+    invoke.mockReturnValue(new Promise(() => {}));
 
-    expect(call).toHaveBeenCalledWith(UI_COMMANDS.check_for_update, undefined, {
-      timeoutMs: UPDATE_CHECK_TIMEOUT_MS,
+    const outcome = checkForUpdate();
+    const rejection = expect(outcome).rejects.toMatchObject({
+      code: "timeout",
+      retryable: true,
     });
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_TIMEOUT_MS);
+
+    await rejection;
+    expect(invoke).toHaveBeenCalledWith(UI_COMMANDS.check_for_update, undefined);
   });
 });
