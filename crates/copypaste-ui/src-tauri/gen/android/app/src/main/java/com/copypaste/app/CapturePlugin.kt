@@ -402,19 +402,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun postSilentNotification(invoke: Invoke) {
-        val args = invoke.getArgs()
-        val title = args.optString("title")
-        val body = args.optString("body")
-        if (title.isBlank() || body.isBlank()) {
-            invoke.reject("The notification was incomplete.")
-            return
-        }
-        CaptureNotifications.postSaved(activity, title, body)
-        invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
-    }
-
-    @Command
     fun setToastSuppressed(invoke: Invoke) {
         // The acknowledgement gate has already run on the Rust side; reaching
         // here means the user was shown what this does and agreed.
