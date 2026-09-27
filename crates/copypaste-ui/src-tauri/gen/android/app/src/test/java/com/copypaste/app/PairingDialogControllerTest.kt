@@ -107,6 +107,26 @@ class PairingDialogControllerTest {
     }
 
     @Test
+    fun scannerFailureExplainsHowToRecoverWithoutExposingCredentials() {
+        val dialogs = PairingDialogController(activity)
+
+        dialogs.presentScanFailure()
+
+        val dialog = latestDialog()
+        assertSecure(dialog)
+        assertEquals(
+            "Can’t open QR scanner",
+            dialog.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)?.text?.toString(),
+        )
+        assertTrue(
+            dialog.findViewById<TextView>(android.R.id.message)
+                ?.text
+                ?.contains("Google Play services") == true,
+        )
+        assertNoViewValue(dialog.window!!.decorView, "SECRET-CODE")
+    }
+
+    @Test
     fun inviteAndProgressCancelAbortTheCeremony() {
         val dialogs = PairingDialogController(activity)
         var aborted = 0

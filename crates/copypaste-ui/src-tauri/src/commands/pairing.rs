@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::backend::{PairingBackend, Result};
 use crate::pairing_presentation::{
-    resolve_pairing_semantics, NativePresentationOutcome, PairingDecision,
+    resolve_pairing_semantics, NativePresentationOutcome, NativeScanOutcome, PairingDecision,
     PairingPresentationState, PairingPresenter, PairingSemantics,
 };
 use crate::SelectedBackend;
@@ -82,6 +82,10 @@ pub async fn pair_create_invite(
         NativePresentationOutcome::Unavailable => backend.pair_cancel().await.map(|progress| {
             PairingCeremony::from_progress(progress, PairingPresentationState::Unavailable)
         }),
+        NativePresentationOutcome::Cancelled => backend.pair_cancel().await.map(|progress| {
+            let presentation = presenter.state_for_progress(progress.state);
+            PairingCeremony::from_progress(progress, presentation)
+        }),
         NativePresentationOutcome::Presented => backend.pair_progress().await.map(|progress| {
             PairingCeremony::from_progress(progress, PairingPresentationState::Presented)
         }),
@@ -98,8 +102,14 @@ pub async fn pair_scan_invite(
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
-    let Some(scanned) = presenter.scan_invite() else {
-        return Ok(PairingCeremony::unavailable());
+    let scanned = match presenter.scan_invite() {
+        NativeScanOutcome::Scanned(scanned) => scanned,
+        NativeScanOutcome::Cancelled | NativeScanOutcome::Failed => {
+            let progress = backend.pair_progress().await?;
+            let presentation = presenter.state_for_progress(progress.state);
+            return Ok(PairingCeremony::from_progress(progress, presentation));
+        }
+        NativeScanOutcome::Unavailable => return Ok(PairingCeremony::unavailable()),
     };
     let progress = backend
         .pair_join(scanned.code.as_str(), scanned.addr.as_str())
@@ -173,9 +183,13 @@ pub async fn pair_reject(backend: State<'_, SelectedBackend>) -> Result<PairingC
 }
 
 #[tauri::command]
-pub async fn pair_cancel(backend: State<'_, SelectedBackend>) -> Result<PairingCeremony> {
+pub async fn pair_cancel(
+    backend: State<'_, SelectedBackend>,
+    presenter: State<'_, PairingPresenter>,
+) -> Result<PairingCeremony> {
     backend.pair_cancel().await.map(|progress| {
-        PairingCeremony::from_progress(progress, PairingPresentationState::Unavailable)
+        let presentation = presenter.state_for_progress(progress.state);
+        PairingCeremony::from_progress(progress, presentation)
     })
 }
 
