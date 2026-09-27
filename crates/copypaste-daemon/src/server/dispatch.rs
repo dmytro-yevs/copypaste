@@ -381,7 +381,10 @@ mod tests {
         assert!(requires_ready(&Method::Copy { id: "x".into() }));
         assert!(requires_ready(&Method::CopyPlainText { id: "x".into() }));
         assert!(requires_ready(&Method::Get { id: "x".into() }));
-        assert!(requires_ready(&Method::ImagePreview { id: "x".into() }));
+        assert!(requires_ready(&Method::ImagePreview {
+            id: "x".into(),
+            max_edge: None
+        }));
         assert!(requires_ready(&Method::Add {
             content: "x".into()
         }));
