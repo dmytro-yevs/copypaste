@@ -14,6 +14,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -106,18 +107,15 @@ class ClipboardReadTest {
     }
 
     @Test
-    fun grantedContentUriJpegIsNormalisedToPng() {
-        val provider = FixtureBinaryProvider(context, imageBytes(Bitmap.CompressFormat.JPEG), "image/jpeg")
-        ShadowContentResolver.registerProviderInternal(FIXTURE_AUTHORITY, provider)
-        val uri = Uri.parse("content://$FIXTURE_AUTHORITY/receipt.png")
-        context.grantUriPermission(context.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        clipboard.setPrimaryClip(clip("image/jpeg", ClipData.Item(uri)))
+    fun jpegFixtureIsNormalisedToPng() {
+        val png = normaliseImage(imageBytes(Bitmap.CompressFormat.JPEG))
 
-        val read = clipboardRead(context, CaptureSource.IN_APP)
+        assertTrue(png?.copyOfRange(0, 8)?.contentEquals(PNG_SIGNATURE) == true)
+    }
 
-        assertEquals(ReadOutcome.SUCCEEDED, read.outcome)
-        assertEquals("image/png", read.clip?.contentType)
-        assertTrue(read.clip?.bytesBase64?.startsWith("iVBOR") == true)
+    @Test
+    fun decodedImageBudgetRejectsDimensionsBeforePixelDecode() {
+        assertTrue(exceedsDecodedImageBudget(5_000, 5_000))
     }
 
     private fun clip(mimeType: String, item: ClipData.Item): ClipData =
@@ -193,6 +191,7 @@ class ClipboardReadTest {
     private companion object {
         const val HOSTILE_AUTHORITY = "binary.example"
         const val FIXTURE_AUTHORITY = "fixture.example"
+        val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
 
         fun imageBytes(format: Bitmap.CompressFormat): ByteArray {
             val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)

@@ -97,14 +97,24 @@ private fun binaryClip(
     ) return null
 
     val resolver = context.contentResolver
-    val resolvedType = resolver.getType(uri)?.lowercase()
+    val resolvedType = try {
+        resolver.getType(uri)?.lowercase()
+    } catch (_: SecurityException) {
+        return null
+    } catch (_: RuntimeException) {
+        return null
+    }
     val contentType = declaredType?.lowercase() ?: return null
     // The provider must agree with the clipboard declaration; no URI or file
     // extension is ever used as a fallback MIME classifier.
     if (resolvedType != null && resolvedType != contentType) return null
     val bytes = try {
         resolver.openInputStream(uri)?.use { input -> readBounded(input) }
+    } catch (_: IOException) {
+        null
     } catch (_: SecurityException) {
+        null
+    } catch (_: RuntimeException) {
         null
     } ?: return null
     val payload = if (contentType.startsWith("image/")) normaliseImage(bytes) ?: return null else bytes
@@ -147,15 +157,23 @@ private fun readBounded(input: java.io.InputStream): ByteArray? {
  * platform's existing binary preview and clipboard paths understand. */
 internal fun normaliseImage(source: ByteArray): ByteArray? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(source, 0, source.size, bounds)
+    try {
+        BitmapFactory.decodeByteArray(source, 0, source.size, bounds)
+    } catch (_: RuntimeException) {
+        return null
+    }
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    if (bounds.outWidth.toLong() > MAX_DECODED_IMAGE_BYTES / 4 / bounds.outHeight.toLong()) return null
-    val bitmap = BitmapFactory.decodeByteArray(
-        source,
-        0,
-        source.size,
-        BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 },
-    ) ?: return null
+    if (exceedsDecodedImageBudget(bounds.outWidth, bounds.outHeight)) return null
+    val bitmap = try {
+        BitmapFactory.decodeByteArray(
+            source,
+            0,
+            source.size,
+            BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 },
+        )
+    } catch (_: RuntimeException) {
+        null
+    } ?: return null
     return try {
         BoundedOutputStream(MAX_BINARY_BYTES).use { output ->
             if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) return null
@@ -167,6 +185,10 @@ internal fun normaliseImage(source: ByteArray): ByteArray? {
         bitmap.recycle()
     }
 }
+
+internal fun exceedsDecodedImageBudget(width: Int, height: Int): Boolean =
+    width <= 0 || height <= 0 ||
+        width.toLong() > MAX_DECODED_IMAGE_BYTES / 4 / height.toLong()
 
 private class SizeLimitExceeded : IOException()
 
