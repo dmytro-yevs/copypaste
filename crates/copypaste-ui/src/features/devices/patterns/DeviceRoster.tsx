@@ -7,11 +7,10 @@ import { DiscoveryDeviceCard } from "@/features/devices/components/DiscoveryDevi
 import { DeviceCard } from "@/features/devices/components/DeviceCard";
 import { DeviceCardSkeleton } from "@/features/devices/components/DeviceCardSkeleton";
 import {
-    discoveredDeviceIdentity,
-    discoveredStatus,
     ownDeviceStatus,
     peerStatus,
     peerIdentity,
+    type DeviceStatusPresentation,
     type DevicePresentationIdentity,
 } from "@/features/devices/model/devicePresentation";
 import {
@@ -22,6 +21,7 @@ import {
     DiscoveryStage,
     type DiscoveryStageState,
 } from "@/features/devices/patterns/DiscoveryStage";
+import { useTranslation } from "@/i18n";
 import type { DiscoveredDevice, PeerInfo } from "@/lib/ipc";
 import styles from "./DeviceRoster.module.css";
 
@@ -30,11 +30,11 @@ export type DeviceSelectionKey =
 
 interface OwnDevice {
     readonly name: string;
-    readonly captureRunning?: boolean;
     readonly privateMode?: boolean;
     readonly loading: boolean;
     readonly failed: boolean;
     readonly identity: DevicePresentationIdentity;
+    readonly status: DeviceStatusPresentation;
 }
 
 interface DeviceRosterProps {
@@ -74,25 +74,24 @@ export function DeviceRoster({
     onSelectDiscovered,
     onRefreshDiscovery,
 }: DeviceRosterProps) {
+    const { t } = useTranslation();
     const pairingsRemaining = Math.max(0, MAX_PAIRINGS - peers.length);
     const discoveryBusy = discoveryLoading || refreshingDiscovery;
-    const discoveryState: DiscoveryStageState = refreshingDiscovery
-        ? "scanning"
-        : discovered.length > 0
-          ? "results"
+    const discoveryState: DiscoveryStageState = discovered.length > 0
+        ? "results"
+        : discoveryFailed
+          ? "error"
           : discoveryLoading
             ? "checking"
-            : discoveryFailed
-              ? "error"
-              : "idle";
+            : "idle";
     const discoveryActionLabel =
-        discoveryState === "scanning"
-            ? "Scanning…"
+        refreshingDiscovery
+            ? t("devices.discovered.scanning")
             : discoveryState === "results"
-              ? "Refresh"
+              ? t("devices.discovered.refresh")
               : discoveryState === "error"
-                ? "Try again"
-                : "Scan";
+                ? t("common.tryAgain")
+                : t("devices.discovered.scan");
 
     return (
         <div
@@ -109,28 +108,28 @@ export function DeviceRoster({
                             id="your-devices-heading"
                             className={styles.heading}
                         >
-                            Your devices
+                            {t("devices.roster.yourDevices")}
                         </h2>
                     </div>
                 </div>
                 <Grid columns={1} gap="sm" className={styles.deviceGrid}>
                     {own.loading ? (
                         <DeviceCardSkeleton
-                            label="Checking this device"
+                            label={t("devices.own.loading")}
                             identity={own.identity}
                             name={own.name}
-                            trustLabel="This device"
+                            trustLabel={t("devices.detail.thisDevice")}
                         />
                     ) : (
                         <DeviceCard
                             name={own.name}
                             identity={own.identity}
-                            trustLabel="This device"
+                            trustLabel={t("devices.detail.thisDevice")}
                             status={ownDeviceStatus(
                                 false,
                                 own.failed,
-                                own.captureRunning,
                                 own.privateMode,
+                                own.status,
                             )}
                             selectionKey="own"
                             selected={selected === "own"}
@@ -142,7 +141,7 @@ export function DeviceRoster({
                             key={peer.pairing_id}
                             name={peer.name}
                             identity={peerIdentity(peer)}
-                            trustLabel="Unverified device name"
+                            trustLabel={t("devices.peer.nameUnverified")}
                             status={peerStatus(
                                 peer,
                                 peerHealth[peer.pairing_id],
@@ -155,7 +154,7 @@ export function DeviceRoster({
                         />
                     ))}
                     {peersLoading && peers.length === 0 ? (
-                        <DeviceCardSkeleton label="Checking paired devices" />
+                        <DeviceCardSkeleton label={t("devices.syncReadiness.peersLoading")} />
                     ) : null}
                 </Grid>
                 {!peersLoading && !peersFailed ? (
@@ -164,8 +163,10 @@ export function DeviceRoster({
                             <strong>{pairingsRemaining}</strong>
                             <span>
                                 {pairingsRemaining === 0
-                                    ? "Pairing limit reached · remove a device to connect another."
-                                    : `more device pairing${pairingsRemaining === 1 ? "" : "s"} available.`}
+                                    ? t("devices.roster.pairingLimit")
+                                    : t("devices.roster.pairingsAvailable", {
+                                        count: pairingsRemaining,
+                                    })}
                             </span>
                         </span>
                     </p>
@@ -182,7 +183,7 @@ export function DeviceRoster({
                             id="cloud-connection-heading"
                             className={styles.heading}
                         >
-                            Cloud connection
+                            {t("devices.roster.cloudConnection")}
                         </h2>
                     </div>
                 </div>
@@ -202,7 +203,7 @@ export function DeviceRoster({
                             id="network-devices-heading"
                             className={styles.heading}
                         >
-                            Discovered on your network
+                            {t("devices.discovered.heading")}
                         </h2>
                         <Button
                             type="button"
@@ -217,7 +218,7 @@ export function DeviceRoster({
                                 name={
                                     discoveryState === "idle" ||
                                     discoveryState === "checking" ||
-                                    discoveryState === "scanning"
+                                    refreshingDiscovery
                                         ? "scan"
                                         : "refresh"
                                 }
@@ -229,19 +230,8 @@ export function DeviceRoster({
                 </div>
                 <DiscoveryStage
                     state={discoveryState}
-                    devices={discovered.map((device) => ({
-                        id: device.discovery_id,
-                        name: device.name,
-                        identity: discoveredDeviceIdentity(device),
-                        address: device.addr,
-                        status: discoveredStatus(device).label,
-                        latencyMs:
-                            device.details?.latency?.connect_latency_ms ?? null,
-                        paired: device.paired,
-                        selected:
-                            selected === `discovered:${device.discovery_id}`,
-                        onSelect: () => onSelectDiscovered(device),
-                    }))}
+                    deviceCount={discovered.length}
+                    refreshing={refreshingDiscovery}
                 >
                     <Grid columns={1} gap="sm" className={styles.discoveryGrid}>
                         {discovered.map((device) => (

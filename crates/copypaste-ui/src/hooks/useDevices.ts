@@ -48,7 +48,8 @@ export function useDiscovered() {
   return useQuery<DiscoveredDevice[]>({
     queryKey: DISCOVERED_KEY,
     queryFn: listDiscovered,
-    refetchInterval: DISCOVERED_POLL_MS,
+    refetchInterval: (q) =>
+      q.state.status === "error" ? POLL_BACKOFF_MS : DISCOVERED_POLL_MS,
     // A build with no discovery answers `unavailable`, which is a fact rather
     // than a transient failure.
     retry: false,

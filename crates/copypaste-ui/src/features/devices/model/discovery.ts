@@ -7,7 +7,6 @@ import type {
 import {
     DEVICE_FORM_FACTOR_LABELS,
     DEVICE_PLATFORM_LABELS,
-    type DevicePresentationIdentity,
 } from "./identity";
 import { observedPresence } from "./peerState";
 
@@ -21,22 +20,9 @@ export type DiscoveryStageState =
 export interface DiscoveryStagePresentation {
     readonly title: string;
     readonly body: string;
-    readonly radarLabel: string;
     readonly busy: boolean;
-    readonly radarActive: boolean;
-    readonly unavailable: boolean;
-    readonly unavailableIcon: "wifiOff" | null;
-    readonly a11y: {
-        readonly role?: "status" | "alert";
-        readonly live?: "polite" | "assertive";
-        readonly atomic?: true;
-        readonly label?: string;
-    };
-}
-
-export interface RadarDevicePresentation {
-    readonly distance: "near" | "middle" | "far" | "unknown";
-    readonly a11yLabel: string;
+    readonly icon: "wifiOff" | "devices" | null;
+    readonly tone: "neutral" | "danger";
 }
 
 export function discoveryStagePresentation(
@@ -45,7 +31,6 @@ export function discoveryStagePresentation(
     const copy = (key: DiscoveryStageState) => ({
         title: t(`devices.presentation.discovery.stage.${key}.title`),
         body: t(`devices.presentation.discovery.stage.${key}.body`),
-        radarLabel: t("devices.presentation.discovery.radar.label"),
     });
     switch (state) {
         case "checking":
@@ -54,68 +39,32 @@ export function discoveryStagePresentation(
             return {
                 ...stage,
                 busy: true,
-                radarActive: true,
-                unavailable: false,
-                unavailableIcon: null,
-                a11y: {
-                    role: "status",
-                    live: "polite",
-                    atomic: true,
-                    label: `${stage.title} ${stage.body}`,
-                },
+                icon: null,
+                tone: "neutral" as const,
             };
         }
         case "error":
             return {
                 ...copy(state),
                 busy: false,
-                radarActive: false,
-                unavailable: true,
-                unavailableIcon: "wifiOff",
-                a11y: { role: "alert", live: "assertive", atomic: true },
+                icon: "wifiOff",
+                tone: "danger",
             };
         case "idle":
+            return {
+                ...copy(state),
+                busy: false,
+                icon: "devices",
+                tone: "neutral",
+            };
         case "results":
             return {
                 ...copy(state),
                 busy: false,
-                radarActive: true,
-                unavailable: false,
-                unavailableIcon: null,
-                a11y: {},
+                icon: null,
+                tone: "neutral",
             };
     }
-}
-
-export function radarDevicePresentation({
-    identity,
-    address,
-    latencyMs,
-    status,
-}: {
-    readonly identity: DevicePresentationIdentity;
-    readonly address: string;
-    readonly latencyMs?: number | null;
-    readonly status: string;
-}): RadarDevicePresentation {
-    const distance =
-        typeof latencyMs !== "number"
-            ? "unknown"
-            : latencyMs <= 35
-              ? "near"
-              : latencyMs <= 90
-                ? "middle"
-                : "far";
-    const latency =
-        typeof latencyMs === "number"
-            ? t("devices.presentation.discovery.radar.latencyMilliseconds", {
-                  count: latencyMs,
-              })
-            : t("devices.presentation.discovery.radar.latencyUnknown");
-    return {
-        distance,
-        a11yLabel: `${DEVICE_PLATFORM_LABELS[identity.platform]}. ${address}. ${latency}. ${status}.`,
-    };
 }
 
 export function discoveryResultsPresentation(count: number): {
@@ -125,11 +74,11 @@ export function discoveryResultsPresentation(count: number): {
     return {
         label: t(
             count === 1
-                ? "devices.presentation.discovery.radar.found_one"
-                : "devices.presentation.discovery.radar.found_other",
+                ? "devices.presentation.discovery.results.found_one"
+                : "devices.presentation.discovery.results.found_other",
             { count },
         ),
-        detail: t("devices.presentation.discovery.radar.foundDetail"),
+        detail: t("devices.presentation.discovery.results.foundDetail"),
     };
 }
 

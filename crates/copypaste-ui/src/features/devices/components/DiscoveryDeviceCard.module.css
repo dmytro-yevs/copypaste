@@ -16,11 +16,6 @@
     box-shadow: var(--sh1);
     white-space: normal;
     text-align: start;
-    transition:
-        border-color var(--dur-fast) var(--ease),
-        background-color var(--dur-fast) var(--ease),
-        box-shadow var(--dur-fast) var(--ease);
-    animation: discovery-device-in var(--dur) var(--ease) both;
 }
 
 .root > [data-slot="button-content"] {
@@ -91,19 +86,5 @@
         min-block-size: calc(var(--ctl-h-lg) + var(--s-6));
         padding: var(--s-2) var(--s-3);
         gap: var(--s-2);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .root {
-        transition: none;
-        animation: none;
-    }
-}
-
-@keyframes discovery-device-in {
-    from {
-        opacity: 0;
-        transform: translateY(var(--s-1));
     }
 }

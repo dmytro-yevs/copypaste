@@ -48,15 +48,23 @@ export function peerStatus(
 export function ownDeviceStatus(
     loading: boolean,
     failed: boolean,
-    captureRunning: boolean | undefined,
     privateMode: boolean | undefined,
+    captureStatus?: DeviceStatusPresentation,
+    captureFailed = false,
 ): DeviceStatusPresentation {
     if (loading) return deviceStatus("refresh", t("devices.presentation.status.waiting"), "busy");
     if (failed) return deviceStatus("xCircle", t("devices.presentation.status.unavailable"), "danger");
-    if (privateMode) return deviceStatus("circle", t("devices.presentation.status.paused"), "neutral");
-    return captureRunning
-        ? deviceStatus("checkCircle", t("devices.presentation.status.captureActive"), "ready")
-        : deviceStatus("circle", t("devices.presentation.status.paused"), "neutral");
+    if (privateMode) return deviceStatus("circle", t("devices.presentation.status.privateMode"), "neutral");
+    if (captureFailed) return deviceStatus(
+        "xCircle",
+        t("devices.presentation.status.captureUnavailable"),
+        "danger",
+    );
+    return captureStatus ?? deviceStatus(
+        "refresh",
+        t("devices.presentation.status.captureChecking"),
+        "busy",
+    );
 }
 
 export function discoveredStatus(
