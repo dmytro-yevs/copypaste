@@ -4,6 +4,12 @@ use tauri::{ipc::Channel, AppHandle};
 use crate::backend::{UiBoundaryErrorCode, UiError};
 
 #[cfg(target_os = "android")]
+const ANDROID_UPDATE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+#[cfg(target_os = "android")]
+const ANDROID_UPDATE_INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+#[cfg(target_os = "android")]
 pub mod android;
 mod config;
 #[cfg(target_os = "macos")]
@@ -82,7 +88,7 @@ pub async fn check_for_update(
     }
     #[cfg(target_os = "android")]
     {
-        let Some(updater) = config::updater(&app, None)? else {
+        let Some(updater) = config::updater(&app, Some(ANDROID_UPDATE_CHECK_TIMEOUT))? else {
             return Ok(UpdateStatus::Unconfigured);
         };
         Ok(
@@ -125,7 +131,7 @@ pub async fn install_update(
     }
     #[cfg(target_os = "android")]
     {
-        let Some(updater) = config::updater(&app, None)? else {
+        let Some(updater) = config::updater(&app, Some(ANDROID_UPDATE_INSTALL_TIMEOUT))? else {
             return Ok(UpdateStatus::Unconfigured);
         };
         let Some(update) = updater
