@@ -53,6 +53,11 @@ name: Android emulator
 on:
   workflow_call:
     inputs:
+      mode:
+        description: Run the critical PR smoke or the full compatibility matrix.
+        required: false
+        type: string
+        default: full
       # Optional: the nightly schedule sweeps all five API levels internally
       # (see the emulator job's matrix below) and never has one level to pass.
       api-level:
@@ -64,6 +69,12 @@ on:
         default: google_apis
   workflow_dispatch:
     inputs:
+      mode:
+        description: Full keeps ABI, release, upgrade, cloud, and API 33 coverage.
+        required: true
+        default: full
+        type: choice
+        options: [critical, full]
       api-level:
         description: "Emulator API level"
         required: true
@@ -159,6 +170,7 @@ jobs:
   # audit, so it spends runner-minutes rather than wall-clock.
   # ---------------------------------------------------------------------------
   link-abis:
+    if: inputs.mode == 'full'
     name: Link Android ABI (${{ matrix.triple }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -316,6 +328,7 @@ jobs:
             dependency-check-12-${{ runner.os }}-
 
       - name: Audit resolved Android dependencies
+        if: inputs.mode == 'full'
         working-directory: crates/copypaste-ui/src-tauri/gen/android
         timeout-minutes: 20
         env:
@@ -478,6 +491,7 @@ jobs:
           APK: dist/copypaste-emulator-x86_64-debug.apk
           SMOKE_OUT: artifacts/android-smoke
           HARNESS_OUT: ${{ github.workspace }}/artifacts/android-ui
+          COPYPASTE_SMOKE_PROFILE: ${{ inputs.mode == 'full' && 'full' || 'critical' }}
 
       # Always: a failed assertion is exactly when the logcat, the screenshot
       # and the pulled database are worth having.
@@ -501,6 +515,7 @@ jobs:
   # never-published emulator fixture; ADR-0006 requires the release workflow to
   # fail closed rather than use such a key for a published artifact.
   release-apk-shard:
+    if: inputs.mode == 'full'
     name: Build release APK shard (${{ matrix.variant }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -633,6 +648,7 @@ jobs:
           retention-days: 7
 
   release-apk:
+    if: inputs.mode == 'full'
     name: Sign release emulator APKs
     needs: release-apk-shard
     runs-on: ubuntu-24.04
@@ -760,6 +776,7 @@ jobs:
 
   # The narrower question, on the artefact that ships.
   release-emulator:
+    if: inputs.mode == 'full'
     name: Launch the shipped build
     needs: release-apk
     runs-on: ubuntu-24.04
@@ -834,6 +851,7 @@ jobs:
           retention-days: 14
 
   release-api33-smoke:
+    if: inputs.mode == 'full'
     name: Launch the shipped build (API 33)
     needs: release-apk
     runs-on: ubuntu-24.04
