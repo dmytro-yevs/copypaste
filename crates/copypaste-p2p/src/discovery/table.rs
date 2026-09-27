@@ -164,13 +164,14 @@ impl PeerTable {
 }
 
 fn canonical_endpoint(addr: SocketAddr) -> SocketAddr {
-    let ip = match addr.ip() {
-        std::net::IpAddr::V6(ip) => ip
+    match addr {
+        SocketAddr::V6(addr) => addr
+            .ip()
             .to_ipv4_mapped()
-            .map_or(std::net::IpAddr::V6(ip), std::net::IpAddr::V4),
-        ip => ip,
-    };
-    SocketAddr::new(ip, addr.port())
+            .map(|ip| SocketAddr::new(std::net::IpAddr::V4(ip), addr.port()))
+            .unwrap_or(SocketAddr::V6(addr)),
+        addr => addr,
+    }
 }
 
 /// Whether a transport observation is still inside the common discovery TTL.
@@ -386,6 +387,41 @@ mod tests {
         );
 
         assert_eq!(table.snapshot(10).len(), 4);
+    }
+
+    #[test]
+    fn scoped_ipv6_endpoints_remain_distinct() {
+        let mut table = PeerTable::default();
+        let ip = "fe80::1".parse().unwrap();
+        table.observe(
+            "link-a._copypaste._tcp.local.",
+            peer_at(
+                "link-a",
+                SocketAddr::V6(std::net::SocketAddrV6::new(ip, crate::DEFAULT_PORT, 0, 2)),
+                10,
+            ),
+            10,
+        );
+        table.observe(
+            "link-b._copypaste._tcp.local.",
+            peer_at(
+                "link-b",
+                SocketAddr::V6(std::net::SocketAddrV6::new(ip, crate::DEFAULT_PORT, 0, 3)),
+                10,
+            ),
+            10,
+        );
+
+        let peers = table.snapshot(10);
+        assert_eq!(peers.len(), 2);
+        let scopes: Vec<u32> = peers
+            .iter()
+            .map(|peer| match peer.addr {
+                SocketAddr::V6(addr) => addr.scope_id(),
+                SocketAddr::V4(_) => panic!("link-local endpoint became IPv4"),
+            })
+            .collect();
+        assert_eq!(scopes, [2, 3]);
     }
 
     #[test]
