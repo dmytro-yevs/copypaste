@@ -25,8 +25,9 @@ pub use config::{
 pub use error::ErrorCode;
 pub use health::SettingsHealth;
 pub use limits::{
-    clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CONTENT_BYTES, MAX_FRAME_BYTES,
-    MAX_PAGE, MAX_PAGE_CONTENT_BYTES,
+    clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CLOUD_METADATA_BYTES,
+    MAX_CONTENT_BYTES, MAX_FRAME_BYTES, MAX_P2P_METADATA_BYTES, MAX_PAGE, MAX_PAGE_CONTENT_BYTES,
+    MAX_SOURCE_APP_ICON_BYTES, SOURCE_APP_ICON_EDGE,
 };
 pub use payload::{
     BackupData, CloudStatusData, CloudSyncData, DeviceClass, DeviceDetails,
