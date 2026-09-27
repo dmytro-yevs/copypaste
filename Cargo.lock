@@ -1058,6 +1058,7 @@ dependencies = [
  "copypaste-p2p",
  "copypaste-retry",
  "copypaste-runtime-log",
+ "copypaste-source-app",
  "directories",
  "futures-util",
  "hex",

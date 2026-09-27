@@ -129,6 +129,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::CopyPlainText { .. }
         | Method::Get { .. }
         | Method::ImagePreview { .. }
+        | Method::SourceAppIcon { .. }
         | Method::Add { .. }
         | Method::Delete { .. }
         | Method::DeleteAll { .. }
@@ -257,6 +258,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             id: item_id,
             max_edge,
         } => items::image_preview(state, id, &item_id, max_edge),
+        Method::SourceAppIcon { id: item_id } => items::source_app_icon(state, id, &item_id),
         Method::Add { content } => items::add(state, id, &content),
         Method::Delete { id: item_id } => items::delete(state, id, &item_id),
         Method::DeleteAll { through } => items::delete_all(state, id, through),

@@ -4,6 +4,7 @@
 //! product `Backend` contract. They own publication and version bookkeeping so
 //! every successful item mutation has the same observable side effects.
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::{IngestError, Ingested, ItemCursor};
 use copypaste_ipc::{ImagePreview, Item, MAX_PAGE_CONTENT_BYTES};
 
@@ -108,9 +109,24 @@ pub(super) async fn add_captured(
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
 ) -> Result<Option<CaptureWrite>> {
+    add_captured_with_source_icon(backend, content, source, app_bundle_id, app_name, None).await
+}
+
+pub(super) async fn add_captured_with_source_icon(
+    backend: &EmbeddedBackend,
+    content: &str,
+    source: CaptureSource,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    source_icon: Option<&crate::capture::model::CaptureSourceIcon>,
+) -> Result<Option<CaptureWrite>> {
     let content = content.to_string();
     let app_bundle_id = app_bundle_id.map(str::to_owned);
     let app_name = app_name.map(str::to_owned);
+    let source_icon = source_icon.and_then(|icon| {
+        let png = STANDARD.decode(&icon.png_base64).ok()?;
+        copypaste_core::SourceAppIconMetadata::new(&png, icon.width, icon.height)
+    });
     backend
         .blocking(move |inner| {
             let settings = inner.settings();
@@ -134,7 +150,15 @@ pub(super) async fn add_captured(
             let sensitive_floor = app_bundle_id
                 .as_deref()
                 .is_some_and(copypaste_core::sensitive::is_password_manager_app);
-            match copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
+            let metadata = (!sensitive_floor)
+                .then(|| {
+                    source_icon.map(|source_app_icon| copypaste_core::PayloadMetadata {
+                        file: None,
+                        source_app_icon: Some(source_app_icon),
+                    })
+                })
+                .flatten();
+            match copypaste_core::ingest::ingest_into_with_capture_source_metadata_with_current_retention(
                 &inner.state.store,
                 &inner.state.detector,
                 &inner.state.keyring,
@@ -144,6 +168,7 @@ pub(super) async fn add_captured(
                 sensitive_floor,
                 app_bundle_id.as_deref(),
                 app_name.as_deref(),
+                metadata.as_ref(),
                 &settings,
                 || inner.settings(),
             ) {
@@ -178,11 +203,38 @@ pub(super) async fn add_captured_binary(
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
 ) -> Result<Option<CaptureWrite>> {
+    add_captured_binary_with_source_icon(
+        backend,
+        bytes,
+        content_type,
+        filename,
+        source,
+        app_bundle_id,
+        app_name,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn add_captured_binary_with_source_icon(
+    backend: &EmbeddedBackend,
+    bytes: &[u8],
+    content_type: &str,
+    filename: Option<&str>,
+    source: CaptureSource,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    source_icon: Option<&crate::capture::model::CaptureSourceIcon>,
+) -> Result<Option<CaptureWrite>> {
     let bytes = bytes.to_vec();
     let content_type = content_type.to_string();
     let filename = filename.map(str::to_owned);
     let app_bundle_id = app_bundle_id.map(str::to_owned);
     let app_name = app_name.map(str::to_owned);
+    let source_icon = source_icon.and_then(|icon| {
+        let png = STANDARD.decode(&icon.png_base64).ok()?;
+        copypaste_core::SourceAppIconMetadata::new(&png, icon.width, icon.height)
+    });
     backend
         .blocking(move |inner| {
             let settings = inner.settings();
@@ -214,14 +266,24 @@ pub(super) async fn add_captured_binary(
             } else {
                 copypaste_ipc::content_type::FILE
             };
-            let metadata = (!content_type.starts_with("image/"))
+            let file = (!content_type.starts_with("image/"))
                 .then(|| {
                     filename.and_then(|name| {
                         copypaste_core::FileMetadata::new(name, content_type.clone())
                     })
                 })
                 .flatten();
-            match copypaste_core::ingest_binary_into_with_capture_source(
+            let metadata = (!sensitive_floor)
+                .then(|| {
+                    (file.is_some() || source_icon.is_some()).then(|| {
+                        copypaste_core::PayloadMetadata {
+                            file,
+                            source_app_icon: source_icon,
+                        }
+                    })
+                })
+                .flatten();
+            match copypaste_core::ingest_binary_into_with_capture_source_metadata(
                 &inner.state.store,
                 &inner.state.keyring,
                 &bytes,
@@ -268,6 +330,30 @@ pub(super) async fn image_preview(
     let id = id.to_string();
     backend
         .blocking(move |inner| inner.image_preview(&id, max_edge))
+        .await
+}
+
+pub(super) async fn source_app_icon(
+    backend: &EmbeddedBackend,
+    id: &str,
+) -> Result<Option<ImagePreview>> {
+    let id = id.to_string();
+    backend
+        .blocking(move |inner| {
+            let icon = inner
+                .state
+                .store
+                .source_app_icon_metadata(&id)
+                .map_err(|_| BackendError::internal("history could not be read"))?;
+            let Some(icon) = icon else {
+                return Ok(None);
+            };
+            Ok(Some(ImagePreview {
+                png_base64: icon.png_base64,
+                width: icon.width,
+                height: icon.height,
+            }))
+        })
         .await
 }
 

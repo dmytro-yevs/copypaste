@@ -298,6 +298,7 @@ export function LibraryInspectorPanel({
                                 className={styles.applicationValue}
                             >
                                 <SourceAppIcon
+                                    itemId={item.id}
                                     bundleId={item.source_app_bundle_id}
                                     Fallback={SourceIcon}
                                     fallbackText={source.label.slice(0, 2)}
@@ -401,6 +402,7 @@ export function LibraryInspectorPanel({
                     <div className={styles.source}>
                         {source.available ? (
                             <SourceAppIcon
+                                itemId={item.id}
                                 bundleId={item.source_app_bundle_id}
                                 Fallback={SourceIcon}
                                 fallbackText={source.label.slice(0, 2)}
