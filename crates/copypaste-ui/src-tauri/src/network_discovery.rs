@@ -19,6 +19,7 @@ const MSG_DISCOVERY_UNAVAILABLE: &str = "Network discovery is unavailable.";
 
 static DISCOVERY: OnceLock<AndroidNetworkDiscovery> = OnceLock::new();
 static LIFECYCLE: OnceLock<LifecycleCoordinator> = OnceLock::new();
+static LOCAL_ADDRS: OnceLock<copypaste_p2p::netif::LocalAddrs> = OnceLock::new();
 
 #[derive(Deserialize)]
 struct Availability {
@@ -160,6 +161,14 @@ fn nsd_device(
         return None;
     }
     let host: std::net::IpAddr = peer.host.parse().ok()?;
+    if copypaste_p2p::netif::is_own_endpoint(
+        LOCAL_ADDRS.get_or_init(copypaste_p2p::netif::LocalAddrs::default),
+        PORT,
+        std::net::SocketAddr::new(host, peer.port),
+        now_ms,
+    ) {
+        return None;
+    }
     let found = copypaste_p2p::discovery::peer_from_record(
         &peer.service_name,
         host,
@@ -224,6 +233,29 @@ pub fn plugin() -> TauriPlugin<Wry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn resolved_peer(host: &str, port: u16, last_seen_ms: i64) -> ResolvedPeer {
+        ResolvedPeer {
+            service_name: "phone._copypaste._tcp.local.".into(),
+            host: host.into(),
+            port,
+            attributes: copypaste_p2p::discovery::advertisement_attributes("Phone", &[]).unwrap(),
+            last_seen_ms,
+        }
+    }
+
+    #[test]
+    fn nsd_records_filter_this_device_before_they_reach_discovery() {
+        let now = copypaste_core::now_ms();
+
+        assert!(nsd_device(resolved_peer("127.0.0.1", PORT, now), now, &[]).is_none());
+        assert!(nsd_device(resolved_peer("::1", PORT, now), now, &[]).is_none());
+        assert!(nsd_device(resolved_peer("::ffff:127.0.0.1", PORT, now), now, &[]).is_none());
+
+        assert!(nsd_device(resolved_peer("127.0.0.1", PORT + 1, now), now, &[]).is_some());
+        assert!(nsd_device(resolved_peer("192.0.2.1", PORT, now), now, &[]).is_some());
+        assert!(nsd_device(resolved_peer("2001:db8::1", PORT, now), now, &[]).is_some());
+    }
 
     #[test]
     fn merge_keeps_mdns_and_adds_unseen_nsd_peers() {

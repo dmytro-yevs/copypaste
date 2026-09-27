@@ -11,7 +11,6 @@
 //! receiver, so they can be driven from a plain `Vec` of events with no network
 //! and no daemon.
 
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::Duration;
 
@@ -22,7 +21,7 @@ use super::names::{instance_of, sanitise_instance};
 use super::record::{build_service_info, peer_from_resolved};
 use super::table::{now_ms, DiscoveredPeer, PeerTable};
 use super::DiscoveryError;
-use crate::netif::LocalAddrs;
+use crate::netif::{is_own_endpoint, LocalAddrs};
 use crate::SERVICE_TYPE;
 
 /// How long teardown waits for the mDNS daemon to acknowledge. Bounded so
@@ -65,26 +64,6 @@ impl Shared {
             ..Self::default()
         }
     }
-}
-
-/// Whether a resolved address is this device's own listener.
-///
-/// The fullname check ([`is_self`]) is the first line and handles the ordinary
-/// case, but it is only as good as the registration we think we hold: it is
-/// `None` when mDNS accepted a browse and refused our registration, and it is
-/// briefly stale after a conflict-driven rename, and in both windows our own
-/// record is taken for a peer. What follows is a timer dialling this device's
-/// own listener, which the responder refuses with
-/// [`SyncError::SelfSync`](crate::sync::SyncError::SelfSync) — correct, and a
-/// round wasted every interval.
-///
-/// The endpoint is the fact that does not depend on any of that: an
-/// advertisement pointing at one of our own addresses *on our own port* is
-/// ours. A second daemon on the same host binds a different port, so it is
-/// still a peer; a device elsewhere on the LAN using the same port has an
-/// address that is not ours.
-fn is_own_endpoint(shared: &Shared, addr: SocketAddr, now_ms: i64) -> bool {
-    addr.port() == shared.port && shared.own_addrs.is_local(addr.ip(), now_ms)
 }
 
 #[derive(Debug, Clone)]
@@ -307,7 +286,7 @@ fn browse_loop(shared: &Shared, events: impl IntoIterator<Item = ServiceEvent>) 
                 let Some(peer) = peer_from_resolved(&resolved, now) else {
                     continue;
                 };
-                if is_own_endpoint(shared, peer.addr, now) {
+                if is_own_endpoint(&shared.own_addrs, shared.port, peer.addr, now) {
                     continue;
                 }
                 lock(&shared.table).observe(&resolved.fullname, peer, now);
