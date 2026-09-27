@@ -46,6 +46,7 @@
     "start_service",
     "restart_service",
     "hide_window",
+    "set_quick_paste_preview",
     "show_main_window",
     "set_allow_screenshots",
     "get_default_shortcut",

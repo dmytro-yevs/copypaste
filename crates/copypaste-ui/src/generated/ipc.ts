@@ -30,6 +30,10 @@ export type CaptureSnapshot = { rung: CaptureRung, health: CaptureHealth, shizuk
 
 export type CaptureSetupInstructions = { packageName: string, shizukuCommands: Array<Array<string>>, adbCommands: Array<Array<string>>, requiresRestart: boolean, };
 
+export type QuickPastePreviewSide = "left" | "right" | "hidden";
+
+export type QuickPastePreviewLayout = { side: QuickPastePreviewSide, width: number, };
+
 export type CapturedPayload = { id: string, source: CaptureSource, isSensitive: boolean, };
 
 export type PermissionHost = "macos" | "windows" | "android" | "linux";

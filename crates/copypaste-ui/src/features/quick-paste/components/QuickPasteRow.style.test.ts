@@ -46,4 +46,9 @@ describe("QuickPasteRow compact presentation", () => {
     expect(hoverRule).toBeDefined();
     expect(hoverRule).not.toContain("transform");
   });
+
+  it("does not render a competing row tooltip", () => {
+    expect(component).not.toContain("TooltipRoot");
+    expect(component).not.toContain("TooltipContent");
+  });
 });

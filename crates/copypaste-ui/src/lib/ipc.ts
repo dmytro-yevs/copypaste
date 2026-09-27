@@ -19,6 +19,7 @@ import type {
   PairingCeremony,
   PeerInfo,
   PrivateModeData,
+  QuickPastePreviewLayout,
   ServiceState,
   StatusData,
   SyncResult,
@@ -65,6 +66,7 @@ export type {
   PairingTone,
   PeerInfo,
   PrivateModeData,
+  QuickPastePreviewLayout,
   ServiceState,
   StatusData,
   SyncResult,
@@ -195,6 +197,11 @@ export function reorderPinned(ids: readonly string[]): Promise<void> {
 
 export function getStatus(): Promise<StatusData> {
   return call(UI_COMMANDS.status);
+}
+
+/** Reserves inline space in the existing protected Quick Paste window. */
+export function setQuickPastePreview(open: boolean): Promise<QuickPastePreviewLayout> {
+  return call(UI_COMMANDS.set_quick_paste_preview, { open });
 }
 
 export function setDeviceName(name: string): Promise<void> {

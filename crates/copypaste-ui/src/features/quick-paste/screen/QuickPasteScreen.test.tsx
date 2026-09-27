@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ const ipc = vi.hoisted(() => ({
   getClipboardWriteAvailability: vi.fn(),
   listItems: vi.fn(),
   searchItems: vi.fn(),
+  setQuickPastePreview: vi.fn(),
 }));
 const lifecycle = vi.hoisted(() => ({ dismiss: vi.fn(), generation: 0 }));
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
@@ -64,6 +65,7 @@ describe("quickPastePresentation", () => {
     ipc.getClipboardWriteAvailability.mockReset().mockResolvedValue("available");
     ipc.listItems.mockReset();
     ipc.searchItems.mockReset().mockResolvedValue(page([]));
+    ipc.setQuickPastePreview.mockReset().mockResolvedValue({ side: "hidden", width: 0 });
     lifecycle.dismiss.mockReset();
     lifecycle.generation = 0;
     toast.error.mockReset();
@@ -106,6 +108,58 @@ describe("quickPastePresentation", () => {
     } finally {
       detected.mockRestore();
     }
+  });
+
+  it("opens one side preview for selection changes and releases it on unmount", async () => {
+    const first = item({ id: "first", content: "first preview" });
+    const second = item({ id: "second", content: "second preview" });
+    ipc.listItems.mockResolvedValue(page([first, second]));
+    ipc.setQuickPastePreview.mockResolvedValue({ side: "right", width: 320 });
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    const preview = await screen.findByLabelText("Clipboard preview");
+    expect(within(preview).getByText("first preview")).toBeTruthy();
+    expect(ipc.setQuickPastePreview).toHaveBeenCalledWith(true);
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{ArrowDown}");
+    expect(within(preview).getByText("second preview")).toBeTruthy();
+    expect(ipc.setQuickPastePreview.mock.calls.filter(([open]) => open === true)).toHaveLength(1);
+
+    unmount();
+    expect(ipc.setQuickPastePreview).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps sensitive selections out of the side preview", async () => {
+    const secret = item({ content: null, is_sensitive: true, content_type: "text/plain" });
+    ipc.listItems.mockResolvedValue(page([secret]));
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole("listitem");
+    expect(screen.queryByLabelText("Clipboard preview")).toBeNull();
+    expect(ipc.setQuickPastePreview).not.toHaveBeenCalledWith(true);
+  });
+
+  it("keeps the list pane in place when native preview space is unavailable", async () => {
+    ipc.setQuickPastePreview.mockResolvedValue({ side: "hidden", width: 0 });
+    const { container } = render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole("listitem");
+    await waitFor(() => expect(ipc.setQuickPastePreview).toHaveBeenCalledWith(true));
+    expect(container.querySelector('[data-preview-side="hidden"] > [aria-label="Quick Paste"]')).not.toBeNull();
+    expect(screen.queryByLabelText("Clipboard preview")).toBeNull();
   });
 
   it.each([
@@ -201,9 +255,6 @@ describe("quickPastePresentation", () => {
     await waitFor(() => expect(row.getAttribute("data-state")).toBe("selected"));
     expect(screen.getByText("This clipboard format can’t be copied on this device.")).toBeTruthy();
     expect(ipc.copyItem).not.toHaveBeenCalled();
-    await user.hover(select);
-    expect(await screen.findByRole("tooltip")).toBeTruthy();
-
     await user.click(screen.getByRole("searchbox"));
     await user.keyboard("{ArrowUp}");
     await waitFor(() => expect(row.getAttribute("data-state")).toBe("idle"));

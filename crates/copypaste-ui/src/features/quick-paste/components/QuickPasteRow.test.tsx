@@ -136,8 +136,7 @@ describe("QuickPasteRow", () => {
     expect(screen.queryByLabelText(raw)).toBeNull();
   });
 
-  it("uses the resolved full body in the tooltip while keeping the card preview", async () => {
-    const user = userEvent.setup();
+  it("keeps the resolved full body out of the compact row", () => {
     render(
       <TooltipProvider>
         <QuickPasteRow item={item({ content: "short preview", truncated: true })} active shortcut={null} pinPending={false} origin={null} fullContent="complete body" fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
@@ -145,37 +144,10 @@ describe("QuickPasteRow", () => {
     );
 
     expect(screen.getByText("short preview")).toBeTruthy();
-    await user.hover(screen.getByRole("button", { name: "Copy short preview" }));
-    expect(await screen.findByText("complete body")).toBeTruthy();
+    expect(screen.queryByText("complete body")).toBeNull();
   });
 
-  it.each([
-    {
-      name: "pending",
-      target: item({ content: "short preview", truncated: true }),
-      failed: false,
-      expected: "Loading the complete value…",
-    },
-    {
-      name: "unavailable",
-      target: item({ content: "short preview", truncated: true }),
-      failed: true,
-      expected: "The complete value could not be loaded.",
-    },
-  ])("shows the resolved $name state instead of a preview fragment", async ({ target, failed, expected }) => {
-    const user = userEvent.setup();
-    render(
-      <TooltipProvider>
-        <QuickPasteRow item={target} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={failed} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
-      </TooltipProvider>,
-    );
-
-    await user.hover(screen.getByRole("button", { name: "Copy short preview" }));
-    expect((await screen.findByRole("status")).textContent).toBe(expected);
-  });
-
-  it("keeps a potential-sensitive failed body out of the card and tooltip", async () => {
-    const user = userEvent.setup();
+  it("keeps a potential-sensitive failed body out of the compact row", () => {
     const raw = "raw secret fragment";
     render(
       <TooltipProvider>
@@ -185,8 +157,6 @@ describe("QuickPasteRow", () => {
 
     expect(screen.queryByText(raw)).toBeNull();
     expect(screen.getByText("Potentially sensitive")).toBeTruthy();
-    await user.hover(screen.getByRole("button", { name: "Copy ••••• fragment" }));
-    expect((await screen.findByRole("status")).textContent).toBe("The complete value could not be loaded.");
     expect(screen.queryByText(raw)).toBeNull();
   });
 });

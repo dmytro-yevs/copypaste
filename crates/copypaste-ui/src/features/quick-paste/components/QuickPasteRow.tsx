@@ -3,7 +3,6 @@ import { useLayoutEffect, useRef } from "react";
 import {
   ActionButton,
   ClipBodyPreview,
-  HighlightedCode,
   SourceMeta,
   SourceMetaBadge,
 } from "@/components/shared";
@@ -14,10 +13,6 @@ import {
   iconComponent,
   ShortcutBadge,
   Surface,
-  TooltipContent,
-  TooltipPortal,
-  TooltipRoot,
-  TooltipTrigger,
   VisuallyHidden,
 } from "@/components/ui";
 import type { OriginDevice } from "@/lib/itemOrigin";
@@ -93,9 +88,6 @@ export function QuickPasteRow({
     revealedContent: null,
   });
   const hasPotentialFinding = item.sensitive_finding !== null;
-  const canPreview =
-    body.state === "unavailable" ||
-    (body.state === "content" && !hasPotentialFinding && kind !== "unknown");
   const cardContent =
     body.state === "content" && body.source === "redacted"
       ? body.content
@@ -104,19 +96,7 @@ export function QuickPasteRow({
         : kind === "unknown"
           ? rowLabel
           : item.content ?? "";
-  const previewContent = body.state === "content" ? body.content : "";
   const compactContent = cardContent.replace(/\s+/gu, " ").trim();
-  const preview = image ? (
-    <ClipImageLoader id={item.id} size="detail" />
-  ) : body.state === "unavailable" ? (
-    <p role="status">{t("quickPaste.row.fullUnavailable")}</p>
-  ) : item.truncated && body.state === "content" && body.source === "preview" ? (
-    <p role="status">{t("quickPaste.row.fullLoading")}</p>
-  ) : kind === "code" || kind === "json" ? (
-    <HighlightedCode content={previewContent} kind={kind} mode="expanded" />
-  ) : (
-    <pre>{previewContent}</pre>
-  );
 
   const copyButton = (
     <Button
@@ -190,7 +170,7 @@ export function QuickPasteRow({
       className={styles.root}
     >
       {!copyAvailability.canCopy ? copyButton : null}
-      {canPreview ? <TooltipTrigger asChild>{activeHit}</TooltipTrigger> : activeHit}
+      {activeHit}
       <span className={styles.sourceIcon} aria-hidden="true">
         {source.available ? (
           <SourceAppIcon
@@ -269,22 +249,5 @@ export function QuickPasteRow({
     </Surface>
   );
 
-  if (!canPreview) return row;
-
-  return (
-    <TooltipRoot delayDuration={220}>
-      {row}
-      <TooltipPortal>
-        <TooltipContent
-          side="bottom"
-          align="center"
-          sideOffset={8}
-          collisionPadding={12}
-          className={styles.previewPopup}
-        >
-          {preview}
-        </TooltipContent>
-      </TooltipPortal>
-    </TooltipRoot>
-  );
+  return row;
 }

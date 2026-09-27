@@ -45,6 +45,7 @@ export const quickPaste = {
 
   settings: "Open Settings",
   copying: "Copying…",
+  preview: { label: "Clipboard preview" },
 
   count: {
     loading: "Loading…",
