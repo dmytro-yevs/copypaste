@@ -228,15 +228,17 @@ jobs:
           cp "$native" "$RUNNER_TEMP/android-native/"
           if [[ "${{ matrix.target }}" == x86_64 ]]; then
             inputs="$RUNNER_TEMP/android-tauri-inputs"
-            mkdir -p "$inputs/src/main"
+            mkdir -p "$inputs/app/src/main"
             [[ -f src-tauri/gen/android/app/tauri.properties ]] || exit 1
             [[ -f src-tauri/gen/android/app/src/main/assets/tauri.conf.json ]] || exit 1
-            cp src-tauri/gen/android/app/tauri.properties "$inputs/"
-            cp -R src-tauri/gen/android/app/src/main/assets "$inputs/src/main/"
+            [[ -f dist/index.html ]] || { echo "::error::Android frontend build produced no dist/index.html"; exit 1; }
+            cp src-tauri/gen/android/app/tauri.properties "$inputs/app/"
+            cp -R src-tauri/gen/android/app/src/main/assets "$inputs/app/src/main/"
             if [[ -d src-tauri/gen/android/app/src/main/java/com/copypaste/app/generated ]]; then
-              mkdir -p "$inputs/src/main/java/com/copypaste/app"
-              cp -R src-tauri/gen/android/app/src/main/java/com/copypaste/app/generated "$inputs/src/main/java/com/copypaste/app/"
+              mkdir -p "$inputs/app/src/main/java/com/copypaste/app"
+              cp -R src-tauri/gen/android/app/src/main/java/com/copypaste/app/generated "$inputs/app/src/main/java/com/copypaste/app/"
             fi
+            cp -R dist "$inputs/frontend-dist"
           fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -306,11 +308,15 @@ jobs:
           [[ ${#bins[@]} -eq 1 ]] || { echo "::error::expected one NDK toolchain"; exit 1; }
           cc="${bins[0]}/x86_64-linux-android${api}-clang"
           cxx="${cc}++"
-          [[ -x "$cc" && -x "$cxx" ]] || { echo "::error::x86_64 Android compiler for minSdk $api is missing"; exit 1; }
+          ar="${bins[0]}/llvm-ar"
+          [[ -x "$cc" && -x "$cxx" && -x "$ar" ]] || { echo "::error::x86_64 Android compiler for minSdk $api is missing"; exit 1; }
           {
             echo "CC_x86_64_linux_android=$cc"
             echo "CXX_x86_64_linux_android=$cxx"
             echo "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$cc"
+            echo "CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS=-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"
+            echo "ANDROID_NATIVE_API_LEVEL=$api"
+            echo "TARGET_AR=$ar"
             echo "TARGET_CC=$cc"
             echo "TARGET_CXX=$cxx"
           } >> "$GITHUB_ENV"
@@ -318,22 +324,60 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android-tauri-inputs
-          path: crates/copypaste-ui/src-tauri/gen/android/app
+          path: crates/copypaste-ui/src-tauri/gen/android
       - name: Generate path-bound Gradle settings locally
         run: |
           set -euo pipefail
           cd crates/copypaste-ui
           npm ci
+          [[ -f src-tauri/gen/android/frontend-dist/index.html ]] || {
+            echo "::error::x86_64 Android frontend artifact is missing dist/index.html"; exit 1; }
+          [[ ! -e dist ]] || { echo "::error::assembly checkout unexpectedly already has frontend dist"; exit 1; }
+          cp -R src-tauri/gen/android/frontend-dist dist
+          diff -qr src-tauri/gen/android/frontend-dist dist
+          mapfile -t mobile < <(
+            node --input-type=module - <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { readFileSync } from "node:fs";
+
+          const android = JSON.parse(readFileSync("src-tauri/tauri.android.conf.json", "utf8"));
+          const identifier = android.identifier;
+          if (typeof identifier !== "string" || !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(identifier)) {
+            throw new Error("Android identifier cannot generate a Kotlin package");
+          }
+          const metadata = JSON.parse(execFileSync("cargo", [
+            "metadata", "--locked", "--no-deps", "--format-version", "1", "--manifest-path", "src-tauri/Cargo.toml",
+          ], { encoding: "utf8" }));
+          const app = metadata.packages.find((item) => item.name === "copypaste-ui");
+          const library = app?.targets.find((target) => target.kind.includes("cdylib"))?.name;
+          if (!library) throw new Error("copypaste-ui cdylib target is missing");
+          process.stdout.write(`${identifier}\n${library}\n`);
+          NODE
+          )
+          [[ ${#mobile[@]} -eq 2 ]] || { echo "::error::could not resolve Android package and library"; exit 1; }
+          package="${mobile[0]}"
+          library="${mobile[1]}"
+          project="$PWD/src-tauri/gen/android"
+          kotlin_out="$project/app/src/main/java/${package//./\/}/generated"
+          [[ -d "${kotlin_out%/generated}" ]] || { echo "::error::Android source package directory is missing"; exit 1; }
+          mkdir -p "$kotlin_out"
           # tauri-build writes settings with absolute cargo-registry paths. A
           # check executes that generator on this runner without linking JNI.
           # The release profile reuses the completed x86_64 shard's cache and
           # the signed overlay keeps its updater configuration identical.
-          TAURI_ANDROID_PROJECT_PATH="$PWD/src-tauri/gen/android" \
+          WRY_ANDROID_PACKAGE="$package" \
+          WRY_ANDROID_LIBRARY="$library" \
+          WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$kotlin_out" \
+          TAURI_ANDROID_PACKAGE_UNESCAPED="$package" \
+          TAURI_ANDROID_PROJECT_PATH="$project" \
           TAURI_CONFIG="$(<src-tauri/tauri.android.signed.generated.conf.json)" \
-            cargo check --release --locked --target x86_64-linux-android -p copypaste-ui
+            cargo check --release --locked --target x86_64-linux-android -p copypaste-ui --lib --features tauri/custom-protocol
           test -f src-tauri/gen/android/tauri.settings.gradle
           test -f src-tauri/gen/android/app/tauri.build.gradle.kts
           test -f src-tauri/gen/android/app/tauri.properties
+          test -f "$kotlin_out/TauriActivity.kt"
+          test -f "$kotlin_out/WryActivity.kt"
+          test -f "$kotlin_out/RustWebView.kt"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { name: android-native-aarch64, path: crates/copypaste-ui/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
