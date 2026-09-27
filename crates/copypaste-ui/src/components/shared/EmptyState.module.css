@@ -38,7 +38,8 @@
 .titleRow { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-2); }
 .title { color: var(--text); font-size: var(--fs-base); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
 .body { max-inline-size: calc(var(--s-9) * 10); color: var(--dim); font-size: var(--fs-sm); overflow-wrap: anywhere; }
-.actions { display: flex; margin-block-start: var(--s-3); flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.actions { margin-block-start: var(--s-3); }
+.actionLayout { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .secondary { display: flex; flex: none; }
 .spinner { animation: empty-state-spin var(--dur-progress) var(--ease-linear) infinite; }
 @keyframes empty-state-spin { to { transform: rotate(1turn); } }
