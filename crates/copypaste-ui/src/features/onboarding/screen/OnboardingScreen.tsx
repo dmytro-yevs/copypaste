@@ -34,6 +34,7 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
   const { t } = useTranslation();
   const progress = usePrefs((state) => state.onboarding);
   const setOnboarding = usePrefs((state) => state.setOnboarding);
+  const [syncSaving, setSyncSaving] = useState(false);
   const index = ONBOARDING_SLIDE_IDS.indexOf(progress.step);
   const android = isAndroidPlatform();
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -139,11 +140,15 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
               title={t("onboarding.sync.title")}
               body={t("onboarding.sync.body")}
               headingRef={headingRef}
-              content={<SyncSetup choice={progress.syncChoice} onChoose={(syncChoice) => setOnboarding({ syncChoice })} />}
+              content={<SyncSetup
+                choice={progress.syncChoice}
+                onChoose={(syncChoice) => setOnboarding({ syncChoice })}
+                onPendingChange={setSyncSaving}
+              />}
               contentInteractive
               pagination={pagination}
-              primary={{ label: t("onboarding.sync.action"), onClick: () => go("complete") }}
-              secondary={{ label: t("onboarding.skip"), onClick: () => setOnboarding({ syncChoice: "later", step: "complete" }) }}
+              primary={{ label: t("onboarding.sync.action"), onClick: () => go("complete"), disabled: syncSaving }}
+              secondary={{ label: t("onboarding.back"), onClick: () => go("privacy") }}
             />
           ) : (
             <OnboardingSlide
@@ -184,7 +189,7 @@ function OnboardingSlide({
   pagination: ReactNode;
   contentInteractive?: boolean;
   lockup?: boolean;
-  primary: { label: string; onClick: () => void };
+  primary: { label: string; onClick: () => void; disabled?: boolean };
   secondary: { label: string; onClick: () => void };
 }) {
   return (
@@ -206,7 +211,7 @@ function OnboardingSlide({
         <p>{body}</p>
         <div className={styles.actions}>
           {pagination}
-          <Button size="md" onClick={primary.onClick}>
+          <Button size="md" disabled={primary.disabled} onClick={primary.onClick}>
             {primary.label}
           </Button>
           <Button size="md" variant="secondary" onClick={secondary.onClick}>
@@ -261,7 +266,6 @@ function StartupOption() {
     <SwitchRow
       id="onboarding-open-at-login"
       title={t("onboarding.startup.title")}
-      description={t("onboarding.startup.description")}
       checked={startup.data ?? false}
       disabled={startup.isPending || unavailable || saveStartup.isPending}
       busy={startup.isPending || saveStartup.isPending}
@@ -276,22 +280,38 @@ function StartupOption() {
 function SyncSetup({
   choice,
   onChoose,
+  onPendingChange,
 }: {
   choice: OnboardingSyncChoice;
   onChoose: (choice: OnboardingSyncChoice) => void;
+  onPendingChange: (pending: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [pairingOpen, setPairingOpen] = useState(false);
   const pairing = usePairing();
   const syncConfig = useSetServiceConfig();
+  const [saveFailed, setSaveFailed] = useState(false);
   const lanSelected = choice === "lan" || choice === "both";
   const cloudSelected = choice === "cloud" || choice === "both";
 
   const choose = (next: Exclude<OnboardingSyncChoice, null>) => {
-    onChoose(next);
-    if (next === "lan" || next === "both") {
-      syncConfig.mutate({ sync_enabled: true, lan_visibility: true });
-    }
+    const config = next === "lan" || next === "both"
+      ? { sync_enabled: true, lan_visibility: true }
+      : next === "cloud"
+        ? { sync_enabled: true, lan_visibility: false }
+        : { sync_enabled: false, lan_visibility: false };
+    setSaveFailed(false);
+    onPendingChange(true);
+    syncConfig.mutate(config, {
+      onSuccess: () => {
+        onChoose(next);
+        onPendingChange(false);
+      },
+      onError: () => {
+        setSaveFailed(true);
+        onPendingChange(false);
+      },
+    });
   };
 
   return (
@@ -324,6 +344,7 @@ function SyncSetup({
       ) : null}
       {cloudSelected ? <CloudSyncSettings /> : null}
       {choice !== null ? <p className={styles.savedChoice}>{t("onboarding.sync.selectionSaved")}</p> : null}
+      {saveFailed ? <p className={styles.savedChoice} role="alert">{t("onboarding.sync.saveFailed")}</p> : null}
       <PairingLauncherDialog
         open={pairingOpen}
         available={pairing.protectedPresentationAvailable || pairing.webPreview}

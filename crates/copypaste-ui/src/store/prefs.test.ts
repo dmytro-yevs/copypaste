@@ -312,4 +312,34 @@ describe("onboarding progress", () => {
     expect(parseOnboardingProgress({ onboarding: { step: "unknown" } }))
       .toEqual(DEFAULT_ONBOARDING_PROGRESS);
   });
+
+  it("does not resolve an Android setup checkpoint before the native store saves", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    let flush: (() => void) | undefined;
+    nativePreferences.save.mockImplementation(() => new Promise<void>((resolve) => {
+      flush = resolve;
+    }));
+
+    const checkpoint = usePrefs.getState().checkpointOnboarding({
+      captureSetupMethod: "shizuku",
+      captureSetupStage: "commands",
+    });
+    let complete = false;
+    void checkpoint.then(() => { complete = true; });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(nativePreferences.set).toHaveBeenCalledWith(
+      STORAGE_KEY,
+      expect.any(String),
+    );
+    expect(complete).toBe(false);
+    flush?.();
+    await expect(checkpoint).resolves.toBe(true);
+    expect(complete).toBe(true);
+  });
 });
