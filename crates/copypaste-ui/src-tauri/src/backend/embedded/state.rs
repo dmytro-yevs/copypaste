@@ -15,8 +15,16 @@ use crate::backend::{BackendError, Result};
 
 use super::settings::EmbeddedSettings;
 
-/// First-run name on Android, where the hostname is only `localhost`.
-const DEVICE_NAME_HINT: &str = "CopyPaste phone";
+fn system_name() -> copypaste_core::device_name::SystemDeviceName {
+    #[cfg(target_os = "android")]
+    {
+        crate::android_context::system_device_name()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        copypaste_core::device_name::SystemDeviceName::current()
+    }
+}
 
 pub(super) struct BackendState {
     pub(super) store: Store,
@@ -67,7 +75,7 @@ impl BackendState {
         // Minted on first run, in the history database, so it moves with the
         // history and is the same identity a restored backup keeps out of.
         let identity = store
-            .device_identity(DEVICE_NAME_HINT)
+            .system_device_identity(&system_name())
             .map_err(|e| BackendError::internal(&format!("could not resolve this device: {e}")))?;
 
         let detector = Detector::new()
@@ -97,7 +105,32 @@ impl BackendState {
             .clone()
     }
 
+    pub(super) fn refresh_system_name(&self) -> Result<bool> {
+        self.refresh_name(&system_name())
+    }
+
+    pub(super) fn refresh_name(
+        &self,
+        system: &copypaste_core::device_name::SystemDeviceName,
+    ) -> Result<bool> {
+        let mut current = self.device_name.write().unwrap_or_else(|p| p.into_inner());
+        let name = self
+            .store
+            .system_device_identity(system)
+            .map_err(|_| BackendError::internal("the device name could not be saved"))?
+            .device_name;
+        let changed = *current != name;
+        *current = name;
+        Ok(changed)
+    }
+
+    pub(super) fn publish_device_name(&self, publish: impl FnOnce(&str)) {
+        let name = self.device_name.read().unwrap_or_else(|p| p.into_inner());
+        publish(&name);
+    }
+
     pub(super) fn set_device_name(&self, name: &str) -> Result<String> {
+        let mut current = self.device_name.write().unwrap_or_else(|p| p.into_inner());
         let name =
             self.store
                 .set_device_name(&self.device_id, name)
@@ -107,10 +140,7 @@ impl BackendState {
                     }
                     _ => BackendError::internal("the device name could not be saved"),
                 })?;
-        *self
-            .device_name
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = name.clone();
+        *current = name.clone();
         Ok(name)
     }
 }
@@ -172,6 +202,20 @@ mod tests {
     use super::*;
     use crate::backend::Backend;
     use copypaste_core::Keyring;
+
+    #[test]
+    fn system_refresh_updates_the_cache_but_preserves_a_manual_name() {
+        use copypaste_core::device_name::SystemDeviceName;
+        let (backend, _, _dir) = backend();
+        let state = &backend.inner.state;
+        let system = SystemDeviceName::from_sources(Some("Phone after rename"), None);
+        assert!(state.refresh_name(&system).unwrap());
+        state.publish_device_name(|name| assert_eq!(name, "Phone after rename"));
+        state.set_device_name("My phone").unwrap();
+        assert!(!state.refresh_name(&system).unwrap());
+        state.publish_device_name(|name| assert_eq!(name, "My phone"));
+        assert_eq!(state.store.current_device_name().unwrap(), "My phone");
+    }
 
     fn index_row(store: &Store, id: &str, text: &str) {
         store

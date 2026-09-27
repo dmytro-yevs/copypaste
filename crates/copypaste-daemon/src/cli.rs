@@ -39,9 +39,8 @@ pub struct Args {
 
     /// What peers call this device.
     ///
-    /// Cosmetic and peer-visible. Stored on first run and kept afterwards, so
-    /// passing it once is enough and a hostname change does not rename the
-    /// device on every peer.
+    /// Stores a manual name that takes precedence over the system name.
+    /// Without an override, the name follows the operating system.
     #[arg(long, value_name = "NAME")]
     pub device_name: Option<String>,
 
