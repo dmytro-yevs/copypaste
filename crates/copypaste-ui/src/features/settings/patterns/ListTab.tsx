@@ -1,4 +1,4 @@
-import { Select, Switch } from "@/components/ui";
+import { Slider, Switch } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import {
   HISTORY_DISPLAY_LIMITS,
@@ -58,23 +58,25 @@ export function ListTab({
           title={t("settings.list.historyDisplayLimit.title")}
           help={t("settings.list.historyDisplayLimit.description")}
         >
-          <Select
-            size="sm"
-            measure="regular"
-            className={styles.limitSelect}
-            aria-label={t("settings.list.historyDisplayLimit.title")}
-            value={String(historyDisplayLimit)}
-            items={HISTORY_DISPLAY_LIMITS.map((limit) => ({
-              value: String(limit),
-              label: limit === UNLIMITED_HISTORY_DISPLAY
+          <div className={styles.sliderControl}>
+            <output className={styles.sliderValue}>
+              {historyDisplayLimit === UNLIMITED_HISTORY_DISPLAY
                 ? t("settings.list.historyDisplayLimit.unlimited")
-                : limit.toLocaleString(),
-            }))}
-            onValueChange={(value) => {
-              const next = HISTORY_DISPLAY_LIMITS.find((limit) => String(limit) === value);
-              if (next !== undefined) set("historyDisplayLimit", next);
-            }}
-          />
+                : historyDisplayLimit.toLocaleString()}
+            </output>
+            <Slider
+              className={styles.limitSlider}
+              aria-label={t("settings.list.historyDisplayLimit.title")}
+              value={[HISTORY_DISPLAY_LIMITS.indexOf(historyDisplayLimit)]}
+              min={0}
+              max={HISTORY_DISPLAY_LIMITS.length - 1}
+              step={1}
+              onValueChange={([index]) => {
+                const next = index === undefined ? undefined : HISTORY_DISPLAY_LIMITS[index];
+                if (next !== undefined) set("historyDisplayLimit", next);
+              }}
+            />
+          </div>
         </SettingsRow>
       </Section>}
 
