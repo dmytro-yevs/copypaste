@@ -26,6 +26,9 @@ mod service;
 mod table;
 
 pub use error::DiscoveryError;
-pub use record::{MAX_ADVERTISED_PAIRING_IDS, MAX_PAIRING_IDS_PER_PEER};
+pub use record::{
+    advertisement_attributes, peer_from_record, MAX_ADVERTISED_PAIRING_IDS,
+    MAX_PAIRING_IDS_PER_PEER,
+};
 pub use service::Discovery;
-pub use table::{DiscoveredPeer, MAX_PEERS, PEER_TTL};
+pub use table::{is_peer_fresh, DiscoveredPeer, MAX_PEERS, PEER_TTL};

@@ -57,7 +57,7 @@ internal class LanDiscovery(
         }
 
         override fun onServiceFound(service: NsdServiceInfo) {
-            if (service.serviceType?.contains(SERVICE_TYPE_TOKEN) != true) return
+            if (!isCopyPasteService(service.serviceType)) return
             if (registered?.serviceName == service.serviceName || advertising?.name == service.serviceName) return
             enqueueResolve(service)
         }
@@ -275,6 +275,7 @@ internal class LanDiscovery(
                                     host = host,
                                     port = serviceInfo.port,
                                     attributes = attributesOf(serviceInfo),
+                                    lastSeenMs = System.currentTimeMillis(),
                                 )
                                 onChange()
                             }
@@ -321,6 +322,7 @@ internal class LanDiscovery(
         val host: String,
         val port: Int,
         val attributes: Map<String, String>,
+        val lastSeenMs: Long,
     )
 
     private data class Advertisement(
@@ -332,7 +334,6 @@ internal class LanDiscovery(
     companion object {
         const val TAG = "copypaste-mdns"
         const val SERVICE_TYPE = "_copypaste._tcp."
-        private const val SERVICE_TYPE_TOKEN = "_copypaste._tcp"
         private const val MAX_SERVICE_NAME = 63
         private const val MAX_TXT_KEY = 9
         private const val MAX_TXT_VALUE = 200
@@ -341,6 +342,9 @@ internal class LanDiscovery(
 }
 
 internal enum class BrowseStart { START, WAITING, READY }
+
+internal fun isCopyPasteService(serviceType: String?): Boolean =
+    serviceType == LanDiscovery.SERVICE_TYPE
 
 internal class BrowseLifecycle {
     private var state = State.STOPPED
