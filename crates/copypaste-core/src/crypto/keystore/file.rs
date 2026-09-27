@@ -3,11 +3,10 @@
 //! **This is not a keystore.** The secret sits in plaintext next to the
 //! database it opens, protected by file permissions alone and readable by any
 //! process running as that user, and by anything that backs the directory up.
-//! It exists so the daemon can be built and tested on a Linux workstation.
+//! It exists so the daemon can be built and tested on Linux and debug macOS.
 //!
-//! Android does not reach it. `cfg(target_os = "android")` selects the Android
-//! Keystore backend, so on that target this file is not compiled at all —
-//! rather than being a fallback that a misconfiguration could land on.
+//! Android, Windows, and release macOS do not reach it. Their platform-specific
+//! backends are selected directly, so this is not a production fallback.
 
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
