@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use super::open::Inner;
 
-const RETRY_INTERVAL: Duration = Duration::from_secs(60);
+const OVERDUE_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) fn sweep(inner: &Inner) {
     let (mutation_started, removed) = inner.state.store.with_retention(|| {
@@ -31,11 +31,12 @@ pub(super) fn sweep(inner: &Inner) {
 }
 
 pub(super) fn start(inner: &Arc<Inner>) {
-    let inner = Arc::downgrade(inner);
-    tauri::async_runtime::spawn(run(inner));
+    let weak = Arc::downgrade(inner);
+    let shutdown = inner.retention_shutdown.subscribe();
+    tauri::async_runtime::spawn(run(weak, shutdown));
 }
 
-async fn run(weak: Weak<Inner>) {
+async fn run(weak: Weak<Inner>, mut shutdown: tokio::sync::watch::Receiver<()>) {
     loop {
         let Some(inner) = weak.upgrade() else {
             break;
@@ -44,14 +45,23 @@ async fn run(weak: Weak<Inner>) {
         let wake = Arc::clone(&inner.retention_wake);
         drop(inner);
 
-        match delay {
+        let stopped = match delay {
             Some(delay) => {
                 tokio::select! {
-                    () = tokio::time::sleep(delay) => {},
-                    () = wake.notified() => {},
+                    () = tokio::time::sleep(delay) => false,
+                    () = wake.notified() => false,
+                    result = shutdown.changed() => result.is_err(),
                 }
             }
-            None => wake.notified().await,
+            None => {
+                tokio::select! {
+                    () = wake.notified() => false,
+                    result = shutdown.changed() => result.is_err(),
+                }
+            }
+        };
+        if stopped {
+            break;
         }
 
         let Some(inner) = weak.upgrade() else {
@@ -73,7 +83,7 @@ fn next_sweep_delay(inner: &Inner) -> Option<Duration> {
                 ?error,
                 "the sensitive-item retention schedule could not be read"
             );
-            return Some(RETRY_INTERVAL);
+            return Some(OVERDUE_RETRY_INTERVAL);
         }
     };
     next_sweep_delay_at(copypaste_core::now_ms(), ttl, oldest)
@@ -87,7 +97,7 @@ fn next_sweep_delay_at(now_ms: i64, ttl: Duration, oldest_ms: Option<i64>) -> Op
     let ttl_ms = i64::try_from(ttl.as_millis()).unwrap_or(i64::MAX);
     let expires_at = oldest_ms.saturating_add(ttl_ms).saturating_add(1);
     if expires_at <= now_ms {
-        return Some(RETRY_INTERVAL);
+        return Some(OVERDUE_RETRY_INTERVAL);
     }
     Some(Duration::from_millis(
         u64::try_from(expires_at.saturating_sub(now_ms)).unwrap_or(u64::MAX),
@@ -145,14 +155,27 @@ mod tests {
     #[test]
     fn shortening_the_sensitive_ttl_wakes_retention_immediately() {
         let (backend, _clipboard, _dir) = backend();
-        let created_at = copypaste_core::now_ms().saturating_sub(2_000);
+        let now = copypaste_core::now_ms();
+        let held = copypaste_core::ingest_into_with_capture_context(
+            &backend.inner.state.store,
+            &backend.inner.state.detector,
+            &backend.inner.state.keyring,
+            "Contact alice@example.com",
+            copypaste_ipc::content_type::TEXT,
+            now.saturating_sub(4_000),
+            true,
+            None,
+            &backend.inner.settings(),
+        )
+        .unwrap()
+        .into_item();
         let item = copypaste_core::ingest_into(
             &backend.inner.state.store,
             &backend.inner.state.detector,
             &backend.inner.state.keyring,
             SECRET,
             copypaste_ipc::content_type::TEXT,
-            created_at,
+            now.saturating_sub(2_000),
             &backend.inner.settings(),
         )
         .unwrap()
@@ -172,6 +195,7 @@ mod tests {
                 .unwrap()
         });
         assert_eq!(event.swept, 1);
+        assert!(backend.inner.state.store.get(&held.id).unwrap().is_some());
         assert!(backend.inner.state.store.get(&item.id).unwrap().is_none());
     }
 
@@ -295,7 +319,53 @@ mod tests {
         );
         assert_eq!(
             next_sweep_delay_at(2_000, Duration::from_secs(1), Some(0)),
-            Some(RETRY_INTERVAL)
+            Some(OVERDUE_RETRY_INTERVAL)
         );
+    }
+
+    #[test]
+    fn a_retained_oldest_row_keeps_overdue_sensitive_checks_on_the_old_bound() {
+        let (backend, _clipboard, _dir) = backend();
+        tauri::async_runtime::block_on(backend.set_config(copypaste_ipc::ConfigPatch {
+            sensitive_ttl_secs: Some(1),
+            ..Default::default()
+        }))
+        .unwrap();
+        let item = copypaste_core::ingest_into_with_capture_context(
+            &backend.inner.state.store,
+            &backend.inner.state.detector,
+            &backend.inner.state.keyring,
+            "Contact alice@example.com",
+            copypaste_ipc::content_type::TEXT,
+            copypaste_core::now_ms().saturating_sub(2_000),
+            true,
+            None,
+            &backend.inner.settings(),
+        )
+        .unwrap()
+        .into_item();
+
+        sweep(&backend.inner);
+
+        assert!(backend.inner.state.store.get(&item.id).unwrap().is_some());
+        assert_eq!(
+            next_sweep_delay(&backend.inner),
+            Some(OVERDUE_RETRY_INTERVAL)
+        );
+    }
+
+    #[tokio::test]
+    async fn idle_scheduler_stops_when_the_backend_drops() {
+        let (backend, _clipboard, _dir) = backend();
+        let weak = Arc::downgrade(&backend.inner);
+        let shutdown = backend.inner.retention_shutdown.subscribe();
+        let task = tokio::spawn(run(weak, shutdown));
+
+        drop(backend);
+
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("idle retention task did not stop")
+            .unwrap();
     }
 }
