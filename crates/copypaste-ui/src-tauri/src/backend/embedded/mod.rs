@@ -123,8 +123,8 @@ impl Backend for EmbeddedBackend {
         items::get(self, id).await
     }
 
-    async fn image_preview(&self, id: &str) -> Result<ImagePreview> {
-        items::image_preview(self, id).await
+    async fn image_preview(&self, id: &str, max_edge: Option<u32>) -> Result<ImagePreview> {
+        items::image_preview(self, id, max_edge).await
     }
 
     async fn copy(&self, id: &str) -> Result<Item> {
