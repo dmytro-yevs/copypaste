@@ -5,7 +5,7 @@
 
 use std::io::{Cursor, Seek, SeekFrom, Write};
 
-use image::{DynamicImage, ImageError, ImageFormat, ImageReader, Limits};
+use image::{DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits};
 
 pub(super) enum CapturedImage {
     Image(Vec<u8>),
@@ -41,19 +41,23 @@ pub(super) fn checked_image(
 
 /// Convert a `CF_DIB` payload into the PNG representation CopyPaste stores.
 ///
-/// A DIB is a BMP file without its 14-byte file header. The clipboard API
-/// exposes its allocation size before `get_vec` copies it, and this helper only
-/// rebuilds that standard header after the caller has enforced the compressed
-/// cap. The `image` crate then owns the actual bitmap decoder and its bounds.
+/// `BmpDecoder::new_without_file_header` is image-rs's native DIB path. The
+/// clipboard API exposes its allocation size before `get_vec` copies it; this
+/// helper applies the decoded-memory cap before image-rs allocates pixels.
 pub(super) fn png_from_dib(dib: &[u8], decoded_memory_mb: u32, encoded_cap: u64) -> CapturedImage {
-    let Some(bmp) = bmp_from_dib(dib) else {
-        return CapturedImage::Invalid;
-    };
-    match decode(Cursor::new(bmp), ImageFormat::Bmp, decoded_memory_mb) {
+    match decode_dib(dib, decoded_memory_mb) {
         Ok(image) => encode_png_bounded(image, encoded_cap),
         Err(ImageError::Limits(_)) => CapturedImage::DecodedTooLarge,
         Err(_) => CapturedImage::Invalid,
     }
+}
+
+fn decode_dib(dib: &[u8], decoded_memory_mb: u32) -> image::ImageResult<DynamicImage> {
+    let mut limits = limits(decoded_memory_mb);
+    let mut decoder = image::codecs::bmp::BmpDecoder::new_without_file_header(Cursor::new(dib))?;
+    limits.reserve(decoder.total_bytes())?;
+    decoder.set_limits(limits)?;
+    DynamicImage::from_decoder(decoder)
 }
 
 fn guess_and_decode(bytes: &[u8], decoded_memory_mb: u32) -> Option<DynamicImage> {
@@ -72,64 +76,6 @@ fn decode(
     let mut reader = ImageReader::with_format(bytes, format);
     reader.limits(limits(decoded_memory_mb));
     reader.decode()
-}
-
-fn bmp_from_dib(dib: &[u8]) -> Option<Vec<u8>> {
-    let header_size = u32::from_le_bytes(dib.get(..4)?.try_into().ok()?) as usize;
-    let (bit_count, compression, colors_used, color_size) = match header_size {
-        12 => (
-            u16::from_le_bytes(dib.get(10..12)?.try_into().ok()?),
-            0,
-            0,
-            3usize,
-        ),
-        size if size >= 40 => (
-            u16::from_le_bytes(dib.get(14..16)?.try_into().ok()?),
-            u32::from_le_bytes(dib.get(16..20)?.try_into().ok()?),
-            u32::from_le_bytes(dib.get(32..36)?.try_into().ok()?) as usize,
-            4usize,
-        ),
-        _ => return None,
-    };
-    if header_size > dib.len() {
-        return None;
-    }
-
-    let palette_entries = if colors_used != 0 {
-        colors_used
-    } else if bit_count <= 8 {
-        1usize.checked_shl(u32::from(bit_count))?
-    } else {
-        0
-    };
-    // `BI_BITFIELDS` masks follow the 40-byte BITMAPINFOHEADER. Newer DIB
-    // headers include their masks in the declared header length.
-    let masks = if header_size == 40 && matches!(compression, 3 | 6) {
-        if compression == 6 {
-            16
-        } else {
-            12
-        }
-    } else {
-        0
-    };
-    let pixel_offset = header_size
-        .checked_add(masks)?
-        .checked_add(palette_entries.checked_mul(color_size)?)?;
-    if pixel_offset > dib.len() {
-        return None;
-    }
-
-    let file_size = dib.len().checked_add(14)?;
-    let file_size = u32::try_from(file_size).ok()?;
-    let pixel_offset = u32::try_from(pixel_offset.checked_add(14)?).ok()?;
-    let mut bmp = Vec::with_capacity(dib.len().checked_add(14)?);
-    bmp.extend_from_slice(b"BM");
-    bmp.extend_from_slice(&file_size.to_le_bytes());
-    bmp.extend_from_slice(&[0; 4]);
-    bmp.extend_from_slice(&pixel_offset.to_le_bytes());
-    bmp.extend_from_slice(dib);
-    Some(bmp)
 }
 
 fn limits(decoded_memory_mb: u32) -> Limits {
