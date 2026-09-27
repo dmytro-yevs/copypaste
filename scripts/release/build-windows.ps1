@@ -81,7 +81,7 @@ function Write-BuildOnlyConfig([string]$SourcePath, [string]$DestinationPath) {
 }
 
 function Get-TauriBuildArguments([string]$BuildConfig, [bool]$UsePrebuiltSidecars) {
-    $commandArguments = @("exec", "tauri", "build", "--", "--no-bundle", "--config", $BuildConfig, "--", "--package", "copypaste-ui")
+    $commandArguments = @("exec", "tauri", "build", "--", "--no-bundle", "--config", $BuildConfig, "--", "--locked", "--package", "copypaste-ui")
     if (-not $UsePrebuiltSidecars) {
         $commandArguments += @("--package", "copypaste-cli", "--package", "copypaste-daemon")
     }
@@ -141,7 +141,7 @@ function Invoke-SelfTest {
         }
         $fullBuild = Get-TauriBuildArguments $buildOnly $false
         $prebuiltBuild = Get-TauriBuildArguments $buildOnly $true
-        if ($fullBuild -notcontains "--no-bundle" -or
+        if ($fullBuild -notcontains "--no-bundle" -or $fullBuild -notcontains "--locked" -or
             [string]::Join("`n", $fullBuild) -notmatch "--package`ncopypaste-ui`n--package`ncopypaste-cli`n--package`ncopypaste-daemon") {
             throw "full Windows build plan does not compile the three release packages once"
         }
