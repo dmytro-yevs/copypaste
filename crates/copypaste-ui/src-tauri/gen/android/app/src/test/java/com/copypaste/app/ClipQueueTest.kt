@@ -78,7 +78,33 @@ class ClipQueueTest {
         assertEquals(1L, ClipQueue.drain().second)
     }
 
+    @Test
+    fun queueReadyWakeIsCoalescedUntilRustDrainsTheBatch() {
+        var sent = 0
+        ClipQueue.subscribeQueueReadyForTest { sent += 1 }
+
+        ClipQueue.offer("first", CaptureSource.IN_APP)
+        ClipQueue.offer("second", CaptureSource.IN_APP)
+        assertEquals(1, sent)
+
+        ClipQueue.drain()
+        ClipQueue.offer("third", CaptureSource.IN_APP)
+        assertEquals(2, sent)
+    }
+
+    @Test
+    fun queueAcceptedBeforeSubscriptionIsReplayedWhenRustRegisters() {
+        var sent = 0
+        ClipQueue.offer("before Rust starts", CaptureSource.IN_APP)
+
+        ClipQueue.subscribeQueueReadyForTest { sent += 1 }
+
+        assertEquals(1, sent)
+        assertEquals(listOf("before Rust starts"), ClipQueue.drain().first.map(CapturedClip::text))
+    }
+
     private fun reset() {
+        ClipQueue.subscribeQueueReadyForTest(null)
         ClipQueue.setPrivateMode(true)
         ClipQueue.setPrivateMode(false)
         // The tally now survives private mode, so it is the drain that clears

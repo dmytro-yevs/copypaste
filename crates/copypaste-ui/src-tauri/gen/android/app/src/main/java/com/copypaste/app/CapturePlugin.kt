@@ -19,6 +19,7 @@ import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.Channel
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -372,6 +373,17 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun subscribeQueueReady(invoke: Invoke) {
+        val channel = invoke.parseArgs(QueueReadyArgs::class.java).onReady
+        if (channel == null) {
+            invoke.reject("The capture queue callback was incomplete.")
+            return
+        }
+        ClipQueue.subscribeQueueReady(channel)
+        invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
+    }
+
+    @Command
     fun setPrivateMode(invoke: Invoke) {
         ClipQueue.setPrivateMode(invoke.getArgs().optBoolean("enabled", false))
         invoke.resolve(CaptureBridgeJson.objectOf(EmptyResult.serializer(), EmptyResult()))
@@ -501,4 +513,9 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         val invoke: Invoke,
         val copy: CaptureArmRequest,
     )
+}
+
+@app.tauri.annotation.InvokeArg
+class QueueReadyArgs {
+    @JvmField var onReady: Channel? = null
 }

@@ -27,6 +27,10 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use copypaste_ipc::EventKind;
 use serde::Serialize;
@@ -40,14 +44,39 @@ use crate::service::push::ChangePayload;
 use super::model::{CaptureSource, Clip};
 use super::{CaptureControl, SelectedCapture};
 
-/// How often the drain task asks the platform for what it has captured.
+/// Bounded retry cadence for a transient sink failure and the channel fallback.
 ///
-/// This is **not** clipboard polling. The clipboard signal is a push — the
-/// listener registered as the shell uid — and this only moves already-captured
-/// text from Kotlin's queue into Rust's database, inside one process. A second
-/// of latency to storage is invisible; what it buys is not needing a JNI
-/// callback into a crate that forbids unsafe code.
+/// Android normally wakes intake through its maintained Tauri Channel callback;
+/// this interval is never an idle poll on that path.
 const DRAIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Coalesces native Android queue-ready callbacks into one Rust wake.
+///
+/// The native channel is registered before intake starts; the first drain
+/// still replays anything queued before that registration.
+#[derive(Clone, Default)]
+pub struct QueueWake {
+    notify: Arc<tokio::sync::Notify>,
+    event_driven: Arc<AtomicBool>,
+}
+
+impl QueueWake {
+    pub fn notify(&self) {
+        self.notify.notify_one();
+    }
+
+    pub fn enable_event_driven(&self) {
+        self.event_driven.store(true, Ordering::Release);
+    }
+
+    fn event_driven(&self) -> bool {
+        self.event_driven.load(Ordering::Acquire)
+    }
+
+    async fn notified(&self) {
+        self.notify.notified().await;
+    }
+}
 
 /// How many clips may wait for a sink that is refusing before the oldest are
 /// counted as lost.
@@ -259,25 +288,94 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
             synchronize_private_mode(&app, &mut private_gate);
         }
 
-        let mut drain_interval = tokio::time::interval(DRAIN_INTERVAL);
-        drain_interval.tick().await;
-        loop {
-            tokio::select! {
-                Some(enabled) = private_mode_rx.recv() => {
-                    if enabled {
-                        let lost = buffer.discard_all();
-                        report_dropped(&app, lost);
-                    }
-                    private_gate.request(enabled);
-                    synchronize_private_mode(&app, &mut private_gate);
-                }
-                _ = drain_interval.tick() => {
-                    synchronize_private_mode(&app, &mut private_gate);
-                    tick(&app, &mut buffer, private_gate.fail_closed()).await;
-                }
-            }
+        // Startup replay covers clips accepted before the native channel was
+        // subscribed. Later idle work waits for a coalesced native callback.
+        tick(&app, &mut buffer, private_gate.fail_closed()).await;
+
+        let queue_wake = app
+            .try_state::<QueueWake>()
+            .map(|wake| wake.inner().clone());
+        if queue_wake.as_ref().is_some_and(QueueWake::event_driven) {
+            run_event_driven(
+                &app,
+                &mut buffer,
+                &mut private_gate,
+                &mut private_mode_rx,
+                queue_wake.as_ref().expect("checked queue wake"),
+            )
+            .await;
+        } else {
+            run_interval_fallback(&app, &mut buffer, &mut private_gate, &mut private_mode_rx).await;
         }
     });
+}
+
+async fn run_event_driven<R: Runtime>(
+    app: &AppHandle<R>,
+    buffer: &mut Buffer,
+    private_gate: &mut PrivateGate,
+    private_mode_rx: &mut tokio::sync::mpsc::UnboundedReceiver<bool>,
+    wake: &QueueWake,
+) {
+    loop {
+        if buffer.is_empty() {
+            tokio::select! {
+                biased;
+                Some(enabled) = private_mode_rx.recv() => apply_private_mode(app, buffer, private_gate, enabled),
+                () = wake.notified() => drain_ready(app, buffer, private_gate, private_mode_rx).await,
+            }
+        } else {
+            tokio::select! {
+                biased;
+                Some(enabled) = private_mode_rx.recv() => apply_private_mode(app, buffer, private_gate, enabled),
+                () = wake.notified() => drain_ready(app, buffer, private_gate, private_mode_rx).await,
+                () = tokio::time::sleep(DRAIN_INTERVAL) => drain_ready(app, buffer, private_gate, private_mode_rx).await,
+            }
+        }
+    }
+}
+
+async fn run_interval_fallback<R: Runtime>(
+    app: &AppHandle<R>,
+    buffer: &mut Buffer,
+    private_gate: &mut PrivateGate,
+    private_mode_rx: &mut tokio::sync::mpsc::UnboundedReceiver<bool>,
+) {
+    let mut drain_interval = tokio::time::interval(DRAIN_INTERVAL);
+    drain_interval.tick().await;
+    loop {
+        tokio::select! {
+            Some(enabled) = private_mode_rx.recv() => apply_private_mode(app, buffer, private_gate, enabled),
+            _ = drain_interval.tick() => drain_ready(app, buffer, private_gate, private_mode_rx).await,
+        }
+    }
+}
+
+async fn drain_ready<R: Runtime>(
+    app: &AppHandle<R>,
+    buffer: &mut Buffer,
+    private_gate: &mut PrivateGate,
+    private_mode_rx: &mut tokio::sync::mpsc::UnboundedReceiver<bool>,
+) {
+    while let Ok(enabled) = private_mode_rx.try_recv() {
+        apply_private_mode(app, buffer, private_gate, enabled);
+    }
+    synchronize_private_mode(app, private_gate);
+    tick(app, buffer, private_gate.fail_closed()).await;
+}
+
+fn apply_private_mode<R: Runtime>(
+    app: &AppHandle<R>,
+    buffer: &mut Buffer,
+    private_gate: &mut PrivateGate,
+    enabled: bool,
+) {
+    if enabled {
+        let lost = buffer.discard_all();
+        report_dropped(app, lost);
+    }
+    private_gate.request(enabled);
+    synchronize_private_mode(app, private_gate);
 }
 
 fn spawn_intake_task(task: impl Future<Output = ()> + Send + 'static) {
@@ -602,6 +700,14 @@ mod tests {
         received
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("the Tauri executor did not start the intake task");
+    }
+
+    #[test]
+    fn native_queue_wake_is_disabled_until_subscription_succeeds() {
+        let wake = QueueWake::default();
+        assert!(!wake.event_driven());
+        wake.enable_event_driven();
+        assert!(wake.event_driven());
     }
 
     #[test]
