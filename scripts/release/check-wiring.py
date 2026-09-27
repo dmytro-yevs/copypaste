@@ -74,6 +74,24 @@ def self_test(ci, android, supply_chain, rust_version):
             step["run"] = "npm ci"
     fixtures.append(("missing Windows product UI test fails", bool(critical_pr_errors(broken))))
 
+    for label, replacement in (
+        ("missing Windows clipboard tests fails", "true"),
+        ("Windows clipboard ignores ordinary tests fails", "--ignored"),
+        ("parallel Windows clipboard tests fails", "--test-threads=2"),
+    ):
+        broken = copy.deepcopy(ci)
+        for step in broken["jobs"]["windows-native"]["steps"]:
+            command = str(step.get("run") or "")
+            if "clipboard::windows::" not in command:
+                continue
+            if replacement == "true":
+                step["run"] = replacement
+            elif replacement == "--ignored":
+                step["run"] = command.replace("--include-ignored", replacement)
+            else:
+                step["run"] = command.replace("--test-threads=1", replacement)
+        fixtures.append((label, bool(critical_pr_errors(broken))))
+
     broken = copy.deepcopy(android)
     for job in (broken.get("jobs") or {}).values():
         step = critical_smoke_step(job)
