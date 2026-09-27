@@ -12,6 +12,7 @@
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
 use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{Manager, Wry};
 
@@ -21,6 +22,7 @@ use super::contract::{
     AndroidArmRequest, AndroidArmResult, AndroidDrainResult, AndroidEmptyResult,
     AndroidProbeResult, AndroidReadResult,
 };
+use super::intake::QueueWake;
 use super::model::{CaptureModel, CaptureSnapshot, CaptureSource, Clip, ReadOutcome};
 use super::CaptureControl;
 
@@ -69,7 +71,13 @@ pub fn init() -> TauriPlugin<Wry> {
     Builder::new("android-capture")
         .setup(|app, api| {
             let handle = api.register_android_plugin(PLUGIN_PACKAGE, PLUGIN_CLASS)?;
-            let capture = AndroidCapture::new(handle);
+            let queue_wake = QueueWake::default();
+            let capture = AndroidCapture::new(handle, queue_wake.clone());
+            if let Err(error) = capture.subscribe_queue_ready() {
+                tracing::warn!(%error, "Android capture queue will use the bounded interval fallback");
+            } else {
+                queue_wake.enable_event_driven();
+            }
             // Probe once at startup so the first frame shows the real state
             // rather than a default that resolves a moment later. A stored
             // (or default-on) preference then re-arms; a missing OS grant
@@ -81,6 +89,7 @@ pub fn init() -> TauriPlugin<Wry> {
             ) {
                 let _ = capture.arm();
             }
+            app.manage(queue_wake);
             app.manage(capture);
             Ok(())
         })
@@ -90,6 +99,7 @@ pub fn init() -> TauriPlugin<Wry> {
 pub struct AndroidCapture {
     handle: PluginHandle<Wry>,
     model: Mutex<CaptureModel>,
+    queue_ready: Channel<()>,
 }
 
 // the wire to Kotlin
@@ -119,11 +129,21 @@ struct ExcludedAppsArgs<'a> {
     bundle_ids: &'a [String],
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QueueReadyArgs {
+    on_ready: Channel<()>,
+}
+
 impl AndroidCapture {
-    fn new(handle: PluginHandle<Wry>) -> Self {
+    fn new(handle: PluginHandle<Wry>, wake: QueueWake) -> Self {
         Self {
             handle,
             model: Mutex::new(CaptureModel::android()),
+            queue_ready: Channel::new(move |_| {
+                wake.notify();
+                Ok(())
+            }),
         }
     }
 
@@ -162,6 +182,17 @@ impl AndroidCapture {
     pub fn installed_source_apps(&self) -> Result<Vec<AndroidInstalledSourceApp>> {
         self.call::<_, AndroidInstalledSourceApps>("installedSourceApps", (), MSG_BRIDGE)
             .map(|response| response.apps)
+    }
+
+    fn subscribe_queue_ready(&self) -> Result<()> {
+        self.call::<_, AndroidEmptyResult>(
+            "subscribeQueueReady",
+            QueueReadyArgs {
+                on_ready: self.queue_ready.clone(),
+            },
+            MSG_BRIDGE,
+        )
+        .map(|_| ())
     }
 
     fn open(&self, command: &'static str) -> Result<()> {
