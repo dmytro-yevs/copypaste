@@ -21,10 +21,3 @@
 }
 
 .root button { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
-
-@container (max-width: $cpSm) {
-  .root [data-settings-search-target^="row:"] > :last-child {
-    inline-size: 100%;
-    justify-content: flex-end;
-  }
-}

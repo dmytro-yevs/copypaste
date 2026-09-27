@@ -7,6 +7,7 @@ import { FieldFeedback, SettingsRow } from "@/components/shared";
 import type { Choice } from "@/features/settings/model/serviceChoices";
 import { valuesWith } from "@/features/settings/model/serviceChoices";
 import { Select } from "@/components/ui";
+import styles from "./ChoiceRow.module.css";
 
 const compactNumber = new Intl.NumberFormat(undefined, {
     notation: "compact",
@@ -15,7 +16,7 @@ const compactNumber = new Intl.NumberFormat(undefined, {
 
 interface ChoiceRowProps {
     title: string;
-    description: string;
+    help?: ReactNode;
     icon: IconName;
     badge?: ReactNode;
     note?: ReactNode;
@@ -33,7 +34,7 @@ interface ChoiceRowProps {
 
 export function ChoiceRow({
     title,
-    description,
+    help,
     icon,
     badge,
     note,
@@ -46,7 +47,6 @@ export function ChoiceRow({
 }: ChoiceRowProps) {
     const { t } = useTranslation();
     const options = valuesWith(choices, value);
-    const descriptionId = useId();
     const errorId = useId();
     const noteId = useId();
     const invalid =
@@ -57,8 +57,7 @@ export function ChoiceRow({
     return (
         <SettingsRow
             title={title}
-            description={description}
-            descriptionId={descriptionId}
+            help={help}
             badge={badge}
             note={
                 <>
@@ -74,11 +73,12 @@ export function ChoiceRow({
             <Select
                 size="sm"
                 aria-label={title}
-                aria-describedby={`${descriptionId}${note === undefined ? "" : ` ${noteId}`}`}
+                aria-describedby={note === undefined ? undefined : noteId}
                 aria-invalid={invalid || undefined}
                 aria-errormessage={invalid ? errorId : undefined}
                 aria-busy={busy || undefined}
                 measure="regular"
+                className={styles.control}
                 disabled={disabled}
                 value={String(value)}
                 leadingIcon={icon}

@@ -36,7 +36,7 @@ export function ClipboardCaptureSection({ revealAdvancedKey }: { revealAdvancedK
       >
         <ChoiceRow
           title={t("settings.service.dedup.title")}
-          description={t("settings.service.dedup.description")}
+          help={t("settings.service.dedup.description")}
           icon="copy"
           choices={DEDUP_WINDOW_SECS}
           value={data.dedup_window_secs}
@@ -75,7 +75,7 @@ export function ClipboardCaptureSection({ revealAdvancedKey }: { revealAdvancedK
       >
         <ChoiceRow
           title={t("settings.service.poll.title")}
-          description={t("settings.service.poll.description")}
+          help={t("settings.service.poll.description")}
           icon="refresh"
           choices={POLL_INTERVAL_MS}
           value={data.poll_interval_ms}
@@ -92,7 +92,7 @@ export function ClipboardCaptureSection({ revealAdvancedKey }: { revealAdvancedK
 
         <ChoiceRow
           title={t("settings.service.maxText.title")}
-          description={t("settings.service.maxText.description")}
+          help={t("settings.service.maxText.description")}
           icon="fileText"
           choices={MAX_TEXT_SIZE_BYTES}
           value={data.max_text_size_bytes}
@@ -111,7 +111,7 @@ export function ClipboardCaptureSection({ revealAdvancedKey }: { revealAdvancedK
 
         <ChoiceRow
           title={t("settings.service.maxImage.title")}
-          description={t("settings.service.maxImage.description")}
+          help={t("settings.service.maxImage.description")}
           icon="fileImage"
           choices={MAX_IMAGE_SIZE_BYTES}
           value={data.max_image_size_bytes}
@@ -130,7 +130,7 @@ export function ClipboardCaptureSection({ revealAdvancedKey }: { revealAdvancedK
 
         <ChoiceRow
           title={t("settings.service.maxFile.title")}
-          description={t("settings.service.maxFile.description")}
+          help={t("settings.service.maxFile.description")}
           icon="file"
           choices={MAX_FILE_SIZE_BYTES}
           value={data.max_file_size_bytes}
@@ -149,7 +149,7 @@ export function ClipboardCaptureSection({ revealAdvancedKey }: { revealAdvancedK
 
         <ChoiceRow
           title={t("settings.service.maxDecodedImage.title")}
-          description={t("settings.service.maxDecodedImage.description")}
+          help={t("settings.service.maxDecodedImage.description")}
           icon="fileImage"
           choices={MAX_DECODED_IMAGE_MB}
           value={data.max_decoded_image_mb}
@@ -183,7 +183,7 @@ export function ClipboardNotificationSection({
       {supportsCopyNotifications ? (
         <SwitchRow
           title={t("settings.service.notify.title")}
-          description={t("settings.service.notify.description")}
+          help={t("settings.service.notify.description")}
           id="notify-on-copy"
           checked={data.notify_on_copy}
           disabled={controller.fieldPending("notify_on_copy")}
@@ -195,7 +195,7 @@ export function ClipboardNotificationSection({
 
       <SwitchRow
         title={t("settings.service.sound.title")}
-        description={t("settings.service.sound.description")}
+        help={t("settings.service.sound.description")}
         id="sound-on-copy"
         checked={data.sound_on_copy}
         disabled={controller.fieldPending("sound_on_copy")}
