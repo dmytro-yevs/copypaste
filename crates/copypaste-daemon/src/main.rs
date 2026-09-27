@@ -286,12 +286,21 @@ async fn run() -> anyhow::Result<()> {
 /// attribution.
 #[cfg(target_os = "macos")]
 fn initialize_macos_workspace() {
-    use objc2_app_kit::NSApplicationLoad;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationLoad};
+    use objc2_foundation::MainThreadMarker;
 
     if !unsafe { NSApplicationLoad() }.as_bool() {
         warn!(
             "macOS workspace services could not initialize; source application attribution may be unavailable"
         );
+    }
+    if let Some(main_thread) = MainThreadMarker::new() {
+        // The helper shares the app bundle. AppKit must not register it as a
+        // second foreground CopyPaste or let it take clipboard attribution.
+        let application = NSApplication::sharedApplication(main_thread);
+        if !application.setActivationPolicy(NSApplicationActivationPolicy::Prohibited) {
+            warn!("the clipboard service could not enter background-only mode");
+        }
     }
 }
 
