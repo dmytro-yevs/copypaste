@@ -14,7 +14,6 @@ import {
   useCaptureNow,
   useCaptureState,
 } from "@/hooks/useCapture";
-import { useSetServiceConfig } from "@/hooks/useServiceConfig";
 import {
   permissionPresentation,
   type PermissionAction,
@@ -26,7 +25,6 @@ import { toFriendly } from "@/lib/errors";
 import {
   captureArm,
   type OnboardingPermissionId,
-  type OnboardingPermissions,
   type OnboardingPermissionStatus,
 } from "@/lib/ipc";
 import styles from "./AndroidCaptureSetup.module.css";
@@ -37,7 +35,6 @@ export function AndroidCaptureSetup() {
   const permissions = useOnboardingPermissions();
   const request = usePermissionRequest();
   const openSettings = usePermissionOpenSettings();
-  const save = useSetServiceConfig();
   const capture = useCaptureState();
   const now = useCaptureNow();
   const arm = useCaptureMutation();
@@ -54,20 +51,12 @@ export function AndroidCaptureSetup() {
     permissions.isFetching ||
     request.isPending ||
     openSettings.isPending ||
-    save.isPending ||
     now.isPending ||
     arm.isPending;
 
   const afterPermission = (id: OnboardingPermissionId, action: PermissionAction) => ({
-    onSuccess: (fresh: OnboardingPermissions) => {
+    onSuccess: () => {
       setActionState(null);
-      if (
-        id === "notifications" &&
-        (fresh.notifications.status === "granted" ||
-          fresh.notifications.status === "not_required")
-      ) {
-        save.mutate({ notify_on_copy: true });
-      }
     },
     onError: (error: unknown) => setActionState({ id, action, error }),
   });
