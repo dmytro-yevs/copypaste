@@ -74,15 +74,18 @@ def self_test(ci, android, supply_chain, rust_version):
             step["run"] = "npm ci"
     fixtures.append(("missing Windows product UI test fails", bool(critical_pr_errors(broken))))
 
-    for label, replacement in (
-        ("missing Windows clipboard tests fails", "true"),
-        ("Windows clipboard ignores ordinary tests fails", "--ignored"),
-        ("parallel Windows clipboard tests fails", "--test-threads=2"),
+    for label, selector, replacement in (
+        ("missing Windows clipboard tests fails", "clipboard::windows::", "true"),
+        ("Windows clipboard ignores ordinary tests fails", "clipboard::windows::", "--ignored"),
+        ("parallel Windows clipboard tests fails", "clipboard::windows::", "--test-threads=2"),
+        ("missing Windows source app tests fails", "copypaste-source-app", "true"),
+        ("Windows source app ignores ordinary tests fails", "copypaste-source-app", "--ignored"),
+        ("parallel Windows source app tests fails", "copypaste-source-app", "--test-threads=2"),
     ):
         broken = copy.deepcopy(ci)
         for step in broken["jobs"]["windows-native"]["steps"]:
             command = str(step.get("run") or "")
-            if "clipboard::windows::" not in command:
+            if selector not in command:
                 continue
             if replacement == "true":
                 step["run"] = replacement
