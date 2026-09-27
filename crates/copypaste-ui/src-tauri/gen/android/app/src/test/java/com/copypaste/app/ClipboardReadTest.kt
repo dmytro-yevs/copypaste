@@ -11,6 +11,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.Base64
+import android.os.Looper
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,6 +24,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
+import java.util.concurrent.TimeUnit
+import org.robolectric.Shadows.shadowOf
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
@@ -130,6 +133,45 @@ class ClipboardReadTest {
         val uri = clipboard.primaryClip!!.getItemAt(0).uri
         assertEquals("image/png", context.contentResolver.getType(uri))
         assertTrue(context.contentResolver.openInputStream(uri)!!.use { it.readBytes().contentEquals(bytes) })
+    }
+
+    @Test
+    fun startupPurgesStaleClipboardStaging() {
+        val directory = stagingDirectory(context).apply { mkdirs() }
+        val stale = File(directory, "stale.png").apply {
+            writeBytes(byteArrayOf(1))
+            setLastModified(System.currentTimeMillis() - STAGING_MAX_AGE_MS - 1)
+        }
+
+        ClipboardStaging.initialize(context, android.os.Handler(Looper.getMainLooper()))
+
+        assertFalse(stale.exists())
+    }
+
+    @Test
+    fun scheduledExpiryPurgesWithoutAnotherCopy() {
+        val directory = stagingDirectory(context).apply { mkdirs() }
+        val stale = File(directory, "later.png").apply {
+            writeBytes(byteArrayOf(1))
+            setLastModified(System.currentTimeMillis() - STAGING_MAX_AGE_MS - 1)
+        }
+        val handler = android.os.Handler(Looper.getMainLooper())
+        ClipboardStaging.schedule(context, handler)
+
+        shadowOf(Looper.getMainLooper()).idleFor(STAGING_MAX_AGE_MS + 1, TimeUnit.MILLISECONDS)
+
+        assertFalse(stale.exists())
+        ClipboardStaging.stop(handler)
+    }
+
+    @Test
+    fun stagingCapacityIsExactlyEightFiles() {
+        val directory = stagingDirectory(context).apply { mkdirs() }
+        repeat(9) { index -> File(directory, "$index.png").writeBytes(byteArrayOf(1)) }
+
+        purgeClipboardStaging(directory)
+
+        assertEquals(8, directory.listFiles()!!.size)
     }
 
     private fun clip(mimeType: String, item: ClipData.Item): ClipData =
