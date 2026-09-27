@@ -6,7 +6,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,7 +14,6 @@ import androidx.core.view.WindowCompat
 
 class MainActivity : TauriActivity() {
   private val notificationWaiters = ArrayList<(NotificationPermissionFacts) -> Unit>()
-  private var imeInsetsHost: WebView? = null
   private val permissionPreferences by lazy {
     getSharedPreferences(PERMISSION_PREFERENCES, Context.MODE_PRIVATE)
   }
@@ -51,26 +49,12 @@ class MainActivity : TauriActivity() {
     CaptureService.restoreIfArmed(this)
   }
 
-  override fun onContentChanged() {
-    super.onContentChanged()
-    // Tauri/Wry installs its RustWebView with setContentView, so this callback
-    // reaches the actual host view synchronously before an accessibility dump.
-    findHostWebView(window.decorView)?.let { webView ->
-      webView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-      if (imeInsetsHost !== webView) {
-        imeInsetsHost = webView
-        WebViewImeInsets.install(webView)
-      }
-    }
-  }
-
-  private fun findHostWebView(view: View): WebView? {
-    if (view is WebView) return view
-    if (view !is ViewGroup) return null
-    for (index in 0 until view.childCount) {
-      findHostWebView(view.getChildAt(index))?.let { return it }
-    }
-    return null
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    webView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+    // Wry calls this before it queues the initial navigation. Installing here
+    // gives the document-start bootstrap the first window-inset snapshot.
+    WebViewImeInsets.install(webView)
   }
 
   /**
