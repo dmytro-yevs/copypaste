@@ -81,9 +81,9 @@ jobs:
           shared-key: linux-1.96-dev
       - name: System dependencies
         run: |
-          sudo apt-get update
+          ./scripts/ci/install-postgresql-server.sh
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config postgresql \
+            build-essential pkg-config \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
             libsoup-3.0-dev libayatana-appindicator3-dev libxdo-dev
       - name: Core workspace tests
