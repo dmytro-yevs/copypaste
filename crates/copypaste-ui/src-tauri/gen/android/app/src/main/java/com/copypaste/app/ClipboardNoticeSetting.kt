@@ -1,7 +1,12 @@
 package com.copypaste.app
 
 import android.content.Context
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import java.util.concurrent.atomic.AtomicBoolean
+import rikka.shizuku.Shizuku
 
 internal fun shouldRefreshClipboardNotice(observing: Boolean, resolved: Boolean): Boolean =
     observing && !resolved
@@ -21,6 +26,7 @@ object ClipboardNoticeSetting {
     @Volatile
     private var resolved = false
     private val refreshing = AtomicBoolean(false)
+    private var observer: ContentObserver? = null
 
     fun suppressed(context: Context): Boolean {
         refresh()
@@ -35,13 +41,34 @@ object ClipboardNoticeSetting {
 
     @Synchronized
     fun observe(context: Context) {
+        if (observer != null) return
         observing = true
         resolved = false
+        val next = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) = invalidate()
+        }
+        try {
+            context.applicationContext.contentResolver.registerContentObserver(
+                Settings.Secure.getUriFor(NAME),
+                false,
+                next,
+            )
+            observer = next
+        } catch (_: Exception) {
+            // Reading remains privileged and cached even where observation is unavailable.
+        }
         refresh()
     }
 
     @Synchronized
     fun stopObserving(context: Context) {
+        observer?.let { registered ->
+            try {
+                context.applicationContext.contentResolver.unregisterContentObserver(registered)
+            } catch (_: Exception) {
+            }
+        }
+        observer = null
         observing = false
         cached = null
         resolved = false
@@ -66,5 +93,10 @@ object ClipboardNoticeSetting {
             }
             refreshing.set(false)
         }
+    }
+
+    init {
+        Shizuku.addBinderReceivedListener { invalidate() }
+        Shizuku.addBinderDeadListener { invalidate() }
     }
 }
