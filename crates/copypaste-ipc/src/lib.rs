@@ -136,7 +136,7 @@ pub enum Method {
     /// image bytes until a row actually becomes visible.
     ImagePreview {
         id: String,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         max_edge: Option<u32>,
     },
     /// Return one persisted source-application icon by item id.

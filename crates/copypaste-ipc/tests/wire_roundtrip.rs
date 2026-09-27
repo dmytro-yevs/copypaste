@@ -62,6 +62,7 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::Page(_) => "page",
         ResponseData::Item(_) => "item",
         ResponseData::ImagePreview(_) => "image_preview",
+        ResponseData::SourceAppIcon(_) => "source_app_icon",
         ResponseData::Count(_) => "count",
         ResponseData::PairingInvite(_) => "pairing_invite",
         ResponseData::PairingProgress(_) => "pairing_progress",
@@ -152,6 +153,11 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             width: 1,
             height: 1,
         }),
+        ResponseData::SourceAppIcon(ImagePreview {
+            png_base64: "iVBORw0KGgo=".into(),
+            width: 32,
+            height: 32,
+        }),
         ResponseData::Count(1),
         ResponseData::PairingInvite(PairingInviteData {
             code: "ABCD-EFGH".into(),
@@ -201,7 +207,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 19);
+    assert_eq!(variants.len(), 20);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }
