@@ -431,8 +431,9 @@ mod tests {
             b"{\"private_mode\": tru",
         )
         .unwrap();
-        let backend = super::super::open::EmbeddedBackend::open(
+        let backend = super::super::open::EmbeddedBackend::open_with_keyring(
             dir.path(),
+            super::super::tests::test_keyring(),
             Box::new(std::sync::Arc::new(
                 super::super::tests::FakeClipboard::default(),
             )),
